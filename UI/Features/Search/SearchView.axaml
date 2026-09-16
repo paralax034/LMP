@@ -144,7 +144,9 @@
                         Classes="flat-search-box"
                         Text="{Binding SearchQuery}"
                         PlaceholderText="{Binding L[Search_Placeholder]}"
-                        Height="44">
+                        Height="44"
+                        AcceptsReturn="False"
+                        AcceptsTab="False">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
                             <KeyBinding Gesture="Escape" Command="{Binding ClearQueryCommand}" />

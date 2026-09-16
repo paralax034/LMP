@@ -5,6 +5,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Threading;
+using LMP.Core.Helpers.Extensions;
 
 namespace LMP.UI.Features.Search;
 
@@ -70,13 +72,64 @@ public partial class SearchView : UserControl
             };
 
             searchBox.AddHandler(InputElement.KeyDownEvent, OnSearchBoxKeyDown, RoutingStrategies.Tunnel);
+            searchBox.AddHandler(TextBox.PastingFromClipboardEvent, OnSearchBoxPastingFromClipboard, RoutingStrategies.Tunnel);
         }
+    }
+
+    /// <summary>
+    /// Перехватывает нативное событие вставки в TextBox из любого источника (клавиатура или контекстное меню)
+    /// для гарантированной санитизации строк с начальными переносами каретки.
+    /// </summary>
+    private async void OnSearchBoxPastingFromClipboard(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox textBox) return;
+
+        e.Handled = true;
+        await PasteCleanTextAsync(textBox);
+    }
+
+    /// <summary>
+    /// Извлекает текст из буфера обмена ОС, нормализует его в однострочный вид и вставляет в позицию выделения поля ввода.
+    /// </summary>
+    /// <param name="textBox">Целевой экземпляр поля ввода.</param>
+    /// <returns>Задача асинхронного выполнения операции вставки.</returns>
+    private static async Task PasteCleanTextAsync(TextBox textBox)
+    {
+        string? raw;
+        try
+        {
+            raw = await Clipboard.GetTextAsync();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(raw)) return;
+
+        var clean = raw.SanitizeSingleLine();
+        var current = textBox.Text ?? string.Empty;
+
+        int start = Math.Clamp(Math.Min(textBox.SelectionStart, textBox.SelectionEnd), 0, current.Length);
+        int end = Math.Clamp(Math.Max(textBox.SelectionStart, textBox.SelectionEnd), 0, current.Length);
+
+        var newText = string.Concat(current.AsSpan(0, start), clean, current.AsSpan(end));
+        textBox.Text = newText;
+        textBox.CaretIndex = start + clean.Length;
     }
 
     private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
     {
         if (sender is not TextBox textBox || DataContext is not SearchViewModel vm)
             return;
+
+        if ((e.Key == Key.V && (e.KeyModifiers & KeyModifiers.Control) != 0) ||
+            (e.Key == Key.Insert && (e.KeyModifiers & KeyModifiers.Shift) != 0))
+        {
+            e.Handled = true;
+            _ = PasteCleanTextAsync(textBox);
+            return;
+        }
 
         if (e.Key == Key.Tab && vm.HasGhostText)
         {

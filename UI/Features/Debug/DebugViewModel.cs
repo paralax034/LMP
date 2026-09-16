@@ -425,8 +425,8 @@ public sealed partial class DebugViewModel : ViewModelBase
             {
                 if (OperatingSystem.IsWindows())
                 {
-                    backend = new NAudioBackend();
-                    AppendLog("  ✓ NAudioBackend");
+                    backend = new WinAudioBackend();
+                    AppendLog("  ✓ WinAudioBackend");
                 }
                 else
                 {

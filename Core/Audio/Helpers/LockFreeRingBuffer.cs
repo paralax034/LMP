@@ -128,7 +128,7 @@ public sealed class LockFreeRingBuffer<T> where T : unmanaged
 
     /// <summary>
     /// Читает данные из буфера.
-    /// Вызывается ТОЛЬКО Consumer-ом (audio callback / NAudio).
+    /// Вызывается ТОЛЬКО Consumer-ом (audio callback / WinAudio).
     /// </summary>
     public int Read(Span<T> output)
     {

@@ -82,6 +82,11 @@
   "CloseAction_Exit": "Close application",
   "CloseAction_MinimizeToTray": "Minimize to tray",
 
+  "ContextMenu_Copy": "Copy",
+  "ContextMenu_Cut": "Cut",
+  "ContextMenu_Paste": "Paste",
+  "ContextMenu_SelectAll": "Select All",
+
   "Common_Apply": "Apply",
   "Common_AppName": "Lite Player",
   "Common_Cancel": "Cancel",

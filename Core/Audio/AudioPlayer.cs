@@ -178,7 +178,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         {
             try
             {
-                return new Backends.NAudioBackend();
+                return new Backends.WinAudioBackend();
             }
             catch (Exception ex)
             {
@@ -770,7 +770,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             if (_state is PlayerState.Loading or PlayerState.Buffering)
                 SetState(PlayerState.Idle);
         }
-        catch (NAudio.MmException ex)
+        catch (AudioDeviceException ex)
         {
             SetState(PlayerState.Error);
             _events.RaiseError(new AudioPlayerError(GetDeviceErrorMessage(), ex));
@@ -1115,7 +1115,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         string message = ex switch
         {
-            AudioDeviceException or NAudio.MmException => GetDeviceErrorMessage(),
+            AudioDeviceException => GetDeviceErrorMessage(),
             CacheInvalidatedException => LocalizationService.Instance.Get(
                 "Error_CacheInvalidated", "Track cache was deleted. Playback stopped."),
             _ => ex.Message

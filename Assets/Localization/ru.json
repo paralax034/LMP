@@ -76,11 +76,16 @@
 
   "Client_AndroidVR": "Android VR (Рекомендуется)",
   "Client_TV": "Smart TV / Консоль",
-  "Client_Web": "Веб-браузер",
+  "Client_Web": "Веб-бра  ер",
 
   "CloseAction_Ask": "Спрашивать каждый раз",
   "CloseAction_Exit": "Закрыть приложение",
   "CloseAction_MinimizeToTray": "Свернуть в трей",
+
+  "ContextMenu_Copy": "Копировать",
+  "ContextMenu_Cut": "Вырезать",
+  "ContextMenu_Paste": "Вставить",
+  "ContextMenu_SelectAll": "Выбрать всё",
 
   "Common_Apply": "Применить",
   "Common_AppName": "Lite Player",

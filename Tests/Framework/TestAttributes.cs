@@ -76,4 +76,5 @@ public static class TestGroups
     public const string Solver = "Solver";
     public const string Pipeline = "Pipeline";
     public const string Cache = "Cache";
+    public const string Audio = "Audio";
 }

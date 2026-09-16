@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -8,6 +9,8 @@ namespace LMP.Core.Helpers.Extensions;
 /// </summary>
 internal static class StringExtensions
 {
+    private const int StackallocThreshold = 256;
+
     extension(string? s)
     {
         /// <summary>
@@ -111,6 +114,87 @@ internal static class StringExtensions
                 (span[state.firstCharIndex], span[state.secondCharIndex]) =
                     (span[state.secondCharIndex], span[state.firstCharIndex]);
             });
+        }
+
+        /// <summary>
+        /// Нормализует входную строку, заменяя любые управляющие символы и переводы строк на пробелы,
+        /// схлопывая повторные пробелы и выполняя тримминг по краям.
+        /// </summary>
+        /// <returns>Нормализованная однострочная строка без мусорных управляющих символов.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        public string SanitizeSingleLine()
+        {
+            if (string.IsNullOrEmpty(str))
+                return string.Empty;
+
+            ReadOnlySpan<char> span = str.AsSpan();
+            int start = 0;
+            while (start < span.Length && (span[start] is '\r' or '\n' or '\t' || char.IsWhiteSpace(span[start]) || char.IsControl(span[start])))
+            {
+                start++;
+            }
+
+            int end = span.Length - 1;
+            while (end >= start && (span[end] is '\r' or '\n' or '\t' || char.IsWhiteSpace(span[end]) || char.IsControl(span[end])))
+            {
+                end--;
+            }
+
+            if (start > end)
+                return string.Empty;
+
+            ReadOnlySpan<char> trimmed = span.Slice(start, end - start + 1);
+
+            bool hasControlChars = false;
+            for (int i = 0; i < trimmed.Length; i++)
+            {
+                char c = trimmed[i];
+                if (c is '\r' or '\n' or '\t' || char.IsControl(c))
+                {
+                    hasControlChars = true;
+                    break;
+                }
+            }
+
+            if (!hasControlChars)
+                return trimmed.Length == str.Length ? str : trimmed.ToString();
+
+            char[]? rentedArray = null;
+            Span<char> buffer = trimmed.Length <= StackallocThreshold
+                ? stackalloc char[trimmed.Length]
+                : (rentedArray = ArrayPool<char>.Shared.Rent(trimmed.Length));
+
+            try
+            {
+                int writeIndex = 0;
+                bool lastWasWhitespace = false;
+
+                for (int i = 0; i < trimmed.Length; i++)
+                {
+                    char c = trimmed[i];
+                    if (c is '\r' or '\n' or '\t' || char.IsControl(c) || char.IsWhiteSpace(c))
+                    {
+                        if (!lastWasWhitespace && writeIndex > 0)
+                        {
+                            buffer[writeIndex++] = ' ';
+                            lastWasWhitespace = true;
+                        }
+                    }
+                    else
+                    {
+                        buffer[writeIndex++] = c;
+                        lastWasWhitespace = false;
+                    }
+                }
+
+                ReadOnlySpan<char> resultSpan = buffer[..writeIndex].TrimEnd();
+                return resultSpan.IsEmpty ? string.Empty : new string(resultSpan);
+            }
+            finally
+            {
+                if (rentedArray != null)
+                    ArrayPool<char>.Shared.Return(rentedArray);
+            }
         }
     }
 }

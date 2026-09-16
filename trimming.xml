@@ -21,8 +21,7 @@
     <type fullname="LMP.Core.Models.Playlist" preserve="all" />
   </assembly>
 
-  <!-- NAudio.Core и Concentus -->
-  <assembly fullname="NAudio.Core" preserve="all" />
+  <!-- Concentus -->
   <assembly fullname="Concentus" preserve="all" />
   <assembly fullname="Concentus.Native" preserve="all" />
 

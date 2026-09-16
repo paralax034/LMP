@@ -36,6 +36,7 @@ public partial class App : Application
             // Локализация
             var bootstrap = AppEntry.Services.GetRequiredService<BootstrapSettings>();
             LocalizationService.Instance.Initialize(bootstrap.LanguageCode);
+            LocalizationService.Instance.UpdateApplicationResources();
             Log.Info($"Localization: {bootstrap.LanguageCode}");
 
             // Splash Screen

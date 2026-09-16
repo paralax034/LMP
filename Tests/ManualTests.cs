@@ -128,4 +128,23 @@ public static class ManualTests
         await Unit.StreamFreshnessTests.TestRefreshWithUnchangedNTokenAndValidExpireAsync();
         await Unit.StreamFreshnessTests.TestProactiveStreamFreshnessOnResumeAsync();
     }
+
+    /// <summary>Запуск всех audio hot-path allocation тестов.</summary>
+    public static async Task TestAudioAllocationsAsync()
+    {
+        await Unit.HotPathAllocationTests.TestGainProcessorSimdZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestGainProcessorRampZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestGainProcessorUnityBypassZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestRingBufferWriteZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestRingBufferReadZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestRingBufferPropertiesZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestAudioCallbackSimulationZeroAllocAsync();
+    }
+
+    /// <summary>Запуск audio бенчмарков (throughput + latency + alloc check).</summary>
+    public static async Task BenchmarkAudioHotPathAsync()
+    {
+        await Unit.AudioHotPathBenchmarks.TestAudioHotPathBenchmarkAsync();
+        await Unit.AudioHotPathBenchmarks.TestRingBufferContentionStressAsync();
+    }
 }

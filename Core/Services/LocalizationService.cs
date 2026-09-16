@@ -54,6 +54,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
         if (_isInitialized && _resources.Count > 0)
         {
             Log.Warn("LocalizationService already initialized");
+            UpdateApplicationResources();
             return;
         }
 
@@ -68,6 +69,8 @@ public sealed class LocalizationService : INotifyPropertyChanged
         CurrentLanguageCode = langToUse;
         LoadLanguage(langToUse);
         _isInitialized = _resources.Count > 0;
+
+        UpdateApplicationResources();
 
         Log.Info($"LocalizationService initialized: {langToUse} (Keys: {_resources.Count})");
     }
@@ -91,6 +94,10 @@ public sealed class LocalizationService : INotifyPropertyChanged
                 ?? throw new InvalidOperationException("Deserialization returned null");
 
             _resources = resources;
+
+            // Синхронизация глобальных строковых ресурсов для DynamicResource в стилях и контекстных меню (AOT)
+            UpdateApplicationResources();
+
             Log.Info($"✓ Loaded {langCode}.json ({_resources.Count} keys)");
         }
         catch (Exception ex)
@@ -107,6 +114,28 @@ public sealed class LocalizationService : INotifyPropertyChanged
                 LoadLanguage("en");
             }
         }
+    }
+
+    /// <summary>
+    /// Экспортирует строковые ключи меню и базового интерфейса в ресурсы Application для поддержки DynamicResource.
+    /// Выполняется синхронно на UI-потоке, гарантируя доступность ключей при первичной отрисовке стилей.
+    /// </summary>
+    public void UpdateApplicationResources()
+    {
+        if (Avalonia.Application.Current is not { } app) return;
+
+        void Apply()
+        {
+            app.Resources["L10n.ContextMenu_Cut"] = Get("ContextMenu_Cut", "Cut");
+            app.Resources["L10n.ContextMenu_Copy"] = Get("ContextMenu_Copy", "Copy");
+            app.Resources["L10n.ContextMenu_Paste"] = Get("ContextMenu_Paste", "Paste");
+            app.Resources["L10n.ContextMenu_SelectAll"] = Get("ContextMenu_SelectAll", "Select All");
+        }
+
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            Apply();
+        else
+            Avalonia.Threading.Dispatcher.UIThread.Invoke(Apply);
     }
 
     /// <summary>

@@ -51,7 +51,6 @@
   </ItemGroup>
 
   <ItemGroup Label="Audio">
-    <PackageReference Include="NAudio.Core" Version="2.3.0" />
     <PackageReference Include="Concentus" Version="2.2.2" />
   </ItemGroup>
 

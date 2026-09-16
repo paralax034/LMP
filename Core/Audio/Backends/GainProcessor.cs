@@ -1,16 +1,23 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using NAudio.Wave;
 
 namespace LMP.Core.Audio.Backends;
 
 /// <summary>
-/// IWaveProvider-обёртка над <see cref="BufferedWaveProvider"/>, применяющая
-/// volume gain к PCM-данным в момент чтения WaveOut (on-read path).
-/// Zero-alloc hot path с аппаратным SIMD-ускорением через <see cref="Vector{T}"/>.
+/// Применяет volume gain к PCM float-сэмплам in-place.
 /// </summary>
-public sealed class GainWaveProvider : IWaveProvider
+/// <remarks>
+/// <para>
+/// Спроектирован для вызова исключительно из потока воспроизведения (playback thread).
+/// Не является потокобезопасным — <see cref="SetVolumeGain"/> принимает значение через
+/// <see langword="volatile"/>, само применение происходит только внутри <see cref="Process"/>.
+/// </para>
+/// <para>
+/// Zero-alloc hot path с аппаратным SIMD-ускорением через <see cref="Vector{T}"/>.
+/// </para>
+/// </remarks>
+public sealed class GainProcessor
 {
     #region Constants
 
@@ -20,7 +27,6 @@ public sealed class GainWaveProvider : IWaveProvider
 
     #region Fields
 
-    private readonly BufferedWaveProvider _source;
     private volatile float _targetGain = 1.0f;
     private float _currentGain = 1.0f;
     private float _rampStartGain = 1.0f;
@@ -28,31 +34,31 @@ public sealed class GainWaveProvider : IWaveProvider
 
     #endregion
 
-    public GainWaveProvider(BufferedWaveProvider source)
-    {
-        ArgumentNullException.ThrowIfNull(source);
-        _source = source;
-    }
-
-    /// <inheritdoc/>
-    public WaveFormat WaveFormat => _source.WaveFormat;
-
+    /// <summary>
+    /// Задаёт целевой volume gain. Потокобезопасно через volatile-запись.
+    /// </summary>
+    /// <param name="gain">Линейный коэффициент усиления. Значения ниже 0 приводятся к 0.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetVolumeGain(float gain)
     {
         _targetGain = Math.Max(0f, gain);
     }
 
-    /// <inheritdoc/>
-    public int Read(byte[] buffer, int offset, int count)
+    /// <summary>
+    /// Применяет volume gain к PCM float-сэмплам in-place.
+    /// </summary>
+    /// <remarks>
+    /// При изменении <see cref="SetVolumeGain"/> запускается линейный ramp длиной
+    /// <c>2400</c> сэмплов (~50 мс при 48 kHz) для предотвращения щелчков.
+    /// После достижения целевого значения применяется SIMD-путь (AVX2/NEON).
+    /// Результат клиппируется в диапазоне [-1, 1].
+    /// </remarks>
+    /// <param name="samples">Interleaved PCM float-сэмплы. Изменяются in-place.</param>
+    public void Process(Span<float> samples)
     {
-        int read = _source.Read(buffer, offset, count);
-        if (read == 0) return 0;
+        if (samples.IsEmpty) return;
 
-        // Zero-copy reinterpret байтового среза в float span
-        var floats = MemoryMarshal.Cast<byte, float>(buffer.AsSpan(offset, read));
-        int length = floats.Length;
-
+        int length = samples.Length;
         float target = _targetGain;
 
         if (MathF.Abs(target - _currentGain) > 0.0005f && _rampRemaining == 0)
@@ -61,7 +67,7 @@ public sealed class GainWaveProvider : IWaveProvider
             _rampRemaining = RampSamples;
         }
 
-        ref float floatsRef = ref MemoryMarshal.GetReference(floats);
+        ref float floatsRef = ref MemoryMarshal.GetReference(samples);
 
         if (_rampRemaining > 0)
         {
@@ -98,10 +104,10 @@ public sealed class GainWaveProvider : IWaveProvider
 
                 for (; i <= length - vectorSize; i += vectorSize)
                 {
-                    var vec = new Vector<float>(floats.Slice(i, vectorSize));
+                    var vec = new Vector<float>(samples.Slice(i, vectorSize));
                     var amplified = vec * gainVec;
                     var clamped = Vector.Max(minVec, Vector.Min(maxVec, amplified));
-                    clamped.CopyTo(floats.Slice(i, vectorSize));
+                    clamped.CopyTo(samples.Slice(i, vectorSize));
                 }
             }
 
@@ -112,7 +118,5 @@ public sealed class GainWaveProvider : IWaveProvider
                 Unsafe.Add(ref floatsRef, i) = Math.Clamp(sample, -1f, 1f);
             }
         }
-
-        return read;
     }
 }

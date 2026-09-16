@@ -1532,7 +1532,11 @@ public partial class YoutubeProvider : IDisposable
                 _suggestionsCache[normalizedQuery] = (DateTime.UtcNow.AddMinutes(5), result);
                 return result;
             }
-            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return [];
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
             {
                 Log.Debug($"[YouTube] Suggestion timeout for '{normalizedQuery}' on endpoint #{i}");
             }

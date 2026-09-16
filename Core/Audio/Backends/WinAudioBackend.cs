@@ -2,26 +2,14 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Exceptions;
-using NAudio.Wave;
 
 namespace LMP.Core.Audio.Backends;
 
 /// <summary>
 /// Аппаратный бэкенд вывода аудио на базе Windows Multimedia API (WinMM).
 /// </summary>
-/// <remarks>
-/// <para>
-/// Использует прямые вызовы к системной библиотеке <c>winmm.dll</c> через <see cref="LibraryImportAttribute"/> 
-/// с ручным управлением неуправляемыми буферами <c>WAVEHDR</c> в нативной памяти (<see cref="NativeMemory"/>).
-/// Полностью совместим с Native AOT и агрессивным триммингом сборок (zero-reflection).
-/// </para>
-/// <para>
-/// <b>Внимание:</b> Данный бэкенд предназначен исключительно для семейства операционных систем Windows.
-/// При исполнении на Linux и macOS среда генерирует платформенное исключение загрузки динамической библиотеки.
-/// </para>
-/// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed partial class NAudioBackend : IPlaybackBackend
+public sealed partial class WinAudioBackend : IPlaybackBackend
 {
     #region WinMM Native Structs & LibraryImports
 
@@ -93,20 +81,14 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
     #region Constants
 
-    private const double InternalBufferSeconds = 0.5;
     private const int DesiredLatencyMs = 300;
     private const int NumberOfBuffers = 3;
-    private const double BufferHighWaterMark = 0.8;
     private const int IdleSleepMs = 10;
-    private const int EmptyCallbackSleepMs = 5;
-    private const int PostFlushSleepMs = 10;
     private const int ErrorSleepMs = 100;
-    private const int FillWakeupTimeoutMs = 200;
-    private const int FillThreadJoinTimeoutMs = 500;
+    private const int PlaybackThreadJoinTimeoutMs = 500;
     private const int FadeFrames = 2400;
     private const int UnderrunLogThreshold = 50;
     private const int DeviceHealthCheckInterval = 50;
-    private const int ChunkDivisor = 20;
     private const int StarvationThreshold = 200;
     private const int DeviceRecoveryDelayMs = 300;
     private const int DeviceRecoveryMaxRetries = 3;
@@ -125,17 +107,14 @@ public sealed partial class NAudioBackend : IPlaybackBackend
     private unsafe WAVEHDR*[]? _headers;
     private nint[]? _bufferPointers;
     private int _bufferByteSize;
+    private int _bufferFloatCount;
 
-    private BufferedWaveProvider? _provider;
-    private GainWaveProvider? _gainProvider;
     private AudioDataCallback? _callback;
+    private GainProcessor? _gainProcessor;
 
     private int _channels;
     private int _sampleRate;
-    private float[]? _floatBuffer;
-    private byte[]? _byteBuffer;
 
-    private volatile bool _fillActive;
     private volatile bool _gateOpen;
     private volatile bool _deviceLost;
 
@@ -146,12 +125,8 @@ public sealed partial class NAudioBackend : IPlaybackBackend
     private readonly Lock _stateLock = new();
     private int _flushGeneration;
 
-    private Thread? _fillThread;
-    private CancellationTokenSource? _cts;
-    private readonly ManualResetEventSlim _fillWakeup = new(false);
-
     private int _consecutiveUnderrunCount;
-    private int _fillLoopIterations;
+    private int _playbackLoopIterations;
     private Action? _onDeviceLost;
 
     private float _fadeGain;
@@ -165,7 +140,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
     #region Properties
 
     /// <inheritdoc/>
-    public string Name => "WinMM-AOT";
+    public string Name => "WinAudio-AOT";
 
     /// <inheritdoc/>
     public float Volume
@@ -183,7 +158,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
                 {
                     _deviceLost = true;
                     StartDeviceWatcher();
-                    Log.Warn($"[NAudioBackend] waveOutSetVolume failed (code {res})");
+                    Log.Warn($"[WinAudioBackend] waveOutSetVolume failed (code {res})");
                 }
             }
         }
@@ -196,12 +171,10 @@ public sealed partial class NAudioBackend : IPlaybackBackend
     public bool IsDeviceLost => _deviceLost;
 
     /// <inheritdoc/>
-    public int BufferedSamples =>
-        _provider != null ? _provider.BufferedBytes / sizeof(float) : 0;
+    public int BufferedSamples => 0;
 
     /// <inheritdoc/>
-    public int BufferedBytes =>
-        _provider?.BufferedBytes ?? 0;
+    public int BufferedBytes => 0;
 
     #endregion
 
@@ -225,11 +198,11 @@ public sealed partial class NAudioBackend : IPlaybackBackend
             if (wasDeviceLost)
             {
                 int delay = DeviceRecoveryDelayMs * (attempt + 1);
-                Log.Info($"[NAudioBackend] Device recovery attempt {attempt + 1}/{maxAttempts + 1}, waiting {delay}ms for endpoint stabilization");
+                Log.Info($"[WinAudioBackend] Device recovery attempt {attempt + 1}/{maxAttempts + 1}, waiting {delay}ms for endpoint stabilization");
                 Thread.Sleep(delay);
             }
 
-            StopFillThread();
+            StopPlaybackThread();
             DisposeWaveOutSafe();
             Thread.Sleep(PostDisposeSettleMs);
 
@@ -240,26 +213,25 @@ public sealed partial class NAudioBackend : IPlaybackBackend
             }
             catch (Exception ex)
             {
-                Log.Warn($"[NAudioBackend] CreateWaveOut attempt {attempt + 1} failed: {ex.Message}");
+                Log.Warn($"[WinAudioBackend] CreateWaveOut attempt {attempt + 1} failed: {ex.Message}");
 
                 if (attempt >= maxAttempts)
                 {
                     _deviceLost = true;
                     DisposeWaveOutSafe();
                     StartDeviceWatcher();
-                    Log.Error($"[NAudioBackend] Failed to open audio device after {attempt + 1} attempts: {ex.Message}");
+                    Log.Error($"[WinAudioBackend] Failed to open audio device after {attempt + 1} attempts: {ex.Message}");
                     throw new AudioDeviceException(GetDeviceErrorMessage(), ex);
                 }
             }
         }
 
-        AllocateBuffers(sampleRate, channels);
-        StartFillThread();
+        _gainProcessor = new GainProcessor();
         StartPlaybackThread();
 
         _deviceLost = false;
         StopDeviceWatcher();
-        Log.Info($"[NAudioBackend] Initialized WinMM (never-stop AOT-hardened): {sampleRate}Hz, {channels}ch");
+        Log.Info($"[WinAudioBackend] Initialized WinMM: {sampleRate}Hz, {channels}ch");
     }
 
     /// <inheritdoc/>
@@ -285,7 +257,6 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
         lock (_stateLock)
         {
-            _fillActive = false;
             _gateOpen = false;
             _fadingIn = false;
             _fadingOut = false;
@@ -297,8 +268,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
         if (sampleRate == _sampleRate && channels == _channels)
         {
-            _provider?.ClearBuffer();
-            Log.Info($"[NAudioBackend] Reinit fast path: {sampleRate}Hz, {channels}ch");
+            Log.Info($"[WinAudioBackend] Reinit fast path: {sampleRate}Hz, {channels}ch");
             return;
         }
 
@@ -327,16 +297,6 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
     private unsafe void CreateWaveOut(int sampleRate, int channels)
     {
-        var format = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, channels);
-
-        _provider = new BufferedWaveProvider(format)
-        {
-            BufferDuration = TimeSpan.FromSeconds(InternalBufferSeconds),
-            DiscardOnBufferOverflow = true
-        };
-
-        _gainProvider = new GainWaveProvider(_provider);
-
         var wfx = new WAVEFORMATEX
         {
             wFormatTag = 0x0003, // WAVE_FORMAT_IEEE_FLOAT
@@ -363,6 +323,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
         _bufferByteSize = (int)(wfx.nAvgBytesPerSec * (DesiredLatencyMs / 1000.0) / NumberOfBuffers);
         _bufferByteSize -= _bufferByteSize % wfx.nBlockAlign;
+        _bufferFloatCount = _bufferByteSize / sizeof(float);
 
         _headers = new WAVEHDR*[NumberOfBuffers];
         _bufferPointers = new nint[NumberOfBuffers];
@@ -394,23 +355,42 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         _playbackRunning = true;
         _playbackThread = new Thread(NativePlaybackLoop)
         {
-            Name = "AotWaveOutPlayback",
+            Name = "WinAudioPlayback",
             IsBackground = true,
             Priority = ThreadPriority.Highest
         };
         _playbackThread.Start();
     }
 
+    /// <summary>
+    /// Основной цикл воспроизведения.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Читает PCM float-данные напрямую из <see cref="_callback"/> без промежуточных managed-буферов.
+    /// Применяет fade envelope и volume gain in-place перед единственным <see cref="Marshal.Copy"/>
+    /// в нативный <c>WAVEHDR.lpData</c>.
+    /// </para>
+    /// <para>
+    /// Underrun/starvation детекция выполняется здесь же: счётчик <see cref="_consecutiveUnderrunCount"/>
+    /// инкрементируется при каждом пустом ответе callback. При достижении <see cref="StarvationThreshold"/>
+    /// вызывается <see cref="_onStarvation"/> в отдельном <see cref="Task"/>.
+    /// </para>
+    /// <para>
+    /// Device health check выполняется каждые <see cref="DeviceHealthCheckInterval"/> итераций
+    /// без дополнительного потока.
+    /// </para>
+    /// </remarks>
     private unsafe void NativePlaybackLoop()
     {
-        byte[] tempBuffer = new byte[_bufferByteSize];
+        float[] floatBuffer = new float[_bufferFloatCount];
         uint headerSize = (uint)sizeof(WAVEHDR);
 
         while (_playbackRunning && !_disposed)
         {
             try
             {
-                if (_hWaveOut == 0 || _headers == null || _bufferPointers == null || _gainProvider == null)
+                if (_hWaveOut == 0 || _headers == null || _bufferPointers == null)
                     break;
 
                 bool wroteAny = false;
@@ -418,33 +398,90 @@ public sealed partial class NAudioBackend : IPlaybackBackend
                 for (int i = 0; i < NumberOfBuffers; i++)
                 {
                     WAVEHDR* hdr = _headers[i];
-                    if ((hdr->dwFlags & WHDR_INQUEUE) == 0)
+                    if ((hdr->dwFlags & WHDR_INQUEUE) != 0)
+                        continue;
+
+                    int framesRead = 0;
+
+                    if (_gateOpen)
                     {
-                        int read = _gainProvider.Read(tempBuffer, 0, _bufferByteSize);
-                        if (read < _bufferByteSize)
-                            Array.Clear(tempBuffer, read, _bufferByteSize - read);
-
-                        Marshal.Copy(tempBuffer, 0, _bufferPointers[i], _bufferByteSize);
-
-                        int res = waveOutWrite(_hWaveOut, (nint)hdr, headerSize);
-                        if (res != MMSYSERR_NOERROR)
+                        _playbackLoopIterations++;
+                        if (_playbackLoopIterations >= DeviceHealthCheckInterval)
                         {
-                            Log.Error($"[NAudioBackend] waveOutWrite failed: code {res}");
-                            _playbackRunning = false;
-                            break;
+                            _playbackLoopIterations = 0;
+                            CheckDeviceHealth();
                         }
-                        wroteAny = true;
+
+                        var cb = _callback;
+                        if (cb != null)
+                            framesRead = cb(floatBuffer.AsSpan(0, _bufferFloatCount));
+
+                        if (framesRead <= 0)
+                        {
+                            int underruns = Interlocked.Increment(ref _consecutiveUnderrunCount);
+
+                            if (underruns == UnderrunLogThreshold)
+                                Log.Warn($"[WinAudioBackend] ⚠ {underruns} underruns");
+
+                            if (underruns == StarvationThreshold)
+                            {
+                                Log.Error($"[WinAudioBackend] Starvation detected: {underruns} consecutive underruns");
+                                var starvationCb = _onStarvation;
+                                if (starvationCb != null) Task.Run(starvationCb);
+                            }
+
+                            Array.Clear(floatBuffer, 0, _bufferFloatCount);
+                        }
+                        else
+                        {
+                            Volatile.Write(ref _consecutiveUnderrunCount, 0);
+
+                            bool fadeOutDone = ApplyFadeEnvelope(floatBuffer, framesRead);
+
+                            _gainProcessor?.Process(floatBuffer.AsSpan(0, framesRead * _channels));
+
+                            if (fadeOutDone)
+                            {
+                                lock (_stateLock)
+                                {
+                                    _gateOpen = false;
+                                    _fadingOut = false;
+                                    _fadeGain = 0f;
+                                }
+                                Array.Clear(floatBuffer, framesRead * _channels,
+                                    _bufferFloatCount - framesRead * _channels);
+                            }
+                            else if (framesRead * _channels < _bufferFloatCount)
+                            {
+                                Array.Clear(floatBuffer, framesRead * _channels,
+                                    _bufferFloatCount - framesRead * _channels);
+                            }
+                        }
                     }
+                    else
+                    {
+                        Array.Clear(floatBuffer, 0, _bufferFloatCount);
+                    }
+
+                    Marshal.Copy(floatBuffer, 0, _bufferPointers[i], _bufferFloatCount);
+
+                    int res = waveOutWrite(_hWaveOut, (nint)hdr, headerSize);
+                    if (res != MMSYSERR_NOERROR)
+                    {
+                        Log.Error($"[WinAudioBackend] waveOutWrite failed: code {res}");
+                        _playbackRunning = false;
+                        break;
+                    }
+
+                    wroteAny = true;
                 }
 
                 if (!wroteAny)
-                {
                     _waveCallbackEvent?.WaitOne(DesiredLatencyMs / NumberOfBuffers);
-                }
             }
             catch (Exception ex)
             {
-                Log.Error($"[NAudioBackend] Playback thread exception: {ex.Message}");
+                Log.Error($"[WinAudioBackend] Playback thread exception: {ex.Message}");
                 break;
             }
         }
@@ -458,7 +495,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         _waveCallbackEvent?.Set();
 
         if (_playbackThread is { IsAlive: true })
-            _playbackThread.Join(FillThreadJoinTimeoutMs);
+            _playbackThread.Join(PlaybackThreadJoinTimeoutMs);
 
         _playbackThread = null;
 
@@ -495,8 +532,6 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
         _headers = null;
         _bufferPointers = null;
-        _provider = null;
-        _gainProvider = null;
     }
 
     #endregion
@@ -511,14 +546,11 @@ public sealed partial class NAudioBackend : IPlaybackBackend
 
         lock (_stateLock)
         {
-            _fillActive = true;
             _gateOpen = false;
             _fadingIn = false;
             _fadingOut = false;
             _fadeGain = 0f;
         }
-
-        _fillWakeup.Set();
     }
 
     /// <inheritdoc/>
@@ -537,14 +569,11 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         {
             if (_gateOpen && !_fadingOut) return;
 
-            _fillActive = true;
             _gateOpen = true;
             _fadingOut = false;
             _fadingIn = true;
             if (_fadeGain <= 0f) _fadeGain = 0f;
         }
-
-        _fillWakeup.Set();
     }
 
     /// <inheritdoc/>
@@ -563,11 +592,10 @@ public sealed partial class NAudioBackend : IPlaybackBackend
     /// <inheritdoc/>
     public void Flush()
     {
-        if (_provider == null || _disposed) return;
+        if (_disposed) return;
 
         lock (_stateLock)
         {
-            _fillActive = false;
             _gateOpen = false;
             _fadingIn = false;
             _fadingOut = false;
@@ -575,139 +603,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         }
 
         Interlocked.Increment(ref _flushGeneration);
-        _provider.ClearBuffer();
         Volatile.Write(ref _consecutiveUnderrunCount, 0);
-    }
-
-    private void FillBufferLoop(CancellationToken ct)
-    {
-        int lastGeneration = Volatile.Read(ref _flushGeneration);
-
-        while (!ct.IsCancellationRequested && !_disposed)
-        {
-            try
-            {
-                var provider = _provider;
-                var callback = _callback;
-                var floatBuf = _floatBuffer;
-                var byteBuf = _byteBuffer;
-
-                if (provider == null || callback == null || floatBuf == null || byteBuf == null)
-                {
-                    Thread.Sleep(IdleSleepMs);
-                    continue;
-                }
-
-                int currentGeneration = Volatile.Read(ref _flushGeneration);
-                if (currentGeneration != lastGeneration)
-                {
-                    lastGeneration = currentGeneration;
-                    _fadingIn = false;
-                    _fadingOut = false;
-                    _fadeGain = 0f;
-                    Thread.Sleep(PostFlushSleepMs);
-                    continue;
-                }
-
-                if (!_fillActive)
-                {
-                    _fillWakeup.Reset();
-                    _fillWakeup.Wait(FillWakeupTimeoutMs, ct);
-                    continue;
-                }
-
-                if (_gateOpen && !_deviceLost)
-                {
-                    _fillLoopIterations++;
-                    if (_fillLoopIterations >= DeviceHealthCheckInterval)
-                    {
-                        _fillLoopIterations = 0;
-                        CheckDeviceHealth();
-                    }
-                }
-
-                if (!_gateOpen)
-                {
-                    _fillWakeup.Reset();
-                    _fillWakeup.Wait(FillWakeupTimeoutMs, ct);
-                    continue;
-                }
-
-                if (provider.BufferedDuration.TotalSeconds > InternalBufferSeconds * BufferHighWaterMark)
-                {
-                    Thread.Sleep(IdleSleepMs);
-                    continue;
-                }
-
-                int framesRead = callback(floatBuf);
-
-                int generationAfterRead = Volatile.Read(ref _flushGeneration);
-                if (generationAfterRead != lastGeneration)
-                {
-                    lastGeneration = generationAfterRead;
-                    _fadingIn = false;
-                    _fadingOut = false;
-                    _fadeGain = 0f;
-                    continue;
-                }
-
-                if (framesRead <= 0)
-                {
-                    int underruns = Interlocked.Increment(ref _consecutiveUnderrunCount);
-
-                    if (underruns == UnderrunLogThreshold)
-                    {
-                        Log.Warn($"[NAudioBackend] ⚠ {underruns} underruns. BufferedMs={(int)provider.BufferedDuration.TotalMilliseconds}");
-                    }
-
-                    if (underruns == StarvationThreshold)
-                    {
-                        Log.Error($"[NAudioBackend] Starvation detected: {underruns} consecutive underruns");
-                        var cb = _onStarvation;
-                        if (cb != null) Task.Run(cb, ct);
-                    }
-
-                    Thread.Sleep(EmptyCallbackSleepMs);
-                    continue;
-                }
-
-                Volatile.Write(ref _consecutiveUnderrunCount, 0);
-
-                bool fadeOutDone = ApplyFadeEnvelope(floatBuf, framesRead);
-
-                int bytes = framesRead * _channels * sizeof(float);
-                Buffer.BlockCopy(floatBuf, 0, byteBuf, 0, bytes);
-
-                try
-                {
-                    provider.AddSamples(byteBuf, 0, bytes);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[NAudioBackend] AddSamples failed: {ex.Message}");
-                    Thread.Sleep(EmptyCallbackSleepMs);
-                    continue;
-                }
-
-                if (fadeOutDone)
-                {
-                    lock (_stateLock)
-                    {
-                        _gateOpen = false;
-                        _fadingOut = false;
-                        _fadeGain = 0f;
-                    }
-                    provider.ClearBuffer();
-                }
-            }
-            catch (OperationCanceledException) { break; }
-            catch (ObjectDisposedException) { break; }
-            catch (Exception ex)
-            {
-                Log.Error($"[NAudioBackend] Fill loop error: {ex.Message}");
-                Thread.Sleep(ErrorSleepMs);
-            }
-        }
     }
 
     private void CheckDeviceHealth()
@@ -719,12 +615,11 @@ public sealed partial class NAudioBackend : IPlaybackBackend
             if (!_playbackRunning && _gateOpen && !_fadingOut)
             {
                 _deviceLost = true;
-                Log.Error("[NAudioBackend] Device lost during playback (playback thread stopped)");
+                Log.Error("[WinAudioBackend] Device lost during playback (playback thread stopped)");
 
                 lock (_stateLock)
                 {
                     _gateOpen = false;
-                    _fillActive = false;
                 }
 
                 StartDeviceWatcher();
@@ -735,7 +630,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         }
         catch (Exception ex)
         {
-            Log.Warn($"[NAudioBackend] Health check error: {ex.Message}");
+            Log.Warn($"[WinAudioBackend] Health check error: {ex.Message}");
         }
     }
 
@@ -814,7 +709,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
             if (deviceCount > 0)
             {
                 StopDeviceWatcher();
-                Log.Info($"[NAudioBackend] Audio device detected ({deviceCount} available) — triggering auto-recovery");
+                Log.Info($"[WinAudioBackend] Audio device detected ({deviceCount} available) — triggering auto-recovery");
 
                 var cb = _onDeviceAvailable;
                 if (cb != null) Task.Run(cb);
@@ -823,38 +718,15 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         catch { }
     }
 
-    private void AllocateBuffers(int sampleRate, int channels)
+    private void StopPlaybackThread()
     {
-        int samplesPerRead = sampleRate * channels / ChunkDivisor;
-        _floatBuffer = new float[samplesPerRead];
-        _byteBuffer = new byte[samplesPerRead * sizeof(float)];
-    }
+        _playbackRunning = false;
+        _waveCallbackEvent?.Set();
 
-    private void StartFillThread()
-    {
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
+        if (_playbackThread is { IsAlive: true })
+            _playbackThread.Join(PlaybackThreadJoinTimeoutMs);
 
-        _fillThread = new Thread(() => FillBufferLoop(token))
-        {
-            Name = "AudioFillBuffer",
-            IsBackground = true,
-            Priority = ThreadPriority.AboveNormal
-        };
-        _fillThread.Start();
-    }
-
-    private void StopFillThread()
-    {
-        _cts?.Cancel();
-        _fillWakeup.Set();
-
-        if (_fillThread is { IsAlive: true })
-            _fillThread.Join(FillThreadJoinTimeoutMs);
-
-        _cts?.Dispose();
-        _cts = null;
-        _fillThread = null;
+        _playbackThread = null;
     }
 
     private static string GetDeviceErrorMessage() =>
@@ -863,7 +735,7 @@ public sealed partial class NAudioBackend : IPlaybackBackend
             "Audio output device is not available. Please connect headphones or speakers.");
 
     /// <inheritdoc/>
-    public void SetVolumeGain(float gain) => _gainProvider?.SetVolumeGain(gain);
+    public void SetVolumeGain(float gain) => _gainProcessor?.SetVolumeGain(gain);
 
     #endregion
 
@@ -875,21 +747,18 @@ public sealed partial class NAudioBackend : IPlaybackBackend
         if (_disposed) return;
         _disposed = true;
 
-        _fillActive = false;
         _gateOpen = false;
 
         StopDeviceWatcher();
-        StopFillThread();
+        StopPlaybackThread();
         DisposeWaveOutSafe();
 
-        _floatBuffer = null;
-        _byteBuffer = null;
+        _gainProcessor = null;
         _onDeviceAvailable = null;
         _onDeviceLost = null;
         _onStarvation = null;
 
-        _fillWakeup.Dispose();
-        Log.Debug("[NAudioBackend] Disposed");
+        Log.Debug("[WinAudioBackend] Disposed");
     }
 
     #endregion
