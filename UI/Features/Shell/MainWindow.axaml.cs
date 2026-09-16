@@ -1,6 +1,5 @@
-﻿using System.Reactive.Disposables;
-using System.Reactive.Linq;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -8,7 +7,6 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Microsoft.Extensions.DependencyInjection;
-using ReactiveUI;
 
 namespace LMP.UI.Features.Shell;
 
@@ -28,7 +26,6 @@ namespace LMP.UI.Features.Shell;
 /// <para><b>Tray:</b> иконка ВСЕГДА видна в системном трее.
 /// На Windows — нативный <see cref="TrayManager"/> с перехватом WM_MOUSEWHEEL.
 /// На других платформах — стандартный Avalonia <see cref="TrayIcon"/>.</para>
-///
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -114,16 +111,12 @@ public partial class MainWindow : Window
 
     #region Fields — Tray
 
-    /// <summary>Подписки на PlayerControlService (живут всё время жизни окна).</summary>
-    private CompositeDisposable? _traySubscriptions;
-
-#if WINDOWS
-    /// <summary>Нативный менеджер трея (lazy mouse hook для скролла громкости).</summary>
+    /// <summary>Нативный менеджер трея Windows (lazy mouse hook для скролла громкости).</summary>
     private TrayManager? _trayManager;
 
-    /// <summary>Таймер восстановления tooltip после показа громкости (debounce).</summary>
+    /// <summary>Таймер восстановления tooltip после показа громкости (Windows debounce).</summary>
     private Avalonia.Threading.DispatcherTimer? _tooltipRestoreTimer;
-#else
+
     /// <summary>Стандартный менеджер трея от Avalonia для Linux/macOS.</summary>
     private TrayIcon? _trayIcon;
     private NativeMenuItem? _playPauseItem;
@@ -137,7 +130,6 @@ public partial class MainWindow : Window
 
     /// <summary>Timestamp последнего toggle (non-Windows debounce).</summary>
     private long _lastToggleTime;
-#endif
 
     #endregion
 
@@ -365,9 +357,10 @@ public partial class MainWindow : Window
 
         if (_isInTray) return;
 
-#if WINDOWS
-        _trayManager?.ForceUninstallHook();
-#endif
+        if (OperatingSystem.IsWindows())
+        {
+            _trayManager?.ForceUninstallHook();
+        }
 
         if (_isDeactivated)
         {
@@ -399,13 +392,15 @@ public partial class MainWindow : Window
         try
         {
             _playerControl = AppEntry.Services.GetRequiredService<PlayerControlService>();
-            _traySubscriptions = [];
 
-#if WINDOWS
-            SetupWindowsTray();
-#else
-            SetupAvaloniaTray();
-#endif
+            if (OperatingSystem.IsWindows())
+            {
+                SetupWindowsTray();
+            }
+            else
+            {
+                SetupAvaloniaTray();
+            }
 
             SubscribeToPlayerControl();
             Log.Info("[Tray] Configured");
@@ -416,11 +411,10 @@ public partial class MainWindow : Window
         }
     }
 
-#if WINDOWS
-
     /// <summary>
     /// Создаёт нативный Windows TrayManager с mouse hook для скролла громкости.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     private void SetupWindowsTray()
     {
         _trayManager = new TrayManager(
@@ -445,10 +439,12 @@ public partial class MainWindow : Window
 
     [LibraryImport("user32.dll", EntryPoint = "LoadImageW",
         StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [SupportedOSPlatform("windows")]
     private static partial IntPtr LoadImage(
         IntPtr hInst, string name, uint type, int cx, int cy, uint load);
 
     [LibraryImport("user32.dll", EntryPoint = "LoadIconW")]
+    [SupportedOSPlatform("windows")]
     private static partial IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
 
     private const uint IMAGE_ICON = 1;
@@ -458,22 +454,24 @@ public partial class MainWindow : Window
     /// Загружает иконку из avares:// ресурсов для Shell_NotifyIcon.
     /// Fallback: IDI_APPLICATION (стандартная системная иконка).
     /// </summary>
+    /// <returns>Дескриптор нативной иконки Windows (<see cref="IntPtr"/>).</returns>
+    [SupportedOSPlatform("windows")]
     private static IntPtr LoadWindowsIcon()
     {
-        string[] candidates = ["avares://LMP/Assets/app.ico", "avares://LMP/Assets/icon.ico"];
+        const string iconPath = "avares://LMP/Assets/app.ico";
 
-        foreach (var path in candidates)
+        try
         {
-            try
+            var uri = new Uri(iconPath);
+            if (Avalonia.Platform.AssetLoader.Exists(uri))
             {
-                var uri = new Uri(path);
-                if (!Avalonia.Platform.AssetLoader.Exists(uri)) continue;
-
                 string tempPath = Path.Combine(Path.GetTempPath(), "lmp_tray_icon.ico");
 
                 using (var source = Avalonia.Platform.AssetLoader.Open(uri))
                 using (var fs = File.Create(tempPath))
+                {
                     source.CopyTo(fs);
+                }
 
                 IntPtr hIcon = LoadImage(IntPtr.Zero, tempPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
 
@@ -481,13 +479,11 @@ public partial class MainWindow : Window
 
                 if (hIcon != IntPtr.Zero) return hIcon;
             }
-            catch { continue; }
         }
+        catch { }
 
         return LoadIconW(IntPtr.Zero, 32512); // IDI_APPLICATION
     }
-
-#else
 
     /// <summary>
     /// Настраивает Avalonia TrayIcon для Linux/macOS с контекстным меню.
@@ -574,33 +570,22 @@ public partial class MainWindow : Window
     {
         if (_trayIcon is null) return;
 
-        string[] candidates =
-        [
-            "avares://LMP/Assets/app.ico",
-            "avares://LMP/Assets/icon.ico",
-            "avares://LMP/Assets/icon.png",
-            "avares://LMP/Assets/logo.png",
-            "avares://LMP/Assets/logo.ico"
-        ];
+        const string iconPath = "avares://LMP/Assets/app.ico";
 
-        foreach (var path in candidates)
+        try
         {
-            try
+            var uri = new Uri(iconPath);
+            if (Avalonia.Platform.AssetLoader.Exists(uri))
             {
-                var uri = new Uri(path);
-                if (!Avalonia.Platform.AssetLoader.Exists(uri)) continue;
-
                 using var stream = Avalonia.Platform.AssetLoader.Open(uri);
                 _trayIcon.Icon = new WindowIcon(stream);
                 return;
             }
-            catch { /* try next */ }
         }
+        catch { /* try next */ }
 
         if (Icon != null) _trayIcon.Icon = Icon;
     }
-
-#endif
 
     #endregion
 
@@ -613,15 +598,16 @@ public partial class MainWindow : Window
     /// </summary>
     private void ToggleTrayWindow()
     {
-#if !WINDOWS
-        long now = Environment.TickCount64;
-        if (now - Volatile.Read(ref _lastToggleTime) < ToggleCooldownMs)
+        if (!OperatingSystem.IsWindows())
         {
-            Log.Debug("[Window] Toggle throttled");
-            return;
+            long now = Environment.TickCount64;
+            if (now - Volatile.Read(ref _lastToggleTime) < ToggleCooldownMs)
+            {
+                Log.Debug("[Window] Toggle throttled");
+                return;
+            }
+            Volatile.Write(ref _lastToggleTime, now);
         }
-        Volatile.Write(ref _lastToggleTime, now);
-#endif
 
         if (_isInTray || !IsVisible || WindowState == WindowState.Minimized)
             RestoreFromTray();
@@ -643,60 +629,45 @@ public partial class MainWindow : Window
         CancelDeactivateSuspend();
         ApplySuspendLevel();
 
-#if !WINDOWS
-        UpdateShowHideItemText();
-#endif
+        if (!OperatingSystem.IsWindows())
+        {
+            UpdateShowHideItemText();
+        }
 
         Log.Info("[Window] Minimized to tray");
     }
 
     /// <summary>
     /// Восстанавливает окно из трея.
-    ///
-    /// <para><b>Порядок операций критичен:</b></para>
-    /// <list type="number">
-    ///   <item><see cref="_isRestoringFromTray"/> guard — блокирует Deactivated race</item>
-    ///   <item><see cref="CancelDeactivateSuspend"/> — отменяет pending таймер</item>
-    ///   <item><c>Show()</c>/<c>Activate()</c> — могут вызвать Deactivated, но guard блокирует</item>
-    ///   <item>Флаги сбрасываются ПОСЛЕ Show — исключает "щель" между состояниями</item>
-    ///   <item><see cref="ApplySuspendLevel"/> безусловно — гарантирует resume</item>
-    ///   <item>Guard сбрасывается в <see cref="OnWindowActivated"/> или fallback 1.5с</item>
-    /// </list>
     /// </summary>
     private void RestoreFromTray()
     {
-        // 1. Guard ДО Show — блокирует Deactivated race на Windows
         _isRestoringFromTray = true;
         CancelDeactivateSuspend();
 
-        // 2. Показываем (может вызвать Deactivated — guard блокирует)
         Show();
         WindowState = WindowState.Normal;
         Activate();
 
-        // 3. Флаги ПОСЛЕ Show
         _isInTray = false;
         _isMinimized = false;
         _isDeactivated = false;
 
-        // 4. Безусловный resume
         _playerControl?.ForceSync();
         ApplySuspendLevel();
 
-        // 5. Fallback: если Activated не сработал за 1.5с — снимаем guard
         _ = ClearRestoreGuardFallbackAsync();
 
-#if !WINDOWS
-        UpdateShowHideItemText();
-#endif
+        if (!OperatingSystem.IsWindows())
+        {
+            UpdateShowHideItemText();
+        }
 
         Log.Info("[Window] Restored from tray");
     }
 
     /// <summary>
-    /// Fallback сброс restore guard. Нормальный путь: guard сбрасывается
-    /// в <see cref="OnWindowActivated"/> (~50–200мс). Fallback нужен если
-    /// Windows не дал foreground focus (редкий случай).
+    /// Fallback сброс restore guard.
     /// </summary>
     private async Task ClearRestoreGuardFallbackAsync()
     {
@@ -715,53 +686,115 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Подписки на PlayerControlService для обновления трея.
-    /// Живут всё время жизни окна (включая tray-режим).
     /// </summary>
     private void SubscribeToPlayerControl()
     {
-        if (_playerControl is null || _traySubscriptions is null) return;
+        if (_playerControl is null) return;
 
-#if WINDOWS
-        _playerControl.CurrentTrackObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => _trayManager?.UpdateTooltipFromPlayerState())
-            .DisposeWith(_traySubscriptions);
+        if (OperatingSystem.IsWindows())
+        {
+            SubscribeWindowsPlayerControl();
+        }
+        else
+        {
+            SubscribeNonWindowsPlayerControl();
+        }
 
-        _playerControl.IsPlayingObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => _trayManager?.UpdateTooltipFromPlayerState())
-            .DisposeWith(_traySubscriptions);
-#else
-        _playerControl.IsPlayingObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(UpdatePlayPauseMenuText)
-            .DisposeWith(_traySubscriptions);
+        _playerControl.ResumeRequested += HandleExternalResumeRequest;
+    }
 
-        _playerControl.CurrentTrackObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(track =>
-            {
-                UpdatePlaybackItemsEnabled(track != null);
-                UpdateTrayTooltip();
-            })
-            .DisposeWith(_traySubscriptions);
+    private void UnsubscribeFromPlayerControl()
+    {
+        if (_playerControl is null) return;
 
-        _playerControl.RepeatModeObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => UpdateRepeatMenuText())
-            .DisposeWith(_traySubscriptions);
+        if (OperatingSystem.IsWindows())
+        {
+            UnsubscribeWindowsPlayerControl();
+        }
+        else
+        {
+            UnsubscribeNonWindowsPlayerControl();
+        }
 
-        _playerControl.VolumeObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => UpdateTrayTooltip())
-            .DisposeWith(_traySubscriptions);
-#endif
+        _playerControl.ResumeRequested -= HandleExternalResumeRequest;
+    }
 
-        // Поддержка внешних запросов на resume (например из Volume popup при suspend)
-        _playerControl.ResumeRequestObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => HandleExternalResumeRequest())
-            .DisposeWith(_traySubscriptions);
+    [SupportedOSPlatform("windows")]
+    private void SubscribeWindowsPlayerControl()
+    {
+        _playerControl!.CurrentTrackChanged += OnWindowsTrackChanged;
+        _playerControl.IsPlayingChanged += OnWindowsPlayingChanged;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void UnsubscribeWindowsPlayerControl()
+    {
+        _playerControl!.CurrentTrackChanged -= OnWindowsTrackChanged;
+        _playerControl.IsPlayingChanged -= OnWindowsPlayingChanged;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void OnWindowsTrackChanged(TrackInfo? _)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(UpdateWindowsTooltip);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void OnWindowsPlayingChanged(bool _)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(UpdateWindowsTooltip);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void UpdateWindowsTooltip()
+    {
+        _trayManager?.UpdateTooltipFromPlayerState();
+    }
+
+    private void SubscribeNonWindowsPlayerControl()
+    {
+        _playerControl!.IsPlayingChanged += OnNonWindowsPlayingChanged;
+        _playerControl.CurrentTrackChanged += OnNonWindowsTrackChanged;
+        _playerControl.RepeatModeChanged += OnNonWindowsRepeatModeChanged;
+        _playerControl.VolumeChanged += OnNonWindowsVolumeChanged;
+    }
+
+    private void UnsubscribeNonWindowsPlayerControl()
+    {
+        if (_playerControl is null) return;
+
+        _playerControl.IsPlayingChanged -= OnNonWindowsPlayingChanged;
+        _playerControl.CurrentTrackChanged -= OnNonWindowsTrackChanged;
+        _playerControl.RepeatModeChanged -= OnNonWindowsRepeatModeChanged;
+        _playerControl.VolumeChanged -= OnNonWindowsVolumeChanged;
+    }
+
+    private void OnNonWindowsPlayingChanged(bool isPlaying)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            UpdatePlayPauseMenuText(isPlaying);
+            UpdateTrayTooltip();
+        });
+    }
+
+    private void OnNonWindowsTrackChanged(TrackInfo? track)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            UpdatePlaybackItemsEnabled(track != null);
+            UpdateTrayTooltip();
+        });
+    }
+
+    private void OnNonWindowsRepeatModeChanged(RepeatMode _)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(UpdateRepeatMenuText);
+    }
+
+    private void OnNonWindowsVolumeChanged(int _)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(UpdateTrayTooltip);
     }
 
     /// <summary>
@@ -797,17 +830,34 @@ public partial class MainWindow : Window
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             if (DataContext is MainWindowViewModel vm)
-                vm.NavigateCommand.Execute("Queue").Subscribe();
+                vm.NavigateCommand.Execute("Queue");
         });
     }
 
     /// <summary>
+    /// Выполняет очистку памяти по команде из меню трея.
+    /// </summary>
+    private static void OnTrayClearMemory()
+    {
+        MemoryCleanupHelper.PerformCleanup(aggressive: true);
+    }
+
+    /// <summary>
     /// Обрабатывает изменение громкости через скролл на иконке трея (Windows).
-    /// Показывает tooltip с акцентом на громкости, debounce-восстанавливает стандартный.
     /// </summary>
     private void HandleTrayVolumeChanged(int newVolume)
     {
-#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            UpdateWindowsVolumeTooltip();
+        }
+
+        Log.Debug($"[Tray] Volume: {newVolume}%");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void UpdateWindowsVolumeTooltip()
+    {
         if (_trayManager is null) return;
 
         _trayManager.UpdateTooltipWithVolumeAccent();
@@ -815,15 +865,9 @@ public partial class MainWindow : Window
         _tooltipRestoreTimer ??= CreateTooltipRestoreTimer();
         _tooltipRestoreTimer.Stop();
         _tooltipRestoreTimer.Start();
-#endif
-        Log.Debug($"[Tray] Volume: {newVolume}%");
     }
 
-#if WINDOWS
-    /// <summary>
-    /// Создаёт DispatcherTimer для debounce-восстановления tooltip.
-    /// Один экземпляр на весь lifecycle окна.
-    /// </summary>
+    [SupportedOSPlatform("windows")]
     private Avalonia.Threading.DispatcherTimer CreateTooltipRestoreTimer()
     {
         var timer = new Avalonia.Threading.DispatcherTimer
@@ -839,13 +883,10 @@ public partial class MainWindow : Window
 
         return timer;
     }
-#endif
 
     #endregion
 
     #region Tray — Platform Helpers (non-Windows)
-
-#if !WINDOWS
 
     private string FormatShowHideText()
     {
@@ -859,7 +900,7 @@ public partial class MainWindow : Window
 
     private void UpdateShowHideItemText()
     {
-        if (_showItem != null) _showItem.Header = FormatShowHideText();
+        _showItem?.Header = FormatShowHideText();
     }
 
     private void UpdateTrayTooltip()
@@ -871,10 +912,10 @@ public partial class MainWindow : Window
 
     private void UpdatePlaybackItemsEnabled(bool enabled)
     {
-        if (_playPauseItem != null) _playPauseItem.IsEnabled = enabled;
-        if (_nextItem != null) _nextItem.IsEnabled = enabled;
-        if (_prevItem != null) _prevItem.IsEnabled = enabled;
-        if (_repeatItem != null) _repeatItem.IsEnabled = enabled;
+        _playPauseItem?.IsEnabled = enabled;
+        _nextItem?.IsEnabled = enabled;
+        _prevItem?.IsEnabled = enabled;
+        _repeatItem?.IsEnabled = enabled;
     }
 
     private void UpdatePlayPauseMenuText(bool isPlaying)
@@ -905,11 +946,11 @@ public partial class MainWindow : Window
         var L = LocalizationService.Instance;
 
         UpdateShowHideItemText();
-        if (_nextItem != null) _nextItem.Header = $"»  {L["Tray_Next"] ?? "Next"}";
-        if (_prevItem != null) _prevItem.Header = $"«  {L["Tray_Previous"] ?? "Previous"}";
-        if (_queueItem != null) _queueItem.Header = $"≡  {L["Tray_Queue"] ?? "Queue"}";
-        if (_cleanMemItem != null) _cleanMemItem.Header = $"⟳  {L["Tray_ClearMemory"] ?? "Clear Memory"}";
-        if (_exitItem != null) _exitItem.Header = $"×  {L["Tray_Exit"] ?? "Exit"}";
+        _nextItem?.Header = $"»  {L["Tray_Next"] ?? "Next"}";
+        _prevItem?.Header = $"«  {L["Tray_Previous"] ?? "Previous"}";
+        _queueItem?.Header = $"≡  {L["Tray_Queue"] ?? "Queue"}";
+        _cleanMemItem?.Header = $"⟳  {L["Tray_ClearMemory"] ?? "Clear Memory"}";
+        _exitItem?.Header = $"×  {L["Tray_Exit"] ?? "Exit"}";
 
         if (_playerControl != null)
         {
@@ -919,8 +960,6 @@ public partial class MainWindow : Window
 
         UpdateTrayTooltip();
     }
-
-#endif
 
     #endregion
 
@@ -978,9 +1017,6 @@ public partial class MainWindow : Window
 
     #region Memory Cleanup
 
-    /// <summary>
-    /// Планирует отложенную очистку памяти. Предыдущий таймер отменяется.
-    /// </summary>
     private void ScheduleCleanup(TimeSpan delay)
     {
         CancelCleanup();
@@ -989,9 +1025,8 @@ public partial class MainWindow : Window
 
         _ = Task.Run(async () =>
         {
-            // Используем безопасный метод ожидания без генерации исключений
             bool completedNormal = await DelayNoThrowAsync(delay, token);
-            if (!completedNormal) return; // Была отмена, выходим
+            if (!completedNormal) return;
 
             var now = DateTime.UtcNow;
             if ((now - _lastCleanupTime).TotalMilliseconds < MinCleanupIntervalMs)
@@ -1011,13 +1046,6 @@ public partial class MainWindow : Window
         _cleanupCts = null;
     }
 
-    /// <summary>
-    /// Выполняет асинхронное ожидание, которое завершается либо по истечении времени,
-    /// либо при отмене токена, без выбрасывания исключений (zero-exception).
-    /// </summary>
-    /// <param name="delay">Время ожидания.</param>
-    /// <param name="token">Токен отмены.</param>
-    /// <returns>True — если ожидание завершилось штатно; False — если была запрошена отмена.</returns>
     private static async Task<bool> DelayNoThrowAsync(TimeSpan delay, CancellationToken token)
     {
         if (token.IsCancellationRequested)
@@ -1025,19 +1053,13 @@ public partial class MainWindow : Window
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Регистрируем коллбек отмены, который переведет задачу в состояние завершения с результатом false
         using (token.Register(static state =>
                {
                    ((TaskCompletionSource<bool>)state!).TrySetResult(false);
                }, tcs))
         {
-            // Запускаем нативный таймер без передачи токена, чтобы он гарантированно не выбрасывал исключений
             var delayTask = Task.Delay(delay, CancellationToken.None);
-
-            // Ждем, что наступит раньше — таймер или отмена токена
             var completedTask = await Task.WhenAny(delayTask, tcs.Task).ConfigureAwait(false);
-
-            // Если первым завершился таймер, возвращаем true
             return completedTask == delayTask;
         }
     }
@@ -1048,7 +1070,6 @@ public partial class MainWindow : Window
 
     private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        // Не перехватываем drag если клик по кнопке
         if (e.Source is Button) return;
 
         if (e.Source is Visual visual)
@@ -1067,10 +1088,6 @@ public partial class MainWindow : Window
 
     #region Copy Hint Overlay
 
-    /// <summary>
-    /// Обработчик запроса от <see cref="CopyHintService"/>.
-    /// Гарантирует выполнение на UI-потоке.
-    /// </summary>
     private void OnCopyHintRequested(string text, CopyHintKind kind, Point? cursorPosition)
     {
         if (!Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
@@ -1083,10 +1100,6 @@ public partial class MainWindow : Window
         ShowCopyHint(text, kind, cursorPosition);
     }
 
-    /// <summary>
-    /// Показывает toast у позиции курсора (или в нижнем центре как fallback).
-    /// CTS отменяет предыдущий цикл при быстрых повторных запросах.
-    /// </summary>
     private async void ShowCopyHint(string text, CopyHintKind kind, Point? cursorPosition)
     {
         if (_copyHintOverlay is null || _copyHintText is null || _copyHintCanvas is null)
@@ -1102,11 +1115,9 @@ public partial class MainWindow : Window
             ApplyCopyHintStyle(kind);
             _copyHintText.Text = text;
 
-            // Показываем невидимо для layout measurement
             _copyHintOverlay.IsVisible = true;
             _copyHintOverlay.Opacity = 0;
 
-            // Ждём один render pass для корректного DesiredSize
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
                 () => { }, Avalonia.Threading.DispatcherPriority.Render);
 
@@ -1120,12 +1131,9 @@ public partial class MainWindow : Window
 
             _copyHintOverlay.IsVisible = false;
         }
-        catch (OperationCanceledException) { /* new hint requested */ }
+        catch (OperationCanceledException) { }
     }
 
-    /// <summary>
-    /// Позиционирует hint над курсором. Если сверху нет места — под курсором.
-    /// </summary>
     private void PositionCopyHint(Point? cursorPosition)
     {
         if (_copyHintCanvas is null || _copyHintOverlay is null) return;
@@ -1139,17 +1147,16 @@ public partial class MainWindow : Window
 
         if (cursorPosition is not { } cursor)
         {
-            // Fallback: центр-низ (аккуратный докинг без гигантского отступа)
             Canvas.SetLeft(_copyHintOverlay, Math.Max(margin, (canvasW - hintW) * 0.5));
             Canvas.SetTop(_copyHintOverlay, Math.Max(margin, canvasH - hintH - 40));
             return;
         }
 
         double x = cursor.X - hintW / 2.0;
-        double y = cursor.Y - hintH - 12; // над курсором
+        double y = cursor.Y - hintH - 12;
 
         if (y < margin)
-            y = cursor.Y + 24; // под курсором
+            y = cursor.Y + 24;
 
         x = Math.Clamp(x, margin, canvasW - hintW - margin);
         y = Math.Clamp(y, margin, canvasH - hintH - margin);
@@ -1158,9 +1165,6 @@ public partial class MainWindow : Window
         Canvas.SetTop(_copyHintOverlay, y);
     }
 
-    /// <summary>
-    /// Применяет иконку и цвет акцента по типу hint-а.
-    /// </summary>
     private void ApplyCopyHintStyle(CopyHintKind kind)
     {
         if (_copyHintIcon is null || _copyHintOverlay is null) return;
@@ -1192,28 +1196,27 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        // Timers
         CancelDeactivateSuspend();
         CancelCleanup();
 
-        // Tray
-#if WINDOWS
-        _tooltipRestoreTimer?.Stop();
-        _tooltipRestoreTimer = null;
-        _trayManager?.Dispose();
-#else
-        if (_trayIcon != null) _trayIcon.IsVisible = false;
-        LocalizationService.Instance.LanguageChanged -= OnTrayLanguageChanged;
-#endif
+        UnsubscribeFromPlayerControl();
 
-        _traySubscriptions?.Dispose();
+        if (OperatingSystem.IsWindows())
+        {
+            _tooltipRestoreTimer?.Stop();
+            _tooltipRestoreTimer = null;
+            _trayManager?.Dispose();
+        }
+        else
+        {
+            _trayIcon?.IsVisible = false;
+            LocalizationService.Instance.LanguageChanged -= OnTrayLanguageChanged;
+        }
 
-        // Window events
         PropertyChanged -= OnWindowPropertyChanged;
         Deactivated -= OnWindowDeactivated;
         Activated -= OnWindowActivated;
 
-        // Copy hint
         CopyHintService.Instance.HintRequested -= OnCopyHintRequested;
         _copyHintCts?.Cancel();
         _copyHintCts?.Dispose();

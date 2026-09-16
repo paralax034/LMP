@@ -1,6 +1,4 @@
 using Avalonia.Controls;
-using ReactiveUI;
-using System.Reactive;
 
 namespace LMP.UI.Dialogs.Content;
 
@@ -31,10 +29,10 @@ public partial class InputDialogContent : UserControl
     public string CancelText { get; }
 
     /// <summary>Подтвердить ввод.</summary>
-    public ReactiveCommand<Unit, Unit> ConfirmCommand { get; }
+    public IRelayCommand ConfirmCommand { get; }
 
     /// <summary>Отменить ввод.</summary>
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     /// <summary>
     /// Конструктор для XAML-компилятора и превьюера.
@@ -62,13 +60,13 @@ public partial class InputDialogContent : UserControl
 
         // Считываем текст напрямую из TextBox при подтверждении —
         // не нужен двусторонний биндинг и INotifyPropertyChanged
-        ConfirmCommand = ReactiveCommand.Create(() =>
+        ConfirmCommand = new RelayCommand(() =>
         {
             var textBox = this.FindControl<TextBox>("InputTextBox");
             onResult(textBox?.Text);
         });
 
-        CancelCommand = ReactiveCommand.Create(() => onResult(null));
+        CancelCommand = new RelayCommand(() => onResult(null));
 
         InitializeComponent();
         DataContext = this;

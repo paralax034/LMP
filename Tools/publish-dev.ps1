@@ -171,7 +171,7 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
-    Write-Host ">>> Сборка Release (publish)..." -ForegroundColor Yellow
+    Write-Host ">>> Сборка Release (Native AOT publish)..." -ForegroundColor Yellow
     & $buildScript "publish" "nopause"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
@@ -218,6 +218,7 @@ $historyNotesTemplate = @"
 | Параметр | Значение |
 |----------|----------|
 | Версия | `{0}` |
+| Архитектура | Native AOT (win-x64) |
 | Тег | `{1}` |
 | Коммит | `{2}` |
 | Всего коммитов | {3} |
@@ -231,18 +232,19 @@ $historyNotes = $historyNotesTemplate -f $fullVersion, $historyTag, $shortHash, 
 $latestNotesTemplate = @"
 # 🎵 LMP Dev Build (Latest)
 
-Актуальная предрелизная сборка. Ссылки на файлы в этом релизе постоянны и не меняются со временем.
+Актуальная предрелизная сборка на базе **Native AOT**. Ссылки на файлы в этом релизе постоянны и не меняются со временем.
 
 | Параметр | Значение |
 |----------|----------|
 | Актуальная версия | `{0}` |
+| Архитектура | Native AOT (win-x64) |
 | Номер коммита | `{1}` |
 | Архивный снапшот | [`{2}`](https://github.com/{5}/releases/tag/{2}) |
 | Среда сборки | {3} |
 | Дата обновления | {4} |
 
 ### 📥 Постоянные ссылки на загрузку:
-- **[Скачать LMP-Release-latest.7z](https://github.com/{5}/releases/download/{6}/LMP-Release-latest.7z)** — рекомендуемая сборка
+- **[Скачать LMP-Release-latest.7z](https://github.com/{5}/releases/download/{6}/LMP-Release-latest.7z)** — Native AOT сборка (рекомендуется)
 - **[Скачать LMP-Debug-latest.7z](https://github.com/{5}/releases/download/{6}/LMP-Debug-latest.7z)** — отладочная версия с логами
 "@
 $latestNotes = $latestNotesTemplate -f $fullVersion, $shortHash, $historyTag, $sourceEnv, (Get-Date -Format "yyyy-MM-dd HH:mm UTC"), $repoSlug, $latestTag

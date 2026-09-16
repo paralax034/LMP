@@ -7,7 +7,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceInclude Source="/UI/Converters/AppConverters.axaml" />
+                <ResourceInclude Source="avares://LMP/UI/Converters/AppConverters.axaml" />
                 <ResourceInclude Source="avares://LMP/UI/Theme/Icons.axaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
@@ -19,12 +19,12 @@
         <StyleInclude Source="avares://AsyncImageLoader.Avalonia/AdvancedImage.axaml" />
 
         <!-- 1. ToolTip первым -->
-        <StyleInclude Source="/UI/Theme/ToolTipTheme.axaml" />
+        <StyleInclude Source="avares://LMP/UI/Theme/ToolTipTheme.axaml" />
         <!-- 2. Theme.axaml: Typography, Buttons, Controls, AppComponents, PlayerBarStyles -->
-        <StyleInclude Source="/UI/Theme/Theme.axaml" />
+        <StyleInclude Source="avares://LMP/UI/Theme/Theme.axaml" />
         <!-- 3. Дополнительные компоненты -->
-        <StyleInclude Source="/UI/Theme/LoadingSkeletons.axaml" />
-        <StyleInclude Source="/UI/Theme/ChipStyles.axaml" />
+        <StyleInclude Source="avares://LMP/UI/Theme/LoadingSkeletons.axaml" />
+        <StyleInclude Source="avares://LMP/UI/Theme/ChipStyles.axaml" />
     </Application.Styles>
 
 </Application>

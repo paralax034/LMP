@@ -1,6 +1,4 @@
 using Avalonia.Controls;
-using ReactiveUI;
-using System.Reactive;
 
 namespace LMP.UI.Dialogs.Content;
 
@@ -19,7 +17,7 @@ public partial class InfoDialogContent : UserControl
     public string ButtonText { get; }
 
     /// <summary>Закрыть диалог.</summary>
-    public ReactiveCommand<Unit, Unit> CloseCommand { get; }
+    public IRelayCommand CloseCommand { get; }
 
     /// <summary>
     /// Конструктор для XAML-компилятора и превьюера.
@@ -43,7 +41,7 @@ public partial class InfoDialogContent : UserControl
         Message = message;
         ButtonText = buttonText;
 
-        CloseCommand = ReactiveCommand.Create(onClose);
+        CloseCommand = new RelayCommand(onClose);
 
         InitializeComponent();
         DataContext = this;

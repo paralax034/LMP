@@ -1,5 +1,4 @@
 ﻿using LMP.Core.Youtube.Utils;
-using ReactiveUI;
 
 namespace LMP.Core.Services;
 
@@ -7,7 +6,7 @@ namespace LMP.Core.Services;
 /// Координирует операции между локальной БД и YouTube.
 /// Single Responsibility: оркестрация sync-операций.
 /// </summary>
-public class MusicLibraryManager : ReactiveObject
+public class MusicLibraryManager : ObservableObject
 {
     private readonly LibraryService _library;
     private readonly YoutubeUserDataService _ytUser;

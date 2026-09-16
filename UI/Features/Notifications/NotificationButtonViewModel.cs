@@ -1,7 +1,3 @@
-using System.Reactive;
-using ReactiveUI;
-
-
 namespace LMP.UI.Features.Notifications;
 
 public sealed partial class NotificationButtonViewModel : ViewModelBase
@@ -9,13 +5,13 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
     private readonly NotificationService _notificationService;
     private readonly NotificationPanelViewModel _panelViewModel;
 
-    [Reactive] public partial bool IsPanelOpen { get; set; }
+    [ObservableProperty] public partial bool IsPanelOpen { get; set; }
 
     public bool HasUnread => _notificationService.HasUnread;
     public int UnreadCount => _notificationService.UnreadCount;
     public string UnreadCountText => UnreadCount > 9 ? "9+" : UnreadCount.ToString();
 
-    public ReactiveCommand<Unit, Unit> TogglePanelCommand { get; }
+    public IRelayCommand TogglePanelCommand { get; }
 
     public NotificationButtonViewModel(
         NotificationService notificationService,
@@ -29,13 +25,13 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
             if (e.PropertyName is nameof(NotificationService.UnreadCount)
                                 or nameof(NotificationService.HasUnread))
             {
-                this.RaisePropertyChanged(nameof(HasUnread));
-                this.RaisePropertyChanged(nameof(UnreadCount));
-                this.RaisePropertyChanged(nameof(UnreadCountText));
+                OnPropertyChanged(nameof(HasUnread));
+                OnPropertyChanged(nameof(UnreadCount));
+                OnPropertyChanged(nameof(UnreadCountText));
             }
         };
 
-        TogglePanelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        TogglePanelCommand = new RelayCommand(() =>
         {
             IsPanelOpen = !IsPanelOpen;
 
@@ -45,6 +41,6 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
                 _ = _panelViewModel.OnPanelOpenedAsync();
                 _notificationService.MarkAllAsRead();
             }
-        }));
+        });
     }
 }

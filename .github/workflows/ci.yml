@@ -28,3 +28,6 @@ jobs:
 
             - name: Build Optimized Debug
               run: ./build.bat optimized nopause
+
+            - name: Validate Native AOT Publish
+              run: ./build.bat publish nopause

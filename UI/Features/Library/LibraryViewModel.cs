@@ -1,14 +1,9 @@
-using LMP.UI.Features.Shell;
-using ReactiveUI;
-
 using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Linq;
+using System.Collections.Specialized;
+using Avalonia.Threading;
 using LMP.Core.Youtube.Search;
 using LMP.UI.Dialogs;
-using Avalonia.Threading;
-using LMP.Core.Helpers.Extensions;
-using System.Collections.Specialized;
+using LMP.UI.Features.Shell;
 
 namespace LMP.UI.Features.Library;
 
@@ -45,6 +40,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     private CancellationTokenSource? _syncCts;
     private CancellationTokenSource? _staggerCts;
     private CancellationTokenSource? _statsAnimCts;
+    private DispatcherTimer? _dataChangedTimer;
     private bool _isDisposed;
     private int _prevPlaylistCount;
     private int _prevTrackCount;
@@ -57,32 +53,37 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     /// <summary>
     /// Идентификатор владельца, для которого последний раз была загружена страница.
     /// Защищает от повторного использования stale-кэша после смены аккаунта,
-    /// даже если broadсast был пропущен или страница уже находилась в кеше навигации.
+    /// даже если broadcast был пропущен или страница уже находилась в кеше навигации.
     /// </summary>
     private string _loadedOwnerId = string.Empty;
 
     #endregion
 
-    #region Reactive-свойства
+    #region Свойства
 
-    [Reactive] public partial bool IsContentReady { get; private set; }
-    [Reactive] public partial bool IsLoading { get; private set; }
-    [Reactive] public partial bool IsSyncing { get; private set; }
-    [Reactive] public partial double SyncProgress { get; private set; }
-    [Reactive] public partial string SyncStatus { get; private set; } = "";
-    [Reactive] public partial bool IsAuthenticated { get; private set; }
-    [Reactive] public partial bool HasPlaylists { get; private set; }
+    [ObservableProperty] public partial bool IsContentReady { get; private set; }
+    [ObservableProperty] public partial bool IsLoading { get; private set; }
+    [ObservableProperty] public partial bool IsSyncing { get; private set; }
+    [ObservableProperty] public partial double SyncProgress { get; private set; }
+    [ObservableProperty] public partial string SyncStatus { get; private set; } = "";
+    [ObservableProperty] public partial bool IsAuthenticated { get; private set; }
+    [ObservableProperty] public partial bool HasPlaylists { get; private set; }
+
+    partial void OnIsSyncingChanged(bool value)
+    {
+        SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+    }
 
     #endregion
 
     #region Статистика
 
-    [Reactive] public partial bool IsStatsVisible { get; private set; }
-    [Reactive] public partial string PlaylistCountText { get; private set; } = "";
-    [Reactive] public partial string TotalTracksText { get; private set; } = "";
-    [Reactive] public partial string TotalDurationText { get; private set; } = "";
-    [Reactive] public partial string AvgTrackDurationText { get; private set; } = "";
-    [Reactive] public partial string AvgPlaylistDurationText { get; private set; } = "";
+    [ObservableProperty] public partial bool IsStatsVisible { get; private set; }
+    [ObservableProperty] public partial string PlaylistCountText { get; private set; } = "";
+    [ObservableProperty] public partial string TotalTracksText { get; private set; } = "";
+    [ObservableProperty] public partial string TotalDurationText { get; private set; } = "";
+    [ObservableProperty] public partial string AvgTrackDurationText { get; private set; } = "";
+    [ObservableProperty] public partial string AvgPlaylistDurationText { get; private set; } = "";
 
     #endregion
 
@@ -90,10 +91,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     public ObservableCollection<PlaylistCardViewModel> Playlists { get; } = [];
 
-    public ReactiveCommand<Unit, Unit> RefreshCommand { get; }
-    public ReactiveCommand<Unit, Unit> OpenCreateCommand { get; }
-    public ReactiveCommand<Unit, Unit> SyncAccountPlaylistsCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelSyncCommand { get; }
+    public IAsyncRelayCommand RefreshCommand { get; }
+    public IAsyncRelayCommand OpenCreateCommand { get; }
+    public IAsyncRelayCommand SyncAccountPlaylistsCommand { get; }
+    public IRelayCommand CancelSyncCommand { get; }
 
     #endregion
 
@@ -128,19 +129,16 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         IsAuthenticated = _auth.IsAuthenticated;
         _auth.OnAuthStateChanged += OnAuthChanged;
 
-        OpenCreateCommand = CreateCommand(ReactiveCommand.CreateFromTask(OpenCreateDialogAsync));
+        OpenCreateCommand = new AsyncRelayCommand(OpenCreateDialogAsync);
+        SyncAccountPlaylistsCommand = new AsyncRelayCommand(SyncAccountPlaylistsAsync, () => !IsSyncing);
 
-        var canSync = this.WhenAnyValue(x => x.IsSyncing, syncing => !syncing);
-        SyncAccountPlaylistsCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(SyncAccountPlaylistsAsync, canSync));
-
-        CancelSyncCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelSyncCommand = new RelayCommand(() =>
         {
             _syncCts?.Cancel();
             SyncStatus = SL["Sync_Cancelling"];
-        }));
+        });
 
-        RefreshCommand = CreateCommand(ReactiveCommand.CreateFromTask(LoadPlaylistsAsync));
+        RefreshCommand = new AsyncRelayCommand(LoadPlaylistsAsync);
 
         SubscribeToLibraryEvents();
         Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
@@ -196,33 +194,38 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     /// </summary>
     private void SubscribeToLibraryEvents()
     {
-        // Инкрементальное обновление при изменении плейлиста
-        Observable.FromEvent<Action<Core.Models.Playlist>, Core.Models.Playlist>(
-                h => _library.OnPlaylistChanged += h,
-                h => _library.OnPlaylistChanged -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Where(_ => !_isDisposed && !IsSyncing)
-            .Subscribe(OnPlaylistChangedIncremental)
-            .DisposeWith(Disposables);
+        _library.OnPlaylistChanged += OnLibraryPlaylistChanged;
+        _library.OnPlaylistRemoved += OnLibraryPlaylistRemoved;
+        _library.OnDataChanged += OnLibraryDataChanged;
+    }
 
-        // Инкрементальное удаление плейлиста
-        Observable.FromEvent<Action<string>, string>(
-                h => _library.OnPlaylistRemoved += h,
-                h => _library.OnPlaylistRemoved -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Where(_ => !_isDisposed && !IsSyncing)
-            .Subscribe(OnPlaylistRemovedIncremental)
-            .DisposeWith(Disposables);
+    private void OnLibraryPlaylistChanged(Core.Models.Playlist playlist)
+    {
+        if (_isDisposed || IsSyncing) return;
+        Dispatcher.UIThread.Post(() => OnPlaylistChangedIncremental(playlist));
+    }
 
-        // Обновление статистики с дебаунсом
-        Observable.FromEvent(
-                h => _library.OnDataChanged += h,
-                h => _library.OnDataChanged -= h)
-            .Throttle(TimeSpan.FromMilliseconds(500))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Where(__ => !_isDisposed && !IsSyncing)
-            .Subscribe(__ => UpdateStatsInBackground())
-            .DisposeWith(Disposables);
+    private void OnLibraryPlaylistRemoved(string playlistId)
+    {
+        if (_isDisposed || IsSyncing) return;
+        Dispatcher.UIThread.Post(() => OnPlaylistRemovedIncremental(playlistId));
+    }
+
+    private void OnLibraryDataChanged()
+    {
+        if (_isDisposed || IsSyncing) return;
+
+        _dataChangedTimer?.Stop();
+        _dataChangedTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(500),
+            DispatcherPriority.Background,
+            (_, _) =>
+            {
+                _dataChangedTimer?.Stop();
+                if (!_isDisposed && !IsSyncing)
+                    UpdateStatsInBackground();
+            });
+        _dataChangedTimer.Start();
     }
 
     private async void UpdateStatsInBackground()
@@ -491,13 +494,13 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                     .ToList();
 
                 playlistsToImport = [.. filtered.Select(p =>
-            {
-                var pid = new Core.Youtube.Playlists.PlaylistId(p.YoutubeId!);
-                var thumbs = new List<Thumbnail>();
-                if (!string.IsNullOrEmpty(p.ThumbnailUrl))
-                    thumbs.Add(new Thumbnail(p.ThumbnailUrl, new Resolution(0, 0)));
-                return new PlaylistSearchResult(pid, p.Name, null, thumbs);
-            })];
+                {
+                    var pid = new Core.Youtube.Playlists.PlaylistId(p.YoutubeId!);
+                    var thumbs = new List<Thumbnail>();
+                    if (!string.IsNullOrEmpty(p.ThumbnailUrl))
+                        thumbs.Add(new Thumbnail(p.ThumbnailUrl, new Resolution(0, 0)));
+                    return new PlaylistSearchResult(pid, p.Name, null, thumbs);
+                })];
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex)
@@ -990,7 +993,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     #endregion
 
     private PlaylistCardViewModel CreatePlaylistCardVm(
-     Core.Models.Playlist playlist, int trackCount)
+        Core.Models.Playlist playlist, int trackCount)
     {
         return new PlaylistCardViewModel(
             _auth,
@@ -1105,6 +1108,13 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _isDisposed = true;
 
             Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
+
+            _library.OnPlaylistChanged -= OnLibraryPlaylistChanged;
+            _library.OnPlaylistRemoved -= OnLibraryPlaylistRemoved;
+            _library.OnDataChanged -= OnLibraryDataChanged;
+
+            _dataChangedTimer?.Stop();
+            _dataChangedTimer = null;
 
             _staggerCts?.Cancel();
             _staggerCts?.Dispose();

@@ -5,11 +5,14 @@
     <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
     <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
-  
+
     <!-- Чтобы IDE-диагностики тоже попадали в сборку (важно для CI) -->
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
     <!-- Опционально, но полезно чтобы реально “давило” -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Отключаем генерацию и поиск сателлитных сборок ресурсов: локализация работает через JSON -->
+    <SatelliteResourceLanguages>none</SatelliteResourceLanguages>
   </PropertyGroup>
 </Project>

@@ -1,15 +1,13 @@
-using System.Reactive;
-using LMP.Core.Youtube.Search;
-using ReactiveUI;
-
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
-using LMP.Core.Audio.Helpers;
+using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Cache;
+using LMP.Core.Audio.Decoders;
+using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Sources;
-using LMP.Core.Audio.Decoders;
-using LMP.Core.Audio.Backends;
 using LMP.Core.Diagnostics;
+using LMP.Core.Youtube.Search;
 
 namespace LMP.UI.Features.Debug;
 
@@ -17,92 +15,99 @@ namespace LMP.UI.Features.Debug;
 /// ViewModel для Debug-окна. Содержит логику YouTube/Memory/Audio вкладок
 /// и предоставляет <see cref="TestRunner"/> для вкладки Tests.
 /// </summary>
-public sealed partial class DebugViewModel : ViewModelBase, IDisposable
+public sealed partial class DebugViewModel : ViewModelBase
 {
     private readonly Lazy<YoutubeProvider> _youtubeLazy;
     private YoutubeProvider Youtube => _youtubeLazy.Value;
 
-    // ═══════════════════════════════════════════════════════════════
     // TEST RUNNER (вкладка Tests)
-    // ═══════════════════════════════════════════════════════════════
 
     /// <summary>ViewModel для вкладки тестов. Создаётся лениво при первом обращении.</summary>
     public TestRunnerViewModel TestRunner { get; } = new();
 
-    // ═══════════════════════════════════════════════════════════════
     // EXISTING PROPERTIES (YouTube / Memory / Audio)
-    // ═══════════════════════════════════════════════════════════════
 
-    [Reactive] public partial string LogOutput { get; set; } = "Debug Session Started...\n";
-    [Reactive] public partial string SearchQuery { get; set; } = "Linkin Park";
-    [Reactive] public partial bool IsBusy { get; set; }
+    [ObservableProperty]
+    public partial string LogOutput { get; set; } = "Debug Session Started...\n";
 
-    [Reactive] public partial string AudioTestInput { get; set; } = "aG_i7fvGSXU";
-    [Reactive] public partial int AudioTestDuration { get; set; } = 10;
-    [Reactive] public partial bool IsAudioPlaying { get; set; }
+    [ObservableProperty]
+    public partial string SearchQuery { get; set; } = "Linkin Park";
+
+    [ObservableProperty]
+    public partial bool IsBusy { get; set; }
+
+    [ObservableProperty]
+    public partial string AudioTestInput { get; set; } = "aG_i7fvGSXU";
+
+    [ObservableProperty]
+    public partial int AudioTestDuration { get; set; } = 10;
+
+    [ObservableProperty]
+    public partial bool IsAudioPlaying { get; set; }
 
     /// <summary> Активен ли в данный момент фоновый мониторинг зависаний UI-потока. </summary>
-    [Reactive] public partial bool IsWatchdogEnabled { get; set; }
+    [ObservableProperty]
+    public partial bool IsWatchdogEnabled { get; set; }
 
     /// <summary> Текст состояния для отображения на кнопке управления Watchdog. </summary>
-    [Reactive] public partial string WatchdogStatusText { get; set; } = "Watchdog: OFF";
+    [ObservableProperty]
+    public partial string WatchdogStatusText { get; set; } = "Watchdog: OFF";
 
     private CancellationTokenSource? _audioTestCts;
     private AudioPlayer? _testPlayer;
     private AudioCacheManager? _testCacheManager;
     private UIHangWatchdog? _uiWatchdog;
 
-    public ReactiveCommand<Unit, Unit> GetLikedVideosCommand { get; }
-    public ReactiveCommand<Unit, Unit> GetLikedMusicCommand { get; }
-    public ReactiveCommand<Unit, Unit> SearchVideosCommand { get; }
-    public ReactiveCommand<Unit, Unit> SearchMusicCommand { get; }
-    public ReactiveCommand<Unit, string> ClearLogCommand { get; }
+    public IAsyncRelayCommand GetLikedVideosCommand { get; }
+    public IAsyncRelayCommand GetLikedMusicCommand { get; }
+    public IAsyncRelayCommand SearchVideosCommand { get; }
+    public IAsyncRelayCommand SearchMusicCommand { get; }
+    public IRelayCommand ClearLogCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> DumpMemoryCommand { get; }
-    public ReactiveCommand<Unit, Unit> ForceGcCommand { get; }
-    public ReactiveCommand<Unit, Unit> ClearCachesCommand { get; }
-    public ReactiveCommand<Unit, Unit> CheckVmLeaksCommand { get; }
+    public IRelayCommand DumpMemoryCommand { get; }
+    public IRelayCommand ForceGcCommand { get; }
+    public IAsyncRelayCommand ClearCachesCommand { get; }
+    public IRelayCommand CheckVmLeaksCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> PlayYoutubeAudioCommand { get; }
-    public ReactiveCommand<Unit, Unit> PlayYoutubeWithCacheCommand { get; }
-    public ReactiveCommand<Unit, Unit> StopAudioTestCommand { get; }
-    public ReactiveCommand<Unit, Unit> ShowCacheStatsCommand { get; }
-    public ReactiveCommand<Unit, Unit> ClearAudioCacheCommand { get; }
-    public ReactiveCommand<Unit, Unit> TestLocalFileCommand { get; }
+    public IAsyncRelayCommand PlayYoutubeAudioCommand { get; }
+    public IAsyncRelayCommand PlayYoutubeWithCacheCommand { get; }
+    public IRelayCommand StopAudioTestCommand { get; }
+    public IRelayCommand ShowCacheStatsCommand { get; }
+    public IAsyncRelayCommand ClearAudioCacheCommand { get; }
+    public IAsyncRelayCommand TestLocalFileCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> ToggleWatchdogCommand { get; }
+    public IRelayCommand ToggleWatchdogCommand { get; }
 
     public DebugViewModel()
     {
         _youtubeLazy = AppEntry.Services.GetRequiredService<Lazy<YoutubeProvider>>();
 
-        GetLikedVideosCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteGetLikedVideos));
-        GetLikedMusicCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteGetLikedMusic));
-        SearchVideosCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteSearchVideos));
-        SearchMusicCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteSearchMusic));
-        ClearLogCommand = CreateCommand(ReactiveCommand.Create(() => LogOutput = ""));
+        GetLikedVideosCommand = new AsyncRelayCommand(ExecuteGetLikedVideos);
+        GetLikedMusicCommand = new AsyncRelayCommand(ExecuteGetLikedMusic);
+        SearchVideosCommand = new AsyncRelayCommand(ExecuteSearchVideos);
+        SearchMusicCommand = new AsyncRelayCommand(ExecuteSearchMusic);
+        ClearLogCommand = new RelayCommand(() => LogOutput = "");
 
-        DumpMemoryCommand = CreateCommand(ReactiveCommand.Create(ExecuteDumpMemory));
-        ForceGcCommand = CreateCommand(ReactiveCommand.Create(ExecuteForceGc));
-        ClearCachesCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteClearCaches));
+        DumpMemoryCommand = new RelayCommand(ExecuteDumpMemory);
+        ForceGcCommand = new RelayCommand(ExecuteForceGc);
+        ClearCachesCommand = new AsyncRelayCommand(ExecuteClearCaches);
 
         // ПРИМЕЧАНИЕ: CheckVmLeaksCommand переведен в no-op, так как фабрика бесстейтовая.
-        CheckVmLeaksCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CheckVmLeaksCommand = new RelayCommand(() =>
         {
             AppendLog("\n[Debug] Track VM cache monitoring disabled (Factory is stateless). VM leaks are impossible.");
-        }));
+        });
 
-        PlayYoutubeAudioCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecutePlayYoutubeAudio));
-        PlayYoutubeWithCacheCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecutePlayYoutubeWithCache));
-        StopAudioTestCommand = CreateCommand(ReactiveCommand.Create(ExecuteStopAudioTest));
-        ShowCacheStatsCommand = CreateCommand(ReactiveCommand.Create(ExecuteShowCacheStats));
-        ClearAudioCacheCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteClearAudioCache));
-        TestLocalFileCommand = CreateCommand(ReactiveCommand.CreateFromTask(ExecuteTestLocalFile));
-
+        PlayYoutubeAudioCommand = new AsyncRelayCommand(ExecutePlayYoutubeAudio);
+        PlayYoutubeWithCacheCommand = new AsyncRelayCommand(ExecutePlayYoutubeWithCache);
+        StopAudioTestCommand = new RelayCommand(ExecuteStopAudioTest);
+        ShowCacheStatsCommand = new RelayCommand(ExecuteShowCacheStats);
+        ClearAudioCacheCommand = new AsyncRelayCommand(ExecuteClearAudioCache);
+        TestLocalFileCommand = new AsyncRelayCommand(ExecuteTestLocalFile);
         IsWatchdogEnabled = UIHangWatchdog.IsEnabled;
         WatchdogStatusText = IsWatchdogEnabled ? "Watchdog: ON" : "Watchdog: OFF";
 
-        ToggleWatchdogCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ToggleWatchdogCommand = new RelayCommand(() =>
         {
             var newState = !IsWatchdogEnabled;
             UIHangWatchdog.SetEnabled(newState);
@@ -123,12 +128,10 @@ public sealed partial class DebugViewModel : ViewModelBase, IDisposable
 
             IsWatchdogEnabled = newState;
             WatchdogStatusText = newState ? "Watchdog: ON" : "Watchdog: OFF";
-        }));
+        });
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Audio methods — без изменений, оставлены как были
-    // ═══════════════════════════════════════════════════════════════
+    // Audio methods
 
     private async Task ExecutePlayYoutubeAudio() =>
         await PlayAudioTestAsync(useCache: false);
@@ -420,13 +423,21 @@ public sealed partial class DebugViewModel : ViewModelBase, IDisposable
             IPlaybackBackend backend;
             try
             {
-                backend = new NAudioBackend();
-                AppendLog($"  ✓ NAudioBackend");
+                if (OperatingSystem.IsWindows())
+                {
+                    backend = new NAudioBackend();
+                    AppendLog("  ✓ NAudioBackend");
+                }
+                else
+                {
+                    backend = new NullAudioBackend();
+                    AppendLog("  ⚠️ NullBackend (no audio output on non-Windows platforms)");
+                }
             }
             catch
             {
                 backend = new NullAudioBackend();
-                AppendLog($"  ⚠️ NullBackend (no audio output)");
+                AppendLog("  ⚠️ NullBackend (no audio output)");
             }
 
             var pcmBuffer = new LockFreeRingBuffer<float>(decoder.SampleRate * decoder.Channels * 4);
@@ -498,27 +509,25 @@ public sealed partial class DebugViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(input)) return null;
         input = input.Trim();
 
-        if (System.Text.RegularExpressions.Regex.IsMatch(input, @"^[a-zA-Z0-9_-]{11}$"))
+        if (Regex.IsMatch(input, @"^[a-zA-Z0-9_-]{11}$"))
             return input;
 
-        var match = System.Text.RegularExpressions.Regex.Match(input, @"[?&]v=([a-zA-Z0-9_-]{11})");
+        var match = Regex.Match(input, @"[?&]v=([a-zA-Z0-9_-]{11})");
         if (match.Success) return match.Groups[1].Value;
 
-        match = System.Text.RegularExpressions.Regex.Match(input, @"youtu\.be/([a-zA-Z0-9_-]{11})");
+        match = Regex.Match(input, @"youtu\.be/([a-zA-Z0-9_-]{11})");
         if (match.Success) return match.Groups[1].Value;
 
-        match = System.Text.RegularExpressions.Regex.Match(input, @"embed/([a-zA-Z0-9_-]{11})");
+        match = Regex.Match(input, @"embed/([a-zA-Z0-9_-]{11})");
         if (match.Success) return match.Groups[1].Value;
 
-        match = System.Text.RegularExpressions.Regex.Match(input, @"shorts/([a-zA-Z0-9_-]{11})");
+        match = Regex.Match(input, @"shorts/([a-zA-Z0-9_-]{11})");
         if (match.Success) return match.Groups[1].Value;
 
         return null;
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // Memory methods
-    // ═══════════════════════════════════════════════════════════════
 
     private void ExecuteDumpMemory()
     {
@@ -588,9 +597,7 @@ public sealed partial class DebugViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // YouTube methods
-    // ═══════════════════════════════════════════════════════════════
 
     private async Task ExecuteGetLikedVideos()
     {
@@ -648,16 +655,12 @@ public sealed partial class DebugViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // LOG
-    // ═══════════════════════════════════════════════════════════════
 
     private void AppendLog(string text) =>
         LogOutput += text + "\n";
 
-    // ═══════════════════════════════════════════════════════════════
     // DISPOSE
-    // ═══════════════════════════════════════════════════════════════
 
     protected override void Dispose(bool disposing)
     {

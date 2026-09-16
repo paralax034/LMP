@@ -1,8 +1,4 @@
-using ReactiveUI;
-
 using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Linq;
 using Avalonia.Threading;
 
 namespace LMP.UI.Features.Home;
@@ -28,25 +24,31 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
     private string _currentQuery = "";
     private CancellationTokenSource? _categoryCts;
     private bool _isDisposed;
-    private bool _isDataLoaded; // Признак того, что данные уже лежат в кэше ОЗУ
+    private bool _isDataLoaded;
 
     #endregion
 
     #region Properties
 
-    [Reactive] public partial string Greeting { get; private set; } = string.Empty;
-    [Reactive] public partial CategoryItem? SelectedCategory { get; set; }
+    [ObservableProperty] public partial string Greeting { get; private set; } = string.Empty;
+    [ObservableProperty] public partial CategoryItem? SelectedCategory { get; set; }
 
     public ObservableCollection<CategoryItem> Categories { get; } = [];
 
     public bool CanReorderItems => CanReorder;
 
+    partial void OnSelectedCategoryChanged(CategoryItem? value)
+    {
+        if (_isDisposed || value is null) return;
+        _ = LoadTracksAsync();
+    }
+
     #endregion
 
     #region Commands
 
-    public ReactiveCommand<Unit, Unit> RefreshCommand { get; }
-    public ReactiveCommand<(int oldIndex, int newIndex), Unit> MoveItemCommand { get; }
+    public IAsyncRelayCommand RefreshCommand { get; }
+    public IAsyncRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
 
     #endregion
 
@@ -76,24 +78,10 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
 
         InitializeCategories();
 
-        RefreshCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(async () => await LoadTracksAsync(force: true)));
+        RefreshCommand = new AsyncRelayCommand(async () => await LoadTracksAsync(force: true));
 
-        MoveItemCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask<(int oldIndex, int newIndex)>(
-                async tuple => await MoveItemAsync(tuple.oldIndex, tuple.newIndex)));
-
-        this.WhenAnyValue(x => x.FilterQuery)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(CanReorderItems)))
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.SelectedCategory)
-            .WhereNotNull()
-            .Skip(1)
-            .Where(_ => !IsLoading) // Использовать IsLoading базового класса
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(async _ => await LoadTracksAsync())
-            .DisposeWith(Disposables);
+        MoveItemCommand = new AsyncRelayCommand<(int oldIndex, int newIndex)>(
+            async tuple => await MoveItemAsync(tuple.oldIndex, tuple.newIndex));
     }
 
     #endregion
@@ -104,15 +92,13 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
     {
         if (_isDisposed) return;
 
-        // Если данные уже в памяти, загрузку не запускаем — базовый класс 
-        // автоматически переключит IsLoading в false по окончании перехода.
+        await base.OnNavigatedToAsync();
+
         if (!_isDataLoaded)
         {
             await LoadTracksAsync();
             _isDataLoaded = true;
         }
-
-        await base.OnNavigatedToAsync(); // Запуск базового перехватчика
     }
 
     #endregion
@@ -146,11 +132,16 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
         base.OnAccountChanged();
         _isDataLoaded = false;
 
-        // Если страница главного экрана активна прямо сейчас, принудительно запускаем обновление
         if (ViewModelBase.CurrentSuspendLevel == SuspendLevel.None)
         {
             _ = Dispatcher.UIThread.InvokeAsync(async () => await LoadTracksAsync(force: true), DispatcherPriority.Background);
         }
+    }
+
+    protected override void RebuildVisibleItems()
+    {
+        base.RebuildVisibleItems();
+        OnPropertyChanged(nameof(CanReorderItems));
     }
 
     #endregion
@@ -311,9 +302,9 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
     #endregion
 }
 
-public sealed partial class CategoryItem : ReactiveObject
+public sealed partial class CategoryItem : ObservableObject
 {
-    [Reactive] public partial string Name { get; set; } = string.Empty;
+    [ObservableProperty] public partial string Name { get; set; } = string.Empty;
     public string Query { get; set; } = string.Empty;
     public bool IsSpecial { get; set; }
     public string LocKey { get; set; } = "";

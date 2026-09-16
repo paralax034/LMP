@@ -1,14 +1,11 @@
-using System.Reactive;
-using ReactiveUI;
-
-
 namespace LMP.UI.Dialogs;
 
 public sealed partial class CreatePlaylistDialogViewModel : ViewModelBase
 {
     public PlaylistEditorViewModel Editor { get; }
 
-    [Reactive] public partial bool SyncToCloud { get; set; }
+    [ObservableProperty]
+    public partial bool SyncToCloud { get; set; }
     public bool ShowSyncToggle { get; }
 
     /// <summary>
@@ -16,8 +13,8 @@ public sealed partial class CreatePlaylistDialogViewModel : ViewModelBase
     /// </summary>
     public Action<CreatePlaylistResult?>? OnResult { get; set; }
 
-    public ReactiveCommand<Unit, Unit> ConfirmCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand ConfirmCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     public CreatePlaylistDialogViewModel(bool isAuthenticated = false)
     {
@@ -25,18 +22,26 @@ public sealed partial class CreatePlaylistDialogViewModel : ViewModelBase
         ShowSyncToggle = isAuthenticated;
         SyncToCloud = isAuthenticated;
 
-        ConfirmCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ConfirmCommand = new RelayCommand(() =>
         {
             var result = new CreatePlaylistResult(
                 Name: Editor.ToResult().Name,
                 SyncToCloud: SyncToCloud);
             OnResult?.Invoke(result);
-        }, Editor.CanSave));
+        }, () => Editor.CanSave);
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelCommand = new RelayCommand(() =>
         {
             OnResult?.Invoke(null);
-        }));
+        });
+
+        Editor.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName is nameof(PlaylistEditorViewModel.HasErrors) or nameof(PlaylistEditorViewModel.CanSave))
+            {
+                ConfirmCommand.NotifyCanExecuteChanged();
+            }
+        };
     }
 }
 

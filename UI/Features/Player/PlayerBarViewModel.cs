@@ -1,27 +1,20 @@
 using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Disposables;
-using System.Reactive.Linq;
-using System.Reactive.Subjects;
 using Avalonia;
 using Avalonia.Media;
+using Avalonia.Threading;
 using LMP.Core.Youtube.Exceptions;
-using ReactiveUI;
-
 
 namespace LMP.UI.Features.Player;
 
 /// <summary>
 /// ViewModel для нижней панели управления плеером (Player Bar).
 /// </summary>
-/// 
 public sealed partial class PlayerBarViewModel : ViewModelBase
 {
     #region Constants - UI & UX
 
     private const int NavigationDebounceMs = 300;
     private const int HintDisplayDurationMs = 1500;
-    private const int PositionUpdateThrottleMs = 50;
     private const int FallbackPositionIntervalMs = 500;
     private const int ShuffleAnimationDurationMs = 500;
 
@@ -54,12 +47,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #endregion
 
-    #region Constants - Network & Buffer
-
-    private const int BufferStateThrottleMs = 100;
-
-    #endregion
-
     #region Fields
 
     private readonly AudioEngine _audio = null!;
@@ -69,9 +56,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private readonly PlayerControlService _playerControl = null!;
     private readonly NotificationService _notificationService = null!;
 
-    private readonly Subject<Unit> _nextSubject = new();
-    private readonly Subject<Unit> _prevSubject = new();
-
     /// <summary>
     /// Кэш треков, для которых получение форматов невозможно из-за контентных ограничений.
     /// Ключ = trackId, значение = причина ограничения.
@@ -80,7 +64,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private readonly Dictionary<string, LoginRequiredReason> _restrictedTracks = [];
     private CancellationTokenSource? _formatsCts;
 
-    private CompositeDisposable? _heavySubscriptions;
+    private DispatcherTimer? _fallbackTimer;
+    private DispatcherTimer? _shuffleAnimationTimer;
+
+    private CancellationTokenSource? _nextDebounceCts;
+    private CancellationTokenSource? _prevDebounceCts;
 
     private bool _isSeeking;
 
@@ -98,15 +86,15 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Properties - Playback State
 
-    [Reactive] public partial TrackInfo? CurrentTrack { get; private set; }
-    [Reactive] public partial bool IsLoading { get; private set; }
-    [Reactive] public partial bool IsPlaying { get; private set; }
-    [Reactive] public partial bool IsPaused { get; private set; }
-    [Reactive] public partial bool HasTrack { get; private set; }
-    [Reactive] public partial bool IsLiked { get; private set; }
-    [Reactive] public partial bool IsNavigating { get; private set; }
-    [Reactive] public partial bool IsTrackResetting { get; private set; }
-    [Reactive] public partial bool IsFormatsLoading { get; private set; }
+    [ObservableProperty] public partial TrackInfo? CurrentTrack { get; private set; }
+    [ObservableProperty] public partial bool IsLoading { get; private set; }
+    [ObservableProperty] public partial bool IsPlaying { get; private set; }
+    [ObservableProperty] public partial bool IsPaused { get; private set; }
+    [ObservableProperty] public partial bool HasTrack { get; private set; }
+    [ObservableProperty] public partial bool IsLiked { get; private set; }
+    [ObservableProperty] public partial bool IsNavigating { get; private set; }
+    [ObservableProperty] public partial bool IsTrackResetting { get; private set; }
+    [ObservableProperty] public partial bool IsFormatsLoading { get; private set; }
 
     public string? CurrentTrackUrl => CurrentTrack?.Url;
 
@@ -118,9 +106,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Properties - Queue Info
 
-    [Reactive] public partial int CurrentTrackIndex { get; private set; }
-    [Reactive] public partial int TotalTracksInQueue { get; private set; }
-    [Reactive] public partial bool HasQueueToShuffle { get; private set; }
+    [ObservableProperty] public partial int CurrentTrackIndex { get; private set; }
+    [ObservableProperty] public partial int TotalTracksInQueue { get; private set; }
+    [ObservableProperty] public partial bool HasQueueToShuffle { get; private set; }
 
     public string CurrentTrackIndexDisplay => (CurrentTrackIndex + 1).ToString();
 
@@ -128,30 +116,30 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Properties - Seek & Duration
 
-    [Reactive] public partial TimeSpan Position { get; set; }
-    [Reactive] public partial TimeSpan Duration { get; private set; }
-    [Reactive] public partial double PositionSeconds { get; set; }
-    [Reactive] public partial double DurationSeconds { get; private set; }
-    [Reactive] public partial bool IsSeekBusy { get; private set; }
-    [Reactive] public partial bool IsSeekPreviewVisible { get; set; }
+    [ObservableProperty] public partial TimeSpan Position { get; set; }
+    [ObservableProperty] public partial TimeSpan Duration { get; private set; }
+    [ObservableProperty] public partial double PositionSeconds { get; set; }
+    [ObservableProperty] public partial double DurationSeconds { get; private set; }
+    [ObservableProperty] public partial bool IsSeekBusy { get; private set; }
+    [ObservableProperty] public partial bool IsSeekPreviewVisible { get; set; }
 
     #endregion
 
     #region Properties - Buffer Progress
 
-    [Reactive] public partial double BufferProgressPercent { get; private set; }
-    [Reactive] public partial IReadOnlyList<(double Start, double End)> BufferedRanges { get; private set; } = [];
+    [ObservableProperty] public partial double BufferProgressPercent { get; private set; }
+    [ObservableProperty] public partial IReadOnlyList<(double Start, double End)> BufferedRanges { get; private set; } = [];
     public bool UseSegmentedBuffer => BufferedRanges.Count > 1;
-    [Reactive] public partial bool IsFullyBuffered { get; private set; }
+    [ObservableProperty] public partial bool IsFullyBuffered { get; private set; }
 
     #endregion
 
     #region Properties - Volume
 
-    [Reactive] public partial int Volume { get; set; }
-    [Reactive] public partial int MaxVolume { get; private set; } = DefaultMaxVolume;
-    [Reactive] public partial bool IsVolumePopupOpen { get; set; }
-    [Reactive] public partial bool IsVolumePreviewVisible { get; set; }
+    [ObservableProperty] public partial int Volume { get; set; }
+    [ObservableProperty] public partial int MaxVolume { get; private set; } = DefaultMaxVolume;
+    [ObservableProperty] public partial bool IsVolumePopupOpen { get; set; }
+    [ObservableProperty] public partial bool IsVolumePreviewVisible { get; set; }
 
     public float RealGain
     {
@@ -177,6 +165,17 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     public bool IsVolumeMedium => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeLowThresholdPercent && _cachedEffectivePercent <= VolumeMediumThresholdPercent;
     public bool IsVolumeHigh => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeMediumThresholdPercent;
     public bool IsVolumeBoosted => IsReallyBoosted;
+
+    partial void OnVolumeChanged(int value)
+    {
+        if (_playerControl.CurrentVolume != value)
+        {
+            _playerControl.SetVolume(value);
+        }
+
+        RecalcEffectivePercent();
+        RaiseVolumePropertiesChanged();
+    }
 
     private void RecalcEffectivePercent()
     {
@@ -216,9 +215,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Properties - Repeat & Shuffle
 
-    [Reactive] public partial bool IsShuffleAnimating { get; private set; }
-    [Reactive] public partial bool AutoShuffleEnabled { get; private set; }
-    [Reactive] public partial RepeatMode RepeatMode { get; set; }
+    [ObservableProperty] public partial bool IsShuffleAnimating { get; private set; }
+    [ObservableProperty] public partial bool AutoShuffleEnabled { get; private set; }
+    [ObservableProperty] public partial RepeatMode RepeatMode { get; set; }
 
     public bool IsRepeatNone => RepeatMode == RepeatMode.None;
     public bool IsRepeatOne => RepeatMode == RepeatMode.One;
@@ -228,22 +227,22 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Properties - Hints
 
-    [Reactive] public partial bool IsRepeatHintVisible { get; private set; }
-    [Reactive] public partial string RepeatHintText { get; private set; } = "";
-    [Reactive] public partial bool IsLikeHintVisible { get; private set; }
-    [Reactive] public partial string LikeHintText { get; private set; } = "";
+    [ObservableProperty] public partial bool IsRepeatHintVisible { get; private set; }
+    [ObservableProperty] public partial string RepeatHintText { get; private set; } = "";
+    [ObservableProperty] public partial bool IsLikeHintVisible { get; private set; }
+    [ObservableProperty] public partial string LikeHintText { get; private set; } = "";
 
     #endregion
 
     #region Properties - Stream Info
 
-    [Reactive] public partial string StreamInfo { get; private set; } = "";
-    [Reactive] public partial bool ShowStreamInfo { get; private set; }
-    [Reactive] public partial string NetworkSpeedText { get; private set; } = "";
-    [Reactive] public partial string PingText { get; private set; } = "";
-    [Reactive] public partial IBrush PingBrush { get; private set; } = Brushes.White;
-    [Reactive] public partial FontWeight PingWeight { get; private set; } = FontWeight.SemiBold;
-    [Reactive] public partial bool ShowNetworkStats { get; private set; }
+    [ObservableProperty] public partial string StreamInfo { get; private set; } = "";
+    [ObservableProperty] public partial bool ShowStreamInfo { get; private set; }
+    [ObservableProperty] public partial string NetworkSpeedText { get; private set; } = "";
+    [ObservableProperty] public partial string PingText { get; private set; } = "";
+    [ObservableProperty] public partial IBrush PingBrush { get; private set; } = Brushes.White;
+    [ObservableProperty] public partial FontWeight PingWeight { get; private set; } = FontWeight.SemiBold;
+    [ObservableProperty] public partial bool ShowNetworkStats { get; private set; }
 
     public ObservableCollection<StreamOption> AvailableFormats { get; } = [];
 
@@ -301,18 +300,18 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Commands
 
-    public ReactiveCommand<Unit, Unit> PlayPauseCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> PreviousCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> NextCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ShuffleQueueCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ToggleAutoShuffleCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ToggleRepeatCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ToggleLikeCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ToggleMuteCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> CopyLinkCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> LoadFormatsCommand { get; private set; } = null!;
-    public ReactiveCommand<Unit, Unit> ForceLoadFormatsCommand { get; private set; } = null!;
-    public ReactiveCommand<StreamOption, Unit> SwitchFormatCommand { get; private set; } = null!;
+    public IAsyncRelayCommand PlayPauseCommand { get; private set; } = null!;
+    public IAsyncRelayCommand PreviousCommand { get; private set; } = null!;
+    public IAsyncRelayCommand NextCommand { get; private set; } = null!;
+    public IRelayCommand ShuffleQueueCommand { get; private set; } = null!;
+    public IRelayCommand ToggleAutoShuffleCommand { get; private set; } = null!;
+    public IRelayCommand ToggleRepeatCommand { get; private set; } = null!;
+    public IAsyncRelayCommand ToggleLikeCommand { get; private set; } = null!;
+    public IRelayCommand ToggleMuteCommand { get; private set; } = null!;
+    public IRelayCommand CopyLinkCommand { get; private set; } = null!;
+    public IAsyncRelayCommand LoadFormatsCommand { get; private set; } = null!;
+    public IAsyncRelayCommand ForceLoadFormatsCommand { get; private set; } = null!;
+    public IAsyncRelayCommand<StreamOption> SwitchFormatCommand { get; private set; } = null!;
 
     #endregion
 
@@ -345,10 +344,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
         _youtube.AuthService.OnAuthStateChanged += ClearRestrictedTracksCache;
 
-        InitializeFromSettings();
+        // Команды должны быть созданы ДО инициализации настроек и подписки на события
         SetupCommands();
-        SubscribeLightweight();
-        SubscribeHeavy();
+        InitializeFromSettings();
+        SubscribeEvents();
 
         Log.Info("[PlayerBar] Initialization complete");
     }
@@ -400,41 +399,74 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void SetupCommands()
     {
-        var hasTrackObs = this.WhenAnyValue(x => x.HasTrack);
-        var canShuffle = this.WhenAnyValue(x => x.HasQueueToShuffle);
+        PlayPauseCommand = new AsyncRelayCommand(_playerControl.PlayPauseAsync, () => HasTrack);
 
-        PlayPauseCommand = CreateCommand(ReactiveCommand.CreateFromTask(
-            _playerControl.PlayPauseAsync, hasTrackObs));
-
-        NextCommand = CreateCommand(ReactiveCommand.Create(() =>
+        NextCommand = new AsyncRelayCommand(async () =>
         {
             IsNavigating = true;
-            _nextSubject.OnNext(Unit.Default);
-        }, hasTrackObs));
+            _nextDebounceCts?.Cancel();
+            _nextDebounceCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _nextDebounceCts = cts;
 
-        PreviousCommand = CreateCommand(ReactiveCommand.Create(() =>
+            try
+            {
+                await Task.Delay(NavigationDebounceMs, cts.Token);
+                await _playerControl.NextAsync();
+            }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                if (ReferenceEquals(_nextDebounceCts, cts))
+                    IsNavigating = false;
+            }
+        }, () => HasTrack);
+
+        PreviousCommand = new AsyncRelayCommand(async () =>
         {
             IsNavigating = true;
-            _prevSubject.OnNext(Unit.Default);
-        }, hasTrackObs));
+            _prevDebounceCts?.Cancel();
+            _prevDebounceCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _prevDebounceCts = cts;
 
-        ShuffleQueueCommand = CreateCommand(ReactiveCommand.Create(() =>
+            try
+            {
+                await Task.Delay(NavigationDebounceMs, cts.Token);
+                await _playerControl.PreviousAsync();
+            }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                if (ReferenceEquals(_prevDebounceCts, cts))
+                    IsNavigating = false;
+            }
+        }, () => HasTrack);
+
+        ShuffleQueueCommand = new RelayCommand(() =>
         {
             _playerControl.ShuffleQueue();
             IsShuffleAnimating = true;
-            Observable.Timer(TimeSpan.FromMilliseconds(ShuffleAnimationDurationMs))
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(_ => IsShuffleAnimating = false)
-                .DisposeWith(Disposables);
-        }, canShuffle));
 
-        ToggleAutoShuffleCommand = CreateCommand(ReactiveCommand.Create(() =>
+            _shuffleAnimationTimer?.Stop();
+            _shuffleAnimationTimer = new DispatcherTimer(
+                TimeSpan.FromMilliseconds(ShuffleAnimationDurationMs),
+                DispatcherPriority.Normal,
+                (_, _) =>
+                {
+                    IsShuffleAnimating = false;
+                    _shuffleAnimationTimer?.Stop();
+                });
+            _shuffleAnimationTimer.Start();
+        }, () => HasQueueToShuffle);
+
+        ToggleAutoShuffleCommand = new RelayCommand(() =>
         {
             _playerControl.ToggleAutoShuffle();
-            this.RaisePropertyChanged(nameof(ShuffleTooltip));
-        }));
+            OnPropertyChanged(nameof(ShuffleTooltip));
+        });
 
-        ToggleRepeatCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ToggleRepeatCommand = new RelayCommand(() =>
         {
             _playerControl.ToggleRepeat();
             ShowHint(
@@ -446,25 +478,25 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                     RepeatMode.One => SL["Player_Repeat_One"],
                     _ => ""
                 });
-        }));
+        });
 
-        ToggleMuteCommand = CreateCommand(ReactiveCommand.Create(() =>
-                {
-                    if (IsMuted)
-                    {
-                        int restoreVolume = Math.Min(
-                            _lastVolumeBeforeMute > 0 ? _lastVolumeBeforeMute : DefaultVolume,
-                            MaxVolume);
-                        Volume = restoreVolume;
-                    }
-                    else
-                    {
-                        _lastVolumeBeforeMute = Volume;
-                        Volume = 0;
-                    }
-                }));
+        ToggleMuteCommand = new RelayCommand(() =>
+        {
+            if (IsMuted)
+            {
+                int restoreVolume = Math.Min(
+                    _lastVolumeBeforeMute > 0 ? _lastVolumeBeforeMute : DefaultVolume,
+                    MaxVolume);
+                Volume = restoreVolume;
+            }
+            else
+            {
+                _lastVolumeBeforeMute = Volume;
+                Volume = 0;
+            }
+        });
 
-        ToggleLikeCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        ToggleLikeCommand = new AsyncRelayCommand(async () =>
         {
             if (CurrentTrack != null)
             {
@@ -473,225 +505,166 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                     v => IsLikeHintVisible = v,
                     () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);
             }
-        }, hasTrackObs));
+        }, () => HasTrack);
 
-        LoadFormatsCommand = CreateCommand(ReactiveCommand.CreateFromTask(() => LoadFormatsAsync(forceRefresh: false)));
-        ForceLoadFormatsCommand = CreateCommand(ReactiveCommand.CreateFromTask(() => LoadFormatsAsync(forceRefresh: true)));
+        LoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: false));
+        ForceLoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: true));
 
-        SwitchFormatCommand = CreateCommand(ReactiveCommand.CreateFromTask<StreamOption>(async option =>
+        SwitchFormatCommand = new AsyncRelayCommand<StreamOption>(async option =>
         {
             if (option == null) return;
             BeginTrackReset();
             await _audio.SwitchQualityAsync(option.Format, (int)option.Bitrate);
-        }));
+        });
+
+        CopyLinkCommand = new RelayCommand(() => { });
     }
 
-    private void SubscribeLightweight()
+    private void SubscribeEvents()
     {
-        _playerControl.PlaybackStateObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(state =>
-            {
-                IsPlaying = state.IsPlaying;
-                IsPaused = state.IsPaused;
-                this.RaisePropertyChanged(nameof(PlayPauseTooltip));
+        _playerControl.IsPlayingChanged += OnPlayerControlIsPlayingChanged;
+        _playerControl.IsPausedChanged += OnPlayerControlIsPausedChanged;
+        _playerControl.CurrentTrackChanged += HandleTrackChanged;
+        _playerControl.RepeatModeChanged += OnPlayerControlRepeatModeChanged;
+        _playerControl.ShuffleEnabledChanged += OnPlayerControlShuffleEnabledChanged;
+        _playerControl.IsLoadingChanged += OnPlayerControlIsLoadingChanged;
+        _playerControl.QueueCountChanged += OnPlayerControlQueueCountChanged;
+        _playerControl.ForceSyncTriggered += HandleForceSync;
+        _playerControl.VolumeChanged += OnPlayerControlVolumeChanged;
 
-                if (state.IsPlaying && IsTrackResetting)
-                {
-                    EndTrackReset();
-                }
-            })
-            .DisposeWith(Disposables);
+        _audio.OnStreamInfoChanged += OnAudioStreamInfoChanged;
+        _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
 
-        _playerControl.CurrentTrackObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(HandleTrackChanged)
-            .DisposeWith(Disposables);
-
-        _playerControl.RepeatModeObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(mode =>
-            {
-                RepeatMode = mode;
-                this.RaisePropertyChanged(nameof(RepeatTooltip));
-                this.RaisePropertyChanged(nameof(IsRepeatNone));
-                this.RaisePropertyChanged(nameof(IsRepeatOne));
-                this.RaisePropertyChanged(nameof(IsRepeatAll));
-            })
-            .DisposeWith(Disposables);
-
-        _playerControl.ShuffleEnabledObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(enabled =>
-            {
-                AutoShuffleEnabled = enabled;
-                this.RaisePropertyChanged(nameof(ShuffleTooltip));
-            })
-            .DisposeWith(Disposables);
-
-        _playerControl.IsLoadingObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(loading =>
-            {
-                IsLoading = loading;
-            })
-            .DisposeWith(Disposables);
-
-        _playerControl.QueueCountObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => UpdateQueueState())
-            .DisposeWith(Disposables);
-
-        _playerControl.ForceSyncObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => HandleForceSync())
-            .DisposeWith(Disposables);
-
-        // Реактивная синхронизация: получение изменений громкости от координатора (трея, горячих клавиш)
-        _playerControl.VolumeObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(v =>
-            {
-                if (Volume != v)
-                {
-                    Volume = v;
-                }
-            })
-            .DisposeWith(Disposables);
-
-        // Передача изменений громкости от слайдера плеербара в единый координатор
-        this.WhenAnyValue(x => x.Volume)
-            .Subscribe(v =>
-            {
-                if (_playerControl.CurrentVolume != v)
-                {
-                    _playerControl.SetVolume(v);
-                }
-
-                RecalcEffectivePercent();
-                RaiseVolumePropertiesChanged();
-            })
-            .DisposeWith(Disposables);
-
-        Observable.FromEvent<Action<AudioStreamInfo>, AudioStreamInfo>(
-                h => _audio.OnStreamInfoChanged += h,
-                h => _audio.OnStreamInfoChanged -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(UpdateStreamInfo)
-            .DisposeWith(Disposables);
-
-        Observable.FromEvent<Action<int>, int>(
-                h => _audio.OnMaxVolumeChanged += h,
-                h => _audio.OnMaxVolumeChanged -= h)
-            .DistinctUntilChanged()
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(HandleMaxVolumeChanged)
-            .DisposeWith(Disposables);
-
-        Observable.FromEvent<Action<TrackInfo>, TrackInfo>(
-                h => _library.OnTrackUpdated += h,
-                h => _library.OnTrackUpdated -= h)
-            .Where(t => CurrentTrack != null && t.Id == CurrentTrack.Id)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(t =>
-            {
-                IsLiked = t.IsLiked;
-                CurrentTrack?.IsLiked = t.IsLiked;
-                this.RaisePropertyChanged(nameof(LikeTooltip));
-            })
-            .DisposeWith(Disposables);
+        _library.OnTrackUpdated += OnLibraryTrackUpdated;
 
         var cacheManager = AudioSourceFactory.GlobalCache
             ?? throw new NullReferenceException("AudioSourceFactory.GlobalCache is not initialized");
 
-        Observable.FromEvent<Action<string, AudioFormat, int, bool>, (string TrackId, AudioFormat Format, int Bitrate, bool Downloaded)>(
-                h => (t, f, b, d) => h((t, f, b, d)),
-                h => cacheManager.OnFormatCached += h,
-                h => cacheManager.OnFormatCached -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(x => OnFormatCached(x.TrackId, x.Format, x.Bitrate, x.Downloaded))
-            .DisposeWith(Disposables);
+        cacheManager.OnFormatCached += OnFormatCachedHandler;
+        cacheManager.OnCacheCleared += OnCacheClearedHandler;
 
-        Observable.FromEvent(
-                h => cacheManager.OnCacheCleared += h,
-                h => cacheManager.OnCacheCleared -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => SyncBufferState())
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.CurrentTrackIndex, x => x.TotalTracksInQueue)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(TrackNumberTooltip)))
-            .DisposeWith(Disposables);
-
-        _nextSubject
-            .Throttle(TimeSpan.FromMilliseconds(NavigationDebounceMs))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(async _ =>
-            {
-                try { await _playerControl.NextAsync(); }
-                finally { IsNavigating = false; }
-            })
-            .DisposeWith(Disposables);
-
-        _prevSubject
-            .Throttle(TimeSpan.FromMilliseconds(NavigationDebounceMs))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(async _ =>
-            {
-                try { await _playerControl.PreviousAsync(); }
-                finally { IsNavigating = false; }
-            })
-            .DisposeWith(Disposables);
+        SubscribeHeavy();
     }
 
     private void SubscribeHeavy()
     {
-        _heavySubscriptions?.Dispose();
-        _heavySubscriptions = [];
+        UnsubscribeHeavy();
 
-        Observable.FromEvent<Action<TimeSpan>, TimeSpan>(
-                h => _audio.OnPositionChanged += h,
-                h => _audio.OnPositionChanged -= h)
-            .Where(_ => !IsTrackResetting)
-            .Throttle(TimeSpan.FromMilliseconds(PositionUpdateThrottleMs))
-            .DistinctUntilChanged(pos => (long)pos.TotalSeconds)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(pos =>
-            {
-                if (IsTrackResetting) return;
-                Position = pos;
-                PositionSeconds = pos.TotalSeconds;
-                this.RaisePropertyChanged(nameof(DurationTooltip));
-            })
-            .DisposeWith(_heavySubscriptions);
+        _audio.OnPositionChanged += OnAudioPositionChanged;
+        _audio.OnSeekCompleted += OnAudioSeekCompleted;
+        _audio.OnBufferStateChanged += OnAudioBufferStateChanged;
 
-        Observable.FromEvent<Action<TimeSpan>, TimeSpan>(
-                h => _audio.OnSeekCompleted += h,
-                h => _audio.OnSeekCompleted -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(pos =>
-            {
-                PositionSeconds = pos.TotalSeconds;
-                Position = pos;
-                SyncBufferState();
+        _fallbackTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(FallbackPositionIntervalMs),
+            DispatcherPriority.Background,
+            (_, _) => FallbackPositionUpdate());
+        _fallbackTimer.Start();
+    }
 
-                // Детерминированный сброс состояния занятости по факту физического завершения
-                IsSeekBusy = false;
-            })
-            .DisposeWith(_heavySubscriptions);
+    private void UnsubscribeHeavy()
+    {
+        _audio.OnPositionChanged -= OnAudioPositionChanged;
+        _audio.OnSeekCompleted -= OnAudioSeekCompleted;
+        _audio.OnBufferStateChanged -= OnAudioBufferStateChanged;
 
-        Observable.FromEvent<Action<BufferState>, BufferState>(
-                h => _audio.OnBufferStateChanged += h,
-                h => _audio.OnBufferStateChanged -= h)
-            .Throttle(TimeSpan.FromMilliseconds(BufferStateThrottleMs))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(state => SyncBufferState(state))
-            .DisposeWith(_heavySubscriptions);
+        _fallbackTimer?.Stop();
+        _fallbackTimer = null;
+    }
 
-        Observable.Interval(TimeSpan.FromMilliseconds(FallbackPositionIntervalMs))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => FallbackPositionUpdate())
-            .DisposeWith(_heavySubscriptions);
+    private void OnPlayerControlIsPlayingChanged(bool isPlaying)
+    {
+        IsPlaying = isPlaying;
+        OnPropertyChanged(nameof(PlayPauseTooltip));
+        if (isPlaying && IsTrackResetting)
+        {
+            EndTrackReset();
+        }
+    }
+
+    private void OnPlayerControlIsPausedChanged(bool isPaused)
+    {
+        IsPaused = isPaused;
+    }
+
+    private void OnPlayerControlRepeatModeChanged(RepeatMode mode)
+    {
+        RepeatMode = mode;
+        OnPropertyChanged(nameof(RepeatTooltip));
+        OnPropertyChanged(nameof(IsRepeatNone));
+        OnPropertyChanged(nameof(IsRepeatOne));
+        OnPropertyChanged(nameof(IsRepeatAll));
+    }
+
+    private void OnPlayerControlShuffleEnabledChanged(bool enabled)
+    {
+        AutoShuffleEnabled = enabled;
+        OnPropertyChanged(nameof(ShuffleTooltip));
+    }
+
+    private void OnPlayerControlIsLoadingChanged(bool loading)
+    {
+        IsLoading = loading;
+    }
+
+    private void OnPlayerControlQueueCountChanged(int count)
+    {
+        UpdateQueueState();
+    }
+
+    private void OnPlayerControlVolumeChanged(int v)
+    {
+        if (Volume != v)
+        {
+            Volume = v;
+        }
+    }
+
+    private void OnAudioStreamInfoChanged(AudioStreamInfo info)
+    {
+        UpdateStreamInfo(info);
+    }
+
+    private void OnLibraryTrackUpdated(TrackInfo t)
+    {
+        if (CurrentTrack != null && t.Id == CurrentTrack.Id)
+        {
+            IsLiked = t.IsLiked;
+            CurrentTrack.IsLiked = t.IsLiked;
+            OnPropertyChanged(nameof(LikeTooltip));
+        }
+    }
+
+    private void OnFormatCachedHandler(string trackId, AudioFormat format, int bitrate, bool downloaded)
+    {
+        OnFormatCached(trackId, format, bitrate, downloaded);
+    }
+
+    private void OnCacheClearedHandler()
+    {
+        SyncBufferState();
+    }
+
+    private void OnAudioPositionChanged(TimeSpan pos)
+    {
+        if (IsTrackResetting) return;
+        Position = pos;
+        PositionSeconds = pos.TotalSeconds;
+        OnPropertyChanged(nameof(DurationTooltip));
+    }
+
+    private void OnAudioSeekCompleted(TimeSpan pos)
+    {
+        PositionSeconds = pos.TotalSeconds;
+        Position = pos;
+        SyncBufferState();
+
+        // Детерминированный сброс состояния занятости по факту физического завершения
+        IsSeekBusy = false;
+    }
+
+    private void OnAudioBufferStateChanged(BufferState state)
+    {
+        SyncBufferState(state);
     }
 
     #endregion
@@ -729,7 +702,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (isPlayingLocalFile)
         {
             SetFullyBuffered();
-            UpdateNetworkStats(0, 0); // Отключаем стату сети только если АКТИВНЫЙ поток действительно локальный
+            UpdateNetworkStats(0, 0); // Отключаем статы сети только если АКТИВНЫЙ поток действительно локальный
             return;
         }
 
@@ -803,7 +776,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             BufferedRanges = rawRanges;
         }
 
-        this.RaisePropertyChanged(nameof(UseSegmentedBuffer));
+        OnPropertyChanged(nameof(UseSegmentedBuffer));
     }
 
     private void UpdateNetworkStats(double speedBytesPerSec, double pingMs)
@@ -876,7 +849,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         BufferProgressPercent = 100;
         BufferedRanges = [(0.0, 1.0)];
         IsFullyBuffered = true;
-        this.RaisePropertyChanged(nameof(UseSegmentedBuffer));
+        OnPropertyChanged(nameof(UseSegmentedBuffer));
     }
 
     private void ResetBufferState()
@@ -884,7 +857,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         BufferProgressPercent = 0;
         BufferedRanges = [];
         IsFullyBuffered = false;
-        this.RaisePropertyChanged(nameof(UseSegmentedBuffer));
+        OnPropertyChanged(nameof(UseSegmentedBuffer));
     }
 
     #endregion
@@ -967,8 +940,45 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             ResetToNoTrack();
         }
 
-        this.RaisePropertyChanged(nameof(DurationTooltip));
+        OnPropertyChanged(nameof(DurationTooltip));
         UpdateQueueState();
+        RefreshCommandStates();
+    }
+
+    private void RefreshCommandStates()
+    {
+        PlayPauseCommand?.NotifyCanExecuteChanged();
+        NextCommand?.NotifyCanExecuteChanged();
+        PreviousCommand?.NotifyCanExecuteChanged();
+        ToggleLikeCommand?.NotifyCanExecuteChanged();
+    }
+
+    private void UpdateQueueState()
+    {
+        var queue = _audio.Queue;
+        TotalTracksInQueue = queue.Count;
+        HasQueueToShuffle = queue.Count > 1;
+
+        if (CurrentTrack != null)
+        {
+            CurrentTrackIndex = 0;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                if (queue[i].Id == CurrentTrack.Id)
+                {
+                    CurrentTrackIndex = i;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            CurrentTrackIndex = 0;
+        }
+
+        OnPropertyChanged(nameof(CurrentTrackIndexDisplay));
+        OnPropertyChanged(nameof(TrackNumberTooltip));
+        ShuffleQueueCommand?.NotifyCanExecuteChanged();
     }
 
     private void ResetToNoTrack()
@@ -1036,38 +1046,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         ShowNetworkStats = false;
 
         RaiseTrackInfoChanged();
-        this.RaisePropertyChanged(nameof(DurationTooltip));
-        this.RaisePropertyChanged(nameof(LikeTooltip));
-        this.RaisePropertyChanged(nameof(PlayPauseTooltip));
+        OnPropertyChanged(nameof(DurationTooltip));
+        OnPropertyChanged(nameof(LikeTooltip));
+        OnPropertyChanged(nameof(PlayPauseTooltip));
 
         UpdateQueueState();
-    }
-
-    private void UpdateQueueState()
-    {
-        var queue = _audio.Queue;
-        TotalTracksInQueue = queue.Count;
-        HasQueueToShuffle = queue.Count > 1;
-
-        if (CurrentTrack != null)
-        {
-            CurrentTrackIndex = 0;
-            for (int i = 0; i < queue.Count; i++)
-            {
-                if (queue[i].Id == CurrentTrack.Id)
-                {
-                    CurrentTrackIndex = i;
-                    break;
-                }
-            }
-        }
-        else
-        {
-            CurrentTrackIndex = 0;
-        }
-
-        this.RaisePropertyChanged(nameof(CurrentTrackIndexDisplay));
-        this.RaisePropertyChanged(nameof(TrackNumberTooltip));
     }
 
     /// <summary>
@@ -1092,7 +1075,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             Duration = TimeSpan.FromMilliseconds(info.DurationMs);
             DurationSeconds = Duration.TotalSeconds > 0 ? Duration.TotalSeconds : 1;
-            this.RaisePropertyChanged(nameof(DurationTooltip));
+            OnPropertyChanged(nameof(DurationTooltip));
 
             UpdateActiveFormat(info.Format, info.Bitrate);
 
@@ -1183,7 +1166,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         seconds = Math.Clamp(seconds, 0, DurationSeconds);
         PositionSeconds = seconds;
         Position = TimeSpan.FromSeconds(seconds);
-        this.RaisePropertyChanged(nameof(DurationTooltip));
+        OnPropertyChanged(nameof(DurationTooltip));
     }
 
     /// <summary>
@@ -1203,7 +1186,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         PositionSeconds = target;
         Position = TimeSpan.FromSeconds(target);
-        this.RaisePropertyChanged(nameof(DurationTooltip));
+        OnPropertyChanged(nameof(DurationTooltip));
 
         IsSeekBusy = true;
 
@@ -1288,23 +1271,23 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void RaiseVolumePropertiesChanged()
     {
-        this.RaisePropertyChanged(nameof(IsMuted));
-        this.RaisePropertyChanged(nameof(IsVolumeLow));
-        this.RaisePropertyChanged(nameof(IsVolumeMedium));
-        this.RaisePropertyChanged(nameof(IsVolumeHigh));
-        this.RaisePropertyChanged(nameof(IsVolumeBoosted));
-        this.RaisePropertyChanged(nameof(IsReallyBoosted));
-        this.RaisePropertyChanged(nameof(VolumePercentBrush));
-        this.RaisePropertyChanged(nameof(MuteTooltip));
+        OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(nameof(IsVolumeLow));
+        OnPropertyChanged(nameof(IsVolumeMedium));
+        OnPropertyChanged(nameof(IsVolumeHigh));
+        OnPropertyChanged(nameof(IsVolumeBoosted));
+        OnPropertyChanged(nameof(IsReallyBoosted));
+        OnPropertyChanged(nameof(VolumePercentBrush));
+        OnPropertyChanged(nameof(MuteTooltip));
     }
 
     private void RaiseTrackInfoChanged()
     {
-        this.RaisePropertyChanged(nameof(SafeTitle));
-        this.RaisePropertyChanged(nameof(SafeAuthor));
-        this.RaisePropertyChanged(nameof(SafeThumbnail));
-        this.RaisePropertyChanged(nameof(PlayPauseTooltip));
-        this.RaisePropertyChanged(nameof(CurrentTrackUrl));
+        OnPropertyChanged(nameof(SafeTitle));
+        OnPropertyChanged(nameof(SafeAuthor));
+        OnPropertyChanged(nameof(SafeThumbnail));
+        OnPropertyChanged(nameof(PlayPauseTooltip));
+        OnPropertyChanged(nameof(CurrentTrackUrl));
     }
 
     private static string FormatTime(TimeSpan time) =>
@@ -1640,17 +1623,17 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         RaiseTrackInfoChanged();
         RaiseVolumePropertiesChanged();
 
-        this.RaisePropertyChanged(nameof(ShuffleTooltip));
-        this.RaisePropertyChanged(nameof(PreviousTooltip));
-        this.RaisePropertyChanged(nameof(NextTooltip));
-        this.RaisePropertyChanged(nameof(RepeatTooltip));
-        this.RaisePropertyChanged(nameof(LikeTooltip));
-        this.RaisePropertyChanged(nameof(TrackNumberTooltip));
-        this.RaisePropertyChanged(nameof(DurationTooltip));
-        this.RaisePropertyChanged(nameof(L));
-        this.RaisePropertyChanged(nameof(IsRepeatNone));
-        this.RaisePropertyChanged(nameof(IsRepeatOne));
-        this.RaisePropertyChanged(nameof(IsRepeatAll));
+        OnPropertyChanged(nameof(ShuffleTooltip));
+        OnPropertyChanged(nameof(PreviousTooltip));
+        OnPropertyChanged(nameof(NextTooltip));
+        OnPropertyChanged(nameof(RepeatTooltip));
+        OnPropertyChanged(nameof(LikeTooltip));
+        OnPropertyChanged(nameof(TrackNumberTooltip));
+        OnPropertyChanged(nameof(DurationTooltip));
+        OnPropertyChanged(nameof(L));
+        OnPropertyChanged(nameof(IsRepeatNone));
+        OnPropertyChanged(nameof(IsRepeatOne));
+        OnPropertyChanged(nameof(IsRepeatAll));
     }
 
     #endregion
@@ -1662,9 +1645,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     /// </summary>
     protected override void OnSuspend(SuspendLevel level)
     {
-        _heavySubscriptions?.Dispose();
-        _heavySubscriptions = null;
-
+        UnsubscribeHeavy();
         CancelFormatsLoading();
 
         NetworkSpeedText = "";
@@ -1713,9 +1694,37 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _activeHintCts?.Cancel();
             _activeHintCts?.Dispose();
 
-            CancelFormatsLoading();
+            _nextDebounceCts?.Cancel();
+            _nextDebounceCts?.Dispose();
 
-            _heavySubscriptions?.Dispose();
+            _prevDebounceCts?.Cancel();
+            _prevDebounceCts?.Dispose();
+
+            _shuffleAnimationTimer?.Stop();
+            _shuffleAnimationTimer = null;
+
+            CancelFormatsLoading();
+            UnsubscribeHeavy();
+
+            _playerControl.IsPlayingChanged -= OnPlayerControlIsPlayingChanged;
+            _playerControl.IsPausedChanged -= OnPlayerControlIsPausedChanged;
+            _playerControl.CurrentTrackChanged -= HandleTrackChanged;
+            _playerControl.RepeatModeChanged -= OnPlayerControlRepeatModeChanged;
+            _playerControl.ShuffleEnabledChanged -= OnPlayerControlShuffleEnabledChanged;
+            _playerControl.IsLoadingChanged -= OnPlayerControlIsLoadingChanged;
+            _playerControl.QueueCountChanged -= OnPlayerControlQueueCountChanged;
+            _playerControl.ForceSyncTriggered -= HandleForceSync;
+            _playerControl.VolumeChanged -= OnPlayerControlVolumeChanged;
+
+            _audio.OnStreamInfoChanged -= OnAudioStreamInfoChanged;
+            _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
+            _library.OnTrackUpdated -= OnLibraryTrackUpdated;
+
+            if (AudioSourceFactory.GlobalCache is { } cacheManager)
+            {
+                cacheManager.OnFormatCached -= OnFormatCachedHandler;
+                cacheManager.OnCacheCleared -= OnCacheClearedHandler;
+            }
         }
         base.Dispose(disposing);
     }

@@ -1,9 +1,6 @@
-using LMP.Core.Youtube.Search;
-using ReactiveUI;
-
 using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Linq;
+using Avalonia.Threading;
+using LMP.Core.Youtube.Search;
 
 namespace LMP.UI.Dialogs;
 
@@ -24,27 +21,36 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
 
     // Флаг для предотвращения рекурсии при смене шаблона
     private bool _suppressTemplateSync;
+    private readonly DispatcherTimer _searchDebounceTimer;
 
     public ObservableCollection<SyncItemViewModel> Items { get; } = [];
 
-    // ═══ Глобальные шаблоны (замена Toggles) ═══
+    // Глобальные шаблоны (замена Toggles)
 
     public List<SyncActionOption> ConflictTemplates { get; }
     public List<SyncActionOption> NewTemplates { get; }
 
-    [Reactive] public partial SyncActionOption SelectedConflictTemplate { get; set; }
-    [Reactive] public partial SyncActionOption SelectedNewTemplate { get; set; }
+    [ObservableProperty]
+    public partial SyncActionOption SelectedConflictTemplate { get; set; }
 
-    // ═══ Статистика ═══
+    [ObservableProperty]
+    public partial SyncActionOption SelectedNewTemplate { get; set; }
 
-    [Reactive] public partial string TotalSummary { get; private set; } = "";
-    [Reactive] public partial string SelectedSummary { get; private set; } = "";
-    [Reactive] public partial string SearchQuery { get; set; } = "";
+    // Статистика
 
-    // ═══ Команды ═══
+    [ObservableProperty]
+    public partial string TotalSummary { get; set; } = "";
 
-    public ReactiveCommand<Unit, Unit> ConfirmCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    [ObservableProperty]
+    public partial string SelectedSummary { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string SearchQuery { get; set; } = "";
+
+    // Команды
+
+    public IRelayCommand ConfirmCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     /// <summary>
     /// Callback для закрытия диалога с результатом.
@@ -71,12 +77,17 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
             new SyncActionOption(MergeAction.Duplicate, L["Sync_Action_Import"]),
             new SyncActionOption(MergeAction.Skip, L["Sync_Action_Skip"])
         ];
-
-        // Дефолтные шаблоны (как было раньше: Merge для конфликтов, Import для новых)
         SelectedConflictTemplate = ConflictTemplates[0];
         SelectedNewTemplate = NewTemplates[0];
 
-        // ═══ Создание элементов ═══
+        _searchDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _searchDebounceTimer.Tick += (s, e) =>
+        {
+            _searchDebounceTimer.Stop();
+            ApplyFilter();
+        };
+
+        // Создание элементов
         foreach (var p in playlists)
         {
             var hasConflict = existingLocalNames.Contains(p.Title);
@@ -90,6 +101,15 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
                 ? item.AvailableActions.First(a => a.Action == SelectedConflictTemplate.Action)
                 : item.AvailableActions.First(a => a.Action == SelectedNewTemplate.Action);
 
+            item.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(SyncItemViewModel.SelectedOption))
+                {
+                    UpdateSelectedSummary();
+                    SyncTemplatesFromItems();
+                }
+            };
+
             _allItems.Add(item);
             Items.Add(item);
 
@@ -97,72 +117,53 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
             else _nonConflictingItems.Add(item);
         }
 
-        // ═══ Команды ═══
-        ConfirmCommand = CreateCommand(ReactiveCommand.Create(() =>
+        // Команды
+        ConfirmCommand = new RelayCommand(() =>
         {
             var result = _allItems.Where(x => x.SelectedAction != MergeAction.Skip)
                 .Select(x => new SyncDecision(x.Original, x.SelectedAction))
                 .ToList();
             OnResult?.Invoke(result);
-        }));
+        });
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelCommand = new RelayCommand(() =>
         {
             OnResult?.Invoke([]);
-        }));
-
-        // ═══ Подписки на элементы: обновление статистики ═══
-        foreach (var item in _allItems)
-        {
-            item.WhenAnyValue(x => x.SelectedOption)
-                .Subscribe(_ =>
-                {
-                    UpdateSelectedSummary();
-                    SyncTemplatesFromItems();
-                })
-                .DisposeWith(Disposables);
-        }
-
-        // ═══ Изменение шаблона пользователем ═══
-        this.WhenAnyValue(x => x.SelectedConflictTemplate)
-            .Skip(1)
-            .Subscribe(template =>
-            {
-                if (_suppressTemplateSync) return;
-                _suppressTemplateSync = true;
-                foreach (var item in _conflictingItems)
-                {
-                    item.SelectedOption = item.AvailableActions.First(a => a.Action == template.Action);
-                }
-                _suppressTemplateSync = false;
-                UpdateSelectedSummary();
-            }).DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.SelectedNewTemplate)
-            .Skip(1)
-            .Subscribe(template =>
-            {
-                if (_suppressTemplateSync) return;
-                _suppressTemplateSync = true;
-                foreach (var item in _nonConflictingItems)
-                {
-                    item.SelectedOption = item.AvailableActions.First(a => a.Action == template.Action);
-                }
-                _suppressTemplateSync = false;
-                UpdateSelectedSummary();
-            }).DisposeWith(Disposables);
-
-        // ═══ Поиск ═══
-        this.WhenAnyValue(x => x.SearchQuery)
-            .Throttle(TimeSpan.FromMilliseconds(300))
-            .DistinctUntilChanged()
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => ApplyFilter())
-            .DisposeWith(Disposables);
+        });
 
         ApplyFilter();
         UpdateTotalSummary();
         UpdateSelectedSummary();
+    }
+
+    partial void OnSelectedConflictTemplateChanged(SyncActionOption value)
+    {
+        if (_suppressTemplateSync || value == null) return;
+        _suppressTemplateSync = true;
+        foreach (var item in _conflictingItems)
+        {
+            item.SelectedOption = item.AvailableActions.First(a => a.Action == value.Action);
+        }
+        _suppressTemplateSync = false;
+        UpdateSelectedSummary();
+    }
+
+    partial void OnSelectedNewTemplateChanged(SyncActionOption value)
+    {
+        if (_suppressTemplateSync || value == null) return;
+        _suppressTemplateSync = true;
+        foreach (var item in _nonConflictingItems)
+        {
+            item.SelectedOption = item.AvailableActions.First(a => a.Action == value.Action);
+        }
+        _suppressTemplateSync = false;
+        UpdateSelectedSummary();
+    }
+
+    partial void OnSearchQueryChanged(string value)
+    {
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
     }
 
     /// <summary>
@@ -255,9 +256,18 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
         return item.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                (!string.IsNullOrEmpty(item.Author) && item.Author.Contains(query, StringComparison.OrdinalIgnoreCase));
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _searchDebounceTimer.Stop();
+        }
+        base.Dispose(disposing);
+    }
 }
 
-public sealed partial class SyncItemViewModel : ReactiveObject
+public sealed partial class SyncItemViewModel : ObservableObject
 {
     public PlaylistSearchResult Original { get; }
     public string PlaylistUrl => Original.Url;
@@ -272,9 +282,13 @@ public sealed partial class SyncItemViewModel : ReactiveObject
     public string FormattedTrackCount => HasTrackCount
         ? LocalizationService.Instance.GetPlural("Playlist_TracksCount", TrackCount) : "";
 
-    [Reactive] public partial bool IsHighlighted { get; set; }
+    [ObservableProperty]
+    public partial bool IsHighlighted { get; set; }
     public List<SyncActionOption> AvailableActions { get; }
-    [Reactive] public partial SyncActionOption? SelectedOption { get; set; }
+
+    [ObservableProperty]
+    public partial SyncActionOption? SelectedOption { get; set; }
+
     public MergeAction SelectedAction => SelectedOption?.Action ?? MergeAction.Skip;
     public static LocalizationService L => LocalizationService.Instance;
 

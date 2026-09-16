@@ -11,10 +11,10 @@ namespace LMP.UI.Features.Shell;
 public sealed partial class DialogHostViewModel : ViewModelBase
 {
     /// <summary>Текущий отображаемый диалог.</summary>
-    [Reactive] public partial object? CurrentDialog { get; private set; }
+    [ObservableProperty] public partial object? CurrentDialog { get; private set; }
 
     /// <summary>Есть ли активный диалог.</summary>
-    [Reactive] public partial bool HasActiveDialog { get; private set; }
+    [ObservableProperty] public partial bool HasActiveDialog { get; private set; }
 
     //  Стек: (контент диалога, его TCS) 
     private readonly Stack<(object Content, TaskCompletionSource<object?> Tcs)> _stack = new();

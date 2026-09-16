@@ -1,12 +1,14 @@
-﻿using Avalonia.Controls;
-using ReactiveUI;
-using ReactiveUI.Avalonia;
-using System.Reactive.Disposables;
-using System.Reactive.Linq;
+﻿using System.ComponentModel;
+using Avalonia;
+using Avalonia.Controls;
 
 namespace LMP.UI.Features.Settings;
 
-public partial class SettingsView : ReactiveUserControl<SettingsViewModel>
+/// <summary>
+/// Представление страницы настроек.
+/// Управляет адаптивной шириной sidebar и сбросом скролла при смене вкладки.
+/// </summary>
+public partial class SettingsView : UserControl
 {
     /// <summary>
     /// Ширина ниже которой текст скрывается — остаются только иконки.
@@ -25,48 +27,77 @@ public partial class SettingsView : ReactiveUserControl<SettingsViewModel>
     /// <summary>Максимум — не даём растянуть больше половины типичного окна.</summary>
     private const double MaxWidthSidebar = 320.0;
 
+    private SettingsViewModel? _currentVm;
+
     public SettingsView()
     {
         InitializeComponent();
+    }
 
-        this.WhenActivated(disposables =>
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+
+        var col = LayoutGrid.ColumnDefinitions[0];
+        col.Width = new GridLength(DefaultWidth, GridUnitType.Pixel);
+        col.MinWidth = MinWidthSidebar;
+        col.MaxWidth = MaxWidthSidebar;
+
+        LayoutGrid.LayoutUpdated += OnLayoutUpdated;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        LayoutGrid.LayoutUpdated -= OnLayoutUpdated;
+        UnsubscribeFromVm();
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    protected override void OnDataContextChanged(EventArgs e)
+    {
+        base.OnDataContextChanged(e);
+        UnsubscribeFromVm();
+
+        if (DataContext is SettingsViewModel vm)
         {
-            if (ViewModel is not SettingsViewModel vm) return;
+            _currentVm = vm;
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+        }
+    }
 
-            // Задаём начальную ширину и ограничения для GridSplitter
-            var col = LayoutGrid.ColumnDefinitions[0];
-            col.Width = new GridLength(DefaultWidth, GridUnitType.Pixel);
-            col.MinWidth = MinWidthSidebar;
-            col.MaxWidth = MaxWidthSidebar;
+    private void UnsubscribeFromVm()
+    {
+        _currentVm?.PropertyChanged -= OnViewModelPropertyChanged;
+        _currentVm = null;
+    }
 
-            // Сброс скролла при смене страницы
-            vm.WhenAnyValue(x => x.SelectedSidebarItem)
-              .Skip(1)
-              .Subscribe(_ => ContentScrollViewer.ScrollToHome())
-              .DisposeWith(disposables);
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SettingsViewModel.SelectedSidebarItem))
+        {
+            ContentScrollViewer.ScrollToHome();
+        }
+    }
 
-            // Следим за реальной шириной Col0 → переключаем collapsed/expanded
-            LayoutGrid.LayoutUpdated += OnLayoutUpdated;
-            disposables.Add(Disposable.Create(() =>
-                LayoutGrid.LayoutUpdated -= OnLayoutUpdated));
+    private void OnLayoutUpdated(object? sender, EventArgs e)
+    {
+        var col = LayoutGrid.ColumnDefinitions[0];
+        var actualWidth = col.ActualWidth;
 
-            void OnLayoutUpdated(object? sender, EventArgs e)
-            {
-                var actualWidth = LayoutGrid.ColumnDefinitions[0].ActualWidth;
+        if (actualWidth <= 0) return;
 
-                // Жёсткий зажим — на случай если GridSplitter всё же вышел за границы
-                if (actualWidth < MinWidthSidebar)
-                    LayoutGrid.ColumnDefinitions[0].Width =
-                        new GridLength(MinWidthSidebar, GridUnitType.Pixel);
-                else if (actualWidth > MaxWidthSidebar)
-                    LayoutGrid.ColumnDefinitions[0].Width =
-                        new GridLength(MaxWidthSidebar, GridUnitType.Pixel);
+        // Жёсткий зажим — на случай если GridSplitter всё же вышел за границы
+        if (actualWidth < MinWidthSidebar)
+            col.Width = new GridLength(MinWidthSidebar, GridUnitType.Pixel);
+        else if (actualWidth > MaxWidthSidebar)
+            col.Width = new GridLength(MaxWidthSidebar, GridUnitType.Pixel);
 
-                // Автоматическое переключение текст ↔ только иконки
-                var shouldExpand = actualWidth >= CollapsedThreshold;
-                if (vm.IsSidebarExpanded != shouldExpand)
-                    vm.IsSidebarExpanded = shouldExpand;
-            }
-        });
+        // Автоматическое переключение текст ↔ только иконки
+        if (_currentVm is { } vm)
+        {
+            var shouldExpand = actualWidth >= CollapsedThreshold;
+            if (vm.IsSidebarExpanded != shouldExpand)
+                vm.IsSidebarExpanded = shouldExpand;
+        }
     }
 }

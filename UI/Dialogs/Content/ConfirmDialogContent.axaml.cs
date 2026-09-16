@@ -1,6 +1,4 @@
 using Avalonia.Controls;
-using ReactiveUI;
-using System.Reactive;
 
 namespace LMP.UI.Dialogs.Content;
 
@@ -26,10 +24,10 @@ public partial class ConfirmDialogContent : UserControl
     public string CancelText { get; }
 
     /// <summary>Подтвердить — вызывает callback с <c>true</c>.</summary>
-    public ReactiveCommand<Unit, Unit> ConfirmCommand { get; }
+    public IRelayCommand ConfirmCommand { get; }
 
     /// <summary>Отменить — вызывает callback с <c>false</c>.</summary>
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     /// <summary>
     /// Конструктор для XAML-компилятора и превьюера.
@@ -57,8 +55,8 @@ public partial class ConfirmDialogContent : UserControl
         ConfirmText = confirmText;
         CancelText = cancelText;
 
-        ConfirmCommand = ReactiveCommand.Create(() => onResult(true));
-        CancelCommand = ReactiveCommand.Create(() => onResult(false));
+        ConfirmCommand = new RelayCommand(() => onResult(true));
+        CancelCommand = new RelayCommand(() => onResult(false));
 
         InitializeComponent();
         DataContext = this;

@@ -1,9 +1,7 @@
 using System.Collections.ObjectModel;
-using System.Text.Json;
 using Avalonia.Threading;
-using LMP.Core.Data.Entities;
 using LMP.Core.Data.Repositories;
-using ReactiveUI;
+using LMP.Core.Models;
 
 namespace LMP.Core.Services;
 
@@ -14,7 +12,7 @@ namespace LMP.Core.Services;
 /// авто-очистка — <see cref="PeriodicTimer"/> в фоновом потоке.
 /// </para>
 /// </summary>
-public sealed class NotificationService : ReactiveObject, IDisposable
+public sealed partial class NotificationService : ObservableObject, IDisposable
 {
     private readonly LibraryService _libraryService;
     private readonly INotificationRepository _repository;
@@ -34,7 +32,7 @@ public sealed class NotificationService : ReactiveObject, IDisposable
     public Notification? CurrentToast
     {
         get => _currentToast;
-        private set => this.RaiseAndSetIfChanged(ref _currentToast, value);
+        private set => SetProperty(ref _currentToast, value);
     }
 
     public bool IsToastVisible => CurrentToast != null;
@@ -66,13 +64,13 @@ public sealed class NotificationService : ReactiveObject, IDisposable
 
         try
         {
-            var entities = await _repository.GetRecentAsync(MaxNotifications, ct);
+            var loadedNotifications = await _repository.GetRecentAsync(MaxNotifications, ct);
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                foreach (var entity in entities)
+                for (int i = 0; i < loadedNotifications.Count; i++)
                 {
-                    var n = EntityToModel(entity);
+                    var n = loadedNotifications[i];
                     Notifications.Add(n);
                     if (!n.IsRead) _unreadCount++;
                 }
@@ -81,7 +79,7 @@ public sealed class NotificationService : ReactiveObject, IDisposable
             });
 
             _isInitialized = true;
-            Log.Info($"[NotificationService] Loaded {entities.Count} notifications from DB");
+            Log.Info($"[NotificationService] Loaded {loadedNotifications.Count} notifications from DB");
 
             StartAutoCleanup();
         }
@@ -306,94 +304,13 @@ public sealed class NotificationService : ReactiveObject, IDisposable
     {
         try
         {
-            await _repository.AddAsync(ModelToEntity(notification));
+            await _repository.AddAsync(notification);
             await _repository.PruneAsync(MaxNotifications * 2);
         }
         catch (Exception ex)
         {
             Log.Warn($"[NotificationService] Failed to persist: {ex.Message}");
         }
-    }
-
-    private static NotificationEntity ModelToEntity(Notification n)
-    {
-        string? attemptsJson = null;
-        if (n.Attempts is { Count: > 0 })
-        {
-            var records = n.Attempts
-                .Select(a => new AttemptDto(a.ClientName, a.Success, a.ErrorMessage, a.Timestamp))
-                .ToList();
-            attemptsJson = JsonSerializer.Serialize(records, AppJsonContext.Default.ListAttemptDto);
-        }
-
-        string? argsJson = null;
-        if (n.MessageArgs is { Length: > 0 })
-            argsJson = JsonSerializer.Serialize(
-                n.MessageArgs.Select(a => a?.ToString()).ToArray(),
-                AppJsonContext.Default.StringArray);
-
-        return new NotificationEntity
-        {
-            Id = n.Id.ToString(),
-            TitleKey = n.TitleKey,
-            TitleRaw = n.TitleRaw,
-            MessageKey = n.MessageKey,
-            MessageRaw = n.MessageRaw,
-            MessageArgsJson = argsJson,
-            RecommendationKey = n.RecommendationKey,
-            Severity = (int)n.Severity,
-            IsRead = n.IsRead,
-            TrackId = n.TrackId,
-            TrackTitle = n.TrackTitle,
-            ExceptionDetails = n.ExceptionDetails,
-            AttemptsJson = attemptsJson,
-            CreatedAt = n.Timestamp
-        };
-    }
-
-    private static Notification EntityToModel(NotificationEntity e)
-    {
-        ObservableCollection<AttemptRecord>? attempts = null;
-        if (!string.IsNullOrEmpty(e.AttemptsJson))
-        {
-            try
-            {
-                var dtos = JsonSerializer.Deserialize(e.AttemptsJson, AppJsonContext.Default.ListAttemptDto);
-                if (dtos is { Count: > 0 })
-                    attempts = new ObservableCollection<AttemptRecord>(
-                        dtos.Select(d => new AttemptRecord(d.ClientName, d.Success, d.ErrorMessage, d.Timestamp)));
-            }
-            catch { /* ignore corrupt data */ }
-        }
-
-        object[]? args = null;
-        if (!string.IsNullOrEmpty(e.MessageArgsJson))
-        {
-            try
-            {
-                args = JsonSerializer.Deserialize(e.MessageArgsJson, AppJsonContext.Default.StringArray)?
-                    .Cast<object>().ToArray();
-            }
-            catch { /* ignore */ }
-        }
-
-        return new Notification
-        {
-            Id = Guid.TryParse(e.Id, out var guid) ? guid : Guid.NewGuid(),
-            Timestamp = e.CreatedAt,
-            TitleKey = e.TitleKey,
-            TitleRaw = e.TitleRaw,
-            MessageKey = e.MessageKey,
-            MessageRaw = e.MessageRaw,
-            MessageArgs = args,
-            RecommendationKey = e.RecommendationKey,
-            Severity = (NotificationSeverity)e.Severity,
-            IsRead = e.IsRead,
-            TrackId = e.TrackId,
-            TrackTitle = e.TrackTitle,
-            ExceptionDetails = e.ExceptionDetails,
-            Attempts = attempts
-        };
     }
 
     public sealed record AttemptDto(string ClientName, bool Success, string? ErrorMessage, DateTime Timestamp);
@@ -433,7 +350,7 @@ public sealed class NotificationService : ReactiveObject, IDisposable
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             CurrentToast = notification;
-            this.RaisePropertyChanged(nameof(IsToastVisible));
+            OnPropertyChanged(nameof(IsToastVisible));
         });
 
         _ = AutoDismissToastAsync(notification, durationMs, localToken);
@@ -450,7 +367,7 @@ public sealed class NotificationService : ReactiveObject, IDisposable
                 if (CurrentToast == notification)
                 {
                     CurrentToast = null;
-                    this.RaisePropertyChanged(nameof(IsToastVisible));
+                    OnPropertyChanged(nameof(IsToastVisible));
                 }
             });
         }
@@ -519,7 +436,7 @@ public sealed class NotificationService : ReactiveObject, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             CurrentToast = null;
-            this.RaisePropertyChanged(nameof(IsToastVisible));
+            OnPropertyChanged(nameof(IsToastVisible));
         });
     }
 
@@ -541,8 +458,8 @@ public sealed class NotificationService : ReactiveObject, IDisposable
     /// </summary>
     private void RaiseUnreadProperties()
     {
-        this.RaisePropertyChanged(nameof(UnreadCount));
-        this.RaisePropertyChanged(nameof(HasUnread));
+        OnPropertyChanged(nameof(UnreadCount));
+        OnPropertyChanged(nameof(HasUnread));
     }
 
     #endregion

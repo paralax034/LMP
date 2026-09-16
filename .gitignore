@@ -7,8 +7,7 @@ appsecrets.*.json
 [Bb]in/
 [Oo]bj/
 # Артефакты публикации
-publish/
-publish-dev/
+publis*/
 
 ## --- [ Visual Studio ] ---
 .vs/

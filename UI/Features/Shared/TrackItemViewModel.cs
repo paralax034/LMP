@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia.Media;
-using ReactiveUI;
 
 namespace LMP.UI.Features.Shared;
 
+/// <summary>
+/// ViewModel для представления отдельного трека в списках и очередях.
+/// </summary>
 public sealed partial class TrackItemViewModel : ViewModelBase
 {
     #region Weak Event Subscription
@@ -87,14 +89,14 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         ? Duration.ToString(@"h\:mm\:ss")
         : Duration.ToString(@"m\:ss");
 
-    [Reactive] public partial bool IsActive { get; private set; }
-    [Reactive] public partial bool IsPlaying { get; private set; }
-    [Reactive] public partial bool IsDownloading { get; private set; }
-    [Reactive] public partial float DownloadProgress { get; private set; }
-    [Reactive] public partial bool IsMenuOpen { get; set; }
-    [Reactive] public partial bool IsSelected { get; set; }
-    [Reactive] public partial bool IsPlaylistContext { get; set; }
-    [Reactive] public partial bool IsQueueContext { get; set; }
+    [ObservableProperty] public partial bool IsActive { get; private set; }
+    [ObservableProperty] public partial bool IsPlaying { get; private set; }
+    [ObservableProperty] public partial bool IsDownloading { get; private set; }
+    [ObservableProperty] public partial float DownloadProgress { get; private set; }
+    [ObservableProperty] public partial bool IsMenuOpen { get; set; }
+    [ObservableProperty] public partial bool IsSelected { get; set; }
+    [ObservableProperty] public partial bool IsPlaylistContext { get; set; }
+    [ObservableProperty] public partial bool IsQueueContext { get; set; }
 
     public bool ShowAddToQueue => !IsQueueContext;
 
@@ -183,7 +185,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         switch (e.PropertyName)
         {
             case nameof(Track.IsLiked):
-                this.RaisePropertyChanged(nameof(IsLiked));
+                OnPropertyChanged(nameof(IsLiked));
                 break;
 
             case nameof(Track.IsDownloaded):
@@ -192,18 +194,18 @@ public sealed partial class TrackItemViewModel : ViewModelBase
                     IsDownloading = false;
                     DownloadProgress = 0f;
                 }
-                this.RaisePropertyChanged(nameof(IsDownloaded));
-                this.RaisePropertyChanged(nameof(DownloadStatusText));
-                this.RaisePropertyChanged(nameof(HasCacheIcon));
-                this.RaisePropertyChanged(nameof(CacheIconGeometry));
-                this.RaisePropertyChanged(nameof(CacheIconTooltip));
+                OnPropertyChanged(nameof(IsDownloaded));
+                OnPropertyChanged(nameof(DownloadStatusText));
+                OnPropertyChanged(nameof(HasCacheIcon));
+                OnPropertyChanged(nameof(CacheIconGeometry));
+                OnPropertyChanged(nameof(CacheIconTooltip));
                 break;
 
             case nameof(Track.IsCached):
-                this.RaisePropertyChanged(nameof(DownloadStatusText));
-                this.RaisePropertyChanged(nameof(HasCacheIcon));
-                this.RaisePropertyChanged(nameof(CacheIconGeometry));
-                this.RaisePropertyChanged(nameof(CacheIconTooltip));
+                OnPropertyChanged(nameof(DownloadStatusText));
+                OnPropertyChanged(nameof(HasCacheIcon));
+                OnPropertyChanged(nameof(CacheIconGeometry));
+                OnPropertyChanged(nameof(CacheIconTooltip));
                 break;
         }
     }
@@ -270,13 +272,13 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         IsDownloading = isDownloading;
         DownloadProgress = isDownloading ? progress : 0f;
 
-        this.RaisePropertyChanged(nameof(HasCacheIcon));
-        this.RaisePropertyChanged(nameof(CacheIconGeometry));
-        this.RaisePropertyChanged(nameof(CacheIconTooltip));
+        OnPropertyChanged(nameof(HasCacheIcon));
+        OnPropertyChanged(nameof(CacheIconGeometry));
+        OnPropertyChanged(nameof(CacheIconTooltip));
 
         if (!isDownloading)
         {
-            this.RaisePropertyChanged(nameof(DownloadStatusText));
+            OnPropertyChanged(nameof(DownloadStatusText));
         }
     }
 

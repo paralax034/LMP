@@ -3,9 +3,9 @@ global using System;
 global using System.Collections.Generic;
 global using System.Threading;
 global using System.Threading.Tasks;
-global using System.Reactive.Disposables.Fluent;
 
-global using ReactiveUI.SourceGenerators;
+// MVVM генераторы (CommunityToolkit.Mvvm)
+global using CommunityToolkit.Mvvm.ComponentModel;
 
 // Пространства имен Ядра (LMP.Core)
 global using LMP.Core.Models;

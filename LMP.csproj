@@ -4,34 +4,18 @@
   <PropertyGroup Label="Package Versions">
     <AvaloniaVersion>12.1.1</AvaloniaVersion>
 
-    <!--
-      ReactiveUI.Avalonia 12.0.3 — согласована с веткой ReactiveUI 23.2.28.
-      Внимание: линейка 12.1.x перешла на ReactiveUI 24.x (вырезаны System.Reactive и DynamicData).
-    -->
-    <ReactiveUIAvaloniaVersion>12.0.3</ReactiveUIAvaloniaVersion>
-
     <!-- Dev-инструменты -->
-    <!--
-      HotAvalonia 3.1.4 (18.07.2026) — версия актуальна, изменений не требуется.
-      HotAvalonia.Fody внутри метапакета остался на 3.1.0 — это штатная ситуация.
-    -->
     <HotAvaloniaVersion>3.1.4</HotAvaloniaVersion>
 
-    <!-- Entity Framework Core: обновлено с 10.0.2 до 10.0.11 (патчи безопасности/багфиксы) -->
-    <EfCoreVersion>10.0.11</EfCoreVersion>
+    <!-- Entity Framework Core: 10.0.11 (патчи безопасности/багфиксы) -->
 
-    <!-- MVVM -->
-    <!--
-      ReactiveUI.SourceGenerators 3.2.0 (было 2.6.30) — compile-time замена ReactiveUI.Fody.
-      Проверено на совместимость с ReactiveUI 23.2.28 (LMP.Core).
-    -->
-    <ReactiveUISourceGenVersion>3.2.0</ReactiveUISourceGenVersion>
+    <!-- MVVM стек CommunityToolkit: современный генератор кода свойств и команд -->
     <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
 
-    <!-- Microsoft Extensions (совпадает с TFM): обновлено с 10.0.2 до 10.0.11 -->
+    <!-- Microsoft Extensions (совпадает с TFM): 10.0.11 -->
     <MsExtVersion>10.0.11</MsExtVersion>
 
-    <!-- AsyncImageLoader: 3.8.0 — последняя актуальная версия, Avalonia 12 support -->
+    <!-- AsyncImageLoader: 3.8.0 — поддержка Avalonia 12 -->
     <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
   </PropertyGroup>
 
@@ -59,20 +43,19 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/app.ico</ApplicationIcon>
 
-    <!-- Компилируемые биндинги по умолчанию: быстрее + ошибки на этапе компиляции -->
+    <!-- Компилируемые биндинги по умолчанию: быстрее + проверка типов на этапе сборки -->
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 
     <!-- Нужно для низкоуровневых аудио-операций (PCM-буферы, нативный interop) -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!--
-      CS0436: ReactiveUI.SourceGenerators генерирует ReactiveAttribute в каждом проекте.
-      LMP видит свой + экспортированный из LMP.Core → конфликт типов (безопасен).
-    -->
-    <NoWarn>$(NoWarn);CS0436</NoWarn>
-
-    <!-- Lock-файл обязателен для cache: true в GitHub Actions CI -->
+    <!-- Lock-файл обязателен для детерминированного восстановления пакетов в CI -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
+    <!-- Подавляет IL20xx/IL30xx ошибки при AOT-анализе -->
+    <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
   </PropertyGroup>
 
   <!--   ОПТИМИЗАЦИЯ ПАМЯТИ / JIT -->
@@ -125,34 +108,33 @@
     <HotAvaloniaMode>Balanced</HotAvaloniaMode>
   </PropertyGroup>
 
-  <!--   RELEASE КОНФИГУРАЦИЯ     -->
+  <!--   RELEASE & AOT КОНФИГУРАЦИЯ     -->
   <PropertyGroup Label="Release" Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
     <Optimize>true</Optimize>
 
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-
     <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**;Tools/**</DefaultItemExcludes>
 
+    <!-- Полный тримминг неиспользуемых сборок и IL-кода -->
     <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    <TrimMode>full</TrimMode>
     <TrimmerRootDescriptor>trimming.xml</TrimmerRootDescriptor>
 
-    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- Строго отключаем рефлексивный fallback для System.Text.Json -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
-    <!-- Подавляет IL20xx warnings от Roslyn trim analyzer при build.
-       ReactiveUI.WhenAnyValue фундаментально использует expression trees через рефлексию.
-       Все затронутые типы сохранены в trimming.xml — runtime корректен. -->
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-
-    <!-- Подавляет IL20xx errors от ILLink при publish.
-       Дублирует SuppressTrimAnalysisWarnings для publish-path (отдельный инструмент). -->
-    <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
+    <!-- Оптимизации компилятора ILC для Native AOT -->
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
   </PropertyGroup>
 
-  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
-    <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
-  </PropertyGroup>
+  <!-- Конфигурация рантайма для Native AOT (заменяет runtimeconfig.template.json) -->
+  <ItemGroup Label="Runtime Host Configuration">
+    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="8" />
+  </ItemGroup>
 
   <ItemGroup Label="File Includes/Excludes">
     <AvaloniaResource Include="Assets/**" />
@@ -183,8 +165,6 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Concentus.Native" Version="1.5.2" />
-    <PackageReference Include="ReactiveUI.Avalonia" Version="$(ReactiveUIAvaloniaVersion)" />
-    <!-- Обновлено с 2.2.1 до 2.2.3 -->
     <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3"
       Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
@@ -202,29 +182,15 @@
 
   <ItemGroup Label="Avalonia Community">
     <!--
-      Avalonia.Controls.ItemsRepeater официально retired начиная с Avalonia 12.
-      Версии 12.1.x не существует; пакет заморожен на 12.0.0 (подтверждено на NuGet).
-      Constraint "Avalonia >= 12.0.0" покрывает 12.1.x — совместимость сохранена.
-      Удаление невозможно: ItemsRepeater активно используется в TrackListControl и PlaylistCoverPicker.
+      Avalonia.Controls.ItemsRepeater официально перенесён начиная с Avalonia 12.
+      Удаление невозможно: ItemsRepeater активно используется в TrackListControl.
     -->
     <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="12.0.0" />
-    <!--
-      Xaml.Behaviors.Avalonia — актуальное имя пакета (старый Avalonia.Xaml.Behaviors deprecated).
-      Версия 12.0.0 согласована с той же линейкой, что ItemsRepeater.
-    -->
     <PackageReference Include="Xaml.Behaviors.Avalonia" Version="12.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="MVVM">
     <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)" />
-    <!--
-      ReactiveUI.SourceGenerators 3.2.0 — compile-time замена ReactiveUI.Fody.
-      PrivateAssets="all": генератор не попадает в transitive-зависимости потребителей.
-    -->
-    <PackageReference Include="ReactiveUI.SourceGenerators" Version="$(ReactiveUISourceGenVersion)">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-    </PackageReference>
   </ItemGroup>
 
   <ItemGroup Label="UI Utilities">
@@ -232,7 +198,6 @@
   </ItemGroup>
 
   <ItemGroup Label="Linux Interop">
-    <!-- Обновлено с 0.94.1 до 0.95.0 -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.0" />
   </ItemGroup>
 

@@ -170,17 +170,25 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private static IPlaybackBackend CreateSharedBackend(AudioPlayerOptions options)
     {
-        if (options.UseNullBackend) return new Backends.NullAudioBackend();
-
-        try
-        {
-            return new Backends.NAudioBackend();
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[AudioPlayer] NAudio failed: {ex.Message}, using NullBackend");
+        if (options.UseNullBackend)
             return new Backends.NullAudioBackend();
+
+        // Проверка платформы в рантайме (при сборке Native AOT под win-x64 сворачивается в true)
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                return new Backends.NAudioBackend();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[AudioPlayer] Windows audio backend initialization failed: {ex.Message}, falling back to NullAudioBackend");
+                return new Backends.NullAudioBackend();
+            }
         }
+
+        Log.Warn("[AudioPlayer] Native audio playback on Linux and macOS requires a dedicated platform backend. Falling back to NullAudioBackend.");
+        return new Backends.NullAudioBackend();
     }
 
     #endregion

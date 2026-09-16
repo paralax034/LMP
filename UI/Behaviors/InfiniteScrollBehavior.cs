@@ -13,8 +13,6 @@ namespace LMP.UI.Behaviors;
 /// </summary>
 public sealed class InfiniteScrollBehavior : Behavior<Control>
 {
-    private IDisposable? _offsetSubscription;
-    private IDisposable? _extentSubscription;
     private ScrollViewer? _scrollViewer;
     private ICommand? _observedCommand;
 
@@ -83,25 +81,33 @@ public sealed class InfiniteScrollBehavior : Behavior<Control>
     private void AttachToScrollViewer(ScrollViewer sv)
     {
         _scrollViewer = sv;
+        _scrollViewer.ScrollChanged += OnScrollViewerScrollChanged;
+        _scrollViewer.PropertyChanged += OnScrollViewerPropertyChanged;
+    }
 
-        _offsetSubscription = sv.GetObservable(ScrollViewer.OffsetProperty)
-            .Subscribe(_ => CheckAndTrigger());
+    private void OnScrollViewerScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        CheckAndTrigger();
+    }
 
-        _extentSubscription = sv.GetObservable(ScrollViewer.ExtentProperty)
-            .Subscribe(_ => CheckAndTrigger());
+    private void OnScrollViewerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == ScrollViewer.OffsetProperty || e.Property == ScrollViewer.ExtentProperty)
+        {
+            CheckAndTrigger();
+        }
     }
 
     protected override void OnDetaching()
     {
         UnhookCommandCanExecute();
 
-        _offsetSubscription?.Dispose();
-        _offsetSubscription = null;
-
-        _extentSubscription?.Dispose();
-        _extentSubscription = null;
-
-        _scrollViewer = null;
+        if (_scrollViewer != null)
+        {
+            _scrollViewer.ScrollChanged -= OnScrollViewerScrollChanged;
+            _scrollViewer.PropertyChanged -= OnScrollViewerPropertyChanged;
+            _scrollViewer = null;
+        }
 
         base.OnDetaching();
     }
@@ -163,7 +169,7 @@ public sealed class InfiniteScrollBehavior : Behavior<Control>
         }
         finally
         {
-            // Сбрасываем флаг только на следующем тике, давая ReactiveCommand обновить IsExecuting
+            // Сбрасываем флаг только на следующем тике, давая RelayCommand обновить IsExecuting
             Dispatcher.UIThread.Post(() => _isExecuting = false, DispatcherPriority.Normal);
         }
     }

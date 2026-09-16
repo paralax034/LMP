@@ -1458,20 +1458,58 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Строит JSON индекса кэша из текущего состояния _entries.
     /// </summary>
-    /// <remarks>
-    /// Устраняет дублирование между <see cref="SaveIndexAsync"/> и <see cref="SaveIndexSync"/>.
-    /// </remarks>
     private string BuildIndexJson()
     {
-        var entries = _entries.Values.ToList();
+        var sourceEntries = _entries.Values.ToList();
+        var snapshotEntries = new List<AudioCacheEntry>(sourceEntries.Count);
 
-        for (int i = 0; i < entries.Count; i++)
-            entries[i].PrepareForSave();
+        for (int i = 0; i < sourceEntries.Count; i++)
+        {
+            var src = sourceEntries[i];
+            List<SerializedDownloadedRange>? rangesSnapshot = null;
+
+            var ranges = src.GetDownloadedRangesSnapshot();
+            if (ranges.Length > 0)
+            {
+                rangesSnapshot = new List<SerializedDownloadedRange>(ranges.Length);
+                for (int j = 0; j < ranges.Length; j++)
+                {
+                    rangesSnapshot.Add(new SerializedDownloadedRange
+                    {
+                        Start = ranges[j].Start,
+                        EndExclusive = ranges[j].EndExclusive
+                    });
+                }
+            }
+
+            var clone = new AudioCacheEntry
+            {
+                CacheKey = src.CacheKey,
+                TrackId = src.TrackId,
+                OriginalUrl = src.OriginalUrl,
+                TotalSize = src.TotalSize,
+                Format = src.Format,
+                Codec = src.Codec,
+                Bitrate = src.Bitrate,
+                DurationMs = src.DurationMs,
+                AlignmentBytes = src.AlignmentBytes,
+                CreatedAt = src.CreatedAt,
+                LastAccessedAt = src.LastAccessedAt,
+                CompletedAt = src.CompletedAt,
+                IsComplete = src.IsComplete,
+                ActualFileSize = src.ActualFileSize,
+                IntegratedLufs = src.IntegratedLufs,
+                IntegratedLufsSource = src.IntegratedLufsSource,
+                DownloadedRangesData = rangesSnapshot
+            };
+
+            snapshotEntries.Add(clone);
+        }
 
         var envelope = new AudioCacheIndexEnvelope
         {
             SchemaVersion = CurrentSchemaVersion,
-            Entries = entries
+            Entries = snapshotEntries
         };
 
         return JsonSerializer.Serialize(envelope, AppJsonContext.Default.AudioCacheIndexEnvelope);

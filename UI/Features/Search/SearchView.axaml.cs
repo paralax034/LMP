@@ -1,12 +1,10 @@
-﻿using System.Reactive.Disposables;
-using System.Reactive.Linq;
+﻿using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using ReactiveUI;
 
 namespace LMP.UI.Features.Search;
 
@@ -53,7 +51,8 @@ public partial class SearchView : UserControl
         ]
     };
 
-    private CompositeDisposable? _cleanup;
+    private SearchViewModel? _currentVm;
+    private ScrollViewer? _ribbonSv;
 
     public SearchView()
     {
@@ -70,7 +69,6 @@ public partial class SearchView : UserControl
                 }
             };
 
-            // Перехватываем Tab и Right на стадии Tunneling, исключая сброс каретки и потерю фокуса
             searchBox.AddHandler(InputElement.KeyDownEvent, OnSearchBoxKeyDown, RoutingStrategies.Tunnel);
         }
     }
@@ -88,7 +86,6 @@ public partial class SearchView : UserControl
             return;
         }
 
-        // Автодополнение по стрелке Вправо разрешено ТОЛЬКО если курсор находится в самом конце текста
         if (e.Key == Key.Right && vm.HasGhostText && textBox.CaretIndex == (textBox.Text?.Length ?? 0))
         {
             e.Handled = true;
@@ -98,45 +95,58 @@ public partial class SearchView : UserControl
         }
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+
+        _ribbonSv = this.FindControl<ScrollViewer>("RibbonScrollViewer");
+        _ribbonSv?.PropertyChanged += OnRibbonScrollViewerPropertyChanged;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        _ribbonSv?.PropertyChanged -= OnRibbonScrollViewerPropertyChanged;
+        _ribbonSv = null;
+
+        UnsubscribeVm();
+        base.OnDetachedFromVisualTree(e);
+    }
+
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
-
-        _cleanup?.Dispose();
-        _cleanup = [];
+        UnsubscribeVm();
 
         if (DataContext is SearchViewModel vm)
         {
-            // Сбрасываем скролл наверх в момент старта нового поиска
-            vm.WhenAnyValue(x => x.IsLoading)
-                .Where(loading => loading)
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(_ =>
-                {
-                    var sv = this.FindControl<ScrollViewer>("ResultsScrollViewer");
-                    if (sv != null)
-                    {
-                        sv.Offset = new Vector(0, 0);
-                    }
-                })
-                .DisposeWith(_cleanup);
+            _currentVm = vm;
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+        }
+    }
 
-            // Адаптивное управление маской краев ленты подсказок
-            var ribbonSv = this.FindControl<ScrollViewer>("RibbonScrollViewer");
-            if (ribbonSv != null)
-            {
-                ribbonSv.GetObservable(ScrollViewer.OffsetProperty)
-                    .Subscribe(_ => UpdateRibbonMask(ribbonSv))
-                    .DisposeWith(_cleanup);
+    private void UnsubscribeVm()
+    {
+        _currentVm?.PropertyChanged -= OnViewModelPropertyChanged;
+        _currentVm = null;
+    }
 
-                ribbonSv.GetObservable(ScrollViewer.ExtentProperty)
-                    .Subscribe(_ => UpdateRibbonMask(ribbonSv))
-                    .DisposeWith(_cleanup);
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SearchViewModel.IsLoading) && sender is SearchViewModel { IsLoading: true })
+        {
+            var sv = this.FindControl<ScrollViewer>("ResultsScrollViewer");
+            sv?.Offset = new Vector(0, 0);
+        }
+    }
 
-                ribbonSv.GetObservable(ScrollViewer.ViewportProperty)
-                    .Subscribe(_ => UpdateRibbonMask(ribbonSv))
-                    .DisposeWith(_cleanup);
-            }
+    private void OnRibbonScrollViewerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (sender is ScrollViewer sv &&
+            (e.Property == ScrollViewer.OffsetProperty ||
+             e.Property == ScrollViewer.ExtentProperty ||
+             e.Property == ScrollViewer.ViewportProperty))
+        {
+            UpdateRibbonMask(sv);
         }
     }
 
@@ -170,7 +180,6 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>
-    /// <summary>
     /// Обрабатывает клики по чипам: ЛКМ — моментальный поиск, ПКМ — удаление элемента.
     /// </summary>
     private void OnSuggestionPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -202,12 +211,5 @@ public partial class SearchView : UserControl
             e.Handled = true;
             ((ICommand)item.Owner.RemoveSuggestionCommand).Execute(item.Text);
         }
-    }
-
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        _cleanup?.Dispose();
-        _cleanup = null;
-        base.OnDetachedFromVisualTree(e);
     }
 }

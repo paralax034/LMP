@@ -3,8 +3,6 @@ using System.Text.Json.Serialization;
 using LMP.Core.Audio.Normalization;
 using LMP.Core.Youtube.Search;
 using LMP.Core.Youtube.Utils;
-using ReactiveUI;
-
 
 namespace LMP.Core.Models;
 
@@ -12,7 +10,7 @@ namespace LMP.Core.Models;
 /// Представляет музыкальный трек.
 /// string interning для ID, минимизированы аллокации.
 /// </summary>
-public sealed partial class TrackInfo : ReactiveObject, IBatchItem, ISearchResult
+public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchResult
 {
     private static readonly ConditionalWeakTable<string, string> _idCache = [];
 
@@ -44,7 +42,7 @@ public sealed partial class TrackInfo : ReactiveObject, IBatchItem, ISearchResul
                 field = value ?? string.Empty;
             }
 
-            this.RaisePropertyChanged();
+            OnPropertyChanged();
         }
     } = string.Empty;
 
@@ -78,32 +76,32 @@ public sealed partial class TrackInfo : ReactiveObject, IBatchItem, ISearchResul
     /// <summary>
     /// Название трека.
     /// </summary>
-    [Reactive] public partial string Title { get; set; } = string.Empty;
+    [ObservableProperty] public partial string Title { get; set; } = string.Empty;
 
     /// <summary>
     /// Исполнитель/автор.
     /// </summary>
-    [Reactive] public partial string Author { get; set; } = string.Empty;
+    [ObservableProperty] public partial string Author { get; set; } = string.Empty;
 
     /// <summary>
     /// ID канала YouTube.
     /// </summary>
-    [Reactive] public partial string? ChannelId { get; set; }
+    [ObservableProperty] public partial string? ChannelId { get; set; }
 
     /// <summary>
     /// URL трека на YouTube.
     /// </summary>
-    [Reactive] public partial string Url { get; set; } = string.Empty;
+    [ObservableProperty] public partial string Url { get; set; } = string.Empty;
 
     /// <summary>
     /// Длительность трека.
     /// </summary>
-    [Reactive] public partial TimeSpan Duration { get; set; }
+    [ObservableProperty] public partial TimeSpan Duration { get; set; }
 
     /// <summary>
     /// URL обложки.
     /// </summary>
-    [Reactive] public partial string ThumbnailUrl { get; set; } = string.Empty;
+    [ObservableProperty] public partial string ThumbnailUrl { get; set; } = string.Empty;
 
     /// <summary>
     /// Флаг официального канала исполнителя.
@@ -125,20 +123,19 @@ public sealed partial class TrackInfo : ReactiveObject, IBatchItem, ISearchResul
 
     #region User State
 
-    [Reactive] public partial bool IsLiked { get; set; }
-    [Reactive] public partial bool IsDisliked { get; set; }
-    [Reactive] public partial bool IsDownloaded { get; set; }
-    [Reactive] public partial bool IsCached { get; set; }
+    [ObservableProperty] public partial bool IsLiked { get; set; }
+    [ObservableProperty] public partial bool IsDisliked { get; set; }
+    [ObservableProperty] public partial bool IsDownloaded { get; set; }
+    [ObservableProperty] public partial bool IsCached { get; set; }
 
     [JsonIgnore]
     public bool IsAvailableOffline => IsDownloaded || IsCached;
 
-    [Reactive] public partial string? LocalPath { get; set; }
+    [ObservableProperty] public partial string? LocalPath { get; set; }
 
     #endregion
 
     #region Playlists
-
 
     public HashSet<string> InPlaylists
     {
@@ -154,13 +151,13 @@ public sealed partial class TrackInfo : ReactiveObject, IBatchItem, ISearchResul
     /// Предпочитаемый формат контейнера для этого трека.
     /// Персистентный пользовательский выбор.
     /// </summary>
-    [Reactive] public partial AudioFormat? PreferredFormat { get; set; }
+    [ObservableProperty] public partial AudioFormat? PreferredFormat { get; set; }
 
     /// <summary>
     /// Предпочитаемый битрейт для этого трека.
     /// Персистентный пользовательский выбор.
     /// </summary>
-    [Reactive] public partial int PreferredBitrate { get; set; }
+    [ObservableProperty] public partial int PreferredBitrate { get; set; }
 
     public string? RadioSeedId { get; set; }
 

@@ -2,8 +2,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using LMP.Core.Youtube.Exceptions;
-using ReactiveUI;
-using System.Reactive;
 
 namespace LMP.UI.Dialogs;
 
@@ -11,8 +9,6 @@ public partial class StreamUnavailableDialog : Window
 {
     private static readonly LocalizationService L = LocalizationService.Instance;
 
-    private readonly IDisposable? _closeSub;
-    private readonly IDisposable? _copySub;
     private string _fullErrorDetails = "";
 
     #region Styled Properties
@@ -88,8 +84,8 @@ public partial class StreamUnavailableDialog : Window
         set => SetValue(ShowCopyButtonProperty, value);
     }
 
-    public ReactiveCommand<Unit, Unit> CloseCommand { get; }
-    public ReactiveCommand<Unit, Unit> CopyErrorCommand { get; }
+    public IRelayCommand CloseCommand { get; }
+    public IAsyncRelayCommand CopyErrorCommand { get; }
 
     #endregion
 
@@ -102,14 +98,12 @@ public partial class StreamUnavailableDialog : Window
         CloseButtonText = L["Common_OK"];
         CopyErrorText = L["Error_CopyDetails"];
 
-        CloseCommand = ReactiveCommand.Create(() => { });
-        _closeSub = CloseCommand.Subscribe(_ =>
+        CloseCommand = new RelayCommand(() =>
         {
             if (IsLoaded) Close();
         });
 
-        CopyErrorCommand = ReactiveCommand.CreateFromTask(CopyErrorToClipboardAsync);
-        _copySub = CopyErrorCommand.Subscribe(_ => { });
+        CopyErrorCommand = new AsyncRelayCommand(CopyErrorToClipboardAsync);
 
         DataContext = this;
     }
@@ -178,30 +172,30 @@ public partial class StreamUnavailableDialog : Window
         // Fallback на английском если ключ не найден
         return ex.Reason switch
         {
-            StreamUnavailableReason.Forbidden403 when ex.WasHlsFallback 
+            StreamUnavailableReason.Forbidden403 when ex.WasHlsFallback
                 => "HLS stream blocked (403). Please contact the developer.",
-            
-            StreamUnavailableReason.Forbidden403 
+
+            StreamUnavailableReason.Forbidden403
                 => "Track access forbidden (403). Please contact the developer.",
-            
-            StreamUnavailableReason.AllClientsFailed 
+
+            StreamUnavailableReason.AllClientsFailed
                 => "Could not access track. Please contact the developer.",
-            
-            StreamUnavailableReason.RegionBlocked 
+
+            StreamUnavailableReason.RegionBlocked
                 => "Track not available in your region.",
-            
-            StreamUnavailableReason.AgeRestricted 
+
+            StreamUnavailableReason.AgeRestricted
                 => "Track is age-restricted. Please sign in.",
-            
-            StreamUnavailableReason.LiveStream 
+
+            StreamUnavailableReason.LiveStream
                 => "Live streams are not supported.",
-            
-            StreamUnavailableReason.Private 
+
+            StreamUnavailableReason.Private
                 => "This is a private video.",
-            
-            StreamUnavailableReason.Removed 
+
+            StreamUnavailableReason.Removed
                 => "Video has been removed.",
-            
+
             _ => "Track unavailable. Please contact the developer."
         };
     }
@@ -244,12 +238,5 @@ public partial class StreamUnavailableDialog : Window
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        _closeSub?.Dispose();
-        _copySub?.Dispose();
-        base.OnClosed(e);
     }
 }

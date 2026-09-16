@@ -4,7 +4,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using LMP.Core.Youtube.Exceptions;
-using LMP.Core.Youtube.Videos;
 using LMP.Core.Youtube.Search;
 using LMP.UI.Dialogs;
 using LMP.UI.Dialogs.Content;

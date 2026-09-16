@@ -1,10 +1,7 @@
 using System.Collections.ObjectModel;
-using System.Reactive;
 using System.Text;
 using Avalonia.Threading;
 using LMP.Tests.Framework;
-using ReactiveUI;
-
 
 namespace LMP.UI.Features.Debug;
 
@@ -27,36 +24,49 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     private readonly TestRunner _runner;
     private CancellationTokenSource? _runCts;
 
-    // ═══════════════════════════════════════════════════════════════
     // PROPERTIES
-    // ═══════════════════════════════════════════════════════════════
 
     /// <summary>Все обнаруженные тесты.</summary>
     public ObservableCollection<TestItemViewModel> AllTests { get; } = [];
 
     /// <summary>Отфильтрованные тесты для отображения.</summary>
-    [Reactive] public partial ObservableCollection<TestItemViewModel> FilteredTests { get; set; } = [];
+    [ObservableProperty]
+    public partial ObservableCollection<TestItemViewModel> FilteredTests { get; set; } = [];
 
     /// <summary>Выбранный фильтр категории (null = все).</summary>
-    [Reactive] public partial TestCategory? SelectedCategory { get; set; }
+    [ObservableProperty]
+    public partial TestCategory? SelectedCategory { get; set; }
 
     /// <summary>Выбранный фильтр тематической группы (null = все).</summary>
-    [Reactive] public partial string? SelectedGroup { get; set; }
+    [ObservableProperty]
+    public partial string? SelectedGroup { get; set; }
 
     /// <summary>Текст поиска по имени теста.</summary>
-    [Reactive] public partial string SearchFilter { get; set; } = "";
+    [ObservableProperty]
+    public partial string SearchFilter { get; set; } = "";
 
     /// <summary>Идёт ли запуск тестов.</summary>
-    [Reactive] public partial bool IsRunning { get; set; }
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RunAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunUnitCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunIntegrationCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunBenchmarksCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunFilteredCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunSingleCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
+    public partial bool IsRunning { get; set; }
 
     /// <summary>Суммарная статистика.</summary>
-    [Reactive] public partial string Summary { get; set; } = "";
+    [ObservableProperty]
+    public partial string Summary { get; set; } = "";
 
     /// <summary>Лог выполнения.</summary>
-    [Reactive] public partial string LogOutput { get; set; } = "";
+    [ObservableProperty]
+    public partial string LogOutput { get; set; } = "";
 
     /// <summary>Прогресс batch-запуска (0-100).</summary>
-    [Reactive] public partial int Progress { get; set; }
+    [ObservableProperty]
+    public partial int Progress { get; set; }
 
     /// <summary>
     /// Все доступные тематические группы для UI-кнопок фильтра.
@@ -64,49 +74,45 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     /// </summary>
     public ObservableCollection<GroupFilterItem> AvailableGroups { get; } = [];
 
-    // ═══════════════════════════════════════════════════════════════
     // COMMANDS
-    // ═══════════════════════════════════════════════════════════════
 
     /// <summary>Запустить ВСЕ тесты.</summary>
-    public ReactiveCommand<Unit, Unit> RunAllCommand { get; }
+    public IAsyncRelayCommand RunAllCommand { get; }
 
     /// <summary>Запустить только Unit.</summary>
-    public ReactiveCommand<Unit, Unit> RunUnitCommand { get; }
+    public IAsyncRelayCommand RunUnitCommand { get; }
 
     /// <summary>Запустить только Integration.</summary>
-    public ReactiveCommand<Unit, Unit> RunIntegrationCommand { get; }
+    public IAsyncRelayCommand RunIntegrationCommand { get; }
 
     /// <summary>Запустить только Benchmarks.</summary>
-    public ReactiveCommand<Unit, Unit> RunBenchmarksCommand { get; }
+    public IAsyncRelayCommand RunBenchmarksCommand { get; }
 
     /// <summary>Запустить отфильтрованные тесты (по текущему фильтру группы/категории).</summary>
-    public ReactiveCommand<Unit, Unit> RunFilteredCommand { get; }
+    public IAsyncRelayCommand RunFilteredCommand { get; }
 
     /// <summary>Запустить один тест по клику.</summary>
-    public ReactiveCommand<TestItemViewModel, Unit> RunSingleCommand { get; }
+    public IAsyncRelayCommand<TestItemViewModel> RunSingleCommand { get; }
 
     /// <summary>Переключить фильтр группы (toggle).</summary>
-    public ReactiveCommand<string?, Unit> ToggleGroupFilterCommand { get; }
+    public IRelayCommand<string?> ToggleGroupFilterCommand { get; }
 
     /// <summary>Отменить текущий запуск.</summary>
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     /// <summary>Сбросить все результаты.</summary>
-    public ReactiveCommand<Unit, Unit> ResetCommand { get; }
+    public IRelayCommand ResetCommand { get; }
 
     /// <summary>Очистить лог.</summary>
-    public ReactiveCommand<Unit, Unit> ClearLogCommand { get; }
+    public IRelayCommand ClearLogCommand { get; }
 
     /// <summary>Открыть test-config.json в редакторе по умолчанию.</summary>
-    public ReactiveCommand<Unit, Unit> OpenConfigCommand { get; }
+    public IRelayCommand OpenConfigCommand { get; }
 
     /// <summary>Перезагрузить test-config.json из файла.</summary>
-    public ReactiveCommand<Unit, Unit> ReloadConfigCommand { get; }
+    public IRelayCommand ReloadConfigCommand { get; }
 
-    // ═══════════════════════════════════════════════════════════════
     // CTOR
-    // ═══════════════════════════════════════════════════════════════
 
     public TestRunnerViewModel()
     {
@@ -114,67 +120,69 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         _runner.TestStarting += OnTestStarting;
         _runner.TestCompleted += OnTestCompleted;
 
-        var canRun = this.WhenAnyValue(x => x.IsRunning, running => !running);
+        RunAllCommand = new AsyncRelayCommand(
+            () => RunBatchByCategoryAsync(null),
+            () => !IsRunning);
 
-        RunAllCommand = CreateCommand(ReactiveCommand.CreateFromTask(
-            () => RunBatchByCategoryAsync(null), canRun));
+        RunUnitCommand = new AsyncRelayCommand(
+            () => RunBatchByCategoryAsync(TestCategory.Unit),
+            () => !IsRunning);
 
-        RunUnitCommand = CreateCommand(ReactiveCommand.CreateFromTask(
-            () => RunBatchByCategoryAsync(TestCategory.Unit), canRun));
+        RunIntegrationCommand = new AsyncRelayCommand(
+            () => RunBatchByCategoryAsync(TestCategory.Integration),
+            () => !IsRunning);
 
-        RunIntegrationCommand = CreateCommand(ReactiveCommand.CreateFromTask(
-            () => RunBatchByCategoryAsync(TestCategory.Integration), canRun));
+        RunBenchmarksCommand = new AsyncRelayCommand(
+            () => RunBatchByCategoryAsync(TestCategory.Benchmark),
+            () => !IsRunning);
 
-        RunBenchmarksCommand = CreateCommand(ReactiveCommand.CreateFromTask(
-            () => RunBatchByCategoryAsync(TestCategory.Benchmark), canRun));
+        RunFilteredCommand = new AsyncRelayCommand(
+            RunFilteredAsync,
+            () => !IsRunning);
 
-        RunFilteredCommand = CreateCommand(ReactiveCommand.CreateFromTask(
-            RunFilteredAsync, canRun));
+        RunSingleCommand = new AsyncRelayCommand<TestItemViewModel>(
+            RunSingleAsync,
+            _ => !IsRunning);
 
-        RunSingleCommand = CreateCommand(ReactiveCommand.CreateFromTask<TestItemViewModel>(
-            RunSingleAsync, canRun));
-
-        ToggleGroupFilterCommand = CreateCommand(ReactiveCommand.Create<string?>(group =>
+        ToggleGroupFilterCommand = new RelayCommand<string?>(group =>
         {
             // Toggle: если та же группа — сбрасываем, иначе ставим
             SelectedGroup = SelectedGroup == group ? null : group;
-        }));
+        });
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(
+        CancelCommand = new RelayCommand(
             () => _runCts?.Cancel(),
-            this.WhenAnyValue(x => x.IsRunning)));
+            () => IsRunning);
 
-        ResetCommand = CreateCommand(ReactiveCommand.Create(ResetAll));
-        ClearLogCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ResetCommand = new RelayCommand(ResetAll);
+        ClearLogCommand = new RelayCommand(() =>
         {
             _logBuilder.Clear();
             LogOutput = "";
-        }));
+        });
 
         // ═══ CONFIG COMMANDS ═══
-        OpenConfigCommand = CreateCommand(ReactiveCommand.Create(() =>
+        OpenConfigCommand = new RelayCommand(() =>
         {
             TestConfig.OpenInEditor();
             AppendLog($"Opened config: {TestConfig.GetConfigPath()}");
-        }));
+        });
 
-        ReloadConfigCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ReloadConfigCommand = new RelayCommand(() =>
         {
             TestConfig.Reload();
             AppendLog("Reloaded test-config.json from disk.");
-        }));
-
-        // Реагируем на все три фильтра
-        this.WhenAnyValue(x => x.SelectedCategory, x => x.SelectedGroup, x => x.SearchFilter)
-            .Subscribe(_ => ApplyFilter());
+        });
 
         DiscoverTests();
         UpdateSummary();
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    partial void OnSelectedCategoryChanged(TestCategory? value) => ApplyFilter();
+    partial void OnSelectedGroupChanged(string? value) => ApplyFilter();
+    partial void OnSearchFilterChanged(string value) => ApplyFilter();
+
     // DISCOVERY
-    // ═══════════════════════════════════════════════════════════════
 
     private void DiscoverTests()
     {
@@ -196,9 +204,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         AppendLog($"Config: {TestConfig.GetConfigPath()}");
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // RUNNING
-    // ═══════════════════════════════════════════════════════════════
 
     /// <summary>Запускает тесты по категории (null = все).</summary>
     private async Task RunBatchByCategoryAsync(TestCategory? category)
@@ -231,9 +237,9 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         Progress = 0;
         _runCts = new CancellationTokenSource();
 
-        AppendLog($"\n{'═'.Repeat(60)}");
+        AppendLog($"\n{new string('═', 60)}");
         AppendLog($"  Running {tests.Count} tests [{label}]...");
-        AppendLog($"{'═'.Repeat(60)}\n");
+        AppendLog($"{new string('═', 60)}\n");
 
         try
         {
@@ -268,15 +274,17 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
             Progress = 100;
             UpdateSummary();
 
-            AppendLog($"\n{'═'.Repeat(60)}");
+            AppendLog($"\n{new string('═', 60)}");
             AppendLog($"  {Summary}");
-            AppendLog($"{'═'.Repeat(60)}\n");
+            AppendLog($"{new string('═', 60)}\n");
         }
     }
 
     /// <summary>Запускает один тест по клику.</summary>
-    private async Task RunSingleAsync(TestItemViewModel item)
+    private async Task RunSingleAsync(TestItemViewModel? item)
     {
+        if (item is null) return;
+
         IsRunning = true;
         _runCts = new CancellationTokenSource();
 
@@ -299,9 +307,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // EVENT HANDLERS (background thread → UI thread)
-    // ═══════════════════════════════════════════════════════════════
 
     private void OnTestStarting(TestDescriptor descriptor)
     {
@@ -345,9 +351,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         });
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // FILTER
-    // ═══════════════════════════════════════════════════════════════
 
     /// <summary>Применяет все три фильтра: категория + группа + текст.</summary>
     private void ApplyFilter()
@@ -389,9 +393,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         return parts.Count > 0 ? string.Join(" + ", parts) : "All";
     }
 
-    // ═══════════════════════════════════════════════════════════════
     // HELPERS
-    // ═══════════════════════════════════════════════════════════════
 
     private void ResetAll()
     {
@@ -456,9 +458,14 @@ public sealed partial class TestItemViewModel : ViewModelBase
     public string Group => Descriptor.Group;
     public bool RequiresNetwork => Descriptor.RequiresNetwork;
 
-    [Reactive] public partial TestRunState State { get; set; } = TestRunState.NotRun;
-    [Reactive] public partial string Duration { get; set; } = "";
-    [Reactive] public partial string? ErrorMessage { get; set; }
+    [ObservableProperty]
+    public partial TestRunState State { get; set; } = TestRunState.NotRun;
+
+    [ObservableProperty]
+    public partial string Duration { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string? ErrorMessage { get; set; }
 
     /// <summary>Иконка состояния.</summary>
     public string StateIcon => State switch
@@ -493,13 +500,12 @@ public sealed partial class TestItemViewModel : ViewModelBase
     public TestItemViewModel(TestDescriptor descriptor)
     {
         Descriptor = descriptor;
+    }
 
-        this.WhenAnyValue(x => x.State)
-            .Subscribe(_ =>
-            {
-                this.RaisePropertyChanged(nameof(StateIcon));
-                this.RaisePropertyChanged(nameof(StateColor));
-            });
+    partial void OnStateChanged(TestRunState value)
+    {
+        OnPropertyChanged(nameof(StateIcon));
+        OnPropertyChanged(nameof(StateColor));
     }
 }
 
@@ -518,17 +524,12 @@ public sealed partial class GroupFilterItem : ViewModelBase
     public string Label => $"{Name} ({Count})";
 
     /// <summary>Выбрана ли эта группа в фильтре.</summary>
-    [Reactive] public partial bool IsSelected { get; set; }
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
 
     public GroupFilterItem(string name, int count)
     {
         Name = name;
         Count = count;
     }
-}
-
-/// <summary>Extension для char.Repeat.</summary>
-internal static class StringExtensions
-{
-    public static string Repeat(this char c, int count) => new(c, count);
 }

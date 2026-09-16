@@ -1,8 +1,11 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace LMP.Core.Youtube.Bridge.PoToken;
 
+/// <summary>
+/// HTTP-клиент для взаимодействия со службой аттестации WAA (Web Attestation API) Google.
+/// Выполняет получение заданий BotGuard (Create) и выпуск токенов целостности (GenerateIT).
+/// </summary>
 internal static class WaaClient
 {
     private const string CreateUrl = "https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/Create";
@@ -10,12 +13,19 @@ internal static class WaaClient
     private const string ApiKey = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw";
     private const string RequestKey = "O43z0dpjhgX20SCx4KAo";
 
+    /// <summary>
+    /// Запрашивает новое задание BotGuard VM от сервера аттестации.
+    /// </summary>
+    /// <param name="http">Экземпляр HTTP-клиента.</param>
+    /// <param name="cachedInterpreterHash">Хеш уже сохранённого интерпретатора (если есть).</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Распарсенное задание <see cref="BotGuardChallenge"/> или <c>null</c> при сбое.</returns>
     public static async Task<BotGuardChallenge?> FetchChallengeAsync(
         HttpClient http, string? cachedInterpreterHash = null, CancellationToken ct = default)
     {
-        var payload = cachedInterpreterHash is not null
-            ? (object)new object[] { RequestKey, cachedInterpreterHash }
-            : new object[] { RequestKey };
+        string[] payload = cachedInterpreterHash is not null
+            ? [RequestKey, cachedInterpreterHash]
+            : [RequestKey];
 
         using var req = BuildRequest(CreateUrl, payload);
         using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
@@ -25,10 +35,17 @@ internal static class WaaClient
         return ParseChallenge(json);
     }
 
+    /// <summary>
+    /// Генерирует IntegrityToken на основе снимка состояния BotGuard VM (snapshot).
+    /// </summary>
+    /// <param name="http">Экземпляр HTTP-клиента.</param>
+    /// <param name="botguardResponse">Асинхронный снимок (snapshot), сгенерированный QuickJS VM.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Данные токена <see cref="IntegrityTokenData"/> или <c>null</c> при ошибке.</returns>
     public static async Task<IntegrityTokenData?> GenerateIntegrityTokenAsync(
-    HttpClient http, string botguardResponse, CancellationToken ct = default)
+        HttpClient http, string botguardResponse, CancellationToken ct = default)
     {
-        var payload = new object[] { RequestKey, botguardResponse };
+        string[] payload = [RequestKey, botguardResponse];
         using var req = BuildRequest(GenerateItUrl, payload);
 
         HttpResponseMessage resp;
@@ -55,6 +72,9 @@ internal static class WaaClient
         return ParseIntegrityToken(json);
     }
 
+    /// <summary>
+    /// Разбирает необработанный JSON-ответ вызова WAA/Create с автоматическим дескрэмблингом Base64.
+    /// </summary>
     private static BotGuardChallenge? ParseChallenge(string rawJson)
     {
         try
@@ -193,6 +213,9 @@ internal static class WaaClient
         }
     }
 
+    /// <summary>
+    /// Извлекает IntegrityToken и параметры его времени жизни из ответа GenerateIT.
+    /// </summary>
     private static IntegrityTokenData? ParseIntegrityToken(string rawJson)
     {
         try
@@ -218,7 +241,7 @@ internal static class WaaClient
             int len = data.GetArrayLength();
             if (len < 1)
             {
-                Log.Error($"[WaaClient] GenerateIT: empty array");
+                Log.Error("[WaaClient] GenerateIT: empty array");
                 return null;
             }
 
@@ -279,17 +302,15 @@ internal static class WaaClient
         }
     }
 
-    [UnconditionalSuppressMessage(
-    "Trimming",
-    "IL2026:RequiresUnreferencedCode",
-    Justification = "WaaClient serializes object[] payloads for PoToken Google API requests. " +
-                    "Payload contains only primitive types (string, object[]) — " +
-                    "no custom types requiring reflection preservation.")]
-    private static HttpRequestMessage BuildRequest(string url, object payload)
+    /// <summary>
+    /// Формирует строго типизированный AOT-безопасный HTTP-запрос с JSON-телом без использования рефлексии.
+    /// </summary>
+    private static HttpRequestMessage BuildRequest(string url, string[] payload)
     {
+        string json = JsonSerializer.Serialize(payload, AppJsonContext.Default.StringArray);
         var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json+protobuf")
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json+protobuf")
         };
         req.Headers.TryAddWithoutValidation("x-goog-api-key", ApiKey);
         req.Headers.TryAddWithoutValidation("x-user-agent", "grpc-web-javascript/0.1");

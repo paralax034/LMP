@@ -1,107 +1,127 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using Microsoft.EntityFrameworkCore;
 
 namespace LMP.Core.Data.Repositories;
 
-public interface ISettingsRepository
+/// <summary>
+/// Репозиторий настроек на базе SQLite.
+/// Реализован на прямом ADO.NET для полной совместимости с Native AOT без использования LINQ-деревьев.
+/// </summary>
+public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISettingsRepository
 {
-    Task<T?> GetAsync<T>(
-        string key,
-        JsonTypeInfo<T> typeInfo,
-        CancellationToken ct = default) where T : class;
+    private readonly ISqliteConnectionFactory _factory = factory;
 
-    Task<T> GetOrDefaultAsync<T>(
-        string key,
-        T defaultValue,
-        JsonTypeInfo<T> typeInfo,
-        CancellationToken ct = default) where T : class;
-
-    Task SetAsync<T>(
-        string key,
-        T value,
-        JsonTypeInfo<T> typeInfo,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Синхронно сохраняет настройку в базу данных.
-    /// Используется при завершении работы приложения (shutdown path) во избежание deadlock.
-    /// </summary>
-    void Set<T>(
-        string key,
-        T value,
-        JsonTypeInfo<T> typeInfo);
-}
-
-public sealed class SettingsRepository(IDbContextFactory<LibraryDbContext> factory) : ISettingsRepository
-{
-    private readonly IDbContextFactory<LibraryDbContext> _factory = factory;
-
+    /// <inheritdoc />
     public async Task<T?> GetAsync<T>(
         string key,
         JsonTypeInfo<T> typeInfo,
         CancellationToken ct = default) where T : class
     {
-        await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var entity = await ctx.Settings.FirstOrDefaultAsync(s => s.Key == key, ct).ConfigureAwait(false);
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        if (entity is null) return null;
+        try
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Value FROM Settings WHERE Key = @key LIMIT 1;";
 
-        Log.Info($"[SettingsRepository] Loaded '{key}' from DB: {entity.Value}");
-        return JsonSerializer.Deserialize(entity.Value, typeInfo);
+            var param = cmd.CreateParameter();
+            param.ParameterName = "@key";
+            param.Value = key;
+            cmd.Parameters.Add(param);
+
+            var rawValue = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (rawValue is not string jsonValue)
+                return null;
+
+            Log.Info($"[SettingsRepository] Loaded '{key}' from DB: {jsonValue}");
+            return JsonSerializer.Deserialize(jsonValue, typeInfo);
+        }
+        finally
+        {
+            // Соединение возвращается в пул при Dispose
+        }
     }
 
+    /// <inheritdoc />
     public async Task<T> GetOrDefaultAsync<T>(
         string key,
         T defaultValue,
         JsonTypeInfo<T> typeInfo,
         CancellationToken ct = default) where T : class
     {
-        return await GetAsync(key, typeInfo, ct) ?? defaultValue;
+        return await GetAsync(key, typeInfo, ct).ConfigureAwait(false) ?? defaultValue;
     }
 
+    /// <inheritdoc />
     public async Task SetAsync<T>(
          string key,
          T value,
          JsonTypeInfo<T> typeInfo,
          CancellationToken ct = default)
     {
-        await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         var json = JsonSerializer.Serialize(value, typeInfo);
 
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+
+        var pKey = cmd.CreateParameter();
+        pKey.ParameterName = "@key";
+        pKey.Value = key;
+        cmd.Parameters.Add(pKey);
+
+        var pValue = cmd.CreateParameter();
+        pValue.ParameterName = "@value";
+        pValue.Value = json;
+        cmd.Parameters.Add(pValue);
+
         // Прямой SQL Upsert в обход ChangeTracker EF Core (гарантирует реальное обновление строки в SQLite)
-        await ctx.Database.ExecuteSqlRawAsync(
-            "INSERT INTO Settings (Key, Value) VALUES ({0}, {1}) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;",
-            [key, json],
-            ct).ConfigureAwait(false);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
         // Сбрасываем страницы WAL в основной файл на диске
         try
         {
-            await ctx.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(PASSIVE);", ct).ConfigureAwait(false);
+            await using var walCmd = connection.CreateCommand();
+            walCmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
+            await walCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         catch { }
 
         Log.Info($"[SettingsRepository] Successfully committed '{key}' to database ({json.Length} bytes)");
     }
 
+    /// <inheritdoc />
     public void Set<T>(
         string key,
         T value,
         JsonTypeInfo<T> typeInfo)
     {
-        using var ctx = _factory.CreateDbContext();
+        using var connection = _factory.CreateConnection();
+        connection.Open();
 
         var json = JsonSerializer.Serialize(value, typeInfo);
 
-        ctx.Database.ExecuteSqlRaw(
-            "INSERT INTO Settings (Key, Value) VALUES ({0}, {1}) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;",
-            key, json);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+
+        var pKey = cmd.CreateParameter();
+        pKey.ParameterName = "@key";
+        pKey.Value = key;
+        cmd.Parameters.Add(pKey);
+
+        var pValue = cmd.CreateParameter();
+        pValue.ParameterName = "@value";
+        pValue.Value = json;
+        cmd.Parameters.Add(pValue);
+
+        cmd.ExecuteNonQuery();
 
         try
         {
-            ctx.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(PASSIVE);");
+            using var walCmd = connection.CreateCommand();
+            walCmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
+            walCmd.ExecuteNonQuery();
         }
         catch { }
 

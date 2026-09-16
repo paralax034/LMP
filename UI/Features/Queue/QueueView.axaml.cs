@@ -23,16 +23,16 @@ public partial class QueueView : UserControl
             }
             else
             {
-                IDisposable? sub = null;
-                sub = trackList.GetObservable(TrackListControl.IsLoadingProperty)
-                    .Subscribe(isLoading =>
+                void OnTrackListPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+                {
+                    if (e.Property == TrackListControl.IsLoadingProperty && !trackList.IsLoading)
                     {
-                        if (!isLoading)
-                        {
-                            sub?.Dispose();
-                            Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Loaded);
-                        }
-                    });
+                        trackList.PropertyChanged -= OnTrackListPropertyChanged;
+                        Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Loaded);
+                    }
+                }
+
+                trackList.PropertyChanged += OnTrackListPropertyChanged;
             }
         };
     }

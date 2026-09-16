@@ -1,5 +1,5 @@
-#if WINDOWS
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace LMP.UI.Features.Shell;
 
@@ -40,6 +40,7 @@ namespace LMP.UI.Features.Shell;
 /// <para><b>Tooltip формат:</b> <c>{AppName}: {TrackTitle} ({Volume}{VolumeEmoji})</c></para>
 /// <para>Форматируется через <see cref="TrayTooltipHelper"/> (DRY).</para>
 /// </summary>
+[SupportedOSPlatform("windows")]
 internal sealed partial class TrayManager : IDisposable
 {
     #region Constants
@@ -1054,4 +1055,3 @@ internal sealed partial class TrayManager : IDisposable
 
     #endregion
 }
-#endif

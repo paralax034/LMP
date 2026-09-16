@@ -1,21 +1,19 @@
-using System.Reactive.Disposables;
-using ReactiveUI;
-
-
 namespace LMP.Core.ViewModels;
 
 /// <summary>
 /// Базовый класс для всех моделей представления (ViewModels) приложения.
-/// Обеспечивает поддержку реактивного изменения свойств и управление жизненным циклом ресурсов.
+/// Построен на CommunityToolkit.Mvvm с полной поддержкой AOT.
 /// </summary>
-public abstract partial class ViewModelBase : ReactiveObject, IDisposable, ISuspendable, IAccountAware
+public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISuspendable, IAccountAware
 {
     #region Properties
 
     /// <summary>
-    /// Контейнер для автоматической утилизации реактивных подписок и ресурсов.
+    /// Контейнер для автоматической утилизации ресурсов.
     /// </summary>
-    protected CompositeDisposable Disposables { get; } = [];
+    protected List<IDisposable> Disposables { get; } = [];
+
+    private readonly Lock _disposablesLock = new();
 
     /// <summary>
     /// Текущий глобальный уровень приостановки активности приложения.
@@ -25,7 +23,7 @@ public abstract partial class ViewModelBase : ReactiveObject, IDisposable, ISusp
     /// <summary>
     /// Указывает, находится ли текущий компонент в состоянии приостановки (фоновом режиме).
     /// </summary>
-    [Reactive] public partial bool IsSuspended { get; private set; }
+    [ObservableProperty] public partial bool IsSuspended { get; private set; }
 
     /// <summary>
     /// Предоставляет доступ к службе локализации для одноуровневого биндинга (требование IFilterable).
@@ -135,23 +133,27 @@ public abstract partial class ViewModelBase : ReactiveObject, IDisposable, ISusp
     #region Helpers for Subclasses
 
     /// <summary>
-    /// Регистрирует команду в контейнере утилизации и настраивает отслеживание ошибок.
+    /// Регистрирует команду или ресурс в контейнере утилизации ресурсов.
     /// </summary>
-    protected ReactiveCommand<TIn, TOut> CreateCommand<TSource, TIn, TOut>(
-        ReactiveCommand<TIn, TOut> command)
-        where TSource : notnull
+    protected TCommand CreateCommand<TCommand>(TCommand command) where TCommand : IDisposable
     {
-        command.DisposeWith(Disposables);
+        lock (_disposablesLock)
+        {
+            Disposables.Add(command);
+        }
         return command;
     }
 
     /// <summary>
-    /// Регистрирует команду в контейнере утилизации ресурсов.
+    /// Регистрирует произвольный ресурс для автоматического освобождения при Dispose.
     /// </summary>
-    protected TCommand CreateCommand<TCommand>(TCommand command) where TCommand : IDisposable
+    protected T TrackDisposable<T>(T disposable) where T : IDisposable
     {
-        command.DisposeWith(Disposables);
-        return command;
+        lock (_disposablesLock)
+        {
+            Disposables.Add(disposable);
+        }
+        return disposable;
     }
 
     #endregion
@@ -215,7 +217,14 @@ public abstract partial class ViewModelBase : ReactiveObject, IDisposable, ISusp
     {
         if (disposing)
         {
-            Disposables.Dispose();
+            lock (_disposablesLock)
+            {
+                for (int i = 0; i < Disposables.Count; i++)
+                {
+                    Disposables[i].Dispose();
+                }
+                Disposables.Clear();
+            }
         }
     }
 

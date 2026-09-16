@@ -40,10 +40,6 @@ public sealed partial class CachingStreamSource
         public override long Length => _source._contentLength;
 
         /// <inheritdoc/>
-        /// <remarks>
-        /// Lightweight setter: только <c>Volatile.Write</c>.
-        /// Cancel CTS выполняется только через <see cref="SeekAndCancelPendingReads"/>.
-        /// </remarks>
         public override long Position
         {
             get => Volatile.Read(ref _position);
@@ -135,7 +131,8 @@ public sealed partial class CachingStreamSource
                     .GetResult();
             }
             catch (OperationCanceledException) { return 0; }
-            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException) { return 0; }
+            catch (ObjectDisposedException) { return 0; }
+            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException or ObjectDisposedException) { return 0; }
             catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException)
             {
                 return 0;
@@ -158,10 +155,28 @@ public sealed partial class CachingStreamSource
         /// Ядро чтения: делегирует в <see cref="ReadAtAsync"/> и
         /// атомарно продвигает позицию только если seek не произошёл во время чтения.
         /// </summary>
+        /// <param name="buffer">Буфер для записи прочитанных байт.</param>
+        /// <param name="ct">Токен отмены операции чтения.</param>
+        /// <returns>Количество вычитанных байт или 0 при отмене/утилизации ресурса.</returns>
         private async ValueTask<int> ReadAsyncCore(Memory<byte> buffer, CancellationToken ct)
         {
+            if (_source._disposed || ct.IsCancellationRequested)
+                return 0;
+
             long posBefore = Volatile.Read(ref _position);
-            int read = await _source.ReadAtAsync(posBefore, buffer, ct).ConfigureAwait(false);
+            int read;
+            try
+            {
+                read = await _source.ReadAtAsync(posBefore, buffer, ct).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                return 0;
+            }
 
             // Если seek произошёл во время I/O — позиция уже обновлена.
             // Возвращаем 0, чтобы парсер не продвинулся по устаревшим данным.

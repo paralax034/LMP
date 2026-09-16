@@ -1,29 +1,28 @@
-using System.Reactive;
-using System.Reactive.Linq;
-using System.Windows.Input;
-using Microsoft.Extensions.DependencyInjection;
-using ReactiveUI;
-
 using System.Diagnostics;
-using LMP.UI.Features.Player;
-using LMP.UI.Features.Search;
+using Avalonia.Threading;
 using LMP.UI.Features.Home;
 using LMP.UI.Features.Library;
-using LMP.UI.Features.Settings;
-using LMP.UI.Features.Playlist;
 using LMP.UI.Features.Notifications;
+using LMP.UI.Features.Player;
+using LMP.UI.Features.Playlist;
 using LMP.UI.Features.Queue;
-using Avalonia.Threading;
+using LMP.UI.Features.Search;
+using LMP.UI.Features.Settings;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Shell;
 
+/// <summary>
+/// Главная модель представления окна оболочки (Shell).
+/// Управляет вкладками навигации, глобальными блокировками, заголовком окна и интеграцией дочерних сервисов.
+/// </summary>
 public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IServiceProvider _services;
     private readonly Dictionary<string, ViewModelBase> _pageCache = new(StringComparer.Ordinal);
 
     // VERSION INFO
-    [Reactive] public partial bool IsVersionInfoVisible { get; set; } = true;
+    [ObservableProperty] public partial bool IsVersionInfoVisible { get; set; } = true;
     public static string VersionDisplay => G.Build.DisplayVersion;
     public static string GitHashDisplay => G.Build.GitHash;
 
@@ -31,26 +30,27 @@ public partial class MainWindowViewModel : ViewModelBase
     public string CommitsDisplay
     {
         get => _commitsDisplay;
-        private set => this.RaiseAndSetIfChanged(ref _commitsDisplay, value);
+        private set => SetProperty(ref _commitsDisplay, value);
     }
 
-    public ICommand ToggleVersionInfoCommand { get; }
-    public ICommand OpenGitHubCommand { get; }
-
     // NAVIGATION
-    [Reactive] public partial ViewModelBase? CurrentPage { get; private set; }
-    [Reactive] public partial PlayerBarViewModel PlayerBar { get; private set; }
-    [Reactive] public partial string CurrentPageName { get; private set; } = "";
-    [Reactive] public partial bool IsNavigationLocked { get; private set; }
-    [Reactive] public partial string NavigationLockReason { get; private set; } = "";
+    [ObservableProperty] public partial ViewModelBase? CurrentPage { get; private set; }
+    [ObservableProperty] public partial PlayerBarViewModel PlayerBar { get; private set; }
+    [ObservableProperty] public partial string CurrentPageName { get; private set; } = "";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(NavigateCommand))]
+    public partial bool IsNavigationLocked { get; private set; }
+
+    [ObservableProperty] public partial string NavigationLockReason { get; private set; } = "";
 
     // NOTIFICATIONS
-    [Reactive] public partial NotificationButtonViewModel NotificationButton { get; private set; }
-    [Reactive] public partial NotificationPanelViewModel NotificationPanel { get; private set; }
-    [Reactive] public partial ToastOverlayViewModel ToastOverlay { get; private set; }
+    [ObservableProperty] public partial NotificationButtonViewModel NotificationButton { get; private set; }
+    [ObservableProperty] public partial NotificationPanelViewModel NotificationPanel { get; private set; }
+    [ObservableProperty] public partial ToastOverlayViewModel ToastOverlay { get; private set; }
 
     // DIALOG HOST
-    [Reactive] public partial DialogHostViewModel DialogHost { get; private set; }
+    [ObservableProperty] public partial DialogHostViewModel DialogHost { get; private set; }
 
     private const int DeferredLoadDelayMs = 140;
     private static readonly TimeSpan StartupAuthValidationTtl = TimeSpan.FromHours(4);
@@ -60,8 +60,6 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _pendingInitialPageName = string.Empty;
     private bool _isShellShown;
     private int _startupAuthValidationStarted;
-
-    public ReactiveCommand<string, Unit> NavigateCommand { get; }
 
     public MainWindowViewModel(
           IServiceProvider services,
@@ -88,28 +86,16 @@ public partial class MainWindowViewModel : ViewModelBase
         LocalizationService.Instance.LanguageChanged += (_, _) =>
         {
             UpdateCommitsDisplay();
-            this.RaisePropertyChanged(nameof(L));
+            OnPropertyChanged(nameof(L));
         };
 
-        ToggleVersionInfoCommand = CreateCommand(ReactiveCommand.Create(() =>
+        DialogHost.PropertyChanged += (s, e) =>
         {
-            IsVersionInfoVisible = !IsVersionInfoVisible;
-        }));
-
-        OpenGitHubCommand = CreateCommand(ReactiveCommand.Create(OpenGitHub));
-
-        var canNavigate = this.WhenAnyValue(
-            x => x.IsNavigationLocked,
-            x => x.DialogHost.HasActiveDialog,
-            (locked, hasDialog) => !locked && !hasDialog);
-
-        NavigateCommand = CreateCommand(ReactiveCommand.Create<string>(pageName =>
-        {
-            if (!IsNavigationLocked && !DialogHost.HasActiveDialog)
+            if (e.PropertyName == nameof(DialogHostViewModel.HasActiveDialog))
             {
-                Navigate(pageName);
+                NavigateCommand.NotifyCanExecuteChanged();
             }
-        }, canNavigate));
+        };
 
         Navigate("Home");
 
@@ -186,6 +172,21 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    [RelayCommand]
+    private void ToggleVersionInfo()
+    {
+        IsVersionInfoVisible = !IsVersionInfoVisible;
+    }
+
+    [RelayCommand]
+    private void OpenGitHub()
+    {
+        OpenGitHubExternal();
+    }
+
+    private bool CanNavigate(string pageName) => !IsNavigationLocked && !DialogHost.HasActiveDialog;
+
+    [RelayCommand(CanExecute = nameof(CanNavigate))]
     private void Navigate(string pageName)
     {
         if (IsNavigationLocked || DialogHost.HasActiveDialog) return;
@@ -374,7 +375,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _services.GetRequiredService<TrackRegistry>().CleanupDeadReferences();
     }
 
-    private static void OpenGitHub()
+    private static void OpenGitHubExternal()
     {
         try
         {

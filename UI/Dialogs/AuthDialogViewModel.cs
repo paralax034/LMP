@@ -1,12 +1,8 @@
 using System.IO.Compression;
-using System.Reactive;
-using System.Reactive.Linq;
 using System.Text.Json;
 using Avalonia.Threading;
 using LMP.Core.Audio.Http;
 using LMP.UI.Features.Shell;
-using ReactiveUI;
-
 
 namespace LMP.UI.Dialogs;
 
@@ -19,20 +15,48 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     private readonly YoutubeUserDataService _userData;
     private readonly LocalAuthServer _localServer;
 
-    [Reactive] public partial string CookiesText { get; set; } = string.Empty;
-    [Reactive] public partial bool IsAuthenticating { get; private set; }
-    [Reactive] public partial string StatusText { get; private set; } = string.Empty;
-    [Reactive] public partial bool IsError { get; private set; }
-    [Reactive] public partial int AttemptCount { get; private set; }
+    [ObservableProperty]
+    public partial string CookiesText { get; set; } = string.Empty;
 
-    [Reactive] public partial bool IsExtensionDownloading { get; private set; }
-    [Reactive] public partial bool IsExtensionReady { get; private set; }
-    [Reactive] public partial bool IsGuideExpanded { get; set; } = true;
-    [Reactive] public partial string ExtensionFolderPath { get; private set; } = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSpinnerActive))]
+    public partial bool IsAuthenticating { get; set; }
 
-    [Reactive] public partial bool IsPathCopied { get; private set; }
-    [Reactive] public partial int SelectedBrowserTabIndex { get; set; }
-    [Reactive] public partial string InstalledExtensionVersion { get; private set; } = "—";
+    [ObservableProperty]
+    public partial string StatusText { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsError { get; set; }
+
+    [ObservableProperty]
+    public partial int AttemptCount { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSpinnerActive))]
+    public partial bool IsExtensionDownloading { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsExtensionReady { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFirefoxWarningVisible))]
+    [NotifyPropertyChangedFor(nameof(IsWarningVisible))]
+    public partial bool IsGuideExpanded { get; set; } = true;
+
+    [ObservableProperty]
+    public partial string ExtensionFolderPath { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsPathCopied { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFirefoxWarningVisible))]
+    [NotifyPropertyChangedFor(nameof(IsWarningVisible))]
+    public partial int SelectedBrowserTabIndex { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ExtensionVersionText))]
+    public partial string InstalledExtensionVersion { get; set; } = "—";
 
     /// <summary>
     /// Возвращает текстовое представление установленной версии расширения на основе текущей локализации.
@@ -60,12 +84,12 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
 
     public Action<bool>? OnResult { get; set; }
 
-    public ReactiveCommand<Unit, Unit> AuthenticateCommand { get; }
-    public ReactiveCommand<Unit, Unit> DownloadExtensionCommand { get; }
-    public ReactiveCommand<Unit, Unit> CopyPathCommand { get; }
-    public ReactiveCommand<string, Unit> CopyLinkCommand { get; }
-    public ReactiveCommand<Unit, bool> ToggleGuideCommand { get; }
-    public ReactiveCommand<Unit, Unit> CloseCommand { get; }
+    public IAsyncRelayCommand AuthenticateCommand { get; }
+    public IAsyncRelayCommand DownloadExtensionCommand { get; }
+    public IAsyncRelayCommand CopyPathCommand { get; }
+    public IAsyncRelayCommand<string> CopyLinkCommand { get; }
+    public IRelayCommand ToggleGuideCommand { get; }
+    public IRelayCommand CloseCommand { get; }
 
     private readonly CancellationTokenSource _cts = new();
 
@@ -81,27 +105,14 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
         _userData = userData;
         _localServer = localServer;
 
-        AuthenticateCommand = CreateCommand(ReactiveCommand.CreateFromTask(AuthenticateAsync));
-        DownloadExtensionCommand = CreateCommand(ReactiveCommand.CreateFromTask(DownloadExtensionAsync));
-        CopyPathCommand = CreateCommand(ReactiveCommand.CreateFromTask(CopyPathToClipboardAsync));
-        CopyLinkCommand = CreateCommand(ReactiveCommand.CreateFromTask<string>(CopyLinkAsync));
-        ToggleGuideCommand = CreateCommand(ReactiveCommand.Create(() => IsGuideExpanded = !IsGuideExpanded));
-        CloseCommand = CreateCommand(ReactiveCommand.Create(() => OnResult?.Invoke(false)));
+        AuthenticateCommand = new AsyncRelayCommand(AuthenticateAsync);
+        DownloadExtensionCommand = new AsyncRelayCommand(DownloadExtensionAsync);
+        CopyPathCommand = new AsyncRelayCommand(CopyPathToClipboardAsync);
+        CopyLinkCommand = new AsyncRelayCommand<string>(CopyLinkAsync);
+        ToggleGuideCommand = new RelayCommand(() => IsGuideExpanded = !IsGuideExpanded);
+        CloseCommand = new RelayCommand(() => OnResult?.Invoke(false));
 
         StatusText = SL["Dialog_Login_WaitingStatus"] ?? "Ожидаем запрос от расширения или введите куки вручную...";
-
-        this.WhenAnyValue(x => x.IsAuthenticating, x => x.IsExtensionDownloading)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(IsSpinnerActive)));
-
-        this.WhenAnyValue(x => x.SelectedBrowserTabIndex, x => x.IsGuideExpanded)
-            .Subscribe(_ =>
-            {
-                this.RaisePropertyChanged(nameof(IsFirefoxWarningVisible));
-                this.RaisePropertyChanged(nameof(IsWarningVisible));
-            });
-
-        this.WhenAnyValue(x => x.InstalledExtensionVersion)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(ExtensionVersionText)));
 
         _ = StartListeningAsync(_cts.Token);
         _ = CheckExtensionVersionAsync(_cts.Token);
@@ -257,7 +268,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     CookiesText = cookies;
-                    AuthenticateCommand.Execute(Unit.Default);
+                    AuthenticateCommand.Execute(null);
                 });
             }
         }
@@ -464,14 +475,15 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     private async Task CopyPathToClipboardAsync()
     {
         if (string.IsNullOrEmpty(ExtensionFolderPath)) return;
-        await Clipboard.SetTextAsync(ExtensionFolderPath);
+        await Helpers.Clipboard.SetTextAsync(ExtensionFolderPath);
         IsPathCopied = true;
         CopyHintService.Instance.Show(SL["Extension_Path_Copied_Toast"], CopyHintKind.Success);
     }
 
-    private async Task CopyLinkAsync(string url)
+    private async Task CopyLinkAsync(string? url)
     {
-        await Clipboard.SetTextAsync(url);
+        if (string.IsNullOrEmpty(url)) return;
+        await Helpers.Clipboard.SetTextAsync(url);
         CopyHintService.Instance.Show(SL["Extension_Link_Copied_Toast"], CopyHintKind.Success);
     }
 

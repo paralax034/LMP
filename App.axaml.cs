@@ -1,6 +1,8 @@
 ﻿using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using LMP.UI.Features.Shell;
@@ -8,7 +10,6 @@ using AsyncImageLoader;
 using LMP.Core.Audio.Cache;
 using System.Diagnostics;
 using LMP.Core.Audio.Http;
-
 
 namespace LMP;
 
@@ -49,15 +50,14 @@ public partial class App : Application
             }, DispatcherPriority.Background);
         }
 
-#if !WINDOWS
-        // Этот код вообще не попадет в сборку под Windows
-        InitializeTrayIcon();
-#endif
+        if (!OperatingSystem.IsWindows())
+        {
+            InitializeTrayIcon();
+        }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-#if !WINDOWS
     private void InitializeTrayIcon()
     {
         var trayIcon = new TrayIcon
@@ -71,7 +71,6 @@ public partial class App : Application
         var trayIcons = new TrayIcons { trayIcon };
         TrayIcon.SetIcons(this, trayIcons);
     }
-#endif
 
     private async Task InitializeAppAsync(IClassicDesktopStyleApplicationLifetime desktop)
     {
@@ -140,7 +139,7 @@ public partial class App : Application
             // Library Service
             _splash?.UpdateStatus(L["Splash_LoadingLibrary"]);
             var library = AppEntry.Services.GetRequiredService<LibraryService>();
-            await Task.Run(async () => await library.InitializeAsync());
+            await library.InitializeAsync().ConfigureAwait(false);
             _splash?.SetProgress(45);
 
             // Применяем загруженные из БД настройки к аудио-движку
@@ -331,10 +330,15 @@ public partial class App : Application
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                _splash?.UpdateStatus(string.Format(L["Splash_Error"], ex.Message));
+                _splash?.UpdateStatus(L["Splash_Error_Title"] ?? "Ошибка инициализации!");
             });
 
-            await Task.Delay(3000);
+            OsNotificationHelper.ShowFatalError(
+                "LMP Startup Error",
+                ex.Message,
+                ex.ToString());
+
+            Environment.Exit(1);
         }
     }
 }

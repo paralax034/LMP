@@ -4,7 +4,6 @@ using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Http;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Normalization;
-using ReactiveUI;
 
 namespace LMP.Core.Services;
 
@@ -15,7 +14,7 @@ namespace LMP.Core.Services;
 /// <remarks>
 /// <para>Освобожден от наследования UI-класса ViewModelBase для строгого разделения слоев Core и UI </para>
 /// </remarks>
-public sealed partial class AudioEngine : ReactiveObject, ISuspendable, IDisposable, IAsyncDisposable
+public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDisposable, IAsyncDisposable
 {
     #region Engine Command Types
 
@@ -215,8 +214,14 @@ public sealed partial class AudioEngine : ReactiveObject, ISuspendable, IDisposa
 
     #region Observable Properties
 
-    [Reactive] public partial TrackInfo? CurrentTrack { get; private set; }
-    [Reactive] public partial AudioStreamInfo StreamInfo { get; private set; } = AudioStreamInfo.Empty;
+    [ObservableProperty] public partial TrackInfo? CurrentTrack { get; private set; }
+
+    private AudioStreamInfo _streamInfo = AudioStreamInfo.Empty;
+    public AudioStreamInfo StreamInfo
+    {
+        get => _streamInfo;
+        private set => SetProperty(ref _streamInfo, value);
+    }
 
     public bool IsPlaying => _player.State == PlaybackState.Playing;
     public bool IsPaused => _player.State == PlaybackState.Paused;
@@ -287,6 +292,8 @@ public sealed partial class AudioEngine : ReactiveObject, ISuspendable, IDisposa
         _youtube = youtube;
         _library = library;
         _trackRegistry = trackRegistry;
+
+        StreamInfo = AudioStreamInfo.Empty;
 
         ApplyStreamingProfile();
 
@@ -546,7 +553,7 @@ public sealed partial class AudioEngine : ReactiveObject, ISuspendable, IDisposa
             if (_isManualLoading != loading)
             {
                 _isManualLoading = loading;
-                this.RaisePropertyChanged(nameof(IsLoading));
+                OnPropertyChanged(nameof(IsLoading));
                 OnLoadingStateChanged?.Invoke(IsLoading);
             }
         });

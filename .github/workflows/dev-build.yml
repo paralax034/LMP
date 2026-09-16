@@ -48,7 +48,7 @@ jobs:
             - name: Build Debug
               run: ./build.bat debug nopause
 
-            - name: Build Release (Publish)
+            - name: Build Release (Native AOT Publish)
               run: ./build.bat publish nopause
 
             # === Архивация ===
@@ -115,6 +115,7 @@ jobs:
                       | Параметр | Значение |
                       |----------|----------|
                       | Версия | `v${{ env.FULL_VERSION }}` |
+                      | Архитектура | Native AOT (win-x64) |
                       | Тег | `dev-${{ env.COMMIT_COUNT }}` |
                       | Коммит | `${{ env.COMMIT_HASH }}` |
                       | Всего коммитов | ${{ env.COMMIT_COUNT }} |
@@ -124,5 +125,5 @@ jobs:
                       ⚠️ **Тестовая сборка — не для продакшена!**
 
                       ### Скачать
-                      - **[LMP-Release-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev/LMP-Release-v${{ env.FULL_VERSION }}.7z)** — рекомендуется
+                      - **[LMP-Release-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev/LMP-Release-v${{ env.FULL_VERSION }}.7z)** — Native AOT сборка (рекомендуется)
                       - [LMP-Debug-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev/LMP-Debug-v${{ env.FULL_VERSION }}.7z) — для отладки

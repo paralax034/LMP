@@ -1,16 +1,15 @@
 using System.Runtime.CompilerServices;
-using Microsoft.Extensions.DependencyInjection;
-using ReactiveUI;
-using System.Reactive.Linq;
-using LMP.UI.Features.Shell;
 using Avalonia.Collections;
+using Avalonia.Threading;
+using LMP.UI.Features.Shell;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.ViewModels;
 
 /// <summary>
 /// Базовый ViewModel для списков треков с виртуализацией, фильтрацией и перетаскиванием.
 /// </summary>
-public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase, IFilterable, ISmoothTransitionViewModel
+public abstract partial class ReorderableViewModel<TSource, TViewModel> : ViewModelBase, IFilterable, ISmoothTransitionViewModel
     where TViewModel : class, IDisposable
     where TSource : notnull
 {
@@ -25,8 +24,6 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
 
     /// <summary>
     /// Канонические source-экземпляры, привязанные к текущему списку.
-    /// Производные классы могут использовать словарь для zero-alloc access
-    /// без повторной материализации snapshot-коллекций.
     /// </summary>
     protected readonly Dictionary<string, TSource> _sources = [];
 
@@ -40,6 +37,7 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
     private bool _isDataLoading;
     private bool _isTransitioning;
     private TaskCompletionSource? _transitionTcs;
+    private CancellationTokenSource? _filterDebounceCts;
 
     #endregion
 
@@ -52,15 +50,33 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
         {
             if (_isDataLoading == value) return;
             _isDataLoading = value;
-            this.RaisePropertyChanged(nameof(IsLoading));
+            OnPropertyChanged(nameof(IsLoading));
         }
     }
 
-    public string FilterQuery
+    [ObservableProperty]
+    public partial string FilterQuery { get; set; } = string.Empty;
+    string IFilterable.FilterQuery
     {
-        get;
-        set => this.RaiseAndSetIfChanged(ref field, value);
-    } = string.Empty;
+        get => FilterQuery;
+        set => FilterQuery = value;
+    }
+
+    partial void OnFilterQueryChanged(string value)
+    {
+        OnPropertyChanged(nameof(CanReorder));
+
+        _filterDebounceCts?.Cancel();
+        _filterDebounceCts?.Dispose();
+        _filterDebounceCts = new CancellationTokenSource();
+        var token = _filterDebounceCts.Token;
+
+        _ = Task.Delay(150, token).ContinueWith(t =>
+        {
+            if (t.IsCanceled || _isDisposed) return;
+            Dispatcher.UIThread.Post(RebuildVisibleItems);
+        }, TaskScheduler.Default);
+    }
 
     public AvaloniaList<TViewModel> Items { get; } = [];
 
@@ -75,13 +91,6 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
     protected ReorderableViewModel()
     {
         LibService = AppEntry.Services.GetRequiredService<LibraryService>();
-
-        this.WhenAnyValue(static x => x.FilterQuery)
-            .Skip(1)
-            .Throttle(TimeSpan.FromMilliseconds(150))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => RebuildVisibleItems())
-            .DisposeWith(Disposables);
     }
 
     #endregion
@@ -93,7 +102,7 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
     {
         _isTransitioning = true;
         _transitionTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        this.RaisePropertyChanged(nameof(IsLoading));
+        OnPropertyChanged(nameof(IsLoading));
     }
 
     #endregion
@@ -105,7 +114,7 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
     {
         _isTransitioning = false;
         _transitionTcs?.TrySetResult();
-        this.RaisePropertyChanged(nameof(IsLoading));
+        OnPropertyChanged(nameof(IsLoading));
 
         await base.OnNavigatedToAsync().ConfigureAwait(false);
     }
@@ -122,6 +131,7 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
         DisposeAndClearVmCache();
 
         _isDataLoading = true;
+        OnPropertyChanged(nameof(IsLoading));
     }
 
     #endregion
@@ -133,42 +143,14 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
     protected abstract bool MatchesFilter(TSource item, string query);
     protected abstract Task<List<TSource>> LoadItemsByIdsAsync(IEnumerable<string> ids, CancellationToken ct);
     protected virtual Task SaveMoveAsync(int fromIndex, int toIndex, CancellationToken ct) => Task.CompletedTask;
-
-    /// <summary>
-    /// Извлекает строковый идентификатор напрямую из экземпляра ViewModel.
-    /// Устраняет необходимость хранения обратного словаря _vmToId.
-    /// </summary>
-    /// <param name="vm">Экземпляр модели представления.</param>
-    /// <returns>Уникальный строковый идентификатор элемента.</returns>
     protected abstract string GetViewModelId(TViewModel vm);
-
-    /// <summary>
-    /// Нормализует свежезагруженный source-элемент перед помещением в master-слой.
-    /// Позволяет производным VM канонизировать объекты и тем самым исключить
-    /// рассинхронизацию между _sources и TrackItemViewModel.Track.
-    /// </summary>
-    /// <param name="item">Свежий source-элемент.</param>
-    /// <returns>Нормализованный экземпляр, который должен попасть в _sources.</returns>
     protected virtual TSource NormalizeSourceItem(TSource item) => item;
-
-    /// <summary>
-    /// Сливает свежие данные в уже существующий source-экземпляр без замены ссылки.
-    /// Это сохраняет identity VM и предотвращает лишние пересоздания UI.
-    /// </summary>
-    /// <param name="current">Текущий экземпляр из _sources.</param>
-    /// <param name="fresh">Свежий нормализованный экземпляр.</param>
     protected virtual void MergeSourceItem(TSource current, TSource fresh) { }
 
     #endregion
 
     #region Transition Barrier
 
-    /// <summary>
-    /// Асинхронно ожидает завершения анимации перехода страницы, если она активна.
-    /// Позволяет подготовить DTO в пуле потоков и не забивать UI-поток до окончания рендеринга.
-    /// </summary>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Задача, представляющая ожидание завершения визуального перехода.</returns>
     protected async Task WaitForTransitionAsync(CancellationToken ct)
     {
         var tcs = _transitionTcs;
@@ -179,17 +161,9 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
         {
             await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            // Корректная отмена при быстрой смене страниц
-        }
+        catch (OperationCanceledException) { }
     }
 
-    /// <summary>
-    /// Инициализирует модель предварительно загруженными данными без повторного обращения к хранилищу.
-    /// </summary>
-    /// <param name="allIds">Целевой master-порядок идентификаторов.</param>
-    /// <param name="items">Свежие предварительно загруженные source-элементы.</param>
     protected void InitializeWithPreloadedData(List<string> allIds, List<TSource> items)
     {
         if (_isDisposed) return;
@@ -202,14 +176,6 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
 
     #region Initialization
 
-    /// <summary>
-    /// Инициализирует список по master-порядку идентификаторов без разрушения
-    /// существующего VM-кэша. На успешной загрузке изменения применяются инкрементально.
-    /// При сбое нового контекста текущий список очищается, чтобы не показывать
-    /// данные от предыдущего экрана под новой шапкой.
-    /// </summary>
-    /// <param name="allIds">Целевой master-порядок идентификаторов.</param>
-    /// <param name="ct">Токен отмены.</param>
     protected async Task InitializeAsync(List<string> allIds, CancellationToken ct = default)
     {
         if (_isDisposed) return;
@@ -244,25 +210,11 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
         }
     }
 
-    /// <summary>
-    /// Инициализирует модель готовыми данными.
-    /// Переписан на инкрементальное обновление master-слоя без потери VM-кэша.
-    /// </summary>
     protected void InitializeWithData(IEnumerable<TSource> items)
     {
         UpdateMasterData(items);
     }
 
-    /// <summary>
-    /// Инкрементально обновляет master-данные без полной инвалидации кэша ViewModel.
-    /// Сохраняет identity существующих source-экземпляров и VM, обновляя только
-    /// порядок, состав и metadata реально изменившихся элементов.
-    /// </summary>
-    /// <param name="items">Свежие source-элементы.</param>
-    /// <param name="explicitOrder">
-    /// Необязательный master-порядок идентификаторов. Если задан, используется как
-    /// источник истинного порядка даже при частичной загрузке source-элементов.
-    /// </param>
     protected void UpdateMasterData(IEnumerable<TSource> items, IReadOnlyList<string>? explicitOrder = null)
     {
         if (_isDisposed) return;
@@ -321,24 +273,37 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
         }
 
         RemoveUnusedSources(retainedIds);
-
         _masterIds = newMasterIds;
 
-        RebuildVisibleItems();
-        DisposeRemovedViewModels(retainedIds);
+        // Гарантируем перестроение UI-коллекции строго в потоке UI
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            RebuildVisibleItems();
+            DisposeRemovedViewModels(retainedIds);
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_isDisposed) return;
+                RebuildVisibleItems();
+                DisposeRemovedViewModels(retainedIds);
+            });
+        }
     }
 
     #endregion
 
     #region Filtering
 
-    /// <summary>
-    /// Перестраивает видимый список на основе master-порядка и текущего фильтра.
-    /// При пустом <see cref="FilterQuery"/> фильтрация пропускается полностью,
-    /// гарантируя отображение всех элементов независимо от реализации <see cref="MatchesFilter"/>.
-    /// </summary>
     protected virtual void RebuildVisibleItems()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(RebuildVisibleItems);
+            return;
+        }
+
         var query = FilterQuery;
         bool hasFilter = !string.IsNullOrWhiteSpace(query);
 
@@ -364,15 +329,6 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
         SyncVisibleItems(_rebuildBuffer);
     }
 
-    /// <summary>
-    /// Синхронизирует видимую коллекцию ViewModel.
-    /// <para>
-    /// Для больших скачков размера списка (фильтрация, сброс поиска) использует атомарную замену,
-    /// исключая лавину одиночных событий Add/Remove, которая ломает виртуализатор ItemsRepeater.
-    /// Поштучный путь сохраняется только для единичных перестановок и мутаций.
-    /// </para>
-    /// </summary>
-    /// <param name="newItems">Целевой видимый порядок VM.</param>
     private void SyncVisibleItems(List<TViewModel> newItems)
     {
         if (Items.Count == newItems.Count)
@@ -700,6 +656,9 @@ public abstract class ReorderableViewModel<TSource, TViewModel> : ViewModelBase,
             _masterIds.Clear();
             _rebuildBuffer = null!;
         }
+
+        _filterDebounceCts?.Cancel();
+        _filterDebounceCts?.Dispose();
 
         base.Dispose(disposing);
         _isDisposed = true;

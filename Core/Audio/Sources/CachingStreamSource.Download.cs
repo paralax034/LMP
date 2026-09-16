@@ -699,6 +699,9 @@ public sealed partial class CachingStreamSource
     /// <summary>
     /// Выполняет HTTP range-запрос, записывает данные в RAM и на диск.
     /// </summary>
+    /// <param name="plan">План загружаемого диапазона байт.</param>
+    /// <param name="ct">Токен отмены текущей операции.</param>
+    /// <returns>Результат выполнения загрузки диапазона.</returns>
     private async Task<RangeDownloadResult> DownloadRangeHttpAsync(DownloadPlan plan, CancellationToken ct)
     {
         int rn = Interlocked.Increment(ref _requestSequenceNumber);
@@ -798,12 +801,12 @@ public sealed partial class CachingStreamSource
                 catch (ObjectDisposedException)
                 {
                     memoryOwner.Dispose();
-                    throw new OperationCanceledException("HTTP stream disposed during read (seek/stop)");
+                    return RangeDownloadResult.Cancelled;
                 }
                 catch (OperationCanceledException)
                 {
                     memoryOwner.Dispose();
-                    throw;
+                    return RangeDownloadResult.Cancelled;
                 }
                 catch (Exception ex) when (
                                     ct.IsCancellationRequested || _disposed || (_lifetimeCts?.IsCancellationRequested == true)
@@ -839,7 +842,7 @@ public sealed partial class CachingStreamSource
                     SaveBandwidth(speedBytesPerSec, actualLength);
                 }
 
-                if (ct.IsCancellationRequested)
+                if (ct.IsCancellationRequested || _disposed || (_lifetimeCts?.IsCancellationRequested == true))
                 {
                     memoryOwner.Dispose();
                     return RangeDownloadResult.Cancelled;
@@ -914,13 +917,34 @@ public sealed partial class CachingStreamSource
     /// <summary>
     /// Читает поток полностью в буфер, пока не достигнут его конец или EOF потока.
     /// </summary>
+    /// <param name="stream">Входной поток данных HTTP-ответа.</param>
+    /// <param name="buffer">Целевой буфер в памяти.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>Фактическое количество успешно вычитанных байт.</returns>
     private static async ValueTask<int> ReadStreamFullyAsync(
         Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
         int totalRead = 0;
         while (totalRead < buffer.Length)
         {
-            int read = await stream.ReadAsync(buffer[totalRead..], ct).ConfigureAwait(false);
+            int read;
+            try
+            {
+                read = await stream.ReadAsync(buffer[totalRead..], ct).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (IOException ex) when (ex.InnerException is ObjectDisposedException)
+            {
+                break;
+            }
+
             if (read == 0) break;
             totalRead += read;
         }

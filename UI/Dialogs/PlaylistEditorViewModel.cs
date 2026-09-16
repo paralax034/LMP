@@ -1,11 +1,8 @@
-using System.Reactive;
-using System.Reactive.Linq;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
-using ReactiveUI;
-
+using Avalonia.Threading;
 
 namespace LMP.UI.Dialogs;
 
@@ -28,10 +25,17 @@ public enum CoverMode
 /// </summary>
 public sealed partial class PlaylistEditorViewModel : ViewModelBase
 {
-    [Reactive] public partial string Name { get; set; }
-    [Reactive] public partial string? ThumbnailUrl { get; set; }
-    [Reactive] public partial string? CustomColor { get; set; }
-    [Reactive] public partial string? Description { get; set; }
+    [ObservableProperty]
+    public partial string Name { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string? ThumbnailUrl { get; set; }
+
+    [ObservableProperty]
+    public partial string? CustomColor { get; set; }
+
+    [ObservableProperty]
+    public partial string? Description { get; set; }
 
     /// <summary>Исходное описание (для определения изменения).</summary>
     private readonly string? _originalDescription;
@@ -45,28 +49,33 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// <summary>true если VM создана для редактирования (а не создания).</summary>
     private readonly bool _isForEdit;
 
-    // ═══ ComputedColor ═══
+    // ComputedColor
 
     /// <summary>
     /// Автоматически вычисленный цвет из обложки (readonly, из БД).
     /// Показывается в UI как информационное поле.
     /// Обновляется при пересчёте через RecalculateColorCommand.
     /// </summary>
-    [Reactive] public partial string? ComputedColor { get; private set; }
+    [ObservableProperty]
+    public partial string? ComputedColor { get; set; }
 
     /// <summary>Кисть превью вычисленного цвета.</summary>
-    [Reactive] public partial IBrush ComputedColorPreviewBrush { get; private set; } = Brushes.Transparent;
+    [ObservableProperty]
+    public partial IBrush ComputedColorPreviewBrush { get; set; } = Brushes.Transparent;
 
     /// <summary>
     /// Идёт ли пересчёт цвета из обложки или загрузка обложки в YouTube.
     /// Используется для блокировки UI во время длительных операций.
     /// </summary>
-    [Reactive] public partial bool IsRecalculatingColor { get; set; }
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RecalculateColorCommand))]
+    [NotifyCanExecuteChangedFor(nameof(UploadThumbnailCommand))]
+    public partial bool IsRecalculatingColor { get; set; }
 
     /// <summary>Команда пересчёта доминантного цвета из текущей обложки.</summary>
-    public ReactiveCommand<Unit, Unit> RecalculateColorCommand { get; }
+    public IAsyncRelayCommand RecalculateColorCommand { get; }
 
-    // ═══ System Playlist ═══
+    // System Playlist
 
     /// <summary>
     /// true если редактируется системный плейлист (например «Понравившиеся»).
@@ -80,7 +89,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// </summary>
     public bool IsNameEditable { get; }
 
-    // ═══ For Edit / Create Copy ═══
+    // For Edit / Create Copy
 
     /// <summary>
     /// true если VM создана для редактирования существующего плейлиста.
@@ -98,26 +107,31 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// Создаёт локальную копию плейлиста с текущими данными из редактора.
     /// Копия всегда локальная (без привязки к YouTube).
     /// </summary>
-    public ReactiveCommand<Unit, Unit> CreateCopyCommand { get; }
+    public IRelayCommand CreateCopyCommand { get; }
 
-    // ═══ Cover Mode ═══
+    // Cover Mode
 
     /// <summary>Текущий режим выбора обложки: URL, из треков, или файл.</summary>
-    [Reactive] public partial CoverMode SelectedCoverMode { get; set; } = CoverMode.Url;
+    [ObservableProperty]
+    public partial CoverMode SelectedCoverMode { get; set; } = CoverMode.Url;
 
     /// <summary>true если выбран режим ручного URL.</summary>
-    [Reactive] public partial bool IsCoverModeUrl { get; set; } = true;
+    [ObservableProperty]
+    public partial bool IsCoverModeUrl { get; set; } = true;
 
     /// <summary>true если выбран режим "Из треков".</summary>
-    [Reactive] public partial bool IsCoverModeFromTracks { get; set; }
+    [ObservableProperty]
+    public partial bool IsCoverModeFromTracks { get; set; }
 
     /// <summary>true если выбран режим "Файл".</summary>
-    [Reactive] public partial bool IsCoverModeFile { get; set; }
+    [ObservableProperty]
+    public partial bool IsCoverModeFile { get; set; }
 
     /// <summary>
     /// ViewModel выбора обложки из треков. null если треки не предоставлены.
     /// </summary>
-    [Reactive] public partial PlaylistCoverPickerViewModel? CoverPicker { get; set; }
+    [ObservableProperty]
+    public partial PlaylistCoverPickerViewModel? CoverPicker { get; set; }
 
     /// <summary>
     /// Показывать ли переключатель режима обложки.
@@ -129,58 +143,77 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     public bool HasTracksCoverOption { get; }
 
     /// <summary>Путь выбранного файла (для отображения в UI).</summary>
-    [Reactive] public partial string? SelectedFilePath { get; set; }
+    [ObservableProperty]
+    public partial string? SelectedFilePath { get; set; }
 
     /// <summary>Команда выбора файла через системный диалог.</summary>
-    public ReactiveCommand<Unit, Unit> SelectFileCommand { get; }
+    public IAsyncRelayCommand SelectFileCommand { get; }
 
-    // ═══ Upload Thumbnail to YouTube ═══
+    // Upload Thumbnail to YouTube
 
     /// <summary>
     /// Показывать ли кнопку загрузки обложки в YouTube.
     /// Видна только для TwoWaySync плейлистов с непустой обложкой.
     /// </summary>
-    [Reactive] public partial bool ShowUploadThumbnailButton { get; private set; }
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(UploadThumbnailCommand))]
+    public partial bool ShowUploadThumbnailButton { get; set; }
 
     /// <summary>Загрузить текущую обложку в YouTube.</summary>
-    public ReactiveCommand<Unit, Unit> UploadThumbnailCommand { get; }
+    public IAsyncRelayCommand UploadThumbnailCommand { get; }
 
-    // ═══ Sync ═══
+    // Sync
 
-    [Reactive] public partial bool ShowSyncSection { get; set; }
-    [Reactive] public partial bool IsSyncedToCloud { get; set; }
+    [ObservableProperty]
+    public partial bool ShowSyncSection { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsSyncedToCloud { get; set; }
     public bool IsAuthenticated { get; }
     public bool HasYoutubeBinding { get; }
     public bool OriginalSyncState { get; }
 
-    // ═══ Validation ═══
-    [Reactive] public partial string? ErrorMessage { get; set; }
-    [Reactive] public partial bool HasErrors { get; private set; }
-    public IObservable<bool> CanSave { get; }
+    // Validation
+    [ObservableProperty]
+    public partial string? ErrorMessage { get; set; }
 
-    // ═══ Preview ═══
+    [ObservableProperty]
+    public partial bool HasErrors { get; set; }
+
+    public bool CanSave => !HasErrors;
+
+    // Preview
 
     /// <summary>
     /// URL или путь для превью обложки (HTTP URL или локальный путь).
     /// </summary>
-    [Reactive] public partial string? ThumbnailPreviewUrl { get; private set; }
+    [ObservableProperty]
+    public partial string? ThumbnailPreviewUrl { get; set; }
 
     /// <summary>Есть ли превью для отображения.</summary>
-    [Reactive] public partial bool HasThumbnailPreview { get; private set; }
+    [ObservableProperty]
+    public partial bool HasThumbnailPreview { get; set; }
 
     /// <summary>Превью — это HTTP URL (для AsyncImageLoader).</summary>
-    [Reactive] public partial bool IsPreviewHttp { get; private set; }
+    [ObservableProperty]
+    public partial bool IsPreviewHttp { get; set; }
 
     /// <summary>Превью — это локальный файл (для LocalFileImageConverter).</summary>
-    [Reactive] public partial bool IsPreviewLocal { get; private set; }
+    [ObservableProperty]
+    public partial bool IsPreviewLocal { get; set; }
 
     /// <summary>
     /// Bitmap превью для локальных файлов (загружается напрямую).
     /// Для HTTP URL остаётся null — используется AsyncImageLoader.
     /// </summary>
-    [Reactive] public partial Bitmap? LocalPreviewBitmap { get; private set; }
+    [ObservableProperty]
+    public partial Bitmap? LocalPreviewBitmap { get; set; }
 
-    [Reactive] public partial IBrush ColorPreviewBrush { get; private set; } = Brushes.Transparent;
+    [ObservableProperty]
+    public partial IBrush ColorPreviewBrush { get; set; } = Brushes.Transparent;
+
+    private readonly DispatcherTimer _thumbnailDebounceTimer;
+    private readonly DispatcherTimer _colorDebounceTimer;
 
     public PlaylistEditorViewModel(
         string name = "",
@@ -197,10 +230,6 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         bool isForEdit = false,
         bool isSystemPlaylist = false)
     {
-        Name = name;
-        ThumbnailUrl = thumbnailUrl;
-        CustomColor = customColor;
-        Description = description;
         _originalDescription = description;
         _originalPlaylist = originalPlaylist;
         _isForEdit = isForEdit;
@@ -216,77 +245,91 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
 
         ComputedColorPreviewBrush = TryParseColor(computedColor);
 
+        _thumbnailDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _thumbnailDebounceTimer.Tick += (s, e) =>
+        {
+            _thumbnailDebounceTimer.Stop();
+            UpdateThumbnailPreview(ThumbnailUrl);
+        };
+
+        _colorDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _colorDebounceTimer.Tick += (s, e) =>
+        {
+            _colorDebounceTimer.Stop();
+            ColorPreviewBrush = TryParseColor(CustomColor);
+        };
+
         HasTracksCoverOption = playlistTracks != null && playlistTracks.Any(t => t.HasThumbnail);
         if (HasTracksCoverOption)
         {
             CoverPicker = new PlaylistCoverPickerViewModel(playlistTracks!);
-
-            CoverPicker.WhenAnyValue(x => x.ResultPath)
-                .Where(path => !string.IsNullOrEmpty(path))
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(path =>
+            CoverPicker.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(PlaylistCoverPickerViewModel.ResultPath) && CoverPicker?.ResultPath is { Length: > 0 } path)
                 {
                     ThumbnailUrl = path;
                     SelectedCoverMode = CoverMode.Url;
-                })
-                .DisposeWith(Disposables);
+                }
+            };
         }
 
-        SelectFileCommand = CreateCommand(ReactiveCommand.CreateFromTask(SelectFileAsync));
+        SelectFileCommand = new AsyncRelayCommand(SelectFileAsync);
 
-        var canRecalculate = this.WhenAnyValue(
-            x => x.ThumbnailUrl,
-            x => x.IsRecalculatingColor,
-            (url, isRecalc) => !string.IsNullOrWhiteSpace(url) && !isRecalc);
+        RecalculateColorCommand = new AsyncRelayCommand(
+            RecalculateColorFromCoverAsync,
+            () => !string.IsNullOrWhiteSpace(ThumbnailUrl) && !IsRecalculatingColor);
 
-        RecalculateColorCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(RecalculateColorFromCoverAsync, canRecalculate));
+        UploadThumbnailCommand = new AsyncRelayCommand(
+            UploadThumbnailAsync,
+            () => !string.IsNullOrEmpty(ThumbnailUrl) && !IsRecalculatingColor && ShowUploadThumbnailButton);
 
-        var canUpload = this.WhenAnyValue(
-            x => x.ThumbnailUrl,
-            x => x.IsRecalculatingColor,
-            x => x.ShowUploadThumbnailButton,
-            (url, busy, show) => !string.IsNullOrEmpty(url) && !busy && show);
-
-        UploadThumbnailCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(UploadThumbnailAsync, canUpload));
-
-        // ═══ Команда создания копии ═══
-        CreateCopyCommand = CreateCommand(ReactiveCommand.Create(() =>
+        // Команда создания копии
+        CreateCopyCommand = new RelayCommand(() =>
         {
             OnCreateCopy?.Invoke();
-        }));
+        });
 
-        this.WhenAnyValue(x => x.SelectedCoverMode)
-            .Subscribe(mode =>
-            {
-                IsCoverModeUrl = mode == CoverMode.Url;
-                IsCoverModeFromTracks = mode == CoverMode.FromTracks;
-                IsCoverModeFile = mode == CoverMode.File;
-            })
-            .DisposeWith(Disposables);
+        Name = name;
+        ThumbnailUrl = thumbnailUrl;
+        CustomColor = customColor;
+        Description = description;
 
-        this.WhenAnyValue(x => x.Name, x => x.ThumbnailUrl, x => x.CustomColor)
-            .Subscribe(_ => UpdateValidation())
-            .DisposeWith(Disposables);
+        UpdateValidation();
+        UpdateUploadButtonVisibility();
+        UpdateThumbnailPreview(ThumbnailUrl);
+    }
 
-        CanSave = this.WhenAnyValue(x => x.HasErrors, errors => !errors);
+    partial void OnSelectedCoverModeChanged(CoverMode value)
+    {
+        IsCoverModeUrl = value == CoverMode.Url;
+        IsCoverModeFromTracks = value == CoverMode.FromTracks;
+        IsCoverModeFile = value == CoverMode.File;
+    }
 
-        this.WhenAnyValue(x => x.ThumbnailUrl)
-            .Throttle(TimeSpan.FromMilliseconds(400))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(UpdateThumbnailPreview)
-            .DisposeWith(Disposables);
+    partial void OnNameChanged(string value) => UpdateValidation();
 
-        this.WhenAnyValue(x => x.ThumbnailUrl)
-            .Subscribe(_ => UpdateUploadButtonVisibility())
-            .DisposeWith(Disposables);
+    partial void OnThumbnailUrlChanged(string? value)
+    {
+        UpdateValidation();
+        UpdateUploadButtonVisibility();
+        RecalculateColorCommand?.NotifyCanExecuteChanged();
+        UploadThumbnailCommand?.NotifyCanExecuteChanged();
 
-        this.WhenAnyValue(x => x.CustomColor)
-            .Throttle(TimeSpan.FromMilliseconds(200))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(colorStr => ColorPreviewBrush = TryParseColor(colorStr))
-            .DisposeWith(Disposables);
+        if (_thumbnailDebounceTimer is not null)
+        {
+            _thumbnailDebounceTimer.Stop();
+            _thumbnailDebounceTimer.Start();
+        }
+    }
+
+    partial void OnCustomColorChanged(string? value)
+    {
+        UpdateValidation();
+        if (_colorDebounceTimer is not null)
+        {
+            _colorDebounceTimer.Stop();
+            _colorDebounceTimer.Start();
+        }
     }
 
     #region Upload Thumbnail to YouTube
@@ -307,13 +350,6 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// <summary>
     /// Загружает текущую обложку в YouTube через Scotty Upload Protocol.
     /// Используется для ручной загрузки без синхронизации всего плейлиста.
-    ///
-    /// <para><b>Поддерживаемые источники:</b></para>
-    /// <list type="bullet">
-    ///   <item>HTTP/HTTPS URL — скачивается, затем загружается</item>
-    ///   <item>file:// URI — читается как локальный файл</item>
-    ///   <item>Абсолютный путь — читается напрямую</item>
-    /// </list>
     /// </summary>
     private async Task UploadThumbnailAsync()
     {
@@ -649,8 +685,19 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         ClearError();
     }
 
-    private void SetError(string msg) { ErrorMessage = msg; HasErrors = true; }
-    private void ClearError() { ErrorMessage = null; HasErrors = false; }
+    private void SetError(string msg)
+    {
+        ErrorMessage = msg;
+        HasErrors = true;
+        OnPropertyChanged(nameof(CanSave));
+    }
+
+    private void ClearError()
+    {
+        ErrorMessage = null;
+        HasErrors = false;
+        OnPropertyChanged(nameof(CanSave));
+    }
 
     #endregion
 
@@ -658,19 +705,6 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
 
     /// <summary>
     /// Проверяет, является ли строка валидным источником изображения.
-    ///
-    /// <para><b>Допустимые форматы:</b></para>
-    /// <list type="bullet">
-    ///   <item><c>http://</c> / <c>https://</c> — URL из интернета</item>
-    ///   <item><c>avares://</c> — встроенный ресурс Avalonia</item>
-    ///   <item><c>file://</c> — явный file URI</item>
-    ///   <item>Абсолютный путь файловой системы (C:\..., /home/...)</item>
-    /// </list>
-    ///
-    /// <para><b>ВАЖНО:</b> <c>Uri.TryCreate</c> с <c>UriKind.Absolute</c> парсит
-    /// hex-строки вида "F1A2B3..." как scheme "f" с хостом "1a2b3...:80",
-    /// что приводит к HTTP-запросам на несуществующие хосты.
-    /// Поэтому проверяем scheme по белому списку.</para>
     /// </summary>
     internal static bool IsValidUri(string? url)
     {
@@ -754,8 +788,6 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             customColor: playlist.CustomColor,
             description: playlist.Description,
             computedColor: playlist.ComputedColor,
-            // Sync-секция скрыта для системных плейлистов:
-            // «Понравившиеся» управляется через like/unlike API, а не прямой привязкой к YouTube.
             showSync: !isSystem && (isAuthenticated || playlist.IsFromAccount),
             isSynced: playlist.IsFromAccount,
             isAuthenticated: isAuthenticated,
@@ -772,8 +804,6 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
 
     /// <summary>
     /// Собирает результат редактирования.
-    /// Description включается всегда — PlaylistEditService сам определит, изменилось ли.
-    /// ComputedColor включается если был пересчитан.
     /// </summary>
     public EditPlaylistResult ToResult() => new()
     {
@@ -793,6 +823,8 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     {
         if (disposing)
         {
+            _thumbnailDebounceTimer.Stop();
+            _colorDebounceTimer.Stop();
             LocalPreviewBitmap?.Dispose();
             CoverPicker?.Dispose();
         }

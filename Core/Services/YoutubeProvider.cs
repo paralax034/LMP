@@ -12,7 +12,6 @@ using LMP.Core.Youtube.Videos;
 using LMP.Core.Youtube.Videos.Streams;
 using LMP.Core.Youtube.Utils;
 using LMP.Core.Helpers.Extensions;
-using ReactiveUI;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Bridge.NToken;
 using LMP.Core.Youtube.Bridge.SigCipher;
@@ -2244,7 +2243,7 @@ public partial class YoutubeProvider : IDisposable
     #endregion
 }
 
-public sealed partial class StreamOption : ReactiveObject
+public sealed partial class StreamOption : ObservableObject
 {
     /// <summary>Типизированный формат контейнера.</summary>
     public AudioFormat Format { get; init; }
@@ -2264,8 +2263,8 @@ public sealed partial class StreamOption : ReactiveObject
         LocalizationService.Instance.Get("Stream_Format_Mb", "{0:F1} MB"),
         SizeMb);
 
-    [Reactive] public partial bool IsDownloaded { get; set; }
-    [Reactive] public partial bool IsActive { get; set; }
+    [ObservableProperty] public partial bool IsDownloaded { get; set; }
+    [ObservableProperty] public partial bool IsActive { get; set; }
 }
 
 public sealed class HomeSection

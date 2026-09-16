@@ -1,15 +1,11 @@
+using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Media;
-using LMP.UI.Features.Shell;
-using LMP.UI.Features.Shared;
-using ReactiveUI;
-
-using System.Reactive;
-using System.Reactive.Linq;
-using LMP.UI.Dialogs;
-using Microsoft.Extensions.DependencyInjection;
 using Avalonia.Threading;
-using System.Globalization;
+using LMP.UI.Dialogs;
+using LMP.UI.Features.Shared;
+using LMP.UI.Features.Shell;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Playlist;
 
@@ -32,7 +28,9 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     private readonly CookieAuthService _auth;
 
     private readonly EventHandler<string> _languageChangedHandler;
-    private readonly IDisposable? _librarySubscription;
+    private DispatcherTimer? _dataChangedDebounceTimer;
+    private DispatcherTimer? _shuffleAnimationTimer;
+    private DispatcherTimer? _downloadAnimationTimer;
 
     private CancellationTokenSource? _playlistLoadCts;
     private string _currentPlaylistId = "";
@@ -52,20 +50,20 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     #region Properties — Metadata
 
-    [Reactive] public partial string PlaylistName { get; private set; } = string.Empty;
-    [Reactive] public partial string? ThumbnailUrl { get; private set; }
-    [Reactive] public partial string? Description { get; private set; }
-    [Reactive] public partial int TrackCount { get; private set; }
-    [Reactive] public partial TimeSpan TotalDuration { get; private set; }
-    [Reactive] public partial string FormattedDuration { get; set; } = "";
-    [Reactive] public partial IBrush? HeaderBackground { get; private set; }
-    [Reactive] public partial bool IsLikedPlaylist { get; private set; }
+    [ObservableProperty] public partial string PlaylistName { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string? ThumbnailUrl { get; private set; }
+    [ObservableProperty] public partial string? Description { get; private set; }
+    [ObservableProperty] public partial int TrackCount { get; private set; }
+    [ObservableProperty] public partial TimeSpan TotalDuration { get; private set; }
+    [ObservableProperty] public partial string FormattedDuration { get; set; } = "";
+    [ObservableProperty] public partial IBrush? HeaderBackground { get; private set; }
+    [ObservableProperty] public partial bool IsLikedPlaylist { get; private set; }
 
     /// <summary>Отформатированное количество просмотров (компактный вид: 1.2K, 3.5M).</summary>
-    [Reactive] public partial string? FormattedViewCount { get; private set; }
+    [ObservableProperty] public partial string? FormattedViewCount { get; private set; }
 
     /// <summary>Отформатированная дата обновления плейлиста.</summary>
-    [Reactive] public partial string? FormattedReleaseDate { get; private set; }
+    [ObservableProperty] public partial string? FormattedReleaseDate { get; private set; }
 
     public string FormattedTrackCount =>
         LocalizationService.Instance.GetPlural("Playlist_TracksCount", TrackCount);
@@ -77,66 +75,91 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 ? $"https://www.youtube.com/playlist?list={id}"
                 : null;
 
-    [Reactive] public partial bool HasYoutubeLink { get; private set; }
+    [ObservableProperty] public partial bool HasYoutubeLink { get; private set; }
+
+    partial void OnTrackCountChanged(int value)
+    {
+        PlayAllCommand.NotifyCanExecuteChanged();
+        ShufflePlayCommand.NotifyCanExecuteChanged();
+        DownloadAllCommand.NotifyCanExecuteChanged();
+        AddToQueueCommand.NotifyCanExecuteChanged();
+    }
 
     #endregion
 
     #region Properties — Author & Ownership
 
     /// <summary>Имя автора/владельца плейлиста.</summary>
-    [Reactive] public partial string? AuthorName { get; private set; }
+    [ObservableProperty] public partial string? AuthorName { get; private set; }
 
     /// <summary>Показывать строку автора (любой плейлист с известным автором).</summary>
-    [Reactive] public partial bool ShowAuthor { get; private set; }
+    [ObservableProperty] public partial bool ShowAuthor { get; private set; }
 
     /// <summary>Плейлист доступен только для прослушивания (Foreign / CloudPublic).</summary>
-    [Reactive] public partial bool IsReadOnly { get; private set; }
+    [ObservableProperty] public partial bool IsReadOnly { get; private set; }
 
     /// <summary>Плейлист можно редактировать (не read-only, не system).</summary>
-    [Reactive] public partial bool CanEdit { get; private set; }
+    [ObservableProperty] public partial bool CanEdit { get; private set; }
 
     /// <summary>Плейлист приватный (🔒).</summary>
-    [Reactive] public partial bool IsPrivate { get; private set; }
+    [ObservableProperty] public partial bool IsPrivate { get; private set; }
 
     /// <summary>Плейлист доступен по ссылке (🔗).</summary>
-    [Reactive] public partial bool IsUnlisted { get; private set; }
+    [ObservableProperty] public partial bool IsUnlisted { get; private set; }
+
+    partial void OnCanEditChanged(bool value)
+    {
+        CanReorderItems = value && CanReorder;
+        MergePlaylistCommand.NotifyCanExecuteChanged();
+        EditPlaylistCommand.NotifyCanExecuteChanged();
+    }
 
     #endregion
 
     #region Properties — Cloud & Sync
 
     /// <summary>Плейлист связан с YouTube (есть YoutubeId и он доступен).</summary>
-    [Reactive] public partial bool HasCloudSource { get; private set; }
+    [ObservableProperty] public partial bool HasCloudSource { get; private set; }
 
     /// <summary>Можно запустить refresh/sync из облака (TwoWaySync или Liked).</summary>
-    [Reactive] public partial bool CanRefreshFromCloud { get; private set; }
+    [ObservableProperty] public partial bool CanRefreshFromCloud { get; private set; }
 
     /// <summary>Двусторонняя синхронизация активна.</summary>
-    [Reactive] public partial bool IsTwoWaySynced { get; private set; }
+    [ObservableProperty] public partial bool IsTwoWaySynced { get; private set; }
 
     /// <summary>Синхронизация в процессе прямо сейчас.</summary>
-    [Reactive] public partial bool IsSyncing { get; private set; }
+    [ObservableProperty] public partial bool IsSyncing { get; private set; }
 
     /// <summary>Есть хотя бы один статусный чип для отображения рядом с action-кнопками.</summary>
-    [Reactive] public partial bool HasStatusChips { get; private set; }
+    [ObservableProperty] public partial bool HasStatusChips { get; private set; }
 
     /// <summary>Локализованная строка последней синхронизации (null если не синхронизировался).</summary>
-    [Reactive] public partial string? LastSyncedText { get; private set; }
+    [ObservableProperty] public partial string? LastSyncedText { get; private set; }
+
+    partial void OnCanRefreshFromCloudChanged(bool value)
+    {
+        RefreshPlaylistCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsSyncingChanged(bool value)
+    {
+        RefreshPlaylistCommand.NotifyCanExecuteChanged();
+    }
 
     #endregion
 
     #region Properties — Playback State
 
-    [Reactive] public partial bool IsPlayingThisPlaylist { get; private set; }
-    [Reactive] public partial bool IsShuffleActive { get; private set; }
-    [Reactive] public partial bool IsDownloadingActive { get; private set; }
-    [Reactive] public partial bool CanReorderItems { get; private set; }
+    [ObservableProperty] public partial bool IsPlayingThisPlaylist { get; private set; }
+    [ObservableProperty] public partial bool IsShuffleActive { get; private set; }
+    [ObservableProperty] public partial bool IsDownloadingActive { get; private set; }
+    [ObservableProperty] public partial bool CanReorderItems { get; private set; }
 
     /// <summary>Очередь «чистая» — запущена из этого плейлиста без сторонних треков.</summary>
-    [Reactive] public partial bool IsQueuePure { get; private set; }
+    [ObservableProperty] public partial bool IsQueuePure { get; private set; }
 
     /// <summary>Очередь чистая и сейчас активно играет (для анимации эквалайзера).</summary>
-    [Reactive] public partial bool IsPlayingPure { get; private set; }
+    [ObservableProperty] public partial bool IsPlayingPure { get; private set; }
 
     /// <summary>Динамическая подсказка для кнопки-трансформера Play/Pause/Replace.</summary>
     public string PlayButtonTooltip
@@ -160,9 +183,11 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         {
             if (!value.IsAbsolute) return;
             var clamped = new GridLength(Math.Clamp(value.Value, HeaderHeightMin, HeaderHeightMax));
-            this.RaiseAndSetIfChanged(ref _headerHeight, clamped);
-            if (Math.Abs(LibService.Settings.PlaylistHeaderHeight - clamped.Value) > 1)
-                LibService.UpdateSettings(s => s.PlaylistHeaderHeight = clamped.Value);
+            if (SetProperty(ref _headerHeight, clamped))
+            {
+                if (Math.Abs(LibService.Settings.PlaylistHeaderHeight - clamped.Value) > 1)
+                    LibService.UpdateSettings(s => s.PlaylistHeaderHeight = clamped.Value);
+            }
         }
     }
 
@@ -174,19 +199,19 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     #region Commands
 
-    public ReactiveCommand<Unit, Unit> PlayAllCommand { get; }
-    public ReactiveCommand<Unit, Unit> DeletePlaylistCommand { get; }
-    public ReactiveCommand<Unit, Unit> UploadToCloudCommand { get; }
-    public ReactiveCommand<Unit, Unit> UnlinkFromCloudCommand { get; }
-    public ReactiveCommand<Unit, Unit> ShufflePlayCommand { get; }
-    public ReactiveCommand<Unit, Unit> DownloadAllCommand { get; }
-    public ReactiveCommand<Unit, Unit> MergePlaylistCommand { get; }
-    public ReactiveCommand<Unit, Unit> RefreshPlaylistCommand { get; }
-    public ReactiveCommand<Unit, Unit> AddToQueueCommand { get; }
-    public ReactiveCommand<(int oldIndex, int newIndex), Unit> MoveItemCommand { get; }
-    public ReactiveCommand<Unit, Unit> EditPlaylistCommand { get; }
-    public ReactiveCommand<Unit, Unit> CopyPlaylistLinkCommand { get; }
-    public ReactiveCommand<Unit, Unit> OpenAuthorCommand { get; }
+    public IAsyncRelayCommand PlayAllCommand { get; }
+    public IAsyncRelayCommand DeletePlaylistCommand { get; }
+    public IAsyncRelayCommand UploadToCloudCommand { get; }
+    public IAsyncRelayCommand UnlinkFromCloudCommand { get; }
+    public IAsyncRelayCommand ShufflePlayCommand { get; }
+    public IAsyncRelayCommand DownloadAllCommand { get; }
+    public IAsyncRelayCommand MergePlaylistCommand { get; }
+    public IAsyncRelayCommand RefreshPlaylistCommand { get; }
+    public IRelayCommand AddToQueueCommand { get; }
+    public IAsyncRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
+    public IAsyncRelayCommand EditPlaylistCommand { get; }
+    public IAsyncRelayCommand CopyPlaylistLinkCommand { get; }
+    public IRelayCommand OpenAuthorCommand { get; }
 
     #endregion
 
@@ -216,30 +241,16 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         _auth = auth;
 
         _languageChangedHandler = (_, _) =>
-            this.RaisePropertyChanged(nameof(FormattedTrackCount));
+            OnPropertyChanged(nameof(FormattedTrackCount));
         LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
 
         _headerHeight = new GridLength(Math.Clamp(
             LibService.Settings.PlaylistHeaderHeight,
             HeaderHeightMin, HeaderHeightMax));
 
-        // CanExecute observables
-        var hasTracks = this.WhenAnyValue(x => x.TrackCount, static c => c > 0)
-            .ObserveOn(RxSchedulers.MainThreadScheduler);
+        PlayAllCommand = new AsyncRelayCommand(PlayAllAsync, () => TrackCount > 0);
 
-        var canEdit = this.WhenAnyValue(x => x.CanEdit)
-            .ObserveOn(RxSchedulers.MainThreadScheduler);
-
-        var canRefresh = this.WhenAnyValue(
-                x => x.CanRefreshFromCloud, x => x.IsSyncing,
-                static (canRefresh, isSyncing) => canRefresh && !isSyncing)
-            .ObserveOn(RxSchedulers.MainThreadScheduler);
-
-        // Commands
-        PlayAllCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(PlayAllAsync, hasTracks));
-
-        DeletePlaylistCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        DeletePlaylistCommand = new AsyncRelayCommand(async () =>
         {
             if (await _dialog.ConfirmAsync(
                 SL["Dialog_Confirm_Title"],
@@ -247,53 +258,44 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             {
                 await _manager.DeletePlaylistAsync(_currentPlaylistId);
             }
-        }));
+        });
 
-        UploadToCloudCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        UploadToCloudCommand = new AsyncRelayCommand(async () =>
         {
             await _manager.UploadPlaylistToAccountAsync(_currentPlaylistId);
             await LoadPlaylistAsync(_currentPlaylistId);
-        }));
+        });
 
-        UnlinkFromCloudCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        UnlinkFromCloudCommand = new AsyncRelayCommand(async () =>
         {
             await _manager.ConvertToLocalAsync(_currentPlaylistId);
             await LoadPlaylistAsync(_currentPlaylistId);
-        }));
+        });
 
-        RefreshPlaylistCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(RefreshPlaylistAsync, canRefresh));
+        RefreshPlaylistCommand = new AsyncRelayCommand(
+            RefreshPlaylistAsync,
+            () => CanRefreshFromCloud && !IsSyncing);
 
-        ShufflePlayCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(ShufflePlayAsync, hasTracks));
+        ShufflePlayCommand = new AsyncRelayCommand(ShufflePlayAsync, () => TrackCount > 0);
+        DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TrackCount > 0);
+        MergePlaylistCommand = new AsyncRelayCommand(MergePlaylistAsync, () => CanEdit);
+        AddToQueueCommand = new RelayCommand(EnqueueUniquePlaylistTracks, () => TrackCount > 0);
 
-        DownloadAllCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(DownloadAllAsync, hasTracks));
+        MoveItemCommand = new AsyncRelayCommand<(int oldIndex, int newIndex)>(async tuple =>
+        {
+            if (!CanReorderItems) return;
+            _lastLocalMutationTime = DateTime.Now;
+            InvalidateAllTracksCache();
+            await MoveItemAsync(tuple.oldIndex, tuple.newIndex);
+        });
 
-        MergePlaylistCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(MergePlaylistAsync, canEdit));
+        EditPlaylistCommand = new AsyncRelayCommand(EditPlaylistAsync, () => CanEdit);
 
-        AddToQueueCommand = CreateCommand(
-            ReactiveCommand.Create(EnqueueUniquePlaylistTracks, hasTracks));
-
-        MoveItemCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask<(int oldIndex, int newIndex)>(async tuple =>
-            {
-                if (!CanReorderItems) return;
-                _lastLocalMutationTime = DateTime.Now;
-                InvalidateAllTracksCache();
-                await MoveItemAsync(tuple.oldIndex, tuple.newIndex);
-            }));
-
-        EditPlaylistCommand = CreateCommand(
-            ReactiveCommand.CreateFromTask(EditPlaylistAsync, canEdit));
-
-        CopyPlaylistLinkCommand = CreateCommand(ReactiveCommand.CreateFromTask(
+        CopyPlaylistLinkCommand = new AsyncRelayCommand(
             CopyPlaylistLinkAsync,
-            this.WhenAnyValue(x => x.HasYoutubeLink)
-                .ObserveOn(RxSchedulers.MainThreadScheduler)));
+            () => HasYoutubeLink);
 
-        OpenAuthorCommand = CreateCommand(ReactiveCommand.Create(() =>
+        OpenAuthorCommand = new RelayCommand(() =>
         {
             var url = _currentPlaylist?.AuthorUrl;
             if (string.IsNullOrEmpty(url)) return;
@@ -311,36 +313,37 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             {
                 Log.Warn($"[Playlist] Failed to open author URL: {ex.Message}");
             }
-        }));
+        });
 
-        // Reactive subscriptions
-        this.WhenAnyValue(x => x.CanEdit, x => x.FilterQuery)
-            .Subscribe(_ => CanReorderItems = CanEdit && CanReorder)
-            .DisposeWith(Disposables);
+        LibService.OnDataChanged += OnLibraryDataChanged;
 
-        _librarySubscription = Observable.FromEvent(
-                h => LibService.OnDataChanged += h,
-                h => LibService.OnDataChanged -= h)
-            .Throttle(TimeSpan.FromMilliseconds(600))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ =>
+        SubscribeToPlaybackSource();
+    }
+
+    private void OnLibraryDataChanged()
+    {
+        if (_isSuspended) return;
+        if ((DateTime.Now - _lastLocalMutationTime).TotalMilliseconds < LocalMutationDebounceMs)
+        {
+            Log.Debug("[Playlist] Ignoring OnDataChanged (recent local mutation)");
+            return;
+        }
+
+        _dataChangedDebounceTimer?.Stop();
+        _dataChangedDebounceTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(600),
+            DispatcherPriority.Background,
+            (_, _) =>
             {
+                _dataChangedDebounceTimer?.Stop();
                 if (_isSuspended) return;
-                if ((DateTime.Now - _lastLocalMutationTime).TotalMilliseconds < LocalMutationDebounceMs)
-                {
-                    Log.Debug("[Playlist] Ignoring OnDataChanged (recent local mutation)");
-                    return;
-                }
 
                 InvalidateAllTracksCache();
                 if (string.IsNullOrEmpty(_currentPlaylistId)) return;
 
-                Dispatcher.UIThread.InvokeAsync(
-                    () => LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None),
-                    DispatcherPriority.Background);
+                _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
             });
-
-        SubscribeToPlaybackSource();
+        _dataChangedDebounceTimer.Start();
     }
 
     #endregion
@@ -364,7 +367,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         _isSuspended = false;
         InvalidateAllTracksCache();
         UpdatePlaybackState();
-        this.RaisePropertyChanged(nameof(FormattedTrackCount));
+        OnPropertyChanged(nameof(FormattedTrackCount));
     }
 
     #endregion
@@ -388,7 +391,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             RemoveItemLocally(t.Id);
 
             TrackCount = Math.Max(0, TrackCount - 1);
-            this.RaisePropertyChanged(nameof(FormattedTrackCount));
+            OnPropertyChanged(nameof(FormattedTrackCount));
 
             if (t.Duration > TimeSpan.Zero)
             {
@@ -420,6 +423,12 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     protected override void OnPlay(TrackInfo track) =>
         _ = PlayFromPlaylistAsync(track);
 
+    protected override void RebuildVisibleItems()
+    {
+        base.RebuildVisibleItems();
+        CanReorderItems = CanEdit && CanReorder;
+    }
+
     #endregion
 
     #region Public API
@@ -444,14 +453,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         return _playlistLoadCts;
     }
 
-    /// <summary>
-    /// Загружает либо мягко обновляет плейлист с детерминированным разделением фаз навигации.
-    /// Выборка из SQLite выполняется в пуле потоков параллельно с анимацией перехода,
-    /// а заливка коллекции в UI-поток происходит строго после завершения анимации.
-    /// </summary>
-    /// <param name="playlistId">Идентификатор целевого плейлиста.</param>
-    /// <param name="showLoader">Флаг принудительного отображения состояния загрузки.</param>
-    /// <param name="ct">Внешний токен отмены операции.</param>
     private async Task LoadPlaylistAsync(string playlistId, bool showLoader, CancellationToken ct)
     {
         var loadCts = ReplacePlaylistLoadCts(ct);
@@ -465,7 +466,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         {
             loadCt.ThrowIfCancellationRequested();
 
-            // ФАЗА 1: Параллельное чтение из SQLite в ThreadPool во время анимации перехода
             var payload = await Task.Run(async () =>
             {
                 var playlist = await LibService.GetPlaylistAsync(playlistId).ConfigureAwait(false);
@@ -487,11 +487,9 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             if (payload is null || loadCt.IsCancellationRequested)
                 return;
 
-            // БАРЬЕР: Дожидаемся завершения анимации CrossFade (130 мс), не блокируя пул
             await WaitForTransitionAsync(loadCt).ConfigureAwait(false);
             loadCt.ThrowIfCancellationRequested();
 
-            // ФАЗА 2: Маршалинг в UI-поток после окончания анимации
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (loadCt.IsCancellationRequested)
@@ -518,11 +516,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         }
     }
 
-    /// <summary>
-    /// Применяет метаданные загруженного плейлиста к презентационному слою.
-    /// Вызывается строго на UI-потоке.
-    /// </summary>
-    /// <param name="payload">Загруженный пакет данных из SQLite.</param>
     private void ApplyLoadedPayload(PlaylistLoadPayload payload)
     {
         var playlist = payload.Playlist;
@@ -549,12 +542,13 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         FormattedViewCount = FormatViewCount(playlist.ViewCount);
         FormattedReleaseDate = FormatReleaseDate(playlist.ReleaseDate);
 
-        this.RaisePropertyChanged(nameof(PlaylistYoutubeUrl));
+        OnPropertyChanged(nameof(PlaylistYoutubeUrl));
         HasYoutubeLink = PlaylistYoutubeUrl is not null;
+        CopyPlaylistLinkCommand.NotifyCanExecuteChanged();
 
         _playlistTrackIds = new HashSet<string>(payload.TrackIds, StringComparer.Ordinal);
         TrackCount = payload.TrackIds.Count;
-        this.RaisePropertyChanged(nameof(FormattedTrackCount));
+        OnPropertyChanged(nameof(FormattedTrackCount));
 
         TotalDuration = payload.TotalDuration;
         FormatDuration();
@@ -661,7 +655,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var allTracks = await GetAllTracksAsync();
         if (allTracks.Count == 0) return;
 
-        // Удален форсированный сброс Shuffle. Сохраняем глобальный выбор пользователя!
         _playerControl.SetActivePlaylistId(_currentPlaylistId);
         IsShuffleActive = false;
         await Audio.StartQueueAsync(allTracks, allTracks[0]);
@@ -673,29 +666,30 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var allTracks = await GetAllTracksAsync();
         if (allTracks.Count == 0) return;
 
-        // Выбираем случайную песню в качестве отправной точки для воспроизведения
         var startTrack = allTracks[Random.Shared.Next(allTracks.Count)];
 
-        // Активируем Shuffle глобально. Теперь статус кнопки на PlayerBar визуально синхронизирован
         _playerControl.SetShuffleEnabled(true);
         _playerControl.SetActivePlaylistId(_currentPlaylistId);
 
-        // Движок AudioEngine автоматически перемешает оставшуюся очередь, закрепив выбранный трек на первой позиции
         await Audio.StartQueueAsync(allTracks, startTrack);
 
         IsShuffleActive = true;
-        Observable.Timer(TimeSpan.FromMilliseconds(800))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => IsShuffleActive = false)
-            .DisposeWith(Disposables);
+        _shuffleAnimationTimer?.Stop();
+        _shuffleAnimationTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(800),
+            DispatcherPriority.Normal,
+            (_, _) =>
+            {
+                IsShuffleActive = false;
+                _shuffleAnimationTimer?.Stop();
+            });
+        _shuffleAnimationTimer.Start();
     }
 
     private async Task PlayFromPlaylistAsync(TrackInfo track)
     {
         try
         {
-            // Удален форсированный сброс Shuffle. 
-            // Если Shuffle включен, при клике на трек очередь автоматически перемешается, воспроизведя этот трек первым.
             _playerControl.SetActivePlaylistId(_currentPlaylistId);
             IsShuffleActive = false;
             var allTracks = await GetAllTracksAsync();
@@ -715,10 +709,16 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         foreach (var track in allTracks.Where(static t => !t.IsDownloaded))
             Downloads.StartDownload(track);
 
-        Observable.Timer(TimeSpan.FromSeconds(2))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => IsDownloadingActive = false)
-            .DisposeWith(Disposables);
+        _downloadAnimationTimer?.Stop();
+        _downloadAnimationTimer = new DispatcherTimer(
+            TimeSpan.FromSeconds(2),
+            DispatcherPriority.Normal,
+            (_, _) =>
+            {
+                IsDownloadingActive = false;
+                _downloadAnimationTimer?.Stop();
+            });
+        _downloadAnimationTimer.Start();
     }
 
     private void EnqueueUniquePlaylistTracks()
@@ -728,27 +728,16 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         Audio.EnqueuePlaylistWithNotification(tracks, PlaylistName);
     }
 
-    /// <summary>
-    /// Подписка на аудио-движок для smart Play/Pause/Equalizer button.
-    /// </summary>
     private void SubscribeToPlaybackSource()
     {
-        Observable.CombineLatest(
-                _playerControl.ActivePlaylistIdObservable,
-                _playerControl.PlaybackStateObservable,
-                _playerControl.QueueCountObservable,
-                (activeId, state, qCount) => new { activeId, state.IsPlaying, qCount })
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(data =>
-            {
-                bool isActive = data.activeId == _currentPlaylistId;
-                IsPlayingThisPlaylist = isActive;
-                IsQueuePure = isActive && CheckQueuePurity();
-                IsPlayingPure = IsQueuePure && data.IsPlaying;
-                this.RaisePropertyChanged(nameof(PlayButtonTooltip));
-            })
-            .DisposeWith(Disposables);
+        _playerControl.ActivePlaylistIdChanged += OnActivePlaylistIdChanged;
+        _playerControl.IsPlayingChanged += OnIsPlayingChanged;
+        _playerControl.QueueCountChanged += OnQueueCountChanged;
     }
+
+    private void OnActivePlaylistIdChanged(string? _) => UpdatePlaybackState();
+    private void OnIsPlayingChanged(bool _) => UpdatePlaybackState();
+    private void OnQueueCountChanged(int _) => UpdatePlaybackState();
 
     private bool CheckQueuePurity()
     {
@@ -766,10 +755,11 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     private void UpdatePlaybackState()
     {
-        IsPlayingThisPlaylist = _playerControl.ActivePlaylistId == _currentPlaylistId;
-        IsQueuePure = IsPlayingThisPlaylist && CheckQueuePurity();
+        bool isActive = _playerControl.ActivePlaylistId == _currentPlaylistId;
+        IsPlayingThisPlaylist = isActive;
+        IsQueuePure = isActive && CheckQueuePurity();
         IsPlayingPure = IsQueuePure && _playerControl.IsPlaying;
-        this.RaisePropertyChanged(nameof(PlayButtonTooltip));
+        OnPropertyChanged(nameof(PlayButtonTooltip));
     }
 
     #endregion
@@ -935,13 +925,11 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
         long v = views.Value;
 
-        // Для точных чисел меньше 10 000 используем полноценное языковое склонение
         if (v < 10_000)
         {
             return SL.GetPlural("Playlist_Views", (int)v);
         }
 
-        // Для сокращенных единиц (K, M, B) форматируем число и подставляем форму множественного числа (other)
         string number = v switch
         {
             >= 1_000_000_000 => string.Create(CultureInfo.CurrentCulture, $"{v / 1_000_000_000.0:0.#}B"),
@@ -1011,10 +999,25 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         {
             Log.Debug($"[PlaylistVM] Disposing {_currentPlaylistId}");
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
-            _librarySubscription?.Dispose();
+
+            LibService.OnDataChanged -= OnLibraryDataChanged;
+            _dataChangedDebounceTimer?.Stop();
+            _dataChangedDebounceTimer = null;
+
+            _shuffleAnimationTimer?.Stop();
+            _shuffleAnimationTimer = null;
+
+            _downloadAnimationTimer?.Stop();
+            _downloadAnimationTimer = null;
+
+            _playerControl.ActivePlaylistIdChanged -= OnActivePlaylistIdChanged;
+            _playerControl.IsPlayingChanged -= OnIsPlayingChanged;
+            _playerControl.QueueCountChanged -= OnQueueCountChanged;
+
             _playlistLoadCts?.Cancel();
             _playlistLoadCts?.Dispose();
             _playlistLoadCts = null;
+
             InvalidateAllTracksCache();
             _currentPlaylist = null;
         }
@@ -1024,8 +1027,8 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     #endregion
 
     private sealed record PlaylistLoadPayload(
-    Core.Models.Playlist Playlist,
-    List<string> TrackIds,
-    TimeSpan TotalDuration,
-    List<TrackInfo> Tracks);
+        Core.Models.Playlist Playlist,
+        List<string> TrackIds,
+        TimeSpan TotalDuration,
+        List<TrackInfo> Tracks);
 }

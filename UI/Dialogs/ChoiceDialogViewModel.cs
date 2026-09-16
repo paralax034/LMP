@@ -1,7 +1,3 @@
-using System.Reactive;
-using ReactiveUI;
-
-
 namespace LMP.UI.Dialogs;
 
 /// <summary>
@@ -34,13 +30,13 @@ public sealed class ChoiceButtonViewModel
     public bool IsPrimary { get; }
 
     /// <summary>Команда нажатия.</summary>
-    public ReactiveCommand<Unit, Unit> ClickCommand { get; }
+    public IRelayCommand ClickCommand { get; }
 
     public ChoiceButtonViewModel(string text, bool isPrimary, Action onClick)
     {
         Text = text;
         IsPrimary = isPrimary;
-        ClickCommand = ReactiveCommand.Create(onClick);
+        ClickCommand = new RelayCommand(onClick);
     }
 }
 
@@ -65,7 +61,7 @@ public sealed class ChoiceButtonViewModel
 /// 
 /// <para>Кнопка Cancel добавляется автоматически если указан <c>cancelText</c>.</para>
 /// </summary>
-public sealed partial class ChoiceDialogViewModel : ReactiveObject
+public sealed partial class ChoiceDialogViewModel : ObservableObject
 {
     /// <summary>Заголовок диалога.</summary>
     public string Title { get; }
@@ -80,7 +76,8 @@ public sealed partial class ChoiceDialogViewModel : ReactiveObject
     public bool HasCheckBox => !string.IsNullOrEmpty(CheckBoxText);
 
     /// <summary>Текущее состояние чекбокса.</summary>
-    [Reactive] public partial bool IsChecked { get; set; }
+    [ObservableProperty]
+    public partial bool IsChecked { get; set; }
 
     /// <summary>Список кнопок для отображения.</summary>
     public IReadOnlyList<ChoiceButtonViewModel> Buttons { get; }

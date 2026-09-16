@@ -1,9 +1,5 @@
 using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Linq;
 using Avalonia.Media.Imaging;
-using ReactiveUI;
-
 
 namespace LMP.UI.Dialogs;
 
@@ -64,25 +60,31 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     public ObservableCollection<TrackCoverItemViewModel> TrackCovers { get; } = [];
 
     /// <summary>Превью сгенерированной мозаики.</summary>
-    [Reactive] public partial Bitmap? MosaicPreview { get; private set; }
+    [ObservableProperty]
+    public partial Bitmap? MosaicPreview { get; set; }
 
     /// <summary>Есть ли превью для отображения.</summary>
-    [Reactive] public partial bool HasPreview { get; private set; }
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ApplyCommand))]
+    public partial bool HasPreview { get; set; }
 
     /// <summary>Текст подсказки: "Выберите 1-4 обложки".</summary>
-    [Reactive] public partial string SelectionHint { get; private set; } = "";
+    [ObservableProperty]
+    public partial string SelectionHint { get; set; } = "";
 
     /// <summary>Статус выбора: "Выбрано: 2/4".</summary>
-    [Reactive] public partial string SelectionStatus { get; private set; } = "";
+    [ObservableProperty]
+    public partial string SelectionStatus { get; set; } = "";
 
     /// <summary>
     /// Результат: путь к сохранённому PNG файлу мозаики.
     /// Заполняется после Apply. null = ещё не применено.
     /// </summary>
-    [Reactive] public partial string? ResultPath { get; private set; }
+    [ObservableProperty]
+    public partial string? ResultPath { get; set; }
 
     /// <summary>Применить мозаику: сохраняет PNG и устанавливает ResultPath.</summary>
-    public ReactiveCommand<Unit, Unit> ApplyCommand { get; }
+    public IAsyncRelayCommand ApplyCommand { get; }
 
     /// <summary>
     /// Создаёт VM для выбора обложки из треков.
@@ -104,13 +106,12 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
         }
 
         // Команда Apply: сохраняет мозаику на диск
-        var canApply = this.WhenAnyValue(x => x.HasPreview);
-        ApplyCommand = CreateCommand(ReactiveCommand.CreateFromTask(ApplyAsync, canApply));
+        ApplyCommand = new AsyncRelayCommand(ApplyAsync, () => HasPreview);
 
         // Подписка на toggle каждого элемента
         foreach (var item in TrackCovers)
         {
-            item.ToggleCommand = ReactiveCommand.Create(() => ToggleSelection(item));
+            item.ToggleCommand = new RelayCommand(() => ToggleSelection(item));
         }
 
         UpdateSelectionStatus();
@@ -343,7 +344,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
 /// <summary>
 /// ViewModel одной обложки трека в сетке выбора.
 /// </summary>
-public sealed partial class TrackCoverItemViewModel : ReactiveObject
+public sealed partial class TrackCoverItemViewModel : ObservableObject
 {
     /// <summary>ID трека (для генерации имени файла мозаики).</summary>
     public string TrackId { get; }
@@ -355,13 +356,15 @@ public sealed partial class TrackCoverItemViewModel : ReactiveObject
     public string TrackTitle { get; }
 
     /// <summary>Выбран ли трек для мозаики.</summary>
-    [Reactive] public partial bool IsSelected { get; set; }
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; }
 
     /// <summary>Порядковый номер выбора (1-4). 0 = не выбран.</summary>
-    [Reactive] public partial int SelectionOrder { get; set; }
+    [ObservableProperty]
+    public partial int SelectionOrder { get; set; }
 
     /// <summary>Команда переключения выбора. Устанавливается parent VM.</summary>
-    public ReactiveCommand<Unit, Unit>? ToggleCommand { get; set; }
+    public IRelayCommand? ToggleCommand { get; set; }
 
     public TrackCoverItemViewModel(string trackId, string thumbnailUrl, string trackTitle)
     {

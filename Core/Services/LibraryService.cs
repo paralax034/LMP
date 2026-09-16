@@ -1,8 +1,7 @@
-﻿using System.Reactive.Linq;
-using System.Text.Json;
+﻿using System.Text.Json;
 using LMP.Core.Data;
 using LMP.Core.Data.Repositories;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 
 namespace LMP.Core.Services;
 
@@ -25,7 +24,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     private readonly ITrackRepository _tracks;
     private readonly IPlaylistRepository _playlists;
     private readonly ISettingsRepository _settings;
-    private readonly IDbContextFactory<LibraryDbContext> _dbFactory;
+    private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly CookieAuthService _auth;
 
     private readonly SemaphoreSlim _settingsLock = new(1, 1);
@@ -69,19 +68,28 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     private string CurrentOwnerId => _auth.State.DisplayId;
 
+    /// <summary>
+    /// Инициализирует новый экземпляр службы <see cref="LibraryService"/>.
+    /// </summary>
+    /// <param name="registry">Реестр канонических треков и L1-кэша метаданных.</param>
+    /// <param name="tracks">Репозиторий персистентного хранения треков.</param>
+    /// <param name="playlists">Репозиторий списков воспроизведения и связей треков.</param>
+    /// <param name="settings">Хранилище пользовательских настроек приложения.</param>
+    /// <param name="connectionFactory">Фабрика нативных подключений SQLite с контролем памяти.</param>
+    /// <param name="auth">Служба аутентификации и управления сессиями Google/YouTube.</param>
     public LibraryService(
         TrackRegistry registry,
         ITrackRepository tracks,
         IPlaylistRepository playlists,
         ISettingsRepository settings,
-        IDbContextFactory<LibraryDbContext> dbFactory,
+        ISqliteConnectionFactory connectionFactory,
         CookieAuthService auth)
     {
         _registry = registry;
         _tracks = tracks;
         _playlists = playlists;
         _settings = settings;
-        _dbFactory = dbFactory;
+        _connectionFactory = connectionFactory;
         _auth = auth;
 
         _saveDebounceTimer = new Timer(OnSaveTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
@@ -217,7 +225,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         sw.Stop();
         Log.Info($"[LibraryService] Initialized in {sw.ElapsedMilliseconds}ms");
 
-        // Установка флага должна происходить строго перед вызовом события во избежание гонок
         IsInitialized = true;
         OnInitialized?.Invoke();
     }
@@ -677,9 +684,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         return all;
     }
 
-    /// <summary>
-    /// Загружает треки плейлиста атомарно: результат не зависит от параллельного Clear() реестра.
-    /// </summary>
     public async Task<List<TrackInfo>> GetPlaylistTracksAsync(
         string playlistId, CancellationToken ct = default)
     {
@@ -689,9 +693,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         return await _registry.PreloadAndReturnAsync(trackIds, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Загружает страницу треков плейлиста атомарно с поддержкой пагинации.
-    /// </summary>
     public async Task<List<TrackInfo>> GetPlaylistTracksAsync(
         string playlistId, int limit, int offset = 0, CancellationToken ct = default)
     {
@@ -799,11 +800,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         set { Settings.DownloadPath = value; SaveSettingsImmediate(); }
     }
 
-    /// <summary>
-    /// Применяет мутацию к настройкам в памяти и перезапускает таймер дебаунса записи в БД.
-    /// Не аллоцирует Tasks и не выбрасывает исключений отмены.
-    /// </summary>
-    /// <param name="update">Делегат мутации настроек.</param>
     public void UpdateSettings(Action<AppSettings> update)
     {
         update(Settings);
@@ -858,18 +854,12 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
     }
 
-    /// <summary>
-    /// Принудительно и синхронно сбрасывает настройки в базу данных.
-    /// </summary>
     public void SaveSettingsImmediate() => SaveSettingsSync();
 
     #endregion
 
     #region Поиск
 
-    /// <summary>
-    /// Извлекает историю поиска текущего пользователя из изолированной БД-таблицы параметров.
-    /// </summary>
     public async Task<List<string>> GetSearchHistoryAsync(CancellationToken ct = default)
     {
         var key = $"SearchHistory_{CurrentOwnerId}";
@@ -877,9 +867,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
             AppJsonContext.Default.ListString, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Сохраняет историю поиска текущего пользователя в изолированную БД-таблицу параметров.
-    /// </summary>
     public async Task SaveSearchHistoryAsync(List<string> history, CancellationToken ct = default)
     {
         var key = $"SearchHistory_{CurrentOwnerId}";
@@ -899,15 +886,28 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     #region Очистка и завершение
 
+    /// <summary>
+    /// Полностью сбрасывает базу данных и кэши приложения до исходного состояния.
+    /// </summary>
     public async Task ResetAsync(CancellationToken ct = default)
     {
         _registry.Clear();
 
-        await using var ctx = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        await ctx.Database.EnsureDeletedAsync(ct).ConfigureAwait(false);
-        await ctx.Database.EnsureCreatedAsync(ct).ConfigureAwait(false);
-        await ctx.OptimizeAsync(ct).ConfigureAwait(false);
-        await ctx.EnsureFtsTablesAsync(ct).ConfigureAwait(false);
+        SqliteConnection.ClearAllPools();
+        var dbPath = G.FilePath.Database;
+        if (File.Exists(dbPath))
+        {
+            try { File.Delete(dbPath); } catch { }
+            try { File.Delete(dbPath + "-wal"); } catch { }
+            try { File.Delete(dbPath + "-shm"); } catch { }
+        }
+
+        await using var connection = await _connectionFactory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await connection.EnsureTablesCreatedAsync(ct).ConfigureAwait(false);
+        await connection.MigrateSchemaAsync(ct).ConfigureAwait(false);
+        await connection.OptimizeAsync(ct).ConfigureAwait(false);
+        await connection.EnsureFtsTablesAsync(ct).ConfigureAwait(false);
+        await connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, ct).ConfigureAwait(false);
 
         Settings = new AppSettings();
         OnDataChanged?.Invoke();

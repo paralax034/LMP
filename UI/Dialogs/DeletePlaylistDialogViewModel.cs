@@ -1,16 +1,14 @@
-using System.Reactive;
-using ReactiveUI;
-
-
 namespace LMP.UI.Dialogs;
 
 public sealed partial class DeletePlaylistDialogViewModel : ViewModelBase
 {
     public string PlaylistName { get; }
 
-    [Reactive] public partial bool IsLocalOnly { get; set; } = true;
-    [Reactive] public partial bool IsDeleteEverywhere { get; set; }
+    [ObservableProperty]
+    public partial bool IsLocalOnly { get; set; } = true;
 
+    [ObservableProperty]
+    public partial bool IsDeleteEverywhere { get; set; }
     public bool CanDeleteFromCloud { get; }
 
     /// <summary>
@@ -18,26 +16,26 @@ public sealed partial class DeletePlaylistDialogViewModel : ViewModelBase
     /// </summary>
     public Action<DeletePlaylistResult?>? OnResult { get; set; }
 
-    public ReactiveCommand<Unit, Unit> ConfirmCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand ConfirmCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     public DeletePlaylistDialogViewModel(Playlist playlist, bool isAuthenticated)
     {
         PlaylistName = playlist.Name;
         CanDeleteFromCloud = playlist.IsFromAccount && isAuthenticated;
 
-        ConfirmCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ConfirmCommand = new RelayCommand(() =>
         {
             var result = new DeletePlaylistResult(
                 DeleteLocally: true,
                 DeleteFromCloud: IsDeleteEverywhere && CanDeleteFromCloud);
             OnResult?.Invoke(result);
-        }));
+        });
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelCommand = new RelayCommand(() =>
         {
             OnResult?.Invoke(null);
-        }));
+        });
     }
 }
 

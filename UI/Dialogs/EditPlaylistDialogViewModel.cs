@@ -1,6 +1,3 @@
-using System.Reactive;
-using ReactiveUI;
-
 namespace LMP.UI.Dialogs;
 
 /// <summary>
@@ -17,8 +14,8 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
     /// </summary>
     public Action<EditPlaylistResult?>? OnResult { get; set; }
 
-    public ReactiveCommand<Unit, Unit> SaveCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand SaveCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     public EditPlaylistDialogViewModel(
         Playlist playlist,
@@ -37,7 +34,7 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
             OnResult?.Invoke(result);
         };
 
-        SaveCommand = CreateCommand(ReactiveCommand.Create(() =>
+        SaveCommand = new RelayCommand(() =>
         {
             var result = Editor.ToResult();
 
@@ -45,11 +42,19 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
                 result.SyncToCloud = Editor.IsSyncedToCloud;
 
             OnResult?.Invoke(result);
-        }, Editor.CanSave));
+        }, () => Editor.CanSave);
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelCommand = new RelayCommand(() =>
         {
             OnResult?.Invoke(null);
-        }));
+        });
+
+        Editor.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName is nameof(PlaylistEditorViewModel.HasErrors) or nameof(PlaylistEditorViewModel.CanSave))
+            {
+                SaveCommand.NotifyCanExecuteChanged();
+            }
+        };
     }
 }

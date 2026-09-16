@@ -1,7 +1,4 @@
-using System.Reactive;
 using Avalonia.Threading;
-using ReactiveUI;
-
 
 namespace LMP.UI.Dialogs;
 
@@ -14,12 +11,19 @@ public sealed partial class MigrationWarningDialogViewModel : ViewModelBase
     private readonly DispatcherTimer _timer;
     private int _secondsRemaining;
 
-    [Reactive] public partial string Title { get; set; } = string.Empty;
-    [Reactive] public partial string Message { get; set; } = string.Empty;
-    [Reactive] public partial string ButtonText { get; set; } = string.Empty;
-    [Reactive] public partial bool CanClose { get; set; }
+    [ObservableProperty]
+    public partial string Title { get; set; } = string.Empty;
 
-    public ReactiveCommand<Unit, Unit> CloseCommand { get; }
+    [ObservableProperty]
+    public partial string Message { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string ButtonText { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CloseCommand))]
+    public partial bool CanClose { get; set; }
+    public IRelayCommand CloseCommand { get; }
 
     public MigrationWarningDialogViewModel(
         string title,
@@ -34,10 +38,10 @@ public sealed partial class MigrationWarningDialogViewModel : ViewModelBase
 
         UpdateButtonState();
 
-        CloseCommand = ReactiveCommand.Create(() =>
+        CloseCommand = new RelayCommand(() =>
         {
             if (CanClose) _onClose();
-        }, this.WhenAnyValue(x => x.CanClose));
+        }, () => CanClose);
 
         _timer = new DispatcherTimer(
             TimeSpan.FromSeconds(1),

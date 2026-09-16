@@ -1,6 +1,5 @@
 using LMP.Core.Audio.Helpers;
 using LMP.Core.Exceptions;
-using ReactiveUI;
 
 namespace LMP.Core.Services;
 
@@ -363,10 +362,10 @@ public sealed partial class AudioEngine
 
         RaiseOnUI(() =>
         {
-            this.RaisePropertyChanged(nameof(IsPlaying));
-            this.RaisePropertyChanged(nameof(IsPaused));
-            this.RaisePropertyChanged(nameof(IsLoading));
-            this.RaisePropertyChanged(nameof(TotalDuration));
+            OnPropertyChanged(nameof(IsPlaying));
+            OnPropertyChanged(nameof(IsPaused));
+            OnPropertyChanged(nameof(IsLoading));
+            OnPropertyChanged(nameof(TotalDuration));
             OnPlaybackStateChanged?.Invoke(state == PlaybackState.Playing, state == PlaybackState.Paused);
             OnLoadingStateChanged?.Invoke(IsLoading);
         });

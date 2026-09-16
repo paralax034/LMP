@@ -1,7 +1,5 @@
-using System.Reactive;
-using System.Reactive.Linq;
-using ReactiveUI;
 using Avalonia.Media;
+using Avalonia.Threading;
 
 namespace LMP.UI.Features.Library;
 
@@ -24,6 +22,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     private readonly Action<string> _onOpen;
 
     private readonly EventHandler<string> _languageChangedHandler;
+    private DispatcherTimer? _playbackCheckTimer;
     private bool _isDisposed;
 
     #endregion
@@ -51,40 +50,48 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Display
 
     /// <summary>
-    /// Название плейлиста. Реактивное — обновляется при переименовании.
+    /// Название плейлиста. Обновляется при переименовании.
     /// </summary>
-    [Reactive] public partial string Name { get; private set; }
+    [ObservableProperty] public partial string Name { get; private set; }
 
     /// <summary>
-    /// URL обложки с upscale для YouTube-превью. Реактивное — обновляется при смене обложки.
+    /// URL обложки с upscale для YouTube-превью. Обновляется при смене обложки.
     /// </summary>
-    [Reactive] public partial string? ThumbnailUrl { get; private set; }
+    [ObservableProperty] public partial string? ThumbnailUrl { get; private set; }
 
     /// <summary>
-    /// Количество треков в плейлисте. Реактивное — обновляется при add/remove треков.
+    /// Количество треков в плейлисте. Обновляется при add/remove треков.
     /// </summary>
-    [Reactive] public partial int TrackCount { get; set; }
+    [ObservableProperty] public partial int TrackCount { get; set; }
 
     /// <summary>
     /// Видимость карточки. Управляется stagger-анимацией в <see cref="LibraryViewModel"/>.
     /// </summary>
-    [Reactive] public partial bool IsVisible { get; set; }
+    [ObservableProperty] public partial bool IsVisible { get; set; }
+
+    partial void OnTrackCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(FormattedTrackCount));
+    }
+
+    partial void OnThumbnailUrlChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasThumbnail));
+        OnPropertyChanged(nameof(ShowPlaceholder));
+    }
 
     /// <summary>
     /// Форматированное количество треков с правильным склонением.
-    /// Пересчитывается через PropertyChanged при изменении TrackCount.
     /// </summary>
     public string FormattedTrackCount => FormatTrackCount(TrackCount);
 
     /// <summary>
     /// Есть обложка для отображения (не пустая и не Liked).
-    /// Пересчитывается через PropertyChanged при изменении ThumbnailUrl.
     /// </summary>
     public bool HasThumbnail => !string.IsNullOrEmpty(ThumbnailUrl) && !IsLikedPlaylist;
 
     /// <summary>
     /// Показывать placeholder вместо обложки.
-    /// Пересчитывается через PropertyChanged при изменении ThumbnailUrl.
     /// </summary>
     public bool ShowPlaceholder => string.IsNullOrEmpty(ThumbnailUrl) && !IsLikedPlaylist;
 
@@ -114,38 +121,35 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Author & Ownership
 
     /// <summary>
-    /// Имя автора/владельца плейлиста. Реактивное.
+    /// Имя автора/владельца плейлиста.
     /// </summary>
-    [Reactive] public partial string? Author { get; private set; }
+    [ObservableProperty] public partial string? Author { get; private set; }
 
     /// <summary>
     /// Показывать строку автора на карточке.
     /// True только для чужих плейлистов с известным автором.
-    /// Реактивное — обновляется при смене ownership.
     /// </summary>
-    [Reactive] public partial bool ShowAuthor { get; private set; }
+    [ObservableProperty] public partial bool ShowAuthor { get; private set; }
 
     /// <summary>
     /// Отображаемая строка автора с предлогом «от X».
-    /// Локализованная, реактивная.
     /// </summary>
-    [Reactive] public partial string? AuthorDisplayText { get; private set; }
+    [ObservableProperty] public partial string? AuthorDisplayText { get; private set; }
 
     /// <summary>
     /// Tooltip для строки автора: «Плейлист от X».
-    /// Локализованный, реактивный.
     /// </summary>
-    [Reactive] public partial string? AuthorTooltip { get; private set; }
+    [ObservableProperty] public partial string? AuthorTooltip { get; private set; }
 
     /// <summary>
-    /// Плейлист приватный (🔒). Реактивное.
+    /// Плейлист приватный (🔒).
     /// </summary>
-    [Reactive] public partial bool IsPrivate { get; private set; }
+    [ObservableProperty] public partial bool IsPrivate { get; private set; }
 
     /// <summary>
-    /// Плейлист по ссылке (🔗). Реактивное.
+    /// Плейлист по ссылке (🔗).
     /// </summary>
-    [Reactive] public partial bool IsUnlisted { get; private set; }
+    [ObservableProperty] public partial bool IsUnlisted { get; private set; }
 
     /// <summary>
     /// Плейлист хранится локально (LocalOnly или TwoWaySync).
@@ -175,15 +179,13 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     /// Плейлист связан с YouTube: есть YoutubeId и он доступен,
     /// или это Liked при аутентифицированном пользователе.
     /// Используется для отображения иконки облака (☁).
-    /// Реактивное.
     /// </summary>
-    [Reactive] public partial bool HasCloudSource { get; private set; }
+    [ObservableProperty] public partial bool HasCloudSource { get; private set; }
 
     /// <summary>
     /// Двусторонняя синхронизация активна (TwoWaySync или Liked + auth).
-    /// Реактивное.
     /// </summary>
-    [Reactive] public partial bool IsTwoWaySynced { get; private set; }
+    [ObservableProperty] public partial bool IsTwoWaySynced { get; private set; }
 
     #endregion
 
@@ -193,22 +195,27 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     /// Данный плейлист активен в плеере и очередь «чистая».
     /// Используется для анимации пульсации рамки карточки.
     /// </summary>
-    [Reactive] public partial bool IsActive { get; private set; }
+    [ObservableProperty] public partial bool IsActive { get; private set; }
 
     /// <summary>
     /// Очередь полностью совпадает с треками этого плейлиста.
     /// </summary>
-    [Reactive] public partial bool IsQueuePure { get; private set; }
+    [ObservableProperty] public partial bool IsQueuePure { get; private set; }
 
     /// <summary>
     /// Очередь чистая и прямо сейчас активно играет.
     /// Используется для иконки Play/Pause в контекстном меню.
     /// </summary>
-    [Reactive] public partial bool IsPlayingPure { get; private set; }
+    [ObservableProperty] public partial bool IsPlayingPure { get; private set; }
+
+    partial void OnIsPlayingPureChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PlayMenuHeader));
+        OnPropertyChanged(nameof(PlayMenuIcon));
+    }
 
     /// <summary>
     /// Текст для пункта контекстного меню «Воспроизвести / Пауза».
-    /// Пересчитывается через PropertyChanged при изменении IsPlayingPure.
     /// </summary>
     public string PlayMenuHeader => IsPlayingPure
         ? (LocalizationService.Instance["Player_Pause"] ?? "Pause")
@@ -216,7 +223,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
 
     /// <summary>
     /// Геометрия иконки Play/Pause для контекстного меню.
-    /// Пересчитывается через PropertyChanged при изменении IsPlayingPure.
     /// </summary>
     public Geometry? PlayMenuIcon
     {
@@ -235,22 +241,22 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Commands
 
     /// <summary>Открыть плейлист (навигация).</summary>
-    public ReactiveCommand<Unit, Unit> OpenCommand { get; }
+    public IRelayCommand OpenCommand { get; }
 
     /// <summary>Удалить плейлист.</summary>
-    public ReactiveCommand<Unit, Unit> DeleteCommand { get; }
+    public IAsyncRelayCommand DeleteCommand { get; }
 
     /// <summary>Добавить все треки в очередь.</summary>
-    public ReactiveCommand<Unit, Unit> AddToQueueCommand { get; }
+    public IAsyncRelayCommand AddToQueueCommand { get; }
 
     /// <summary>Воспроизвести плейлист (smart play/pause).</summary>
-    public ReactiveCommand<Unit, Unit> PlayCommand { get; }
+    public IAsyncRelayCommand PlayCommand { get; }
 
     /// <summary>Открыть диалог редактирования.</summary>
-    public ReactiveCommand<Unit, Unit> EditCommand { get; }
+    public IAsyncRelayCommand EditCommand { get; }
 
     /// <summary>Скопировать ссылку на YouTube-плейлист.</summary>
-    public ReactiveCommand<Unit, Unit> CopyLinkCommand { get; }
+    public IAsyncRelayCommand CopyLinkCommand { get; }
 
     #endregion
 
@@ -290,36 +296,35 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         ApplyCloudState(playlist);
 
         // ═══ Commands ═══
-        OpenCommand = CreateCommand(ReactiveCommand.Create(() =>
+        OpenCommand = new RelayCommand(() =>
         {
             if (!_isDisposed) _onOpen(Playlist.Id);
-        }));
+        });
 
-        DeleteCommand = CreateCommand(ReactiveCommand.CreateFromTask(
+        DeleteCommand = new AsyncRelayCommand(
             async () =>
             {
                 if (!_isDisposed && _onDelete != null)
                     await _onDelete(Playlist.Id);
             },
-            this.WhenAnyValue(x => x.CanDelete)
-                .ObserveOn(RxSchedulers.MainThreadScheduler)));
+            () => CanDelete);
 
-        AddToQueueCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        AddToQueueCommand = new AsyncRelayCommand(async () =>
         {
             if (!_isDisposed) await _addToQueueAction(Playlist);
-        }));
+        });
 
-        PlayCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        PlayCommand = new AsyncRelayCommand(async () =>
         {
             if (!_isDisposed) await _playAction(Playlist);
-        }));
+        });
 
-        EditCommand = CreateCommand(ReactiveCommand.CreateFromTask(async () =>
+        EditCommand = new AsyncRelayCommand(async () =>
         {
             if (!_isDisposed && _onEdit != null) await _onEdit(Playlist);
-        }));
+        });
 
-        CopyLinkCommand = CreateCommand(ReactiveCommand.CreateFromTask(
+        CopyLinkCommand = new AsyncRelayCommand(
             async () =>
             {
                 if (_isDisposed || string.IsNullOrEmpty(YoutubeUrl)) return;
@@ -328,90 +333,89 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
                     LocalizationService.Instance["Playlist_LinkCopied"] ?? "Copied!",
                     CopyHintKind.Success);
             },
-            this.WhenAnyValue(x => x.YoutubeUrl, url => !string.IsNullOrEmpty(url))
-                .ObserveOn(RxSchedulers.MainThreadScheduler)));
+            () => !string.IsNullOrEmpty(YoutubeUrl));
 
         // ═══ Playback state tracking ═══
-        Observable.CombineLatest(
-                _playerControl.ActivePlaylistIdObservable,
-                _playerControl.PlaybackStateObservable,
-                _playerControl.QueueCountObservable,
-                (activeId, state, qCount) => new { activeId, state.IsPlaying, qCount })
-            .Throttle(TimeSpan.FromMilliseconds(50))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(async data =>
-            {
-                if (_isDisposed) return;
-
-                if (data.activeId != Id || data.qCount != TrackCount)
-                {
-                    IsActive = false;
-                    IsQueuePure = false;
-                    IsPlayingPure = false;
-                    return;
-                }
-
-                try
-                {
-                    var trackIds = await _library.GetPlaylistTrackIdsAsync(Id);
-                    var trackIdSet = new HashSet<string>(trackIds, StringComparer.Ordinal);
-                    var queue = _audio.Queue;
-
-                    bool isPure = queue.Count == trackIds.Count;
-                    if (isPure)
-                    {
-                        for (int i = 0; i < queue.Count; i++)
-                        {
-                            if (!trackIdSet.Contains(queue[i].Id))
-                            {
-                                isPure = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    IsActive = isPure;
-                    IsQueuePure = isPure;
-                    IsPlayingPure = isPure && data.IsPlaying;
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"[PlaylistCard] Queue purity check error: {ex.Message}");
-                    IsActive = false;
-                    IsQueuePure = false;
-                    IsPlayingPure = false;
-                }
-            })
-            .DisposeWith(Disposables);
-
-        // ═══ Derived property invalidation ═══
-        this.WhenAnyValue(x => x.IsPlayingPure)
-            .Subscribe(_ =>
-            {
-                this.RaisePropertyChanged(nameof(PlayMenuHeader));
-                this.RaisePropertyChanged(nameof(PlayMenuIcon));
-            })
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.TrackCount)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(FormattedTrackCount)))
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.ThumbnailUrl)
-            .Subscribe(_ =>
-            {
-                this.RaisePropertyChanged(nameof(HasThumbnail));
-                this.RaisePropertyChanged(nameof(ShowPlaceholder));
-            })
-            .DisposeWith(Disposables);
+        _playerControl.ActivePlaylistIdChanged += OnActivePlaylistIdChanged;
+        _playerControl.IsPlayingChanged += OnIsPlayingChanged;
+        _playerControl.QueueCountChanged += OnQueueCountChanged;
 
         _languageChangedHandler = (_, _) =>
         {
-            this.RaisePropertyChanged(nameof(FormattedTrackCount));
-            this.RaisePropertyChanged(nameof(PlayMenuHeader));
+            OnPropertyChanged(nameof(FormattedTrackCount));
+            OnPropertyChanged(nameof(PlayMenuHeader));
             RefreshAuthorTexts();
         };
         LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
+
+        SchedulePurityCheck();
+    }
+
+    private void OnActivePlaylistIdChanged(string? activeId) => SchedulePurityCheck();
+    private void OnIsPlayingChanged(bool isPlaying) => SchedulePurityCheck();
+    private void OnQueueCountChanged(int queueCount) => SchedulePurityCheck();
+
+    private void SchedulePurityCheck()
+    {
+        if (_isDisposed) return;
+
+        _playbackCheckTimer?.Stop();
+        _playbackCheckTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(50),
+            DispatcherPriority.Normal,
+            async (_, _) =>
+            {
+                _playbackCheckTimer?.Stop();
+                if (_isDisposed) return;
+                await CheckPlaybackPurityAsync();
+            });
+        _playbackCheckTimer.Start();
+    }
+
+    private async Task CheckPlaybackPurityAsync()
+    {
+        string? activeId = _playerControl.ActivePlaylistId;
+        bool isPlaying = _playerControl.IsPlaying;
+        int qCount = _playerControl.QueueCount;
+
+        if (activeId != Id || qCount != TrackCount)
+        {
+            IsActive = false;
+            IsQueuePure = false;
+            IsPlayingPure = false;
+            return;
+        }
+
+        try
+        {
+            var trackIds = await _library.GetPlaylistTrackIdsAsync(Id);
+            var trackIdSet = new HashSet<string>(trackIds, StringComparer.Ordinal);
+            var queue = _audio.Queue;
+
+            bool isPure = queue.Count == trackIds.Count;
+            if (isPure)
+            {
+                for (int i = 0; i < queue.Count; i++)
+                {
+                    if (!trackIdSet.Contains(queue[i].Id))
+                    {
+                        isPure = false;
+                        break;
+                    }
+                }
+            }
+
+            IsActive = isPure;
+            IsQueuePure = isPure;
+            IsPlayingPure = isPure && isPlaying;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlaylistCard] Queue purity check error: {ex.Message}");
+            IsActive = false;
+            IsQueuePure = false;
+            IsPlayingPure = false;
+        }
     }
 
     #endregion
@@ -471,6 +475,9 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
             Playlist.IsCloudUnavailable = playlist.IsCloudUnavailable;
             ApplyCloudState(playlist);
         }
+
+        DeleteCommand.NotifyCanExecuteChanged();
+        CopyLinkCommand.NotifyCanExecuteChanged();
     }
 
     #endregion
@@ -478,8 +485,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Helpers
 
     /// <summary>
-    /// Выставляет все reactive-свойства ownership/visibility/author из модели.
-    /// Вызывается из конструктора и <see cref="UpdateFrom"/>.
+    /// Выставляет все свойства ownership/visibility/author из модели.
     /// </summary>
     private void ApplyOwnershipState(Core.Models.Playlist playlist)
     {
@@ -491,8 +497,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выставляет все reactive-свойства cloud/sync из модели.
-    /// Вызывается из конструктора и <see cref="UpdateFrom"/>.
+    /// Выставляет все свойства cloud/sync из модели.
     /// </summary>
     private void ApplyCloudState(Core.Models.Playlist playlist)
     {
@@ -505,7 +510,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
 
     /// <summary>
     /// Пересчитывает локализованные строки автора.
-    /// Вызывается при смене автора, ownership или языка.
     /// </summary>
     private void RefreshAuthorTexts()
     {
@@ -568,6 +572,14 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         if (disposing)
         {
             _isDisposed = true;
+
+            _playbackCheckTimer?.Stop();
+            _playbackCheckTimer = null;
+
+            _playerControl.ActivePlaylistIdChanged -= OnActivePlaylistIdChanged;
+            _playerControl.IsPlayingChanged -= OnIsPlayingChanged;
+            _playerControl.QueueCountChanged -= OnQueueCountChanged;
+
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
         }
         base.Dispose(disposing);

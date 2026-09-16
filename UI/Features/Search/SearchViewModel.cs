@@ -1,17 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
-using System.Reactive;
-using System.Reactive.Linq;
 using Avalonia.Threading;
-using LMP.Core.Audio.Http;
-using LMP.Core.Helpers.Extensions;
-using LMP.Core.Models;
-using LMP.Core.Services;
 using LMP.Core.Youtube.Search;
-using LMP.UI.Features.Shared;
-using LMP.UI.ViewModels;
-using ReactiveUI;
 
 namespace LMP.UI.Features.Search;
 
@@ -42,6 +33,8 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     private readonly ImageCacheService _imageCache;
     private readonly HashSet<string> _dismissedSuggestions = new(StringComparer.OrdinalIgnoreCase);
 
+    private DispatcherTimer? _suggestDebounceTimer;
+
     private string _currentQuery = string.Empty;
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _suggestCts;
@@ -63,17 +56,17 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         ? LibService.Settings.SearchBatchSize
         : 25;
 
-    [Reactive] public partial string SearchQuery { get; set; } = string.Empty;
+    [ObservableProperty] public partial string SearchQuery { get; set; } = string.Empty;
 
     /// <summary>
     /// Полный текст автодополнения (Ghost Text), применяемый при нажатии Tab / стрелки вправо.
     /// </summary>
-    [Reactive] public partial string GhostText { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string GhostText { get; private set; } = string.Empty;
 
     /// <summary>
     /// Суффикс автодополнения (хвост подсказки, отображаемый следом за введенным текстом).
     /// </summary>
-    [Reactive] public partial string GhostTextSuffix { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string GhostTextSuffix { get; private set; } = string.Empty;
 
     /// <summary>
     /// Флаг наличия доступного суффикса Ghost Text для отображения полупрозрачного слоя.
@@ -83,30 +76,75 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     /// <summary>
     /// Источник поиска: YouTube Music, YouTube, Local.
     /// </summary>
-    [Reactive] public partial ContentSource Source { get; set; } = ContentSource.YouTubeMusic;
+    [ObservableProperty] public partial ContentSource Source { get; set; } = ContentSource.YouTubeMusic;
 
-    [Reactive] public partial bool HasResults { get; private set; }
-    [Reactive] public partial string? ErrorMessage { get; private set; }
-    [Reactive] public partial bool IsFromCache { get; private set; }
-    [Reactive] public partial bool IsOfflineMode { get; private set; }
+    [ObservableProperty] public partial bool HasResults { get; private set; }
+    [ObservableProperty] public partial string? ErrorMessage { get; private set; }
+    [ObservableProperty] public partial bool IsFromCache { get; private set; }
+    [ObservableProperty] public partial bool IsOfflineMode { get; private set; }
+
+    partial void OnSearchQueryChanged(string value)
+    {
+        if (_isDisposed) return;
+
+        // 1. Мгновенная синхронная реакция на ввод
+        UpdateLocalSuggestionsAndGhostText(value);
+
+        // 2. Дебаунс 200 мс для сетевого InnerTube/Suggest API
+        _suggestDebounceTimer?.Stop();
+        _suggestDebounceTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(200),
+            DispatcherPriority.Normal,
+            (_, _) =>
+            {
+                _suggestDebounceTimer?.Stop();
+                if (!_isDisposed)
+                    FetchRemoteSuggestionsThrottled(SearchQuery);
+            });
+        _suggestDebounceTimer.Start();
+
+        SearchCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnSourceChanged(ContentSource value)
+    {
+        OnPropertyChanged(nameof(IsSourceYtm));
+        OnPropertyChanged(nameof(IsSourceYt));
+        OnPropertyChanged(nameof(IsSourceLocal));
+        IsOfflineMode = value == ContentSource.Local;
+
+        if (!_isDisposed && !string.IsNullOrWhiteSpace(SearchQuery))
+        {
+            _ = ExecuteSearchAsync(forceNetwork: false, bypassDebounce: true);
+        }
+    }
+
+    partial void OnIsFromCacheChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowForceSearchButton));
+        ForceSearchCommand.NotifyCanExecuteChanged();
+    }
 
     /// <summary>
-    /// Точное число отображаемых треков (реактивно слушает UI-коллекцию Items).
+    /// Точное число отображаемых треков (слушает UI-коллекцию Items).
     /// </summary>
     public int DisplayTrackCount
     {
         get => _displayTrackCount;
-        private set => this.RaiseAndSetIfChanged(ref _displayTrackCount, value);
+        private set
+        {
+            if (SetProperty(ref _displayTrackCount, value))
+                NotifyBadgeChanged();
+        }
     }
 
     /// <summary>
     /// Значение счетчика слева от строки поиска.
-    /// Отображает число найденных треков, при их отсутствии — число доступных подсказок либо 0.
     /// </summary>
     public int BadgeCount => DisplayTrackCount > 0 ? DisplayTrackCount : Suggestions.Count;
 
     /// <summary>
-    /// Индикатор видимости счетчика. Зафиксирован в true для предотвращения горизонтальных сдвигов интерфейса.
+    /// Индикатор видимости счетчика.
     /// </summary>
     public bool IsBadgeVisible => true;
 
@@ -121,7 +159,6 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
     /// <summary>
     /// Текст-заглушка ленты подсказок, когда подсказки отсутствуют.
-    /// Сохраняет высоту строки и исключает вертикальные сдвиги макета.
     /// </summary>
     public string RibbonPlaceholderText
     {
@@ -149,7 +186,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     public ObservableCollection<string> RecentSearches { get; } = [];
 
     /// <summary>
-    /// Флаг наличия сохранённых запросов в локальной истории. Управляет видимостью кнопки-метлы.
+    /// Флаг наличия сохранённых запросов в локальной истории.
     /// </summary>
     public bool HasRecentSearches => RecentSearches.Count > 0;
 
@@ -183,15 +220,15 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
     #region Commands
 
-    public ReactiveCommand<Unit, Unit> SearchCommand { get; }
-    public ReactiveCommand<Unit, Unit> ForceSearchCommand { get; }
-    public ReactiveCommand<string, Unit> SuggestionClickCommand { get; }
-    public ReactiveCommand<string, Unit> RemoveSuggestionCommand { get; }
-    public ReactiveCommand<string, Unit> RemoveHistoryCommand => RemoveSuggestionCommand;
-    public ReactiveCommand<Unit, Unit> ClearHistoryCommand { get; }
-    public ReactiveCommand<Unit, Unit> ClearQueryCommand { get; }
-    public ReactiveCommand<Unit, Unit> CompleteGhostTextCommand { get; }
-    public ReactiveCommand<string, Unit> SetSourceCommand { get; }
+    public IAsyncRelayCommand SearchCommand { get; }
+    public IAsyncRelayCommand ForceSearchCommand { get; }
+    public IAsyncRelayCommand<string> SuggestionClickCommand { get; }
+    public IRelayCommand<string> RemoveSuggestionCommand { get; }
+    public IRelayCommand<string> RemoveHistoryCommand => RemoveSuggestionCommand;
+    public IRelayCommand ClearHistoryCommand { get; }
+    public IRelayCommand ClearQueryCommand { get; }
+    public IRelayCommand CompleteGhostTextCommand { get; }
+    public IRelayCommand<string> SetSourceCommand { get; }
 
     #endregion
 
@@ -253,32 +290,24 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         _searchCache = searchCache;
         _imageCache = imageCache;
 
-        var canSearch = this.WhenAnyValue(
-            x => x.SearchQuery, x => x.IsLoading,
-            static (q, loading) => !string.IsNullOrWhiteSpace(q) && !loading);
-
-        SearchCommand = CreateCommand(ReactiveCommand.CreateFromTask(
+        SearchCommand = new AsyncRelayCommand(
             () => ExecuteSearchAsync(forceNetwork: false, bypassDebounce: true),
-            canSearch));
+            () => !string.IsNullOrWhiteSpace(SearchQuery) && !IsLoading);
 
-        var canForceSearch = this.WhenAnyValue(
-            x => x.IsFromCache, x => x.IsLoading,
-            static (cache, loading) => cache && !loading);
-
-        ForceSearchCommand = CreateCommand(ReactiveCommand.CreateFromTask(
+        ForceSearchCommand = new AsyncRelayCommand(
             () => ExecuteSearchAsync(forceNetwork: true, bypassDebounce: true),
-            canForceSearch));
+            () => IsFromCache && !IsLoading);
 
-        SuggestionClickCommand = CreateCommand(ReactiveCommand.CreateFromTask<string>(async q =>
+        SuggestionClickCommand = new AsyncRelayCommand<string>(async q =>
         {
             if (_isDisposed || string.IsNullOrEmpty(q)) return;
             SearchQuery = q;
             await ExecuteSearchAsync(forceNetwork: false, bypassDebounce: true);
-        }));
+        });
 
-        CompleteGhostTextCommand = CreateCommand(ReactiveCommand.Create(CompleteGhostText));
+        CompleteGhostTextCommand = new RelayCommand(CompleteGhostText);
 
-        RemoveSuggestionCommand = CreateCommand(ReactiveCommand.Create<string>(q =>
+        RemoveSuggestionCommand = new RelayCommand<string>(q =>
         {
             if (_isDisposed || string.IsNullOrEmpty(q)) return;
 
@@ -291,7 +320,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
             }
 
             UpdateHistoryStorage();
-            this.RaisePropertyChanged(nameof(HasRecentSearches));
+            OnPropertyChanged(nameof(HasRecentSearches));
 
             for (int i = Suggestions.Count - 1; i >= 0; i--)
             {
@@ -304,115 +333,52 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
             CalculateGhostText(SearchQuery, Suggestions);
             NotifySuggestionsChanged();
-        }));
+        });
 
-        ClearHistoryCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ClearHistoryCommand = new RelayCommand(() =>
         {
             if (_isDisposed) return;
             RecentSearches.Clear();
             _dismissedSuggestions.Clear();
             UpdateHistoryStorage();
-            this.RaisePropertyChanged(nameof(HasRecentSearches));
+            OnPropertyChanged(nameof(HasRecentSearches));
             UpdateLocalSuggestionsAndGhostText(SearchQuery);
-        }));
+        });
 
-        ClearQueryCommand = CreateCommand(ReactiveCommand.Create(ClearQuery));
+        ClearQueryCommand = new RelayCommand(ClearQuery);
 
-        SetSourceCommand = CreateCommand(ReactiveCommand.Create<string>(sourceStr =>
+        SetSourceCommand = new RelayCommand<string>(sourceStr =>
         {
             if (_isDisposed) return;
             if (Enum.TryParse<ContentSource>(sourceStr, true, out var result))
                 Source = result;
-        }));
+        });
 
-        // 1. Мгновенная синхронная реакция на ввод: история и Ghost Text вычисляются на 0-м кадре без ожидания таймеров
-        this.WhenAnyValue(x => x.SearchQuery)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(query =>
-            {
-                if (_isDisposed) return;
-                UpdateLocalSuggestionsAndGhostText(query);
-            })
-            .DisposeWith(Disposables);
-
-        // 2. Дебаунс 200 мс ИСКЛЮЧИТЕЛЬНО для сетевого InnerTube/Suggest API
-        this.WhenAnyValue(x => x.SearchQuery)
-            .Throttle(TimeSpan.FromMilliseconds(200))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(query =>
-            {
-                if (_isDisposed) return;
-                FetchRemoteSuggestionsThrottled(query);
-            })
-            .DisposeWith(Disposables);
-
-        // Синхронизация счетчика отображаемых треков на главном потоке
-        Observable.FromEventPattern<NotifyCollectionChangedEventHandler, NotifyCollectionChangedEventArgs>(
-                h => ((INotifyCollectionChanged)Items).CollectionChanged += h,
-                h => ((INotifyCollectionChanged)Items).CollectionChanged -= h)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ =>
-            {
-                DisplayTrackCount = Items.Count;
-                NotifyBadgeChanged();
-            })
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.IsFromCache, x => x.IsLoading)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(ShowForceSearchButton)))
-            .DisposeWith(Disposables);
-
-        // Единая подписка на визуальное переключение источника
-        this.WhenAnyValue(x => x.Source)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ =>
-            {
-                this.RaisePropertyChanged(nameof(IsSourceYtm));
-                this.RaisePropertyChanged(nameof(IsSourceYt));
-                this.RaisePropertyChanged(nameof(IsSourceLocal));
-                IsOfflineMode = Source == ContentSource.Local;
-            })
-            .DisposeWith(Disposables);
-
-        // Переключение источника обходит debounce (действие пользователя намеренное)
-        this.WhenAnyValue(x => x.Source)
-            .Skip(1)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(async _ =>
-            {
-                if (_isDisposed) return;
-                if (!string.IsNullOrWhiteSpace(SearchQuery))
-                    await ExecuteSearchAsync(forceNetwork: false, bypassDebounce: true);
-            })
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.IsLoading, x => x.IsFetchingFromNetwork, static (l, f) => l || f)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(IsBusy)))
-            .DisposeWith(Disposables);
-
-        this.WhenAnyValue(x => x.IsLoading, x => x.HasResults, static (l, r) => !l && !r)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(ShowEmptyState)))
-            .DisposeWith(Disposables);
+        ((INotifyCollectionChanged)Items).CollectionChanged += OnItemsCollectionChanged;
 
         IsLoading = false;
     }
 
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        DisplayTrackCount = Items.Count;
+        NotifyBadgeChanged();
+    }
+
     private void NotifyBadgeChanged()
     {
-        this.RaisePropertyChanged(nameof(BadgeCount));
-        this.RaisePropertyChanged(nameof(IsBadgeVisible));
-        this.RaisePropertyChanged(nameof(BadgeTooltip));
+        OnPropertyChanged(nameof(BadgeCount));
+        OnPropertyChanged(nameof(IsBadgeVisible));
+        OnPropertyChanged(nameof(BadgeTooltip));
     }
 
     private void NotifySuggestionsChanged()
     {
         NotifyBadgeChanged();
-        this.RaisePropertyChanged(nameof(HasSuggestions));
-        this.RaisePropertyChanged(nameof(HasHistoryInSuggestions));
-        this.RaisePropertyChanged(nameof(RibbonPlaceholderText));
-        this.RaisePropertyChanged(nameof(HasGhostText));
+        OnPropertyChanged(nameof(HasSuggestions));
+        OnPropertyChanged(nameof(HasHistoryInSuggestions));
+        OnPropertyChanged(nameof(RibbonPlaceholderText));
+        OnPropertyChanged(nameof(HasGhostText));
     }
 
     #endregion
@@ -590,7 +556,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
             _currentQuery = SearchQuery.Trim();
             AddToHistory(_currentQuery);
 
-            // 1. ПРИОРИТЕТНАЯ ПРОВЕРКА URL: исполняется всегда, независимо от выбранного источника
+            // 1. ПРИОРИТЕТНАЯ ПРОВЕРКА URL
             var queryType = YoutubeProvider.DetectQueryType(_currentQuery);
 
             if (queryType == QueryType.DirectUrl)
@@ -634,6 +600,12 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
                 IsLoading = false;
                 IsFetchingFromNetwork = false;
             }
+
+            OnPropertyChanged(nameof(IsBusy));
+            OnPropertyChanged(nameof(ShowEmptyState));
+            OnPropertyChanged(nameof(ShowForceSearchButton));
+            SearchCommand.NotifyCanExecuteChanged();
+            ForceSearchCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -783,7 +755,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
                 for (int i = 0; i < history.Count; i++)
                     RecentSearches.Add(history[i]);
 
-                this.RaisePropertyChanged(nameof(HasRecentSearches));
+                OnPropertyChanged(nameof(HasRecentSearches));
                 UpdateLocalSuggestionsAndGhostText(SearchQuery);
             });
         }
@@ -812,7 +784,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
             RecentSearches.RemoveAt(RecentSearches.Count - 1);
 
         UpdateHistoryStorage();
-        this.RaisePropertyChanged(nameof(HasRecentSearches));
+        OnPropertyChanged(nameof(HasRecentSearches));
     }
 
     private void UpdateHistoryStorage()
@@ -824,7 +796,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
     /// <summary>
     /// Мгновенно фильтрует текущие доступные подсказки (историю и уже полученные данные YouTube)
-    /// и рассчитывает Ghost Text на 0-м кадре, сохраняя подсказки активными при вводе пробелов.
+    /// и рассчитывает Ghost Text на 0-м кадре.
     /// </summary>
     private void UpdateLocalSuggestionsAndGhostText(string query)
     {
@@ -872,8 +844,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
             }
         }
 
-        // 2. ВАЖНО: не затираем уже загруженные подсказки YouTube, если они все еще подходят под ввод!
-        // Это обеспечивает непрерывную работу Ghost Text при нажатии пробела.
+        // 2. Добавляем уже загруженные подсказки YouTube
         for (int i = 0; i < Suggestions.Count; i++)
         {
             var item = Suggestions[i];
@@ -892,7 +863,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     }
 
     /// <summary>
-    /// Вычисляет полный Ghost Text и изолированный суффикс без двоения букв и сбоев на пробелах.
+    /// Вычисляет полный Ghost Text и изолированный суффикс.
     /// </summary>
     private void CalculateGhostText(string rawQuery, IReadOnlyList<SearchSuggestionItem> items)
     {
@@ -909,14 +880,13 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
             var candidate = items[i].Text;
             if (candidate.StartsWith(rawQuery, StringComparison.OrdinalIgnoreCase) && candidate.Length > rawQuery.Length)
             {
-                // Префикс берем строго в пользовательском вводе, суффикс берем из подсказки
                 GhostText = string.Concat(rawQuery, candidate.AsSpan(rawQuery.Length));
                 GhostTextSuffix = candidate[rawQuery.Length..];
                 return;
             }
         }
 
-        // Приоритет 2: если пользователь поставил хвостовой пробел, ищем совпадение по первому слову
+        // Приоритет 2: если пользователь поставил хвостовой пробел
         var trimmed = rawQuery.TrimStart();
         if (trimmed.Length > 0)
         {
@@ -937,7 +907,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     }
 
     /// <summary>
-    /// Выполняет фоновую подгрузку подсказок из сети после завершения паузы ввода пользователем.
+    /// Выполняет фоновую подгрузку подсказок из сети после завершения паузы ввода.
     /// </summary>
     private void FetchRemoteSuggestionsThrottled(string query)
     {
@@ -1006,8 +976,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     }
 
     /// <summary>
-    /// Выполняет in-place синхронизацию подсказок без вызова Clear(),
-    /// исключая пересборку визуального дерева и лаги UI.
+    /// Выполняет in-place синхронизацию подсказок без вызова Clear().
     /// </summary>
     private void ApplySuggestions(List<SearchSuggestionItem> newItems)
     {
@@ -1064,6 +1033,12 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         if (disposing)
         {
             _isDisposed = true;
+
+            ((INotifyCollectionChanged)Items).CollectionChanged -= OnItemsCollectionChanged;
+
+            _suggestDebounceTimer?.Stop();
+            _suggestDebounceTimer = null;
+
             _suggestCts?.Cancel();
             _suggestCts?.Dispose();
             _searchCts?.Cancel();

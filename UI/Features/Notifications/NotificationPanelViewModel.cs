@@ -1,9 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Reactive;
 using Avalonia.Threading;
-using ReactiveUI;
-
 using Notification = LMP.Core.Models.Notification;
 
 namespace LMP.UI.Features.Notifications;
@@ -37,10 +34,10 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
 
     public bool HasNotifications => Notifications.Count > 0;
 
-    [Reactive] public partial bool IsLoading { get; private set; }
+    [ObservableProperty] public partial bool IsLoading { get; private set; }
 
-    public ReactiveCommand<Unit, Unit> ClearAllCommand { get; }
-    public ReactiveCommand<string?, Unit> CopyErrorCommand { get; }
+    public IRelayCommand ClearAllCommand { get; }
+    public IAsyncRelayCommand<string?> CopyErrorCommand { get; }
 
     public NotificationPanelViewModel(NotificationService notificationService)
     {
@@ -48,17 +45,17 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
 
         Notifications.CollectionChanged += OnSourceCollectionChanged;
 
-        ClearAllCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ClearAllCommand = new RelayCommand(() =>
         {
             _notificationService.ClearAll();
             DisplayedNotifications.Clear();
-        }));
+        });
 
-        CopyErrorCommand = CreateCommand(ReactiveCommand.Create<string?>(async details =>
+        CopyErrorCommand = new AsyncRelayCommand<string?>(async details =>
         {
             if (!string.IsNullOrEmpty(details))
                 await CopyToClipboardAsync(details, "Error details");
-        }));
+        });
     }
 
     /// <summary>
@@ -68,7 +65,7 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
     /// </summary>
     private void OnSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        this.RaisePropertyChanged(nameof(HasNotifications));
+        OnPropertyChanged(nameof(HasNotifications));
 
         if (IsLoading) return;
 
@@ -92,18 +89,6 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
 
     /// <summary>
     /// Вызывается при каждом открытии панели.
-    ///
-    /// <para>Инкрементальная загрузка пачками по <see cref="BatchSize"/> элементов:</para>
-    /// <list type="number">
-    ///   <item>Первая пачка добавляется синхронно — панель открывается уже с контентом.</item>
-    ///   <item>После каждой следующей пачки —
-    ///         <c>await InvokeAsync(Background)</c> отдаёт управление render-циклу,
-    ///         UI остаётся отзывчивым между пачками.</item>
-    ///   <item><see cref="IsLoading"/> = false после последней пачки.</item>
-    /// </list>
-    ///
-    /// <para>Generation-guard защищает от конкурентных вызовов при быстром
-    /// закрытии и повторном открытии панели.</para>
     /// </summary>
     public async Task OnPanelOpenedAsync()
     {
@@ -121,13 +106,11 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
         }
 
         // Первая пачка — синхронно, без yield.
-        // Панель открывается уже с видимым контентом, а не пустой.
         var firstBatch = Math.Min(BatchSize, snapshot.Count);
         for (var i = 0; i < firstBatch; i++)
             DisplayedNotifications.Add(snapshot[i]);
 
-        // Остальные пачки — с yield между каждой,
-        // чтобы Avalonia успевала рендерить между добавлениями.
+        // Остальные пачки — с yield между каждой
         for (var i = firstBatch; i < snapshot.Count; i += BatchSize)
         {
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);

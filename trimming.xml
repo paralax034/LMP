@@ -1,61 +1,40 @@
 <!--
   Trimmer Root Descriptor.
-  Защищает типы, используемые через рефлексию — EF Core entity mapping,
-  JSON-сериализация, ReactiveUI property resolution.
-  https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/trimming-options
+  Защищает типы, используемые через EF Core, нативный P/Invoke,
+  SQLite-провайдер и скомпилированные контексты JSON.
 -->
 <linker>
 
-  <!-- EF Core: entity types, DbContext, конфигурации -->
+  <!-- ADO NET -->
   <assembly fullname="LMP.Core">
-    <!-- DbContext и все entity-классы -->
-    <type fullname="LMP.Core.Data.LibraryDbContext" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.TrackEntity" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.PlaylistEntity" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.PlaylistTrackEntity" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.LikedTrackEntity" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.RecentlyPlayedEntity" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.SettingEntity" preserve="all" />
-    <type fullname="LMP.Core.Data.Entities.NotificationEntity" preserve="all" />
-
     <!-- JSON Source Generation контекст -->
     <type fullname="LMP.Core.Models.AppJsonContext" preserve="all" />
 
-    <!-- Models, используемые через рефлексию в настройках/сериализации -->
+    <!-- Модели, используемые в настройках и сохранении состояния -->
     <type fullname="LMP.Core.Models.AppSettings" preserve="all" />
     <type fullname="LMP.Core.Models.BootstrapSettings" preserve="all" />
     <type fullname="LMP.Core.Models.ThemeSettings" preserve="all" />
     <type fullname="LMP.Core.Models.StreamingConfig" preserve="all" />
 
-    <!-- ReactiveUI: свойства резолвятся через рефлексию в WhenAnyValue -->
+    <!-- Доменные модели сущностей данных -->
     <type fullname="LMP.Core.Models.TrackInfo" preserve="all" />
     <type fullname="LMP.Core.Models.Playlist" preserve="all" />
   </assembly>
 
-  <!-- EF Core internals: провайдер SQLite, миграции -->
-  <assembly fullname="Microsoft.EntityFrameworkCore" preserve="all" />
-  <assembly fullname="Microsoft.EntityFrameworkCore.Sqlite" preserve="all" />
-  <assembly fullname="Microsoft.EntityFrameworkCore.Sqlite.Core" preserve="all" />
-  <assembly fullname="Microsoft.EntityFrameworkCore.Relational" preserve="all" />
+  <!-- NAudio.Core и Concentus -->
+  <assembly fullname="NAudio.Core" preserve="all" />
+  <assembly fullname="Concentus" preserve="all" />
+  <assembly fullname="Concentus.Native" preserve="all" />
 
-  <!-- SQLite native interop -->
+  <!-- SQLite native interop и низкоуровневый драйвер C-библиотеки -->
   <assembly fullname="Microsoft.Data.Sqlite" preserve="all" />
   <assembly fullname="Microsoft.Data.Sqlite.Core" preserve="all" />
   <assembly fullname="SQLitePCLRaw.core" preserve="all" />
   <assembly fullname="SQLitePCLRaw.provider.e_sqlite3" preserve="all" />
 
-  <!-- ReactiveUI / Splat: reflection-based IoC и property system -->
-  <assembly fullname="ReactiveUI" preserve="all" />
-  <assembly fullname="Splat" preserve="all" />
-  <assembly fullname="Splat.Core" preserve="all" />
-  <assembly fullname="Splat.Builder" preserve="all" />
-  <assembly fullname="DynamicData" preserve="all" />
+  <!-- Базовые сборки Avalonia UI для отрисовки и разметки XAML -->
 
-  <!-- Avalonia XAML runtime resolver -->
-  <assembly fullname="Avalonia" preserve="all" />
-  <assembly fullname="Avalonia.Markup.Xaml.Loader" preserve="all" />
-
-  <!-- Microsoft.Extensions.DependencyInjection: runtime registration -->
+  <!-- Microsoft Dependency Injection -->
   <assembly fullname="Microsoft.Extensions.DependencyInjection" preserve="all" />
 
 </linker>

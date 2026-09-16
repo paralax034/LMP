@@ -17,8 +17,7 @@ set PAUSE=1
 if /i "%2"=="nopause" set PAUSE=0
 if /i "%MODE%"=="" set MODE=debug
 
-:: Получение версии из Git только для информационного вывода в консоль.
-:: Основное версионирование контролируется через Directory.Build.targets.
+:: Получение версии из Git только для информационного вывода в консоль
 where git >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     set COMMIT_COUNT=0
@@ -41,12 +40,10 @@ if exist Directory.Build.props (
     for /f "tokens=2 delims=>< " %%a in ('type Directory.Build.props ^| find "VersionPrefix"') do set "VERSION_PREFIX=%%a"
 )
 
-:: Очистка возможных пробелов в значениях
 if defined VERSION_MAJOR set "VERSION_MAJOR=!VERSION_MAJOR: =!"
 if defined VERSION_MINOR set "VERSION_MINOR=!VERSION_MINOR: =!"
 if defined VERSION_PREFIX set "VERSION_PREFIX=!VERSION_PREFIX: =!"
 
-:: Формируем базовый префикс версии
 set "VER_PREF="
 if defined VERSION_MAJOR (
     if defined VERSION_MINOR (
@@ -61,7 +58,6 @@ if "!VER_PREF!"=="" (
     )
 )
 
-:: Формируем строки версии в соответствии с Directory.Build.targets
 set VERSION=!VER_PREF!.!COMMIT_COUNT!
 set FULL_VERSION=!VER_PREF!.!COMMIT_COUNT!+!GIT_HASH!
 
@@ -75,10 +71,11 @@ if /i "%MODE%"=="debug" goto :DEBUG
 if /i "%MODE%"=="optimized" goto :OPTIMIZED
 if /i "%MODE%"=="release" goto :RELEASE
 if /i "%MODE%"=="publish" goto :PUBLISH
+if /i "%MODE%"=="aot" goto :PUBLISH
 if /i "%MODE%"=="restore" goto :RESTORE
 
 echo Unknown mode "%MODE%".
-echo Available: debug ^| optimized ^| release ^| publish ^| restore ^| clean
+echo Available: debug ^| optimized ^| release ^| publish ^| aot ^| restore ^| clean
 goto :END
 
 :RESTORE
@@ -101,7 +98,6 @@ goto :CHECK
 :RELEASE
 echo Checking for dead events...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Tools\find-dead-events.ps1"
-:: exit-код = кол-во мёртвых событий; не прерываем билд, только предупреждаем
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [WARNING] Dead events detected. Consider fixing before release.
@@ -115,44 +111,35 @@ dotnet build LMP.sln -c Release ^
 goto :CHECK
 
 :PUBLISH
-echo Publishing self-contained Release...
+echo Publishing Native AOT Binary (ILC Native Machine Code)...
 
 if exist "publish" rmdir /s /q "publish"
 
-dotnet publish LMP.csproj -c Release -r win-x64 --self-contained true ^
-    -p:PublishSingleFile=true ^
-    -p:PublishReadyToRun=true ^
-    -p:PublishTrimmed=true ^
-    -p:TrimMode=partial ^
-    -p:IncludeNativeLibrariesForSelfExtract=true ^
-    -p:EnableCompressionInSingleFile=true ^
+dotnet publish LMP.csproj -c Release -r win-x64 ^
+    -p:PublishAot=true ^
+    -p:TrimMode=full ^
+    -p:StripSymbols=true ^
     -p:DebugType=None ^
     -p:DebugSymbols=false ^
     -o "./publish"
 
-if %ERRORLEVEL% NEQ 0 (
-    echo ✗ dotnet publish failed!
-    goto :FAIL
-)
+if %ERRORLEVEL% NEQ 0 goto :FAIL
 
-:: Удаляем мусор
 del /q "publish\*.xml" 2>nul
 del /q "publish\*.pdb" 2>nul
 del /q "publish\*.config" 2>nul
 
-echo ✓ Publish completed: ./publish
+echo.
+echo ✓ Native AOT Publish completed: ./publish
 goto :END
 
 :CLEAN
 echo Cleaning all project folders recursively...
 
-:: Очистка папки публикации и архивов в корне
 if exist "publish" rmdir /s /q "publish"
+if exist "publish_aot" rmdir /s /q "publish_aot"
 del /q "*.7z" 2>nul
 
-:: Рекурсивный поиск и безопасное удаление всех папок bin и obj на всех уровнях вложенности.
-:: Пакет packages.lock.json умышленно игнорируется, так как он зафиксирован в Git.
-echo Finding and removing all nested bin and obj folders...
 for /d /r . %%d in (bin,obj) do (
     if exist "%%d" (
         echo Deleting: %%d

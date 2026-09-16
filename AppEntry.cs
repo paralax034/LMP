@@ -1,27 +1,25 @@
-﻿using LMP.Core.Data;
+﻿using System.Globalization;
+using AsyncImageLoader;
+using Avalonia;
+using LMP.Core.Audio.Cache;
+using LMP.Core.Audio.Http;
+using LMP.Core.Data;
 using LMP.Core.Data.Repositories;
+using LMP.Core.Diagnostics;
+using LMP.Core.Youtube.Bridge.Common;
+using LMP.Core.Youtube.Bridge.NToken;
+using LMP.Core.Youtube.Bridge.SigCipher;
+using LMP.UI.Dialogs;
 using LMP.UI.Features.Home;
 using LMP.UI.Features.Library;
+using LMP.UI.Features.Notifications;
 using LMP.UI.Features.Player;
 using LMP.UI.Features.Playlist;
+using LMP.UI.Features.Queue;
 using LMP.UI.Features.Search;
 using LMP.UI.Features.Settings;
 using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
-using Avalonia;
-using AsyncImageLoader;
-using LMP.UI.Dialogs;
-using LMP.Core.Audio.Cache;
-using LMP.Core.Youtube.Bridge.NToken;
-using LMP.Core.Audio.Http;
-using LMP.Core.Youtube.Bridge.SigCipher;
-using LMP.Core.Youtube.Bridge.Common;
-using LMP.UI.Features.Notifications;
-using ReactiveUI.Avalonia;
-using LMP.UI.Features.Queue;
-using LMP.Core.Data.Entities;
-using LMP.Core.Diagnostics;
 
 namespace LMP;
 
@@ -52,7 +50,14 @@ public sealed class AppEntry
     [STAThread]
     public static void Main(string[] args)
     {
-        // Защита от параллельного запуска: удерживает мьютекс на всё время жизни процесса
+        // 1. Инициализация нативного моста SQLite для Native AOT (критично перед любым вызовом к БД)
+        try
+        {
+            SQLitePCL.Batteries_V2.Init();
+        }
+        catch { }
+
+        // 2. Защита от параллельного запуска: удерживает мьютекс на всё время жизни процесса
         using var instanceGuard = SingleInstanceGuard.TryAcquire();
         if (instanceGuard is null)
             return;
@@ -117,6 +122,7 @@ public sealed class AppEntry
         catch (Exception ex)
         {
             Log.Fatal($"Global crash: {ex.Message}\n{ex.StackTrace}");
+            OsNotificationHelper.ShowFatalError("LMP Fatal Startup Error", ex.Message, ex.ToString());
         }
         finally
         {
@@ -126,7 +132,6 @@ public sealed class AppEntry
 
     /// <summary>
     /// Настраивает конфигурацию сборщика приложения Avalonia.
-    /// Выполняет условную настройку графического стека в зависимости от версии ОС.
     /// </summary>
     public static AppBuilder BuildAvaloniaApp()
     {
@@ -141,16 +146,12 @@ public sealed class AppEntry
                 MaxGpuResourceSizeBytes = gpuCacheBytes
             });
 
-        // Windows 11 начинается со сборки 22000.
-        // Если это Windows, но версия сборки ниже 22000 — значит это Windows 10 или старше.
         if (OperatingSystem.IsWindows() && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
             Log.Info("[AppEntry] Windows 10 detected. Using RedirectionSurface to prevent dcomp.dll compositor crashes.");
 
             builder.With(new Win32PlatformOptions
             {
-                // Исключаем DirectComposition на Windows 10.
-                // RedirectionSurface рендерит окно через стандартный GDI-backbuffer, что обходит баги нативных аниматоров ОС.
                 CompositionMode =
                 [
                     Win32CompositionMode.RedirectionSurface
@@ -159,7 +160,6 @@ public sealed class AppEntry
         }
 
 #if DEBUG
-        // Настройка диагностического логирования Avalonia в зависимости от переданных аргументов командной строки
         builder.AfterSetup(_ =>
         {
             if (!_disableAvaloniaLogging)
@@ -174,19 +174,9 @@ public sealed class AppEntry
         });
 #endif
 
-        return builder.UseReactiveUI(_ => { });
+        return builder;
     }
 
-    /// <summary>
-    /// Выполняет инициализацию базы данных с поддержкой инкрементных миграций.
-    /// <para><b>Алгоритм:</b></para>
-    /// <list type="number">
-    ///   <item>БД отсутствует → создать с нуля</item>
-    ///   <item>Версия устарела → выполнить инкрементную миграцию</item>
-    ///   <item>Миграция упала → backup + recreate как аварийный fallback</item>
-    ///   <item>Версия актуальна → только оптимизация и проверка FTS</item>
-    /// </list>
-    /// </summary>
     private static void MigrateDatabaseSync()
     {
         var dbPath = G.FilePath.Database;
@@ -201,14 +191,14 @@ public sealed class AppEntry
 
         try
         {
-            var dbFactory = Services.GetRequiredService<IDbContextFactory<LibraryDbContext>>();
-            using var ctx = dbFactory.CreateDbContext();
+            var connectionFactory = Services.GetRequiredService<ISqliteConnectionFactory>();
+            using var connection = connectionFactory.CreateConnection();
+            connection.Open();
 
-            dbVersion = ctx.GetDatabaseVersionAsync(CancellationToken.None).GetAwaiter().GetResult();
+            dbVersion = connection.GetDatabaseVersionAsync(CancellationToken.None).GetAwaiter().GetResult();
 
             if (dbVersion < DatabaseExtensions.CurrentDbVersion)
             {
-                // Если старая версия базы данных была меньше v3 (в которой произошла крупная миграция плейлистов)
                 if (dbVersion < 3)
                 {
                     WasMigratedFromLegacy = true;
@@ -216,19 +206,19 @@ public sealed class AppEntry
 
                 Log.Info($"[DB] Upgrading schema: v{dbVersion} -> v{DatabaseExtensions.CurrentDbVersion}");
 
-                ctx.Database.EnsureCreated();
-                ctx.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
-                ctx.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-                ctx.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
-                ctx.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
+                connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
 
                 Log.Info($"[DB] Schema upgrade complete (Version: {DatabaseExtensions.CurrentDbVersion})");
             }
             else
             {
-                ctx.Database.EnsureCreated();
-                ctx.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-                ctx.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+                connection.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
 
                 Log.Info($"[DB] Database schema is current (Version: {dbVersion})");
             }
@@ -240,22 +230,19 @@ public sealed class AppEntry
         }
     }
 
-    /// <summary>
-    /// Создаёт новую пустую базу данных.
-    /// Используется при первом запуске и после аварийного fallback-recreate.
-    /// </summary>
     private static void CreateFreshDatabase()
     {
         try
         {
-            var dbFactory = Services.GetRequiredService<IDbContextFactory<LibraryDbContext>>();
-            using var ctx = dbFactory.CreateDbContext();
+            var connectionFactory = Services.GetRequiredService<ISqliteConnectionFactory>();
+            using var connection = connectionFactory.CreateConnection();
+            connection.Open();
 
-            ctx.Database.EnsureCreated();
-            ctx.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ctx.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ctx.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
-            ctx.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
+            connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
 
             Log.Info($"[DB] Fresh database created (Version: {DatabaseExtensions.CurrentDbVersion})");
         }
@@ -266,10 +253,6 @@ public sealed class AppEntry
         }
     }
 
-    /// <summary>
-    /// Выполняет backup текущей БД и пересоздаёт её с нуля.
-    /// Вызывается только при неустранимой ошибке инкрементной миграции.
-    /// </summary>
     private static void BackupAndRecreateDatabase(string dbPath)
     {
         try
@@ -306,29 +289,59 @@ public sealed class AppEntry
         }
     }
 
-    /// <summary>
-    /// Записывает локализованное уведомление о сбросе базы данных с использованием JSON-ключей
-    /// </summary>
     private static void SaveEmergencyNotification()
     {
         try
         {
-            var dbFactory = Services.GetRequiredService<IDbContextFactory<LibraryDbContext>>();
-            using var ctx = dbFactory.CreateDbContext();
+            var connectionFactory = Services.GetRequiredService<ISqliteConnectionFactory>();
+            using var connection = connectionFactory.CreateConnection();
+            connection.Open();
 
-            var notification = new NotificationEntity
-            {
-                Id = Guid.NewGuid().ToString(),
-                TitleKey = "Dialog_Warning_Title", // "Предупреждение" / "Warning"
-                MessageKey = "Auth_ProfileLoadError_Message", // Сообщение об ошибке профиля/БД
-                RecommendationKey = "Recommendation_ContactDev", // "Обратитесь к разработчику"
-                Severity = (int)NotificationSeverity.Warning,
-                IsRead = false,
-                CreatedAt = DateTime.UtcNow
-            };
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO Notifications (
+                    Id, TitleKey, TitleRaw, MessageKey, MessageRaw,
+                    MessageArgsJson, RecommendationKey, Severity, IsRead,
+                    TrackId, TrackTitle, ExceptionDetails, AttemptsJson, CreatedAt
+                )
+                VALUES (
+                    @id, @titleKey, NULL, @messageKey, NULL,
+                    NULL, @recommendationKey, @severity, 0,
+                    NULL, NULL, NULL, NULL, @createdAt
+                );
+                """;
 
-            ctx.Notifications.Add(notification);
-            ctx.SaveChanges();
+            var pId = cmd.CreateParameter();
+            pId.ParameterName = "@id";
+            pId.Value = Guid.NewGuid().ToString();
+            cmd.Parameters.Add(pId);
+
+            var pTitle = cmd.CreateParameter();
+            pTitle.ParameterName = "@titleKey";
+            pTitle.Value = "Dialog_Warning_Title";
+            cmd.Parameters.Add(pTitle);
+
+            var pMsg = cmd.CreateParameter();
+            pMsg.ParameterName = "@messageKey";
+            pMsg.Value = "Auth_ProfileLoadError_Message";
+            cmd.Parameters.Add(pMsg);
+
+            var pRec = cmd.CreateParameter();
+            pRec.ParameterName = "@recommendationKey";
+            pRec.Value = "Recommendation_ContactDev";
+            cmd.Parameters.Add(pRec);
+
+            var pSev = cmd.CreateParameter();
+            pSev.ParameterName = "@severity";
+            pSev.Value = (int)NotificationSeverity.Warning;
+            cmd.Parameters.Add(pSev);
+
+            var pCreated = cmd.CreateParameter();
+            pCreated.ParameterName = "@createdAt";
+            pCreated.Value = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            cmd.Parameters.Add(pCreated);
+
+            cmd.ExecuteNonQuery();
             Log.Info("[DB] Emergency recovery notification saved to database using localization keys");
         }
         catch (Exception ex)
@@ -365,6 +378,7 @@ public sealed class AppEntry
                     }
 
                     Log.Error($"[AppDomain] Unhandled: {ex.Message}", ex);
+                    OsNotificationHelper.ShowFatalError("Unhandled Exception", ex.Message, ex.ToString());
                 }
                 else
                 {
@@ -378,21 +392,25 @@ public sealed class AppEntry
     private static bool IsSslRelatedException(Exception ex)
     {
         var current = ex;
-        while (current != null)
+        while (current is not null)
         {
-            var typeName = current.GetType().FullName ?? "";
-            var msg = current.Message ?? "";
-
-            if (typeName.Contains("SslStream", StringComparison.Ordinal) ||
-                typeName.Contains("Ssl", StringComparison.OrdinalIgnoreCase) ||
-                typeName.Contains("Tls", StringComparison.OrdinalIgnoreCase) ||
-                msg.Contains("SSL", StringComparison.OrdinalIgnoreCase) ||
-                msg.Contains("TLS", StringComparison.OrdinalIgnoreCase) ||
-                msg.Contains("secure channel", StringComparison.OrdinalIgnoreCase) ||
-                msg.Contains("authentication", StringComparison.OrdinalIgnoreCase) ||
-                msg.Contains("EnsureFullTlsFrame", StringComparison.Ordinal))
+            if (current is System.Security.Authentication.AuthenticationException)
             {
                 return true;
+            }
+
+            var msg = current.Message;
+            if (!string.IsNullOrEmpty(msg))
+            {
+                var span = msg.AsSpan();
+                if (span.Contains("SSL".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("TLS".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("secure channel".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("authentication".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("EnsureFullTlsFrame".AsSpan(), StringComparison.Ordinal))
+                {
+                    return true;
+                }
             }
 
             current = current.InnerException;
@@ -400,9 +418,10 @@ public sealed class AppEntry
 
         if (ex is AggregateException agg)
         {
-            foreach (var inner in agg.InnerExceptions)
+            var inners = agg.InnerExceptions;
+            for (int i = 0; i < inners.Count; i++)
             {
-                if (IsSslRelatedException(inner))
+                if (IsSslRelatedException(inners[i]))
                     return true;
             }
         }
@@ -417,15 +436,7 @@ public sealed class AppEntry
         services.AddSingleton(_ => BootstrapSettings.Current);
 
         var dbPath = G.FilePath.Database;
-        services.AddDbContextFactory<LibraryDbContext>(options =>
-        {
-            options.UseSqlite($"Data Source={dbPath}");
-            options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
-#if DEBUG
-            options.EnableSensitiveDataLogging();
-            options.EnableDetailedErrors();
-#endif
-        });
+        services.AddSingleton<ISqliteConnectionFactory>(_ => new LowMemorySqliteConnectionFactory(dbPath));
 
         services.AddSingleton<ITrackRepository, TrackRepository>();
         services.AddSingleton<IPlaylistRepository, PlaylistRepository>();

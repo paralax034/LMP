@@ -1,10 +1,8 @@
-using System.Reactive;
-using ReactiveUI;
 using Notification = LMP.Core.Models.Notification;
 
 namespace LMP.UI.Features.Notifications;
 
-public sealed class ToastOverlayViewModel : ViewModelBase
+public sealed partial class ToastOverlayViewModel : ViewModelBase
 {
     private readonly NotificationService _notificationService;
 
@@ -16,7 +14,7 @@ public sealed class ToastOverlayViewModel : ViewModelBase
     public string ToastTitle => CurrentToast?.Title ?? string.Empty;
     public string ToastMessage => CurrentToast?.Message ?? string.Empty;
     public string ToastIcon => CurrentToast?.Icon ?? string.Empty;
-    
+
     /// <summary>
     /// Severity для конвертера в XAML.
     /// </summary>
@@ -24,7 +22,7 @@ public sealed class ToastOverlayViewModel : ViewModelBase
 
     #endregion
 
-    public ReactiveCommand<Unit, Unit> DismissCommand { get; }
+    public IRelayCommand DismissCommand { get; }
 
     public ToastOverlayViewModel(NotificationService notificationService)
     {
@@ -34,27 +32,27 @@ public sealed class ToastOverlayViewModel : ViewModelBase
         {
             if (e.PropertyName == nameof(NotificationService.CurrentToast))
             {
-                this.RaisePropertyChanged(nameof(CurrentToast));
-                this.RaisePropertyChanged(nameof(IsVisible));
+                OnPropertyChanged(nameof(CurrentToast));
+                OnPropertyChanged(nameof(IsVisible));
                 RaiseToastWrapperProperties();
             }
             if (e.PropertyName == nameof(NotificationService.IsToastVisible))
             {
-                this.RaisePropertyChanged(nameof(IsVisible));
+                OnPropertyChanged(nameof(IsVisible));
             }
         };
 
-        DismissCommand = CreateCommand(ReactiveCommand.Create(() =>
+        DismissCommand = new RelayCommand(() =>
         {
             _notificationService.DismissToast();
-        }));
+        });
     }
 
     private void RaiseToastWrapperProperties()
     {
-        this.RaisePropertyChanged(nameof(ToastTitle));
-        this.RaisePropertyChanged(nameof(ToastMessage));
-        this.RaisePropertyChanged(nameof(ToastIcon));
-        this.RaisePropertyChanged(nameof(ToastSeverity));
+        OnPropertyChanged(nameof(ToastTitle));
+        OnPropertyChanged(nameof(ToastMessage));
+        OnPropertyChanged(nameof(ToastIcon));
+        OnPropertyChanged(nameof(ToastSeverity));
     }
 }

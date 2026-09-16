@@ -93,7 +93,7 @@
             }
         },
         {
-            "label": "publish: single-file",
+            "label": "publish: release",
             "type": "shell",
             "command": "${workspaceFolder}\\build.bat publish nopause",
             "options": {
@@ -116,7 +116,7 @@
             }
         },
         {
-            "label": "publish: dev release (github)",
+            "label": "web-publish: dev",
             "type": "shell",
             "command": "powershell.exe",
             "args": [
@@ -160,170 +160,6 @@
                 "panel": "dedicated",
                 "clear": true
             }
-        },
-        {
-            "label": "check: dead events",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-events.ps1"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "test",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "check: dead code",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-code.ps1",
-                "-Project",
-                "${workspaceFolder}\\LMP.csproj"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "test",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "check: dead l10n",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-l10n.ps1"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "test",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "format: l10n",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\sort-l10n.ps1"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "build",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "watch",
-            "type": "shell",
-            "command": "dotnet",
-            "args": [
-                "watch",
-                "run",
-                "--project",
-                "LMP.csproj",
-                "--configuration",
-                "Debug"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "isBackground": true,
-            "problemMatcher": "$msCompile",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true
-            }
-        },
-        {
-            "label": "migrate: fody → sourcegen (dry run)",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\migrate-fody-to-sourcegen.ps1",
-                "-DryRun"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "test",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "migrate: fody → sourcegen (apply)",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\migrate-fody-to-sourcegen.ps1"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "test",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            },
-            "problemMatcher": []
         }
     ]
 }

@@ -239,6 +239,11 @@ public sealed class ImageCacheService : IDisposable
     /// Принимает <paramref name="ct"/> уровня приложения (не контрола):
     /// скачивание файла не прерывается при рециклинге элемента списка.
     /// </summary>
+    /// <param name="url">Веб-адрес изображения.</param>
+    /// <param name="memKey">Хеш-ключ для оперативной памяти.</param>
+    /// <param name="decodeWidth">Целевая ширина декодирования.</param>
+    /// <param name="ct">Токен отмены уровня приложения.</param>
+    /// <returns>Декодированный <see cref="Bitmap"/> или <see langword="null"/> при отмене.</returns>
     private async Task<Bitmap?> LoadImageInternalAsync(string url, ulong memKey, int decodeWidth, CancellationToken ct)
     {
         var diskHash = ComputeDiskKeyHash(url);
@@ -259,22 +264,30 @@ public sealed class ImageCacheService : IDisposable
 
         if (!File.Exists(diskPath)) return null;
 
-        var bitmap = await Task.Run(() =>
+        Bitmap? bitmap = null;
+        try
         {
-            try
+            bitmap = await Task.Run(() =>
             {
-                using var stream = File.OpenRead(diskPath);
-                return decodeWidth > 0
-                    ? Bitmap.DecodeToWidth(stream, decodeWidth, BitmapInterpolationMode.LowQuality)
-                    : new Bitmap(stream);
-            }
-            catch (Exception ex)
-            {
-                Log.Debug($"[ImageCache] Decode failed: {ex.Message}");
-                try { File.Delete(diskPath); } catch { }
-                return null;
-            }
-        }, ct).ConfigureAwait(false);
+                try
+                {
+                    using var stream = File.OpenRead(diskPath);
+                    return decodeWidth > 0
+                        ? Bitmap.DecodeToWidth(stream, decodeWidth, BitmapInterpolationMode.LowQuality)
+                        : new Bitmap(stream);
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug($"[ImageCache] Decode failed: {ex.Message}");
+                    try { File.Delete(diskPath); } catch { }
+                    return null;
+                }
+            }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
 
         if (bitmap != null && !ct.IsCancellationRequested)
             AddToMemoryCache(memKey, bitmap);

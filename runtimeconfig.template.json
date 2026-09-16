@@ -1,8 +1,0 @@
-{
-  "configProperties": {
-    "System.GC.Concurrent": true,
-    "System.GC.Server": false,
-    "System.GC.RetainVM": false,
-    "System.Threading.ThreadPool.MinThreads": 8
-  }
-}

@@ -1,8 +1,5 @@
 using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Linq;
-using ReactiveUI;
-
+using Avalonia.Threading;
 
 namespace LMP.UI.Dialogs;
 
@@ -14,21 +11,36 @@ public sealed partial class AddToPlaylistDialogViewModel : ViewModelBase
     private readonly List<PlaylistCheckItem> _allItems = [];
     public ObservableCollection<PlaylistCheckItem> FilteredPlaylists { get; } = [];
 
-    [Reactive] public partial string FilterQuery { get; set; } = "";
-    [Reactive] public partial string SummaryText { get; private set; } = "";
+    [ObservableProperty]
+    public partial string FilterQuery { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string SummaryText { get; set; } = "";
+
+    private readonly DispatcherTimer _filterDebounceTimer;
 
     /// <summary>
     /// Callback для закрытия диалога с результатом.
     /// </summary>
     public Action<List<string>>? OnResult { get; set; }
 
-    public ReactiveCommand<Unit, Unit> ConfirmCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand ConfirmCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     public AddToPlaylistDialogViewModel(TrackInfo track, IEnumerable<Playlist> playlists)
     {
         Track = track;
         TrackDisplayName = $"{track.Author} — {track.Title}";
+
+        _filterDebounceTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        _filterDebounceTimer.Tick += (s, e) =>
+        {
+            _filterDebounceTimer.Stop();
+            ApplyFilter();
+        };
 
         foreach (var p in playlists)
         {
@@ -36,19 +48,15 @@ public sealed partial class AddToPlaylistDialogViewModel : ViewModelBase
             if (!p.IsEditable) continue;
 
             var item = new PlaylistCheckItem(p, track.InPlaylists.Contains(p.Id));
-            item.WhenAnyValue(x => x.IsChecked)
-                .Subscribe(_ => UpdateSummary())
-                .DisposeWith(Disposables);
+            item.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(PlaylistCheckItem.IsChecked))
+                    UpdateSummary();
+            };
             _allItems.Add(item);
         }
 
-        this.WhenAnyValue(x => x.FilterQuery)
-            .Throttle(TimeSpan.FromMilliseconds(200))
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => ApplyFilter())
-            .DisposeWith(Disposables);
-
-        ConfirmCommand = CreateCommand(ReactiveCommand.Create(() =>
+        ConfirmCommand = new RelayCommand(() =>
         {
             var result = new List<string>();
             for (int i = 0; i < _allItems.Count; i++)
@@ -57,15 +65,21 @@ public sealed partial class AddToPlaylistDialogViewModel : ViewModelBase
                     result.Add(_allItems[i].PlaylistId);
             }
             OnResult?.Invoke(result);
-        }));
+        });
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelCommand = new RelayCommand(() =>
         {
             OnResult?.Invoke([]);
-        }));
+        });
 
         ApplyFilter();
         UpdateSummary();
+    }
+
+    partial void OnFilterQueryChanged(string value)
+    {
+        _filterDebounceTimer.Stop();
+        _filterDebounceTimer.Start();
     }
 
     private void ApplyFilter()
@@ -108,16 +122,26 @@ public sealed partial class AddToPlaylistDialogViewModel : ViewModelBase
             ? string.Format(SL["AddToPlaylist_Selected"], newCount)
             : SL["AddToPlaylist_NoneSelected"];
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _filterDebounceTimer.Stop();
+        }
+        base.Dispose(disposing);
+    }
 }
 
-public sealed partial class PlaylistCheckItem : ReactiveObject
+public sealed partial class PlaylistCheckItem : ObservableObject
 {
     public string PlaylistId { get; }
     public string Name { get; }
     public int TrackCount { get; }
     public bool WasAlreadyIn { get; }
 
-    [Reactive] public partial bool IsChecked { get; set; }
+    [ObservableProperty]
+    public partial bool IsChecked { get; set; }
 
     public PlaylistCheckItem(Playlist playlist, bool alreadyContains)
     {

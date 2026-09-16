@@ -1,12 +1,10 @@
-using System.Reactive.Disposables;
-using System.Reactive.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
-using ReactiveUI;
+using Avalonia.Threading;
 
 namespace LMP.UI.Features.Shell;
 
@@ -20,7 +18,7 @@ namespace LMP.UI.Features.Shell;
 ///   <item>Секция громкости поддерживает скролл колесиком (PointerWheelChanged)</item>
 ///   <item>Текст и иконка кнопки Show/Hide меняются в зависимости от видимости главного окна</item>
 ///   <item>Все тексты локализованы и обновляются при каждом показе</item>
-///   <item>Поддерживает реактивные подписки на состояние плеера в момент отображения</item>
+///   <item>Поддерживает подписки на события состояния плеера в момент отображения</item>
 /// </list>
 /// </summary>
 public partial class TrayPopupWindow : Window
@@ -42,10 +40,9 @@ public partial class TrayPopupWindow : Window
     private bool _lastKnownWindowVisible;
 
     /// <summary>
-    /// Пакет подписок на изменение состояния плеера. 
-    /// Активен исключительно во время показа всплывающего окна.
+    /// Флаг активности подписок на события сервиса плеера.
     /// </summary>
-    private CompositeDisposable? _disposables;
+    private bool _isSubscribed;
 
     // ═══ UI контролы ═══
     private Border? _trackInfoSection;
@@ -334,62 +331,21 @@ public partial class TrayPopupWindow : Window
 
     #endregion
 
-    #region Reactive Subscriptions
+    #region Subscriptions
 
     /// <summary>
-    /// Подписывается на реактивные изменения состояния плеера.
+    /// Подписывается на события изменения состояния плеера.
     /// Запускается только во время видимости всплывающего окна.
     /// </summary>
     private void SubscribeToPlayerChanges()
     {
-        _disposables?.Dispose();
-        _disposables = new CompositeDisposable();
+        if (_isSubscribed || _playerControl == null) return;
+        _isSubscribed = true;
 
-        if (_playerControl == null) return;
-
-        var L = LocalizationService.Instance;
-
-        // 1. Статус воспроизведения (Воспроизведение / Пауза)
-        _playerControl.PlaybackStateObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(state =>
-            {
-                UpdatePlayPauseButton(state.IsPlaying, L);
-            })
-            .DisposeWith(_disposables);
-
-        // 2. Текущий трек и метаданные (также управляет доступностью кнопок)
-        _playerControl.CurrentTrackObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(track =>
-            {
-                bool hasTrack = track != null;
-                UpdateTrackInfo(track, hasTrack);
-
-                SetEnabled(_playPauseButton, hasTrack);
-                SetEnabled(_nextButton, hasTrack);
-                SetEnabled(_prevButton, hasTrack);
-                SetEnabled(_repeatButton, hasTrack);
-            })
-            .DisposeWith(_disposables);
-
-        // 3. Режим повтора треков
-        _playerControl.RepeatModeObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(mode =>
-            {
-                UpdateRepeatButton(mode, L);
-            })
-            .DisposeWith(_disposables);
-
-        // 4. Громкость звука
-        _playerControl.VolumeObservable
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ =>
-            {
-                UpdateVolumeDisplay();
-            })
-            .DisposeWith(_disposables);
+        _playerControl.IsPlayingChanged += OnIsPlayingChanged;
+        _playerControl.CurrentTrackChanged += OnCurrentTrackChanged;
+        _playerControl.RepeatModeChanged += OnRepeatModeChanged;
+        _playerControl.VolumeChanged += OnVolumeChanged;
     }
 
     /// <summary>
@@ -398,8 +354,42 @@ public partial class TrayPopupWindow : Window
     /// </summary>
     private void UnsubscribeFromPlayerChanges()
     {
-        _disposables?.Dispose();
-        _disposables = null;
+        if (!_isSubscribed || _playerControl == null) return;
+        _isSubscribed = false;
+
+        _playerControl.IsPlayingChanged -= OnIsPlayingChanged;
+        _playerControl.CurrentTrackChanged -= OnCurrentTrackChanged;
+        _playerControl.RepeatModeChanged -= OnRepeatModeChanged;
+        _playerControl.VolumeChanged -= OnVolumeChanged;
+    }
+
+    private void OnIsPlayingChanged(bool isPlaying)
+    {
+        Dispatcher.UIThread.Post(() => UpdatePlayPauseButton(isPlaying, LocalizationService.Instance));
+    }
+
+    private void OnCurrentTrackChanged(TrackInfo? track)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            bool hasTrack = track != null;
+            UpdateTrackInfo(track, hasTrack);
+
+            SetEnabled(_playPauseButton, hasTrack);
+            SetEnabled(_nextButton, hasTrack);
+            SetEnabled(_prevButton, hasTrack);
+            SetEnabled(_repeatButton, hasTrack);
+        });
+    }
+
+    private void OnRepeatModeChanged(RepeatMode mode)
+    {
+        Dispatcher.UIThread.Post(() => UpdateRepeatButton(mode, LocalizationService.Instance));
+    }
+
+    private void OnVolumeChanged(int volume)
+    {
+        Dispatcher.UIThread.Post(UpdateVolumeDisplay);
     }
 
     #endregion
@@ -477,9 +467,6 @@ public partial class TrayPopupWindow : Window
     private async void OnPlayPauseClick(object? sender, RoutedEventArgs e)
     {
         if (_playerControl == null) return;
-        
-        // Синхронный вызов UpdateState удален — обновление произойдет автоматически 
-        // через реактивную подписку по факту смены состояния в движке.
         await _playerControl.PlayPauseAsync();
     }
 
@@ -497,7 +484,6 @@ public partial class TrayPopupWindow : Window
 
     private void OnRepeatClick(object? sender, RoutedEventArgs e)
     {
-        // Синхронный вызов UpdateState удален — состояние обновится реактивно.
         _playerControl?.ToggleRepeat();
     }
 

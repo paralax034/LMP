@@ -37,7 +37,7 @@ jobs:
 
                   Write-Host "Version: v$fullVersion"
 
-            # === Сборка Release (Publish) ===
+            # === Сборка Release ===
             - name: Build Release Publish
               run: ./build.bat publish nopause
 

@@ -26,11 +26,18 @@ public partial class AppIcon : UserControl
     public AppIcon()
     {
         InitializeComponent();
-        
-        // Обновляем размеры при изменении
-        this.GetObservable(IconSizeProperty).Subscribe(_ => UpdateLayoutIcon());
-        this.GetObservable(ShowGlowProperty).Subscribe(_ => UpdateLayoutIcon());
-        this.GetObservable(BoundsProperty).Subscribe(_ => UpdateLayoutIcon());
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == IconSizeProperty ||
+            change.Property == ShowGlowProperty ||
+            change.Property == BoundsProperty)
+        {
+            UpdateLayoutIcon();
+        }
     }
 
     protected override void OnLoaded(Avalonia.Interactivity.RoutedEventArgs e)
@@ -47,7 +54,7 @@ public partial class AppIcon : UserControl
         // Root Grid size
         RootGrid.Width = size;
         RootGrid.Height = size;
-        // 430A-DCC8-41A0-4631
+
         // Glow
         GlowBorder.IsVisible = ShowGlow;
         GlowBorder.CornerRadius = new CornerRadius(size * 0.17);
@@ -61,7 +68,7 @@ public partial class AppIcon : UserControl
         var chevronWidth = size * 0.2;
         var chevronHeight = size * 0.3;
         var chevronThickness = Math.Max(1.5, size * 0.1);
-        
+
         ChevronsPanel.Spacing = -size * 0.08;
         ChevronsPanel.Margin = new Thickness(0, 0, size * 0.04, size * 0.12);
 

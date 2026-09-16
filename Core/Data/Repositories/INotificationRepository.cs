@@ -1,4 +1,4 @@
-using LMP.Core.Data.Entities;
+using LMP.Core.Models;
 
 namespace LMP.Core.Data.Repositories;
 
@@ -10,12 +10,18 @@ public interface INotificationRepository
     /// <summary>
     /// Получить последние уведомления.
     /// </summary>
-    Task<List<NotificationEntity>> GetRecentAsync(int limit = 50, CancellationToken ct = default);
+    /// <param name="limit">Максимальное количество возвращаемых записей.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Список доменных моделей уведомлений.</returns>
+    Task<List<Notification>> GetRecentAsync(int limit = 50, CancellationToken ct = default);
 
     /// <summary>
     /// Добавить уведомление.
     /// </summary>
-    Task AddAsync(NotificationEntity entity, CancellationToken ct = default);
+    /// <param name="notification">Экземпляр доменной модели уведомления.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Задача, представляющая асинхронную операцию записи.</returns>
+    Task AddAsync(Notification notification, CancellationToken ct = default);
 
     /// <summary>
     /// Пометить все как прочитанные.

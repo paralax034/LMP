@@ -1,7 +1,3 @@
-using System.Reactive;
-using ReactiveUI;
-
-
 namespace LMP.UI.Dialogs;
 
 /// <summary>
@@ -13,7 +9,8 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
 {
     public PlaylistSyncPreview Preview { get; }
 
-    [Reactive] public partial int SelectedStrategyIndex { get; set; }
+    [ObservableProperty]
+    public partial int SelectedStrategyIndex { get; set; }
 
     public PlaylistSyncStrategy SelectedStrategy => SelectedStrategyIndex switch
     {
@@ -23,10 +20,17 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
         _ => PlaylistSyncStrategy.Merge
     };
 
-    [Reactive] public partial bool SyncName { get; set; } = true;
-    [Reactive] public partial bool SyncDescription { get; set; } = true;
-    [Reactive] public partial bool SyncThumbnail { get; set; }
-    [Reactive] public partial bool SyncTracks { get; set; } = true;
+    [ObservableProperty]
+    public partial bool SyncName { get; set; } = true;
+
+    [ObservableProperty]
+    public partial bool SyncDescription { get; set; } = true;
+
+    [ObservableProperty]
+    public partial bool SyncThumbnail { get; set; }
+
+    [ObservableProperty]
+    public partial bool SyncTracks { get; set; } = true;
 
     public bool HasNameDiff => Preview.NameDiffers;
     public bool HasDescDiff => Preview.DescriptionDiffers;
@@ -103,8 +107,8 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
     /// </summary>
     public Action<PlaylistSyncOptions?>? OnResult { get; set; }
 
-    public ReactiveCommand<Unit, Unit> SyncCommand { get; }
-    public ReactiveCommand<Unit, Unit> CancelCommand { get; }
+    public IRelayCommand SyncCommand { get; }
+    public IRelayCommand CancelCommand { get; }
 
     public SyncPlaylistDialogViewModel(PlaylistSyncPreview preview)
     {
@@ -119,7 +123,7 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
 
         SyncTracks = preview.TracksDiffer;
 
-        SyncCommand = CreateCommand(ReactiveCommand.Create(() =>
+        SyncCommand = new RelayCommand(() =>
         {
             var result = new PlaylistSyncOptions
             {
@@ -130,20 +134,19 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
                 SyncTracks = SyncTracks
             };
             OnResult?.Invoke(result);
-        }));
+        });
 
-        CancelCommand = CreateCommand(ReactiveCommand.Create(() =>
+        CancelCommand = new RelayCommand(() =>
         {
             OnResult?.Invoke(null);
-        }));
+        });
+    }
 
-        this.WhenAnyValue(x => x.SelectedStrategyIndex)
-            .Subscribe(_ =>
-            {
-                this.RaisePropertyChanged(nameof(StrategyDescription));
-                this.RaisePropertyChanged(nameof(CanSyncThumbnail));
-            })
-            .DisposeWith(Disposables);
+    partial void OnSelectedStrategyIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(SelectedStrategy));
+        OnPropertyChanged(nameof(StrategyDescription));
+        OnPropertyChanged(nameof(CanSyncThumbnail));
     }
 
     /// <summary>

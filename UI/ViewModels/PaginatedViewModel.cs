@@ -1,32 +1,26 @@
-using System.Collections.ObjectModel;
-using System.Reactive;
-using System.Reactive.Disposables;
-using System.Reactive.Linq;
-using DynamicData;
+using Avalonia.Collections;
+using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
-using ReactiveUI;
-
-using LMP.UI.Features.Shell; // Добавлено
+using LMP.UI.Features.Shell;
 
 namespace LMP.UI.ViewModels;
 
 public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewModelBase, IFilterable, ISmoothTransitionViewModel
-    where TViewModel : IDisposable
+    where TViewModel : class, IDisposable
     where TSource : notnull
 {
     #region Fields
 
     protected readonly LibraryService LibService;
 
-    private readonly SourceList<TSource> _sourceList = new();
-    private readonly ReadOnlyObservableCollection<TViewModel> _items;
-    private readonly CompositeDisposable _dynamicDataSubscriptions = [];
+    private readonly List<(TSource Source, TViewModel Vm)> _itemPairs = [];
     private readonly HashSet<string> _loadedIds = new(StringComparer.Ordinal);
 
     private int _consecutiveEmptyLoads;
     private const int MaxConsecutiveEmptyLoads = 5;
 
     private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _filterDebounceCts;
     private bool _canFetchMore;
     private bool _isDisposed;
 
@@ -54,25 +48,38 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
         {
             if (_isDataLoading == value) return;
             _isDataLoading = value;
-            this.RaisePropertyChanged(nameof(IsLoading));
+            OnPropertyChanged(nameof(IsLoading));
+            LoadMoreCommand.NotifyCanExecuteChanged();
         }
     }
 
-    [Reactive] public partial bool IsLoadingMore { get; protected set; }
-    [Reactive] public partial bool IsFetchingFromNetwork { get; protected set; }
-    [Reactive] public partial bool HasMoreItems { get; protected set; }
-    [Reactive] public partial bool ReachedEnd { get; protected set; }
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(LoadMoreCommand))]
+    public partial bool IsLoadingMore { get; protected set; }
 
-    public string FilterQuery
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(LoadMoreCommand))]
+    public partial bool IsFetchingFromNetwork { get; protected set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(LoadMoreCommand))]
+    public partial bool HasMoreItems { get; protected set; }
+
+    [ObservableProperty]
+    public partial bool ReachedEnd { get; protected set; }
+
+    [ObservableProperty]
+    public partial string FilterQuery { get; set; } = string.Empty;
+    string IFilterable.FilterQuery
     {
-        get;
-        set => this.RaiseAndSetIfChanged(ref field, value);
-    } = string.Empty;
+        get => FilterQuery;
+        set => FilterQuery = value;
+    }
 
-    public ReadOnlyObservableCollection<TViewModel> Items => _items;
+    public AvaloniaList<TViewModel> Items { get; } = [];
     protected int TotalCount { get; private set; }
 
-    public ReactiveCommand<Unit, Unit> LoadMoreCommand { get; }
+    public IAsyncRelayCommand LoadMoreCommand { get; }
 
     #endregion
 
@@ -82,32 +89,51 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
     {
         LibService = AppEntry.Services.GetRequiredService<LibraryService>();
 
-        var filterPredicate = this.WhenAnyValue(x => x.FilterQuery)
-            .Throttle(TimeSpan.FromMilliseconds(200))
-            .ObserveOn(RxSchedulers.TaskpoolScheduler)
-            .Select(BuildFilterPredicate)
-            .StartWith(BuildFilterPredicate(FilterQuery));
+        LoadMoreCommand = new AsyncRelayCommand(
+            LoadNextBatchAsync,
+            () => !IsLoadingMore && !IsLoading && !IsFetchingFromNetwork && HasMoreItems);
+    }
 
-        _sourceList.Connect()
-            .Filter(filterPredicate)
-            .Transform(CreateItemViewModel)
-            .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Bind(out _items)
-            .Subscribe()
-            .DisposeWith(_dynamicDataSubscriptions);
+    #endregion
 
-        var canLoadMore = this.WhenAnyValue(
-            x => x.IsLoadingMore,
-            x => x.IsLoading,
-            x => x.IsFetchingFromNetwork,
-            x => x.HasMoreItems,
-            static (more, init, net, hasMore) => !more && !init && !net && hasMore);
+    #region Filtering
 
-        LoadMoreCommand = CreateCommand(ReactiveCommand.CreateFromTask(LoadNextBatchAsync, canLoadMore));
+    partial void OnFilterQueryChanged(string value)
+    {
+        _consecutiveEmptyLoads = 0;
 
-        this.WhenAnyValue(x => x.FilterQuery)
-            .Subscribe(_ => _consecutiveEmptyLoads = 0)
-            .DisposeWith(_dynamicDataSubscriptions);
+        _filterDebounceCts?.Cancel();
+        _filterDebounceCts?.Dispose();
+        _filterDebounceCts = new CancellationTokenSource();
+        var token = _filterDebounceCts.Token;
+
+        _ = Task.Delay(200, token).ContinueWith(t =>
+        {
+            if (t.IsCanceled || _isDisposed) return;
+            Dispatcher.UIThread.Post(ApplyFilter);
+        }, TaskScheduler.Default);
+    }
+
+    private void ApplyFilter()
+    {
+        if (_isDisposed) return;
+
+        var query = FilterQuery;
+        bool hasFilter = !string.IsNullOrWhiteSpace(query);
+
+        Items.Clear();
+
+        var matched = new List<TViewModel>(_itemPairs.Count);
+        for (int i = 0; i < _itemPairs.Count; i++)
+        {
+            var pair = _itemPairs[i];
+            if (!hasFilter || FilterItem(pair.Source, query))
+            {
+                matched.Add(pair.Vm);
+            }
+        }
+
+        Items.AddRange(matched);
     }
 
     #endregion
@@ -118,7 +144,7 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
     public virtual void PrepareForTransition()
     {
         _isTransitioning = true;
-        this.RaisePropertyChanged(nameof(IsLoading));
+        OnPropertyChanged(nameof(IsLoading));
     }
 
     #endregion
@@ -128,7 +154,7 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
     public override async Task OnNavigatedToAsync()
     {
         _isTransitioning = false;
-        this.RaisePropertyChanged(nameof(IsLoading));
+        OnPropertyChanged(nameof(IsLoading));
 
         await base.OnNavigatedToAsync();
     }
@@ -146,33 +172,23 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
 
     #endregion
 
-    #region Private Helpers
-
-    private Func<TSource, bool> BuildFilterPredicate(string query)
-    {
-        return item => FilterItem(item, query);
-    }
-
-    #endregion
-
     #region Public Methods
 
     /// <summary>
-    /// Переносит элементы в источник данных и сбрасывает состояние пагинации.
+    /// Переносит элементы в источнике данных и синхронизирует список.
     /// </summary>
     protected virtual void MoveSourceItem(int oldIndex, int newIndex)
     {
-        _sourceList.Edit(list =>
-        {
-            if (oldIndex < 0 || oldIndex >= list.Count ||
-                newIndex < 0 || newIndex >= list.Count ||
-                oldIndex == newIndex)
-                return;
+        if (oldIndex < 0 || oldIndex >= _itemPairs.Count ||
+            newIndex < 0 || newIndex >= _itemPairs.Count ||
+            oldIndex == newIndex)
+            return;
 
-            var item = list[oldIndex];
-            list.RemoveAt(oldIndex);
-            list.Insert(newIndex, item);
-        });
+        var item = _itemPairs[oldIndex];
+        _itemPairs.RemoveAt(oldIndex);
+        _itemPairs.Insert(newIndex, item);
+
+        ApplyFilter();
     }
 
     /// <summary>
@@ -187,24 +203,26 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
         _canFetchMore = canFetchMore;
         _consecutiveEmptyLoads = 0;
 
+        DisposePairs();
+
         var itemsList = items as List<TSource> ?? items?.ToList() ?? [];
 
         _loadedIds.Clear();
         for (int i = 0; i < itemsList.Count; i++)
         {
-            var id = GetItemId(itemsList[i]);
+            var source = itemsList[i];
+            var id = GetItemId(source);
             if (!string.IsNullOrEmpty(id))
                 _loadedIds.Add(id);
+
+            var vm = CreateItemViewModel(source);
+            _itemPairs.Add((source, vm));
         }
 
-        _sourceList.Edit(innerList =>
-        {
-            innerList.Clear();
-            innerList.AddRange(itemsList);
-        });
-
-        TotalCount = _sourceList.Count;
+        TotalCount = _itemPairs.Count;
         UpdateState();
+        ApplyFilter();
+        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -212,15 +230,38 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
     /// </summary>
     protected virtual void ClearItems()
     {
-        _sourceList.Clear();
+        DisposePairs();
+        Items.Clear();
         _loadedIds.Clear();
         TotalCount = 0;
         _canFetchMore = false;
         UpdateState();
     }
 
-    protected List<TSource> GetItemsSnapshot() => [.. _sourceList.Items];
-    protected List<string> GetLoadedItemsIds() => [.. _sourceList.Items.Select(GetItemId)];
+    protected List<TSource> GetItemsSnapshot()
+    {
+        var list = new List<TSource>(_itemPairs.Count);
+        for (int i = 0; i < _itemPairs.Count; i++)
+            list.Add(_itemPairs[i].Source);
+        return list;
+    }
+
+    protected List<string> GetLoadedItemsIds()
+    {
+        var list = new List<string>(_itemPairs.Count);
+        for (int i = 0; i < _itemPairs.Count; i++)
+            list.Add(GetItemId(_itemPairs[i].Source));
+        return list;
+    }
+
+    private void DisposePairs()
+    {
+        for (int i = 0; i < _itemPairs.Count; i++)
+        {
+            _itemPairs[i].Vm.Dispose();
+        }
+        _itemPairs.Clear();
+    }
 
     #endregion
 
@@ -266,19 +307,26 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
 
             if (newItems is { Count: > 0 })
             {
-                _sourceList.Edit(list =>
+                var newVms = new List<TViewModel>(newItems.Count);
+                var hasFilter = !string.IsNullOrWhiteSpace(FilterQuery);
+
+                for (int i = 0; i < newItems.Count; i++)
                 {
-                    for (int i = 0; i < newItems.Count; i++)
+                    var item = newItems[i];
+                    var id = GetItemId(item);
+                    if (!string.IsNullOrEmpty(id) && _loadedIds.Add(id))
                     {
-                        var item = newItems[i];
-                        var id = GetItemId(item);
-                        if (!string.IsNullOrEmpty(id) && _loadedIds.Add(id))
-                        {
-                            list.Add(item);
-                            TotalCount++;
-                        }
+                        var vm = CreateItemViewModel(item);
+                        _itemPairs.Add((item, vm));
+                        TotalCount++;
+
+                        if (!hasFilter || FilterItem(item, FilterQuery))
+                            newVms.Add(vm);
                     }
-                });
+                }
+
+                if (newVms.Count > 0)
+                    Items.AddRange(newVms);
 
                 if (TotalCount == countBefore)
                     _consecutiveEmptyLoads++;
@@ -317,18 +365,16 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
 
         if (disposing)
         {
-            Log.Debug($"[PaginatedVM] Disposing");
+            Log.Debug("[PaginatedVM] Disposing");
 
             CancelLoading();
-            _dynamicDataSubscriptions.Dispose();
 
-            foreach (var item in _items)
-            {
-                if (item is IDisposable d)
-                    d.Dispose();
-            }
+            _filterDebounceCts?.Cancel();
+            _filterDebounceCts?.Dispose();
+            _filterDebounceCts = null;
 
-            _sourceList.Dispose();
+            Items.Clear();
+            DisposePairs();
         }
 
         base.Dispose(disposing);
