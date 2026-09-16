@@ -149,18 +149,12 @@
                         HorizontalAlignment="Center"
                         BorderBrush="{DynamicResource BgHighlightBrush}"
                         BorderThickness="1">
-                        <Border Width="60" Height="60"
-                            CornerRadius="30"
+                        <PathIcon Data="{StaticResource Icon.BellSleep}"
+                            Width="26" Height="26"
+                            Foreground="{DynamicResource TextMutedBrush}"
                             HorizontalAlignment="Center"
-                            BorderBrush="{DynamicResource BgHighlightBrush}"
-                            BorderThickness="1">
-                            <PathIcon Data="{StaticResource Icon.BellSleep}"
-                                Width="26" Height="26"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Opacity="0.5" />
-                        </Border>
+                            VerticalAlignment="Center"
+                            Opacity="0.5" />
                     </Border>
                     <TextBlock Text="{Binding L[Notification_NoNotifications]}"
                         FontSize="13"
