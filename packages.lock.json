@@ -320,11 +320,6 @@
         "resolved": "3.0.1",
         "contentHash": "s/s20YTVY9r9TPfTrN5g8zPF1YhwxyqO6PxUkrYTGI2B+OGPe9AdajWZrLhFqXIvqIW23fnUE4+ztrUWNU1+9g=="
       },
-      "NAudio.Core": {
-        "type": "Transitive",
-        "resolved": "2.3.0",
-        "contentHash": "jMd7r6dB6tAtXhOYL58ntPqwERNm1/Rhw5MKOIYvsnXzuX+PTGsa2VMam6n0npZYSwlSidKa4GAm4bFcXFUlcg=="
-      },
       "SkiaSharp": {
         "type": "Transitive",
         "resolved": "4.151.1",
@@ -468,7 +463,6 @@
           "Microsoft.Data.Sqlite": "[10.0.11, )",
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.*, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.11, )",
-          "NAudio.Core": "[2.3.0, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.3, )",
           "SkiaSharp": "[4.151.1, )",
           "System.Security.Cryptography.ProtectedData": "[10.0.11, )"

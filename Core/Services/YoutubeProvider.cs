@@ -772,10 +772,7 @@ public partial class YoutubeProvider : IDisposable
             _manifestRamCache[track.Id] = manifest;
             SessionCacheStore.RecordManifest(track.Id, audioStreams, manifest.IntegratedLufs);
 
-            var descriptor = SelectFromManifest(manifest, track.Id, requested.Format, requested.BitrateKbps);
-            if (descriptor == null)
-                throw new StreamUnavailableException($"No matching stream for {rawVideoId}", rawVideoId, StreamUnavailableReason.AllClientsFailed);
-
+            var descriptor = SelectFromManifest(manifest, track.Id, requested.Format, requested.BitrateKbps) ?? throw new StreamUnavailableException($"No matching stream for {rawVideoId}", rawVideoId, StreamUnavailableReason.AllClientsFailed);
             Log.Info($"[YouTube] RefreshStreamAsync YOUTUBE API ({audioStreams.Count} variants) -> {descriptor}");
             return descriptor;
         }

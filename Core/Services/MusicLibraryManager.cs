@@ -81,25 +81,30 @@ public class MusicLibraryManager : ObservableObject
             var localLikedTrackIds = await _library.GetPlaylistTrackIdsAsync(
                 LibraryService.LikedPlaylistId, ct);
             var existingIds = new HashSet<string>(localLikedTrackIds, StringComparer.Ordinal);
-            int addedCount = 0;
 
-            foreach (var track in likedTracks)
+            var newTracks = new List<TrackInfo>();
+
+            for (int i = 0; i < likedTracks.Count; i++)
             {
                 if (ct.IsCancellationRequested) break;
 
+                var track = likedTracks[i];
                 track.IsLiked = true;
-                await _library.AddOrUpdateTrackAsync(track, ct);
 
                 if (existingIds.Add(track.Id))
                 {
-                    await _library.AddTrackToPlaylistAsync(
-                        track, LibraryService.LikedPlaylistId, ct);
-                    addedCount++;
+                    newTracks.Add(track);
                 }
             }
 
-            Log.Info(addedCount > 0
-                ? $"[Sync] Added {addedCount} new liked tracks."
+            if (newTracks.Count > 0)
+            {
+                await _library.AddTracksToPlaylistAsync(
+                    newTracks, LibraryService.LikedPlaylistId, ct);
+            }
+
+            Log.Info(newTracks.Count > 0
+                ? $"[Sync] Added {newTracks.Count} new liked tracks."
                 : "[Sync] No new liked tracks found.");
         }
         catch (Exception ex)

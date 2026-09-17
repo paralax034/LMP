@@ -147,4 +147,13 @@ public static class ManualTests
         await Unit.AudioHotPathBenchmarks.TestAudioHotPathBenchmarkAsync();
         await Unit.AudioHotPathBenchmarks.TestRingBufferContentionStressAsync();
     }
+
+    /// <summary>
+    /// Запуск комплексной диагностики последовательности треков в плейлистах и лайках.
+    /// Позволяет выявить рассинхронизацию между SQLite, L1-кэшем и внешним YouTube API.
+    /// </summary>
+    /// <param name="playlistUrl">URL плейлиста YouTube или null для проверки локального Liked плейлиста.</param>
+    /// <returns>Асинхронная задача выполнения диагностики.</returns>
+    public static Task DiagnosePlaylistOrderAsync(string? playlistUrl = null) =>
+        Integration.PlaylistOrderTests.DiagnosePlaylistOrderAsync(AppEntry.Services, playlistUrl);
 }

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Helpers.Extensions;
+using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Music;
 
@@ -211,7 +212,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
             {
                 writer.WriteStartObject();
                 writer.WriteString("action", "ACTION_ADD_VIDEO");
-                writer.WriteString("addedVideoId", videoIds[i]);
+                writer.WriteString("addedVideoId", YoutubeIdHelper.ExtractRawId(videoIds[i]));
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();

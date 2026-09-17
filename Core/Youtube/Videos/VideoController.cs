@@ -115,13 +115,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
                 $"https://www.youtube.com/watch?v={videoId}&bpctr=9999999999",
                 cancellationToken).ConfigureAwait(false);
 
-            var watchPage = VideoWatchPage.TryParse(rawHtml);
-
-            if (watchPage is null)
-            {
-                throw new YoutubeExplodeException("Video watch page is broken. Please try again in a few minutes.");
-            }
-
+            var watchPage = VideoWatchPage.TryParse(rawHtml) ?? throw new YoutubeExplodeException("Video watch page is broken. Please try again in a few minutes.");
             if (!watchPage.IsAvailable)
             {
                 throw new VideoUnavailableException($"Video '{videoId}' is not available.");

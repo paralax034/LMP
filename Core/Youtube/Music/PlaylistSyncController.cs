@@ -381,8 +381,12 @@ internal sealed class PlaylistSyncController(HttpClient http)
         var direct = header.Value.GetPropertyOrNull("musicResponsiveHeaderRenderer");
         if (direct is not null) return direct;
 
+        var detail = header.Value.GetPropertyOrNull("musicDetailHeaderRenderer");
+        if (detail is not null) return detail;
+
         // Path 3: descendant search
-        return header.Value.FindFirstDescendantProperty("musicResponsiveHeaderRenderer");
+        return header.Value.FindFirstDescendantProperty("musicResponsiveHeaderRenderer")
+            ?? header.Value.FindFirstDescendantProperty("musicDetailHeaderRenderer");
     }
 
     /// <summary>
@@ -473,12 +477,19 @@ internal sealed class PlaylistSyncController(HttpClient http)
     }
 
     /// <summary>
-    /// Путь заголовка в WEB_REMIX нестабилен между вариантами страницы.
-    /// Сначала используется быстрый путь pageHeaderRenderer.pageTitle,
-    /// затем безопасные fallback-пути внутри header subtree.
+    /// Путь заголовка в WEB_REMIX.
+    /// Сначала извлекает заголовок из resolved music header, затем fallback-пути.
     /// </summary>
     private static string? ParsePlaylistTitle(JsonElement root)
     {
+        var responsiveHeader = ResolveMusicResponsiveHeader(root);
+        if (responsiveHeader is not null)
+        {
+            var title = GetTextValue(responsiveHeader.Value.GetPropertyOrNull("title"));
+            if (!string.IsNullOrEmpty(title))
+                return title;
+        }
+
         var header = root.GetPropertyOrNull("header");
         if (header is null)
             return null;
@@ -498,12 +509,24 @@ internal sealed class PlaylistSyncController(HttpClient http)
     }
 
     /// <summary>
-    /// Путь описания в WEB_REMIX может приходить через descriptionPreviewViewModel
-    /// либо через альтернативные рендереры. Сначала используется точный путь,
-    /// затем ограниченный fallback внутри header subtree.
+    /// Путь описания в WEB_REMIX.
+    /// Поддерживает musicDescriptionShelfRenderer и альтернативные рендереры.
     /// </summary>
     private static string? ParsePlaylistDescription(JsonElement root)
     {
+        var responsiveHeader = ResolveMusicResponsiveHeader(root);
+        if (responsiveHeader is not null)
+        {
+            var desc = GetTextValue(responsiveHeader.Value.GetPropertyOrNull("description"))
+                ?? GetTextValue(responsiveHeader.Value
+                    .GetPropertyOrNull("description")
+                    ?.GetPropertyOrNull("musicDescriptionShelfRenderer")
+                    ?.GetPropertyOrNull("description"));
+
+            if (!string.IsNullOrEmpty(desc))
+                return desc;
+        }
+
         var header = root.GetPropertyOrNull("header");
         if (header is null)
             return null;
@@ -527,27 +550,30 @@ internal sealed class PlaylistSyncController(HttpClient http)
     }
 
     /// <summary>
-    /// Берёт URL обложки из sources[last] для максимального разрешения.
-    /// Если точный путь не найден, используется fallback-поиск массива sources внутри header.
+    /// Извлекает URL обложки плейлиста.
     /// </summary>
     private static string? ParsePlaylistThumbnail(JsonElement root)
     {
+        var responsiveHeader = ResolveMusicResponsiveHeader(root);
+        if (responsiveHeader is not null)
+        {
+            var thumb = ExtractLastThumbnailUrl(responsiveHeader.Value);
+            if (!string.IsNullOrEmpty(thumb))
+                return thumb;
+        }
+
         var header = root.GetPropertyOrNull("header");
         if (header is null)
             return null;
 
-        var sources = header.Value
+        var sources = (header.Value
             .GetPropertyOrNull("pageHeaderRenderer")
             ?.GetPropertyOrNull("content")
             ?.GetPropertyOrNull("pageHeaderViewModel")
             ?.GetPropertyOrNull("image")
             ?.GetPropertyOrNull("contentPreviewImageViewModel")
             ?.GetPropertyOrNull("image")
-            ?.GetPropertyOrNull("sources");
-
-        if (sources is null)
-            sources = header.Value.FindFirstDescendantProperty("sources");
-
+            ?.GetPropertyOrNull("sources")) ?? header.Value.FindFirstDescendantProperty("sources");
         if (sources is null || sources.Value.ValueKind != JsonValueKind.Array)
             return null;
 
@@ -565,105 +591,56 @@ internal sealed class PlaylistSyncController(HttpClient http)
     #region Track Parsers
 
     /// <summary>
-    /// Ищет массив contents у playlistVideoListRenderer.
-    /// Сначала проверяет выбранные вкладки, затем все вкладки,
-    /// затем использует ограниченный descendant fallback.
+    /// Находит начальный массив треков в структуре YouTube Music (WEB_REMIX).
+    /// Приоритет отдаётся <c>musicPlaylistShelfRenderer.contents</c>,
+    /// затем проверяется fallback на <c>playlistVideoListRenderer.contents</c>.
     /// </summary>
     private static JsonElement? GetInitialTrackContents(JsonElement root)
     {
-        var tabs = root.GetPropertyOrNull("contents")
+        // 1. YouTube Music primary: singleColumnBrowseResultsRenderer / tabs
+        var sectionList = root.GetPropertyOrNull("contents")
             ?.GetPropertyOrNull("twoColumnBrowseResultsRenderer")
-            ?.GetPropertyOrNull("tabs");
+            ?.GetPropertyOrNull("secondaryContents")
+            ?.GetPropertyOrNull("sectionListRenderer")
+            ?.GetPropertyOrNull("contents");
 
-        if (tabs is { } tabsElement && tabsElement.ValueKind == JsonValueKind.Array)
+        if (sectionList is null)
         {
-            int len = tabsElement.GetArrayLength();
+            var tabs = root.GetPropertyOrNull("contents")
+                ?.GetPropertyOrNull("singleColumnBrowseResultsRenderer")
+                ?.GetPropertyOrNull("tabs");
 
-            for (int i = 0; i < len; i++)
+            if (tabs != null)
             {
-                var tabRenderer = tabsElement[i].GetPropertyOrNull("tabRenderer");
-                if (tabRenderer?.GetPropertyOrNull("selected")?.GetBooleanOrNull() != true)
-                    continue;
-
-                var selectedContents = TryGetTrackContentsFromTab(tabRenderer.Value);
-                if (selectedContents is not null)
-                    return selectedContents;
-            }
-
-            for (int i = 0; i < len; i++)
-            {
-                var tabRenderer = tabsElement[i].GetPropertyOrNull("tabRenderer");
-                if (tabRenderer is null)
-                    continue;
-
-                var contents = TryGetTrackContentsFromTab(tabRenderer.Value);
-                if (contents is not null)
-                    return contents;
+                var firstTab = tabs.Value.GetFirstArrayElementOrNull();
+                sectionList = firstTab?.GetPropertyOrNull("tabRenderer")
+                    ?.GetPropertyOrNull("content")
+                    ?.GetPropertyOrNull("sectionListRenderer")
+                    ?.GetPropertyOrNull("contents");
             }
         }
 
+        if (sectionList != null && sectionList.Value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var section in sectionList.Value.EnumerateArray())
+            {
+                if (section.TryGetProperty("musicPlaylistShelfRenderer", out var shelf))
+                {
+                    var shelfContents = shelf.GetPropertyOrNull("contents");
+                    if (shelfContents is not null)
+                        return shelfContents;
+                }
+            }
+        }
+
+        // 2. YouTube Music fallback: прямой поиск musicPlaylistShelfRenderer
+        var musicShelf = root.FindFirstDescendantProperty("musicPlaylistShelfRenderer");
+        if (musicShelf?.GetPropertyOrNull("contents") is { } directShelfContents)
+            return directShelfContents;
+
+        // 3. YouTube Web fallback: поиск playlistVideoListRenderer
         var listRenderer = root.FindFirstDescendantProperty("playlistVideoListRenderer");
         return listRenderer?.GetPropertyOrNull("contents");
-    }
-
-    /// <summary>
-    /// Извлекает playlistVideoListRenderer.contents из содержимого вкладки.
-    /// </summary>
-    private static JsonElement? TryGetTrackContentsFromTab(JsonElement tabRenderer)
-    {
-        var content = tabRenderer.GetPropertyOrNull("content");
-        if (content is null)
-            return null;
-
-        var sectionContents = content.Value
-            .GetPropertyOrNull("sectionListRenderer")
-            ?.GetPropertyOrNull("contents");
-
-        if (sectionContents is { } sectionArray &&
-            sectionArray.ValueKind == JsonValueKind.Array &&
-            sectionArray.GetArrayLength() > 0)
-        {
-            for (int i = 0; i < sectionArray.GetArrayLength(); i++)
-            {
-                var section = sectionArray[i];
-
-                var itemSectionContents = section
-                    .GetPropertyOrNull("itemSectionRenderer")
-                    ?.GetPropertyOrNull("contents");
-
-                if (itemSectionContents is { } itemArray &&
-                    itemArray.ValueKind == JsonValueKind.Array &&
-                    itemArray.GetArrayLength() > 0)
-                {
-                    for (int j = 0; j < itemArray.GetArrayLength(); j++)
-                    {
-                        var direct = itemArray[j]
-                            .GetPropertyOrNull("playlistVideoListRenderer")
-                            ?.GetPropertyOrNull("contents");
-
-                        if (direct is not null)
-                            return direct;
-                    }
-                }
-
-                var directSection = section
-                    .GetPropertyOrNull("playlistVideoListRenderer")
-                    ?.GetPropertyOrNull("contents");
-
-                if (directSection is not null)
-                    return directSection;
-            }
-        }
-
-        var directContent = content.Value
-            .GetPropertyOrNull("playlistVideoListRenderer")
-            ?.GetPropertyOrNull("contents");
-
-        if (directContent is not null)
-            return directContent;
-
-        var fallback = content.Value.FindFirstDescendantProperty("playlistVideoListRenderer");
-        return fallback?.GetPropertyOrNull("contents");
     }
 
     private static void ParseMusicPlaylistTracks(JsonElement root, List<RemoteTrackInfo> results)
@@ -702,51 +679,156 @@ internal sealed class PlaylistSyncController(HttpClient http)
         for (int i = 0; i < len; i++)
         {
             var item = array[i];
-
-            var renderer = item.GetPropertyOrNull("playlistVideoRenderer");
-            if (renderer is null)
-                renderer = item.FindFirstDescendantProperty("playlistVideoRenderer");
-
-            if (renderer is null)
-                continue;
-
-            if (TryParseRemoteTrack(renderer.Value, results.Count, out var track))
+            if (TryParseRemoteTrack(item, results.Count, out var track))
                 results.Add(track);
         }
     }
 
+
     /// <summary>
-    /// Парсит один playlistVideoRenderer в RemoteTrackInfo.
+    /// Парсит элемент трека в <see cref="RemoteTrackInfo"/>.
+    /// Поддерживает как YouTube Music (<c>musicResponsiveListItemRenderer</c>),
+    /// так и классический YouTube Web (<c>playlistVideoRenderer</c>).
     /// </summary>
     private static bool TryParseRemoteTrack(
-        JsonElement renderer,
+        JsonElement item,
         int position,
         out RemoteTrackInfo track)
     {
         track = default;
 
-        var videoId = renderer.GetPropertyOrNull("videoId")?.GetStringOrNull();
-        var setVideoId = renderer.GetPropertyOrNull("setVideoId")?.GetStringOrNull();
+        // Вариант 1: YouTube Music — musicResponsiveListItemRenderer
+        bool hasMusicRenderer = item.TryGetProperty("musicResponsiveListItemRenderer", out var musicRenderer);
+        if (!hasMusicRenderer && item.FindFirstDescendantProperty("musicResponsiveListItemRenderer") is { } foundMusic)
+        {
+            musicRenderer = foundMusic;
+            hasMusicRenderer = true;
+        }
 
-        if (string.IsNullOrEmpty(videoId) || string.IsNullOrEmpty(setVideoId))
+        if (hasMusicRenderer)
+        {
+            var playlistItemData = musicRenderer.GetPropertyOrNull("playlistItemData");
+            var vId = playlistItemData?.GetPropertyOrNull("videoId")?.GetStringOrNull()
+                ?? musicRenderer.FindFirstDescendantProperty("videoId")?.GetStringOrNull();
+
+            // В актуальном InnerTube API YTM идентификатор вхождения именуется как playlistSetVideoId или setVideoId
+            var sId = playlistItemData?.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
+                ?? playlistItemData?.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
+                ?? musicRenderer.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
+                ?? musicRenderer.FindFirstDescendantProperty("playlistSetVideoId")?.GetStringOrNull()
+                ?? musicRenderer.FindFirstDescendantProperty("setVideoId")?.GetStringOrNull();
+
+            if (string.IsNullOrEmpty(vId))
+                return false;
+
+            var flexCols = musicRenderer.GetPropertyOrNull("flexColumns");
+            var tName = flexCols?.GetArrayElementOrNull(0)
+                ?.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
+                ?.GetPropertyOrNull("text")
+                ?.GetPropertyOrNull("runs")
+                ?.GetFirstArrayElementOrNull()
+                ?.GetPropertyOrNull("text")?.GetStringOrNull() ?? "";
+
+            string authorName = "";
+            var metaRuns = flexCols?.GetArrayElementOrNull(1)
+                ?.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
+                ?.GetPropertyOrNull("text")
+                ?.GetPropertyOrNull("runs");
+
+            if (metaRuns != null)
+            {
+                foreach (var run in metaRuns.Value.EnumerateArrayOrEmpty())
+                {
+                    var text = run.GetPropertyOrNull("text")?.GetStringOrNull();
+                    if (text == null) continue;
+
+                    var nav = run.GetPropertyOrNull("navigationEndpoint");
+                    if (nav != null)
+                    {
+                        var pageType = nav.Value.GetPropertyOrNull("browseEndpoint")
+                            ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
+                            ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
+                            ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
+
+                        if (pageType is "MUSIC_PAGE_TYPE_ARTIST" or "MUSIC_PAGE_TYPE_USER_CHANNEL")
+                        {
+                            authorName = text;
+                            break;
+                        }
+                    }
+                    else if (string.IsNullOrEmpty(authorName) && !text.Contains("views", StringComparison.OrdinalIgnoreCase) && !text.Contains("Song", StringComparison.OrdinalIgnoreCase) && !text.Contains(':'))
+                    {
+                        authorName = text;
+                    }
+                }
+            }
+
+            int durSec = 0;
+            var durationText = musicRenderer.GetPropertyOrNull("fixedColumns")
+                ?.GetFirstArrayElementOrNull()
+                ?.GetPropertyOrNull("musicResponsiveListItemFixedColumnRenderer")
+                ?.GetPropertyOrNull("text")
+                ?.GetPropertyOrNull("runs")
+                ?.GetFirstArrayElementOrNull()
+                ?.GetPropertyOrNull("text")?.GetStringOrNull();
+
+            if (durationText != null)
+            {
+                var parsedDur = YoutubeClientUtils.DurationParser.Parse(durationText);
+                if (parsedDur.HasValue)
+                    durSec = (int)parsedDur.Value.TotalSeconds;
+            }
+
+            var tUrl = ExtractLastThumbnailUrl(musicRenderer);
+            var pol = musicRenderer.GetPropertyOrNull("musicItemRendererDisplayPolicy")?.GetStringOrNull();
+            bool playable = !string.Equals(pol, GreyOutPolicy, StringComparison.Ordinal);
+
+            track = new RemoteTrackInfo(
+                VideoId: vId,
+                SetVideoId: sId ?? string.Empty,
+                Title: tName,
+                Author: authorName,
+                DurationSeconds: durSec,
+                ThumbnailUrl: tUrl,
+                IsPlayable: playable,
+                Position: position);
+
+            return true;
+        }
+
+        // Вариант 2: Классический Web — playlistVideoRenderer
+        var renderer = item.GetPropertyOrNull("playlistVideoRenderer");
+        if (renderer is null)
+            renderer = item.FindFirstDescendantProperty("playlistVideoRenderer");
+
+        if (renderer is null)
             return false;
 
-        var title = GetTextValue(renderer.GetPropertyOrNull("title")) ?? "";
-        var author = ExtractArtist(renderer);
+        var videoId = renderer.Value.GetPropertyOrNull("videoId")?.GetStringOrNull();
+        var setVideoId = renderer.Value.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
+            ?? renderer.Value.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
+            ?? renderer.Value.FindFirstDescendantProperty("playlistSetVideoId")?.GetStringOrNull()
+            ?? renderer.Value.FindFirstDescendantProperty("setVideoId")?.GetStringOrNull();
+
+        if (string.IsNullOrEmpty(videoId))
+            return false;
+
+        var title = GetTextValue(renderer.Value.GetPropertyOrNull("title")) ?? "";
+        var author = ExtractArtist(renderer.Value);
 
         int durationSeconds = 0;
-        var lenStr = renderer.GetPropertyOrNull("lengthSeconds")?.GetStringOrNull();
+        var lenStr = renderer.Value.GetPropertyOrNull("lengthSeconds")?.GetStringOrNull();
         if (!string.IsNullOrEmpty(lenStr))
             int.TryParse(lenStr, out durationSeconds);
 
-        var thumbUrl = ExtractLastThumbnailUrl(renderer);
+        var thumbUrl = ExtractLastThumbnailUrl(renderer.Value);
 
-        var policy = renderer.GetPropertyOrNull("musicItemRendererDisplayPolicy")?.GetStringOrNull();
+        var policy = renderer.Value.GetPropertyOrNull("musicItemRendererDisplayPolicy")?.GetStringOrNull();
         bool isPlayable = !string.Equals(policy, GreyOutPolicy, StringComparison.Ordinal);
 
         track = new RemoteTrackInfo(
             VideoId: videoId,
-            SetVideoId: setVideoId,
+            SetVideoId: setVideoId ?? string.Empty,
             Title: title,
             Author: author,
             DurationSeconds: durationSeconds,
@@ -804,12 +886,8 @@ internal sealed class PlaylistSyncController(HttpClient http)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string ExtractLastThumbnailUrl(JsonElement renderer)
     {
-        var thumbs = renderer.GetPropertyOrNull("thumbnail")
-            ?.GetPropertyOrNull("thumbnails");
-
-        if (thumbs is null)
-            thumbs = renderer.FindFirstDescendantProperty("thumbnails");
-
+        var thumbs = (renderer.GetPropertyOrNull("thumbnail")
+            ?.GetPropertyOrNull("thumbnails")) ?? renderer.FindFirstDescendantProperty("thumbnails");
         if (thumbs is null || thumbs.Value.ValueKind != JsonValueKind.Array)
             return "";
 
@@ -828,21 +906,11 @@ internal sealed class PlaylistSyncController(HttpClient http)
 
     /// <summary>
     /// Извлекает continuation token из initial browse или continuation response.
+    /// Поддерживает как свойство continuations, так и хвостовой элемент continuationItemRenderer в массивах contents.
     /// </summary>
     private static string? ExtractMusicContinuationToken(JsonElement root)
     {
-        var actionItems = root.GetPropertyOrNull("onResponseReceivedActions")
-            ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("appendContinuationItemsAction")
-            ?.GetPropertyOrNull("continuationItems");
-
-        if (actionItems is { } actionArray && actionArray.ValueKind == JsonValueKind.Array)
-        {
-            var token = TryGetTokenFromLastItem(actionArray);
-            if (!string.IsNullOrEmpty(token))
-                return token;
-        }
-
+        // 1. Continuation response: continuationContents.musicPlaylistShelfContinuation
         var continuationContents = root.GetPropertyOrNull("continuationContents")
             ?.GetPropertyOrNull("musicPlaylistShelfContinuation");
 
@@ -858,15 +926,29 @@ internal sealed class PlaylistSyncController(HttpClient http)
             if (!string.IsNullOrEmpty(directToken))
                 return directToken;
 
-            var shelfItems = continuationRoot.GetPropertyOrNull("contents");
-            if (shelfItems is { } shelfArray && shelfArray.ValueKind == JsonValueKind.Array)
+            var contShelfItems = continuationRoot.GetPropertyOrNull("contents");
+            if (contShelfItems is { } contShelfArray && contShelfArray.ValueKind == JsonValueKind.Array)
             {
-                var token = TryGetTokenFromLastItem(shelfArray);
+                var token = TryGetTokenFromLastItem(contShelfArray);
                 if (!string.IsNullOrEmpty(token))
                     return token;
             }
         }
 
+        // 2. Action items continuation
+        var actionItems = root.GetPropertyOrNull("onResponseReceivedActions")
+            ?.GetFirstArrayElementOrNull()
+            ?.GetPropertyOrNull("appendContinuationItemsAction")
+            ?.GetPropertyOrNull("continuationItems");
+
+        if (actionItems is { } actionArray && actionArray.ValueKind == JsonValueKind.Array)
+        {
+            var token = TryGetTokenFromLastItem(actionArray);
+            if (!string.IsNullOrEmpty(token))
+                return token;
+        }
+
+        // 3. Initial browse: последний элемент массива contents в musicPlaylistShelfRenderer
         var initialContents = GetInitialTrackContents(root);
         if (initialContents is { } initialArray && initialArray.ValueKind == JsonValueKind.Array)
         {
@@ -875,6 +957,19 @@ internal sealed class PlaylistSyncController(HttpClient http)
                 return token;
         }
 
+        // 4. Initial browse: musicPlaylistShelfRenderer.continuations
+        var musicShelf = root.FindFirstDescendantProperty("musicPlaylistShelfRenderer");
+        var shelfToken = musicShelf?
+            .GetPropertyOrNull("continuations")
+            ?.GetFirstArrayElementOrNull()
+            ?.GetPropertyOrNull("nextContinuationData")
+            ?.GetPropertyOrNull("continuation")
+            ?.GetStringOrNull();
+
+        if (!string.IsNullOrEmpty(shelfToken))
+            return shelfToken;
+
+        // 5. Fallback playlistVideoListRenderer
         var listRenderer = root.FindFirstDescendantProperty("playlistVideoListRenderer");
         return listRenderer?
             .GetPropertyOrNull("continuations")

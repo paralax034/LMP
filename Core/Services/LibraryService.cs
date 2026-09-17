@@ -743,6 +743,34 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         OnDataChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Пакетно добавляет список треков в плейлист с сохранением метаданных и единичным уведомлением слушателей событий.
+    /// Предотвращает множественный вызов OnDataChanged и снижает нагрузку на пул соединений SQLite.
+    /// </summary>
+    /// <param name="tracks">Коллекция добавляемых треков в целевом порядке.</param>
+    /// <param name="playlistId">Идентификатор целевого плейлиста.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Асинхронная задача выполнения операции.</returns>
+    public async Task AddTracksToPlaylistAsync(IReadOnlyList<TrackInfo> tracks, string playlistId, CancellationToken ct = default)
+    {
+        if (tracks.Count == 0) return;
+
+        var trackIds = new List<string>(tracks.Count);
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            var t = tracks[i];
+            await AddOrUpdateTrackAsync(t, ct).ConfigureAwait(false);
+            trackIds.Add(t.Id);
+            t.InPlaylists.Add(playlistId);
+            _registry.UpdatePinStatus(t);
+        }
+
+        await _playlists.AddTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
+
+        OnPlaylistChanged?.Invoke(new Playlist { Id = playlistId });
+        OnDataChanged?.Invoke();
+    }
+
     public async Task RemoveTrackFromPlaylistAsync(string trackId, string playlistId, CancellationToken ct = default)
     {
         await _playlists.RemoveTrackAsync(playlistId, trackId, CurrentOwnerId, ct).ConfigureAwait(false);

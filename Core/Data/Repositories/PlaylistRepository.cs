@@ -545,13 +545,53 @@ public sealed class PlaylistRepository : IPlaylistRepository
     {
         if (playlistId == LibraryService.LikedPlaylistId)
         {
-            int added = 0;
-            foreach (var trackId in trackIds)
+            var idList = trackIds as IList<string> ?? [.. trackIds];
+            if (idList.Count == 0) return 0;
+
+            await using var likedConn = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var likedTx = (SqliteTransaction)await likedConn.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+            try
             {
-                await SetLikedDirectAsync(trackId, ownerId, true, ct).ConfigureAwait(false);
-                added++;
+                var baseTime = DateTime.UtcNow;
+                int added = 0;
+
+                await using var cmd = likedConn.CreateCommand();
+                cmd.Transaction = likedTx;
+                cmd.CommandText = """
+                    INSERT OR IGNORE INTO LikedTracks (OwnerId, TrackId, LikedAt)
+                    VALUES (@ownerId, @trackId, @likedAt);
+                    """;
+
+                var pOwner = cmd.CreateParameter();
+                pOwner.ParameterName = "@ownerId";
+                pOwner.Value = ownerId ?? string.Empty;
+                cmd.Parameters.Add(pOwner);
+
+                var pTrack = cmd.CreateParameter();
+                pTrack.ParameterName = "@trackId";
+                cmd.Parameters.Add(pTrack);
+
+                var pLikedAt = cmd.CreateParameter();
+                pLikedAt.ParameterName = "@likedAt";
+                cmd.Parameters.Add(pLikedAt);
+
+                for (int i = 0; i < idList.Count; i++)
+                {
+                    pTrack.Value = idList[i];
+                    // Монотонно убывающий timestamp: idList[0] (самый свежий) получает наибольший timestamp
+                    pLikedAt.Value = baseTime.AddMilliseconds(-i).ToString("o", CultureInfo.InvariantCulture);
+                    added += await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+
+                await likedTx.CommitAsync(ct).ConfigureAwait(false);
+                return added;
             }
-            return added;
+            catch
+            {
+                await likedTx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
         }
 
         var trackIdList = trackIds as IList<string> ?? [.. trackIds];

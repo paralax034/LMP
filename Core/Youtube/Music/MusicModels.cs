@@ -222,7 +222,12 @@ internal sealed class MusicBrowseResponse
 
         if (id == null) return null;
 
-        var setVideoId = playlistItemData?.GetPropertyOrNull("setVideoId")?.GetStringOrNull();
+        var setVideoId = playlistItemData?.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
+            ?? playlistItemData?.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
+            ?? json.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
+            ?? json.FindFirstDescendantProperty("playlistSetVideoId")?.GetStringOrNull()
+            ?? json.FindFirstDescendantProperty("setVideoId")?.GetStringOrNull();
+
         var flexCols = json.GetPropertyOrNull("flexColumns");
 
         var title = flexCols?.GetArrayElementOrNull(0)
