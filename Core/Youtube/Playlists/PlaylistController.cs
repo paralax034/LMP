@@ -48,12 +48,12 @@ internal class PlaylistController(HttpClient http)
         );
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-        using var response = await http.SendAsync(request, cancellationToken);
+        using var response = await http.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var playlistResponse = PlaylistBrowseResponse.Parse(
-            await response.Content.ReadAsStringAsync(cancellationToken)
-        );
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var playlistResponse = await PlaylistBrowseResponse.ParseAsync(stream, cancellationToken).ConfigureAwait(false);
 
         if (!playlistResponse.IsAvailable && browseId != "VLLL")
             throw new PlaylistUnavailableException($"Плейлист '{playlistId}' недоступен.");
@@ -101,12 +101,12 @@ internal class PlaylistController(HttpClient http)
             """
         );
 
-        using var response = await http.SendAsync(request, cancellationToken);
+        using var response = await http.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        return PlaylistContinuationResponse.Parse(
-            await response.Content.ReadAsStringAsync(cancellationToken)
-        );
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        return await PlaylistContinuationResponse.ParseAsync(stream, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -155,12 +155,12 @@ internal class PlaylistController(HttpClient http)
                 """
             );
 
-            using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await http.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
-            var playlistResponse = PlaylistNextResponse.Parse(
-                await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false)
-            );
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var playlistResponse = await PlaylistNextResponse.ParseAsync(stream, cancellationToken).ConfigureAwait(false);
 
             if (!playlistResponse.IsAvailable)
             {

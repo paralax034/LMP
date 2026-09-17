@@ -8,70 +8,212 @@ namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
 /// Представляет ответ API YouTube на запрос страницы просмотра плейлиста (Browse).
+/// Чистая легковесная DTO-модель: извлекает данные при разборе и не удерживает <see cref="JsonDocument"/> в памяти.
 /// </summary>
-internal partial class PlaylistBrowseResponse(JsonElement content) : IPlaylistData
+internal partial class PlaylistBrowseResponse : IPlaylistData
 {
-    private JsonElement? _cachedPlaylistContents;
-    private bool _playlistContentsCached;
+    /// <inheritdoc />
+    public bool IsAvailable { get; init; }
 
-    private JsonElement? Sidebar =>
-        content
-            .GetPropertyOrNull("sidebar")
-            ?.GetPropertyOrNull("playlistSidebarRenderer")
-            ?.GetPropertyOrNull("items");
+    /// <inheritdoc />
+    public string? Title { get; init; }
 
-    private JsonElement? SidebarPrimary =>
-        Sidebar
-            ?.EnumerateArrayOrNull()
-            ?.ElementAtOrNull(0)
-            ?.GetPropertyOrNull("playlistSidebarPrimaryInfoRenderer");
+    /// <inheritdoc />
+    public string? Author { get; init; }
 
-    private JsonElement? SidebarSecondary =>
-        Sidebar
-            ?.EnumerateArrayOrNull()
-            ?.ElementAtOrNull(1)
-            ?.GetPropertyOrNull("playlistSidebarSecondaryInfoRenderer");
+    /// <inheritdoc />
+    public string? ChannelId { get; init; }
+
+    /// <inheritdoc />
+    public string? Description { get; init; }
+
+    /// <inheritdoc />
+    public int? Count { get; init; }
 
     /// <summary>
-    /// Renderer формы приватности плейлиста. Доступен, как правило, для плейлистов,
-    /// принадлежащих текущему аутентифицированному пользователю.
+    /// Количество просмотров плейлиста.
+    /// Поддерживает новый UI-отрендеренный объект заголовка (frameworkUpdates) и классический сайдбар.
     /// </summary>
-    private JsonElement? PrivacyDropdownRenderer =>
-        SidebarPrimary
-            ?.GetPropertyOrNull("privacyForm")
-            ?.GetPropertyOrNull("dropdownFormFieldRenderer");
+    public long? ViewCount { get; init; }
 
     /// <summary>
-    /// Кэшированный результат поиска <c>playlistVideoListRenderer</c>.
-    /// Вычисляется один раз при первом обращении через <see cref="ResolvePlaylistContents"/>.
+    /// Дата создания или последнего обновления плейлиста (в строковом представлении).
+    /// Извлекает чистое значение даты без локализованных префиксов («Обновлен», «Updated»).
+    /// Поддерживает новый UI заголовка (frameworkUpdates) и парсинг третьего элемента
+    /// статистики классического сайдбара.
     /// </summary>
-    private JsonElement? EffectivePlaylistContents
-    {
-        get
-        {
-            if (!_playlistContentsCached)
-            {
-                _cachedPlaylistContents = ResolvePlaylistContents();
-                _playlistContentsCached = true;
-            }
-            return _cachedPlaylistContents;
-        }
-    }
+    public DateOnly? ReleaseDate { get; init; }
 
     /// <summary>
     /// Вычисленный уровень доступа к плейлисту.
     /// Для owned playlists берётся из privacy dropdown, для остальных остаётся Unknown.
     /// </summary>
-    public PlaylistVisibility Visibility =>
-        TryParseVisibility(PrivacyDropdownRenderer, out var visibility)
-            ? visibility
-            : PlaylistVisibility.Unknown;
+    public PlaylistVisibility Visibility { get; init; } = PlaylistVisibility.Unknown;
+
+    /// <inheritdoc />
+    public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
+
+    /// <summary>
+    /// Список видео в текущей партии плейлиста.
+    /// </summary>
+    public IReadOnlyList<PlaylistVideoData> Videos { get; init; } = [];
+
+    /// <summary>
+    /// Токен пагинации для получения следующей страницы списка видео.
+    /// </summary>
+    public string? ContinuationToken { get; init; }
+
+    /// <summary>
+    /// Данные о сессии пользователя для отслеживания контекста.
+    /// </summary>
+    public string? VisitorData { get; init; }
+
+    /// <summary>
+    /// Инициализирует DTO-модель, извлекая все свойства из корневого элемента JSON за один проход.
+    /// </summary>
+    /// <param name="content">Корневой JSON-элемент ответа Browse.</param>
+    public PlaylistBrowseResponse(JsonElement content)
+    {
+        var sidebar = content
+            .GetPropertyOrNull("sidebar")
+            ?.GetPropertyOrNull("playlistSidebarRenderer")
+            ?.GetPropertyOrNull("items");
+
+        var sidebarPrimary = sidebar
+            ?.EnumerateArrayOrNull()
+            ?.ElementAtOrNull(0)
+            ?.GetPropertyOrNull("playlistSidebarPrimaryInfoRenderer");
+
+        var sidebarSecondary = sidebar
+            ?.EnumerateArrayOrNull()
+            ?.ElementAtOrNull(1)
+            ?.GetPropertyOrNull("playlistSidebarSecondaryInfoRenderer");
+
+        /// <summary>
+        /// Renderer формы приватности плейлиста. Доступен, как правило, для плейлистов,
+        /// принадлежащих текущему аутентифицированному пользователю.
+        /// </summary>
+        var privacyDropdownRenderer = sidebarPrimary
+            ?.GetPropertyOrNull("privacyForm")
+            ?.GetPropertyOrNull("dropdownFormFieldRenderer");
+
+        var effectivePlaylistContents = ResolvePlaylistContents(content);
+
+        IsAvailable = sidebar is not null || effectivePlaylistContents is not null;
+
+        if (TryParseVisibility(privacyDropdownRenderer, out var visibility))
+            Visibility = visibility;
+
+        Title =
+            sidebarPrimary
+                ?.GetPropertyOrNull("title")
+                ?.GetPropertyOrNull("simpleText")
+                ?.GetStringOrNull()
+            ?? YoutubeParsingHelpers.ConcatTextRuns(
+                sidebarPrimary?.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
+            ?? sidebarPrimary
+                ?.GetPropertyOrNull("titleForm")
+                ?.GetPropertyOrNull("inlineFormRenderer")
+                ?.GetPropertyOrNull("formField")
+                ?.GetPropertyOrNull("textInputFormFieldRenderer")
+                ?.GetPropertyOrNull("value")
+                ?.GetStringOrNull()
+            ?? content
+                .GetPropertyOrNull("header")
+                ?.GetPropertyOrNull("playlistHeaderRenderer")
+                ?.GetPropertyOrNull("title")
+                ?.GetPropertyOrNull("simpleText")
+                ?.GetStringOrNull();
+
+        var authorDetails =
+            sidebarSecondary?.GetPropertyOrNull("videoOwner")?.GetPropertyOrNull("videoOwnerRenderer");
+
+        Author =
+            authorDetails
+                ?.GetPropertyOrNull("title")
+                ?.GetPropertyOrNull("simpleText")
+                ?.GetStringOrNull()
+            ?? YoutubeParsingHelpers.ConcatTextRuns(
+                authorDetails?.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
+            ?? content
+                .GetPropertyOrNull("header")
+                ?.GetPropertyOrNull("playlistHeaderRenderer")
+                ?.GetPropertyOrNull("ownerText")
+                ?.GetPropertyOrNull("runs")
+                ?.GetArrayElementOrNull(0)
+                ?.GetPropertyOrNull("text")
+                ?.GetStringOrNull();
+
+        ChannelId =
+            authorDetails
+                ?.GetPropertyOrNull("navigationEndpoint")
+                ?.GetPropertyOrNull("browseEndpoint")
+                ?.GetPropertyOrNull("browseId")
+                ?.GetStringOrNull();
+
+        Description =
+            sidebarPrimary
+                ?.GetPropertyOrNull("description")
+                ?.GetPropertyOrNull("simpleText")
+                ?.GetStringOrNull()
+            ?? YoutubeParsingHelpers.ConcatTextRuns(
+                sidebarPrimary?.GetPropertyOrNull("description")?.GetPropertyOrNull("runs"))
+            ?? sidebarPrimary
+                ?.GetPropertyOrNull("descriptionForm")
+                ?.GetPropertyOrNull("inlineFormRenderer")
+                ?.GetPropertyOrNull("formField")
+                ?.GetPropertyOrNull("textInputFormFieldRenderer")
+                ?.GetPropertyOrNull("value")
+                ?.GetStringOrNull();
+
+        var stats = sidebarPrimary?.GetPropertyOrNull("stats");
+        if (stats?.ValueKind == JsonValueKind.Array && stats.Value.GetArrayLength() > 0)
+        {
+            var text = GetTextFromStat(stats.Value[0]);
+            if (text != null)
+            {
+                var val = YoutubeParsingHelpers.ParseLongFromText(text);
+                if (val.HasValue)
+                    Count = (int)val.Value;
+            }
+        }
+
+        ViewCount = ExtractViewCount(content, sidebarPrimary);
+        ReleaseDate = ExtractReleaseDate(content, sidebarPrimary);
+
+        var thumbsElement = sidebarPrimary
+            ?.GetPropertyOrNull("thumbnailRenderer")
+            ?.GetPropertyOrNull("playlistVideoThumbnailRenderer")
+            ?.GetPropertyOrNull("thumbnail")
+            ?.GetPropertyOrNull("thumbnails")
+            ?? sidebarPrimary
+            ?.GetPropertyOrNull("thumbnailRenderer")
+            ?.GetPropertyOrNull("playlistCustomThumbnailRenderer")
+            ?.GetPropertyOrNull("thumbnail")
+            ?.GetPropertyOrNull("thumbnails");
+
+        if (thumbsElement is { ValueKind: JsonValueKind.Array } thumbsArray)
+        {
+            int len = thumbsArray.GetArrayLength();
+            if (len > 0)
+            {
+                var result = new ThumbnailData[len];
+                for (int i = 0; i < len; i++)
+                    result[i] = new ThumbnailData(thumbsArray[i]);
+                Thumbnails = result;
+            }
+        }
+
+        Videos = ExtractVideos(effectivePlaylistContents);
+        ContinuationToken = ExtractContinuationToken(content, effectivePlaylistContents);
+        VisitorData = content.GetVisitorData();
+    }
 
     /// <summary>
     /// Выполняет структурный поиск <c>playlistVideoListRenderer</c> по всем вкладкам,
     /// секциям и элементам browse-ответа.
     /// </summary>
-    private JsonElement? ResolvePlaylistContents()
+    private static JsonElement? ResolvePlaylistContents(JsonElement content)
     {
         var tabs = content
             .GetPropertyOrNull("contents")
@@ -259,237 +401,132 @@ internal partial class PlaylistBrowseResponse(JsonElement content) : IPlaylistDa
         return visibility != PlaylistVisibility.Unknown;
     }
 
-    /// <inheritdoc />
-    public bool IsAvailable => Sidebar is not null || EffectivePlaylistContents is not null;
-
-    /// <inheritdoc />
-    public string? Title =>
-        SidebarPrimary
-            ?.GetPropertyOrNull("title")
-            ?.GetPropertyOrNull("simpleText")
-            ?.GetStringOrNull()
-        ?? YoutubeParsingHelpers.ConcatTextRuns(
-            SidebarPrimary?.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
-        ?? SidebarPrimary
-            ?.GetPropertyOrNull("titleForm")
-            ?.GetPropertyOrNull("inlineFormRenderer")
-            ?.GetPropertyOrNull("formField")
-            ?.GetPropertyOrNull("textInputFormFieldRenderer")
-            ?.GetPropertyOrNull("value")
-            ?.GetStringOrNull()
-        ?? content
-            .GetPropertyOrNull("header")
-            ?.GetPropertyOrNull("playlistHeaderRenderer")
-            ?.GetPropertyOrNull("title")
-            ?.GetPropertyOrNull("simpleText")
-            ?.GetStringOrNull();
-
-    private JsonElement? AuthorDetails =>
-        SidebarSecondary?.GetPropertyOrNull("videoOwner")?.GetPropertyOrNull("videoOwnerRenderer");
-
-    /// <inheritdoc />
-    public string? Author =>
-        AuthorDetails
-            ?.GetPropertyOrNull("title")
-            ?.GetPropertyOrNull("simpleText")
-            ?.GetStringOrNull()
-        ?? YoutubeParsingHelpers.ConcatTextRuns(
-            AuthorDetails?.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
-        ?? content
-            .GetPropertyOrNull("header")
-            ?.GetPropertyOrNull("playlistHeaderRenderer")
-            ?.GetPropertyOrNull("ownerText")
-            ?.GetPropertyOrNull("runs")
-            ?.GetArrayElementOrNull(0)
-            ?.GetPropertyOrNull("text")
-            ?.GetStringOrNull();
-
-    /// <inheritdoc />
-    public string? ChannelId =>
-        AuthorDetails
-            ?.GetPropertyOrNull("navigationEndpoint")
-            ?.GetPropertyOrNull("browseEndpoint")
-            ?.GetPropertyOrNull("browseId")
-            ?.GetStringOrNull();
-
-    /// <inheritdoc />
-    public string? Description =>
-        SidebarPrimary
-            ?.GetPropertyOrNull("description")
-            ?.GetPropertyOrNull("simpleText")
-            ?.GetStringOrNull()
-        ?? YoutubeParsingHelpers.ConcatTextRuns(
-            SidebarPrimary?.GetPropertyOrNull("description")?.GetPropertyOrNull("runs"))
-        ?? SidebarPrimary
-            ?.GetPropertyOrNull("descriptionForm")
-            ?.GetPropertyOrNull("inlineFormRenderer")
-            ?.GetPropertyOrNull("formField")
-            ?.GetPropertyOrNull("textInputFormFieldRenderer")
-            ?.GetPropertyOrNull("value")
-            ?.GetStringOrNull();
-
-    /// <inheritdoc />
-    public int? Count
+    private static long? ExtractViewCount(JsonElement content, JsonElement? sidebarPrimary)
     {
-        get
+        // 1. Попытка через новый UI (frameworkUpdates)
+        var mutations = content
+            .GetPropertyOrNull("frameworkUpdates")
+            ?.GetPropertyOrNull("entityBatchUpdate")
+            ?.GetPropertyOrNull("mutations");
+
+        if (mutations?.ValueKind == JsonValueKind.Array)
         {
-            var stats = SidebarPrimary?.GetPropertyOrNull("stats");
-            if (stats?.ValueKind == JsonValueKind.Array && stats.Value.GetArrayLength() > 0)
+            foreach (var mutation in mutations.Value.EnumerateArray())
             {
-                var text = GetTextFromStat(stats.Value[0]);
-                if (text != null)
+                var metadataRows = mutation
+                    .GetPropertyOrNull("payload")
+                    ?.GetPropertyOrNull("pageHeaderEntity")
+                    ?.GetPropertyOrNull("header")
+                    ?.GetPropertyOrNull("pageHeaderViewModel")
+                    ?.GetPropertyOrNull("metadata")
+                    ?.GetPropertyOrNull("contentMetadataViewModel")
+                    ?.GetPropertyOrNull("metadataRows");
+
+                if (metadataRows?.ValueKind == JsonValueKind.Array)
                 {
-                    var val = YoutubeParsingHelpers.ParseLongFromText(text);
-                    if (val.HasValue)
-                        return (int)val.Value;
-                }
-            }
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Количество просмотров плейлиста.
-    /// Поддерживает новый UI-отрендеренный объект заголовка (frameworkUpdates) и классический сайдбар.
-    /// </summary>
-    public long? ViewCount
-    {
-        get
-        {
-            // 1. Попытка через новый UI (frameworkUpdates)
-            var mutations = content
-                .GetPropertyOrNull("frameworkUpdates")
-                ?.GetPropertyOrNull("entityBatchUpdate")
-                ?.GetPropertyOrNull("mutations");
-
-            if (mutations?.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var mutation in mutations.Value.EnumerateArray())
-                {
-                    var metadataRows = mutation
-                        .GetPropertyOrNull("payload")
-                        ?.GetPropertyOrNull("pageHeaderEntity")
-                        ?.GetPropertyOrNull("header")
-                        ?.GetPropertyOrNull("pageHeaderViewModel")
-                        ?.GetPropertyOrNull("metadata")
-                        ?.GetPropertyOrNull("contentMetadataViewModel")
-                        ?.GetPropertyOrNull("metadataRows");
-
-                    if (metadataRows?.ValueKind == JsonValueKind.Array)
+                    foreach (var row in metadataRows.Value.EnumerateArray())
                     {
-                        foreach (var row in metadataRows.Value.EnumerateArray())
+                        var parts = row.GetPropertyOrNull("metadataParts");
+                        if (parts?.ValueKind == JsonValueKind.Array)
                         {
-                            var parts = row.GetPropertyOrNull("metadataParts");
-                            if (parts?.ValueKind == JsonValueKind.Array)
+                            foreach (var part in parts.Value.EnumerateArray())
                             {
-                                foreach (var part in parts.Value.EnumerateArray())
+                                var text = part.GetPropertyOrNull("text")?.GetPropertyOrNull("content")?.GetStringOrNull();
+                                if (text != null && (text.Contains("view", StringComparison.OrdinalIgnoreCase) ||
+                                                     text.Contains("просмотр", StringComparison.OrdinalIgnoreCase)))
                                 {
-                                    var text = part.GetPropertyOrNull("text")?.GetPropertyOrNull("content")?.GetStringOrNull();
-                                    if (text != null && (text.Contains("view", StringComparison.OrdinalIgnoreCase) ||
-                                                         text.Contains("просмотр", StringComparison.OrdinalIgnoreCase)))
-                                    {
-                                        var views = YoutubeParsingHelpers.ParseLongFromText(text);
-                                        if (views.HasValue) return views;
-                                    }
+                                    var views = YoutubeParsingHelpers.ParseLongFromText(text);
+                                    if (views.HasValue) return views;
                                 }
                             }
                         }
                     }
                 }
             }
-
-            // 2. Попытка через классический Sidebar stats[1]
-            var stats = SidebarPrimary?.GetPropertyOrNull("stats");
-            if (stats?.ValueKind == JsonValueKind.Array)
-            {
-                int len = stats.Value.GetArrayLength();
-                if (len > 1)
-                {
-                    var text = GetTextFromStat(stats.Value[1]);
-                    var views = YoutubeParsingHelpers.ParseLongFromText(text);
-                    if (views.HasValue) return views;
-                }
-            }
-
-            return null;
         }
+
+        // 2. Попытка через классический Sidebar stats[1]
+        var stats = sidebarPrimary?.GetPropertyOrNull("stats");
+        if (stats?.ValueKind == JsonValueKind.Array)
+        {
+            int len = stats.Value.GetArrayLength();
+            if (len > 1)
+            {
+                var text = GetTextFromStat(stats.Value[1]);
+                var views = YoutubeParsingHelpers.ParseLongFromText(text);
+                if (views.HasValue) return views;
+            }
+        }
+
+        return null;
     }
 
-    /// <summary>
-    /// Дата создания или последнего обновления плейлиста (в строковом представлении).
-    /// Извлекает чистое значение даты без локализованных префиксов («Обновлен», «Updated»).
-    /// Поддерживает новый UI заголовка (frameworkUpdates) и парсинг третьего элемента
-    /// статистики классического сайдбара.
-    /// </summary>
-    public DateOnly? ReleaseDate
+    private static DateOnly? ExtractReleaseDate(JsonElement content, JsonElement? sidebarPrimary)
     {
-        get
+        // 1. Попытка через новый UI (frameworkUpdates)
+        var mutations = content
+            .GetPropertyOrNull("frameworkUpdates")
+            ?.GetPropertyOrNull("entityBatchUpdate")
+            ?.GetPropertyOrNull("mutations");
+
+        if (mutations?.ValueKind == JsonValueKind.Array)
         {
-            // 1. Попытка через новый UI (frameworkUpdates)
-            var mutations = content
-                .GetPropertyOrNull("frameworkUpdates")
-                ?.GetPropertyOrNull("entityBatchUpdate")
-                ?.GetPropertyOrNull("mutations");
-
-            if (mutations?.ValueKind == JsonValueKind.Array)
+            foreach (var mutation in mutations.Value.EnumerateArray())
             {
-                foreach (var mutation in mutations.Value.EnumerateArray())
+                var metadataRows = mutation
+                    .GetPropertyOrNull("payload")
+                    ?.GetPropertyOrNull("pageHeaderEntity")
+                    ?.GetPropertyOrNull("header")
+                    ?.GetPropertyOrNull("pageHeaderViewModel")
+                    ?.GetPropertyOrNull("metadata")
+                    ?.GetPropertyOrNull("contentMetadataViewModel")
+                    ?.GetPropertyOrNull("metadataRows");
+
+                if (metadataRows?.ValueKind == JsonValueKind.Array)
                 {
-                    var metadataRows = mutation
-                        .GetPropertyOrNull("payload")
-                        ?.GetPropertyOrNull("pageHeaderEntity")
-                        ?.GetPropertyOrNull("header")
-                        ?.GetPropertyOrNull("pageHeaderViewModel")
-                        ?.GetPropertyOrNull("metadata")
-                        ?.GetPropertyOrNull("contentMetadataViewModel")
-                        ?.GetPropertyOrNull("metadataRows");
-
-                    if (metadataRows?.ValueKind == JsonValueKind.Array)
+                    foreach (var row in metadataRows.Value.EnumerateArray())
                     {
-                        foreach (var row in metadataRows.Value.EnumerateArray())
+                        var parts = row.GetPropertyOrNull("metadataParts");
+                        if (parts?.ValueKind == JsonValueKind.Array)
                         {
-                            var parts = row.GetPropertyOrNull("metadataParts");
-                            if (parts?.ValueKind == JsonValueKind.Array)
+                            foreach (var part in parts.Value.EnumerateArray())
                             {
-                                foreach (var part in parts.Value.EnumerateArray())
-                                {
-                                    var text = part.GetPropertyOrNull("text")
-                                        ?.GetPropertyOrNull("content")
-                                        ?.GetStringOrNull();
+                                var text = part.GetPropertyOrNull("text")
+                                    ?.GetPropertyOrNull("content")
+                                    ?.GetStringOrNull();
 
-                                    if (text != null &&
-                                        (YoutubeParsingHelpers.ParseYearFromText(text).HasValue || YoutubeParsingHelpers.IsRelativeDate(text)))
-                                    {
-                                        return TryParseDate(text);
-                                    }
+                                if (text != null &&
+                                    (YoutubeParsingHelpers.ParseYearFromText(text).HasValue || YoutubeParsingHelpers.IsRelativeDate(text)))
+                                {
+                                    return TryParseDate(text);
                                 }
                             }
                         }
                     }
                 }
             }
-
-            // 2. Попытка через классический Sidebar stats[2] (третий элемент массива)
-            var stats = SidebarPrimary?.GetPropertyOrNull("stats");
-            if (stats?.ValueKind == JsonValueKind.Array)
-            {
-                int len = stats.Value.GetArrayLength();
-                if (len > 2)
-                {
-                    var dateStat = stats.Value[2];
-
-                    var dateFromRuns = GetDateFromStatRuns(dateStat.GetPropertyOrNull("runs"));
-                    if (dateFromRuns != null)
-                        return TryParseDate(dateFromRuns);
-
-                    var simpleText = dateStat.GetPropertyOrNull("simpleText")?.GetStringOrNull();
-                    if (simpleText != null)
-                        return TryParseDate(simpleText);
-                }
-            }
-
-            return null;
         }
+
+        // 2. Попытка через классический Sidebar stats[2] (третий элемент массива)
+        var stats = sidebarPrimary?.GetPropertyOrNull("stats");
+        if (stats?.ValueKind == JsonValueKind.Array)
+        {
+            int len = stats.Value.GetArrayLength();
+            if (len > 2)
+            {
+                var dateStat = stats.Value[2];
+
+                var dateFromRuns = GetDateFromStatRuns(dateStat.GetPropertyOrNull("runs"));
+                if (dateFromRuns != null)
+                    return TryParseDate(dateFromRuns);
+
+                var simpleText = dateStat.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+                if (simpleText != null)
+                    return TryParseDate(simpleText);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -558,124 +595,77 @@ internal partial class PlaylistBrowseResponse(JsonElement content) : IPlaylistDa
         return year.HasValue ? new DateOnly(year.Value, 1, 1) : null;
     }
 
-    /// <inheritdoc />
-    public IReadOnlyList<ThumbnailData> Thumbnails
+    private static IReadOnlyList<PlaylistVideoData> ExtractVideos(JsonElement? effectivePlaylistContents)
     {
-        get
+        var contents = effectivePlaylistContents?.GetPropertyOrNull("contents");
+        if (contents is null || contents.Value.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var array = contents.Value;
+        int len = array.GetArrayLength();
+
+        // Предварительный проход без аллокаций для подсчета валидных элементов
+        int validCount = 0;
+        for (int i = 0; i < len; i++)
         {
-            var thumbsElement = SidebarPrimary
-                ?.GetPropertyOrNull("thumbnailRenderer")
-                ?.GetPropertyOrNull("playlistVideoThumbnailRenderer")
-                ?.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails")
-                ?? SidebarPrimary
-                ?.GetPropertyOrNull("thumbnailRenderer")
-                ?.GetPropertyOrNull("playlistCustomThumbnailRenderer")
-                ?.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails");
-
-            if (thumbsElement is null || thumbsElement.Value.ValueKind != JsonValueKind.Array)
-                return Array.Empty<ThumbnailData>();
-
-            var array = thumbsElement.Value;
-            int len = array.GetArrayLength();
-            if (len == 0) return Array.Empty<ThumbnailData>();
-
-            var result = new ThumbnailData[len];
-            for (int i = 0; i < len; i++)
-                result[i] = new ThumbnailData(array[i]);
-
-            return result;
+            if (array[i].GetPropertyOrNull("playlistVideoRenderer") is not null)
+                validCount++;
         }
+
+        if (validCount == 0) return [];
+
+        var result = new PlaylistVideoData[validCount];
+        int index = 0;
+        for (int i = 0; i < len; i++)
+        {
+            var videoRenderer = array[i].GetPropertyOrNull("playlistVideoRenderer");
+            if (videoRenderer is not null)
+            {
+                result[index++] = new PlaylistVideoData(videoRenderer.Value);
+            }
+        }
+
+        return result;
     }
 
-    /// <summary>
-    /// Список видео в текущей партии плейлиста.
-    /// </summary>
-    public IReadOnlyList<PlaylistVideoData> Videos
+    private static string? ExtractContinuationToken(JsonElement content, JsonElement? effectivePlaylistContents)
     {
-        get
+        if (effectivePlaylistContents != null)
         {
-            var contents = EffectivePlaylistContents?.GetPropertyOrNull("contents");
-            if (contents is null || contents.Value.ValueKind != JsonValueKind.Array)
-                return Array.Empty<PlaylistVideoData>();
-
-            var array = contents.Value;
-            int len = array.GetArrayLength();
-
-            // Предварительный проход без аллокаций для подсчета валидных элементов
-            int validCount = 0;
-            for (int i = 0; i < len; i++)
+            var continuations = effectivePlaylistContents.Value.GetPropertyOrNull("continuations");
+            if (continuations != null)
             {
-                if (array[i].GetPropertyOrNull("playlistVideoRenderer") is not null)
-                    validCount++;
+                var token = continuations.Value.EnumerateArrayOrNull()?.FirstOrNull()
+                    ?.GetPropertyOrNull("nextContinuationData")
+                    ?.GetPropertyOrNull("continuation")
+                    ?.GetStringOrNull();
+                if (token != null) return token;
             }
 
-            if (validCount == 0) return Array.Empty<PlaylistVideoData>();
-
-            var result = new PlaylistVideoData[validCount];
-            int index = 0;
-            for (int i = 0; i < len; i++)
+            var contents = effectivePlaylistContents.Value.GetPropertyOrNull("contents");
+            if (contents != null)
             {
-                var videoRenderer = array[i].GetPropertyOrNull("playlistVideoRenderer");
-                if (videoRenderer is not null)
-                {
-                    result[index++] = new PlaylistVideoData(videoRenderer.Value);
-                }
+                var token = BridgeUtils.FindTokenInContents(contents.Value);
+                if (token != null) return token;
             }
-
-            return result;
         }
-    }
 
-    /// <inheritdoc />
-    public string? ContinuationToken
-    {
-        get
+        var actions = content.GetPropertyOrNull("onResponseReceivedActions");
+        if (actions != null)
         {
-            var videoListRenderer = EffectivePlaylistContents;
-            if (videoListRenderer != null)
+            var continuationItems = actions.Value.EnumerateArrayOrNull()?.FirstOrNull()
+                ?.GetPropertyOrNull("appendContinuationItemsAction")
+                ?.GetPropertyOrNull("continuationItems");
+
+            if (continuationItems != null)
             {
-                var continuations = videoListRenderer.Value.GetPropertyOrNull("continuations");
-                if (continuations != null)
-                {
-                    var token = continuations.Value.EnumerateArrayOrNull()?.FirstOrNull()
-                        ?.GetPropertyOrNull("nextContinuationData")
-                        ?.GetPropertyOrNull("continuation")
-                        ?.GetStringOrNull();
-                    if (token != null) return token;
-                }
-
-                var contents = videoListRenderer.Value.GetPropertyOrNull("contents");
-                if (contents != null)
-                {
-                    var token = BridgeUtils.FindTokenInContents(contents.Value);
-                    if (token != null) return token;
-                }
+                var token = BridgeUtils.FindTokenInContents(continuationItems.Value);
+                if (token != null) return token;
             }
-
-            var actions = content.GetPropertyOrNull("onResponseReceivedActions");
-            if (actions != null)
-            {
-                var continuationItems = actions.Value.EnumerateArrayOrNull()?.FirstOrNull()
-                    ?.GetPropertyOrNull("appendContinuationItemsAction")
-                    ?.GetPropertyOrNull("continuationItems");
-
-                if (continuationItems != null)
-                {
-                    var token = BridgeUtils.FindTokenInContents(continuationItems.Value);
-                    if (token != null) return token;
-                }
-            }
-
-            return null;
         }
-    }
 
-    /// <summary>
-    /// Данные о сессии пользователя для отслеживания контекста.
-    /// </summary>
-    public string? VisitorData => content.GetVisitorData();
+        return null;
+    }
 
     #region High-Performance JSON Helpers
 
@@ -778,5 +768,26 @@ internal partial class PlaylistBrowseResponse(JsonElement content) : IPlaylistDa
 
 internal partial class PlaylistBrowseResponse
 {
-    public static PlaylistBrowseResponse Parse(string raw) => new(Json.Parse(raw));
+    /// <summary>
+    /// Парсит ответ Browse плейлиста из сырой JSON-строки.
+    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// </summary>
+    public static PlaylistBrowseResponse Parse(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        return new PlaylistBrowseResponse(doc.RootElement);
+    }
+
+    /// <summary>
+    /// Парсит ответ Browse плейлиста напрямую из сетевого потока без промежуточных строк в LOH.
+    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// </summary>
+    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Экземпляр плоского ответа плейлиста.</returns>
+    public static async ValueTask<PlaylistBrowseResponse> ParseAsync(Stream stream, CancellationToken ct = default)
+    {
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+        return new PlaylistBrowseResponse(doc.RootElement);
+    }
 }

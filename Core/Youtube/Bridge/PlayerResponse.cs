@@ -8,32 +8,13 @@ using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Bridge;
 
-internal partial class PlayerResponse(JsonElement content)
+internal partial class PlayerResponse
 {
-    private JsonElement? _details;
-    private bool _detailsCached;
-    private JsonElement? _playability;
-    private bool _playabilityCached;
-
-    private JsonElement? Playability
-    {
-        get
-        {
-            if (!_playabilityCached)
-            {
-                _playability = content.GetPropertyOrNull("playabilityStatus");
-                _playabilityCached = true;
-            }
-            return _playability;
-        }
-    }
+    /// <inheritdoc/>
+    private string? PlayabilityStatus { get; init; }
 
     /// <inheritdoc/>
-    private string? PlayabilityStatus =>
-        Playability?.GetPropertyOrNull("status")?.GetStringOrNull();
-
-    /// <inheritdoc/>
-    public string? PlayabilityError => Playability?.GetPropertyOrNull("reason")?.GetStringOrNull();
+    public string? PlayabilityError { get; init; }
 
     /// <summary>
     /// Требуется ли авторизация для просмотра (LOGIN_REQUIRED).
@@ -44,13 +25,72 @@ internal partial class PlayerResponse(JsonElement content)
     /// <summary>
     /// Причина требования авторизации.
     /// </summary>
-    public LoginRequiredReason LoginRequiredReason
-    {
-        get
-        {
-            if (!IsLoginRequired)
-                return LoginRequiredReason.Unknown;
+    public LoginRequiredReason LoginRequiredReason { get; init; } = LoginRequiredReason.Unknown;
 
+    /// <inheritdoc/>
+    public string? Category { get; init; }
+
+    /// <inheritdoc/>
+    public bool IsMusic { get; init; }
+
+    /// <inheritdoc/>
+    public bool IsAvailable { get; init; }
+
+    /// <inheritdoc/>
+    public bool IsPlayable { get; init; }
+
+    /// <inheritdoc/>
+    public string? Title { get; init; }
+
+    /// <inheritdoc/>
+    public string? ChannelId { get; init; }
+
+    /// <inheritdoc/>
+    public string? Author { get; init; }
+
+    /// <inheritdoc/>
+    public DateTimeOffset? UploadDate { get; init; }
+
+    /// <inheritdoc/>
+    public TimeSpan? Duration { get; init; }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> Keywords { get; init; } = [];
+
+    /// <inheritdoc/>
+    public string? Description { get; init; }
+
+    /// <inheritdoc/>
+    public long? ViewCount { get; init; }
+
+    /// <inheritdoc/>
+    public string? PreviewVideoId { get; init; }
+
+    public string? DashManifestUrl { get; init; }
+
+    public string? HlsManifestUrl { get; init; }
+
+    public IReadOnlyList<IStreamData> Streams { get; init; } = [];
+
+    public IReadOnlyList<ClosedCaptionTrackData> ClosedCaptionTracks { get; init; } = [];
+
+    /// <summary>
+    /// Integrated loudness трека в LUFS из <c>playerConfig.audioConfig.perceptualLoudnessDb</c>.
+    /// <c>float.NaN</c> если поле отсутствует.
+    /// </summary>
+    public float PerceptualLoudnessDb { get; init; } = float.NaN;
+
+    public PlayerResponse(JsonElement content)
+    {
+        var playability = content.GetPropertyOrNull("playabilityStatus");
+        PlayabilityStatus = playability?.GetPropertyOrNull("status")?.GetStringOrNull();
+        PlayabilityError = playability?.GetPropertyOrNull("reason")?.GetStringOrNull();
+
+        if (IsLoginRequired)
+        {
             var reason = PlayabilityError ?? "";
 
             // 1. Bot detection — ОБЯЗАТЕЛЬНО первым
@@ -60,277 +100,180 @@ internal partial class PlayerResponse(JsonElement content)
             if (reason.Contains("bot", StringComparison.OrdinalIgnoreCase) ||
                 reason.Contains("не робот", StringComparison.OrdinalIgnoreCase))
             {
-                return LoginRequiredReason.BotDetection;
+                LoginRequiredReason = LoginRequiredReason.BotDetection;
             }
-
-            // 2. Age gate
-            var desktopAgeGateReason = Playability
-                ?.GetPropertyOrNull("desktopLegacyAgeGateReason")
-                ?.GetInt32OrNull();
-
-            if (desktopAgeGateReason == 1 ||
-                reason.Contains("age", StringComparison.OrdinalIgnoreCase))
+            else
             {
-                return LoginRequiredReason.AgeRestricted;
-            }
+                // 2. Age gate
+                var desktopAgeGateReason = playability
+                    ?.GetPropertyOrNull("desktopLegacyAgeGateReason")
+                    ?.GetInt32OrNull();
 
-            // 3. Private
-            if (reason.Contains("private", StringComparison.OrdinalIgnoreCase))
-            {
-                return LoginRequiredReason.Private;
+                if (desktopAgeGateReason == 1 ||
+                    reason.Contains("age", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoginRequiredReason = LoginRequiredReason.AgeRestricted;
+                }
+                // 3. Private
+                else if (reason.Contains("private", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoginRequiredReason = LoginRequiredReason.Private;
+                }
+                // 4. Members only
+                else if (reason.Contains("members", StringComparison.OrdinalIgnoreCase) ||
+                         reason.Contains("member", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoginRequiredReason = LoginRequiredReason.MembersOnly;
+                }
             }
-
-            // 4. Members only
-            if (reason.Contains("members", StringComparison.OrdinalIgnoreCase) ||
-                reason.Contains("member", StringComparison.OrdinalIgnoreCase))
-            {
-                return LoginRequiredReason.MembersOnly;
-            }
-
-            return LoginRequiredReason.Unknown;
         }
-    }
 
-    /// <inheritdoc/>
-    public string? Category =>
-        content
+        Category = content
             .GetPropertyOrNull("microformat")
             ?.GetPropertyOrNull("playerMicroformatRenderer")
             ?.GetPropertyOrNull("category")
             ?.GetStringOrNull();
 
-    /// <inheritdoc/>
-    public bool IsMusic =>
-        string.Equals(Category, "Music", StringComparison.OrdinalIgnoreCase) ||
-        content.GetPropertyOrNull("videoDetails")?.GetPropertyOrNull("musicVideoType") != null;
+        var details = content.GetPropertyOrNull("videoDetails");
 
-    /// <inheritdoc/>
-    public bool IsAvailable =>
-        !string.Equals(PlayabilityStatus, "error", StringComparison.OrdinalIgnoreCase)
-        && Details is not null;
+        IsMusic = string.Equals(Category, "Music", StringComparison.OrdinalIgnoreCase) ||
+                  details?.GetPropertyOrNull("musicVideoType") != null;
 
-    /// <inheritdoc/>
-    public bool IsPlayable =>
-        string.Equals(PlayabilityStatus, "ok", StringComparison.OrdinalIgnoreCase);
+        IsAvailable = !string.Equals(PlayabilityStatus, "error", StringComparison.OrdinalIgnoreCase)
+                      && details is not null;
 
-    /// <inheritdoc/>
-    private JsonElement? Details
-    {
-        get
-        {
-            if (!_detailsCached)
-            {
-                _details = content.GetPropertyOrNull("videoDetails");
-                _detailsCached = true;
-            }
-            return _details;
-        }
-    }
+        IsPlayable = string.Equals(PlayabilityStatus, "ok", StringComparison.OrdinalIgnoreCase);
 
-    /// <inheritdoc/>
-    public string? Title => Details?.GetPropertyOrNull("title")?.GetStringOrNull();
+        Title = details?.GetPropertyOrNull("title")?.GetStringOrNull();
+        ChannelId = details?.GetPropertyOrNull("channelId")?.GetStringOrNull();
+        Author = details?.GetPropertyOrNull("author")?.GetStringOrNull();
 
-    /// <inheritdoc/>
-    public string? ChannelId => Details?.GetPropertyOrNull("channelId")?.GetStringOrNull();
-
-    /// <inheritdoc/>
-    public string? Author => Details?.GetPropertyOrNull("author")?.GetStringOrNull();
-
-    /// <inheritdoc/>
-    public DateTimeOffset? UploadDate =>
-        content
+        UploadDate = content
             .GetPropertyOrNull("microformat")
             ?.GetPropertyOrNull("playerMicroformatRenderer")
             ?.GetPropertyOrNull("uploadDate")
             ?.GetDateTimeOffset();
 
-    /// <inheritdoc/>
-    public TimeSpan? Duration
-    {
-        get
+        var lengthSecStr = details?.GetPropertyOrNull("lengthSeconds")?.GetStringOrNull();
+        if (lengthSecStr is not null && double.TryParse(lengthSecStr, CultureInfo.InvariantCulture, out var seconds))
         {
-            var s = Details?.GetPropertyOrNull("lengthSeconds")?.GetStringOrNull();
-            if (s is null) return null;
-            return double.TryParse(s, CultureInfo.InvariantCulture, out var seconds)
-                ? TimeSpan.FromSeconds(seconds)
-                : null;
+            Duration = TimeSpan.FromSeconds(seconds);
         }
-    }
 
-    /// <inheritdoc/>
-    public IReadOnlyList<ThumbnailData> Thumbnails
-    {
-        get
+        var thumbsArray = details
+            ?.GetPropertyOrNull("thumbnail")
+            ?.GetPropertyOrNull("thumbnails");
+
+        if (thumbsArray is { ValueKind: JsonValueKind.Array } thumbsEl)
         {
-            var thumbsArray = Details
-                ?.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails");
-
-            if (thumbsArray is null || thumbsArray.Value.ValueKind != JsonValueKind.Array)
-                return [];
-
-            var array = thumbsArray.Value;
-            int len = array.GetArrayLength();
-            if (len == 0) return [];
-
-            var result = new ThumbnailData[len];
-            for (int i = 0; i < len; i++)
-                result[i] = new ThumbnailData(array[i]);
-            return result;
-        }
-    }
-
-    /// <inheritdoc/>
-    public IReadOnlyList<string> Keywords
-    {
-        get
-        {
-            var keywordsArray = Details?.GetPropertyOrNull("keywords");
-            if (keywordsArray is null || keywordsArray.Value.ValueKind != JsonValueKind.Array)
-                return [];
-
-            var array = keywordsArray.Value;
-            int len = array.GetArrayLength();
-            if (len == 0) return [];
-
-            var result = new List<string>(len);
-            for (int i = 0; i < len; i++)
+            int len = thumbsEl.GetArrayLength();
+            if (len > 0)
             {
-                var s = array[i].GetStringOrNull();
-                if (s is not null) result.Add(s);
-            }
-
-            return result.Count > 0 ? result : [];
-        }
-    }
-
-    /// <inheritdoc/>
-    public string? Description => Details?.GetPropertyOrNull("shortDescription")?.GetStringOrNull();
-
-    /// <inheritdoc/>
-    public long? ViewCount
-    {
-        get
-        {
-            var s = Details?.GetPropertyOrNull("viewCount")?.GetStringOrNull();
-            if (s is null) return null;
-            return long.TryParse(s, CultureInfo.InvariantCulture, out var result) ? result : null;
-        }
-    }
-
-    /// <inheritdoc/>
-    public string? PreviewVideoId =>
-        Playability
-            ?.GetPropertyOrNull("errorScreen")
-            ?.GetPropertyOrNull("playerLegacyDesktopYpcTrailerRenderer")
-            ?.GetPropertyOrNull("trailerVideoId")
-            ?.GetStringOrNull()
-        ?? (Playability
-            ?.GetPropertyOrNull("errorScreen")
-            ?.GetPropertyOrNull("ypcTrailerRenderer")
-            ?.GetPropertyOrNull("playerVars")
-            ?.GetStringOrNull() is { } playerVars
-                ? UrlEx.GetQueryParameters(playerVars).GetValueOrDefault("video_id")
-                : null)
-        ?? (Playability
-            ?.GetPropertyOrNull("errorScreen")
-            ?.GetPropertyOrNull("ypcTrailerRenderer")
-            ?.GetPropertyOrNull("playerResponse")
-            ?.GetStringOrNull() is { } encoded
-                ? DecodePreviewVideoId(encoded)
-                : null);
-
-    private JsonElement? StreamingData => content.GetPropertyOrNull("streamingData");
-
-    public string? DashManifestUrl =>
-        StreamingData?.GetPropertyOrNull("dashManifestUrl")?.GetStringOrNull();
-
-    public string? HlsManifestUrl =>
-        StreamingData?.GetPropertyOrNull("hlsManifestUrl")?.GetStringOrNull();
-
-    // Lazy enumerable to save allocations
-    // public IEnumerable<IStreamData> Streams
-    // {
-    //     get
-    //     {
-    //         var serverAbrUrl = ServerAbrStreamingUrl;
-
-    //         var formats = StreamingData?.GetPropertyOrNull("formats");
-    //         if (formats != null)
-    //         {
-    //             foreach (var j in formats.Value.EnumerateArrayOrEmpty())
-    //                 yield return new StreamData(j, serverAbrUrl);
-    //         }
-
-    //         var adaptiveFormats = StreamingData?.GetPropertyOrNull("adaptiveFormats");
-    //         if (adaptiveFormats != null)
-    //         {
-    //             foreach (var j in adaptiveFormats.Value.EnumerateArrayOrEmpty())
-    //                 yield return new StreamData(j, serverAbrUrl);
-    //         }
-    //     }
-    // }
-
-    public IEnumerable<IStreamData> Streams
-    {
-        get
-        {
-            var formats = StreamingData?.GetPropertyOrNull("formats");
-            if (formats != null)
-            {
-                foreach (var j in formats.Value.EnumerateArrayOrEmpty())
-                    yield return new StreamData(j);
-            }
-
-            var adaptiveFormats = StreamingData?.GetPropertyOrNull("adaptiveFormats");
-            if (adaptiveFormats != null)
-            {
-                foreach (var j in adaptiveFormats.Value.EnumerateArrayOrEmpty())
-                    yield return new StreamData(j);
+                var result = new ThumbnailData[len];
+                for (int i = 0; i < len; i++)
+                    result[i] = new ThumbnailData(thumbsEl[i]);
+                Thumbnails = result;
             }
         }
-    }
 
-    public IEnumerable<ClosedCaptionTrackData> ClosedCaptionTracks
-    {
-        get
+        var keywordsArray = details?.GetPropertyOrNull("keywords");
+        if (keywordsArray is { ValueKind: JsonValueKind.Array } kwEl)
         {
-            var tracks = content
-                .GetPropertyOrNull("captions")
-                ?.GetPropertyOrNull("playerCaptionsTracklistRenderer")
-                ?.GetPropertyOrNull("captionTracks");
-
-            if (tracks != null)
+            int len = kwEl.GetArrayLength();
+            if (len > 0)
             {
-                foreach (var j in tracks.Value.EnumerateArrayOrEmpty())
-                    yield return new ClosedCaptionTrackData(j);
+                var result = new List<string>(len);
+                for (int i = 0; i < len; i++)
+                {
+                    var s = kwEl[i].GetStringOrNull();
+                    if (s is not null) result.Add(s);
+                }
+                if (result.Count > 0) Keywords = result;
             }
         }
-    }
 
-    /// <summary>
-    /// Integrated loudness трека в LUFS из <c>playerConfig.audioConfig.perceptualLoudnessDb</c>.
-    /// <c>float.NaN</c> если поле отсутствует.
-    /// </summary>
-    public float PerceptualLoudnessDb
-    {
-        get
+        Description = details?.GetPropertyOrNull("shortDescription")?.GetStringOrNull();
+
+        var viewCountStr = details?.GetPropertyOrNull("viewCount")?.GetStringOrNull();
+        if (viewCountStr is not null && long.TryParse(viewCountStr, CultureInfo.InvariantCulture, out var vc))
         {
-            var audioConfig = content
-                .GetPropertyOrNull("playerConfig"u8)
-                ?.GetPropertyOrNull("audioConfig"u8);
+            ViewCount = vc;
+        }
 
-            if (audioConfig.HasValue)
+        PreviewVideoId =
+            playability
+                ?.GetPropertyOrNull("errorScreen")
+                ?.GetPropertyOrNull("playerLegacyDesktopYpcTrailerRenderer")
+                ?.GetPropertyOrNull("trailerVideoId")
+                ?.GetStringOrNull()
+            ?? (playability
+                ?.GetPropertyOrNull("errorScreen")
+                ?.GetPropertyOrNull("ypcTrailerRenderer")
+                ?.GetPropertyOrNull("playerVars")
+                ?.GetStringOrNull() is { } playerVars
+                    ? UrlEx.GetQueryParameters(playerVars).GetValueOrDefault("video_id")
+                    : null)
+            ?? (playability
+                ?.GetPropertyOrNull("errorScreen")
+                ?.GetPropertyOrNull("ypcTrailerRenderer")
+                ?.GetPropertyOrNull("playerResponse")
+                ?.GetStringOrNull() is { } encoded
+                    ? DecodePreviewVideoId(encoded)
+                    : null);
+
+        var streamingData = content.GetPropertyOrNull("streamingData");
+
+        DashManifestUrl = streamingData?.GetPropertyOrNull("dashManifestUrl")?.GetStringOrNull();
+        HlsManifestUrl = streamingData?.GetPropertyOrNull("hlsManifestUrl")?.GetStringOrNull();
+
+        var streamsList = new List<IStreamData>(32);
+
+        var formats = streamingData?.GetPropertyOrNull("formats");
+        if (formats is { ValueKind: JsonValueKind.Array } formatsEl)
+        {
+            foreach (var j in formatsEl.EnumerateArray())
+                streamsList.Add(new StreamData(j));
+        }
+
+        var adaptiveFormats = streamingData?.GetPropertyOrNull("adaptiveFormats");
+        if (adaptiveFormats is { ValueKind: JsonValueKind.Array } adaptiveEl)
+        {
+            foreach (var j in adaptiveEl.EnumerateArray())
+                streamsList.Add(new StreamData(j));
+        }
+
+        if (streamsList.Count > 0)
+            Streams = streamsList;
+
+        var tracks = content
+            .GetPropertyOrNull("captions")
+            ?.GetPropertyOrNull("playerCaptionsTracklistRenderer")
+            ?.GetPropertyOrNull("captionTracks");
+
+        if (tracks is { ValueKind: JsonValueKind.Array } tracksEl)
+        {
+            int len = tracksEl.GetArrayLength();
+            if (len > 0)
             {
-                var val = audioConfig.Value
-                    .GetPropertyOrNull("perceptualLoudnessDb"u8)
-                    ?.GetDoubleOrNull();
-
-                if (val.HasValue && double.IsFinite(val.Value))
-                    return (float)val.Value;
+                var captionList = new List<ClosedCaptionTrackData>(len);
+                foreach (var j in tracksEl.EnumerateArray())
+                    captionList.Add(new ClosedCaptionTrackData(j));
+                ClosedCaptionTracks = captionList;
             }
+        }
 
-            return float.NaN;
+        var audioConfig = content
+            .GetPropertyOrNull("playerConfig"u8)
+            ?.GetPropertyOrNull("audioConfig"u8);
+
+        if (audioConfig.HasValue)
+        {
+            var val = audioConfig.Value
+                .GetPropertyOrNull("perceptualLoudnessDb"u8)
+                ?.GetDoubleOrNull();
+
+            if (val.HasValue && double.IsFinite(val.Value))
+                PerceptualLoudnessDb = (float)val.Value;
         }
     }
 
@@ -351,33 +294,37 @@ internal partial class PlayerResponse(JsonElement content)
 
 internal partial class PlayerResponse
 {
-    public sealed class ClosedCaptionTrackData(JsonElement content)
+    public sealed class ClosedCaptionTrackData
     {
         /// <inheritdoc/>
-        public string? Url => content.GetPropertyOrNull("baseUrl")?.GetStringOrNull();
+        public string? Url { get; init; }
 
         /// <inheritdoc/>
-        public string? LanguageCode => content.GetPropertyOrNull("languageCode")?.GetStringOrNull();
+        public string? LanguageCode { get; init; }
 
         /// <inheritdoc/>
-        public string? LanguageName
+        public string? LanguageName { get; init; }
+
+        /// <inheritdoc/>
+        public bool IsAutoGenerated { get; init; }
+
+        public ClosedCaptionTrackData(JsonElement content)
         {
-            get
-            {
-                var name = content.GetPropertyOrNull("name");
-                if (name is null) return null;
+            Url = content.GetPropertyOrNull("baseUrl")?.GetStringOrNull();
+            LanguageCode = content.GetPropertyOrNull("languageCode")?.GetStringOrNull();
 
-                return name.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull()
+            var name = content.GetPropertyOrNull("name");
+            if (name is not null)
+            {
+                LanguageName = name.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull()
                     ?? YoutubeParsingHelpers.ConcatTextRuns(name.Value.GetPropertyOrNull("runs"));
             }
-        }
 
-        /// <inheritdoc/>
-        public bool IsAutoGenerated =>
-            content
+            IsAutoGenerated = content
                 .GetPropertyOrNull("vssId")
                 ?.GetStringOrNull()
                 ?.StartsWith("a.", StringComparison.OrdinalIgnoreCase) ?? false;
+        }
     }
 }
 
@@ -390,68 +337,127 @@ internal partial class PlayerResponse
     /// </summary>
     public sealed class StreamData : IStreamData
     {
-        private readonly JsonElement _content;
+        /// <inheritdoc/>
+        public int? Itag { get; init; }
 
-        /// <summary>
-        /// Кэш разобранных параметров <c>signatureCipher</c>/<c>cipher</c>.
-        /// <c>null</c> означает либо «не разбирали», либо «поле отсутствует» —
-        /// разграничение через <see cref="_cipherDataResolved"/>.
-        /// </summary>
-        private IReadOnlyDictionary<string, string>? _cipherData;
+        /// <inheritdoc/>
+        public string? Url { get; init; }
 
-        /// <summary>
-        /// Флаг однократной инициализации <see cref="_cipherData"/>.
-        /// Без него при отсутствии cipher-полей геттер повторно сканировал бы JSON
-        /// на каждое обращение к <see cref="Url"/>, <see cref="Signature"/>,
-        /// <see cref="SignatureParameter"/>.
-        /// </summary>
-        private bool _cipherDataResolved;
+        /// <inheritdoc/>
+        public string? Signature { get; init; }
+
+        /// <inheritdoc/>
+        public string? SignatureParameter { get; init; }
+
+        /// <inheritdoc/>
+        public long? ContentLength { get; init; }
+
+        /// <inheritdoc/>
+        public long? Bitrate { get; init; }
+
+        /// <inheritdoc/>
+        public string? MimeType { get; init; }
+
+        /// <inheritdoc/>
+        public string? Container { get; init; }
+
+        /// <summary>Все кодеки из MIME-типа.</summary>
+        public string? Codecs { get; init; }
+
+        /// <inheritdoc/>
+        public string? AudioCodec { get; init; }
+
+        /// <inheritdoc/>
+        public string? AudioLanguageCode { get; init; }
+
+        /// <inheritdoc/>
+        public string? AudioLanguageName { get; init; }
+
+        /// <inheritdoc/>
+        public bool? IsAudioLanguageDefault { get; init; }
+
+        /// <inheritdoc/>
+        public string? VideoCodec { get; init; }
+
+        /// <inheritdoc/>
+        public string? VideoQualityLabel { get; init; }
+
+        /// <inheritdoc/>
+        public int? VideoWidth { get; init; }
+
+        /// <inheritdoc/>
+        public int? VideoHeight { get; init; }
+
+        /// <inheritdoc/>
+        public int? VideoFramerate { get; init; }
 
         /// <summary>Создаёт экземпляр данных потока из JSON-элемента PlayerResponse.</summary>
         /// <param name="content">JSON-элемент одного формата из <c>formats</c> / <c>adaptiveFormats</c>.</param>
         public StreamData(JsonElement content)
         {
-            _content = content;
-        }
+            Itag = content.GetPropertyOrNull("itag")?.GetInt32OrNull();
 
-        /// <inheritdoc/>
-        public int? Itag => _content.GetPropertyOrNull("itag")?.GetInt32OrNull();
+            var cipherStr =
+                content.GetPropertyOrNull("cipher")?.GetStringOrNull()
+                ?? content.GetPropertyOrNull("signatureCipher")?.GetStringOrNull();
 
-        /// <summary>
-        /// Разобранные параметры из <c>cipher</c> или <c>signatureCipher</c>.
-        /// Инициализируется один раз через <see cref="_cipherDataResolved"/>.
-        /// </summary>
-        /// <remarks>
-        /// YouTube возвращает <c>signatureCipher</c> вместо прямого <c>url</c> когда:
-        /// <list type="bullet">
-        ///   <item>Клиент не авторизован (WEB_REMIX без кук)</item>
-        ///   <item>Age-restricted контент через определённые клиенты</item>
-        ///   <item>Запрос без корректного <c>signatureTimestamp</c></item>
-        /// </list>
-        /// Формат строки: <c>s={encrypted_sig}&amp;sp=sig&amp;url={encoded_url}</c>
-        /// </remarks>
-        private IReadOnlyDictionary<string, string>? CipherData
-        {
-            get
+            IReadOnlyDictionary<string, string>? cipherData = null;
+            if (cipherStr is not null)
             {
-                if (_cipherDataResolved) return _cipherData;
-
-                _cipherDataResolved = true;
-
-                var cipherStr =
-                    _content.GetPropertyOrNull("cipher")?.GetStringOrNull()
-                    ?? _content.GetPropertyOrNull("signatureCipher")?.GetStringOrNull();
-
-                if (cipherStr is null) return null;
-
-                _cipherData = ParseCipherString(cipherStr);
-
-                Log.Debug($"[StreamData] itag={Itag}: signatureCipher detected, " +
-                          $"sig_len={_cipherData.GetValueOrDefault("s")?.Length ?? 0}, " +
-                          $"sp={_cipherData.GetValueOrDefault("sp") ?? "null"}");
-
-                return _cipherData;
+                cipherData = ParseCipherString(cipherStr);
+                Signature = cipherData.GetValueOrDefault("s");
+                SignatureParameter = cipherData.GetValueOrDefault("sp");
             }
+
+            Url = content.GetPropertyOrNull("url")?.GetStringOrNull()
+                ?? cipherData?.GetValueOrDefault("url");
+
+            // Остальные свойства без изменений ↓
+            ContentLength =
+                content
+                    .GetPropertyOrNull("contentLength")
+                    ?.GetStringOrNull()
+                    ?.Pipe(s => long.TryParse(s, CultureInfo.InvariantCulture, out var r) ? r : (long?)null)
+                ?? Url
+                    ?.Pipe(s => UrlEx.TryGetQueryParameterValue(s, "clen"))
+                    ?.NullIfWhiteSpace()
+                    ?.Pipe(s => long.TryParse(s, CultureInfo.InvariantCulture, out var r) ? r : (long?)null);
+
+            Bitrate = content.GetPropertyOrNull("bitrate")?.GetInt64OrNull();
+            MimeType = content.GetPropertyOrNull("mimeType")?.GetStringOrNull();
+
+            bool isAudioOnly = MimeType?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) ?? false;
+
+            Container = MimeType?.SubstringUntil(";").SubstringAfter("/");
+            Codecs = MimeType?.SubstringAfter("codecs=\"").SubstringUntil("\"");
+
+            AudioCodec = isAudioOnly ? Codecs : Codecs?.SubstringAfter(", ").NullIfWhiteSpace();
+
+            AudioLanguageCode = content
+                .GetPropertyOrNull("audioTrack")
+                ?.GetPropertyOrNull("id")
+                ?.GetStringOrNull()
+                ?.SubstringUntil(".");
+
+            AudioLanguageName = content
+                .GetPropertyOrNull("audioTrack")
+                ?.GetPropertyOrNull("displayName")
+                ?.GetStringOrNull();
+
+            IsAudioLanguageDefault = content
+                .GetPropertyOrNull("audioTrack")
+                ?.GetPropertyOrNull("audioIsDefault")
+                ?.GetBooleanOrNull();
+
+            var rawVideoCodec = isAudioOnly ? null : Codecs?.SubstringUntil(", ").NullIfWhiteSpace();
+            VideoCodec = string.Equals(rawVideoCodec, "unknown", StringComparison.OrdinalIgnoreCase)
+                ? "av01.0.05M.08"
+                : rawVideoCodec;
+
+            VideoQualityLabel = content.GetPropertyOrNull("qualityLabel")?.GetStringOrNull();
+            VideoWidth = content.GetPropertyOrNull("width")?.GetInt32OrNull();
+            VideoHeight = content.GetPropertyOrNull("height")?.GetInt32OrNull();
+            VideoFramerate = content.GetPropertyOrNull("fps")?.GetInt32OrNull();
         }
 
         /// <summary>
@@ -496,106 +502,30 @@ internal partial class PlayerResponse
 
             return result;
         }
-
-        /// <inheritdoc/>
-        /// <remarks>
-        /// Приоритет: прямой <c>"url"</c> из JSON (ANDROID_VR, авторизованный WEB_REMIX),
-        /// затем <c>url=...</c> из <c>signatureCipher</c> (неавторизованные веб-клиенты).
-        /// </remarks>
-        public string? Url =>
-            _content.GetPropertyOrNull("url")?.GetStringOrNull()
-            ?? CipherData?.GetValueOrDefault("url");
-
-        /// <inheritdoc/>
-        public string? Signature => CipherData?.GetValueOrDefault("s");
-
-        /// <inheritdoc/>
-        public string? SignatureParameter => CipherData?.GetValueOrDefault("sp");
-
-        // Остальные свойства без изменений ↓
-
-        /// <inheritdoc/>
-        public long? ContentLength =>
-            _content
-                .GetPropertyOrNull("contentLength")
-                ?.GetStringOrNull()
-                ?.Pipe(s => long.TryParse(s, CultureInfo.InvariantCulture, out var r) ? r : (long?)null)
-            ?? Url
-                ?.Pipe(s => UrlEx.TryGetQueryParameterValue(s, "clen"))
-                ?.NullIfWhiteSpace()
-                ?.Pipe(s => long.TryParse(s, CultureInfo.InvariantCulture, out var r) ? r : (long?)null);
-
-        /// <inheritdoc/>
-        public long? Bitrate => _content.GetPropertyOrNull("bitrate")?.GetInt64OrNull();
-
-        /// <inheritdoc/>
-        public string? MimeType => _content.GetPropertyOrNull("mimeType")?.GetStringOrNull();
-
-        private bool IsAudioOnly =>
-            MimeType?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) ?? false;
-
-        /// <inheritdoc/>
-        public string? Container => MimeType?.SubstringUntil(";").SubstringAfter("/");
-
-        /// <summary>Все кодеки из MIME-типа.</summary>
-        public string? Codecs => MimeType?.SubstringAfter("codecs=\"").SubstringUntil("\"");
-
-        /// <inheritdoc/>
-        public string? AudioCodec =>
-            IsAudioOnly ? Codecs : Codecs?.SubstringAfter(", ").NullIfWhiteSpace();
-
-        /// <inheritdoc/>
-        public string? AudioLanguageCode =>
-            _content
-                .GetPropertyOrNull("audioTrack")
-                ?.GetPropertyOrNull("id")
-                ?.GetStringOrNull()
-                ?.SubstringUntil(".");
-
-        /// <inheritdoc/>
-        public string? AudioLanguageName =>
-            _content
-                .GetPropertyOrNull("audioTrack")
-                ?.GetPropertyOrNull("displayName")
-                ?.GetStringOrNull();
-
-        /// <inheritdoc/>
-        public bool? IsAudioLanguageDefault =>
-            _content
-                .GetPropertyOrNull("audioTrack")
-                ?.GetPropertyOrNull("audioIsDefault")
-                ?.GetBooleanOrNull();
-
-
-        /// <inheritdoc/>
-        public string? VideoCodec
-        {
-            get
-            {
-                var codec = IsAudioOnly ? null : Codecs?.SubstringUntil(", ").NullIfWhiteSpace();
-                return string.Equals(codec, "unknown", StringComparison.OrdinalIgnoreCase)
-                    ? "av01.0.05M.08"
-                    : codec;
-            }
-        }
-
-        /// <inheritdoc/>
-        public string? VideoQualityLabel =>
-            _content.GetPropertyOrNull("qualityLabel")?.GetStringOrNull();
-
-        /// <inheritdoc/>
-        public int? VideoWidth => _content.GetPropertyOrNull("width")?.GetInt32OrNull();
-
-        /// <inheritdoc/>
-        public int? VideoHeight => _content.GetPropertyOrNull("height")?.GetInt32OrNull();
-
-        /// <inheritdoc/>
-        public int? VideoFramerate => _content.GetPropertyOrNull("fps")?.GetInt32OrNull();
     }
 }
 
 internal partial class PlayerResponse
 {
-    /// <inheritdoc/>
-    public static PlayerResponse Parse(string raw) => new(Json.Parse(raw));
+    /// <summary>
+    /// Парсит ответ PlayerResponse из сырого текста с мгновенным освобождением <see cref="JsonDocument"/>.
+    /// </summary>
+    public static PlayerResponse Parse(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        return new PlayerResponse(doc.RootElement);
+    }
+
+    /// <summary>
+    /// Парсит ответ PlayerResponse напрямую из сетевого потока без промежуточных строк в LOH.
+    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// </summary>
+    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Экземпляр плоского ответа PlayerResponse.</returns>
+    public static async ValueTask<PlayerResponse> ParseAsync(Stream stream, CancellationToken ct = default)
+    {
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+        return new PlayerResponse(doc.RootElement);
+    }
 }

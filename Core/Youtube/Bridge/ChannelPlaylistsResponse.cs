@@ -124,7 +124,7 @@ internal class ChannelPlaylistsResponse(JsonElement content)
             return ParseGridPlaylist(grid);
 
         if (item.TryGetProperty("playlistRenderer", out var list))
-            return ParseGridPlaylist(list); 
+            return ParseGridPlaylist(list);
 
         if (item.TryGetProperty("lockupViewModel", out var lockup))
             return ParseLockupViewModel(lockup);
@@ -188,4 +188,13 @@ internal class ChannelPlaylistsResponse(JsonElement content)
     }
 
     public static ChannelPlaylistsResponse Parse(string raw) => new(Json.Parse(raw));
+
+    /// <summary>
+    /// Парсит ответ со списком плейлистов канала напрямую из сетевого потока без выделения строк в LOH.
+    /// </summary>
+    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Экземпляр ответа списка плейлистов канала.</returns>
+    public static async ValueTask<ChannelPlaylistsResponse> ParseAsync(Stream stream, CancellationToken ct = default) =>
+        new(await Json.ParseAsync(stream, ct).ConfigureAwait(false));
 }

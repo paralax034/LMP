@@ -155,10 +155,11 @@ internal sealed class PlaylistMutationController(HttpClient http)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string SanitizePlaylistId(string playlistId)
     {
-        var span = playlistId.AsSpan();
+        var rawId = YoutubeIdHelper.ExtractRawId(playlistId);
+        var span = rawId.AsSpan();
         if (span.StartsWith("VL") && span.Length > 2)
-            return playlistId[2..];
-        return playlistId;
+            return rawId[2..];
+        return rawId;
     }
 
     #region Public API
@@ -202,9 +203,11 @@ internal sealed class PlaylistMutationController(HttpClient http)
     {
         if (videoIds.Count == 0) return [];
 
+        var cleanId = SanitizePlaylistId(playlistId);
+
         var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
         {
-            writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
+            writer.WriteString("playlistId", cleanId);
             writer.WriteString("params", "ICE%3D");
 
             writer.WriteStartArray("actions");
@@ -253,17 +256,36 @@ internal sealed class PlaylistMutationController(HttpClient http)
     {
         if (setVideoIds.Count == 0) return;
 
+        var cleanPlaylistId = SanitizePlaylistId(playlistId);
+
+        // Фильтруем пустые setVideoId, чтобы исключить 400 Bad Request
+        var validSetVideoIds = new List<string>(setVideoIds.Count);
+        for (int i = 0; i < setVideoIds.Count; i++)
+        {
+            var sId = setVideoIds[i];
+            if (!string.IsNullOrWhiteSpace(sId))
+                validSetVideoIds.Add(sId);
+            else
+                Log.Warn($"[PlaylistMutation] Skipping track removal at index {i}: empty setVideoId");
+        }
+
+        if (validSetVideoIds.Count == 0)
+        {
+            Log.Warn("[PlaylistMutation] No valid setVideoIds provided for removal.");
+            return;
+        }
+
         var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
         {
-            writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
+            writer.WriteString("playlistId", cleanPlaylistId);
             writer.WriteString("params", "ICE%3D");
 
             writer.WriteStartArray("actions");
-            for (int i = 0; i < setVideoIds.Count; i++)
+            for (int i = 0; i < validSetVideoIds.Count; i++)
             {
                 writer.WriteStartObject();
                 writer.WriteString("action", "ACTION_REMOVE_VIDEO");
-                writer.WriteString("setVideoId", setVideoIds[i]);
+                writer.WriteString("setVideoId", validSetVideoIds[i]);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();

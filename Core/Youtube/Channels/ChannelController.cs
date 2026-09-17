@@ -45,10 +45,10 @@ internal class ChannelController(HttpClient http)
     ) => await GetChannelPageAsync("@" + channelHandle, cancellationToken);
 
     public async ValueTask<ChannelPlaylistsResponse> GetChannelPlaylistsPageAsync(
-    ChannelId channelId,
-    string? continuationToken,
-    CancellationToken cancellationToken = default
-)
+        ChannelId channelId,
+        string? continuationToken,
+        CancellationToken cancellationToken = default
+    )
     {
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
@@ -98,11 +98,11 @@ internal class ChannelController(HttpClient http)
 
         request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-        using var response = await http.SendAsync(request, cancellationToken);
+        using var response = await http.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        return ChannelPlaylistsResponse.Parse(responseText);
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        return await ChannelPlaylistsResponse.ParseAsync(stream, cancellationToken).ConfigureAwait(false);
     }
 }

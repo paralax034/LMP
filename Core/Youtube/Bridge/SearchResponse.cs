@@ -23,7 +23,7 @@ internal partial class SearchResponse
     }.ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly FrozenSet<string> ContainerNames = new[]
-        {
+    {
         "contents", "items", "primaryContents", "secondaryContents",
         "twoColumnSearchResultsRenderer", "sectionListRenderer",
         "itemSectionRenderer", "musicShelfRenderer", "richGridRenderer",
@@ -306,43 +306,55 @@ internal partial class SearchResponse
         return null;
     }
 
-    public static SearchResponse Parse(string raw) => new(Json.Parse(raw));
+    public static SearchResponse Parse(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        return new SearchResponse(doc.RootElement);
+    }
 
     /// <summary>
     /// Парсит из потока — избегает промежуточной строки.
     /// </summary>
     public static async ValueTask<SearchResponse> ParseAsync(Stream stream, CancellationToken ct = default)
     {
-        var element = await Json.ParseAsync(stream, ct);
-        return new SearchResponse(element);
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+        return new SearchResponse(doc.RootElement);
     }
 
     // VideoData с кэшированием свойств при первом доступе
-    internal sealed class VideoData(JsonElement content, bool isYtm)
+    internal sealed class VideoData
     {
-        private bool _idComputed;
-        private bool _titleComputed;
-        private bool _authorComputed;
-        private bool _channelIdComputed;
-        private bool _durationComputed;
-        private bool? _isPlaylistContext;
-        private bool? _isArtistContext;
+        public bool IsMusicItem { get; init; }
+        public string? Id { get; init; }
+        public string? Title { get; init; }
+        public string? Author { get; init; }
+        public string? ChannelId { get; init; }
+        public bool IsOfficialArtist { get; init; }
+        public bool IsShort { get; init; }
+        public TimeSpan? Duration { get; init; }
+        public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
+        public bool IsPlaylistContext { get; init; }
+        public bool IsArtistContext { get; init; }
 
-        public bool IsMusicItem => isYtm;
-
-        public string? Id
+        public VideoData(JsonElement content, bool isYtm)
         {
-            get
-            {
-                if (_idComputed) return field;
-                field = ComputeId();
-                _idComputed = true;
-                return field;
-            }
+            IsMusicItem = isYtm;
+            Id = ComputeId(content, isYtm);
+            Title = ComputeTitle(content, isYtm);
+            Author = ComputeAuthor(content, isYtm);
+            ChannelId = ComputeChannelId(content, isYtm);
+            IsOfficialArtist = ComputeIsOfficialArtist(content, isYtm);
+            IsShort = !isYtm &&
+                (content.TryGetProperty("shortsLockupViewModel", out _) ||
+                 content.TryGetProperty("reelItemRenderer", out _));
+            Duration = ComputeDuration(content, isYtm);
+            Thumbnails = ComputeThumbnails(content);
+            IsPlaylistContext = ComputeIsPlaylistContext(content, isYtm, Id, Title);
+            IsArtistContext = ComputeIsArtistContext(content, isYtm);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private string? ComputeId()
+        private static string? ComputeId(JsonElement content, bool isYtm)
         {
             if (isYtm)
             {
@@ -365,18 +377,7 @@ internal partial class SearchResponse
                 ?.GetPropertyOrNull("videoId")?.GetStringOrNull();
         }
 
-        public string? Title
-        {
-            get
-            {
-                if (_titleComputed) return field;
-                field = ComputeTitle();
-                _titleComputed = true;
-                return field;
-            }
-        }
-
-        private string? ComputeTitle()
+        private static string? ComputeTitle(JsonElement content, bool isYtm)
         {
             if (isYtm) return GetRunText(content, 0);
 
@@ -397,18 +398,7 @@ internal partial class SearchResponse
                 ?.GetPropertyOrNull("content")?.GetStringOrNull();
         }
 
-        public string? Author
-        {
-            get
-            {
-                if (_authorComputed) return field;
-                field = ComputeAuthor();
-                _authorComputed = true;
-                return field;
-            }
-        }
-
-        private string? ComputeAuthor()
+        private static string? ComputeAuthor(JsonElement content, bool isYtm)
         {
             if (isYtm)
             {
@@ -446,18 +436,7 @@ internal partial class SearchResponse
             return null;
         }
 
-        public string? ChannelId
-        {
-            get
-            {
-                if (_channelIdComputed) return field;
-                field = ComputeChannelId();
-                _channelIdComputed = true;
-                return field;
-            }
-        }
-
-        private string? ComputeChannelId()
+        private static string? ComputeChannelId(JsonElement content, bool isYtm)
         {
             if (isYtm)
             {
@@ -496,42 +475,24 @@ internal partial class SearchResponse
                 ?.GetPropertyOrNull("browseId")?.GetStringOrNull();
         }
 
-        public bool IsOfficialArtist
+        private static bool ComputeIsOfficialArtist(JsonElement content, bool isYtm)
         {
-            get
+            if (isYtm) return true;
+
+            var badges = content.GetPropertyOrNull("ownerBadges");
+            if (badges == null) return false;
+
+            foreach (var badge in badges.Value.EnumerateArrayOrEmpty())
             {
-                if (isYtm) return true;
-
-                var badges = content.GetPropertyOrNull("ownerBadges");
-                if (badges == null) return false;
-
-                foreach (var badge in badges.Value.EnumerateArrayOrEmpty())
-                {
-                    var iconType = badge.GetPropertyOrNull("metadataBadgeRenderer")
-                        ?.GetPropertyOrNull("icon")
-                        ?.GetPropertyOrNull("iconType")?.GetStringOrNull();
-                    if (iconType == "AUDIO_BADGE") return true;
-                }
-                return false;
+                var iconType = badge.GetPropertyOrNull("metadataBadgeRenderer")
+                    ?.GetPropertyOrNull("icon")
+                    ?.GetPropertyOrNull("iconType")?.GetStringOrNull();
+                if (iconType == "AUDIO_BADGE") return true;
             }
+            return false;
         }
 
-        public bool IsShort => !isYtm &&
-            (content.TryGetProperty("shortsLockupViewModel", out _) ||
-             content.TryGetProperty("reelItemRenderer", out _));
-
-        public TimeSpan? Duration
-        {
-            get
-            {
-                if (_durationComputed) return field;
-                field = ComputeDuration();
-                _durationComputed = true;
-                return field;
-            }
-        }
-
-        private TimeSpan? ComputeDuration()
+        private static TimeSpan? ComputeDuration(JsonElement content, bool isYtm)
         {
             if (isYtm)
             {
@@ -556,17 +517,7 @@ internal partial class SearchResponse
             return textDuration != null ? YoutubeClientUtils.DurationParser.Parse(textDuration) : null;
         }
 
-        public IReadOnlyList<ThumbnailData> Thumbnails
-        {
-            get
-            {
-                if (field != null) return field;
-                field = ComputeThumbnails();
-                return field;
-            }
-        }
-
-        private IReadOnlyList<ThumbnailData> ComputeThumbnails()
+        internal static IReadOnlyList<ThumbnailData> ComputeThumbnails(JsonElement content)
         {
             var thumbsElement = content.GetPropertyOrNull("thumbnail")
                 ?.GetPropertyOrNull("musicThumbnailRenderer")
@@ -585,23 +536,14 @@ internal partial class SearchResponse
             var len = thumbsElement.Value.GetArrayLength();
             if (len == 0) return [];
 
-            var list = new List<ThumbnailData>(len);
+            var list = new ThumbnailData[len];
+            int idx = 0;
             foreach (var t in thumbsElement.Value.EnumerateArray())
-                list.Add(new ThumbnailData(t));
+                list[idx++] = new ThumbnailData(t);
             return list;
         }
 
-        public bool IsPlaylistContext
-        {
-            get
-            {
-                if (_isPlaylistContext.HasValue) return _isPlaylistContext.Value;
-                _isPlaylistContext = ComputeIsPlaylistContext();
-                return _isPlaylistContext.Value;
-            }
-        }
-
-        private bool ComputeIsPlaylistContext()
+        private static bool ComputeIsPlaylistContext(JsonElement content, bool isYtm, string? id, string? title)
         {
             if (!isYtm) return false;
 
@@ -611,20 +553,10 @@ internal partial class SearchResponse
                 ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
                 ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
 
-            return pageType == "MUSIC_PAGE_TYPE_ALBUM" || (Id == null && Title != null);
+            return pageType == "MUSIC_PAGE_TYPE_ALBUM" || (id == null && title != null);
         }
 
-        public bool IsArtistContext
-        {
-            get
-            {
-                if (_isArtistContext.HasValue) return _isArtistContext.Value;
-                _isArtistContext = ComputeIsArtistContext();
-                return _isArtistContext.Value;
-            }
-        }
-
-        private bool ComputeIsArtistContext()
+        private static bool ComputeIsArtistContext(JsonElement content, bool isYtm)
         {
             if (!isYtm) return false;
 
@@ -696,128 +628,76 @@ internal partial class SearchResponse
 
     internal sealed class PlaylistData
     {
-        private readonly JsonElement _content;
-        private readonly bool _isYtm;
+        public string? Id { get; init; }
+        public string? Title { get; init; }
+        public string? Author { get; init; }
+        public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
         public PlaylistData(JsonElement content, bool isYtm = false)
         {
-            _content = content;
-            _isYtm = isYtm;
-        }
+            Id = content.GetPropertyOrNull("playlistId")?.GetStringOrNull() ??
+                 content.GetPropertyOrNull("contentId")?.GetStringOrNull() ??
+                 (isYtm ? content.GetPropertyOrNull("navigationEndpoint")
+                     ?.GetPropertyOrNull("browseEndpoint")
+                     ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
 
-        public string? Id =>
-            _content.GetPropertyOrNull("playlistId")?.GetStringOrNull() ??
-            _content.GetPropertyOrNull("contentId")?.GetStringOrNull() ??
-            (_isYtm ? _content.GetPropertyOrNull("navigationEndpoint")
-                ?.GetPropertyOrNull("browseEndpoint")
-                ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
-
-        public string? Title
-        {
-            get
+            var titleProp = content.GetPropertyOrNull("title");
+            if (titleProp.HasValue)
             {
-                var titleProp = _content.GetPropertyOrNull("title");
-                if (titleProp.HasValue)
+                var simple = titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+                if (simple != null)
                 {
-                    var simple = titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull();
-                    if (simple != null) return simple;
-
+                    Title = simple;
+                }
+                else
+                {
                     var firstRun = titleProp.Value.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
                     if (firstRun.HasValue)
-                        return firstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
+                        Title = firstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
                 }
+            }
 
-                var lockupTitle = _content.GetPropertyOrNull("metadata")
+            if (Title is null)
+            {
+                var lockupTitle = content.GetPropertyOrNull("metadata")
                     ?.GetPropertyOrNull("lockupMetadataViewModel")
                     ?.GetPropertyOrNull("title")
                     ?.GetPropertyOrNull("content")?.GetStringOrNull();
-                if (lockupTitle != null) return lockupTitle;
 
-                return _isYtm ? VideoData.GetRunText(_content, 0) : null;
+                if (lockupTitle != null)
+                    Title = lockupTitle;
+                else if (isYtm)
+                    Title = VideoData.GetRunText(content, 0);
             }
-        }
 
-        public string? Author
-        {
-            get
-            {
-                var firstRun = _content.GetPropertyOrNull("shortBylineText")
-                    ?.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
-                if (firstRun.HasValue)
-                    return firstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
+            var firstRunAuthor = content.GetPropertyOrNull("shortBylineText")
+                ?.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
+            if (firstRunAuthor.HasValue)
+                Author = firstRunAuthor.Value.GetPropertyOrNull("text")?.GetStringOrNull();
+            else if (isYtm)
+                Author = VideoData.GetRunText(content, 1);
 
-                return _isYtm ? VideoData.GetRunText(_content, 1) : null;
-            }
-        }
-
-        public IReadOnlyList<ThumbnailData> Thumbnails
-        {
-            get
-            {
-                var thumbsElement = _content.GetPropertyOrNull("thumbnail")
-                    ?.GetPropertyOrNull("thumbnails");
-
-                thumbsElement ??= _content.GetPropertyOrNull("thumbnail")
-                    ?.GetPropertyOrNull("musicThumbnailRenderer")
-                    ?.GetPropertyOrNull("thumbnail")
-                    ?.GetPropertyOrNull("thumbnails");
-
-                if (thumbsElement == null) return [];
-
-                var len = thumbsElement.Value.GetArrayLength();
-                if (len == 0) return [];
-
-                var list = new List<ThumbnailData>(len);
-                foreach (var t in thumbsElement.Value.EnumerateArray())
-                    list.Add(new ThumbnailData(t));
-                return list;
-            }
+            Thumbnails = VideoData.ComputeThumbnails(content);
         }
     }
 
     internal sealed class ChannelData
     {
-        private readonly JsonElement _content;
-        private readonly bool _isYtm;
+        public string? Id { get; init; }
+        public string? Title { get; init; }
+        public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
         public ChannelData(JsonElement content, bool isYtm = false)
         {
-            _content = content;
-            _isYtm = isYtm;
-        }
+            Id = content.GetPropertyOrNull("channelId")?.GetStringOrNull() ??
+                 (isYtm ? content.GetPropertyOrNull("navigationEndpoint")
+                     ?.GetPropertyOrNull("browseEndpoint")
+                     ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
 
-        public string? Id =>
-            _content.GetPropertyOrNull("channelId")?.GetStringOrNull() ??
-            (_isYtm ? _content.GetPropertyOrNull("navigationEndpoint")
-                ?.GetPropertyOrNull("browseEndpoint")
-                ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
+            Title = content.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull() ??
+                    (isYtm ? VideoData.GetRunText(content, 0) : null);
 
-        public string? Title =>
-            _content.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull() ??
-            (_isYtm ? VideoData.GetRunText(_content, 0) : null);
-
-        public IReadOnlyList<ThumbnailData> Thumbnails
-        {
-            get
-            {
-                var thumbsElement = _content.GetPropertyOrNull("thumbnail")
-                    ?.GetPropertyOrNull("thumbnails");
-
-                thumbsElement ??= _content.GetPropertyOrNull("thumbnail")
-                    ?.GetPropertyOrNull("musicThumbnailRenderer")
-                    ?.GetPropertyOrNull("thumbnail")
-                    ?.GetPropertyOrNull("thumbnails");
-
-                if (thumbsElement == null) return [];
-
-                var len = thumbsElement.Value.GetArrayLength();
-                if (len == 0) return [];
-
-                var list = new List<ThumbnailData>(len);
-                foreach (var t in thumbsElement.Value.EnumerateArray())
-                    list.Add(new ThumbnailData(t));
-                return list;
-            }
+            Thumbnails = VideoData.ComputeThumbnails(content);
         }
     }
 }
