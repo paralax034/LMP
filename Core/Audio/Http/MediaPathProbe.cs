@@ -11,7 +11,7 @@ namespace LMP.Core.Audio.Http;
 /// </summary>
 internal static class MediaPathProbe
 {
-    private const int DefaultTimeoutMs = 5_000;
+    private const int DefaultTimeoutMs = 6_000;
 
     /// <summary>
     /// Результат проверки одного CDN-хоста по двум путям.
@@ -93,7 +93,7 @@ internal static class MediaPathProbe
         try
         {
             using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            probeCts.CancelAfter(Math.Max(timeoutMs, 4000));
+            probeCts.CancelAfter(Math.Max(timeoutMs, DefaultTimeoutMs));
 
             // Формируем URL с параметрами воспроизведения (rn/rbuf), чтобы CDN не отклонял запрос
             string probeUrl = mediaUrl;
@@ -128,7 +128,7 @@ internal static class MediaPathProbe
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            return (false, (int)sw.ElapsedMilliseconds, 0, 0, "Timeout (TSPU silent drop?)");
+            return (false, (int)sw.ElapsedMilliseconds, 0, 0, "Timeout (Network congested or TSPU drop)");
         }
         catch (HttpRequestException ex)
         {

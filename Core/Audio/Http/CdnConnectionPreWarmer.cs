@@ -10,8 +10,7 @@ internal static class CdnConnectionPreWarmer
     private const string GoogleVideoCdnSuffix = ".googlevideo.com";
     private const string GenerateEndpoint = "/generate_204";
     private const int MaxTrackedHosts = 4;
-    // Порог: 2 таймаута подряд = туннель мёртв.
-    private const int TunnelDeadTimeoutThreshold = 2;
+    private const int TunnelDeadTimeoutThreshold = 4;
 
     private static readonly TimeSpan WarmCooldown = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan WarmTimeout = TimeSpan.FromMilliseconds(1500);

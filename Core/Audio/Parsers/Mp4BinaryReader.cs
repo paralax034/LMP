@@ -157,6 +157,7 @@ public sealed class Mp4BinaryReader
     /// <returns>Заголовок box. <see cref="BoxHeader.IsEmpty"/> = true при EOF.</returns>
     public async ValueTask<BoxHeader> ReadBoxHeaderAsync(CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         int read = await _stream.ReadAsync(_ioBuffer.AsMemory(0, 8), ct).ConfigureAwait(false);
         if (read < 8)
             return default;
@@ -259,9 +260,13 @@ public sealed class Mp4BinaryReader
         int totalRead = 0;
         while (totalRead < buffer.Length)
         {
+            ct.ThrowIfCancellationRequested();
             int read = await _stream.ReadAsync(buffer[totalRead..], ct).ConfigureAwait(false);
             if (read == 0)
+            {
+                ct.ThrowIfCancellationRequested();
                 throw new EndOfStreamException();
+            }
             totalRead += read;
         }
     }

@@ -187,8 +187,13 @@ public sealed class WebMParser : IDisposable
 
         while (remaining > 0)
         {
+            ct.ThrowIfCancellationRequested();
             int read = await _stream.ReadAsync(buffer[offset..], ct).ConfigureAwait(false);
-            if (read == 0) throw new EndOfStreamException("Unexpected EOF while reading exact payload.");
+            if (read == 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                throw new EndOfStreamException("Unexpected EOF while reading exact payload.");
+            }
             offset += read;
             remaining -= read;
         }
@@ -531,12 +536,22 @@ public sealed class WebMParser : IDisposable
                         continue;
                 }
             }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
             catch (EndOfStreamException ex) when (!ct.IsCancellationRequested && _stream.CanSeek)
             {
+                if (ct.IsCancellationRequested || _requiresResync)
+                    return null;
+
                 throw new ParserCorruptionException(StreamPositionWithBuffer(), "Unexpected EOF inside EBML stream", ex);
             }
             catch (InvalidDataException ex) when (!ct.IsCancellationRequested && _stream.CanSeek)
             {
+                if (ct.IsCancellationRequested || _requiresResync)
+                    return null;
+
                 throw new ParserCorruptionException(StreamPositionWithBuffer(), "EBML structural corruption detected", ex);
             }
         }

@@ -707,6 +707,9 @@ public sealed partial class CachingStreamSource : IAudioSource
 
         for (int attempt = 0; attempt < maxHealingAttempts; attempt++)
         {
+            if (ct.IsCancellationRequested || _seekInProgress)
+                return null;
+
             try
             {
                 var frame = await _parser.ReadNextFrameAsync(ct).ConfigureAwait(false);
@@ -717,11 +720,21 @@ public sealed partial class CachingStreamSource : IAudioSource
                 }
                 return frame;
             }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
             catch (ParserCorruptionException ex)
             {
+                if (ct.IsCancellationRequested || _seekInProgress)
+                    return null;
+
                 await HealCorruptionAsync(ex.AbsoluteBytePosition, ct).ConfigureAwait(false);
             }
         }
+
+        if (ct.IsCancellationRequested || _seekInProgress)
+            return null;
 
         throw new InvalidDataException("Unrecoverable container corruption after max healing attempts.");
     }

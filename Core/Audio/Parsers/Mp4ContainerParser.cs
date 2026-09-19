@@ -155,10 +155,14 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     }
 
     /// <summary>
-    /// Изменяем чтение сэмпла: при сбое I/O выбрасываем ParserCorruptionException вместо возврата null.
+    /// Считывает сэмпл MP4. При отмене операции или смене позиции возвращает null,
+    /// предотвращая ложный ParserCorruptionException.
     /// </summary>
     private async ValueTask<AudioFrame?> ReadSampleAsFrameAsync(SampleInfo sample, CancellationToken ct)
     {
+        if (ct.IsCancellationRequested)
+            return null;
+
         _reader.Position = sample.Offset;
         var owner = MemoryPool<byte>.Shared.Rent(sample.Size);
         var memory = owner.Memory[..sample.Size];
@@ -179,7 +183,10 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         catch (Exception ex)
         {
             owner.Dispose();
-            if (ct.IsCancellationRequested) throw;
+
+            if (ct.IsCancellationRequested || Helpers.CancellationHelper.IsCancellationLike(ex))
+                return null;
+
             throw new ParserCorruptionException(sample.Offset, $"Failed to read MP4 sample at offset {sample.Offset}", ex);
         }
     }
