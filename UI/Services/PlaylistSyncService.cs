@@ -1,3 +1,4 @@
+using LMP.Core.Services;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Music;
 
@@ -30,6 +31,7 @@ namespace LMP.UI.Services;
 /// </summary>
 public sealed class PlaylistSyncService
 {
+    private readonly INetworkManager _networkManager;
     private readonly LibraryService _library;
     private readonly YoutubeProvider _youtube;
     private readonly CookieAuthService _auth;
@@ -44,11 +46,13 @@ public sealed class PlaylistSyncService
     private static LocalizationService SL => LocalizationService.Instance;
 
     public PlaylistSyncService(
+        INetworkManager networkManager,
         LibraryService library,
         YoutubeProvider youtube,
         CookieAuthService auth,
         DialogService dialog)
     {
+        _networkManager = networkManager;
         _library = library;
         _youtube = youtube;
         _auth = auth;
@@ -674,12 +678,10 @@ public sealed class PlaylistSyncService
 
         if (thumbnailUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            using var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(15);
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
-            var response = await httpClient.GetAsync(thumbnailUrl, ct);
-            response.EnsureSuccessStatusCode();
-            imageData = await response.Content.ReadAsByteArrayAsync(ct);
+            imageData = await _networkManager.ImageClient.GetByteArrayAsync(thumbnailUrl, linkedCts.Token);
         }
         else if (thumbnailUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {

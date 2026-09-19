@@ -3,6 +3,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using LMP.Core.Services;
 
 namespace LMP.UI.Dialogs;
 
@@ -25,6 +26,10 @@ public enum CoverMode
 /// </summary>
 public sealed partial class PlaylistEditorViewModel : ViewModelBase
 {
+    private readonly INetworkManager? _networkManager;
+    private readonly DominantColorService? _dominantColorService;
+    private readonly Lazy<YoutubeProvider>? _youtube;
+
     [ObservableProperty]
     public partial string Name { get; set; } = "";
 
@@ -228,8 +233,14 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         IReadOnlyList<TrackInfo>? playlistTracks = null,
         Playlist? originalPlaylist = null,
         bool isForEdit = false,
-        bool isSystemPlaylist = false)
+        bool isSystemPlaylist = false,
+        INetworkManager? networkManager = null,
+        DominantColorService? dominantColorService = null,
+        Lazy<YoutubeProvider>? youtube = null)
     {
+        _networkManager = networkManager;
+        _dominantColorService = dominantColorService;
+        _youtube = youtube;
         _originalDescription = description;
         _originalPlaylist = originalPlaylist;
         _isForEdit = isForEdit;
@@ -260,9 +271,9 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         };
 
         HasTracksCoverOption = playlistTracks != null && playlistTracks.Any(t => t.HasThumbnail);
-        if (HasTracksCoverOption)
+        if (HasTracksCoverOption && _networkManager != null)
         {
-            CoverPicker = new PlaylistCoverPickerViewModel(playlistTracks!);
+            CoverPicker = new PlaylistCoverPickerViewModel(playlistTracks!, _networkManager);
             CoverPicker.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(PlaylistCoverPickerViewModel.ResultPath) && CoverPicker?.ResultPath is { Length: > 0 } path)
@@ -367,19 +378,18 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
 
         try
         {
-            var youtube = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
-                .GetRequiredService<Lazy<YoutubeProvider>>(AppEntry.Services);
+            if (_youtube == null || _networkManager == null)
+            {
+                SetError("Required services not initialized");
+                return;
+            }
 
             byte[] imageData;
 
             if (IsHttpUrl(ThumbnailUrl))
             {
-                using var httpClient = new HttpClient();
-                httpClient.Timeout = TimeSpan.FromSeconds(15);
-
-                var response = await httpClient.GetAsync(ThumbnailUrl);
-                response.EnsureSuccessStatusCode();
-                imageData = await response.Content.ReadAsByteArrayAsync();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                imageData = await _networkManager.ImageClient.GetByteArrayAsync(ThumbnailUrl, cts.Token);
             }
             else if (ThumbnailUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
             {
@@ -416,7 +426,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
                 return;
             }
 
-            var success = await youtube.Value.UploadPlaylistThumbnailAsync(
+            var success = await _youtube.Value.UploadPlaylistThumbnailAsync(
                 _originalPlaylist.YoutubeId, imageData);
 
             if (success)
@@ -472,11 +482,13 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         IsRecalculatingColor = true;
         try
         {
-            var dominantColorService = Microsoft.Extensions.DependencyInjection
-                .ServiceProviderServiceExtensions
-                .GetRequiredService<DominantColorService>(AppEntry.Services);
+            if (_dominantColorService == null)
+            {
+                Log.Warn("[PlaylistEditor] DominantColorService is not configured");
+                return;
+            }
 
-            var color = await dominantColorService.GetDominantColorAsync(ThumbnailUrl, ct);
+            var color = await _dominantColorService.GetDominantColorAsync(ThumbnailUrl, ct);
 
             if (color.HasValue)
             {
@@ -756,7 +768,10 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// <summary>
     /// Создаёт VM для создания нового плейлиста.
     /// </summary>
-    public static PlaylistEditorViewModel ForCreate() =>
+    public static PlaylistEditorViewModel ForCreate(
+        INetworkManager? networkManager = null,
+        DominantColorService? dominantColorService = null,
+        Lazy<YoutubeProvider>? youtube = null) =>
         new(name: "", thumbnailUrl: null, customColor: null, description: null,
             computedColor: null,
             showSync: false, isSynced: false,
@@ -764,7 +779,10 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             playlistTracks: null,
             originalPlaylist: null,
             isForEdit: false,
-            isSystemPlaylist: false);
+            isSystemPlaylist: false,
+            networkManager: networkManager,
+            dominantColorService: dominantColorService,
+            youtube: youtube);
 
     /// <summary>
     /// Создаёт VM для редактирования существующего плейлиста.
@@ -775,10 +793,16 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// Треки плейлиста для <see cref="PlaylistCoverPickerViewModel"/>.
     /// null — вкладка «Из треков» скрыта.
     /// </param>
+    /// <param name="networkManager">Централизованный менеджер сети.</param>
+    /// <param name="dominantColorService">Сервис доминантных цветов.</param>
+    /// <param name="youtube">Провайдер YouTube.</param>
     public static PlaylistEditorViewModel ForEdit(
         Playlist playlist,
         bool isAuthenticated,
-        IReadOnlyList<TrackInfo>? playlistTracks = null)
+        IReadOnlyList<TrackInfo>? playlistTracks = null,
+        INetworkManager? networkManager = null,
+        DominantColorService? dominantColorService = null,
+        Lazy<YoutubeProvider>? youtube = null)
     {
         var isSystem = LibraryService.IsSystemPlaylist(playlist.Id);
 
@@ -795,7 +819,10 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             playlistTracks: playlistTracks,
             originalPlaylist: playlist,
             isForEdit: true,
-            isSystemPlaylist: isSystem);
+            isSystemPlaylist: isSystem,
+            networkManager: networkManager,
+            dominantColorService: dominantColorService,
+            youtube: youtube);
     }
 
     #endregion

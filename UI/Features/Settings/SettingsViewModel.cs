@@ -46,6 +46,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
     private const int NavigationDebounceMs = 128;
 
+    private readonly INetworkManager _networkManager;
     private readonly LibraryService _library;
     private readonly TrackRegistry _registry;
     private readonly SearchCacheService _searchCache;
@@ -807,6 +808,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     /// Создаёт VM настроек и инициализирует команды и sidebar.
     /// </summary>
     public SettingsViewModel(
+        INetworkManager networkManager,
         LibraryService library,
         TrackRegistry registry,
         SearchCacheService searchCache,
@@ -820,6 +822,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         YoutubeUserDataService userData,
         NotificationService notifications)
     {
+        _networkManager = networkManager;
         _library = library;
         _registry = registry;
         _searchCache = searchCache;
@@ -1289,10 +1292,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         };
 
         _library.UpdateSettings(s => s.Proxy = proxy);
-
-        Core.Audio.Http.SharedHttpClient.Rebuild(proxy);
-        _youtube.ReloadClient();
-        _imageCache.RebuildClient(proxy);
+        _networkManager.UpdateProxy(proxy);
 
         NetworkStatus = NetworkStatusKind.Unknown;
         NetworkStatusText = "";
@@ -1300,7 +1300,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         OnPropertyChanged(nameof(NetworkStatusColor));
         OnPropertyChanged(nameof(HasLatency));
 
-        Log.Info("[Settings] Network settings applied immediately.");
+        Log.Info("[Settings] Network settings applied immediately via NetworkManager.");
     }
 
     private void SaveStorageSettings()
@@ -1570,7 +1570,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
                 return;
             }
 
-            bool vpnDetected = DetectVpnInterface();
+            bool vpnDetected = _networkManager.IsVpnActive || DetectVpnInterface();
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             bool reachable = await ProbeYoutubeAsync().ConfigureAwait(false);
@@ -1620,7 +1620,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         }
     }
 
-    private static async Task<bool> ProbeCdnAsync()
+    private async Task<bool> ProbeCdnAsync()
     {
         try
         {
@@ -1632,7 +1632,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             request.Headers.TryAddWithoutValidation("User-Agent",
                 YoutubeClientUtils.UaWebRemix);
 
-            using var response = await Core.Audio.Http.SharedHttpClient.Instance
+            using var response = await _networkManager.ProbeClient
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token)
                 .ConfigureAwait(false);
 
@@ -1644,7 +1644,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         }
     }
 
-    private static async Task<bool> ProbeYoutubeAsync()
+    private async Task<bool> ProbeYoutubeAsync()
     {
         try
         {
@@ -1655,7 +1655,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             request.Version = HttpVersion.Version11;
             request.Headers.TryAddWithoutValidation("User-Agent", YoutubeClientUtils.UaWebRemix);
 
-            using var response = await Core.Audio.Http.SharedHttpClient.Instance
+            using var response = await _networkManager.ProbeClient
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token)
                 .ConfigureAwait(false);
 

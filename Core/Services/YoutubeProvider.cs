@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using LMP.Core.Youtube;
@@ -32,6 +31,7 @@ public partial class YoutubeProvider : IDisposable
 {
     #region Fields & Dependencies
 
+    private readonly INetworkManager _networkManager;
     private readonly NTokenDecryptor _nTokenDecryptor;
     private readonly SigCipherDecryptor _sigCipherDecryptor;
     private readonly TrackRegistry _trackRegistry;
@@ -51,8 +51,6 @@ public partial class YoutubeProvider : IDisposable
     private readonly ConcurrentDictionary<string, StreamManifest> _manifestRamCache = new(StringComparer.Ordinal);
 
     private YoutubeClient _youtube = null!;
-    private SocketsHttpHandler? _currentHandler;
-    private HttpClient? _currentHttpClient;
     private volatile bool _disposed;
 
     private Task? _initTask;
@@ -85,6 +83,7 @@ public partial class YoutubeProvider : IDisposable
     /// Создаёт экземпляр провайдера YouTube.
     /// </summary>
     public YoutubeProvider(
+        INetworkManager networkManager,
         TrackRegistry trackRegistry,
         LibraryService? libraryService,
         CookieAuthService cookieAuth,
@@ -92,32 +91,26 @@ public partial class YoutubeProvider : IDisposable
         SigCipherDecryptor sigCipherDecryptor,
         YoutubeUserDataService userDataService)
     {
+        _networkManager = networkManager;
         _trackRegistry = trackRegistry;
         _libraryService = libraryService;
         AuthService = cookieAuth;
         _nTokenDecryptor = nTokenDecryptor;
         _sigCipherDecryptor = sigCipherDecryptor;
         _userDataService = userDataService;
-        _poTokenProvider = new PoTokenProvider(SharedHttpClient.Instance);
+        _poTokenProvider = new PoTokenProvider(() => _networkManager.AudioClient);
 
         // Связываем централизованный утилитный класс с куками сессии
         YoutubeClientUtils.Initialize(cookieAuth);
 
         _nTokenDecryptor.OnComplexDecryptionStarted += HandleNTokenDecryptionStarted;
 
+        ReloadClient();
+
         if (AuthService != null)
-        {
-            ReloadClient();
             AuthService.OnAuthStateChanged += ReloadClient;
-        }
-    }
 
-    private void HandleNTokenDecryptionStarted(string? rawVideoId)
-    {
-        if (string.IsNullOrWhiteSpace(rawVideoId))
-            return;
-
-        OnNTokenDecryptionStarted?.Invoke(rawVideoId);
+        _networkManager.NetworkRebuilt += ReloadClient;
     }
 
     #endregion
@@ -155,83 +148,31 @@ public partial class YoutubeProvider : IDisposable
     #region Client Initialization
 
     /// <summary>
-    /// Пересоздаёт HTTP-клиент и внутренний <see cref="YoutubeClient"/> с учётом
-    /// текущих кук авторизации и настроек прокси из <see cref="LibraryService"/>.
+    /// Пересоздаёт внутренний <see cref="YoutubeClient"/> на базе актуального ApiClient из <see cref="INetworkManager"/>.
     /// Вызывается при смене аккаунта, смене сетевого интерфейса (VPN) и изменении прокси.
     /// </summary>
     public void ReloadClient()
     {
-        DisposeCurrentClient();
-
         // VisitorData привязан к сессии — при смене клиента он невалиден.
         _poTokenProvider?.Invalidate();
 
-        var proxy = _libraryService?.Settings.Proxy;
-        var webProxy = ProxyHelper.CreateWebProxy(proxy);
-        bool isExplicitProxy = webProxy is not null;
+        var baseHttpClient = _networkManager.ApiClient;
+        var youtubeHandler = new YoutubeHttpHandler(baseHttpClient, AuthService, disposeClient: false);
 
-        _currentHandler = new SocketsHttpHandler
-        {
-            UseCookies = false,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-            AllowAutoRedirect = false,
-
-            ConnectCallback = isExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
-            Proxy = webProxy,
-            UseProxy = true,
-
-            // 2 минуты вместо 5: VPN туннели живут 60-120с при переподключении.
-            // 5 минут гарантировало накопление зомби-соединений.
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15),
-            MaxConnectionsPerServer = 20,
-            EnableMultipleHttp2Connections = true,
-
-            // HTTP/2 application-level ping — дополнительный слой поверх TCP keepalive
-            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(15),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
-            ConnectTimeout = TimeSpan.FromSeconds(8),
-        };
-
-        var baseHttpClient = new HttpClient(_currentHandler, disposeHandler: false)
-        {
-            Timeout = Timeout.InfiniteTimeSpan
-        };
-
-        var youtubeHandler = new YoutubeHttpHandler(baseHttpClient, AuthService, disposeClient: true);
-
-        _currentHttpClient = new HttpClient(youtubeHandler, disposeHandler: true)
+        var wrappedClient = new HttpClient(youtubeHandler, disposeHandler: true)
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
 
         _youtube = new YoutubeClient(
-            _currentHttpClient,
+            wrappedClient,
             _nTokenDecryptor,
             _sigCipherDecryptor,
             isAuthenticatedCheck: () => AuthService?.IsAuthenticated ?? false,
-            ownsHttpClient: false,
+            ownsHttpClient: true,
             poTokenProvider: _poTokenProvider);
 
-        Log.Info($"[YouTube] Client reloaded. Auth: {AuthService?.IsAuthenticated ?? false}, " +
-                $"Proxy: {(isExplicitProxy ? webProxy!.Address?.ToString() : "system/direct")}");
-    }
-
-    private void DisposeCurrentClient()
-    {
-        try
-        {
-            _currentHttpClient?.Dispose();
-            _currentHttpClient = null;
-
-            _youtube = null!;
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[YouTube] Error disposing client: {ex.Message}");
-        }
+        Log.Info($"[YouTube] Client reloaded via NetworkManager. Auth: {AuthService?.IsAuthenticated ?? false}");
     }
 
     /// <summary>
@@ -271,6 +212,18 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public YoutubeClient GetClient() =>
         _youtube ?? throw new InvalidOperationException("YouTube client not initialized");
+
+    #endregion
+
+    #region Handles
+
+    private void HandleNTokenDecryptionStarted(string? rawVideoId)
+    {
+        if (string.IsNullOrWhiteSpace(rawVideoId))
+            return;
+
+        OnNTokenDecryptionStarted?.Invoke(rawVideoId);
+    }
 
     #endregion
 
@@ -1181,11 +1134,11 @@ public partial class YoutubeProvider : IDisposable
 
     /// <summary>
     /// Итеративная сессия постраничного поиска с авто-дедупликацией и неблокирующим освобождением.
-    /// Гарантирует отсутствие взаимных блокировок (deadlocks) в UI-потоке.
+    /// Динамически запрашивает актуальный YoutubeClient, предотвращая ObjectDisposedException при пересборке сети.
     /// </summary>
     public sealed class SearchSession : IAsyncDisposable, IDisposable
     {
-        private readonly YoutubeClient _youtube;
+        private readonly YoutubeProvider _provider;
         private readonly TrackRegistry _registry;
         private readonly string _query;
         private readonly int _maxResults;
@@ -1215,14 +1168,14 @@ public partial class YoutubeProvider : IDisposable
         public SearchFilter Filter { get; }
 
         internal SearchSession(
-            YoutubeClient youtube,
+            YoutubeProvider provider,
             TrackRegistry registry,
             string query,
             int maxResults = 300,
             SearchFilter filter = SearchFilter.Video,
             IEnumerable<string>? skipTrackIds = null)
         {
-            _youtube = youtube;
+            _provider = provider;
             _registry = registry;
             _query = query;
             _maxResults = maxResults;
@@ -1240,7 +1193,7 @@ public partial class YoutubeProvider : IDisposable
 
         /// <summary>
         /// Получает следующий пакет результатов поиска с контролем сетевой квоты.
-        /// Гарантирует отдачу стабильного объема треков за минимальное число сетевых запросов.
+        /// Автоматически пересоздаёт энумератор при смене сетевого клиента (ObjectDisposedException recovery).
         /// </summary>
         public async Task<List<TrackInfo>> FetchNextBatchAsync(int count = 25, CancellationToken ct = default)
         {
@@ -1280,11 +1233,30 @@ public partial class YoutubeProvider : IDisposable
                 {
                     networkCalls++;
 
-                    _enumerator ??= _youtube.Search
-                        .GetResultBatchesAsync(_query, Filter, token)
-                        .GetAsyncEnumerator(token);
+                    bool moveNextOk;
+                    try
+                    {
+                        var client = _provider.GetClient();
+                        _enumerator ??= client.Search
+                            .GetResultBatchesAsync(_query, Filter, token)
+                            .GetAsyncEnumerator(token);
 
-                    if (!await _enumerator.MoveNextAsync().ConfigureAwait(false))
+                        moveNextOk = await _enumerator.MoveNextAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Сеть была пересобрана (RebuildAll). Сбрасываем кэшированный энумератор со старым клиентом
+                        Log.Info("[SearchSession] Client was rebuilt during active search session. Recovering enumerator...");
+                        _enumerator = null;
+                        var freshClient = _provider.GetClient();
+                        _enumerator = freshClient.Search
+                            .GetResultBatchesAsync(_query, Filter, token)
+                            .GetAsyncEnumerator(token);
+
+                        moveNextOk = await _enumerator.MoveNextAsync().ConfigureAwait(false);
+                    }
+
+                    if (!moveNextOk)
                     {
                         _hasMore = false;
                         break;
@@ -1344,7 +1316,7 @@ public partial class YoutubeProvider : IDisposable
             if (_enumerator != null)
             {
                 try { await _enumerator.DisposeAsync().ConfigureAwait(false); }
-                catch (NotSupportedException) { /* Игнорируем: энумератор InnerTube не требует явного Dispose */ }
+                catch (NotSupportedException) { }
                 catch (Exception ex) { Log.Warn($"[SearchSession] Async dispose warning: {ex.Message}"); }
                 _enumerator = null;
             }
@@ -1372,7 +1344,7 @@ public partial class YoutubeProvider : IDisposable
                 _ = Task.Run(async () =>
                 {
                     try { await enumerator.DisposeAsync().ConfigureAwait(false); }
-                    catch (NotSupportedException) { /* Игнорируем */ }
+                    catch (NotSupportedException) { }
                     catch (Exception ex) { Log.Warn($"[SearchSession] Background dispose warning: {ex.Message}"); }
                 });
             }
@@ -1395,7 +1367,7 @@ public partial class YoutubeProvider : IDisposable
         IEnumerable<string>? skipTrackIds = null)
     {
         _currentSearchSession?.Dispose();
-        _currentSearchSession = new SearchSession(_youtube, _trackRegistry, query, maxResults, filter, skipTrackIds);
+        _currentSearchSession = new SearchSession(this, _trackRegistry, query, maxResults, filter, skipTrackIds);
         Log.Info($"[YouTube] Search session: '{query}' (max:{maxResults}, filter:{filter})");
         return _currentSearchSession;
     }
@@ -1448,7 +1420,7 @@ public partial class YoutubeProvider : IDisposable
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
         var token = linkedCts.Token;
 
-        var client = _currentHttpClient ?? SharedHttpClient.Instance;
+        var client = _networkManager.ProbeClient;
         var encoded = Uri.EscapeDataString(normalizedQuery);
 
         // Zero-alloc fallback: генерируем строку по требованию без аллокации промежуточного массива и без ReadOnlySpan через await
@@ -2184,12 +2156,12 @@ public partial class YoutubeProvider : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        AuthService.OnAuthStateChanged -= ReloadClient;
-        DisposeCurrentClient();
+        if (AuthService != null)
+            AuthService.OnAuthStateChanged -= ReloadClient;
 
-        _currentHandler?.Dispose();
-        _currentHandler = null;
+        _networkManager.NetworkRebuilt -= ReloadClient;
 
+        _youtube?.Dispose();
         _poTokenProvider?.Dispose();
         _poTokenProvider = null;
 

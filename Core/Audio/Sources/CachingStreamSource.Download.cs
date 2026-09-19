@@ -150,6 +150,7 @@ public sealed partial class CachingStreamSource
     /// <summary>
     /// Читает данные с произвольной позиции, используя RAM-кэш, диск и сеть в порядке приоритета.
     /// Реализует бесконечный retry для transient network errors с exponential backoff.
+    /// При смене эпохи (URL refresh) ожидает завершения обновления без преждевременного сброса.
     /// </summary>
     /// <param name="position">Абсолютная позиция чтения в контенте.</param>
     /// <param name="buffer">Буфер назначения.</param>
@@ -167,6 +168,8 @@ public sealed partial class CachingStreamSource
         if (diskRead > 0) return diskRead;
 
         int epochRetries = 0;
+        const int MaxEpochRetries = 15; // Расширенный бюджет (до 4.5 сек) для завершения QuickJS/BotGuard refresh
+        const int EpochRetryDelayMs = 250;
         int consecutiveNetworkFailures = 0;
         bool networkStallPublished = false;
 
@@ -225,9 +228,9 @@ public sealed partial class CachingStreamSource
                         if (downloadToken.IsCancellationRequested)
                         {
                             epochRetries++;
-                            if (epochRetries >= ReadAtMaxEpochRetries)
+                            if (epochRetries >= MaxEpochRetries)
                                 throw CreateReadAtFatalException(position);
-                            await Task.Delay(ReadAtEpochRetryDelayMs, ct).ConfigureAwait(false);
+                            await Task.Delay(EpochRetryDelayMs, ct).ConfigureAwait(false);
                         }
                         else
                         {
@@ -255,16 +258,15 @@ public sealed partial class CachingStreamSource
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 epochRetries++;
-                if (epochRetries >= ReadAtMaxEpochRetries)
+                if (epochRetries >= MaxEpochRetries)
                 {
-                    Log.Warn($"[CachingSource] ReadAt {position}: epoch retries exhausted " +
-                             $"({ReadAtMaxEpochRetries})");
+                    Log.Warn($"[CachingSource] ReadAt {position}: epoch retries exhausted ({MaxEpochRetries})");
                     throw CreateReadAtFatalException(position);
                 }
 
                 Log.Debug($"[CachingSource] ReadAt at {position}: epoch changed, " +
-                          $"retry {epochRetries}/{ReadAtMaxEpochRetries}");
-                await Task.Delay(ReadAtEpochRetryDelayMs, ct).ConfigureAwait(false);
+                          $"retry {epochRetries}/{MaxEpochRetries}");
+                await Task.Delay(EpochRetryDelayMs, ct).ConfigureAwait(false);
             }
         }
     }

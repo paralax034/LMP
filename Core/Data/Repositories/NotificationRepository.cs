@@ -3,8 +3,6 @@ using System.Data.Common;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using LMP.Core.Models;
-using LMP.Core.Services;
 
 namespace LMP.Core.Data.Repositories;
 

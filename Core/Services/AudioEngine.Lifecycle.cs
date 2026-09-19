@@ -28,7 +28,7 @@ public sealed partial class AudioEngine
         ApplyLifecycleSourceSuspendPolicy();
 
         AudioSourceFactory.PreWarmCdnConnections(
-            Audio.Http.SharedHttpClient.Instance, _lifetimeCts.Token);
+            _networkManager.AudioClient, _lifetimeCts.Token);
     }
 
     #endregion
@@ -197,6 +197,8 @@ public sealed partial class AudioEngine
             CdnConnectionPreWarmer.OnTunnelDeadDetected -= HandleCdnTunnelDead;
             Audio.Sources.CachingStreamSource.OnNetworkStalled -= HandleSourceNetworkStalled;
             Audio.Sources.CachingStreamSource.OnNetworkRecovered -= HandleSourceNetworkRecovered;
+            UnsubscribeNetworkManagerEvents();
+
             lock (_sessionLock) { _sessionCts?.Cancel(); _sessionCts?.Dispose(); }
 
             try
@@ -213,17 +215,6 @@ public sealed partial class AudioEngine
 
             try { _commandProcessorTask?.Wait(millisecondsTimeout: 500); } catch { }
             try { _volumeSaveTask?.Wait(millisecondsTimeout: 200); } catch { }
-            try { _networkWatchdogTask?.Wait(millisecondsTimeout: 300); } catch { }
-
-            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged
-                -= OnNetworkAddressChanged;
-
-            lock (_networkRebuildLock)
-            {
-                _networkRebuildCts?.Cancel();
-                _networkRebuildCts?.Dispose();
-                _networkRebuildCts = null;
-            }
 
             _player.Dispose();
             _lifetimeCts.Dispose();
@@ -239,6 +230,8 @@ public sealed partial class AudioEngine
         CdnConnectionPreWarmer.OnTunnelDeadDetected -= HandleCdnTunnelDead;
         Audio.Sources.CachingStreamSource.OnNetworkStalled -= HandleSourceNetworkStalled;
         Audio.Sources.CachingStreamSource.OnNetworkRecovered -= HandleSourceNetworkRecovered;
+        UnsubscribeNetworkManagerEvents();
+
         lock (_sessionLock) { _sessionCts?.Cancel(); _sessionCts?.Dispose(); }
 
         using (var flushCts = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
@@ -281,27 +274,6 @@ public sealed partial class AudioEngine
             catch (TimeoutException)
             { Log.Warn("[AudioEngine] Volume save loop did not finish within dispose timeout"); }
             catch (Exception ex) when (ex is OperationCanceledException or AggregateException) { }
-        }
-
-        if (_networkWatchdogTask != null)
-        {
-            try
-            {
-                await _networkWatchdogTask
-                    .WaitAsync(TimeSpan.FromMilliseconds(500))
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or AggregateException) { }
-        }
-
-        System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged
-            -= OnNetworkAddressChanged;
-
-        lock (_networkRebuildLock)
-        {
-            _networkRebuildCts?.Cancel();
-            _networkRebuildCts?.Dispose();
-            _networkRebuildCts = null;
         }
 
         await _player.DisposeAsync().ConfigureAwait(false);

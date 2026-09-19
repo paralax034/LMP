@@ -468,7 +468,7 @@ public sealed class WebMParser : IDisposable
 
     #region Чтение Блоков (Streaming Flat-Loop)
 
-     /// <summary>
+    /// <summary>
     /// Сбрасывает состояние парсера и подготавливает его к поиску нового синхромаркера.
     /// </summary>
     public void RequireResync()
@@ -476,7 +476,7 @@ public sealed class WebMParser : IDisposable
         _requiresResync = true;
         _bufPos = 0;
         _bufLen = 0;
-        
+
         while (_lacedFrames.TryDequeue(out var frame))
             frame.Owner.Dispose();
     }
@@ -550,7 +550,7 @@ public sealed class WebMParser : IDisposable
         await EnsureBufferedOrThrowAsync(1, "track number", ct).ConfigureAwait(false);
         int trackByte = BufferedReadByte();
         int trackLen = GetVIntLength((byte)trackByte);
-        
+
         long trackNum;
         if (trackLen == 1) trackNum = trackByte & 0x7F;
         else

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
+using LMP.Core.Services;
 
 namespace LMP.UI.Dialogs;
 
@@ -26,6 +27,8 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     /// <summary>Максимальное количество выбранных обложек.</summary>
     private const int MaxSelection = 4;
 
+    private readonly INetworkManager _networkManager;
+
     /// <summary>
     /// Порядок выбора (FIFO для автоснятия при переполнении).
     /// Модифицируется ТОЛЬКО на UI-потоке.
@@ -43,15 +46,6 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     private readonly SemaphoreSlim _loadSemaphore = new(3, 3);
 
     private CancellationTokenSource? _previewCts;
-
-    /// <summary>
-    /// Статический HttpClient — переиспользуется для всех загрузок.
-    /// Избегает IOException от множественных параллельных создании HttpClient.
-    /// </summary>
-    private static readonly HttpClient SharedHttpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(15)
-    };
 
     /// <summary>Текущий превью-bitmap (для Dispose).</summary>
     private RenderTargetBitmap? _currentPreview;
@@ -90,8 +84,10 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     /// Создаёт VM для выбора обложки из треков.
     /// </summary>
     /// <param name="tracks">Треки плейлиста (нужны ThumbnailUrl и Id).</param>
-    public PlaylistCoverPickerViewModel(IReadOnlyList<TrackInfo> tracks)
+    /// <param name="networkManager">Централизованный менеджер сети.</param>
+    public PlaylistCoverPickerViewModel(IReadOnlyList<TrackInfo> tracks, INetworkManager networkManager)
     {
+        _networkManager = networkManager;
         SelectionHint = SL["CoverPicker_Hint"] ?? "1-4";
 
         // Фильтруем треки с обложками, убираем дубликаты URL
@@ -266,7 +262,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
             if (_bitmapCache.TryGetValue(url, out cached))
                 return cached;
 
-            var data = await SharedHttpClient.GetByteArrayAsync(url);
+            var data = await _networkManager.ImageClient.GetByteArrayAsync(url);
             using var stream = new MemoryStream(data);
             var bitmap = new Bitmap(stream);
             _bitmapCache[url] = bitmap;

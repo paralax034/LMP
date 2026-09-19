@@ -1,5 +1,3 @@
-using LMP.Core.Models;
-
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>

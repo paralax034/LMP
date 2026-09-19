@@ -91,6 +91,10 @@ public partial class App : Application
             await auth.InitializeAsync().ConfigureAwait(false);
             _splash?.SetProgress(10);
 
+            // Привязываем статический SharedHttpClient к синглтону NetworkManager
+            var networkManager = AppEntry.Services.GetRequiredService<INetworkManager>();
+            SharedHttpClient.Initialize(networkManager);
+
             // Audio Cache
             _splash?.UpdateStatus(L["Splash_InitAudioCache"]);
             var audioCacheTask = Task.Run(() =>
@@ -109,7 +113,7 @@ public partial class App : Application
 
             // Fire-and-forget: прогрев top CDN-кластеров пока UI продолжает инициализацию
             _ = CdnHostStatsStore.PreWarmTopClustersAsync(
-                    SharedHttpClient.Instance,
+                    networkManager.AudioClient,
                     _appLifetimeCts.Token);
 
             _splash?.SetProgress(20);

@@ -33,6 +33,7 @@ internal static class DohResolver
         "www.youtube.com",
         "googleapis.com",
         "jnn-pa.googleapis.com",
+        "googlevideo.com",
     ];
 
     private const long PositiveTtlTicks = 5 * 60 * TimeSpan.TicksPerSecond;  // 5 минут

@@ -443,6 +443,9 @@ public sealed class AppEntry
         services.AddSingleton<ISettingsRepository, SettingsRepository>();
         services.AddSingleton<INotificationRepository, NotificationRepository>();
 
+        // 1. Централизованный сетевой менеджер (Singleton)
+        services.AddSingleton<INetworkManager, NetworkManager>();
+
         services.AddSingleton(sp =>
         {
             var trackRepo = sp.GetRequiredService<ITrackRepository>();
@@ -480,7 +483,13 @@ public sealed class AppEntry
             return new DialogService(auth, userData, localServer, GetDialogHost);
         });
 
-        services.AddSingleton(_ => new PlayerContextManager(SharedHttpClient.Instance));
+        // 2. PlayerContextManager с динамическим разрешением HttpClient через NetworkManager
+        services.AddSingleton(sp =>
+        {
+            var net = sp.GetRequiredService<INetworkManager>();
+            return new PlayerContextManager(() => net.AudioClient);
+        });
+
         services.AddSingleton<JsDecryptionService>();
 
         services.AddSingleton(sp =>

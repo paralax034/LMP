@@ -11,12 +11,26 @@ namespace LMP.Core.Audio.Http;
 /// </summary>
 public static class SharedHttpClient
 {
-    private static volatile HttpClient _instance = CreateClient(null);
-    private static readonly Lock _rebuildLock = new();
+    private static INetworkManager? _networkManager;
     private static long _connectionSequence;
 
+    /// <summary>
+    /// Инициализирует статический фасад ссылкой на централизованный NetworkManager.
+    /// </summary>
+    public static void Initialize(INetworkManager networkManager)
+    {
+        _networkManager = networkManager;
+    }
+
     /// <summary>Текущий активный экземпляр клиента.</summary>
-    public static HttpClient Instance => _instance;
+    public static HttpClient Instance =>
+        _networkManager?.AudioClient ?? FallbackClient;
+
+    private static readonly HttpClient FallbackClient = new(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromSeconds(90),
+        MaxConnectionsPerServer = 6
+    });
 
     /// <summary>
     /// Пересоздаёт HTTP-клиент с новым пулом соединений.
@@ -24,67 +38,13 @@ public static class SharedHttpClient
     /// </summary>
     public static void Rebuild(ProxySettings? proxy = null)
     {
-        HttpClient newClient;
-        HttpClient? oldClient;
-
-        lock (_rebuildLock)
+        if (_networkManager != null)
         {
-            newClient = CreateClient(proxy);
-            oldClient = Interlocked.Exchange(ref _instance, newClient);
+            if (proxy != null)
+                _networkManager.UpdateProxy(proxy);
+            else
+                _networkManager.RebuildAll("SharedHttpClient.Rebuild invocation", force: true);
         }
-
-        // Сбрасываем DoH-кэш: при смене сети IP-адреса YouTube могут измениться
-        DohResolver.InvalidateCache();
-
-        if (oldClient is not null)
-        {
-            _ = Task.Delay(TimeSpan.FromSeconds(30))
-                    .ContinueWith(_ => oldClient.Dispose(), TaskScheduler.Default);
-        }
-
-        Log.Debug("[SharedHttpClient] Rebuilt. " +
-                  $"Proxy: {(proxy?.Enabled == true ? $"{proxy.Host}:{proxy.Port}" : "none")}");
-    }
-
-    /// <summary>
-    /// Создаёт новый экземпляр <see cref="HttpClient"/> для CDN-запросов аудио.
-    /// </summary>
-    private static HttpClient CreateClient(ProxySettings? proxy)
-    {
-        AudioSourceFactory.CurrentProxySettings = proxy;
-        var webProxy = ProxyHelper.CreateWebProxy(proxy);
-        bool isExplicitProxy = webProxy is not null;
-
-        var handler = new SocketsHttpHandler
-        {
-            // Если прокси задан явно (HTTP/SOCKS5) — ConnectCallback = null (SocketsHttpHandler рулит туннелем).
-            // Если прокси не задан в LMP — используем ConnectWithKeepAliveAsync, но разрешаем системный прокси Windows.
-            ConnectCallback = isExplicitProxy ? null : ConnectWithKeepAliveAsync,
-            Proxy = webProxy,
-            UseProxy = true,
-            PooledConnectionLifetime = TimeSpan.FromSeconds(90),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(45),
-            MaxConnectionsPerServer = 6,
-            AutomaticDecompression = DecompressionMethods.All,
-            UseCookies = false,
-            ResponseDrainTimeout = TimeSpan.FromSeconds(1),
-            ConnectTimeout = TimeSpan.FromSeconds(8),
-        };
-
-        var client = new HttpClient(handler)
-        {
-            Timeout = Timeout.InfiniteTimeSpan,
-            DefaultRequestVersion = HttpVersion.Version11,
-            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
-        };
-
-        client.DefaultRequestHeaders.Add("Accept", "*/*");
-
-        Log.Debug($"[SharedHttpClient] Created: HTTP/{client.DefaultRequestVersion}, " +
-                  $"policy={client.DefaultVersionPolicy}, " +
-                  $"poolLifetime=90s, maxConn=6, idleTimeout=45s, proxy={(isExplicitProxy ? webProxy!.Address?.ToString() : "system/direct")}");
-
-        return client;
     }
 
     /// <summary>
@@ -93,10 +53,32 @@ public static class SharedHttpClient
     /// (<see cref="DohResolver"/>).
     /// </summary>
     internal static async ValueTask<Stream> ConnectWithKeepAliveAsync(
-        SocketsHttpConnectionContext ctx,
-        CancellationToken ct)
+           SocketsHttpConnectionContext ctx,
+           CancellationToken ct)
     {
         IPAddress[] addresses;
+
+        // Если запрос идёт к локальному прокси (127.0.0.1 / localhost) — подключаемся напрямую без DNS/DoH
+        if (ctx.DnsEndPoint.Host is "127.0.0.1" or "localhost" ||
+            IPAddress.TryParse(ctx.DnsEndPoint.Host, out _))
+        {
+            var targetHost = ctx.DnsEndPoint.Host;
+            var socketDirect = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+            {
+                NoDelay = true
+            };
+
+            try
+            {
+                await socketDirect.ConnectAsync(targetHost, ctx.DnsEndPoint.Port, ct).ConfigureAwait(false);
+                return new NetworkStream(socketDirect, ownsSocket: true);
+            }
+            catch
+            {
+                socketDirect.Dispose();
+                throw;
+            }
+        }
 
         try
         {
@@ -108,9 +90,7 @@ public static class SharedHttpClient
             ex.SocketErrorCode is SocketError.HostNotFound or SocketError.NoData &&
             DohResolver.IsFallbackDomain(ctx.DnsEndPoint.Host))
         {
-            // Системный DNS заблокирован провайдером или Zapret — fallback на DoH
-            Log.Warn($"[SharedHttpClient] DNS blocked for {ctx.DnsEndPoint.Host}, " +
-                     $"trying DoH fallback...");
+            Log.Warn($"[SharedHttpClient] DNS blocked for {ctx.DnsEndPoint.Host}, trying DoH fallback...");
 
             var dohResult = await DohResolver.ResolveAsync(ctx.DnsEndPoint.Host, ct)
                 .ConfigureAwait(false);

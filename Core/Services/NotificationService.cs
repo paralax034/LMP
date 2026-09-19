@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using LMP.Core.Data.Repositories;
-using LMP.Core.Models;
 
 namespace LMP.Core.Services;
 

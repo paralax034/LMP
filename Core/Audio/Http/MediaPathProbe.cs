@@ -5,7 +5,7 @@ namespace LMP.Core.Audio.Http;
 
 /// <summary>
 /// Проверка доступности медиа-пути к YouTube CDN-хосту.
-/// Сравнивает <c>/generate_204</c> (health check) с <c>Range GET bytes=0-1</c>
+/// Сравнивает <c>/generate_204</c> (health check) с <c>Range GET</c>
 /// к <c>/videoplayback</c> (media path).
 /// Расхождение — ключевой индикатор DPI-блокировки ТСПУ.
 /// </summary>
@@ -59,13 +59,13 @@ internal static class MediaPathProbe
 
         await Task.WhenAll(healthTask, mediaTask).ConfigureAwait(false);
 
-        var health = await healthTask.ConfigureAwait(false);
-        var media = await mediaTask.ConfigureAwait(false);
+        var (healthOk, healthMs) = await healthTask.ConfigureAwait(false);
+        var (mediaOk, mediaMs, mediaStatus, mediaBytes, mediaError) = await mediaTask.ConfigureAwait(false);
 
         return new HostProbeResult(
             host,
-            health.Ok, health.Ms,
-            media.Ok, media.Ms, media.Status, media.Bytes, media.Error);
+            healthOk, healthMs,
+            mediaOk, mediaMs, mediaStatus, mediaBytes, mediaError);
     }
 
     /// <summary>
@@ -77,14 +77,14 @@ internal static class MediaPathProbe
         int timeoutMs = DefaultTimeoutMs,
         CancellationToken ct = default)
     {
-        var result = await ProbeMediaRangeAsync(mediaUrl, timeoutMs, ct)
+        var (Ok, _, _, Bytes, _) = await ProbeMediaRangeAsync(mediaUrl, timeoutMs, ct)
             .ConfigureAwait(false);
-        return result.Ok && result.Bytes > 0;
+        return Ok && Bytes > 0;
     }
 
     /// <summary>
-    /// <c>Range GET bytes=0-1</c> к media URL.
-    /// Использует общий рабочий SharedHttpClient.Instance, чтобы строго соблюдать текущие настройки прокси и пула.
+    /// <c>Range GET</c> к media URL с корректными параметрами сессии YouTube.
+    /// Использует общий рабочий SharedHttpClient.Instance.
     /// </summary>
     private static async Task<(bool Ok, int Ms, int Status, long Bytes, string? Error)>
         ProbeMediaRangeAsync(string mediaUrl, int timeoutMs, CancellationToken ct)
@@ -95,9 +95,18 @@ internal static class MediaPathProbe
             using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             probeCts.CancelAfter(Math.Max(timeoutMs, 4000));
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, mediaUrl);
-            request.Headers.Range = new RangeHeaderValue(0, 1);
-            SharedHttpClient.ApplyUserAgentFromUrl(request, mediaUrl);
+            // Формируем URL с параметрами воспроизведения (rn/rbuf), чтобы CDN не отклонял запрос
+            string probeUrl = mediaUrl;
+            if (mediaUrl.Contains("googlevideo.com/videoplayback", StringComparison.Ordinal))
+            {
+                probeUrl = UrlEx.SetQueryParameter(probeUrl, "rn", "1");
+                probeUrl = UrlEx.SetQueryParameter(probeUrl, "rbuf", "0");
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, probeUrl);
+            request.Headers.Range = new RangeHeaderValue(0, 1023);
+            request.Version = HttpVersion.Version11;
+            SharedHttpClient.ApplyUserAgentFromUrl(request, probeUrl);
 
             using var response = await SharedHttpClient.Instance
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
@@ -113,7 +122,7 @@ internal static class MediaPathProbe
             }
 
             sw.Stop();
-            bool ok = status is 200 or 206 && bytes > 0;
+            bool ok = (status is 200 or 206) && bytes > 0;
             return (ok, (int)sw.ElapsedMilliseconds, status, bytes,
                 ok ? null : $"HTTP {status}, {bytes} bytes");
         }
@@ -148,6 +157,7 @@ internal static class MediaPathProbe
             probeCts.CancelAfter(Math.Max(timeoutMs, 3000));
 
             using var request = new HttpRequestMessage(HttpMethod.Get, $"https://{host}/generate_204");
+            request.Version = HttpVersion.Version11;
             SharedHttpClient.ApplyUserAgentFromUrl(request, referenceUrl);
 
             using var response = await SharedHttpClient.Instance

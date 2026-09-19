@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Net;
 using System.Runtime.CompilerServices;
 using Avalonia.Media.Imaging;
 
@@ -29,8 +28,7 @@ public enum ImageQuality
 /// </summary>
 public sealed class ImageCacheService : IDisposable
 {
-    private volatile HttpClient _httpClient;
-    private readonly Lock _clientRebuildLock = new();
+    private readonly INetworkManager _networkManager;
     private readonly LibraryService _library;
     private readonly SemaphoreSlim _downloadSemaphore = new(6);
 
@@ -77,12 +75,10 @@ public sealed class ImageCacheService : IDisposable
     // High (400px): 400×400×4 = 640KB × 25 items ≈ 16MB — нужно учитывать
     private long MaxMemoryBytes => MaxMemoryItems * 400L * 400 * 4; // запас для High качества
 
-    public ImageCacheService(LibraryService library)
+    public ImageCacheService(INetworkManager networkManager, LibraryService library)
     {
+        _networkManager = networkManager;
         _library = library;
-
-        // Инициализируем клиент с передачей настроек прокси плеера
-        _httpClient = CreateImageHttpClient(_library.Settings.Proxy);
 
         if (!Directory.Exists(G.Folder.ImageCache))
             Directory.CreateDirectory(G.Folder.ImageCache);
@@ -92,60 +88,6 @@ public sealed class ImageCacheService : IDisposable
 
     public Task<Bitmap?> GetImageAsync(string url, ImageQuality quality = ImageQuality.Low, CancellationToken ct = default)
         => GetImageAsync(url, (int)quality, ct);
-
-    /// <summary>
-    /// Фабрика изолированного HTTP-клиента для изображений.
-    /// </summary>
-    private static HttpClient CreateImageHttpClient(ProxySettings? proxy)
-    {
-        var webProxy = Helpers.ProxyHelper.CreateWebProxy(proxy);
-        bool isProxyActive = webProxy is not null;
-
-        var handler = new SocketsHttpHandler
-        {
-            Proxy = webProxy,
-            UseProxy = isProxyActive,
-            MaxConnectionsPerServer = 8,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            // Быстрый сброс простаивающих соединений, чтобы не копить зомби-сокеты
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
-            EnableMultipleHttp2Connections = true,
-
-            // Проактивный пинг: тихо убивает зависшие соединения в фоне, 
-            // предотвращая таймауты при скроллинге или смене трека.
-            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(15),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(5)
-        };
-
-        return new HttpClient(handler, disposeHandler: true)
-        {
-            Timeout = TimeSpan.FromSeconds(15),
-            DefaultRequestVersion = HttpVersion.Version20,
-            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
-        };
-    }
-
-    /// <summary>
-    /// Горячая пересборка HTTP-клиента кэша изображений при изменении настроек прокси.
-    /// </summary>
-    /// <param name="proxy">Новые параметры прокси.</param>
-    public void RebuildClient(ProxySettings? proxy)
-    {
-        HttpClient newClient;
-        HttpClient oldClient;
-
-        lock (_clientRebuildLock)
-        {
-            newClient = CreateImageHttpClient(proxy);
-            oldClient = Interlocked.Exchange(ref _httpClient, newClient);
-        }
-
-        _ = Task.Delay(TimeSpan.FromSeconds(10))
-                .ContinueWith(_ => oldClient.Dispose(), TaskScheduler.Default);
-
-        Log.Debug($"[ImageCache] HTTP client rebuilt with proxy: {(proxy?.Enabled == true ? $"{proxy.Host}:{proxy.Port}" : "none")}");
-    }
 
     /// <summary>
     /// Нормализует <paramref name="decodeWidth"/> один раз на входе.
@@ -312,18 +254,16 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Скачивание файла на диск через изолированный <see cref="_httpClient"/>.
-    /// Не зависит от состояния <c>SharedHttpClient.Instance</c>:
-    /// пересборка аудио-клиента при смене IP не прерывает загрузку thumbnails.
+    /// Скачивание файла на диск через изолированный ImageClient из <see cref="INetworkManager"/>.
     /// </summary>
     private async Task DownloadDirectToDiskAsync(string url, string finalPath, CancellationToken ct)
     {
-        var tmpPath = finalPath + ".tmp";
+        // Уникальный временный файл для предотвращения IOException при параллельных загрузках одного URL
+        var tmpPath = $"{finalPath}.{Guid.NewGuid():N}.tmp";
 
         try
         {
-            // _httpClient — изолирован, не SharedHttpClient.Instance
-            using var response = await _httpClient
+            using var response = await _networkManager.ImageClient
                 .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
                 .ConfigureAwait(false);
 
@@ -599,7 +539,6 @@ public sealed class ImageCacheService : IDisposable
         _isDisposed = true;
         _appCts.Cancel();
         _appCts.Dispose();
-        _httpClient.Dispose();
         ClearMemoryCache();
         _downloadSemaphore.Dispose();
     }

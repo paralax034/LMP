@@ -18,7 +18,8 @@ public sealed class PoTokenProvider : IDisposable
 
     // State
 
-    private readonly BotGuardService _botGuard;
+    private readonly Func<HttpClient> _httpProvider;
+    private BotGuardService _botGuard;
 
     /// <summary>Семафор lazy-init: загрузка с диска выполняется ровно один раз.</summary>
     private readonly SemaphoreSlim _initLock = new(1, 1);
@@ -31,10 +32,11 @@ public sealed class PoTokenProvider : IDisposable
     private volatile bool _initialized;
     private bool _disposed;
 
-    /// <param name="http">HTTP-клиент для WAA/gstatic запросов. Не требует YouTube cookies.</param>
-    public PoTokenProvider(HttpClient http)
+    /// <param name="httpProvider">Фабрика HTTP-клиента для WAA/gstatic запросов. Не требует YouTube cookies.</param>
+    public PoTokenProvider(Func<HttpClient> httpProvider)
     {
-        _botGuard = new BotGuardService(http);
+        _httpProvider = httpProvider ?? throw new ArgumentNullException(nameof(httpProvider));
+        _botGuard = new BotGuardService(_httpProvider());
     }
 
     // Public API
@@ -129,6 +131,8 @@ public sealed class PoTokenProvider : IDisposable
     {
         _sessionToken = null;
         _initialized = false;
+        _botGuard?.Dispose();
+        _botGuard = new BotGuardService(_httpProvider());
         Log.Info("[PoTokenProvider] Cache invalidated");
     }
 

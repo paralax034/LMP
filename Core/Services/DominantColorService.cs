@@ -11,8 +11,8 @@ namespace LMP.Core.Services;
 /// </summary>
 public sealed class DominantColorService
 {
+    private readonly INetworkManager _networkManager;
     private readonly ImageCacheService _imageCache;
-    private readonly HttpClient _http;
     private readonly ConcurrentDictionary<string, Color> _cache = new();
 
     private const float MinLuminance = 0.1f;
@@ -20,13 +20,10 @@ public sealed class DominantColorService
     private const float MinSaturation = 0.15f;
     private const int SampleSize = 50;
 
-    public DominantColorService(ImageCacheService imageCache)
+    public DominantColorService(INetworkManager networkManager, ImageCacheService imageCache)
     {
+        _networkManager = networkManager;
         _imageCache = imageCache;
-        _http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(10)
-        };
     }
 
     /// <summary>
@@ -122,7 +119,7 @@ public sealed class DominantColorService
                     // Fallback: скачиваем сами
                     try
                     {
-                        imageData = await _http.GetByteArrayAsync(imageUrl, ct);
+                        imageData = await _networkManager.ImageClient.GetByteArrayAsync(imageUrl, ct);
                     }
                     catch (Exception ex)
                     {

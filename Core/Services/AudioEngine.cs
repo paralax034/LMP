@@ -121,11 +121,11 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     #region Dependencies
 
+    private readonly INetworkManager _networkManager;
     private readonly YoutubeProvider _youtube;
     private readonly LibraryService _library;
     private readonly AudioPlayer _player;
     private readonly TrackRegistry _trackRegistry;
-    private readonly ImageCacheService _imageCache;
 
     #endregion
 
@@ -138,11 +138,6 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private SessionGuard _session;
     private CancellationTokenSource? _sessionCts;
     private readonly Lock _sessionLock = new();
-
-    private CancellationTokenSource? _networkRebuildCts;
-    private readonly Lock _networkRebuildLock = new();
-    private string? _lastOutboundIp;
-    private Task? _networkWatchdogTask;
 
     /// <summary>
     /// Single-flight задачи первичного получения continuation URL по trackId.
@@ -288,12 +283,16 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// <summary>
     /// Инициализирует центральный движок воспроизведения.
     /// </summary>
-    public AudioEngine(YoutubeProvider youtube, LibraryService library, TrackRegistry trackRegistry, ImageCacheService imageCache)
+    public AudioEngine(
+        INetworkManager networkManager,
+        YoutubeProvider youtube,
+        LibraryService library,
+        TrackRegistry trackRegistry)
     {
+        _networkManager = networkManager;
         _youtube = youtube;
         _library = library;
         _trackRegistry = trackRegistry;
-        _imageCache = imageCache;
 
         StreamInfo = AudioStreamInfo.Empty;
 
@@ -337,6 +336,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         });
 
         SubscribeToPlayerEvents();
+        SubscribeNetworkManagerEvents();
+
         _youtube.OnNTokenDecryptionStarted += HandleNTokenDecryptionStarted;
         CdnConnectionPreWarmer.OnTunnelDeadDetected += HandleCdnTunnelDead;
         Audio.Sources.CachingStreamSource.OnNetworkStalled += HandleSourceNetworkStalled;
@@ -354,14 +355,6 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         _volumeSaveTask = Task.Run(VolumeSaveLoopAsync);
 
         LifecycleRegistry.Instance?.RegisterBackgroundSuspendable(this);
-
-        _lastOutboundIp = GetOutboundIp();
-        Log.Debug($"[AudioEngine] Initial outbound IP: {_lastOutboundIp ?? "(none)"}");
-
-        System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged
-            += OnNetworkAddressChanged;
-
-        _networkWatchdogTask = Task.Run(NetworkWatchdogAsync);
     }
 
     /// <summary>

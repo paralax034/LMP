@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using LMP.Core.Youtube.Utils;
 using LMP.Core.Helpers.Extensions;
-using System.Globalization;
 
 namespace LMP.Core.Youtube.Music;
 

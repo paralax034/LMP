@@ -4,10 +4,10 @@ namespace LMP.Core.Youtube.Bridge.Common;
 /// Единая точка управления версией плеера и base.js.
 /// Singleton, потокобезопасный.
 /// </summary>
-/// <param name="http">HTTP-клиент для загрузки скриптов плеера.</param>
-public class PlayerContextManager(HttpClient http)
+/// <param name="httpProvider">Фабрика HTTP-клиента для загрузки скриптов плеера.</param>
+public class PlayerContextManager(Func<HttpClient> httpProvider)
 {
-    private readonly HttpClient _http = http;
+    private readonly Func<HttpClient> _httpProvider = httpProvider ?? throw new ArgumentNullException(nameof(httpProvider));
 
     /// <summary>
     /// Семафор single-flight: гарантирует один активный <see cref="PlayerContext.DetectVersionAsync"/>
@@ -40,11 +40,13 @@ public class PlayerContextManager(HttpClient http)
             current = _current;
             if (current?.IsValid() == true) return current;
 
+            var http = _httpProvider();
+
             // Попытка определить версию через сеть
             (string Version, string[] Urls)? versionInfo;
             try
             {
-                versionInfo = await PlayerContext.DetectVersionAsync(_http, ct).ConfigureAwait(false);
+                versionInfo = await PlayerContext.DetectVersionAsync(http, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -85,7 +87,7 @@ public class PlayerContextManager(HttpClient http)
                 try
                 {
                     Log.Debug($"[PlayerContextManager] Downloading: {url}");
-                    var baseJs = await _http.GetStringAsync(url, ct).ConfigureAwait(false);
+                    var baseJs = await http.GetStringAsync(url, ct).ConfigureAwait(false);
                     var newContext = new PlayerContext(version, baseJs);
                     await newContext.SaveCacheAsync().ConfigureAwait(false);
                     _current = newContext;
