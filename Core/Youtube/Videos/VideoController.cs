@@ -454,7 +454,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
                              StreamUnavailableReason.Removed)
                 {
                     Log.Info($"[VideoController] [{videoId}] Hard legal restriction detected ({reason}). Fast-failing further clients.");
-                    throw new StreamUnavailableException(error, videoId.Value, reason, wasHlsFallback: false);
+                    throw new StreamUnavailableException(error, videoId.Value, reason);
                 }
 
                 if (!IsBotDetectionResponse(response))
@@ -500,11 +500,11 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             }
             catch (StreamUnavailableException) { throw; }
             catch (BotDetectionException) { throw; }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 // Пытаемся классифицировать как сетевую ошибку (на случай
-                // если YoutubeHttpHandler не обернул — например, ошибка до SendAsync)
+                // если YoutubeHttpHandler не обернул — например, ошибка до SendAsync или внутренний таймаут)
                 var classified = YoutubeNetworkException.TryClassify(ex, cancellationToken);
                 if (classified is not null)
                 {
@@ -567,46 +567,6 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         return false;
     }
 
-    public async ValueTask<string?> GetHlsManifestUrlAsync(
-        VideoId videoId,
-        CancellationToken cancellationToken = default)
-    {
-        foreach (var clientName in YoutubeClientUtils.HlsFallbackClients)
-        {
-            try
-            {
-                var response = await GetPlayerResponseWithClientAsync(videoId, clientName, cancellationToken);
-
-                var hlsUrl = response.HlsManifestUrl;
-                if (!string.IsNullOrEmpty(hlsUrl))
-                {
-                    Log.Info($"[VideoController] [{videoId}] HLS found via {clientName}");
-                    return hlsUrl;
-                }
-            }
-            catch (StreamUnavailableException ex) when (ex.HttpStatusCode == 403)
-            {
-                Log.Warn($"[VideoController] [{videoId}] HLS via {clientName} got 403");
-
-                throw new StreamUnavailableException(
-                    $"HLS stream returned 403 for video {videoId}",
-                    videoId.Value,
-                    StreamUnavailableReason.Forbidden403,
-                    httpStatusCode: 403,
-                    wasHlsFallback: true);
-            }
-            catch (BotDetectionException) { throw; }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                Log.Debug($"[VideoController] [{videoId}] HLS via {clientName} failed: {ex.Message}");
-            }
-        }
-
-        Log.Warn($"[VideoController] [{videoId}] No HLS manifest available from any client");
-        return null;
-    }
-
     public async ValueTask<PlayerResponse> GetPlayerResponseAsync(
         VideoId videoId,
         string? signatureTimestamp,
@@ -615,11 +575,6 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         return await GetPlayerResponseWithClientAsync(
             videoId, "TVHTML5_SIMPLY_EMBEDDED_PLAYER", cancellationToken, signatureTimestamp);
     }
-
-    public async ValueTask<DashManifest> GetDashManifestAsync(
-        string url,
-        CancellationToken cancellationToken = default)
-        => DashManifest.Parse(await Http.GetStringAsync(url, cancellationToken));
 
     /// <summary>
     /// Сбрасывает закэшированный signatureTimestamp через <see cref="PlayerContextManager"/>.

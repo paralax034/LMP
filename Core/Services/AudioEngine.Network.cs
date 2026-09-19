@@ -159,6 +159,7 @@ public sealed partial class AudioEngine
 
         SharedHttpClient.Rebuild(_library.Settings.Proxy);
         _youtube.ReloadClient();
+        _imageCache.RebuildClient(_library.Settings.Proxy);
 
         Log.Info($"[AudioEngine] HTTP clients rebuilt (force={force}).");
 

@@ -509,7 +509,7 @@ public sealed partial class AudioEngine
     #region Cache & Metadata Helpers
 
     /// <summary>
-    /// Выбирает вариант из записи манифеста, предпочитая хосты не в CDN blacklist.
+    /// Выбирает подходящий стерео-вариант из записи манифеста, отсекая многоканальные (Surround 5.1) потоки и хосты из CDN blacklist.
     /// </summary>
     private static VariantEntry? SelectBestVariantFromEntry(
         List<VariantEntry> variants,
@@ -519,30 +519,43 @@ public sealed partial class AudioEngine
 
         var blacklist = Audio.AudioSourceFactory.CdnBlacklist;
 
-        // Сначала ищем вариант с нужным форматом, не в blacklist
+        // Предикат допустимости: только стерео/моно потоки (YouTube itag 328/338 и 5.1 surround исключаются)
+        static bool IsStereoCompatible(VariantEntry v) =>
+            v.Itag is not (325 or 328 or 338);
+
+        // 1. Поиск по предпочитаемому формату среди не заблокированных стерео-потоков
         if (preferredFormat is { } fmt && fmt != AudioFormat.Unknown)
         {
             for (int i = 0; i < variants.Count; i++)
             {
-                if (variants[i].Format != fmt) continue;
-                if (!blacklist.IsBlockedUrl(variants[i].Url)) return variants[i];
+                var v = variants[i];
+                if (v.Format != fmt || !IsStereoCompatible(v)) continue;
+                if (!blacklist.IsBlockedUrl(v.Url)) return v;
             }
 
-            // Все нужного формата заблокированы — берём любой того формата
             for (int i = 0; i < variants.Count; i++)
             {
-                if (variants[i].Format == fmt) return variants[i];
+                var v = variants[i];
+                if (v.Format == fmt && IsStereoCompatible(v)) return v;
             }
         }
 
-        // Без формата — любой не заблокированный
+        // 2. Без привязки к формату: любой совместимый не заблокированный стерео-поток
         for (int i = 0; i < variants.Count; i++)
         {
-            if (!blacklist.IsBlockedUrl(variants[i].Url)) return variants[i];
+            var v = variants[i];
+            if (IsStereoCompatible(v) && !blacklist.IsBlockedUrl(v.Url)) return v;
         }
 
-        // Все заблокированы — fallback на первый (YouTube API даст другой CDN)
-        Log.Warn("[AudioEngine] All manifest variants are CDN-blacklisted — using first anyway");
+        // 3. Fallback: любой стерео-поток (даже если CDN в blacklist)
+        for (int i = 0; i < variants.Count; i++)
+        {
+            var v = variants[i];
+            if (IsStereoCompatible(v)) return v;
+        }
+
+        // 4. Крайний fallback на первый элемент списка
+        Log.Warn("[AudioEngine] No stereo-compatible variants found in manifest — falling back to first variant");
         return variants[0];
     }
 

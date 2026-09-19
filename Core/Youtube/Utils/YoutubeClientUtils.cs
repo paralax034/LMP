@@ -193,16 +193,6 @@ public static class YoutubeClientUtils
 	public static string[] StreamFallbackClients => StreamFallbackClientsDefault;
 
 	/// <summary>
-	/// Клиенты для получения HLS.
-	/// </summary>
-	public static readonly string[] HlsFallbackClients =
-	[
-		"IOS",
-		"ANDROID_VR",
-		"WEB_REMIX"
-	];
-
-	/// <summary>
 	/// Возвращает строковый идентификатор клиента для YouTube API.
 	/// Enum.ToString() даёт "AndroidVR", а API ожидает "ANDROID_VR" — прямое
 	/// преобразование через switch исключает ошибки при добавлении новых клиентов.

@@ -69,10 +69,6 @@ internal partial class PlayerResponse
     /// <inheritdoc/>
     public string? PreviewVideoId { get; init; }
 
-    public string? DashManifestUrl { get; init; }
-
-    public string? HlsManifestUrl { get; init; }
-
     public IReadOnlyList<IStreamData> Streams { get; init; } = [];
 
     public IReadOnlyList<ClosedCaptionTrackData> ClosedCaptionTracks { get; init; } = [];
@@ -223,9 +219,6 @@ internal partial class PlayerResponse
 
         var streamingData = content.GetPropertyOrNull("streamingData");
 
-        DashManifestUrl = streamingData?.GetPropertyOrNull("dashManifestUrl")?.GetStringOrNull();
-        HlsManifestUrl = streamingData?.GetPropertyOrNull("hlsManifestUrl")?.GetStringOrNull();
-
         var streamsList = new List<IStreamData>(32);
 
         var formats = streamingData?.GetPropertyOrNull("formats");
@@ -368,6 +361,9 @@ internal partial class PlayerResponse
         public string? AudioCodec { get; init; }
 
         /// <inheritdoc/>
+        public int AudioChannels { get; init; } = 2;
+
+        /// <inheritdoc/>
         public string? AudioLanguageCode { get; init; }
 
         /// <inheritdoc/>
@@ -432,6 +428,7 @@ internal partial class PlayerResponse
             Codecs = MimeType?.SubstringAfter("codecs=\"").SubstringUntil("\"");
 
             AudioCodec = isAudioOnly ? Codecs : Codecs?.SubstringAfter(", ").NullIfWhiteSpace();
+            AudioChannels = content.GetPropertyOrNull("audioChannels")?.GetInt32OrNull() ?? 2;
 
             AudioLanguageCode = content
                 .GetPropertyOrNull("audioTrack")

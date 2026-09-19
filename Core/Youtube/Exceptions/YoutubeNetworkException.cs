@@ -99,13 +99,16 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static YoutubeNetworkException? TryClassify(Exception exception, CancellationToken cancellationToken)
     {
-        // 1. TaskCanceledException от HttpClient.Timeout (не user-cancel)
-        if (exception is TaskCanceledException tce && !cancellationToken.IsCancellationRequested)
+        // 1. TaskCanceledException / TimeoutException от HttpClient.Timeout (не user-cancel)
+        if (!cancellationToken.IsCancellationRequested &&
+            (exception is TimeoutException ||
+             exception is TaskCanceledException ||
+             ContainsInChain<TimeoutException>(exception)))
         {
             return new YoutubeNetworkException(
-                $"Connection timed out: {tce.Message}",
+                $"Connection timed out: {exception.Message}",
                 NetworkErrorType.Timeout,
-                tce);
+                exception);
         }
 
         // 2. OperationCanceledException от внутреннего таймаута (не user-cancel)

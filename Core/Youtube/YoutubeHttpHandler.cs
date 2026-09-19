@@ -32,6 +32,9 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     /// <summary>Origin заголовок для основного YouTube.</summary>
     public const string YoutubeOrigin = "https://www.youtube.com";
 
+    /// <summary>Максимально время ожидания ответа от сервера</summary>
+    private static readonly TimeSpan PerAttemptTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Ключ параметров для передачи Visitor Data в запросе.</summary>
     public static readonly HttpRequestOptionsKey<string> VisitorDataKey = new("VisitorData");
 
@@ -203,12 +206,17 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
         for (var i = 0; i < 3; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var requestClone = await CloneRequestAsync(request).ConfigureAwait(false);
             var processedRequest = HandleRequest(requestClone);
 
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attemptCts.CancelAfter(PerAttemptTimeout);
+
             try
             {
-                var response = await base.SendAsync(processedRequest, cancellationToken).ConfigureAwait(false);
+                var response = await base.SendAsync(processedRequest, attemptCts.Token).ConfigureAwait(false);
 
                 bool cookiesUpdated = false;
                 if (authService != null && response.Headers.TryGetValues("Set-Cookie", out var newCookies))
@@ -238,12 +246,12 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
             }
             catch (Exception ex)
             {
-                if (cancellationToken.IsCancellationRequested && ex is OperationCanceledException)
+                if (cancellationToken.IsCancellationRequested)
                     throw;
 
                 lastException = ex;
 
-                if (i < 2 && (ex is HttpRequestException || ex is OperationCanceledException || ex is IOException))
+                if (i < 2)
                 {
                     Log.Warn($"[YouTube] Network error: {ex.Message}. Retrying {i + 1}...");
                     try

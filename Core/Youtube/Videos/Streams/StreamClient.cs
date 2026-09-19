@@ -251,6 +251,11 @@ public sealed class StreamClient
             var bitrate = streamData.Bitrate is { } b ? new Bitrate(b) : (Bitrate?)null;
             if (bitrate is null) continue;
 
+            // LMP воспроизводит стерео/моно. Исключаем 5.1 Surround (audioChannels > 2),
+            // которые валят контейнерные парсеры и декодеры.
+            int channels = streamData.AudioChannels;
+            if (channels > 2) continue;
+
             Language? audioLanguage = null;
             if (!string.IsNullOrWhiteSpace(streamData.AudioLanguageCode))
             {
@@ -268,7 +273,8 @@ public sealed class StreamClient
                 audioCodec,
                 audioLanguage,
                 streamData.IsAudioLanguageDefault,
-                hasEncryptedNToken);
+                hasEncryptedNToken,
+                channels);
         }
     }
 

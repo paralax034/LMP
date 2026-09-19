@@ -29,7 +29,8 @@ public enum ImageQuality
 /// </summary>
 public sealed class ImageCacheService : IDisposable
 {
-    private readonly HttpClient _httpClient;
+    private volatile HttpClient _httpClient;
+    private readonly Lock _clientRebuildLock = new();
     private readonly LibraryService _library;
     private readonly SemaphoreSlim _downloadSemaphore = new(6);
 
@@ -97,8 +98,13 @@ public sealed class ImageCacheService : IDisposable
     /// </summary>
     private static HttpClient CreateImageHttpClient(ProxySettings? proxy)
     {
+        var webProxy = Helpers.ProxyHelper.CreateWebProxy(proxy);
+        bool isProxyActive = webProxy is not null;
+
         var handler = new SocketsHttpHandler
         {
+            Proxy = webProxy,
+            UseProxy = isProxyActive,
             MaxConnectionsPerServer = 8,
             PooledConnectionLifetime = TimeSpan.FromMinutes(10),
             // Быстрый сброс простаивающих соединений, чтобы не копить зомби-сокеты
@@ -112,23 +118,33 @@ public sealed class ImageCacheService : IDisposable
             KeepAlivePingTimeout = TimeSpan.FromSeconds(5)
         };
 
-        if (proxy?.Enabled == true && !string.IsNullOrWhiteSpace(proxy.Host))
-        {
-            var webProxy = new WebProxy($"http://{proxy.Host}:{proxy.Port}");
-
-            if (proxy.UseAuth && !string.IsNullOrWhiteSpace(proxy.Username))
-                webProxy.Credentials = new NetworkCredential(proxy.Username, proxy.Password);
-
-            handler.Proxy = webProxy;
-            handler.UseProxy = true;
-        }
-
         return new HttpClient(handler, disposeHandler: true)
         {
             Timeout = TimeSpan.FromSeconds(15),
             DefaultRequestVersion = HttpVersion.Version20,
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
         };
+    }
+
+    /// <summary>
+    /// Горячая пересборка HTTP-клиента кэша изображений при изменении настроек прокси.
+    /// </summary>
+    /// <param name="proxy">Новые параметры прокси.</param>
+    public void RebuildClient(ProxySettings? proxy)
+    {
+        HttpClient newClient;
+        HttpClient oldClient;
+
+        lock (_clientRebuildLock)
+        {
+            newClient = CreateImageHttpClient(proxy);
+            oldClient = Interlocked.Exchange(ref _httpClient, newClient);
+        }
+
+        _ = Task.Delay(TimeSpan.FromSeconds(10))
+                .ContinueWith(_ => oldClient.Dispose(), TaskScheduler.Default);
+
+        Log.Debug($"[ImageCache] HTTP client rebuilt with proxy: {(proxy?.Enabled == true ? $"{proxy.Host}:{proxy.Port}" : "none")}");
     }
 
     /// <summary>

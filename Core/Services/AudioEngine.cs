@@ -125,6 +125,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private readonly LibraryService _library;
     private readonly AudioPlayer _player;
     private readonly TrackRegistry _trackRegistry;
+    private readonly ImageCacheService _imageCache;
 
     #endregion
 
@@ -287,11 +288,12 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// <summary>
     /// Инициализирует центральный движок воспроизведения.
     /// </summary>
-    public AudioEngine(YoutubeProvider youtube, LibraryService library, TrackRegistry trackRegistry)
+    public AudioEngine(YoutubeProvider youtube, LibraryService library, TrackRegistry trackRegistry, ImageCacheService imageCache)
     {
         _youtube = youtube;
         _library = library;
         _trackRegistry = trackRegistry;
+        _imageCache = imageCache;
 
         StreamInfo = AudioStreamInfo.Empty;
 

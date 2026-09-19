@@ -49,56 +49,19 @@ public static class SharedHttpClient
     /// <summary>
     /// Создаёт новый экземпляр <see cref="HttpClient"/> для CDN-запросов аудио.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Клиент конфигурируется для работы с YouTube CDN (<c>*.googlevideo.com</c>):
-    /// <list type="bullet">
-    ///   <item>
-    ///     <description>
-    ///       <see cref="SocketsHttpHandler.ConnectCallback"/> — кастомный обработчик TCP-подключений
-    ///       с явным выбором <c>IPv4</c> при <see cref="System.Net.Sockets.AddressFamily.Unspecified"/>.
-    ///       Гарантирует прохождение трафика через инструменты обхода DPI (zapret, GoodbyeDPI),
-    ///       которые перехватывают только IPv4.
-    ///     </description>
-    ///   </item>
-    ///   <item>
-    ///     <description>
-    ///       <see cref="SocketsHttpHandler.PooledConnectionLifetime"/> = 90 секунд —
-    ///       предотвращает накопление «зомби»-соединений при смене VPN-туннеля.
-    ///     </description>
-    ///   </item>
-    ///   <item>
-    ///     <description>
-    ///       <see cref="SocketsHttpHandler.PooledConnectionIdleTimeout"/> = 45 секунд —
-    ///       даёт запас между прогревом CDN (<see cref="CdnConnectionPreWarmer"/>) и первым
-    ///       Range GET из <c>CachingStreamSource</c>.
-    ///     </description>
-    ///   </item>
-    ///   <item>
-    ///     <description>
-    ///       <see cref="SocketsHttpHandler.UseProxy"/> = <see langword="false"/> —
-    ///       явно отключает системный proxy Windows, исключая захват трафика
-    ///       отладочными инструментами (Fiddler, Charles) в нейтральных запусках.
-    ///     </description>
-    ///   </item>
-    /// </list>
-    /// </para>
-    /// <para>
-    /// TCP keepalive намеренно <b>не используется</b>: при ТСПУ silent-drop keepalive-зонды
-    /// уходят в никуда, и ОС закрывает сокет через <c>KeepaliveTime + Interval × RetryCount</c>
-    /// секунд с <c>WSAECONNRESET</c>, маскируя истинную причину отказа.
-    /// Вместо этого таймаут регулируется через <see cref="HttpClient.Timeout"/>.
-    /// </para>
-    /// </remarks>
-    /// <param name="proxy">
-    /// Пользовательские настройки HTTP-прокси. Передайте <see langword="null"/> для прямого подключения.
-    /// </param>
-    /// <returns>Новый настроенный экземпляр <see cref="HttpClient"/>.</returns>
     private static HttpClient CreateClient(ProxySettings? proxy)
     {
+        AudioSourceFactory.CurrentProxySettings = proxy;
+        var webProxy = ProxyHelper.CreateWebProxy(proxy);
+        bool isExplicitProxy = webProxy is not null;
+
         var handler = new SocketsHttpHandler
         {
-            ConnectCallback = ConnectWithKeepAliveAsync,
+            // Если прокси задан явно (HTTP/SOCKS5) — ConnectCallback = null (SocketsHttpHandler рулит туннелем).
+            // Если прокси не задан в LMP — используем ConnectWithKeepAliveAsync, но разрешаем системный прокси Windows.
+            ConnectCallback = isExplicitProxy ? null : ConnectWithKeepAliveAsync,
+            Proxy = webProxy,
+            UseProxy = true,
             PooledConnectionLifetime = TimeSpan.FromSeconds(90),
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(45),
             MaxConnectionsPerServer = 6,
@@ -108,11 +71,9 @@ public static class SharedHttpClient
             ConnectTimeout = TimeSpan.FromSeconds(8),
         };
 
-        ApplyProxy(handler, proxy);
-
         var client = new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromSeconds(20),
+            Timeout = Timeout.InfiniteTimeSpan,
             DefaultRequestVersion = HttpVersion.Version11,
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
         };
@@ -121,7 +82,7 @@ public static class SharedHttpClient
 
         Log.Debug($"[SharedHttpClient] Created: HTTP/{client.DefaultRequestVersion}, " +
                   $"policy={client.DefaultVersionPolicy}, " +
-                  $"poolLifetime=90s, maxConn=6, idleTimeout=45s, proxy={(proxy?.Enabled == true ? $"{proxy.Host}:{proxy.Port}" : "none")}");
+                  $"poolLifetime=90s, maxConn=6, idleTimeout=45s, proxy={(isExplicitProxy ? webProxy!.Address?.ToString() : "system/direct")}");
 
         return client;
     }
@@ -224,29 +185,6 @@ public static class SharedHttpClient
             static a => a.AddressFamily == AddressFamily.InterNetwork);
 
         return ipv4Only.Length > 0 ? ipv4Only : allAddresses;
-    }
-
-    /// <summary>
-    /// Применяет настройки прокси к обработчику.
-    /// Игнорирует системный прокси Windows, чтобы избежать падений из-за залипших
-    /// программ отладки трафика (например, закрытого Fiddler на порту 8888).
-    /// </summary>
-    private static void ApplyProxy(SocketsHttpHandler handler, ProxySettings? proxy)
-    {
-        if (proxy?.Enabled == true && !string.IsNullOrWhiteSpace(proxy.Host))
-        {
-            var webProxy = new WebProxy($"http://{proxy.Host}:{proxy.Port}");
-
-            if (proxy.UseAuth && !string.IsNullOrWhiteSpace(proxy.Username))
-                webProxy.Credentials = new NetworkCredential(proxy.Username, proxy.Password);
-
-            handler.Proxy = webProxy;
-            handler.UseProxy = true;
-            return;
-        }
-
-        handler.Proxy = null;
-        handler.UseProxy = false;
     }
 
     /// <summary>

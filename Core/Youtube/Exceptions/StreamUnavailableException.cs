@@ -57,24 +57,17 @@ public sealed class StreamUnavailableException : YoutubeExplodeException
     public int? HttpStatusCode { get; }
 
     /// <summary>
-    /// Был ли это HLS fallback.
-    /// </summary>
-    public bool WasHlsFallback { get; }
-
-    /// <summary>
     /// Инициализирует новое исключение StreamUnavailableException.
     /// </summary>
     public StreamUnavailableException(
         string message,
         string videoId,
         StreamUnavailableReason reason,
-        int? httpStatusCode = null,
-        bool wasHlsFallback = false) : base(message)
+        int? httpStatusCode = null) : base(message)
     {
         VideoId = videoId;
         Reason = reason;
         HttpStatusCode = httpStatusCode;
-        WasHlsFallback = wasHlsFallback;
     }
 
     /// <summary>
@@ -84,36 +77,33 @@ public sealed class StreamUnavailableException : YoutubeExplodeException
     {
         return Reason switch
         {
-            StreamUnavailableReason.CopyrightBlocked 
+            StreamUnavailableReason.CopyrightBlocked
                 => "Error_Stream_CopyrightBlocked",
 
-            StreamUnavailableReason.Forbidden403 when WasHlsFallback 
-                => "Error_Stream_HlsForbidden",
-            
-            StreamUnavailableReason.Forbidden403 
+            StreamUnavailableReason.Forbidden403
                 => "Error_Stream_Forbidden",
-            
-            StreamUnavailableReason.AllClientsFailed 
+
+            StreamUnavailableReason.AllClientsFailed
                 => "Error_Stream_AllClientsFailed",
-            
-            StreamUnavailableReason.RegionBlocked 
+
+            StreamUnavailableReason.RegionBlocked
                 => "Error_Stream_RegionBlocked",
-            
-            StreamUnavailableReason.AgeRestricted 
+
+            StreamUnavailableReason.AgeRestricted
                 => "Error_Stream_AgeRestricted",
-            
-            StreamUnavailableReason.LiveStream 
+
+            StreamUnavailableReason.LiveStream
                 => "Error_Stream_LiveStream",
-            
-            StreamUnavailableReason.Private 
+
+            StreamUnavailableReason.Private
                 => "Error_Stream_Private",
-            
-            StreamUnavailableReason.Removed 
+
+            StreamUnavailableReason.Removed
                 => "Error_Stream_Removed",
-            
-            StreamUnavailableReason.PaymentRequired 
+
+            StreamUnavailableReason.PaymentRequired
                 => "Error_Stream_PaymentRequired",
-            
+
             _ => "Error_Stream_Unknown"
         };
     }

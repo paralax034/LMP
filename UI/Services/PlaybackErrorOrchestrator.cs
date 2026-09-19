@@ -443,7 +443,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         return
         [
             new AttemptRecord(
-                exception.WasHlsFallback ? "HLS Fallback" : "Stream Request",
+                "Stream Request",
                 false,
                 $"{exception.Reason}: {exception.Message}",
                 DateTime.UtcNow)

@@ -14,7 +14,7 @@ public readonly record struct ResolvedStreamDescriptor()
     /// <summary>YouTube itag потока. 0 = неизвестен (cache-only path).</summary>
     public int Itag { get; init; }
 
-    /// <summary>Формат контейнера (WebM, Mp4, Ogg, Hls).</summary>
+    /// <summary>Формат контейнера (WebM, Mp4, Ogg).</summary>
     public required AudioFormat Format { get; init; }
 
     /// <summary>Аудио кодек (Opus, Aac).</summary>

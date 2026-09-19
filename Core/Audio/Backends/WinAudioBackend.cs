@@ -372,13 +372,8 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     /// в нативный <c>WAVEHDR.lpData</c>.
     /// </para>
     /// <para>
-    /// Underrun/starvation детекция выполняется здесь же: счётчик <see cref="_consecutiveUnderrunCount"/>
-    /// инкрементируется при каждом пустом ответе callback. При достижении <see cref="StarvationThreshold"/>
-    /// вызывается <see cref="_onStarvation"/> в отдельном <see cref="Task"/>.
-    /// </para>
-    /// <para>
-    /// Device health check выполняется каждые <see cref="DeviceHealthCheckInterval"/> итераций
-    /// без дополнительного потока.
+    /// При ошибке <see cref="waveOutWrite"/> (например, MMSYSERR_INVALHANDLE = 6 при смене устройства)
+    /// немедленно переводит бэкенд в состояние DeviceLost, закрывает gate и оповещает плеер.
     /// </para>
     /// </remarks>
     private unsafe void NativePlaybackLoop()
@@ -470,6 +465,18 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
                     {
                         Log.Error($"[WinAudioBackend] waveOutWrite failed: code {res}");
                         _playbackRunning = false;
+
+                        lock (_stateLock)
+                        {
+                            _gateOpen = false;
+                        }
+
+                        _deviceLost = true;
+                        StartDeviceWatcher();
+
+                        var lostCb = _onDeviceLost;
+                        if (lostCb != null) Task.Run(lostCb);
+
                         break;
                     }
 
@@ -488,7 +495,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
 
         _playbackRunning = false;
     }
-
     private unsafe void DisposeWaveOutSafe()
     {
         _playbackRunning = false;
@@ -695,6 +701,11 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     private void StopDeviceWatcher() =>
         Interlocked.Exchange(ref _deviceWatchTimer, null)?.Dispose();
 
+    private const uint WAVE_FORMAT_QUERY = 0x00000001;
+
+    /// <summary>
+    /// Периодический опрос готовности дефолтного аудио-устройства после потери хэндла.
+    /// </summary>
     private void OnDeviceWatchTick(object? state)
     {
         if (_disposed || !_deviceLost)
@@ -708,11 +719,26 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
             int deviceCount = waveOutGetNumDevs();
             if (deviceCount > 0)
             {
-                StopDeviceWatcher();
-                Log.Info($"[WinAudioBackend] Audio device detected ({deviceCount} available) — triggering auto-recovery");
+                var wfx = new WAVEFORMATEX
+                {
+                    wFormatTag = 0x0003, // WAVE_FORMAT_IEEE_FLOAT
+                    nChannels = (ushort)(_channels > 0 ? _channels : 2),
+                    nSamplesPerSec = (uint)(_sampleRate > 0 ? _sampleRate : 48000),
+                    nAvgBytesPerSec = (uint)((_sampleRate > 0 ? _sampleRate : 48000) * (_channels > 0 ? _channels : 2) * sizeof(float)),
+                    nBlockAlign = (ushort)((_channels > 0 ? _channels : 2) * sizeof(float)),
+                    wBitsPerSample = 32,
+                    cbSize = 0
+                };
 
-                var cb = _onDeviceAvailable;
-                if (cb != null) Task.Run(cb);
+                int queryRes = waveOutOpen(out _, WAVE_MAPPER, in wfx, 0, 0, WAVE_FORMAT_QUERY);
+                if (queryRes == MMSYSERR_NOERROR)
+                {
+                    StopDeviceWatcher();
+                    Log.Info($"[WinAudioBackend] Audio endpoint verified available via query — triggering auto-recovery");
+
+                    var cb = _onDeviceAvailable;
+                    if (cb != null) Task.Run(cb);
+                }
             }
         }
         catch { }

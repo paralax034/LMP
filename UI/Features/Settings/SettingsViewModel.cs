@@ -72,6 +72,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     private DispatcherTimer? _normLufsDebounceTimer;
     private DispatcherTimer? _normGainDebounceTimer;
     private DispatcherTimer? _suggestionsDebounceTimer;
+    private DispatcherTimer? _proxyDebounceTimer;
 
     /// <summary>
     /// Локальный признак наличия данных в памяти.
@@ -232,7 +233,17 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     private void OnProxyParamChanged()
     {
         if (_isLoadingSettings) return;
-        SaveNetworkSettings();
+
+        _proxyDebounceTimer?.Stop();
+        _proxyDebounceTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(400),
+            DispatcherPriority.Normal,
+            (_, _) =>
+            {
+                _proxyDebounceTimer?.Stop();
+                SaveNetworkSettings();
+            });
+        _proxyDebounceTimer.Start();
     }
 
     #endregion
@@ -1281,6 +1292,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
         Core.Audio.Http.SharedHttpClient.Rebuild(proxy);
         _youtube.ReloadClient();
+        _imageCache.RebuildClient(proxy);
 
         NetworkStatus = NetworkStatusKind.Unknown;
         NetworkStatusText = "";

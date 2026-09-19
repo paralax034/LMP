@@ -23,6 +23,11 @@ public static class AudioSourceFactory
     internal static readonly CdnBlacklist CdnBlacklist = new(ttl: TimeSpan.FromMinutes(5));
 
     /// <summary>
+    /// Текущие активные настройки прокси для использования в probe-запросах.
+    /// </summary>
+    internal static ProxySettings? CurrentProxySettings { get; set; }
+
+    /// <summary>
     /// Инициализирует глобальный кэш-менеджер.
     /// </summary>
     public static void InitializeGlobalCache(AudioCacheManager cacheManager)

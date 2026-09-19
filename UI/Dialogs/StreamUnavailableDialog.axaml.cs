@@ -127,11 +127,6 @@ public partial class StreamUnavailableDialog : Window
             techInfo.AppendLine($"HTTP Status: {exception.HttpStatusCode}");
         }
 
-        if (exception.WasHlsFallback)
-        {
-            techInfo.AppendLine("HLS Fallback: Yes");
-        }
-
         TechnicalInfo = techInfo.ToString().TrimEnd();
 
         // Полная информация для копирования
@@ -172,9 +167,6 @@ public partial class StreamUnavailableDialog : Window
         // Fallback на английском если ключ не найден
         return ex.Reason switch
         {
-            StreamUnavailableReason.Forbidden403 when ex.WasHlsFallback
-                => "HLS stream blocked (403). Please contact the developer.",
-
             StreamUnavailableReason.Forbidden403
                 => "Track access forbidden (403). Please contact the developer.",
 
@@ -208,7 +200,6 @@ public partial class StreamUnavailableDialog : Window
             Video ID: {ex.VideoId}
             Reason: {ex.Reason}
             HTTP Status: {ex.HttpStatusCode?.ToString() ?? "N/A"}
-            HLS Fallback: {ex.WasHlsFallback}
             Message: {ex.Message}
             
             Stack Trace:

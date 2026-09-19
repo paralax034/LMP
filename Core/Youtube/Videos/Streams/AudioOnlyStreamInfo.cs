@@ -15,7 +15,8 @@ public sealed class AudioOnlyStreamInfo(
     string audioCodec,
     Language? audioLanguage,
     bool? isAudioLanguageDefault,
-    bool hasEncryptedNToken
+    bool hasEncryptedNToken,
+    int audioChannels = 2
 ) : IAudioStreamInfo
 {
     /// <inheritdoc />
@@ -35,6 +36,9 @@ public sealed class AudioOnlyStreamInfo(
 
     /// <inheritdoc />
     public string AudioCodec { get; } = audioCodec;
+
+    /// <summary>Количество аудиоканалов (1 = mono, 2 = stereo, 6 = 5.1 surround).</summary>
+    public int AudioChannels { get; } = audioChannels;
 
     /// <inheritdoc />
     public Language? AudioLanguage { get; } = audioLanguage;

@@ -167,6 +167,8 @@ public partial class YoutubeProvider : IDisposable
         _poTokenProvider?.Invalidate();
 
         var proxy = _libraryService?.Settings.Proxy;
+        var webProxy = ProxyHelper.CreateWebProxy(proxy);
+        bool isExplicitProxy = webProxy is not null;
 
         _currentHandler = new SocketsHttpHandler
         {
@@ -174,10 +176,9 @@ public partial class YoutubeProvider : IDisposable
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             AllowAutoRedirect = false,
 
-            // HTTP/2 ping (KeepAlivePingPolicy) работает на application level,
-            // но TCP keepalive детектирует мёртвый туннель на уровне ОС —
-            // независимо от версии HTTP протокола.
-            ConnectCallback = SharedHttpClient.ConnectWithKeepAliveAsync,
+            ConnectCallback = isExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
+            Proxy = webProxy,
+            UseProxy = true,
 
             // 2 минуты вместо 5: VPN туннели живут 60-120с при переподключении.
             // 5 минут гарантировало накопление зомби-соединений.
@@ -191,30 +192,19 @@ public partial class YoutubeProvider : IDisposable
             KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
             KeepAlivePingDelay = TimeSpan.FromSeconds(15),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
-            ConnectTimeout = TimeSpan.FromSeconds(10),
+            ConnectTimeout = TimeSpan.FromSeconds(8),
         };
-
-        if (proxy?.Enabled == true && !string.IsNullOrWhiteSpace(proxy.Host))
-        {
-            var webProxy = new WebProxy($"http://{proxy.Host}:{proxy.Port}");
-
-            if (proxy.UseAuth && !string.IsNullOrWhiteSpace(proxy.Username))
-                webProxy.Credentials = new NetworkCredential(proxy.Username, proxy.Password);
-
-            _currentHandler.Proxy = webProxy;
-            _currentHandler.UseProxy = true;
-        }
 
         var baseHttpClient = new HttpClient(_currentHandler, disposeHandler: false)
         {
-            Timeout = TimeSpan.FromSeconds(30)
+            Timeout = Timeout.InfiniteTimeSpan
         };
 
         var youtubeHandler = new YoutubeHttpHandler(baseHttpClient, AuthService, disposeClient: true);
 
         _currentHttpClient = new HttpClient(youtubeHandler, disposeHandler: true)
         {
-            Timeout = TimeSpan.FromSeconds(30)
+            Timeout = Timeout.InfiniteTimeSpan
         };
 
         _youtube = new YoutubeClient(
@@ -226,7 +216,7 @@ public partial class YoutubeProvider : IDisposable
             poTokenProvider: _poTokenProvider);
 
         Log.Info($"[YouTube] Client reloaded. Auth: {AuthService?.IsAuthenticated ?? false}, " +
-                $"Proxy: {(proxy?.Enabled == true ? $"{proxy.Host}:{proxy.Port}" : "none")}");
+                $"Proxy: {(isExplicitProxy ? webProxy!.Address?.ToString() : "system/direct")}");
     }
 
     private void DisposeCurrentClient()
@@ -939,26 +929,7 @@ public partial class YoutubeProvider : IDisposable
     }
     #endregion
 
-    #region Support Helpers (Formatting & Fallback)
-
-    private async Task<string?> GetHlsManifestAsync(string videoId, CancellationToken ct)
-    {
-        try
-        {
-            var vId = VideoId.Parse(videoId);
-            var controller = new VideoController(_currentHttpClient!, _nTokenDecryptor.PlayerManager);
-            return await controller.GetHlsManifestUrlAsync(vId, ct);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (BotDetectionException) { throw; }
-        catch (StreamUnavailableException) { throw; }
-        catch (LoginRequiredException) { throw; }
-        catch (Exception ex)
-        {
-            Log.Error($"[YouTube] [{videoId}] GetHlsManifest failed: {ex.Message}");
-            return null;
-        }
-    }
+    #region Support Helpers
 
     private AudioOnlyStreamInfo? SelectBestStream(
          List<AudioOnlyStreamInfo> streams,

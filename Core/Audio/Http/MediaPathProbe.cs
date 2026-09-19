@@ -83,7 +83,8 @@ internal static class MediaPathProbe
     }
 
     /// <summary>
-    /// <c>Range GET bytes=0-1</c> к media URL. Именно этот запрос блокирует ТСПУ.
+    /// <c>Range GET bytes=0-1</c> к media URL.
+    /// Использует общий рабочий SharedHttpClient.Instance, чтобы строго соблюдать текущие настройки прокси и пула.
     /// </summary>
     private static async Task<(bool Ok, int Ms, int Status, long Bytes, string? Error)>
         ProbeMediaRangeAsync(string mediaUrl, int timeoutMs, CancellationToken ct)
@@ -91,14 +92,15 @@ internal static class MediaPathProbe
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            using var handler = BuildProbeHandler(timeoutMs);
-            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            probeCts.CancelAfter(Math.Max(timeoutMs, 4000));
+
             using var request = new HttpRequestMessage(HttpMethod.Get, mediaUrl);
             request.Headers.Range = new RangeHeaderValue(0, 1);
             SharedHttpClient.ApplyUserAgentFromUrl(request, mediaUrl);
 
-            using var response = await client
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            using var response = await SharedHttpClient.Instance
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
                 .ConfigureAwait(false);
 
             int status = (int)response.StatusCode;
@@ -106,7 +108,7 @@ internal static class MediaPathProbe
 
             if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.PartialContent)
             {
-                var content = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                var content = await response.Content.ReadAsByteArrayAsync(probeCts.Token).ConfigureAwait(false);
                 bytes = content.Length;
             }
 
@@ -134,7 +136,7 @@ internal static class MediaPathProbe
     }
 
     /// <summary>
-    /// <c>GET /generate_204</c> — проходит через ТСПУ в большинстве случаев.
+    /// <c>GET /generate_204</c> — проверка доступности хоста.
     /// </summary>
     private static async Task<(bool Ok, int Ms)> Probe204Async(
         string host, string referenceUrl, int timeoutMs, CancellationToken ct)
@@ -142,13 +144,14 @@ internal static class MediaPathProbe
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            using var handler = BuildProbeHandler(timeoutMs);
-            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            probeCts.CancelAfter(Math.Max(timeoutMs, 3000));
+
             using var request = new HttpRequestMessage(HttpMethod.Get, $"https://{host}/generate_204");
             SharedHttpClient.ApplyUserAgentFromUrl(request, referenceUrl);
 
-            using var response = await client
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            using var response = await SharedHttpClient.Instance
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
                 .ConfigureAwait(false);
 
             sw.Stop();
@@ -160,17 +163,6 @@ internal static class MediaPathProbe
             return (false, (int)sw.ElapsedMilliseconds);
         }
     }
-
-    /// <summary>
-    /// Изолированный handler для probe — не загрязняет рабочий connection pool.
-    /// </summary>
-    private static SocketsHttpHandler BuildProbeHandler(int timeoutMs) => new()
-    {
-        ConnectCallback = SharedHttpClient.ConnectWithKeepAliveAsync,
-        UseProxy = false,
-        ConnectTimeout = TimeSpan.FromMilliseconds(timeoutMs),
-        PooledConnectionLifetime = TimeSpan.Zero,
-    };
 
     /// <summary>
     /// Извлекает hostname из media URL без лишних аллокаций на hot path.
