@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using LMP.Core.Youtube.Search;
 using LMP.UI.Dialogs;
 using LMP.UI.Features.Shell;
+using LMP.UI.Services;
 
 namespace LMP.UI.Features.Library;
 
@@ -28,7 +29,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     private readonly CookieAuthService _auth;
     private readonly DialogService _dialog;
     private readonly MainWindowViewModel _mainWindow;
-    private readonly MusicLibraryManager _manager;
+    private readonly PlaylistSyncService _syncService;
     private readonly PlaylistEditService _editService;
     private readonly NotificationService _notifications;
     private readonly PlayerControlService _playerControl;
@@ -116,7 +117,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         CookieAuthService auth,
         MainWindowViewModel mainWindow,
         DialogService dialog,
-        MusicLibraryManager manager,
+        PlaylistSyncService syncService,
         AudioEngine audio,
         NotificationService notifications,
         PlaylistEditService editService,
@@ -128,7 +129,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _auth = auth;
         _dialog = dialog;
         _mainWindow = mainWindow;
-        _manager = manager;
+        _syncService = syncService;
         _notifications = notifications;
         _editService = editService;
         _playerControl = playerControl;
@@ -533,7 +534,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 if (confirmSyncLikes)
                 {
                     SyncStatus = SL["Sync_LikedSongs"];
-                    await _manager.SyncLikedTracksAsync(ct);
+                    await _syncService.SyncLikedTracksAsync(ct);
                     await _dialog.ShowInfoAsync(
                         SL["Dialog_Done_Title"],
                         SL["Sync_Success_Msg_LikedOnly"] ?? "Понравившиеся песни синхронизированы.");
@@ -643,7 +644,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             ct.ThrowIfCancellationRequested();
             SyncStatus = SL["Sync_LikedSongs"];
             SyncProgress = 0.9;
-            await _manager.SyncLikedTracksAsync(ct);
+            await _syncService.SyncLikedTracksAsync(ct);
 
             SyncProgress = 1.0;
             SyncStatus = SL["Sync_Complete"];
@@ -1013,8 +1014,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         return new PlaylistCardViewModel(
             _auth,
             _playerControl,
-            _library,
-            _audio,
             playlist,
             trackCount,
             onOpen: _mainWindow.NavigateToPlaylist,
@@ -1025,41 +1024,16 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             },
             playAction: async (p) =>
             {
-                // Умная логика Play/Pause, если плейлист уже воспроизводится в чистом виде
-                bool isActive = _playerControl.ActivePlaylistId == p.Id;
-                if (isActive)
+                if (_playerControl.ActivePlaylistId == p.Id && _playerControl.IsQueuePure)
                 {
-                    var queue = _audio.Queue;
-                    var trackIds = await _library.GetPlaylistTrackIdsAsync(p.Id);
-
-                    bool isPure = queue.Count == trackIds.Count;
-                    if (isPure)
-                    {
-                        var queueSet = new HashSet<string>(queue.Select(t => t.Id), StringComparer.Ordinal);
-                        foreach (var id in trackIds)
-                        {
-                            if (!queueSet.Contains(id))
-                            {
-                                isPure = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (isPure)
-                    {
-                        await _playerControl.PlayPauseAsync();
-                        return;
-                    }
+                    await _playerControl.PlayPauseAsync();
+                    return;
                 }
 
-                // Полная очистка очереди и запуск с фиксацией ID плейлиста в плеере
                 var tracks = await _library.GetPlaylistTracksAsync(p.Id);
                 if (tracks.Count > 0)
                 {
-                    _playerControl.SetShuffleEnabled(false);
-                    _playerControl.SetActivePlaylistId(p.Id); // Фиксируем источник для иконок и анимации
-                    await _audio.StartQueueAsync(tracks, tracks[0]);
+                    await _playerControl.PlayPlaylistAsync(p.Id, tracks, tracks[0], enableShuffle: false);
                 }
             },
             onDelete: DeletePlaylistAsync,
@@ -1100,7 +1074,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _mainWindow.LockNavigation(SL["Playlist_Deleting"]);
         try
         {
-            await _manager.DeletePlaylistAsync(playlistId);
+            await _syncService.DeletePlaylistAsync(playlistId, deleteFromCloud: true);
         }
         finally { _mainWindow.UnlockNavigation(); }
     }

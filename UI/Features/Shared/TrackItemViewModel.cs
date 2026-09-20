@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia.Media;
+using LMP.UI.Services;
 
 namespace LMP.UI.Features.Shared;
 
@@ -57,7 +58,8 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     #endregion
 
     private readonly AudioEngine _audio;
-    private readonly MusicLibraryManager _manager;
+    private readonly PlayerControlService _playerControl;
+    private readonly PlaylistSyncService _syncService;
     private readonly DownloadService _downloads;
     private readonly DialogService _dialog;
     private readonly LibraryService _library;
@@ -160,15 +162,17 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     public TrackItemViewModel(
         TrackInfo track,
         AudioEngine audio,
+        PlayerControlService playerControl,
+        PlaylistSyncService syncService,
         DownloadService downloads,
-        MusicLibraryManager manager,
         DialogService dialog,
         LibraryService library,
         Action<TrackInfo>? onPlay = null)
     {
         Track = track;
         _audio = audio;
-        _manager = manager;
+        _playerControl = playerControl;
+        _syncService = syncService;
         _downloads = downloads;
         _dialog = dialog;
         _library = library;
@@ -210,7 +214,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         }
     }
 
-    private Task ToggleLikeAsync() => _manager.ToggleLikeAsync(Track);
+    private Task ToggleLikeAsync() => _playerControl.ToggleLikeAsync(Track);
 
     private void OnAddToQueue() => _audio.Enqueue(Track);
 
@@ -290,7 +294,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         if (selectedIds.Count == 0) return;
 
         foreach (var playlistId in selectedIds)
-            await _manager.AddTrackToPlaylistAsync(playlistId, Track).ConfigureAwait(false);
+            await _syncService.AddTrackToPlaylistAsync(playlistId, Track).ConfigureAwait(false);
     }
 
     private async Task CopyLinkAsync()

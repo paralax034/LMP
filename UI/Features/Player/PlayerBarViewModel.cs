@@ -52,7 +52,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private readonly AudioEngine _audio = null!;
     private readonly LibraryService _library = null!;
     private readonly YoutubeProvider _youtube = null!;
-    private readonly MusicLibraryManager _musicManager = null!;
     private readonly PlayerControlService _playerControl = null!;
     private readonly NotificationService _notificationService = null!;
 
@@ -328,14 +327,12 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         AudioEngine audio,
         LibraryService library,
         YoutubeProvider youtube,
-        MusicLibraryManager musicManager,
         PlayerControlService playerControl,
         NotificationService notificationService)
     {
         _audio = audio;
         _library = library;
         _youtube = youtube;
-        _musicManager = musicManager;
         _playerControl = playerControl;
         _notificationService = notificationService;
 
@@ -500,7 +497,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         {
             if (CurrentTrack != null)
             {
-                await _musicManager.ToggleLikeAsync(CurrentTrack);
+                await _playerControl.ToggleLikeAsync(CurrentTrack);
                 ShowHint(
                     v => IsLikeHintVisible = v,
                     () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);

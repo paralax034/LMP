@@ -2,7 +2,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="using:LMP.UI.Dialogs"
     xmlns:controls="using:LMP.UI.Controls"
-    xmlns:asyncImage="using:AsyncImageLoader"
     x:Class="LMP.UI.Controls.PlaylistEditorControl"
     x:DataType="d:PlaylistEditorViewModel">
 
@@ -110,7 +109,8 @@
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
                                     IsVisible="{Binding !HasThumbnailPreview}" />
-                                <Image asyncImage:ImageLoader.Source="{Binding ThumbnailPreviewUrl}"
+                                <Image controls:SmartImage.Source="{Binding ThumbnailPreviewUrl}"
+                                    controls:SmartImage.Quality="Low"
                                     Stretch="UniformToFill"
                                     Width="36" Height="36"
                                     IsVisible="{Binding IsPreviewHttp}" />

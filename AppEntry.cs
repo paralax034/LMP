@@ -476,7 +476,6 @@ public sealed class AppEntry
         services.AddSingleton<YoutubeProvider>();
         services.AddTransient(sp => new Lazy<YoutubeProvider>(sp.GetRequiredService<YoutubeProvider>));
         services.AddSingleton<YoutubeUserDataService>();
-        services.AddSingleton<MusicLibraryManager>();
 
         services.AddSingleton<DialogHostViewModel>();
 
@@ -534,7 +533,12 @@ public sealed class AppEntry
         services.AddSingleton<PlaybackErrorOrchestrator>();
 
         services.AddSingleton<DominantColorService>();
-        services.AddSingleton<PlayerControlService>();
+        services.AddSingleton(sp => new PlayerControlService(
+            sp.GetRequiredService<AudioEngine>(),
+            sp.GetRequiredService<LibraryService>(),
+            sp.GetService<NotificationService>(),
+            sp.GetService<YoutubeProvider>(),
+            sp.GetService<CookieAuthService>()));
 
         services.AddTransient<HomeViewModel>();
         services.AddTransient<SearchViewModel>();

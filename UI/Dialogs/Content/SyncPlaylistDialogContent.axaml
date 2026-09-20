@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:dialogs="using:LMP.UI.Dialogs"
-    xmlns:asyncImage="using:AsyncImageLoader"
+    xmlns:controls="using:LMP.UI.Controls"
     x:Class="LMP.UI.Dialogs.Content.SyncPlaylistDialogContent"
     x:DataType="dialogs:SyncPlaylistDialogViewModel">
 
@@ -130,7 +130,8 @@
                                                 IsVisible="{Binding LocalThumbnailPreviewUrl,
                                                     Converter={x:Static StringConverters.IsNullOrEmpty}}" />
                                             <Image
-                                                asyncImage:ImageLoader.Source="{Binding LocalThumbnailPreviewUrl}"
+                                                controls:SmartImage.Source="{Binding LocalThumbnailPreviewUrl}"
+                                                controls:SmartImage.Quality="Medium"
                                                 Stretch="UniformToFill"
                                                 IsVisible="{Binding LocalThumbnailPreviewUrl,
                                                        Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
@@ -164,7 +165,8 @@
                                                 IsVisible="{Binding CloudThumbnailPreviewUrl,
                                                     Converter={x:Static StringConverters.IsNullOrEmpty}}" />
                                             <Image
-                                                asyncImage:ImageLoader.Source="{Binding CloudThumbnailPreviewUrl}"
+                                                controls:SmartImage.Source="{Binding CloudThumbnailPreviewUrl}"
+                                                controls:SmartImage.Quality="Medium"
                                                 Stretch="UniformToFill"
                                                 IsVisible="{Binding CloudThumbnailPreviewUrl,
                                                        Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
@@ -180,7 +182,8 @@
                                     CornerRadius="6" ClipToBounds="True"
                                     Background="{DynamicResource BgSkeletonBrush}">
                                     <Image
-                                        asyncImage:ImageLoader.Source="{Binding CloudThumbnailPreviewUrl}"
+                                        controls:SmartImage.Source="{Binding CloudThumbnailPreviewUrl}"
+                                        controls:SmartImage.Quality="Medium"
                                         Stretch="UniformToFill" />
                                 </Border>
                             </StackPanel>

@@ -150,7 +150,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
         UpdateSelectionStatus();
 
         // Генерируем превью (snapshot списка для потокобезопасности)
-        RegeneratePreviewAsync();
+        RegeneratePreview();
     }
 
     /// <summary>
@@ -165,20 +165,15 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Регенерирует превью мозаики.
-    /// Отменяет предыдущую генерацию при быстрых кликах (debounce 150ms).
-    /// Делает snapshot <c>_selectionOrder</c> перед async-операцией
-    /// для предотвращения <c>Collection was modified</c>.
+    /// Безопасно запускает отменяемую регенерацию превью мозаики.
     /// </summary>
-    private async void RegeneratePreviewAsync()
+    private void RegeneratePreview()
     {
-        // Отменяем предыдущую генерацию (предотвращает параллельные загрузки)
         _previewCts?.Cancel();
         _previewCts?.Dispose();
         _previewCts = new CancellationTokenSource();
         var ct = _previewCts.Token;
 
-        // Snapshot на UI-потоке ДО любой async операции
         var selectedItems = _selectionOrder.ToList();
 
         if (selectedItems.Count == 0)
@@ -187,17 +182,22 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
             return;
         }
 
+        _ = GeneratePreviewInternalAsync(selectedItems, ct);
+    }
+
+    private async Task GeneratePreviewInternalAsync(List<TrackCoverItemViewModel> selectedItems, CancellationToken ct)
+    {
         try
         {
             // Debounce: ждём 150ms перед генерацией (быстрые клики отменяют предыдущий)
-            await Task.Delay(150, ct);
+            await Task.Delay(150, ct).ConfigureAwait(true);
 
             // Загружаем недостающие Bitmap
             var bitmaps = new List<Bitmap>(selectedItems.Count);
             foreach (var item in selectedItems)
             {
                 ct.ThrowIfCancellationRequested();
-                var bmp = await GetOrLoadBitmapAsync(item.ThumbnailUrl);
+                var bmp = await GetOrLoadBitmapAsync(item.ThumbnailUrl, ct).ConfigureAwait(true);
                 if (bmp != null)
                     bitmaps.Add(bmp);
             }
@@ -219,7 +219,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            // Нормально — отменено новым кликом
+            // Нормально — отменено новым кликом, ничего не делаем
         }
         catch (Exception ex)
         {
@@ -243,30 +243,29 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
 
     /// <summary>
     /// Загружает Bitmap из URL с кэшированием и ограничением параллелизма.
-    /// 
-    /// <para><b>Потокобезопасность:</b> семафор ограничивает до 3 параллельных загрузок,
-    /// предотвращая IOException от перегрузки сети.</para>
-    /// 
-    /// <para><b>Кэширование:</b> один Bitmap на URL — не загружаем повторно.</para>
     /// </summary>
-    private async Task<Bitmap?> GetOrLoadBitmapAsync(string url)
+    private async Task<Bitmap?> GetOrLoadBitmapAsync(string url, CancellationToken ct = default)
     {
         // Быстрый путь: уже в кэше
         if (_bitmapCache.TryGetValue(url, out var cached))
             return cached;
 
-        await _loadSemaphore.WaitAsync();
+        await _loadSemaphore.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             // Double-check после ожидания семафора
             if (_bitmapCache.TryGetValue(url, out cached))
                 return cached;
 
-            var data = await _networkManager.ImageClient.GetByteArrayAsync(url);
+            var data = await _networkManager.ImageClient.GetByteArrayAsync(url, ct).ConfigureAwait(false);
             using var stream = new MemoryStream(data);
             var bitmap = new Bitmap(stream);
             _bitmapCache[url] = bitmap;
             return bitmap;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
         }
         catch (Exception ex)
         {
@@ -295,7 +294,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
 
             foreach (var item in selectedItems)
             {
-                var bmp = await GetOrLoadBitmapAsync(item.ThumbnailUrl);
+                var bmp = await GetOrLoadBitmapAsync(item.ThumbnailUrl, ct).ConfigureAwait(true);
                 if (bmp != null)
                 {
                     bitmaps.Add(bmp);
@@ -303,10 +302,11 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
                 }
             }
 
-            if (bitmaps.Count == 0) return;
+            if (bitmaps.Count == 0 || ct.IsCancellationRequested) return;
 
-            ResultPath = await MosaicGenerator.GenerateAsync(bitmaps, trackIds, ct);
+            ResultPath = await MosaicGenerator.GenerateAsync(bitmaps, trackIds, ct).ConfigureAwait(true);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             Log.Error($"[CoverPicker] Apply failed: {ex.Message}");

@@ -2,7 +2,6 @@
     x:Class="LMP.UI.Features.Player.PlayerBarView"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:asyncImage="using:AsyncImageLoader"
     xmlns:vm="using:LMP.UI.Features.Player"
     xmlns:controls="using:LMP.UI.Controls"
     x:DataType="vm:PlayerBarViewModel"
@@ -429,7 +428,8 @@
                                 Foreground="{DynamicResource TextMutedBrush}"
                                 Data="{StaticResource Icon.MusicNote}"
                                 IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}, ConverterParameter=invert}" />
-                            <Image asyncImage:ImageLoader.Source="{Binding SafeThumbnail}"
+                            <Image controls:SmartImage.Source="{Binding SafeThumbnail}"
+                                controls:SmartImage.Quality="Low"
                                 IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}}"
                                 Stretch="UniformToFill" />
                         </Panel>

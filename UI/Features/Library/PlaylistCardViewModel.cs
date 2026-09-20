@@ -1,5 +1,4 @@
 using Avalonia.Media;
-using Avalonia.Threading;
 
 namespace LMP.UI.Features.Library;
 
@@ -12,8 +11,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
 
     private readonly CookieAuthService _auth;
     private readonly PlayerControlService _playerControl;
-    private readonly LibraryService _library;
-    private readonly AudioEngine _audio;
 
     private readonly Func<string, Task>? _onDelete;
     private readonly Func<Core.Models.Playlist, Task>? _onEdit;
@@ -22,7 +19,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     private readonly Action<string> _onOpen;
 
     private readonly EventHandler<string> _languageChangedHandler;
-    private DispatcherTimer? _playbackCheckTimer;
     private bool _isDisposed;
 
     #endregion
@@ -265,8 +261,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     public PlaylistCardViewModel(
         CookieAuthService auth,
         PlayerControlService playerControl,
-        LibraryService library,
-        AudioEngine audio,
         Core.Models.Playlist playlist,
         int trackCount,
         Action<string> onOpen,
@@ -278,8 +272,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         Playlist = playlist;
         _auth = auth;
         _playerControl = playerControl;
-        _library = library;
-        _audio = audio;
         _onOpen = onOpen;
         _addToQueueAction = addToQueueAction;
         _playAction = playAction;
@@ -335,10 +327,8 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
             },
             () => !string.IsNullOrEmpty(YoutubeUrl));
 
-        // ═══ Playback state tracking ═══
-        _playerControl.ActivePlaylistIdChanged += OnActivePlaylistIdChanged;
-        _playerControl.IsPlayingChanged += OnIsPlayingChanged;
-        _playerControl.QueueCountChanged += OnQueueCountChanged;
+        // ═══ Playback state tracking (Zero-Allocation O(1) Centralized Purity) ═══
+        _playerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
 
         _languageChangedHandler = (_, _) =>
         {
@@ -348,74 +338,25 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         };
         LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
 
-        SchedulePurityCheck();
+        SyncInitialPlaybackState();
     }
 
-    private void OnActivePlaylistIdChanged(string? activeId) => SchedulePurityCheck();
-    private void OnIsPlayingChanged(bool isPlaying) => SchedulePurityCheck();
-    private void OnQueueCountChanged(int queueCount) => SchedulePurityCheck();
+    private void SyncInitialPlaybackState()
+    {
+        bool isThis = _playerControl.ActivePlaylistId == Id;
+        IsActive = isThis && _playerControl.IsQueuePure;
+        IsQueuePure = isThis && _playerControl.IsQueuePure;
+        IsPlayingPure = isThis && _playerControl.IsPlayingPure;
+    }
 
-    private void SchedulePurityCheck()
+    private void OnPlaybackPurityChanged(string? activeId, bool isPure, bool isPlayingPure)
     {
         if (_isDisposed) return;
 
-        _playbackCheckTimer?.Stop();
-        _playbackCheckTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(50),
-            DispatcherPriority.Normal,
-            async (_, _) =>
-            {
-                _playbackCheckTimer?.Stop();
-                if (_isDisposed) return;
-                await CheckPlaybackPurityAsync();
-            });
-        _playbackCheckTimer.Start();
-    }
-
-    private async Task CheckPlaybackPurityAsync()
-    {
-        string? activeId = _playerControl.ActivePlaylistId;
-        bool isPlaying = _playerControl.IsPlaying;
-        int qCount = _playerControl.QueueCount;
-
-        if (activeId != Id || qCount != TrackCount)
-        {
-            IsActive = false;
-            IsQueuePure = false;
-            IsPlayingPure = false;
-            return;
-        }
-
-        try
-        {
-            var trackIds = await _library.GetPlaylistTrackIdsAsync(Id);
-            var trackIdSet = new HashSet<string>(trackIds, StringComparer.Ordinal);
-            var queue = _audio.Queue;
-
-            bool isPure = queue.Count == trackIds.Count;
-            if (isPure)
-            {
-                for (int i = 0; i < queue.Count; i++)
-                {
-                    if (!trackIdSet.Contains(queue[i].Id))
-                    {
-                        isPure = false;
-                        break;
-                    }
-                }
-            }
-
-            IsActive = isPure;
-            IsQueuePure = isPure;
-            IsPlayingPure = isPure && isPlaying;
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[PlaylistCard] Queue purity check error: {ex.Message}");
-            IsActive = false;
-            IsQueuePure = false;
-            IsPlayingPure = false;
-        }
+        bool isThis = string.Equals(activeId, Id, StringComparison.Ordinal);
+        IsActive = isThis && isPure;
+        IsQueuePure = isThis && isPure;
+        IsPlayingPure = isThis && isPlayingPure;
     }
 
     #endregion
@@ -573,13 +514,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         {
             _isDisposed = true;
 
-            _playbackCheckTimer?.Stop();
-            _playbackCheckTimer = null;
-
-            _playerControl.ActivePlaylistIdChanged -= OnActivePlaylistIdChanged;
-            _playerControl.IsPlayingChanged -= OnIsPlayingChanged;
-            _playerControl.QueueCountChanged -= OnQueueCountChanged;
-
+            _playerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
         }
         base.Dispose(disposing);

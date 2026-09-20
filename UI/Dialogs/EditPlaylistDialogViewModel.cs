@@ -1,3 +1,5 @@
+using LMP.Core.Services;
+
 namespace LMP.UI.Dialogs;
 
 /// <summary>
@@ -20,9 +22,18 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
     public EditPlaylistDialogViewModel(
         Playlist playlist,
         bool isAuthenticated,
-        IReadOnlyList<TrackInfo>? playlistTracks = null)
+        IReadOnlyList<TrackInfo>? playlistTracks = null,
+        INetworkManager? networkManager = null,
+        DominantColorService? dominantColorService = null,
+        Lazy<YoutubeProvider>? youtube = null)
     {
-        Editor = PlaylistEditorViewModel.ForEdit(playlist, isAuthenticated, playlistTracks);
+        Editor = PlaylistEditorViewModel.ForEdit(
+            playlist,
+            isAuthenticated,
+            playlistTracks,
+            networkManager,
+            dominantColorService,
+            youtube);
 
         // Провязка callback создания копии.
         // Собираем текущие данные редактора и возвращаем результат с флагом ShouldCreateCopy.

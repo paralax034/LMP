@@ -1,6 +1,7 @@
 using Avalonia.Collections;
 using Avalonia.Threading;
 using LMP.UI.Features.Shared;
+using LMP.UI.Services;
 
 namespace LMP.UI.Features.Queue;
 
@@ -13,7 +14,7 @@ public sealed partial class QueueViewModel : TrackListReorderableViewModel
 
     private readonly DownloadService _downloads;
     private readonly DialogService _dialog;
-    private readonly MusicLibraryManager _manager;
+    private readonly PlaylistSyncService _syncService;
     private readonly LibraryService _library;
 
     private DispatcherTimer? _queueChangedDebounceTimer;
@@ -62,14 +63,14 @@ public sealed partial class QueueViewModel : TrackListReorderableViewModel
         AudioEngine audio,
         DownloadService downloads,
         DialogService dialog,
-        MusicLibraryManager manager,
+        PlaylistSyncService syncService,
         LibraryService library,
         TrackViewModelFactory vmFactory)
         : base(audio, downloads, vmFactory)
     {
         _downloads = downloads;
         _dialog = dialog;
-        _manager = manager;
+        _syncService = syncService;
         _library = library;
 
         ClearQueueCommand = new RelayCommand(() => Audio.ClearQueue());
@@ -245,7 +246,7 @@ public sealed partial class QueueViewModel : TrackListReorderableViewModel
         var playlist = await _library.CreatePlaylistAsync(result.Name.Trim());
 
         foreach (var track in tracks)
-            await _manager.AddTrackToPlaylistAsync(playlist.Id, track);
+            await _syncService.AddTrackToPlaylistAsync(playlist.Id, track);
 
         Log.Info($"[Queue] Saved {tracks.Count} tracks to playlist '{result.Name}'");
     }

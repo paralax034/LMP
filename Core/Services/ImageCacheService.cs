@@ -209,9 +209,10 @@ public sealed class ImageCacheService : IDisposable
 
         if (!File.Exists(diskPath))
         {
-            await _downloadSemaphore.WaitAsync(ct).ConfigureAwait(false);
             try
             {
+                await _downloadSemaphore.WaitAsync(ct).ConfigureAwait(false);
+
                 if (!File.Exists(diskPath))
                     await DownloadDirectToDiskAsync(url, diskPath, ct).ConfigureAwait(false);
             }
@@ -227,6 +228,8 @@ public sealed class ImageCacheService : IDisposable
         {
             bitmap = await Task.Run(() =>
             {
+                if (ct.IsCancellationRequested) return null;
+
                 try
                 {
                     using var stream = File.OpenRead(diskPath);
@@ -240,7 +243,7 @@ public sealed class ImageCacheService : IDisposable
                     try { File.Delete(diskPath); } catch { }
                     return null;
                 }
-            }, ct).ConfigureAwait(false);
+            }, CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

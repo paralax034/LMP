@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using LMP.UI.Dialogs;
 using LMP.UI.Features.Shared;
 using LMP.UI.Features.Shell;
+using LMP.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Playlist;
@@ -18,7 +19,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 {
     #region Fields
 
-    private readonly MusicLibraryManager _manager;
     private readonly DialogService _dialog;
     private readonly DominantColorService _dominantColor;
     private readonly MainWindowViewModel _mainWindow;
@@ -44,7 +44,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     private volatile bool _isSuspended;
     private int _syncInProgressGate;
-    private HashSet<string>? _playlistTrackIds;
 
     #endregion
 
@@ -220,7 +219,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     public PlaylistViewModel(
         AudioEngine audio,
         DownloadService downloads,
-        MusicLibraryManager manager,
         DialogService dialog,
         TrackViewModelFactory vmFactory,
         DominantColorService dominantColor,
@@ -231,7 +229,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         CookieAuthService auth)
         : base(audio, downloads, vmFactory)
     {
-        _manager = manager;
         _dialog = dialog;
         _dominantColor = dominantColor;
         _mainWindow = mainWindow;
@@ -256,19 +253,19 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 SL["Dialog_Confirm_Title"],
                 string.Format(SL["Playlist_DeleteConfirm"], PlaylistName)))
             {
-                await _manager.DeletePlaylistAsync(_currentPlaylistId);
+                await _syncService.DeletePlaylistAsync(_currentPlaylistId, deleteFromCloud: true);
             }
         });
 
         UploadToCloudCommand = new AsyncRelayCommand(async () =>
         {
-            await _manager.UploadPlaylistToAccountAsync(_currentPlaylistId);
+            await _syncService.UploadPlaylistToAccountAsync(_currentPlaylistId);
             await LoadPlaylistAsync(_currentPlaylistId);
         });
 
         UnlinkFromCloudCommand = new AsyncRelayCommand(async () =>
         {
-            await _manager.ConvertToLocalAsync(_currentPlaylistId);
+            await _syncService.ConvertToLocalAsync(_currentPlaylistId);
             await LoadPlaylistAsync(_currentPlaylistId);
         });
 
@@ -317,7 +314,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
         LibService.OnDataChanged += OnLibraryDataChanged;
 
-        SubscribeToPlaybackSource();
+        _playerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
     }
 
     private void OnLibraryDataChanged()
@@ -387,7 +384,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
             _lastLocalMutationTime = DateTime.Now;
             InvalidateAllTracksCache();
-            _playlistTrackIds?.Remove(t.Id);
             RemoveItemLocally(t.Id);
 
             TrackCount = Math.Max(0, TrackCount - 1);
@@ -401,7 +397,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 FormatDuration();
             }
 
-            await _manager.RemoveTrackFromPlaylistAsync(_currentPlaylistId, t.Id);
+            await _syncService.RemoveTrackFromPlaylistAsync(_currentPlaylistId, t.Id);
         };
 
         vm.StartRadioAction = t => Log.Info($"[Playlist] Start radio requested for {t.Title}");
@@ -416,7 +412,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         int fromMasterIndex, int toMasterIndex, CancellationToken ct)
     {
         Log.Info($"[Playlist] Saving move {fromMasterIndex}→{toMasterIndex}");
-        await _manager.MovePlaylistTrackAsync(_currentPlaylistId, fromMasterIndex, toMasterIndex, ct);
+        await _syncService.MovePlaylistTrackAsync(_currentPlaylistId, fromMasterIndex, toMasterIndex, ct);
         Log.Info("[Playlist] Move saved");
     }
 
@@ -546,7 +542,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         HasYoutubeLink = PlaylistYoutubeUrl is not null;
         CopyPlaylistLinkCommand.NotifyCanExecuteChanged();
 
-        _playlistTrackIds = new HashSet<string>(payload.TrackIds, StringComparer.Ordinal);
         TrackCount = payload.TrackIds.Count;
         OnPropertyChanged(nameof(FormattedTrackCount));
 
@@ -655,9 +650,8 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var allTracks = await GetAllTracksAsync();
         if (allTracks.Count == 0) return;
 
-        _playerControl.SetActivePlaylistId(_currentPlaylistId);
         IsShuffleActive = false;
-        await Audio.StartQueueAsync(allTracks, allTracks[0]);
+        await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, allTracks[0], enableShuffle: false);
     }
 
     private async Task ShufflePlayAsync()
@@ -666,12 +660,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var allTracks = await GetAllTracksAsync();
         if (allTracks.Count == 0) return;
 
-        var startTrack = allTracks[Random.Shared.Next(allTracks.Count)];
-
-        _playerControl.SetShuffleEnabled(true);
-        _playerControl.SetActivePlaylistId(_currentPlaylistId);
-
-        await Audio.StartQueueAsync(allTracks, startTrack);
+        await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, enableShuffle: true);
 
         IsShuffleActive = true;
         _shuffleAnimationTimer?.Stop();
@@ -690,10 +679,9 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     {
         try
         {
-            _playerControl.SetActivePlaylistId(_currentPlaylistId);
             IsShuffleActive = false;
             var allTracks = await GetAllTracksAsync();
-            await Audio.StartQueueAsync(allTracks, track);
+            await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: false);
             _ = LibService.AddToRecentlyPlayedAsync(track);
         }
         catch (Exception ex)
@@ -728,37 +716,17 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         Audio.EnqueuePlaylistWithNotification(tracks, PlaylistName);
     }
 
-    private void SubscribeToPlaybackSource()
+    private void OnPlaybackPurityChanged(string? activeId, bool isPure, bool isPlayingPure)
     {
-        _playerControl.ActivePlaylistIdChanged += OnActivePlaylistIdChanged;
-        _playerControl.IsPlayingChanged += OnIsPlayingChanged;
-        _playerControl.QueueCountChanged += OnQueueCountChanged;
-    }
-
-    private void OnActivePlaylistIdChanged(string? _) => UpdatePlaybackState();
-    private void OnIsPlayingChanged(bool _) => UpdatePlaybackState();
-    private void OnQueueCountChanged(int _) => UpdatePlaybackState();
-
-    private bool CheckQueuePurity()
-    {
-        if (_playlistTrackIds == null) return false;
-        var queue = Audio.Queue;
-        if (queue.Count != TrackCount) return false;
-
-        for (int i = 0; i < queue.Count; i++)
-        {
-            if (!_playlistTrackIds.Contains(queue[i].Id))
-                return false;
-        }
-        return true;
+        UpdatePlaybackState();
     }
 
     private void UpdatePlaybackState()
     {
-        bool isActive = _playerControl.ActivePlaylistId == _currentPlaylistId;
-        IsPlayingThisPlaylist = isActive;
-        IsQueuePure = isActive && CheckQueuePurity();
-        IsPlayingPure = IsQueuePure && _playerControl.IsPlaying;
+        bool isThis = string.Equals(_playerControl.ActivePlaylistId, _currentPlaylistId, StringComparison.Ordinal);
+        IsPlayingThisPlaylist = isThis;
+        IsQueuePure = isThis && _playerControl.IsQueuePure;
+        IsPlayingPure = isThis && _playerControl.IsPlayingPure;
         OnPropertyChanged(nameof(PlayButtonTooltip));
     }
 
@@ -784,7 +752,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
             if (IsLikedPlaylist)
             {
-                await _manager.SyncLikedTracksAsync();
+                await _syncService.SyncLikedTracksAsync();
                 InvalidateAllTracksCache();
                 await LoadPlaylistAsync(_currentPlaylistId);
 
@@ -885,7 +853,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var targetId = otherPlaylists.First().Id;
         if (!string.IsNullOrEmpty(targetId))
         {
-            bool ok = await _manager.MergePlaylistsAsync(_currentPlaylistId, targetId);
+            bool ok = await _syncService.MergePlaylistsAsync(_currentPlaylistId, targetId);
             await _dialog.ShowInfoAsync(
                 ok ? SL["Dialog_Success"] : SL["Dialog_Error_Title"],
                 ok ? SL["Merge_Success_Msg"] : SL["Merge_Error_Msg"]);
@@ -1010,9 +978,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             _downloadAnimationTimer?.Stop();
             _downloadAnimationTimer = null;
 
-            _playerControl.ActivePlaylistIdChanged -= OnActivePlaylistIdChanged;
-            _playerControl.IsPlayingChanged -= OnIsPlayingChanged;
-            _playerControl.QueueCountChanged -= OnQueueCountChanged;
+            _playerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
 
             _playlistLoadCts?.Cancel();
             _playlistLoadCts?.Dispose();

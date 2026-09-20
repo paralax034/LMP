@@ -1,3 +1,5 @@
+using LMP.Core.Youtube.Utils;
+
 namespace LMP.Core.Services;
 
 /// <summary>
@@ -29,6 +31,11 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
     private readonly NotificationService? _notificationService;
+    private readonly YoutubeProvider? _youtube;
+    private readonly CookieAuthService? _auth;
+
+    private readonly HashSet<string> _activePlaylistTrackIds = new(StringComparer.Ordinal);
+    private int _expectedPlaylistTrackCount;
 
     [ObservableProperty]
     public partial bool IsPlaying { get; set; }
@@ -61,6 +68,18 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string? ActivePlaylistId { get; set; }
 
+    /// <summary>
+    /// Указывает, совпадает ли активная очередь воспроизведения с оригинальным составом запущенного плейлиста.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsQueuePure { get; private set; }
+
+    /// <summary>
+    /// Указывает, воспроизводится ли в данный момент чистая очередь запущенного плейлиста.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsPlayingPure { get; private set; }
+
     public bool HasTrack => CurrentTrack != null;
 
     #region Events
@@ -78,22 +97,31 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     public event Action<int>? VolumeChanged;
     public event Action<string?>? ActivePlaylistIdChanged;
 
+    /// <summary>
+    /// Событие изменения чистоты очереди активного плейлиста.
+    /// Аргументы: ActivePlaylistId, IsQueuePure, IsPlayingPure.
+    /// </summary>
+    public event Action<string?, bool, bool>? PlaybackPurityChanged;
+
     #endregion
 
     private bool _disposed;
 
     #region Constructors
 
-    public PlayerControlService(AudioEngine audio, LibraryService library)
-        : this(audio, library, null)
-    {
-    }
-
-    public PlayerControlService(AudioEngine audio, LibraryService library, NotificationService? notificationService)
+    public PlayerControlService(
+        AudioEngine audio,
+        LibraryService library,
+        NotificationService? notificationService = null,
+        YoutubeProvider? youtube = null,
+        CookieAuthService? auth = null)
     {
         _audio = audio;
         _library = library;
         _notificationService = notificationService;
+        _youtube = youtube;
+        _auth = auth;
+
         CurrentTrack = _audio.CurrentTrack;
         IsPlaying = _audio.IsPlaying;
         IsPaused = _audio.IsPaused;
@@ -237,15 +265,79 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
     /// <summary>
     /// Устанавливает ID плейлиста-источника текущей очереди.
-    /// Вызывается из PlaylistViewModel перед StartQueueAsync.
     /// Null = очередь запущена не из плейлиста.
     /// </summary>
     public void SetActivePlaylistId(string? playlistId)
     {
         if (ActivePlaylistId == playlistId) return;
+
         ActivePlaylistId = playlistId;
+        _activePlaylistTrackIds.Clear();
+        _expectedPlaylistTrackCount = 0;
+
         ActivePlaylistIdChanged?.Invoke(playlistId);
+        UpdatePurityState();
         Log.Debug($"[PlayerControl] ActivePlaylistId = {playlistId ?? "null"}");
+    }
+
+    /// <summary>
+    /// Запускает воспроизведение плейлиста с полной регистрацией его состава для отслеживания чистоты очереди в памяти.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор плейлиста.</param>
+    /// <param name="tracks">Полный упорядоченный список треков плейлиста.</param>
+    /// <param name="startTrack">Трек, с которого необходимо начать воспроизведение (по умолчанию первый).</param>
+    /// <param name="enableShuffle">Включить ли режим случайного порядка.</param>
+    public async Task PlayPlaylistAsync(
+        string playlistId,
+        IReadOnlyList<TrackInfo> tracks,
+        TrackInfo? startTrack = null,
+        bool enableShuffle = false)
+    {
+        if (tracks.Count == 0) return;
+
+        SetShuffleEnabled(enableShuffle);
+
+        ActivePlaylistId = playlistId;
+        _activePlaylistTrackIds.Clear();
+        _expectedPlaylistTrackCount = tracks.Count;
+
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            _activePlaylistTrackIds.Add(tracks[i].Id);
+        }
+
+        ActivePlaylistIdChanged?.Invoke(playlistId);
+
+        var targetStartTrack = startTrack ?? (enableShuffle ? tracks[Random.Shared.Next(tracks.Count)] : tracks[0]);
+        await _audio.StartQueueAsync(tracks, targetStartTrack).ConfigureAwait(false);
+
+        UpdatePurityState();
+    }
+
+    /// <summary>
+    /// Переключает состояние отметки "Мне нравится" для трека локально и в облаке YouTube.
+    /// </summary>
+    /// <param name="track">Экземпляр трека.</param>
+    /// <param name="ct">Токен отмены.</param>
+    public async Task ToggleLikeAsync(TrackInfo track, CancellationToken ct = default)
+    {
+        var canonical = _library.GetTrack(track.Id) ?? track;
+        bool targetLikedState = !canonical.IsLiked;
+
+        if (_auth?.IsAuthenticated == true && _youtube != null)
+        {
+            try
+            {
+                await _youtube.LikeTrackAsync(track.Id, targetLikedState).ConfigureAwait(false);
+                Log.Info($"[PlayerControl] Track {track.Id} liked={targetLikedState} synced to YouTube");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[PlayerControl] Failed to sync like to YouTube: {ex.Message}");
+            }
+        }
+
+        await _library.SetLikeStateAsync(track, targetLikedState, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -322,6 +414,8 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         IsPaused = isPaused;
         IsPlayingChanged?.Invoke(isPlaying);
         IsPausedChanged?.Invoke(isPaused);
+
+        UpdatePurityState();
     }
 
     /// <summary>
@@ -337,7 +431,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         if (previous?.Id == track?.Id)
             return;
 
-        CurrentTrack = track;
         CurrentTrackChanged?.Invoke(track);
 
         // Сбрасываем источник только при реальной остановке (track → null).
@@ -346,7 +439,10 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         if (track == null && ActivePlaylistId != null)
         {
             ActivePlaylistId = null;
+            _activePlaylistTrackIds.Clear();
+            _expectedPlaylistTrackCount = 0;
             ActivePlaylistIdChanged?.Invoke(null);
+            UpdatePurityState();
             Log.Debug("[PlayerControl] ActivePlaylistId cleared (track → null)");
         }
     }
@@ -355,6 +451,42 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     {
         QueueCount = _audio.Queue.Count;
         QueueCountChanged?.Invoke(QueueCount);
+
+        UpdatePurityState();
+    }
+
+    private void UpdatePurityState()
+    {
+        bool isPure = false;
+
+        if (!string.IsNullOrEmpty(ActivePlaylistId) && _expectedPlaylistTrackCount > 0)
+        {
+            var queue = _audio.Queue;
+            if (queue.Count == _expectedPlaylistTrackCount)
+            {
+                isPure = true;
+                for (int i = 0; i < queue.Count; i++)
+                {
+                    if (!_activePlaylistTrackIds.Contains(queue[i].Id))
+                    {
+                        isPure = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        bool purityChanged = IsQueuePure != isPure;
+        bool playingPure = isPure && IsPlaying;
+        bool playingPureChanged = IsPlayingPure != playingPure;
+
+        IsQueuePure = isPure;
+        IsPlayingPure = playingPure;
+
+        if (purityChanged || playingPureChanged)
+        {
+            PlaybackPurityChanged?.Invoke(ActivePlaylistId, IsQueuePure, IsPlayingPure);
+        }
     }
 
     private void HandleLoadingStateChanged(bool isLoading)
@@ -473,6 +605,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
             CurrentTrack = actualTrack;
         }
 
+        UpdatePurityState();
         ForceSyncTriggered?.Invoke();
 
         Log.Debug("[PlayerControl] Forced sync completed (soft, no track reset)");

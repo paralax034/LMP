@@ -94,9 +94,9 @@ public sealed class PlaylistEditService
     /// <c>null</c> если пользователь отменил диалог или плейлист не найден.
     /// </returns>
     public async Task<EditResult?> EditPlaylistAsync(
-        string playlistId,
-        Action<string> lockNavigation,
-        Action unlockNavigation)
+            string playlistId,
+            Action<string> lockNavigation,
+            Action unlockNavigation)
     {
         var playlist = await _library.GetPlaylistAsync(playlistId);
         if (playlist == null) return null;
@@ -117,7 +117,10 @@ public sealed class PlaylistEditService
             return null;
         }
 
-        var result = await _dialog.ShowEditPlaylistDialogAsync(playlist);
+        // Загружаем треки плейлиста для работы вкладки «Из треков» (мозаика)
+        var tracks = await _library.GetPlaylistTracksAsync(playlistId);
+
+        var result = await _dialog.ShowEditPlaylistDialogAsync(playlist, tracks);
         if (result == null) return null;
 
         // CREATE COPY: обрабатываем до всех остальных шагов

@@ -388,28 +388,51 @@ public sealed class DialogService
 
     /// <summary>
     /// Диалог редактирования плейлиста.
+    /// Автоматически загружает треки плейлиста и разрешает зависимости для генератора мозаики и палитры цветов.
     /// </summary>
-    public async Task<EditPlaylistResult?> ShowEditPlaylistDialogAsync(Playlist playlist)
+    public async Task<EditPlaylistResult?> ShowEditPlaylistDialogAsync(
+        Playlist playlist,
+        IReadOnlyList<TrackInfo>? playlistTracks = null)
     {
         var host = _getDialogHost();
         var tcs = new TaskCompletionSource<EditPlaylistResult?>();
 
-        IReadOnlyList<TrackInfo>? tracks = null;
-        try
+        var tracks = playlistTracks;
+        if (tracks == null || tracks.Count == 0)
         {
-            var library = Microsoft.Extensions.DependencyInjection
-                .ServiceProviderServiceExtensions
-                .GetRequiredService<LibraryService>(AppEntry.Services);
-            var loaded = await library.GetPlaylistTracksAsync(playlist.Id, limit: 200);
-            if (loaded.Count > 0) tracks = loaded;
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[DialogService] CoverPicker tracks load failed: {ex.Message}");
+            try
+            {
+                var library = Microsoft.Extensions.DependencyInjection
+                    .ServiceProviderServiceExtensions
+                    .GetRequiredService<LibraryService>(AppEntry.Services);
+                var loaded = await library.GetPlaylistTracksAsync(playlist.Id, limit: 200).ConfigureAwait(false);
+                if (loaded.Count > 0) tracks = loaded;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[DialogService] CoverPicker tracks load failed: {ex.Message}");
+            }
         }
 
+        var networkManager = Microsoft.Extensions.DependencyInjection
+            .ServiceProviderServiceExtensions
+            .GetService<INetworkManager>(AppEntry.Services);
+
+        var dominantColorService = Microsoft.Extensions.DependencyInjection
+            .ServiceProviderServiceExtensions
+            .GetService<DominantColorService>(AppEntry.Services);
+
+        var youtube = Microsoft.Extensions.DependencyInjection
+            .ServiceProviderServiceExtensions
+            .GetService<Lazy<YoutubeProvider>>(AppEntry.Services);
+
         var vm = new EditPlaylistDialogViewModel(
-            playlist, _authService.IsAuthenticated, tracks)
+            playlist,
+            _authService.IsAuthenticated,
+            tracks,
+            networkManager,
+            dominantColorService,
+            youtube)
         {
             OnResult = result =>
             {

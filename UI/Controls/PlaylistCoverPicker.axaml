@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="using:LMP.UI.Dialogs"
-    xmlns:asyncImage="using:AsyncImageLoader"
+    xmlns:controls="using:LMP.UI.Controls"
     x:Class="LMP.UI.Controls.PlaylistCoverPicker"
     x:DataType="d:PlaylistCoverPickerViewModel">
 
@@ -89,8 +89,10 @@
                             ToolTip.Tip="{Binding TrackTitle}">
                             <Border CornerRadius="3" ClipToBounds="True">
                                 <Panel>
-                                    <!-- Обложка -->
-                                    <Image asyncImage:ImageLoader.Source="{Binding ThumbnailUrl}"
+                                    <!-- Обложка через SmartImage с LRU кэшированием и дебаунсом -->
+                                    <Image controls:SmartImage.Source="{Binding ThumbnailUrl}"
+                                        controls:SmartImage.Quality="Low"
+                                        controls:SmartImage.Debounce="80"
                                         Stretch="UniformToFill"
                                         Width="52" Height="52" />
 
