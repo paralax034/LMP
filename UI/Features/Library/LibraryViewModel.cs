@@ -223,6 +223,12 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     {
         if (_isDisposed || IsSyncing) return;
 
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(OnLibraryDataChanged);
+            return;
+        }
+
         _dataChangedTimer?.Stop();
         _dataChangedTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(500),
@@ -281,6 +287,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 await Task.Delay(50);
                 vm.Show();
             }
+
+            UpdateStatsInBackground();
         }
         catch (Exception ex)
         {
@@ -298,6 +306,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         {
             vm.Dispose();
             Playlists.Remove(vm);
+            UpdateStatsInBackground();
         }
     }
 
@@ -459,7 +468,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     /// <summary>
     /// Выполняет синхронизацию плейлистов и любимых треков с аккаунтом YouTube Music.
-    /// Все изменения bindable-состояния выполняются строго на UI-потоке.
+    /// Гарантирует двустороннюю сверку сирот и кэширование SetVideoId в существующие плейлисты при слиянии.
     /// </summary>
     private async Task SyncAccountPlaylistsAsync()
     {
@@ -486,9 +495,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 return;
             }
 
+            List<Core.Models.Playlist> ytPlaylists;
             try
             {
-                var ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync();
+                ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync();
                 ct.ThrowIfCancellationRequested();
                 SyncProgress = 0.1;
 
@@ -523,6 +533,41 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
             SyncProgress = 0.15;
 
+            var allPlaylists = await _library.GetAllPlaylistsAsync(ct);
+
+            // Двусторонняя сверка: выявление и отвязка плейлистов, физически удаленных на YouTube
+            var cloudPlaylistIds = new HashSet<string>(
+                ytPlaylists.Select(p => p.YoutubeId).Where(id => !string.IsNullOrEmpty(id))!,
+                StringComparer.Ordinal);
+
+            int orphansCleaned = 0;
+            for (int i = 0; i < allPlaylists.Count; i++)
+            {
+                var localPl = allPlaylists[i];
+                if (localPl.SyncMode == PlaylistSyncMode.TwoWaySync
+                    && !string.IsNullOrEmpty(localPl.YoutubeId)
+                    && localPl.Id != LibraryService.LikedPlaylistId
+                    && !cloudPlaylistIds.Contains(localPl.YoutubeId))
+                {
+                    localPl.SyncMode = PlaylistSyncMode.LocalOnly;
+                    localPl.YoutubeId = null;
+                    localPl.IsCloudUnavailable = false;
+                    await _library.AddOrUpdatePlaylistAsync(localPl, ct);
+                    orphansCleaned++;
+                    Log.Info($"[Sync] Orphan cloud playlist '{localPl.Name}' (ID: {localPl.Id}) converted to LocalOnly because it was deleted on YouTube.");
+                }
+            }
+
+            if (orphansCleaned > 0)
+            {
+                await _notifications.ShowToastAsync(
+                    "Dialog_Warning_Title",
+                    "Playlist_OrphansCleaned",
+                    NotificationSeverity.Warning,
+                    durationMs: 4000,
+                    messageArgs: [orphansCleaned]);
+            }
+
             if (playlistsToImport.Count == 0)
             {
                 var confirmSyncLikes = await _dialog.ConfirmAsync(
@@ -546,7 +591,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             ct.ThrowIfCancellationRequested();
             SyncStatus = SL["Sync_SelectPlaylists"];
 
-            var allPlaylists = await _library.GetAllPlaylistsAsync(ct);
             var existingLocal = allPlaylists
                 .Where(p => p.IsLocal)
                 .GroupBy(p => p.Name, StringComparer.Ordinal)
@@ -609,6 +653,32 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                         {
                             t.InPlaylists.Add(existing.Id);
                             await _library.AddOrUpdateTrackAsync(t, ct);
+                        }
+                    }
+
+                    // Перенос актуальных SetVideoId в существующий плейлист библиотеки для исключения browse при будущем удалении
+                    if (_auth.IsAuthenticated && !string.IsNullOrEmpty(existing.YoutubeId))
+                    {
+                        try
+                        {
+                            var fullData = await _youtube.GetFullPlaylistDataAsync(existing.YoutubeId, ct);
+                            if (fullData?.Tracks is { Count: > 0 } remoteTracks)
+                            {
+                                var mappings = new List<(string TrackId, string SetVideoId)>(remoteTracks.Count);
+                                for (int i = 0; i < remoteTracks.Count; i++)
+                                {
+                                    var r = remoteTracks[i];
+                                    if (!string.IsNullOrEmpty(r.SetVideoId))
+                                        mappings.Add(("yt_" + r.VideoId, r.SetVideoId));
+                                }
+
+                                if (mappings.Count > 0)
+                                    await _library.UpdateSetVideoIdsAsync(existing.Id, mappings, ct);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warn($"[Sync] Failed to mirror setVideoIds to existing playlist {existing.Id}: {ex.Message}");
                         }
                     }
 
@@ -871,44 +941,68 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         int diff = Math.Abs(targetPlaylists - startPlaylists)
                  + Math.Abs(targetTracks - startTracks);
+
+        if (diff == 0)
+        {
+            PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
+            TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
+            TotalDurationText = FormatDurationLocalized(totalDuration);
+            AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
+            AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
+            return;
+        }
+
         int steps = diff <= 3 ? 15 : 25;
 
-        for (int i = 1; i <= steps; i++)
+        try
         {
-            if (ct.IsCancellationRequested || _isDisposed) return;
+            for (int i = 1; i <= steps; i++)
+            {
+                if (ct.IsCancellationRequested || _isDisposed) return;
 
-            double t = (double)i / steps;
-            double ease = 1 - Math.Pow(1 - t, 3);
+                double t = (double)i / steps;
+                double ease = 1 - Math.Pow(1 - t, 3);
 
-            int currentPlaylists = startPlaylists
-                + (int)Math.Round((targetPlaylists - startPlaylists) * ease);
-            int currentTracks = startTracks
-                + (int)Math.Round((targetTracks - startTracks) * ease);
+                int currentPlaylists = startPlaylists
+                    + (int)Math.Round((targetPlaylists - startPlaylists) * ease);
+                int currentTracks = startTracks
+                    + (int)Math.Round((targetTracks - startTracks) * ease);
 
-            PlaylistCountText = SL.GetPlural("Library_PlaylistWord", currentPlaylists);
-            TotalTracksText = SL.GetPlural("Library_TrackWord", currentTracks);
+                PlaylistCountText = SL.GetPlural("Library_PlaylistWord", currentPlaylists);
+                TotalTracksText = SL.GetPlural("Library_TrackWord", currentTracks);
 
-            TotalDurationText = FormatDurationLocalized(totalDuration);
+                TotalDurationText = FormatDurationLocalized(totalDuration);
 
-            if (i == steps)
+                if (i == steps)
+                {
+                    PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
+                    TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
+                    AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
+                    AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
+                }
+                else
+                {
+                    AvgTrackDurationText = "";
+                    AvgPlaylistDurationText = "";
+                }
+
+                try { await Task.Delay(16, ct); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested && !_isDisposed)
             {
                 PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
                 TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
+                TotalDurationText = FormatDurationLocalized(totalDuration);
                 AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
                 AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
+                _prevPlaylistCount = targetPlaylists;
+                _prevTrackCount = targetTracks;
             }
-            else
-            {
-                AvgTrackDurationText = "";
-                AvgPlaylistDurationText = "";
-            }
-
-            try { await Task.Delay(16, ct); }
-            catch (OperationCanceledException) { break; }
         }
-
-        _prevPlaylistCount = targetPlaylists;
-        _prevTrackCount = targetTracks;
     }
 
     private static string FormatDurationLocalized(TimeSpan ts)

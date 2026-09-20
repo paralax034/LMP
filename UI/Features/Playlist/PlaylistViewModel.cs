@@ -216,6 +216,9 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     #region Constructor
 
+    /// <summary>
+    /// Инициализирует новый экземпляр ViewModel экрана плейлиста.
+    /// </summary>
     public PlaylistViewModel(
         AudioEngine audio,
         DownloadService downloads,
@@ -313,6 +316,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         });
 
         LibService.OnDataChanged += OnLibraryDataChanged;
+        LibService.OnTrackUpdated += OnLibraryTrackUpdated;
 
         _playerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
     }
@@ -320,6 +324,13 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     private void OnLibraryDataChanged()
     {
         if (_isSuspended) return;
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(OnLibraryDataChanged);
+            return;
+        }
+
         if ((DateTime.Now - _lastLocalMutationTime).TotalMilliseconds < LocalMutationDebounceMs)
         {
             Log.Debug("[Playlist] Ignoring OnDataChanged (recent local mutation)");
@@ -341,6 +352,50 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
             });
         _dataChangedDebounceTimer.Start();
+    }
+
+    /// <summary>
+    /// Обрабатывает событие изменения метаданных трека в библиотеке.
+    /// Синхронизирует счетчики и длительность плейлиста Liked, гарантируя вызов в UI-потоке.
+    /// </summary>
+    /// <param name="track">Экземпляр обновленного трека.</param>
+    private void OnLibraryTrackUpdated(TrackInfo track)
+    {
+        if (_isSuspended) return;
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnLibraryTrackUpdated(track));
+            return;
+        }
+
+        InvalidateAllTracksCache();
+
+        if (IsLikedPlaylist)
+        {
+            if (track.IsLiked)
+            {
+                TrackCount++;
+                if (track.Duration > TimeSpan.Zero)
+                {
+                    TotalDuration += track.Duration;
+                    FormatDuration();
+                }
+            }
+            else
+            {
+                TrackCount = Math.Max(0, TrackCount - 1);
+                if (track.Duration > TimeSpan.Zero)
+                {
+                    TotalDuration = TotalDuration > track.Duration
+                        ? TotalDuration - track.Duration
+                        : TimeSpan.Zero;
+                    FormatDuration();
+                }
+            }
+
+            OnPropertyChanged(nameof(FormattedTrackCount));
+        }
     }
 
     #endregion
@@ -681,6 +736,20 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         {
             IsShuffleActive = false;
             var allTracks = await GetAllTracksAsync();
+
+            if (!allTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
+            {
+                var visibleTracks = GetLoadedItemsSnapshot();
+                if (visibleTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
+                {
+                    allTracks = visibleTracks;
+                }
+                else
+                {
+                    allTracks = [track, .. allTracks];
+                }
+            }
+
             await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: false);
             _ = LibService.AddToRecentlyPlayedAsync(track);
         }
@@ -759,8 +828,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 await notifications.ShowToastAsync(
                     titleKey: "Playlist_SyncComplete_Toast_Title",
                     messageKey: "Sync_Success_Msg_LikedOnly",
-                    severity: NotificationSeverity.Success,
-                    durationMs: 4000);
+                    severity: NotificationSeverity.Success);
                 NotificationService.PlaySuccessSound();
             }
             else
@@ -785,8 +853,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                                 result.TracksAddedLocally, result.TracksAddedToCloud,
                                 result.TracksRemovedLocally, result.TracksRemovedFromCloud
                             ],
-                            severity: NotificationSeverity.Success,
-                            durationMs: 4000);
+                            severity: NotificationSeverity.Success);
                         NotificationService.PlaySuccessSound();
                     }
                 }
@@ -969,6 +1036,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
 
             LibService.OnDataChanged -= OnLibraryDataChanged;
+            LibService.OnTrackUpdated -= OnLibraryTrackUpdated;
             _dataChangedDebounceTimer?.Stop();
             _dataChangedDebounceTimer = null;
 

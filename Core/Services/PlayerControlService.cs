@@ -282,6 +282,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
     /// <summary>
     /// Запускает воспроизведение плейлиста с полной регистрацией его состава для отслеживания чистоты очереди в памяти.
+    /// Гарантирует наличие стартового трека в очереди воспроизведения даже при его внешнем удалении из источника данных.
     /// </summary>
     /// <param name="playlistId">Идентификатор плейлиста.</param>
     /// <param name="tracks">Полный упорядоченный список треков плейлиста.</param>
@@ -293,23 +294,31 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         TrackInfo? startTrack = null,
         bool enableShuffle = false)
     {
-        if (tracks.Count == 0) return;
+        if (tracks.Count == 0 && startTrack == null) return;
 
         SetShuffleEnabled(enableShuffle);
 
+        IReadOnlyList<TrackInfo> effectiveTracks = tracks;
+        if (startTrack != null && !tracks.Any(t => string.Equals(t.Id, startTrack.Id, StringComparison.Ordinal)))
+        {
+            var list = new List<TrackInfo>(tracks.Count + 1) { startTrack };
+            list.AddRange(tracks);
+            effectiveTracks = list;
+        }
+
         ActivePlaylistId = playlistId;
         _activePlaylistTrackIds.Clear();
-        _expectedPlaylistTrackCount = tracks.Count;
+        _expectedPlaylistTrackCount = effectiveTracks.Count;
 
-        for (int i = 0; i < tracks.Count; i++)
+        for (int i = 0; i < effectiveTracks.Count; i++)
         {
-            _activePlaylistTrackIds.Add(tracks[i].Id);
+            _activePlaylistTrackIds.Add(effectiveTracks[i].Id);
         }
 
         ActivePlaylistIdChanged?.Invoke(playlistId);
 
-        var targetStartTrack = startTrack ?? (enableShuffle ? tracks[Random.Shared.Next(tracks.Count)] : tracks[0]);
-        await _audio.StartQueueAsync(tracks, targetStartTrack).ConfigureAwait(false);
+        var targetStartTrack = startTrack ?? (enableShuffle ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)] : effectiveTracks[0]);
+        await _audio.StartQueueAsync(effectiveTracks, targetStartTrack).ConfigureAwait(false);
 
         UpdatePurityState();
     }

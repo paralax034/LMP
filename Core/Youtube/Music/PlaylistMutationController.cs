@@ -11,6 +11,9 @@ namespace LMP.Core.Youtube.Music;
 internal sealed class PlaylistMutationController(HttpClient http)
 {
     private const string ApiUrl = "https://www.youtube.com/youtubei/v1";
+    private const string EditPlaylistEndpoint = "browse/edit_playlist";
+    private const string CreatePlaylistEndpoint = "playlist/create";
+    private const string DeletePlaylistEndpoint = "playlist/delete";
 
     private static readonly byte[] Utf8Context = "context"u8.ToArray();
     private static readonly byte[] Utf8Client = "client"u8.ToArray();
@@ -63,6 +66,13 @@ internal sealed class PlaylistMutationController(HttpClient http)
         return content;
     }
 
+    /// <summary>
+    /// Выполняет детерминированный POST-запрос к эндпоинту InnerTube API.
+    /// </summary>
+    /// <param name="endpoint">Имя эндпоинта без query-параметров.</param>
+    /// <param name="writeBody">Делегат записи JSON-структуры запроса.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>Распарсенный корень JSON-ответа.</returns>
     private async Task<JsonElement> PostAsync(
         string endpoint,
         Action<Utf8JsonWriter> writeBody,
@@ -72,13 +82,19 @@ internal sealed class PlaylistMutationController(HttpClient http)
         request.Content = CreateJsonContent(writeBody);
 
         using var response = await http.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, ct);
+            request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        using var stream = await response.Content.ReadAsStreamAsync(ct);
-        return await Json.ParseAsync(stream, ct);
+        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        return await Json.ParseAsync(stream, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Выполняет POST-запрос без чтения тела ответа.
+    /// </summary>
+    /// <param name="endpoint">Имя эндпоинта без query-параметров.</param>
+    /// <param name="writeBody">Делегат записи JSON-структуры запроса.</param>
+    /// <param name="ct">Токен отмены операции.</param>
     private async Task PostFireAndForgetAsync(
         string endpoint,
         Action<Utf8JsonWriter> writeBody,
@@ -88,7 +104,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
         request.Content = CreateJsonContent(writeBody);
 
         using var response = await http.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, ct);
+            request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
 
@@ -152,14 +168,16 @@ internal sealed class PlaylistMutationController(HttpClient http)
             message ?? $"Playlist operation failed with status: {status}");
     }
 
+    /// <summary>
+    /// Нормализует идентификатор плейлиста, отсекая префикс VL без аллокаций в куче.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string SanitizePlaylistId(string playlistId)
     {
-        var rawId = YoutubeIdHelper.ExtractRawId(playlistId);
-        var span = rawId.AsSpan();
-        if (span.StartsWith("VL") && span.Length > 2)
-            return rawId[2..];
-        return rawId;
+        var span = playlistId.AsSpan();
+        if (span.StartsWith("VL", StringComparison.Ordinal) && span.Length > 2)
+            return span[2..].ToString();
+        return playlistId;
     }
 
     #region Public API
@@ -173,7 +191,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
         IReadOnlyList<string>? videoIds = null,
         CancellationToken ct = default)
     {
-        var root = await PostAsync("playlist/create", writer =>
+        var root = await PostAsync(CreatePlaylistEndpoint, writer =>
         {
             writer.WriteString("title", title);
             writer.WriteString("params", "ICE%3D");
@@ -185,7 +203,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
                     writer.WriteStringValue(videoIds[i]);
                 writer.WriteEndArray();
             }
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         return root.GetPropertyOrNull("playlistId")?.GetStringOrNull()
             ?? throw new YoutubeExplodeException(
@@ -205,21 +223,20 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
         var cleanId = SanitizePlaylistId(playlistId);
 
-        var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+        var root = await PostAsync(EditPlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", cleanId);
-            writer.WriteString("params", "ICE%3D");
 
             writer.WriteStartArray("actions");
             for (int i = 0; i < videoIds.Count; i++)
             {
                 writer.WriteStartObject();
                 writer.WriteString("action", "ACTION_ADD_VIDEO");
-                writer.WriteString("addedVideoId", YoutubeIdHelper.ExtractRawId(videoIds[i]));
+                writer.WriteString("addedVideoId", videoIds[i]);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         CheckStatus(root);
 
@@ -259,7 +276,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
         var cleanPlaylistId = SanitizePlaylistId(playlistId);
 
-        var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+        var root = await PostAsync(EditPlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", cleanPlaylistId);
             writer.WriteString("params", "CAFAAQ%3D%3D");
@@ -286,7 +303,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         CheckStatus(root);
     }
@@ -320,10 +337,9 @@ internal sealed class PlaylistMutationController(HttpClient http)
             return;
         }
 
-        var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+        var root = await PostAsync(EditPlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", cleanPlaylistId);
-            writer.WriteString("params", "ICE%3D");
 
             writer.WriteStartArray("actions");
             for (int i = 0; i < validSetVideoIds.Count; i++)
@@ -334,7 +350,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         CheckStatus(root);
     }
@@ -347,10 +363,9 @@ internal sealed class PlaylistMutationController(HttpClient http)
         string newTitle,
         CancellationToken ct = default)
     {
-        var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+        var root = await PostAsync(EditPlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
-            writer.WriteString("params", "ICE%3D");
 
             writer.WriteStartArray("actions");
             writer.WriteStartObject();
@@ -358,7 +373,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
             writer.WriteString("playlistName", newTitle);
             writer.WriteEndObject();
             writer.WriteEndArray();
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         CheckStatus(root);
     }
@@ -371,10 +386,9 @@ internal sealed class PlaylistMutationController(HttpClient http)
         string description,
         CancellationToken ct = default)
     {
-        var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+        var root = await PostAsync(EditPlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
-            writer.WriteString("params", "ICE%3D");
 
             writer.WriteStartArray("actions");
             writer.WriteStartObject();
@@ -382,7 +396,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
             writer.WriteString("playlistDescription", description);
             writer.WriteEndObject();
             writer.WriteEndArray();
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         CheckStatus(root);
     }
@@ -394,11 +408,10 @@ internal sealed class PlaylistMutationController(HttpClient http)
         string playlistId,
         CancellationToken ct = default)
     {
-        await PostFireAndForgetAsync("playlist/delete", writer =>
+        await PostFireAndForgetAsync(DeletePlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
-            writer.WriteString("params", "ICE%3D");
-        }, ct);
+        }, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -448,7 +461,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
                 CharSet = "UTF-8"
             };
 
-            using var initiateResponse = await http.SendAsync(initiateRequest, ct);
+            using var initiateResponse = await http.SendAsync(initiateRequest, ct).ConfigureAwait(false);
             initiateResponse.EnsureSuccessStatusCode();
 
             // Upload URL в заголовке X-Goog-Upload-URL
@@ -470,12 +483,12 @@ internal sealed class PlaylistMutationController(HttpClient http)
                 CharSet = "utf-8"
             };
 
-            using var uploadResponse = await http.SendAsync(uploadRequest, ct);
+            using var uploadResponse = await http.SendAsync(uploadRequest, ct).ConfigureAwait(false);
             uploadResponse.EnsureSuccessStatusCode();
 
             // Parse JSON response для получения blobId
-            using var uploadStream = await uploadResponse.Content.ReadAsStreamAsync(ct);
-            var uploadResult = await Json.ParseAsync(uploadStream, ct);
+            using var uploadStream = await uploadResponse.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var uploadResult = await Json.ParseAsync(uploadStream, ct).ConfigureAwait(false);
 
             // Формат ответа: {"encryptedBlobId": "..."}
             var blobId = uploadResult.GetPropertyOrNull("encryptedBlobId")?.GetStringOrNull();
@@ -488,10 +501,9 @@ internal sealed class PlaylistMutationController(HttpClient http)
             Log.Debug($"[Scotty] Got blobId: {blobId[..Math.Min(50, blobId.Length)]}...");
 
             // STEP 3: Apply thumbnail via edit_playlist API
-            var applyRoot = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+            var applyRoot = await PostAsync(EditPlaylistEndpoint, writer =>
             {
                 writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
-                writer.WriteString("params", "ICE%3D");
 
                 writer.WriteStartArray("actions");
                 writer.WriteStartObject();
@@ -511,7 +523,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
                 writer.WriteEndObject(); // action
                 writer.WriteEndArray(); // actions
-            }, ct);
+            }, ct).ConfigureAwait(false);
 
             CheckStatus(applyRoot);
 

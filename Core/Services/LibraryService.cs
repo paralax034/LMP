@@ -633,14 +633,20 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         return await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Возвращает модель плейлиста вместе с числом треков без избыточного вычитывания коллекции идентификаторов.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор плейлиста.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Кортеж модели плейлиста и точного количества треков или <c>null</c>.</returns>
     public async Task<(Playlist Playlist, int TrackCount)?> GetPlaylistWithCountAsync(
         string playlistId, CancellationToken ct = default)
     {
         var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
         if (playlist == null) return null;
 
-        var trackIds = await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
-        return (playlist, trackIds.Count);
+        var count = await _playlists.GetTrackCountAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
+        return (playlist, count);
     }
 
     public async Task<List<(Playlist Playlist, int TrackCount)>> GetAllPlaylistsWithCountsAsync(CancellationToken ct = default)

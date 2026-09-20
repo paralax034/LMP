@@ -174,7 +174,7 @@ public sealed class PlaylistSyncService
     #region Single Playlist CRUD & Item Mutations
 
     /// <summary>
-    /// Добавляет трек в плейлист с транзакционной синхронизацией в облако.
+    /// Добавляет трек в плейлист с транзакционной синхронизацией в облако и автоматическим даунгрейдом при 404.
     /// </summary>
     public async Task AddTrackToPlaylistAsync(
         string playlistId,
@@ -206,11 +206,36 @@ public sealed class PlaylistSyncService
                 if (!string.IsNullOrEmpty(setVideoId))
                     await _library.UpdateSetVideoIdAsync(playlistId, track.Id, setVideoId, ct);
             }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                await DowngradeDeadCloudPlaylistAsync(playlist, ct);
+            }
             catch (Exception ex)
             {
                 Log.Error($"[PlaylistSync] Add track to cloud failed: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Разрывает связь с облаком и переводит плейлист в локальный режим при обнаружении его удаления на YouTube.
+    /// </summary>
+    /// <param name="playlist">Экземпляр локального плейлиста.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    private async Task DowngradeDeadCloudPlaylistAsync(Playlist playlist, CancellationToken ct)
+    {
+        playlist.SyncMode = PlaylistSyncMode.LocalOnly;
+        playlist.YoutubeId = null;
+        playlist.IsCloudUnavailable = false;
+        await _library.AddOrUpdatePlaylistAsync(playlist, ct);
+
+        Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' (ID: {playlist.Id}) not found on YouTube (404). Converted to LocalOnly.");
+
+        await _dialog.ShowInfoAsync(
+            SL["Dialog_Warning_Title"] ?? "Warning",
+            string.Format(
+                SL["Playlist_NotFoundOnCloud_Downgraded"] ?? "Playlist \"{0}\" not found on YouTube and converted to local mode.",
+                playlist.Name));
     }
 
     /// <summary>
@@ -527,7 +552,7 @@ public sealed class PlaylistSyncService
 
     /// <summary>
     /// Строит снимок различий между локальным и облачным состоянием плейлиста.
-    /// Нормализует 11-значные идентификаторы треков и диагностирует единичные несовпадения.
+    /// Исключает повторный парсинг уже нормализованных идентификаторов и производит расчет расхождений за O(1).
     /// </summary>
     private async Task<PlaylistSyncPreview?> BuildPreviewAsync(
         Playlist playlist,
@@ -560,16 +585,16 @@ public sealed class PlaylistSyncService
                 await _library.AddOrUpdatePlaylistAsync(playlist, ct);
             }
 
-            // Нормализуем облачные ID до канонического 11-значного rawId
+            // Облачные ID приходят из InnerTube уже чистыми (11 символов) — индексируем напрямую
             var cloudVideoIds = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
             for (int i = 0; i < fullData.Tracks.Count; i++)
             {
-                var rawId = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
-                if (!string.IsNullOrEmpty(rawId))
-                    cloudVideoIds.Add(rawId);
+                var vid = fullData.Tracks[i].VideoId;
+                if (!string.IsNullOrEmpty(vid))
+                    cloudVideoIds.Add(vid);
             }
 
-            // Нормализуем локальные ID (отсекая yt_, yt_pl_ и возможные параметры)
+            // Локальные ID нормализуем один раз при наполнении множества
             var localIdSet = new HashSet<string>(localTrackIds.Count, StringComparer.Ordinal);
             for (int i = 0; i < localTrackIds.Count; i++)
             {
@@ -579,32 +604,14 @@ public sealed class PlaylistSyncService
             }
 
             int commonCount = 0;
-            int cloudOnlyCount = 0;
-
             for (int i = 0; i < fullData.Tracks.Count; i++)
             {
-                var rawId = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
-                if (localIdSet.Contains(rawId))
-                {
+                if (localIdSet.Contains(fullData.Tracks[i].VideoId))
                     commonCount++;
-                }
-                else
-                {
-                    cloudOnlyCount++;
-                    Log.Warn($"[PlaylistSync] Несовпадение (есть только в облаке): rawId='{rawId}', title='{fullData.Tracks[i].Title}'");
-                }
             }
 
-            int localOnlyCount = 0;
-            for (int i = 0; i < localTrackIds.Count; i++)
-            {
-                var rawId = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
-                if (!cloudVideoIds.Contains(rawId))
-                {
-                    localOnlyCount++;
-                    Log.Warn($"[PlaylistSync] Несовпадение (есть только локально): trackId='{localTrackIds[i]}', rawId='{rawId}'");
-                }
-            }
+            int cloudOnlyCount = fullData.Tracks.Count - commonCount;
+            int localOnlyCount = localIdSet.Count - commonCount;
 
             Log.Debug($"[PlaylistSync] Diff: common={commonCount}, " +
                       $"cloudOnly={cloudOnlyCount}, localOnly={localOnlyCount}");

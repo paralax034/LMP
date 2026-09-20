@@ -290,11 +290,11 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     private async Task AddToPlaylistAsync()
     {
-        var selectedIds = await _dialog.ShowAddToPlaylistDialogAsync(Track).ConfigureAwait(false);
+        var selectedIds = await _dialog.ShowAddToPlaylistDialogAsync(Track);
         if (selectedIds.Count == 0) return;
 
         foreach (var playlistId in selectedIds)
-            await _syncService.AddTrackToPlaylistAsync(playlistId, Track).ConfigureAwait(false);
+            await _syncService.AddTrackToPlaylistAsync(playlistId, Track);
     }
 
     private async Task CopyLinkAsync()

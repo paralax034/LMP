@@ -76,7 +76,7 @@
 
   "Client_AndroidVR": "Android VR (Рекомендуется)",
   "Client_TV": "Smart TV / Консоль",
-  "Client_Web": "Веб-бра  ер",
+  "Client_Web": "Веб-браузер",
 
   "CloseAction_Ask": "Спрашивать каждый раз",
   "CloseAction_Exit": "Закрыть приложение",
@@ -392,8 +392,10 @@
   "Playlist_Liked": "Понравившиеся треки",
   "Playlist_LinkCopied": "Ссылка скопирована!",
   "Playlist_LinkingToCloud": "Привязка к YouTube Music...",
+  "Playlist_NotFoundOnCloud_Downgraded": "Плейлист \"{0}\" не найден на YouTube и переведён в локальный режим.",
   "Playlist_Open": "Открыть",
   "Playlist_OpenAuthorChannel": "Открыть канал автора",
+  "Playlist_OrphansCleaned": "Отвязано плейлистов, удалённых с YouTube: {0}",
   "Playlist_PlayAll": "Воспроизвести (заменить очередь)",
   "Playlist_Private": "Приватный",
   "Playlist_Private_Tooltip": "Этот плейлист виден только владельцу",

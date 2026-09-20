@@ -178,8 +178,7 @@ public sealed class PlaylistEditService
                     await _notifications.ShowToastAsync(
                         titleKey: "Dialog_Warning_Title",
                         messageKey: "Error_InvalidThumbnailUrl",
-                        severity: NotificationSeverity.Warning,
-                        durationMs: 4000);
+                        severity: NotificationSeverity.Warning);
                 }
             }
             else
@@ -320,8 +319,7 @@ public sealed class PlaylistEditService
                 titleKey: "Dialog_Error_Title",
                 messageKey: "EditPlaylist_CopyFailed",
                 messageArgs: [ex.Message],
-                severity: NotificationSeverity.Error,
-                durationMs: 4000);
+                severity: NotificationSeverity.Error);
 
             _notifications.TryPlayErrorSound();
             return null;
@@ -396,8 +394,7 @@ public sealed class PlaylistEditService
                 await _notifications.ShowToastAsync(
                     titleKey: "Dialog_Error_Title",
                     messageKey: "Playlist_CloudCreateFailed",
-                    severity: NotificationSeverity.Error,
-                    durationMs: 4000);
+                    severity: NotificationSeverity.Error);
 
                 _notifications.TryPlayErrorSound();
                 return false;

@@ -1379,8 +1379,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
                 await _notifications.ShowToastAsync(
                     titleKey: SL["Dialog_Success"] ?? "Success",
                     messageKey: string.Format(SL["Auth_LoggedInAs"] ?? "Signed in: {0}", _auth.State.UserName),
-                    severity: NotificationSeverity.Success,
-                    durationMs: 4000);
+                    severity: NotificationSeverity.Success);
             }
         }
         finally
@@ -1428,8 +1427,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             await _notifications.ShowToastAsync(
                 titleKey: SL["Dialog_Success"] ?? "Success",
                 messageKey: string.Format(SL["Auth_LoggedInAs"] ?? "Signed in: {0}", selectedAccount.Name),
-                severity: NotificationSeverity.Success,
-                durationMs: 4000);
+                severity: NotificationSeverity.Success);
         }
         catch (LoginRequiredException ex) when (ex.Reason == LoginRequiredReason.SessionExpired)
         {

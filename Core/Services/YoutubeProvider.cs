@@ -347,19 +347,27 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Добавляет один трек в существующий облачный плейлист.
+    /// Добавляет один трек в существующий облачный плейлист с пробросом исключений отсутствия ресурса (404).
     /// </summary>
+    /// <param name="playlistId">Идентификатор целевого плейлиста.</param>
+    /// <param name="trackId">Идентификатор добавляемого трека.</param>
+    /// <returns>Идентификатор созданной связи (setVideoId) или <c>null</c> при отсутствии авторизации.</returns>
     public async Task<string?> AddToPlaylistAsync(string playlistId, string trackId)
     {
         if (AuthService?.IsAuthenticated != true) return null;
         try
         {
-            var rawId = YoutubeIdHelper.ExtractRawIdSpan(trackId).ToString();
+            var rawId = YoutubeIdHelper.ExtractRawId(trackId);
             var setVideoIds = await _youtube.Mutations.AddTracksAsync(playlistId, [rawId]);
             var result = setVideoIds.Count > 0 ? setVideoIds[0] : null;
             if (!string.IsNullOrEmpty(result))
                 Log.Debug($"[Music] Added {rawId} to {playlistId}, setVideoId={result}");
             return result;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            Log.Warn($"[Music] Playlist {playlistId} not found on YouTube (404).");
+            throw;
         }
         catch (Exception ex)
         {
@@ -1632,7 +1640,7 @@ public partial class YoutubeProvider : IDisposable
 
     /// <summary>
     /// Импортирует плейлист: загружает метаданные и все треки единым запросом,
-    /// определяет ownership и visibility, сохраняет треки в БД.
+    /// сохраняет соответствия SetVideoId в локальную БД для исключения повторных запросов browse при удалении.
     /// </summary>
     public async Task<Playlist?> ImportPlaylistAsync(
         string playlistId, bool isAccountSync = false, CancellationToken ct = default)
@@ -1669,6 +1677,32 @@ public partial class YoutubeProvider : IDisposable
                     ct.ThrowIfCancellationRequested();
                     await _libraryService.AddOrUpdateTrackAsync(tracks[i], ct).ConfigureAwait(false);
                     playlist.TrackIds.Add(tracks[i].Id);
+                }
+
+                // Извлечение и фиксация связей SetVideoId для исключения сетевых browse-запросов при будущем удалении
+                if (isAccountSync && AuthService?.IsAuthenticated == true && !string.IsNullOrEmpty(playlist.YoutubeId))
+                {
+                    try
+                    {
+                        var fullData = await _youtube.Sync.GetFullPlaylistDataAsync(playlist.YoutubeId, ct).ConfigureAwait(false);
+                        if (fullData?.Tracks is { Count: > 0 } remoteTracks)
+                        {
+                            var mappings = new List<(string TrackId, string SetVideoId)>(remoteTracks.Count);
+                            for (int i = 0; i < remoteTracks.Count; i++)
+                            {
+                                var r = remoteTracks[i];
+                                if (!string.IsNullOrEmpty(r.SetVideoId))
+                                    mappings.Add(("yt_" + r.VideoId, r.SetVideoId));
+                            }
+
+                            if (mappings.Count > 0)
+                                await _libraryService.UpdateSetVideoIdsAsync(playlist.Id, mappings, ct).ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"[YouTube] Non-fatal: failed to cache setVideoIds during import of {playlistId}: {ex.Message}");
+                    }
                 }
             }
             else
