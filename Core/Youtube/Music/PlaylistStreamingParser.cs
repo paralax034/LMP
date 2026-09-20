@@ -13,6 +13,7 @@ namespace LMP.Core.Youtube.Music;
 internal static class PlaylistStreamingParser
 {
     private const string GreyOutPolicy = "MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT";
+    private const string PlaceholderSetVideoId = "to_be_updated_by_client";
 
     private static readonly JsonReaderOptions ReaderOptions = new()
     {
@@ -23,6 +24,7 @@ internal static class PlaylistStreamingParser
     /// <summary>
     /// Выполняет потоковый разбор ответа <c>browse</c> плейлиста.
     /// Извлекает метаданные шапки, начальную партию треков и продолжение за один проход.
+    /// Треки и токен продолжения извлекаются строго из полки плейлиста, игнорируя посторонние секции страницы.
     /// </summary>
     /// <param name="stream">Сетевой поток HTTP-ответа.</param>
     /// <param name="ct">Токен отмены операции.</param>
@@ -37,11 +39,17 @@ internal static class PlaylistStreamingParser
         var result = new FullPlaylistSyncData();
         string? continuationToken = null;
         string? visitorData = null;
+        int playlistShelfDepth = -1;
 
         var reader = new Utf8JsonReader(buffer.WrittenSpan, ReaderOptions);
 
         while (reader.Read())
         {
+            if (playlistShelfDepth != -1 && reader.CurrentDepth < playlistShelfDepth)
+            {
+                playlistShelfDepth = -1;
+            }
+
             if (reader.TokenType != JsonTokenType.PropertyName)
                 continue;
 
@@ -53,7 +61,7 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // 2. Изолированный парсинг шапки (Парето-оптимизация: ~3 КБ вместо 1 МБ)
+            // 2. Изолированный парсинг шапки
             if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveHeaderRenderer) ||
                 reader.ValueTextEquals(InnerTubeTokens.MusicDetailHeaderRenderer) ||
                 reader.ValueTextEquals(InnerTubeTokens.MusicEditablePlaylistDetailHeaderRenderer))
@@ -63,39 +71,52 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // 3. Сканирование треков YouTube Music (~1.5 КБ мини-объект в Gen 0 без сбоев глубины)
-            if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
+            // 3. Фиксация входа в полку треков плейлиста
+            if (playlistShelfDepth == -1 &&
+                (reader.ValueTextEquals("musicPlaylistShelfRenderer") ||
+                 reader.ValueTextEquals("playlistVideoListRenderer")))
             {
-                using var itemDoc = JsonDocument.ParseValue(ref reader);
-                if (TryParseMusicItem(itemDoc.RootElement, result.Tracks.Count, out var track))
+                if (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
                 {
-                    result.Tracks.Add(track);
+                    playlistShelfDepth = reader.CurrentDepth;
                 }
                 continue;
             }
 
-            // 4. Fallback: сканирование треков классического YouTube Web
-            if (reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoRenderer))
+            // 4. Сканирование треков строго внутри полки плейлиста
+            if (playlistShelfDepth != -1)
             {
-                using var itemDoc = JsonDocument.ParseValue(ref reader);
-                if (TryParseWebItem(itemDoc.RootElement, result.Tracks.Count, out var track))
+                if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
                 {
-                    result.Tracks.Add(track);
+                    using var itemDoc = JsonDocument.ParseValue(ref reader);
+                    if (TryParseMusicItem(itemDoc.RootElement, result.Tracks.Count, out var track))
+                    {
+                        result.Tracks.Add(track);
+                    }
+                    continue;
                 }
-                continue;
-            }
 
-            // 5. Поиск токена продолжения
-            if (reader.ValueTextEquals(InnerTubeTokens.ContinuationItemRenderer))
-            {
-                continuationToken ??= TryExtractContinuationItemToken(ref reader);
-                continue;
-            }
+                if (reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoRenderer))
+                {
+                    using var itemDoc = JsonDocument.ParseValue(ref reader);
+                    if (TryParseWebItem(itemDoc.RootElement, result.Tracks.Count, out var track))
+                    {
+                        result.Tracks.Add(track);
+                    }
+                    continue;
+                }
 
-            if (reader.ValueTextEquals(InnerTubeTokens.NextContinuationData))
-            {
-                continuationToken ??= TryExtractNextContinuationDataToken(ref reader);
-                continue;
+                if (reader.ValueTextEquals(InnerTubeTokens.ContinuationItemRenderer))
+                {
+                    continuationToken ??= TryExtractContinuationItemToken(ref reader);
+                    continue;
+                }
+
+                if (reader.ValueTextEquals(InnerTubeTokens.NextContinuationData))
+                {
+                    continuationToken ??= TryExtractNextContinuationDataToken(ref reader);
+                    continue;
+                }
             }
 
             // Мусорные узлы телеметрии сбрасываем мгновенно без рекурсии
@@ -113,6 +134,7 @@ internal static class PlaylistStreamingParser
 
     /// <summary>
     /// Потоковый разбор ответа продолжения пагинации (<c>continuation</c>).
+    /// Парсит только элементы продолжения треков (musicPlaylistShelfContinuation), игнорируя виджеты рекомендаций.
     /// </summary>
     /// <param name="stream">Сетевой поток HTTP-ответа продолжения.</param>
     /// <param name="currentTrackCount">Текущее количество треков в плейлисте для индексации позиции.</param>
@@ -128,11 +150,17 @@ internal static class PlaylistStreamingParser
         var tracks = new List<RemoteTrackInfo>(64);
         string? continuationToken = null;
         string? visitorData = null;
+        int continuationShelfDepth = -1;
 
         var reader = new Utf8JsonReader(buffer.WrittenSpan, ReaderOptions);
 
         while (reader.Read())
         {
+            if (continuationShelfDepth != -1 && reader.CurrentDepth < continuationShelfDepth)
+            {
+                continuationShelfDepth = -1;
+            }
+
             if (reader.TokenType != JsonTokenType.PropertyName)
                 continue;
 
@@ -143,36 +171,52 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
+            // Фиксация входа в продолжение полки треков
+            if (continuationShelfDepth == -1 &&
+                (reader.ValueTextEquals("musicPlaylistShelfContinuation") ||
+                 reader.ValueTextEquals("playlistVideoListContinuation")))
             {
-                using var itemDoc = JsonDocument.ParseValue(ref reader);
-                if (TryParseMusicItem(itemDoc.RootElement, currentTrackCount + tracks.Count, out var track))
+                if (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
                 {
-                    tracks.Add(track);
+                    continuationShelfDepth = reader.CurrentDepth;
                 }
                 continue;
             }
 
-            if (reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoRenderer))
+            // Парсим треки и continuation-токены исключительно внутри полки продолжения плейлиста
+            if (continuationShelfDepth != -1)
             {
-                using var itemDoc = JsonDocument.ParseValue(ref reader);
-                if (TryParseWebItem(itemDoc.RootElement, currentTrackCount + tracks.Count, out var track))
+                if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
                 {
-                    tracks.Add(track);
+                    using var itemDoc = JsonDocument.ParseValue(ref reader);
+                    if (TryParseMusicItem(itemDoc.RootElement, currentTrackCount + tracks.Count, out var track))
+                    {
+                        tracks.Add(track);
+                    }
+                    continue;
                 }
-                continue;
-            }
 
-            if (reader.ValueTextEquals(InnerTubeTokens.ContinuationItemRenderer))
-            {
-                continuationToken ??= TryExtractContinuationItemToken(ref reader);
-                continue;
-            }
+                if (reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoRenderer))
+                {
+                    using var itemDoc = JsonDocument.ParseValue(ref reader);
+                    if (TryParseWebItem(itemDoc.RootElement, currentTrackCount + tracks.Count, out var track))
+                    {
+                        tracks.Add(track);
+                    }
+                    continue;
+                }
 
-            if (reader.ValueTextEquals(InnerTubeTokens.NextContinuationData))
-            {
-                continuationToken ??= TryExtractNextContinuationDataToken(ref reader);
-                continue;
+                if (reader.ValueTextEquals(InnerTubeTokens.ContinuationItemRenderer))
+                {
+                    continuationToken ??= TryExtractContinuationItemToken(ref reader);
+                    continue;
+                }
+
+                if (reader.ValueTextEquals(InnerTubeTokens.NextContinuationData))
+                {
+                    continuationToken ??= TryExtractNextContinuationDataToken(ref reader);
+                    continue;
+                }
             }
 
             if (reader.ValueTextEquals(InnerTubeTokens.TrackingParams) ||
@@ -206,9 +250,12 @@ internal static class PlaylistStreamingParser
 
         var setVideoId = playlistItemData?.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
             ?? playlistItemData?.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
-            ?? musicRenderer.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
-            ?? musicRenderer.FindFirstDescendantProperty("playlistSetVideoId")?.GetStringOrNull()
-            ?? musicRenderer.FindFirstDescendantProperty("setVideoId")?.GetStringOrNull();
+            ?? musicRenderer.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull();
+
+        if (string.Equals(setVideoId, PlaceholderSetVideoId, StringComparison.OrdinalIgnoreCase))
+        {
+            setVideoId = null;
+        }
 
         var flexCols = musicRenderer.GetPropertyOrNull("flexColumns");
         var title = flexCols?.GetArrayElementOrNull(0)
@@ -298,9 +345,12 @@ internal static class PlaylistStreamingParser
             return false;
 
         var setVideoId = renderer.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
-            ?? renderer.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
-            ?? renderer.FindFirstDescendantProperty("playlistSetVideoId")?.GetStringOrNull()
-            ?? renderer.FindFirstDescendantProperty("setVideoId")?.GetStringOrNull();
+            ?? renderer.GetPropertyOrNull("setVideoId")?.GetStringOrNull();
+
+        if (string.Equals(setVideoId, PlaceholderSetVideoId, StringComparison.OrdinalIgnoreCase))
+        {
+            setVideoId = null;
+        }
 
         var title = renderer.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull()
             ?? YoutubeParsingHelpers.ConcatTextRuns(renderer.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
@@ -401,9 +451,16 @@ internal static class PlaylistStreamingParser
             ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull("text")?.GetStringOrNull()
             ?? targetElement.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
 
-        target.Description ??= targetElement.GetPropertyOrNull("description")?.GetPropertyOrNull("runs")
-            ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull("text")?.GetStringOrNull()
-            ?? targetElement.GetPropertyOrNull("description")?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+        // Извлечение описания: поддержка прямого runs (Web) и вложенного musicDescriptionShelfRenderer (YouTube Music)
+        var descContainer = targetElement.GetPropertyOrNull("description");
+        if (descContainer.HasValue)
+        {
+            var innerShelf = descContainer.Value.GetPropertyOrNull("musicDescriptionShelfRenderer");
+            var effectiveDesc = innerShelf?.GetPropertyOrNull("description") ?? descContainer.Value;
+
+            target.Description ??= YoutubeParsingHelpers.ConcatTextRuns(effectiveDesc.GetPropertyOrNull("runs"))
+                ?? effectiveDesc.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+        }
 
         var thumbs = targetElement.GetPropertyOrNull("thumbnail")?.GetPropertyOrNull("musicThumbnailRenderer")
             ?.GetPropertyOrNull("thumbnail")?.GetPropertyOrNull("thumbnails")

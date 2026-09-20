@@ -1,9 +1,12 @@
-﻿namespace LMP.Core.Models;
+﻿using MemoryPack;
+
+namespace LMP.Core.Models;
 
 /// <summary>
 /// Представляет состояние авторизации пользователя Google/YouTube.
 /// </summary>
-public sealed class AuthState
+[MemoryPackable]
+public sealed partial class AuthState
 {
     public const string DefaultAuthUser = "0";
 
@@ -45,8 +48,9 @@ public sealed class AuthState
     /// Использует Gaia ID при наличии, иначе email, с безусловным fallback на гостя.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public string DisplayId => !string.IsNullOrEmpty(ActiveGaiaId) 
-        ? ActiveGaiaId 
+    [MemoryPackIgnore]
+    public string DisplayId => !string.IsNullOrEmpty(ActiveGaiaId)
+        ? ActiveGaiaId
         : (!string.IsNullOrEmpty(UserEmail) ? UserEmail : "guest");
 
     public DateTime LastUpdated { get; set; } = DateTime.MinValue;

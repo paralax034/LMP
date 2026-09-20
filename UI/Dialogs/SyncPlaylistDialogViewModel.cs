@@ -55,13 +55,9 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
     public string? CloudThumbnailPreviewUrl => NormalizeThumbnailUrl(Preview.CloudThumbnailUrl);
 
     /// <summary>
-    /// Обложки отличаются (по нормализованному URL).
+    /// Обложки отличаются. Использует единую логику сравнения из снимка превью.
     /// </summary>
-    public bool ThumbnailDiffers =>
-        !string.Equals(
-            NormalizeThumbnailUrl(Preview.LocalThumbnailUrl),
-            NormalizeThumbnailUrl(Preview.CloudThumbnailUrl),
-            StringComparison.OrdinalIgnoreCase);
+    public bool ThumbnailDiffers => Preview.ThumbnailDiffers;
 
     public string TrackDiffSummary
     {
@@ -118,8 +114,7 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
         SyncDescription = preview.DescriptionDiffers;
 
         // Thumbnail sync включён только если обложки реально различаются
-        // (нормализованное сравнение исключает ложные diff из-за query params)
-        SyncThumbnail = ThumbnailDiffers && HasThumbnailSection;
+        SyncThumbnail = preview.ThumbnailDiffers && HasThumbnailSection;
 
         SyncTracks = preview.TracksDiffer;
 
@@ -154,7 +149,7 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
     /// </summary>
     private static string? NormalizeThumbnailUrl(string? url)
     {
-        if (string.IsNullOrEmpty(url)) return url;
+        if (string.IsNullOrWhiteSpace(url)) return null;
 
         if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {

@@ -178,8 +178,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        Settings = await _settings.GetOrDefaultAsync("AppSettings", new AppSettings(),
-            AppJsonContext.Default.AppSettings, ct);
+        Settings = await _settings.GetOrDefaultAsync("AppSettings", new AppSettings(), ct);
 
         bool requireSave = false;
 
@@ -200,12 +199,12 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         if (requireSave)
         {
-            await _settings.SetAsync("AppSettings", Settings, AppJsonContext.Default.AppSettings, ct).ConfigureAwait(false);
+            await _settings.SetAsync("AppSettings", Settings, ct).ConfigureAwait(false);
         }
 
         AudioSourceFactory.ApplyInternetProfile(Settings.InternetProfile);
 
-        var jsonPath = G.FilePath.Library;
+        var jsonPath = G.FilePath.LegacyDatabase;
         if (File.Exists(jsonPath))
         {
             await MigrateFromJsonAsync(jsonPath, ct).ConfigureAwait(false);
@@ -325,7 +324,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
             }
 
             Settings = MapLegacySettings(legacy);
-            await _settings.SetAsync("AppSettings", Settings, AppJsonContext.Default.AppSettings, ct).ConfigureAwait(false);
+            await _settings.SetAsync("AppSettings", Settings, ct).ConfigureAwait(false);
 
             var backup = path + $".migrated.{DateTime.Now:yyyyMMddHHmmss}";
             File.Move(path, backup);
@@ -849,7 +848,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         try
         {
-            await _settings.SetAsync("AppSettings", Settings, AppJsonContext.Default.AppSettings, ct).ConfigureAwait(false);
+            await _settings.SetAsync("AppSettings", Settings, ct).ConfigureAwait(false);
             Log.Info($"[LibraryService] Debounced settings flush completed (Volume={Settings.Volume}%)");
         }
         catch (OperationCanceledException) { throw; }
@@ -870,7 +869,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         _settingsLock.Wait();
         try
         {
-            _settings.Set("AppSettings", Settings, AppJsonContext.Default.AppSettings);
+            _settings.Set("AppSettings", Settings);
         }
         catch (Exception ex)
         {
@@ -891,14 +890,13 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     public async Task<List<string>> GetSearchHistoryAsync(CancellationToken ct = default)
     {
         var key = $"SearchHistory_{CurrentOwnerId}";
-        return await _settings.GetOrDefaultAsync(key, [],
-            AppJsonContext.Default.ListString, ct).ConfigureAwait(false);
+        return await _settings.GetOrDefaultAsync<List<string>>(key, [], ct).ConfigureAwait(false);
     }
 
     public async Task SaveSearchHistoryAsync(List<string> history, CancellationToken ct = default)
     {
         var key = $"SearchHistory_{CurrentOwnerId}";
-        await _settings.SetAsync(key, history, AppJsonContext.Default.ListString, ct).ConfigureAwait(false);
+        await _settings.SetAsync(key, history, ct).ConfigureAwait(false);
     }
 
     #endregion

@@ -1,13 +1,15 @@
 using System.Collections.Concurrent;
 using System.Text.Json.Serialization;
 using LMP.Core.Audio.Interfaces;
+using MemoryPack;
 
 namespace LMP.Core.Audio.Cache;
 
 /// <summary>
 /// Метаданные range-based кэша одного аудиопотока.
 /// </summary>
-public sealed class AudioCacheEntry
+[MemoryPackable]
+public sealed partial class AudioCacheEntry
 {
     /// <summary>Уникальный ключ кэша.</summary>
     public string CacheKey { get; init; } = "";
@@ -68,23 +70,29 @@ public sealed class AudioCacheEntry
     /// </summary>
     public List<SerializedDownloadedRange>? DownloadedRangesData { get; set; }
 
+    [MemoryPackIgnore]
     private long _downloadedBytes;
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     private List<CacheByteRange>? _downloadedRanges;
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     private readonly Lock _rangesLock = new();
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     private ConcurrentDictionary<long, byte>? _corruptedOfflineRanges;
 
     /// <summary>Точное количество байт, доступных локально.</summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public long DownloadedBytes => Volatile.Read(ref _downloadedBytes);
 
     /// <summary>Прогресс загрузки в процентах.</summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public double DownloadProgress =>
         TotalSize <= 0 ? 0 : Math.Min(100.0, (double)DownloadedBytes / TotalSize * 100.0);
 
@@ -411,7 +419,8 @@ public sealed class AudioCacheEntry
 /// <summary>
 /// Сериализуемый диапазон локально скачанных данных.
 /// </summary>
-public sealed class SerializedDownloadedRange
+[MemoryPackable]
+public sealed partial class SerializedDownloadedRange
 {
     /// <summary>Начало диапазона включительно.</summary>
     public long Start { get; set; }

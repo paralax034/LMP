@@ -187,6 +187,18 @@ public sealed class AppEntry
             return;
         }
 
+        // Страховочный бэкап базы данных перед проверкой и обновлением схемы
+        try
+        {
+            var bakPath = dbPath + ".bak";
+            File.Copy(dbPath, bakPath, overwrite: true);
+            Log.Info($"[DB] Safety backup created: {bakPath}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[DB] Failed to create safety database backup: {ex.Message}");
+        }
+
         int dbVersion = 0;
 
         try

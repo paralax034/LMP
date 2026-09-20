@@ -133,18 +133,74 @@ public sealed class PlaylistSyncPreview
     /// <summary>Кол-во общих треков.</summary>
     public int CommonTrackCount { get; init; }
 
+    /// <summary>Была ли обложка уже синхронизирована с облаком (локальный плейлист не редактировался после последней синхронизации).</summary>
+    public bool IsThumbnailAlreadySynced { get; init; }
+
+    /// <summary>ID плейлиста в YouTube для сопоставления студийных обложек.</summary>
+    public string? YoutubePlaylistId { get; init; }
+
     /// <summary>Есть ли отличия в названии.</summary>
     public bool NameDiffers =>
-        !string.Equals(LocalName, CloudName, StringComparison.Ordinal);
+        !string.Equals(LocalName?.Trim(), CloudName?.Trim(), StringComparison.Ordinal);
 
-    /// <summary>Есть ли отличия в описании.</summary>
-    public bool DescriptionDiffers =>
-        !string.Equals(LocalDescription?.Trim(), CloudDescription?.Trim(), StringComparison.Ordinal);
+    /// <summary>Есть ли отличия в описании (null и пустая строка считаются эквивалентными).</summary>
+    public bool DescriptionDiffers
+    {
+        get
+        {
+            var local = string.IsNullOrWhiteSpace(LocalDescription) ? string.Empty : LocalDescription.Trim();
+            var cloud = string.IsNullOrWhiteSpace(CloudDescription) ? string.Empty : CloudDescription.Trim();
+            return !string.Equals(local, cloud, StringComparison.Ordinal);
+        }
+    }
 
     /// <summary>Есть ли отличия в треках.</summary>
     public bool TracksDiffer => LocalOnlyTrackCount > 0 || CloudOnlyTrackCount > 0;
 
+    /// <summary>Есть ли отличия в обложке с учётом нормализации и локальных файлов.</summary>
+    public bool ThumbnailDiffers
+    {
+        get
+        {
+            // Если обе стороны не имеют обложки — различий нет
+            if (string.IsNullOrWhiteSpace(LocalThumbnailUrl) && string.IsNullOrWhiteSpace(CloudThumbnailUrl))
+                return false;
+
+            // Если локальный плейлист не изменялся после последней синхронизации, а в облаке уже есть студийная обложка
+            if (IsThumbnailAlreadySynced && !string.IsNullOrEmpty(CloudThumbnailUrl))
+                return false;
+
+            var localNorm = NormalizeUrl(LocalThumbnailUrl);
+            var cloudNorm = NormalizeUrl(CloudThumbnailUrl);
+
+            if (string.Equals(localNorm, cloudNorm, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            // Если оба URL указывают на студийную обложку текущего плейлиста в YouTube (независимо от параметров sqp=)
+            if (!string.IsNullOrEmpty(YoutubePlaylistId) &&
+                localNorm != null && cloudNorm != null &&
+                localNorm.Contains($"/pl_c/{YoutubePlaylistId}/", StringComparison.OrdinalIgnoreCase) &&
+                cloudNorm.Contains($"/pl_c/{YoutubePlaylistId}/", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return true;
+        }
+    }
+
     /// <summary>Есть ли какие-либо отличия.</summary>
     public bool HasAnyDifference =>
-        NameDiffers || DescriptionDiffers || TracksDiffer;
+        NameDiffers || DescriptionDiffers || TracksDiffer || ThumbnailDiffers;
+
+    private static string? NormalizeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            int q = url.IndexOf('?');
+            return q >= 0 ? url[..q] : url;
+        }
+        return url;
+    }
 }

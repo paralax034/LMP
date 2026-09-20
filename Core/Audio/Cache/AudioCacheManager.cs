@@ -7,15 +7,21 @@ using Microsoft.Win32.SafeHandles;
 using LMP.Core.Audio.Interfaces;
 using static LMP.Core.Audio.AudioConstants;
 using LMP.Core.Audio.Normalization;
+using MemoryPack;
 
 namespace LMP.Core.Audio.Cache;
 
-public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
+public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 {
     /// <summary>
     /// Текущая версия схемы metadata кэша.
     /// </summary>
     private const int CurrentSchemaVersion = 4;
+
+    /// <summary>
+    /// Имя бинарного файла индекса кэша.
+    /// </summary>
+    private const string CacheMetadataBinFileName = "cache_index.bin";
 
     /// <summary>
     /// Известные стандартные комбинации форматов и битрейтов YouTube для восстановления файлов-сирот.
@@ -33,7 +39,8 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Обёртка индекса кэша с версионированием схемы.
     /// </summary>
-    public sealed class AudioCacheIndexEnvelope
+    [MemoryPackable]
+    public sealed partial class AudioCacheIndexEnvelope
     {
         /// <summary>Версия схемы metadata.</summary>
         public int SchemaVersion { get; set; }
@@ -1242,14 +1249,64 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
 
     private void LoadIndex()
     {
-        var indexPath = Path.Combine(_cacheDirectory, CacheMetadataFileName);
-        var json = AtomicFile.ReadTextWithFallback(indexPath, out bool loadedFromBackup);
+        var binPath = Path.Combine(_cacheDirectory, CacheMetadataBinFileName);
+        var bytes = AtomicFile.ReadBytesWithFallback(binPath, out bool loadedFromBinaryBackup);
 
-        if (string.IsNullOrWhiteSpace(json))
+        if (bytes != null && bytes.Length > 0)
+        {
+            try
+            {
+                var envelope = MemoryPackSerializer.Deserialize<AudioCacheIndexEnvelope>(bytes);
+                if (envelope?.Entries != null)
+                {
+                    int restoredCount = 0;
+                    for (int i = 0; i < envelope.Entries.Count; i++)
+                    {
+                        var entry = envelope.Entries[i];
+                        if (string.IsNullOrEmpty(entry.CacheKey)) continue;
+
+                        string filePath = GetCachePath(entry.CacheKey);
+                        if (!File.Exists(filePath)) continue;
+
+                        entry.RestoreAfterLoad();
+                        UpdateFileSizeCache(entry);
+                        _entries.TryAdd(entry.CacheKey, entry);
+                        AddToTrackIndex(entry.TrackId, entry.CacheKey);
+                        restoredCount++;
+                    }
+
+                    Log.Info($"[AudioCache] Binary index loaded successfully (MemoryPack, v{envelope.SchemaVersion}): {restoredCount} entries restored");
+                    if (loadedFromBinaryBackup)
+                    {
+                        _ = SaveIndexAsync();
+                    }
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[AudioCache] Failed to deserialize binary index, trying JSON migration fallback: {ex.Message}");
+            }
+        }
+
+        var legacyIndexPath = Path.Combine(_cacheDirectory, CacheMetadataFileName);
+        if (File.Exists(legacyIndexPath))
+        {
+            MigrateLegacyJsonIndex(legacyIndexPath);
+        }
+        else
         {
             Log.Info("[AudioCache] Starting with fresh index (no valid index or backup found)");
-            return;
         }
+    }
+
+    /// <summary>
+    /// Изолированная миграция схемы индексов со старого JSON в бинарный MemoryPack.
+    /// </summary>
+    private void MigrateLegacyJsonIndex(string indexPath)
+    {
+        var json = AtomicFile.ReadTextWithFallback(indexPath, out _);
+        if (string.IsNullOrWhiteSpace(json)) return;
 
         try
         {
@@ -1356,12 +1413,20 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
                 AddToTrackIndex(entry.TrackId, entry.CacheKey);
             }
 
-            if (needsMigration || needsLufsMigration || needsBitrateMigration || migratedComplete > 0 || loadedFromBackup)
+            Log.Info($"[AudioCache] Legacy JSON index migrated to MemoryPack (Schema v{loadedSchemaVersion}→v{CurrentSchemaVersion}): " +
+                     $"{_entries.Count} entries restored");
+            SaveIndexSync();
+
+            try
             {
-                Log.Info($"[AudioCache] Index loaded successfully (Schema v{loadedSchemaVersion}→v{CurrentSchemaVersion}): " +
-                         $"{_entries.Count} entries restored");
-                _ = SaveIndexAsync();
+                var bak = indexPath + ".bak";
+                if (File.Exists(indexPath) && !File.Exists(bak))
+                    File.Copy(indexPath, bak, overwrite: true);
+
+                if (File.Exists(indexPath))
+                    File.Delete(indexPath);
             }
+            catch { }
 
             Log.Debug($"[AudioCache] Loaded {_entries.Count} entries");
         }
@@ -1372,7 +1437,7 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Атомарно сохраняет индекс кэша на диск с созданием резервной копии (.bak).
+    /// Атомарно сохраняет индекс кэша на диск в бинарном формате.
     /// </summary>
     private async Task SaveIndexAsync()
     {
@@ -1381,9 +1446,10 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
 
         try
         {
-            var json = BuildIndexJson();
-            var indexPath = Path.Combine(_cacheDirectory, CacheMetadataFileName);
-            await AtomicFile.WriteTextAsync(indexPath, json, createBackup: true).ConfigureAwait(false);
+            var envelope = BuildIndexEnvelope();
+            byte[] bytes = MemoryPackSerializer.Serialize(envelope);
+            var binPath = Path.Combine(_cacheDirectory, CacheMetadataBinFileName);
+            await AtomicFile.WriteBytesAsync(binPath, bytes, createBackup: false, ct: CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1405,9 +1471,10 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
 
         try
         {
-            var json = BuildIndexJson();
-            var indexPath = Path.Combine(_cacheDirectory, CacheMetadataFileName);
-            AtomicFile.WriteText(indexPath, json, createBackup: true);
+            var envelope = BuildIndexEnvelope();
+            byte[] bytes = MemoryPackSerializer.Serialize(envelope);
+            var binPath = Path.Combine(_cacheDirectory, CacheMetadataBinFileName);
+            AtomicFile.WriteBytes(binPath, bytes, createBackup: false);
         }
         catch (Exception ex)
         {
@@ -1456,9 +1523,9 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Строит JSON индекса кэша из текущего состояния _entries.
+    /// Строит объект конверта индекса кэша из текущего состояния _entries.
     /// </summary>
-    private string BuildIndexJson()
+    private AudioCacheIndexEnvelope BuildIndexEnvelope()
     {
         var sourceEntries = _entries.Values.ToList();
         var snapshotEntries = new List<AudioCacheEntry>(sourceEntries.Count);
@@ -1506,13 +1573,11 @@ public sealed class AudioCacheManager : IAsyncDisposable, IDisposable
             snapshotEntries.Add(clone);
         }
 
-        var envelope = new AudioCacheIndexEnvelope
+        return new AudioCacheIndexEnvelope
         {
             SchemaVersion = CurrentSchemaVersion,
             Entries = snapshotEntries
         };
-
-        return JsonSerializer.Serialize(envelope, AppJsonContext.Default.AudioCacheIndexEnvelope);
     }
 
     private async Task AutoSaveLoopAsync(CancellationToken ct)

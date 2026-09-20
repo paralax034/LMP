@@ -247,6 +247,51 @@ internal sealed class PlaylistMutationController(HttpClient http)
     }
 
     /// <summary>
+    /// Пакетно перемещает треки внутри плейлиста на YouTube.
+    /// Поддерживает ACTION_MOVE_VIDEO_AFTER и ACTION_MOVE_VIDEO_BEFORE.
+    /// </summary>
+    public async Task MoveTracksAsync(
+        string playlistId,
+        IReadOnlyList<(string SetVideoId, string? PredecessorSetVideoId, string? SuccessorSetVideoId)> moves,
+        CancellationToken ct = default)
+    {
+        if (moves.Count == 0) return;
+
+        var cleanPlaylistId = SanitizePlaylistId(playlistId);
+
+        var root = await PostAsync("browse/edit_playlist?prettyPrint=false", writer =>
+        {
+            writer.WriteString("playlistId", cleanPlaylistId);
+            writer.WriteString("params", "CAFAAQ%3D%3D");
+
+            writer.WriteStartArray("actions");
+            for (int i = 0; i < moves.Count; i++)
+            {
+                var (setVideoId, predecessor, successor) = moves[i];
+                writer.WriteStartObject();
+
+                if (!string.IsNullOrEmpty(predecessor))
+                {
+                    writer.WriteString("action", "ACTION_MOVE_VIDEO_AFTER");
+                    writer.WriteString("setVideoId", setVideoId);
+                    writer.WriteString("movedSetVideoIdPredecessor", predecessor);
+                }
+                else if (!string.IsNullOrEmpty(successor))
+                {
+                    writer.WriteString("action", "ACTION_MOVE_VIDEO_BEFORE");
+                    writer.WriteString("setVideoId", setVideoId);
+                    writer.WriteString("movedSetVideoIdSuccessor", successor);
+                }
+
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }, ct);
+
+        CheckStatus(root);
+    }
+
+    /// <summary>
     /// Batch removes tracks from a playlist. Only setVideoId is needed.
     /// </summary>
     public async Task RemoveTracksAsync(
@@ -263,10 +308,10 @@ internal sealed class PlaylistMutationController(HttpClient http)
         for (int i = 0; i < setVideoIds.Count; i++)
         {
             var sId = setVideoIds[i];
-            if (!string.IsNullOrWhiteSpace(sId))
+            if (!string.IsNullOrWhiteSpace(sId) && !sId.Equals("to_be_updated_by_client", StringComparison.OrdinalIgnoreCase))
                 validSetVideoIds.Add(sId);
             else
-                Log.Warn($"[PlaylistMutation] Skipping track removal at index {i}: empty setVideoId");
+                Log.Warn($"[PlaylistMutation] Skipping track removal at index {i}: empty or invalid setVideoId '{sId}'");
         }
 
         if (validSetVideoIds.Count == 0)

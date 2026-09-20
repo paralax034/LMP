@@ -1,10 +1,12 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MemoryPack;
 
 namespace LMP.Core.Services;
 
-public sealed class CachedSearchResult
+[MemoryPackable]
+public sealed partial class CachedSearchResult
 {
     public string Query { get; set; } = "";
     public string Source { get; set; } = "";
@@ -69,12 +71,34 @@ public sealed class SearchCacheService
         try
         {
             var filePath = GetFilePath(key);
-            if (!File.Exists(filePath)) return null;
+            CachedSearchResult? cached = null;
 
-            var (json, _) = await AtomicFile.ReadTextWithFallbackAsync(filePath).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json)) return null;
-
-            var cached = JsonSerializer.Deserialize(json, AppJsonContext.Default.CachedSearchResult);
+            if (File.Exists(filePath))
+            {
+                var (bytes, _) = await AtomicFile.ReadBytesWithFallbackAsync(filePath).ConfigureAwait(false);
+                if (bytes != null && bytes.Length > 0)
+                {
+                    cached = MemoryPackSerializer.Deserialize<CachedSearchResult>(bytes);
+                }
+            }
+            else
+            {
+                var legacyJsonPath = Path.ChangeExtension(filePath, ".json");
+                if (File.Exists(legacyJsonPath))
+                {
+                    var (json, _) = await AtomicFile.ReadTextWithFallbackAsync(legacyJsonPath).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(json))
+                    {
+                        cached = JsonSerializer.Deserialize(json, AppJsonContext.Default.CachedSearchResult);
+                        if (cached != null)
+                        {
+                            byte[] bin = MemoryPackSerializer.Serialize(cached);
+                            await AtomicFile.WriteBytesAsync(filePath, bin, createBackup: false).ConfigureAwait(false);
+                            try { File.Delete(legacyJsonPath); } catch { }
+                        }
+                    }
+                }
+            }
 
             if (cached == null) return null;
 
@@ -124,9 +148,9 @@ public sealed class SearchCacheService
         try
         {
             var filePath = GetFilePath(key);
-            var json = JsonSerializer.Serialize(cached, AppJsonContext.Default.CachedSearchResult);
-            await AtomicFile.WriteTextAsync(filePath, json, createBackup: false).ConfigureAwait(false);
-            Log.Debug($"[SearchCache] Stored: '{query}' ({source}), {tracks.Count} items");
+            byte[] bytes = MemoryPackSerializer.Serialize(cached);
+            await AtomicFile.WriteBytesAsync(filePath, bytes, createBackup: false).ConfigureAwait(false);
+            Log.Debug($"[SearchCache] Stored: '{query}' ({source}), {tracks.Count} items [MemoryPack]");
         }
         catch (Exception ex)
         {
@@ -149,6 +173,7 @@ public sealed class SearchCacheService
         {
             var filePath = GetFilePath(key);
             TryDeleteFile(filePath);
+            TryDeleteFile(Path.ChangeExtension(filePath, ".json"));
             Log.Debug($"[SearchCache] Invalidated: '{query}' ({source})");
         }
         catch { }
@@ -205,7 +230,8 @@ public sealed class SearchCacheService
             EnsureCacheDirectoryExists();
 
             var ttl = CacheTtl;
-            var files = Directory.GetFiles(G.Folder.SearchCache, "*.json")
+            var files = Directory.GetFiles(G.Folder.SearchCache, "*.bin")
+                .Concat(Directory.GetFiles(G.Folder.SearchCache, "*.json"))
                 .Select(static f => new FileInfo(f))
                 .OrderByDescending(static f => f.LastWriteTimeUtc)
                 .ToList();
@@ -281,7 +307,7 @@ public sealed class SearchCacheService
     }
 
     private static string GetFilePath(string key) =>
-        Path.Combine(G.Folder.SearchCache, $"{key}.json");
+        Path.Combine(G.Folder.SearchCache, $"{key}.bin");
 
     private static void EnsureCacheDirectoryExists()
     {
@@ -306,7 +332,7 @@ public sealed class SearchCacheService
         try
         {
             EnsureCacheDirectoryExists();
-            foreach (var file in Directory.GetFiles(G.Folder.SearchCache, "*.json"))
+            foreach (var file in Directory.GetFiles(G.Folder.SearchCache, "*.*"))
                 TryDeleteFile(file);
 
             Log.Info("[SearchCache] Cleared all cache");
@@ -323,7 +349,7 @@ public sealed class SearchCacheService
         lock (_memoryCache) { memCount = _memoryCache.Count; }
 
         EnsureCacheDirectoryExists();
-        var files = Directory.GetFiles(G.Folder.SearchCache, "*.json");
+        var files = Directory.GetFiles(G.Folder.SearchCache, "*.bin");
         long size = files.Sum(static f => new FileInfo(f).Length);
         int ttl = (int)CacheTtl.TotalMinutes;
         return (memCount, files.Length, size, ttl);

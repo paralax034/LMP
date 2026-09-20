@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using MemoryPack;
 
 namespace LMP.Core.Youtube.Bridge.Common;
 
@@ -7,7 +8,7 @@ namespace LMP.Core.Youtube.Bridge.Common;
 /// Обеспечивает высокопроизводительное и потокобезопасное кэширование дешифрованных значений (string -> string)
 /// с автоматическим сохранением и фоновой очисткой устаревших записей на диске.
 /// </summary>
-public sealed class DecryptorCache
+public sealed partial class DecryptorCache
 {
     private readonly ConcurrentDictionary<string, (string Value, long Ticks)> _memory = new(StringComparer.Ordinal);
     private readonly int _maxMemory;
@@ -112,33 +113,88 @@ public sealed class DecryptorCache
 
         try
         {
-            var (json, recovered) = await AtomicFile.ReadTextWithFallbackAsync(DiskPath).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json)) return;
-
-            if (recovered)
-                Log.Warn($"[Cache] Recovered decryptor cache from backup (.bak) for {Path.GetFileName(DiskPath)}");
-
-            var data = JsonSerializer.Deserialize(json, AppJsonContext.Default.DecryptorCacheData);
-
-            if (data is null || data.PlayerVersion != playerVersion)
+            var (binary, recovered) = await AtomicFile.ReadBytesWithFallbackAsync(DiskPath).ConfigureAwait(false);
+            if (binary != null && binary.Length > 0)
             {
-                Clear();
-                return;
+                if (recovered)
+                    Log.Warn($"[Cache] Recovered decryptor cache from backup (.bak) for {Path.GetFileName(DiskPath)}");
+
+                var binData = MemoryPackSerializer.Deserialize<DecryptorCacheData>(binary);
+                if (binData != null)
+                {
+                    if (binData.PlayerVersion != "unknown" && binData.PlayerVersion != playerVersion)
+                    {
+                        Clear();
+                        return;
+                    }
+
+                    var ticks = Environment.TickCount64;
+                    foreach (var kvp in binData.Entries)
+                    {
+                        if (kvp.Key is not null && kvp.Value is not null)
+                            _memory[kvp.Key] = (kvp.Value, ticks);
+                    }
+
+                    Log.Debug($"[Cache] Loaded {_memory.Count} entries from {Path.GetFileName(DiskPath)} [MemoryPack]");
+                    return;
+                }
             }
 
-            var ticks = Environment.TickCount64;
-            foreach (var kvp in data.Entries)
+            var legacyJsonPath = Path.ChangeExtension(DiskPath, ".json");
+            if (File.Exists(legacyJsonPath))
             {
-                if (kvp.Key is not null && kvp.Value is not null)
-                    _memory[kvp.Key] = (kvp.Value, ticks);
+                await MigrateLegacyJsonIfPresentAsync(legacyJsonPath, playerVersion).ConfigureAwait(false);
             }
-
-            Log.Debug($"[Cache] Loaded {_memory.Count} entries from {Path.GetFileName(DiskPath)}");
         }
         catch (Exception ex)
         {
             Log.Debug($"[Cache] Load failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Выполняет единоразовую миграцию устаревшего JSON кэша в бинарный MemoryPack формат.
+    /// </summary>
+    /// <param name="legacyJsonPath">Путь к старому JSON-файлу.</param>
+    /// <param name="playerVersion">Целевая версия плеера.</param>
+    private async Task MigrateLegacyJsonIfPresentAsync(string legacyJsonPath, string playerVersion)
+    {
+        var (json, jsonRecovered) = await AtomicFile.ReadTextWithFallbackAsync(legacyJsonPath).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(json)) return;
+
+        if (jsonRecovered)
+            Log.Warn($"[Cache] Recovered decryptor cache from legacy backup (.bak) for {Path.GetFileName(legacyJsonPath)}");
+
+        var data = JsonSerializer.Deserialize(json, AppJsonContext.Default.DecryptorCacheData);
+
+        if (data is null || (data.PlayerVersion != "unknown" && data.PlayerVersion != playerVersion))
+        {
+            Clear();
+            return;
+        }
+
+        var legacyTicks = Environment.TickCount64;
+        foreach (var kvp in data.Entries)
+        {
+            if (kvp.Key is not null && kvp.Value is not null)
+                _memory[kvp.Key] = (kvp.Value, legacyTicks);
+        }
+
+        Log.Info($"[Cache] Migrated {_memory.Count} entries from legacy JSON to MemoryPack for {Path.GetFileName(DiskPath)}");
+
+        Volatile.Write(ref _isDirty, 1);
+        await SaveAsync().ConfigureAwait(false);
+
+        try
+        {
+            var legacyBak = legacyJsonPath + ".bak";
+            if (File.Exists(legacyJsonPath) && !File.Exists(legacyBak))
+                File.Copy(legacyJsonPath, legacyBak, overwrite: true);
+
+            if (File.Exists(legacyJsonPath))
+                File.Delete(legacyJsonPath);
+        }
+        catch { }
     }
 
     public async Task SaveAsync()
@@ -164,8 +220,8 @@ public sealed class DecryptorCache
                 Entries = entries
             };
 
-            var json = JsonSerializer.Serialize(data, AppJsonContext.Default.DecryptorCacheData);
-            await AtomicFile.WriteTextAsync(DiskPath, json, createBackup: true).ConfigureAwait(false);
+            byte[] bytes = MemoryPackSerializer.Serialize(data);
+            await AtomicFile.WriteBytesAsync(DiskPath, bytes, createBackup: false).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -185,10 +241,6 @@ public sealed class DecryptorCache
                 File.Delete(DiskPath);
                 Log.Info($"[Cache] Deleted cache file on disk: {Path.GetFileName(DiskPath)}");
             }
-
-            var backupPath = string.Concat(DiskPath, ".bak");
-            if (File.Exists(backupPath))
-                File.Delete(backupPath);
         }
         catch (Exception ex)
         {
@@ -224,7 +276,8 @@ public sealed class DecryptorCache
         }
     }
 
-    public sealed class DecryptorCacheData
+    [MemoryPackable]
+    public sealed partial class DecryptorCacheData
     {
         public string PlayerVersion { get; set; } = "";
         public Dictionary<string, string> Entries { get; set; } = [];

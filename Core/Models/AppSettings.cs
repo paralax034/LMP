@@ -1,4 +1,5 @@
 using LMP.Core.Audio.Normalization;
+using MemoryPack;
 
 namespace LMP.Core.Models;
 
@@ -131,7 +132,8 @@ public enum AudioQualityPreference
     Standard
 }
 
-public sealed class ProxySettings
+[MemoryPackable]
+public sealed partial class ProxySettings
 {
     public bool Enabled { get; set; } = false;
     public string Host { get; set; } = "";
@@ -144,7 +146,8 @@ public sealed class ProxySettings
 /// <summary>
 /// Настройки хранения данных.
 /// </summary>
-public sealed class StorageSettings
+[MemoryPackable]
+public sealed partial class StorageSettings
 {
     /// <summary>
     /// Лимит кэша изображений в МБ.
@@ -174,7 +177,8 @@ public sealed class StorageSettings
 /// <summary>
 /// Настройки аудио системы.
 /// </summary>
-public sealed class AudioSettings
+[MemoryPackable]
+public sealed partial class AudioSettings
 {
     /// <summary>
     /// Включить boost громкости выше 100%.
@@ -259,7 +263,8 @@ public sealed class AudioSettings
 /// что устраняет жёсткие константы в коде сервиса.
 /// </para>
 /// </summary>
-public sealed class NotificationSettings
+[MemoryPackable]
+public sealed partial class NotificationSettings
 {
     /// <summary>
     /// Ширина панели уведомлений в пикселях.
@@ -292,7 +297,8 @@ public sealed class NotificationSettings
 /// <summary>
 /// Настройки автоматической очистки памяти.
 /// </summary>
-public sealed class MemorySettings
+[MemoryPackable]
+public sealed partial class MemorySettings
 {
     /// <summary>
     /// Включить автоматическую очистку памяти по таймеру.
@@ -314,7 +320,8 @@ public sealed class MemorySettings
 /// <summary>
 /// Application settings. Stored as JSON in Settings table.
 /// </summary>
-public sealed class AppSettings
+[MemoryPackable]
+public sealed partial class AppSettings
 {
     // === Audio ===
 

@@ -1,15 +1,18 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MemoryPack;
 
 namespace LMP.Core.Models;
 
-public sealed class BootstrapSettings
+[MemoryPackable]
+public sealed partial class BootstrapSettings
 {
     public string LanguageCode { get; set; } = "en";
     public bool IsFirstRun { get; set; } = true;
     public string? ThemeJson { get; set; }
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     private static readonly string FilePath = G.FilePath.Bootstrap;
 
     /// <summary>
@@ -27,19 +30,20 @@ public sealed class BootstrapSettings
     /// Используется для условного сброса критических конфигураций.
     /// </summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public bool AppUpdatedThisRun { get; private set; }
 
     public static BootstrapSettings Load()
     {
         try
         {
-            var json = AtomicFile.ReadTextWithFallback(FilePath, out bool recovered);
-            if (!string.IsNullOrWhiteSpace(json))
+            var bytes = AtomicFile.ReadBytesWithFallback(FilePath, out bool recovered);
+            if (bytes != null && bytes.Length > 0)
             {
                 if (recovered)
                     Log.Warn("[Bootstrap] Recovered settings from backup (.bak)");
 
-                var settings = JsonSerializer.Deserialize(json, AppJsonContext.Default.BootstrapSettings);
+                var settings = MemoryPackSerializer.Deserialize<BootstrapSettings>(bytes);
                 if (settings != null)
                 {
                     // ОЧИСТКА КЭША ПРИ ОБНОВЛЕНИИ ВЕРСИИ ПЛЕЕРА
@@ -62,10 +66,18 @@ public sealed class BootstrapSettings
                     }
                     else
                     {
-                        Log.Info($"[Bootstrap] Loaded: lang={settings.LanguageCode}");
+                        Log.Info($"[Bootstrap] Loaded: lang={settings.LanguageCode} [MemoryPack]");
                     }
                     return settings;
                 }
+            }
+
+            var legacyJsonPath = Path.ChangeExtension(FilePath, ".json");
+            if (File.Exists(legacyJsonPath))
+            {
+                var legacySettings = MigrateLegacyJsonBootstrap(legacyJsonPath);
+                if (legacySettings != null)
+                    return legacySettings;
             }
         }
         catch (Exception ex)
@@ -84,6 +96,70 @@ public sealed class BootstrapSettings
         defaults.Save();
 
         return defaults;
+    }
+
+    /// <summary>
+    /// Изолированная миграция устаревшего JSON файла настроек bootstrap в бинарный MemoryPack.
+    /// </summary>
+    /// <param name="legacyJsonPath">Физический путь к старому JSON-файлу.</param>
+    /// <returns>Экземпляр десериализованных настроек или <c>null</c> при сбое.</returns>
+    private static BootstrapSettings? MigrateLegacyJsonBootstrap(string legacyJsonPath)
+    {
+        try
+        {
+            var json = AtomicFile.ReadTextWithFallback(legacyJsonPath, out bool recovered);
+            if (string.IsNullOrWhiteSpace(json)) return null;
+
+            if (recovered)
+                Log.Warn("[Bootstrap] Recovered settings from legacy backup (.bak)");
+
+            var settings = JsonSerializer.Deserialize(json, AppJsonContext.Default.BootstrapSettings);
+            if (settings != null)
+            {
+                // ОЧИСТКА КЭША ПРИ ОБНОВЛЕНИИ ВЕРСИИ ПЛЕЕРА
+                if (settings.LastRunVersion != G.Build.Version)
+                {
+                    settings.AppUpdatedThisRun = true;
+                    Log.Info($"[Bootstrap] App updated: {settings.LastRunVersion} -> {G.Build.Version}. Purging obsolete bypass caches...");
+                    PurgeBypassCaches();
+                    settings.LastRunVersion = G.Build.Version;
+                }
+
+                // ПРОВЕРКА ПЕРВОГО ЗАПУСКА
+                if (settings.IsFirstRun)
+                {
+                    settings.LanguageCode = G.SystemInfo.DetectSystemLanguage();
+                    settings.IsFirstRun = false;
+                    Log.Info($"[Bootstrap] First run, detected language: {settings.LanguageCode}");
+                }
+                else
+                {
+                    Log.Info($"[Bootstrap] Loaded from legacy JSON: lang={settings.LanguageCode}");
+                }
+
+                settings.Save();
+
+                try
+                {
+                    var bak = legacyJsonPath + ".bak";
+                    if (File.Exists(legacyJsonPath) && !File.Exists(bak))
+                        File.Copy(legacyJsonPath, bak, overwrite: true);
+
+                    if (File.Exists(legacyJsonPath))
+                        File.Delete(legacyJsonPath);
+                }
+                catch { }
+
+                Log.Info("[Bootstrap] Migrated bootstrap settings from legacy JSON to MemoryPack");
+                return settings;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[Bootstrap] Legacy migration failed: {ex.Message}");
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -110,8 +186,8 @@ public sealed class BootstrapSettings
     {
         try
         {
-            var json = JsonSerializer.Serialize(this, AppJsonContext.Default.BootstrapSettings);
-            AtomicFile.WriteText(FilePath, json, createBackup: true);
+            byte[] bytes = MemoryPackSerializer.Serialize(this);
+            AtomicFile.WriteBytes(FilePath, bytes, createBackup: false);
         }
         catch (Exception ex)
         {

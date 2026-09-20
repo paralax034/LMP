@@ -156,4 +156,15 @@ public static class ManualTests
     /// <returns>Асинхронная задача выполнения диагностики.</returns>
     public static Task DiagnosePlaylistOrderAsync(string? playlistUrl = null) =>
         Integration.PlaylistOrderTests.DiagnosePlaylistOrderAsync(AppEntry.Services, playlistUrl);
+
+    /// <summary>
+    /// Запуск тестов сериализации, миграции и замеров аллокаций MemoryPack.
+    /// </summary>
+    public static async Task TestMemoryPackAsync()
+    {
+        await Unit.MemoryPackTests.TestAtomicFileBinaryBakRecoveryAsync();
+        await Unit.MemoryPackTests.TestAudioCacheBinaryRoundtripAndAllocationAsync();
+        await Unit.MemoryPackTests.TestSessionCacheBinaryRoundtripAsync();
+        await Unit.MemoryPackTests.TestSettingsRepositoryBinaryBlobAndLegacyMigrationAsync(AppEntry.Services);
+    }
 }

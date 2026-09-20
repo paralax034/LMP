@@ -77,23 +77,62 @@ public partial class CookieAuthService
     {
         try
         {
-            var (json, recovered) = await AtomicFile.ReadTextWithFallbackAsync(_authDataPath).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json)) return;
-
-            if (recovered)
-                Log.Warn("[Auth] Recovered auth profile from backup (.bak)");
-
-            var loadedState = JsonSerializer.Deserialize(json, AppJsonContext.DefaultCompact.AuthState);
-            if (loadedState != null)
+            var (binary, recovered) = await AtomicFile.ReadBytesWithFallbackAsync(_authDataPath).ConfigureAwait(false);
+            if (binary != null && binary.Length > 0)
             {
-                State = loadedState;
-                Log.Info($"[Auth] Profile restored from cache: {State.UserName}");
+                if (recovered)
+                    Log.Warn("[Auth] Recovered auth profile from backup (.bak)");
+
+                var loadedState = MemoryPack.MemoryPackSerializer.Deserialize<AuthState>(binary);
+                if (loadedState != null)
+                {
+                    State = loadedState;
+                    Log.Info($"[Auth] Profile restored from cache: {State.UserName} [MemoryPack]");
+                    return;
+                }
+            }
+
+            var legacyJsonPath = Path.ChangeExtension(_authDataPath, ".json");
+            if (File.Exists(legacyJsonPath))
+            {
+                await MigrateLegacyJsonAuthAsync(legacyJsonPath).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
             _profileLoadError = ex.Message;
             Log.Error($"[Auth] Failed to load auth data: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Изолированная миграция профиля авторизации из legacy JSON в бинарный MemoryPack.
+    /// </summary>
+    private async Task MigrateLegacyJsonAuthAsync(string legacyJsonPath)
+    {
+        var (json, jsonRecovered) = await AtomicFile.ReadTextWithFallbackAsync(legacyJsonPath).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(json)) return;
+
+        if (jsonRecovered)
+            Log.Warn("[Auth] Recovered auth profile from legacy backup (.bak)");
+
+        var legacyState = JsonSerializer.Deserialize(json, AppJsonContext.DefaultCompact.AuthState);
+        if (legacyState != null)
+        {
+            State = legacyState;
+            Log.Info($"[Auth] Profile restored from legacy cache: {State.UserName}");
+            SaveAuthData();
+
+            try
+            {
+                var bak = legacyJsonPath + ".bak";
+                if (File.Exists(legacyJsonPath) && !File.Exists(bak))
+                    File.Copy(legacyJsonPath, bak, overwrite: true);
+
+                if (File.Exists(legacyJsonPath))
+                    File.Delete(legacyJsonPath);
+            }
+            catch { }
         }
     }
 
@@ -721,25 +760,25 @@ public partial class CookieAuthService
     /// </summary>
     public void SaveAuthData()
     {
-        string json;
+        byte[] bytes;
         try
         {
-            json = JsonSerializer.Serialize(State, AppJsonContext.DefaultCompact.AuthState);
+            bytes = MemoryPack.MemoryPackSerializer.Serialize(State);
         }
         catch (Exception ex)
         {
             Log.Error($"[Auth] Failed to serialize auth data: {ex.Message}");
             return;
         }
-        _ = WriteAuthDataAsync(json);
+        _ = WriteAuthDataAsync(bytes);
     }
 
-    private async Task WriteAuthDataAsync(string json)
+    private async Task WriteAuthDataAsync(byte[] bytes)
     {
         await _authSaveSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
-            await AtomicFile.WriteTextAsync(_authDataPath, json, createBackup: true).ConfigureAwait(false);
+            await AtomicFile.WriteBytesAsync(_authDataPath, bytes, createBackup: false).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

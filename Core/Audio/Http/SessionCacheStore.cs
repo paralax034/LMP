@@ -4,6 +4,7 @@ using LMP.Core.Audio.Interfaces;
 using LMP.Core.Models.Json;
 using LMP.Core.Youtube.Utils;
 using LMP.Core.Youtube.Videos.Streams;
+using MemoryPack;
 
 namespace LMP.Core.Audio.Http;
 
@@ -12,7 +13,8 @@ namespace LMP.Core.Audio.Http;
 /// <summary>
 /// Один вариант аудиопотока внутри закэшированного манифеста.
 /// </summary>
-public sealed class VariantEntry
+[MemoryPackable]
+public sealed partial class VariantEntry
 {
     /// <summary>YouTube itag потока.</summary>
     public int Itag { get; set; }
@@ -37,6 +39,7 @@ public sealed class VariantEntry
     /// Не сериализуется и вычисляется из <see cref="Container"/>.
     /// </summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public AudioFormat Format => YoutubeIdHelper.MapContainerToFormat(Container);
 
     /// <summary>
@@ -44,6 +47,7 @@ public sealed class VariantEntry
     /// Не сериализуется и вычисляется из <see cref="Codec"/>.
     /// </summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public AudioCodec CodecType => Codec.ToAudioCodec(Format);
 
     /// <summary>Код языка аудиодорожки.</summary>
@@ -57,7 +61,8 @@ public sealed class VariantEntry
 /// Закэшированный полный манифест для одного трека.
 /// Содержит все доступные аудио-варианты с живыми URL.
 /// </summary>
-public sealed class TrackManifestEntry
+[MemoryPackable]
+public sealed partial class TrackManifestEntry
 {
     /// <summary>Идентификатор трека (с префиксом yt_).</summary>
     public required string TrackId { get; set; }
@@ -88,7 +93,8 @@ public sealed class TrackManifestEntry
 /// <summary>
 /// Конверт JSON-файла session-кэша.
 /// </summary>
-public sealed class SessionCacheEnvelope
+[MemoryPackable]
+public sealed partial class SessionCacheEnvelope
 {
     /// <summary>Закэшированные манифесты (LRU, max записей).</summary>
     public List<TrackManifestEntry> Manifests { get; set; } = [];
@@ -148,41 +154,88 @@ internal static class SessionCacheStore
     {
         try
         {
-            var path = G.FilePath.SessionCache;
-            var json = AtomicFile.ReadTextWithFallback(path, out bool recovered);
-            if (string.IsNullOrWhiteSpace(json))
-                return;
+            var binPath = G.FilePath.SessionCache;
+            var binary = AtomicFile.ReadBytesWithFallback(binPath, out bool recovered);
 
             if (recovered)
                 Log.Warn("[SessionCache] Recovered session cache from backup (.bak)");
 
-            var envelope = JsonSerializer.Deserialize(
-                json,
-                AppJsonContext.DefaultCompact.SessionCacheEnvelope);
-
-            if (envelope is null)
-                return;
-
-            lock (_lock)
+            if (binary != null && binary.Length > 0)
             {
-                _data = envelope;
-                EvictExpiredMustHoldLock();
+                var envelope = MemoryPackSerializer.Deserialize<SessionCacheEnvelope>(binary);
+                if (envelope != null)
+                {
+                    lock (_lock)
+                    {
+                        _data = envelope;
+                        EvictExpiredMustHoldLock();
+                    }
+
+                    int count, variants;
+                    lock (_lock)
+                    {
+                        count = _data.Manifests.Count;
+                        variants = CountTotalVariants();
+                    }
+
+                    Log.Debug($"[SessionCache] Loaded {count} manifest(s), {variants} variant(s) from binary store");
+                    return;
+                }
             }
 
-            int count, variants;
-            lock (_lock)
+            var legacyJsonPath = Path.ChangeExtension(binPath, ".json");
+            if (File.Exists(legacyJsonPath))
             {
-                count = _data.Manifests.Count;
-                variants = CountTotalVariants();
+                MigrateLegacyJsonIfPresent(legacyJsonPath);
             }
-
-            Log.Debug($"[SessionCache] Loaded {count} manifest(s), {variants} variant(s)");
         }
         catch (Exception ex)
         {
             Log.Warn($"[SessionCache] Load failed (starting fresh): {ex.Message}");
             lock (_lock) { _data = new SessionCacheEnvelope(); }
         }
+    }
+
+    /// <summary>
+    /// Изолированная миграция манифестов из legacy JSON в бинарный MemoryPack.
+    /// </summary>
+    private static void MigrateLegacyJsonIfPresent(string legacyJsonPath)
+    {
+        var json = AtomicFile.ReadTextWithFallback(legacyJsonPath, out bool jsonRecovered);
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+
+        if (jsonRecovered)
+            Log.Warn("[SessionCache] Recovered session cache from legacy backup (.bak)");
+
+        var legacyEnvelope = JsonSerializer.Deserialize(
+            json,
+            AppJsonContext.DefaultCompact.SessionCacheEnvelope);
+
+        if (legacyEnvelope is null)
+            return;
+
+        lock (_lock)
+        {
+            _data = legacyEnvelope;
+            EvictExpiredMustHoldLock();
+            _dirty = true;
+        }
+
+        Save();
+
+        try
+        {
+            var legacyBak = legacyJsonPath + ".bak";
+            if (File.Exists(legacyJsonPath) && !File.Exists(legacyBak))
+                File.Copy(legacyJsonPath, legacyBak, overwrite: true);
+
+            if (File.Exists(legacyJsonPath))
+                File.Delete(legacyJsonPath);
+        }
+        catch { }
+
+        Log.Info($"[SessionCache] Migrated {legacyEnvelope.Manifests.Count} manifest(s) from legacy JSON to MemoryPack");
     }
 
     /// <summary>
@@ -204,20 +257,18 @@ internal static class SessionCacheStore
 
         try
         {
-            string json = JsonSerializer.Serialize(
-                snapshot,
-                AppJsonContext.DefaultCompact.SessionCacheEnvelope);
+            byte[] binary = MemoryPackSerializer.Serialize(snapshot);
 
             lock (_saveIoLock)
             {
-                AtomicFile.WriteText(G.FilePath.SessionCache, json, createBackup: true);
+                AtomicFile.WriteBytes(G.FilePath.SessionCache, binary, createBackup: false);
             }
 
             int variants = 0;
             for (int i = 0; i < snapshot.Manifests.Count; i++)
                 variants += snapshot.Manifests[i].Variants.Count;
 
-            Log.Debug($"[SessionCache] Saved {snapshot.Manifests.Count} manifest(s), {variants} variant(s)");
+            Log.Debug($"[SessionCache] Saved {snapshot.Manifests.Count} manifest(s), {variants} variant(s) [binary]");
         }
         catch (Exception ex)
         {

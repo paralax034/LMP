@@ -1,6 +1,9 @@
+using MemoryPack;
+
 namespace LMP.Core.Models;
 
-public sealed class YoutubeAccountItem
+[MemoryPackable]
+public sealed partial class YoutubeAccountItem
 {
     public static LocalizationService L => LocalizationService.Instance;
 
@@ -12,7 +15,7 @@ public sealed class YoutubeAccountItem
     public string Name { get; set; } = "";
     public string Email { get; set; } = "";
     public string AvatarUrl { get; set; } = "";
-    
+
     /// <summary>
     /// Идентификатор Gaia основного аккаунта.
     /// </summary>
@@ -32,6 +35,6 @@ public sealed class YoutubeAccountItem
     /// Индекс сессии мульти-авторизации Google (обычно "0" для основного, "1", "2" для дополнительных).
     /// </summary>
     public string AuthUser { get; set; } = AuthState.DefaultAuthUser;
-    
+
     public bool IsSelected { get; set; }
 }

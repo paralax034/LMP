@@ -71,7 +71,14 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     partial void OnIsSyncingChanged(bool value)
     {
-        SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => SyncAccountPlaylistsCommand.NotifyCanExecuteChanged());
+        }
     }
 
     #endregion
@@ -450,8 +457,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     #region Синхронизация с YouTube
 
     /// <summary>
-    /// Выполняет синхронизацию плейлистов с аккаунтом YouTube Music.
-    /// Лайки синхронизируются отдельно и не запускаются скрыто в фоне.
+    /// Выполняет синхронизацию плейлистов и любимых треков с аккаунтом YouTube Music.
     /// Все изменения bindable-состояния выполняются строго на UI-потоке.
     /// </summary>
     private async Task SyncAccountPlaylistsAsync()
@@ -571,7 +577,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 if (fullPlaylist == null)
                 {
                     processed++;
-                    SyncProgress = 0.2 + (0.8 * processed / totalToProcess);
+                    SyncProgress = 0.2 + (0.65 * processed / totalToProcess);
                     continue;
                 }
 
@@ -630,8 +636,14 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 }
 
                 processed++;
-                SyncProgress = 0.2 + (0.8 * processed / totalToProcess);
+                SyncProgress = 0.2 + (0.65 * processed / totalToProcess);
             }
+
+            // Синхронизация любимых треков при общей синхронизации библиотеки (строго на UI-потоке)
+            ct.ThrowIfCancellationRequested();
+            SyncStatus = SL["Sync_LikedSongs"];
+            SyncProgress = 0.9;
+            await _manager.SyncLikedTracksAsync(ct);
 
             SyncProgress = 1.0;
             SyncStatus = SL["Sync_Complete"];
@@ -673,30 +685,33 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             {
             }
 
-            try
+            await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                _mainWindow.UnlockNavigation();
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"[Library] UnlockNavigation error: {ex.Message}");
-            }
-
-            if (!_isDisposed)
-            {
-                IsSyncing = false;
-                SyncProgress = 0;
-                SyncStatus = string.Empty;
-
                 try
                 {
-                    await LoadPlaylistsAsync();
+                    _mainWindow.UnlockNavigation();
                 }
                 catch (Exception ex)
                 {
-                    Log.Warn($"[Library] Post-sync reload error: {ex.Message}");
+                    Log.Warn($"[Library] UnlockNavigation error: {ex.Message}");
                 }
-            }
+
+                if (!_isDisposed)
+                {
+                    IsSyncing = false;
+                    SyncProgress = 0;
+                    SyncStatus = string.Empty;
+
+                    try
+                    {
+                        await LoadPlaylistsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"[Library] Post-sync reload error: {ex.Message}");
+                    }
+                }
+            });
         }
     }
 

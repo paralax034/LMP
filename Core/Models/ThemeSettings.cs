@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using MemoryPack;
 
 namespace LMP.Core.Models;
 
@@ -6,7 +7,8 @@ namespace LMP.Core.Models;
 /// Настройки темы приложения.
 /// Все цвета хранятся в HEX-формате (#RRGGBB или #AARRGGBB).
 /// </summary>
-public sealed class ThemeSettings
+[MemoryPackable]
+public sealed partial class ThemeSettings
 {
     /// <summary>Имя темы для отображения</summary>
     public string Name { get; set; } = "Paralax Purple";
@@ -78,6 +80,7 @@ public sealed class ThemeSettings
     // SERIALIZATION
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     public bool IsBuiltIn { get; init; }
 
     public override string ToString() => Name;

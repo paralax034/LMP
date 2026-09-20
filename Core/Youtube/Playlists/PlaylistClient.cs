@@ -11,17 +11,17 @@ public sealed class PlaylistClient(HttpClient http)
     private static readonly string[] MusicKeywords =
     [
         "official video", "official music", "official audio", "music video",
-    "lyrics", "lyric video", "(audio)", "[audio]", "ft.", "feat.",
-    "official mv", "m/v", "visualizer", "acoustic", "remix", "cover",
-    "live performance", "official lyric", "audio only"
+        "lyrics", "lyric video", "(audio)", "[audio]", "ft.", "feat.",
+        "official mv", "m/v", "visualizer", "acoustic", "remix", "cover",
+        "live performance", "official lyric", "audio only"
     ];
 
     private static readonly string[] NonMusicKeywords =
     [
         "tutorial", "how to", "review", "unboxing", "gameplay", "walkthrough",
-    "podcast", "interview", "news", "trailer", "teaser", "behind the scenes",
-    "making of", "reaction", "compilation", "best of", "highlights",
-    "episode", "ep.", "part ", "chapter", "lecture", "course"
+        "podcast", "interview", "news", "trailer", "teaser", "behind the scenes",
+        "making of", "reaction", "compilation", "best of", "highlights",
+        "episode", "ep.", "part ", "chapter", "lecture", "course"
     ];
 
     /// <summary>

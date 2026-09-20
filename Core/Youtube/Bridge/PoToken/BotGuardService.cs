@@ -848,12 +848,10 @@ public sealed class BotGuardService : IDisposable
     [Conditional("DEBUG")]
     private void BeginTraceCapture(string operationName)
     {
-#if DEBUG
         if (_handle == IntPtr.Zero) return;
         Common.QuickJsNative.TraceEnable(_handle, true);
         Common.QuickJsNative.TraceReset(_handle);
         Log.Debug($"[BotGuardService] Trace reset for {operationName}");
-#endif
     }
 
     private string CollectTraceData()

@@ -1,6 +1,7 @@
 using LMP.Core.Services;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Music;
+using LMP.Core.Youtube.Utils;
 
 namespace LMP.UI.Services;
 
@@ -136,7 +137,7 @@ public sealed class PlaylistSyncService
 
     /// <summary>
     /// Строит снимок различий между локальным и облачным состоянием плейлиста.
-    /// При недоступности облака помечает плейлист как <see cref="Playlist.IsCloudUnavailable"/>.
+    /// Нормализует 11-значные идентификаторы треков и диагностирует единичные несовпадения.
     /// </summary>
     private async Task<PlaylistSyncPreview?> BuildPreviewAsync(
         Playlist playlist,
@@ -163,37 +164,64 @@ public sealed class PlaylistSyncService
 
             _cachedSyncData = fullData;
 
-            // Успешный доступ — облако доступно
             if (playlist.IsCloudUnavailable)
             {
                 playlist.IsCloudUnavailable = false;
                 await _library.AddOrUpdatePlaylistAsync(playlist, ct);
             }
 
+            // Нормализуем облачные ID до канонического 11-значного rawId
             var cloudVideoIds = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
             for (int i = 0; i < fullData.Tracks.Count; i++)
-                cloudVideoIds.Add("yt_" + fullData.Tracks[i].VideoId);
+            {
+                var rawId = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
+                if (!string.IsNullOrEmpty(rawId))
+                    cloudVideoIds.Add(rawId);
+            }
 
-            var localIdSet = new HashSet<string>(localTrackIds, StringComparer.Ordinal);
+            // Нормализуем локальные ID (отсекая yt_, yt_pl_ и возможные параметры)
+            var localIdSet = new HashSet<string>(localTrackIds.Count, StringComparer.Ordinal);
+            for (int i = 0; i < localTrackIds.Count; i++)
+            {
+                var rawId = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
+                if (!string.IsNullOrEmpty(rawId))
+                    localIdSet.Add(rawId);
+            }
 
             int commonCount = 0;
             int cloudOnlyCount = 0;
 
-            foreach (var cloudId in cloudVideoIds)
+            for (int i = 0; i < fullData.Tracks.Count; i++)
             {
-                if (localIdSet.Contains(cloudId)) commonCount++;
-                else cloudOnlyCount++;
+                var rawId = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
+                if (localIdSet.Contains(rawId))
+                {
+                    commonCount++;
+                }
+                else
+                {
+                    cloudOnlyCount++;
+                    Log.Warn($"[PlaylistSync] Несовпадение (есть только в облаке): rawId='{rawId}', title='{fullData.Tracks[i].Title}'");
+                }
             }
 
             int localOnlyCount = 0;
-            foreach (var localId in localIdSet)
+            for (int i = 0; i < localTrackIds.Count; i++)
             {
-                if (!cloudVideoIds.Contains(localId))
+                var rawId = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
+                if (!cloudVideoIds.Contains(rawId))
+                {
                     localOnlyCount++;
+                    Log.Warn($"[PlaylistSync] Несовпадение (есть только локально): trackId='{localTrackIds[i]}', rawId='{rawId}'");
+                }
             }
 
             Log.Debug($"[PlaylistSync] Diff: common={commonCount}, " +
                       $"cloudOnly={cloudOnlyCount}, localOnly={localOnlyCount}");
+
+            bool isThumbnailSynced = playlist.LastSyncedAtUtc.HasValue &&
+                                     playlist.UpdatedAt <= playlist.LastSyncedAtUtc.Value.AddSeconds(5) &&
+                                     !string.IsNullOrEmpty(fullData.ThumbnailUrl);
 
             return new PlaylistSyncPreview
             {
@@ -205,14 +233,15 @@ public sealed class PlaylistSyncService
                 CloudThumbnailUrl = fullData.ThumbnailUrl,
                 LocalOnlyTrackCount = localOnlyCount,
                 CloudOnlyTrackCount = cloudOnlyCount,
-                CommonTrackCount = commonCount
+                CommonTrackCount = commonCount,
+                IsThumbnailAlreadySynced = isThumbnailSynced,
+                YoutubePlaylistId = playlist.YoutubeId
             };
         }
         catch (Exception ex)
         {
             Log.Error($"[PlaylistSync] Preview failed: {ex.Message}");
 
-            // Помечаем как недоступный при сетевых/API ошибках
             if (ex is PlaylistUnavailableException or HttpRequestException)
             {
                 playlist.IsCloudUnavailable = true;
@@ -221,23 +250,6 @@ public sealed class PlaylistSyncService
 
             return null;
         }
-    }
-
-    /// <summary>
-    /// Нормализует URL обложки для стабильного сравнения.
-    /// Убирает query string (sqp=..., v=...) — YouTube меняет их при каждом запросе.
-    /// </summary>
-    private static string? NormalizeThumbnailUrl(string? url)
-    {
-        if (string.IsNullOrEmpty(url)) return url;
-
-        if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            var queryIndex = url.IndexOf('?');
-            return queryIndex >= 0 ? url[..queryIndex] : url;
-        }
-
-        return url;
     }
 
     #endregion
@@ -327,12 +339,6 @@ public sealed class PlaylistSyncService
 
     /// <summary>
     /// Синхронизирует метаданные по выбранным полям.
-    ///
-    /// <para><b>Направление:</b></para>
-    /// <list type="bullet">
-    ///   <item>ReplaceLocal / Merge → YouTube → Local</item>
-    ///   <item>ReplaceCloud → Local → YouTube</item>
-    /// </list>
     /// </summary>
     private async Task<bool> SyncMetadataAsync(
         Playlist playlist,
@@ -369,7 +375,7 @@ public sealed class PlaylistSyncService
         {
             if (isCloudSource)
             {
-                playlist.Description = preview.CloudDescription;
+                playlist.Description = preview.CloudDescription ?? string.Empty;
                 changed = true;
                 Log.Info("[PlaylistSync] Description updated locally");
             }
@@ -378,8 +384,9 @@ public sealed class PlaylistSyncService
                 try
                 {
                     var client = _youtube.GetClient();
-                    await client.Mutations.SetPlaylistDescriptionAsync(
-                        playlist.YoutubeId!, playlist.Description ?? "", ct);
+                    var targetDesc = playlist.Description?.Trim() ?? string.Empty;
+                    await client.Mutations.SetPlaylistDescriptionAsync(playlist.YoutubeId!, targetDesc, ct);
+                    playlist.Description = targetDesc;
                     Log.Info("[PlaylistSync] Description updated in YouTube");
                 }
                 catch (Exception ex)
@@ -389,17 +396,11 @@ public sealed class PlaylistSyncService
             }
         }
 
-        if (options.SyncThumbnail)
+        if (options.SyncThumbnail && preview.ThumbnailDiffers)
         {
             if (isCloudSource)
             {
-                // Сравниваем нормализованные URL для определения реального различия,
-                // но сохраняем оригинальный URL из YouTube
-                var cloudNorm = NormalizeThumbnailUrl(preview.CloudThumbnailUrl);
-                var localNorm = NormalizeThumbnailUrl(playlist.ThumbnailUrl);
-
-                if (!string.IsNullOrEmpty(preview.CloudThumbnailUrl) &&
-                    !string.Equals(cloudNorm, localNorm, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrEmpty(preview.CloudThumbnailUrl))
                 {
                     playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
                     playlist.ComputedColor = null;
@@ -417,9 +418,19 @@ public sealed class PlaylistSyncService
                             playlist.YoutubeId!, playlist.ThumbnailUrl, ct);
 
                         if (success)
+                        {
                             Log.Info("[PlaylistSync] Thumbnail uploaded to YouTube");
+                            // Привязываем локальный URL к студийной обложке YouTube, чтобы исключить повторную заливку
+                            if (!string.IsNullOrEmpty(preview.CloudThumbnailUrl))
+                            {
+                                playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
+                                changed = true;
+                            }
+                        }
                         else
+                        {
                             Log.Warn("[PlaylistSync] Thumbnail upload to YouTube skipped or failed");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -497,6 +508,7 @@ public sealed class PlaylistSyncService
 
     /// <summary>
     /// Local → YouTube: полностью заменить облачные треки локальными.
+    /// Сопоставляет треки по 11-значному каноническому ID, удаляет cloud-only, добавляет local-only и выравнивает порядок.
     /// </summary>
     private async Task<(int AddedLocally, int AddedToCloud, int RemovedLocally, int RemovedFromCloud)>
         ReplaceCloudTracksAsync(Playlist playlist, CancellationToken ct)
@@ -517,48 +529,142 @@ public sealed class PlaylistSyncService
             return (0, 0, 0, 0);
         }
 
-        int removedFromCloud = 0;
-        if (fullData.Tracks.Count > 0)
+        // Строим нормализованный справочник локальных треков (rawId -> оригинальный trackId)
+        var localRawIdMap = new Dictionary<string, string>(localTrackIds.Count, StringComparer.Ordinal);
+        for (int i = 0; i < localTrackIds.Count; i++)
         {
-            var setVideoIds = new List<string>(fullData.Tracks.Count);
-            for (int i = 0; i < fullData.Tracks.Count; i++)
-            {
-                if (!string.IsNullOrEmpty(fullData.Tracks[i].SetVideoId))
-                    setVideoIds.Add(fullData.Tracks[i].SetVideoId);
-            }
+            var raw = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
+            if (!string.IsNullOrEmpty(raw))
+                localRawIdMap.TryAdd(raw, localTrackIds[i]);
+        }
 
-            if (setVideoIds.Count > 0)
+        // 1. Cloud-only треки -> удаляем из YouTube
+        var toRemoveSetVideoIds = new List<string>();
+        for (int i = 0; i < fullData.Tracks.Count; i++)
+        {
+            var cloudTrack = fullData.Tracks[i];
+            var cloudRawId = YoutubeIdHelper.ExtractRawId(cloudTrack.VideoId);
+
+            if (!localRawIdMap.ContainsKey(cloudRawId) &&
+                !string.IsNullOrEmpty(cloudTrack.SetVideoId) &&
+                !cloudTrack.SetVideoId.Equals("to_be_updated_by_client", StringComparison.OrdinalIgnoreCase))
             {
-                await _youtube.RemoveTracksFromPlaylistAsync(youtubeId, setVideoIds);
-                removedFromCloud = setVideoIds.Count;
+                toRemoveSetVideoIds.Add(cloudTrack.SetVideoId);
             }
         }
 
-        var ytTrackIds = new List<string>(localTrackIds.Count);
+        int removedFromCloud = 0;
+        if (toRemoveSetVideoIds.Count > 0)
+        {
+            await _youtube.RemoveTracksFromPlaylistAsync(youtubeId, toRemoveSetVideoIds);
+            removedFromCloud = toRemoveSetVideoIds.Count;
+        }
+
+        // 2. Текущее состояние облака после удаления
+        var currentCloudTracks = fullData.Tracks
+            .Where(t => localRawIdMap.ContainsKey(YoutubeIdHelper.ExtractRawId(t.VideoId)))
+            .ToList();
+
+        var trackToSetVideoId = new Dictionary<string, string>(localTrackIds.Count, StringComparer.Ordinal);
+        for (int i = 0; i < currentCloudTracks.Count; i++)
+        {
+            var t = currentCloudTracks[i];
+            var raw = YoutubeIdHelper.ExtractRawId(t.VideoId);
+            if (!string.IsNullOrEmpty(t.SetVideoId) && localRawIdMap.TryGetValue(raw, out var originalLocalId))
+            {
+                trackToSetVideoId[originalLocalId] = t.SetVideoId;
+            }
+        }
+
+        // 3. Local-only треки -> добавляем в YouTube
+        var cloudRawIdSet = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
+        for (int i = 0; i < fullData.Tracks.Count; i++)
+        {
+            var raw = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
+            if (!string.IsNullOrEmpty(raw))
+                cloudRawIdSet.Add(raw);
+        }
+
+        var toUpload = new List<string>();
         for (int i = 0; i < localTrackIds.Count; i++)
         {
-            if (localTrackIds[i].StartsWith("yt_", StringComparison.Ordinal))
-                ytTrackIds.Add(localTrackIds[i]);
+            var raw = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
+            if (!cloudRawIdSet.Contains(raw))
+            {
+                toUpload.Add(localTrackIds[i]);
+            }
         }
 
         int addedToCloud = 0;
-        if (ytTrackIds.Count > 0)
+        if (toUpload.Count > 0)
         {
-            var newSetVideoIds = await _youtube.AddTracksToPlaylistAsync(youtubeId, ytTrackIds);
-            addedToCloud = ytTrackIds.Count;
+            var newSetVideoIds = await _youtube.AddTracksToPlaylistAsync(youtubeId, toUpload);
+            addedToCloud = toUpload.Count;
 
-            var mappings = new List<(string TrackId, string SetVideoId)>(newSetVideoIds.Count);
-            for (int i = 0; i < newSetVideoIds.Count && i < ytTrackIds.Count; i++)
+            for (int i = 0; i < newSetVideoIds.Count && i < toUpload.Count; i++)
             {
                 if (!string.IsNullOrEmpty(newSetVideoIds[i]))
-                    mappings.Add((ytTrackIds[i], newSetVideoIds[i]!));
+                    trackToSetVideoId[toUpload[i]] = newSetVideoIds[i]!;
             }
-
-            if (mappings.Count > 0)
-                await _library.UpdateSetVideoIdsAsync(playlist.Id, mappings, ct);
         }
 
-        Log.Info($"[PlaylistSync] ReplaceCloud: removed={removedFromCloud}, added={addedToCloud}");
+        // Сохраняем актуальные SetVideoId в SQLite
+        if (trackToSetVideoId.Count > 0)
+        {
+            var mappings = trackToSetVideoId.Select(kvp => (kvp.Key, kvp.Value)).ToList();
+            await _library.UpdateSetVideoIdsAsync(playlist.Id, mappings, ct);
+        }
+
+        // 4. Выравнивание порядка треков в облаке под локальный плейлист
+        var simulatedCloudOrder = currentCloudTracks
+            .Select(t => t.SetVideoId)
+            .Where(s => !string.IsNullOrEmpty(s))
+            .ToList();
+
+        for (int i = 0; i < toUpload.Count; i++)
+        {
+            if (trackToSetVideoId.TryGetValue(toUpload[i], out var sid))
+                simulatedCloudOrder.Add(sid);
+        }
+
+        var desiredOrder = new List<string>(localTrackIds.Count);
+        for (int i = 0; i < localTrackIds.Count; i++)
+        {
+            if (trackToSetVideoId.TryGetValue(localTrackIds[i], out var sid))
+                desiredOrder.Add(sid);
+        }
+
+        var reorderMoves = new List<(string SetVideoId, string? Predecessor, string? Successor)>();
+        for (int targetIdx = 0; targetIdx < desiredOrder.Count; targetIdx++)
+        {
+            var desiredSid = desiredOrder[targetIdx];
+            int currentIdx = simulatedCloudOrder.IndexOf(desiredSid);
+
+            if (currentIdx == -1 || currentIdx == targetIdx)
+                continue;
+
+            simulatedCloudOrder.RemoveAt(currentIdx);
+            simulatedCloudOrder.Insert(targetIdx, desiredSid);
+
+            if (targetIdx == 0)
+            {
+                var successor = simulatedCloudOrder[targetIdx + 1];
+                reorderMoves.Add((desiredSid, null, successor));
+            }
+            else
+            {
+                var predecessor = simulatedCloudOrder[targetIdx - 1];
+                reorderMoves.Add((desiredSid, predecessor, null));
+            }
+        }
+
+        if (reorderMoves.Count > 0)
+        {
+            await _youtube.MoveTracksInPlaylistAsync(youtubeId, reorderMoves, ct);
+            Log.Info($"[PlaylistSync] Applied {reorderMoves.Count} reorder move(s) to match local playlist order");
+        }
+
+        Log.Info($"[PlaylistSync] ReplaceCloud: removed={removedFromCloud}, added={addedToCloud}, reordered={reorderMoves.Count}");
         return (0, addedToCloud, 0, removedFromCloud);
     }
 

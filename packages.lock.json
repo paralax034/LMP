@@ -282,6 +282,25 @@
           "Fody": "6.9.2"
         }
       },
+      "MemoryPack": {
+        "type": "Transitive",
+        "resolved": "1.21.4",
+        "contentHash": "wy3JTBNBsO8LfQcBvvYsWr3lm2Oakolrfu0UQ3oSJSEiD+7ye0GUhYTaXuYYBowqsXBXWD9gf2218ae0JRiYVQ==",
+        "dependencies": {
+          "MemoryPack.Core": "1.21.4",
+          "MemoryPack.Generator": "1.21.4"
+        }
+      },
+      "MemoryPack.Core": {
+        "type": "Transitive",
+        "resolved": "1.21.4",
+        "contentHash": "6RszGorZ0ejNmp37ZcboPBMvvPCuNW2jlrdQfcs/lMzE5b3pmPF6hsm/laDc34hRlbAST1ZxaX/DvYu2DF5sBQ=="
+      },
+      "MemoryPack.Generator": {
+        "type": "Transitive",
+        "resolved": "1.21.4",
+        "contentHash": "g14EsSS85yn0lHTi0J9ivqlZMf09A2iI51fmI+0KkzIzyCbWOBWPi5mdaY7YWmXprk12aYh9u/qfWHQUYthlwg=="
+      },
       "MicroCom.Runtime": {
         "type": "Transitive",
         "resolved": "0.11.6",
@@ -459,7 +478,8 @@
           "Avalonia": "[12.1.1, )",
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Concentus": "[2.2.2, )",
-          "LMP.Decoders.AAC": "[0.0.359, )",
+          "LMP.Decoders.AAC": "[0.0.360, )",
+          "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.Sqlite": "[10.0.11, )",
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.*, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.11, )",

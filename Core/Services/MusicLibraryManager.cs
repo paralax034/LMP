@@ -388,9 +388,65 @@ public class MusicLibraryManager : ObservableObject
     }
 
     public async Task MovePlaylistTrackAsync(
-        string playlistId, int oldIndex, int newIndex, CancellationToken ct = default)
+            string playlistId, int oldIndex, int newIndex, CancellationToken ct = default)
     {
+        if (oldIndex == newIndex) return;
+
+        var playlist = await _library.GetPlaylistAsync(playlistId, ct);
+        var trackIds = await _library.GetPlaylistTrackIdsAsync(playlistId, ct);
+
+        if (oldIndex < 0 || oldIndex >= trackIds.Count || newIndex < 0 || newIndex >= trackIds.Count)
+            return;
+
+        var movingTrackId = trackIds[oldIndex];
+
+        // 1. Перемещение в локальной базе данных
         await _library.MoveTrackInPlaylistAsync(playlistId, oldIndex, newIndex, ct);
+
+        // 2. Синхронизация с YouTube при наличии облачной привязки
+        if (playlist != null &&
+            playlist.SyncMode == PlaylistSyncMode.TwoWaySync &&
+            !string.IsNullOrEmpty(playlist.YoutubeId) &&
+            _auth.IsAuthenticated)
+        {
+            var movingSetVideoId = await _library.GetSetVideoIdAsync(playlistId, movingTrackId, ct);
+            if (!string.IsNullOrEmpty(movingSetVideoId))
+            {
+                trackIds.RemoveAt(oldIndex);
+                trackIds.Insert(newIndex, movingTrackId);
+
+                string? predecessor = null;
+                string? successor = null;
+
+                if (newIndex == 0)
+                {
+                    if (trackIds.Count > 1)
+                        successor = await _library.GetSetVideoIdAsync(playlistId, trackIds[1], ct);
+                }
+                else
+                {
+                    predecessor = await _library.GetSetVideoIdAsync(playlistId, trackIds[newIndex - 1], ct);
+                }
+
+                if (!string.IsNullOrEmpty(predecessor) || !string.IsNullOrEmpty(successor))
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _youtube.MoveTracksInPlaylistAsync(
+                                playlist.YoutubeId!,
+                                [(movingSetVideoId, predecessor, successor)],
+                                CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warn($"[Manager] Remote move sync failed: {ex.Message}");
+                        }
+                    }, CancellationToken.None);
+                }
+            }
+        }
     }
 
     public async Task ConvertToLocalAsync(

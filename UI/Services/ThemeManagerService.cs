@@ -481,10 +481,10 @@ public sealed class ThemeManagerService
     {
         try
         {
-            var json = JsonSerializer.Serialize(theme, AppJsonContext.Default.ThemeSettings);
-            AtomicFile.WriteText(G.FilePath.Theme, json, createBackup: true);
+            byte[] bytes = MemoryPack.MemoryPackSerializer.Serialize(theme);
+            AtomicFile.WriteBytes(G.FilePath.Theme, bytes, createBackup: false);
             _cachedTheme = theme;
-            Log.Info($"Theme '{theme.Name}' saved.");
+            Log.Info($"Theme '{theme.Name}' saved [MemoryPack].");
         }
         catch (Exception ex)
         {
@@ -646,18 +646,27 @@ public sealed class ThemeManagerService
     {
         try
         {
-            var json = AtomicFile.ReadTextWithFallback(G.FilePath.Theme, out bool recovered);
-            if (!string.IsNullOrWhiteSpace(json))
+            var binPath = G.FilePath.Theme;
+            var bytes = AtomicFile.ReadBytesWithFallback(binPath, out bool recovered);
+            if (bytes != null && bytes.Length > 0)
             {
                 if (recovered)
                     Log.Warn("[ThemeManager] Recovered theme settings from backup (.bak)");
 
-                var theme = JsonSerializer.Deserialize(json, AppJsonContext.Default.ThemeSettings);
+                var theme = MemoryPack.MemoryPackSerializer.Deserialize<ThemeSettings>(bytes);
                 if (theme != null)
                 {
                     _cachedTheme = theme;
                     return theme;
                 }
+            }
+
+            var legacyJsonPath = Path.ChangeExtension(binPath, ".json");
+            if (File.Exists(legacyJsonPath))
+            {
+                var legacyTheme = MigrateLegacyJsonTheme(legacyJsonPath);
+                if (legacyTheme != null)
+                    return legacyTheme;
             }
         }
         catch (Exception ex)
@@ -669,6 +678,41 @@ public sealed class ThemeManagerService
         var def = GetDefaultTheme();
         SaveTheme(def);
         return def;
+    }
+
+    /// <summary>
+    /// Изолированная миграция темы оформления из legacy JSON в бинарный MemoryPack.
+    /// </summary>
+    private ThemeSettings? MigrateLegacyJsonTheme(string legacyJsonPath)
+    {
+        var json = AtomicFile.ReadTextWithFallback(legacyJsonPath, out bool legacyRecovered);
+        if (string.IsNullOrWhiteSpace(json)) return null;
+
+        if (legacyRecovered)
+            Log.Warn("[ThemeManager] Recovered theme settings from legacy backup (.bak)");
+
+        var legacyTheme = JsonSerializer.Deserialize(json, AppJsonContext.Default.ThemeSettings);
+        if (legacyTheme != null)
+        {
+            _cachedTheme = legacyTheme;
+            SaveTheme(legacyTheme);
+
+            try
+            {
+                var bak = legacyJsonPath + ".bak";
+                if (File.Exists(legacyJsonPath) && !File.Exists(bak))
+                    File.Copy(legacyJsonPath, bak, overwrite: true);
+
+                if (File.Exists(legacyJsonPath))
+                    File.Delete(legacyJsonPath);
+            }
+            catch { }
+
+            Log.Info($"[ThemeManager] Migrated '{legacyTheme.Name}' from legacy JSON to MemoryPack");
+            return legacyTheme;
+        }
+
+        return null;
     }
 
     private static void SetColor(IResourceDictionary resources, string key, string hex)

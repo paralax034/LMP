@@ -37,6 +37,10 @@
     <PackageReference Include="SkiaSharp" Version="$(SkiaSharpVersion)" />
   </ItemGroup>
 
+  <ItemGroup Label="Serialization">
+    <PackageReference Include="MemoryPack" Version="1.21.4" />
+  </ItemGroup>
+
   <!-- SQLite Native Provider -->
   <ItemGroup Label="Entity Framework">
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />

@@ -171,21 +171,21 @@ public static class G
 
     public static class FilePath
     {
-        public static readonly string Bootstrap = Path.Combine(Folder.Data, "bootstrap.json");
+        public static readonly string Bootstrap = Path.Combine(Folder.Data, "bootstrap.bin");
         public static readonly string Cookie = Path.Combine(Folder.Data, "auth_cookies.txt");
-        public static readonly string Library = Path.Combine(Folder.Data, "library.json");
+        public static readonly string LegacyDatabase = Path.Combine(Folder.Data, "library.json");
         public static readonly string Database = Path.Combine(Folder.Data, "library.db");
-        public static readonly string Theme = Path.Combine(Folder.Data, "theme.json");
+        public static readonly string Theme = Path.Combine(Folder.Data, "theme.bin");
 
         /// <summary>
         /// Файл состояния авторизации (профиль пользователя, кэш данных).
-        /// Хранится в %APPDATA%/LMP/auth.json
+        /// Хранится в %APPDATA%/LMP/auth.bin
         /// </summary>
-        public static readonly string AuthData = Path.Combine(Folder.Data, "auth.json");
+        public static readonly string AuthData = Path.Combine(Folder.Data, "auth.bin");
 
-        public static readonly string NTokenCache = Path.Combine(Folder.NTokenCache, "tokens.json");
+        public static readonly string NTokenCache = Path.Combine(Folder.NTokenCache, "tokens.bin");
         public static readonly string NTokenScript = Path.Combine(Folder.NTokenCache, "ntoken_override.js");
-        public static readonly string SigCipherCache = Path.Combine(Folder.SigCipherCache, "sigcache.json");
+        public static readonly string SigCipherCache = Path.Combine(Folder.SigCipherCache, "sigcache.bin");
 
         /// <summary>
         /// Конфигурация параметров тестов.
@@ -196,8 +196,8 @@ public static class G
 
         public static readonly string TempAuthExtensionZipFile = Path.Combine(Folder.Cache, "LMP-Auth-main.zip");
 
-        public static readonly string CdnHostStats = Path.Combine(Folder.StreamCache, "cdn_hosts.json");
-        public static readonly string SessionCache = Path.Combine(Folder.StreamCache, "session_cache.json");
+        public static readonly string CdnHostStats = Path.Combine(Folder.StreamCache, "cdn_hosts.bin");
+        public static readonly string SessionCache = Path.Combine(Folder.StreamCache, "session_cache.bin");
     }
 
     public static class Json

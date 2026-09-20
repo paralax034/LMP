@@ -87,6 +87,66 @@ public static class AtomicFile
         }
     }
 
+    /// <summary>
+    /// Считывает бинарные данные из целевого файла. При его повреждении, нулевом размере или отсутствии
+    /// автоматически считывает резервную копию (<c>.bak</c>) и восстанавливает основной файл.
+    /// </summary>
+    /// <param name="targetPath">Путь к целевому файлу.</param>
+    /// <param name="recoveredFromBackup">Возвращает <c>true</c>, если данные были успешно восстановлены из <c>.bak</c>.</param>
+    /// <returns>Массив прочитанных байт или <c>null</c>, если ни основной файл, ни бэкап прочитать не удалось.</returns>
+    /// <remarks>
+    /// Обеспечивает аппаратную защиту от повреждения данных (Torn Write Protection) для бинарных MemoryPack-структур.
+    /// </remarks>
+    public static byte[]? ReadBytesWithFallback(
+        string targetPath,
+        out bool recoveredFromBackup)
+    {
+        recoveredFromBackup = false;
+        if (string.IsNullOrWhiteSpace(targetPath)) return null;
+
+        var backupPath = string.Concat(targetPath, ".bak");
+
+        // 1. Попытка чтения основного файла
+        if (File.Exists(targetPath))
+        {
+            try
+            {
+                var fi = new FileInfo(targetPath);
+                if (fi.Length > 0)
+                {
+                    return File.ReadAllBytes(targetPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[AtomicFile] Primary binary file read failed for '{targetPath}': {ex.Message}");
+            }
+        }
+
+        // 2. Fallback на резервную копию
+        if (File.Exists(backupPath))
+        {
+            try
+            {
+                var fi = new FileInfo(backupPath);
+                if (fi.Length > 0)
+                {
+                    var backupBytes = File.ReadAllBytes(backupPath);
+                    recoveredFromBackup = true;
+                    TryAutoHeal(backupPath, targetPath);
+                    Log.Warn($"[AtomicFile] ⚠️ Successfully recovered binary '{targetPath}' from backup (.bak)");
+                    return backupBytes;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[AtomicFile] Backup binary file read failed for '{backupPath}': {ex.Message}");
+            }
+        }
+
+        return null;
+    }
+
     #endregion
 
     #region Write Asynchronous
@@ -168,6 +228,67 @@ public static class AtomicFile
             TryDelete(tempPath);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Асинхронно считывает бинарные данные из целевого файла с автоматическим восстановлением из <c>.bak</c> при сбое.
+    /// </summary>
+    /// <param name="targetPath">Путь к целевому файлу.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>Кортеж из массива прочитанных байт и признака восстановления из резервной копии.</returns>
+    /// <remarks>
+    /// Обеспечивает аппаратную защиту от повреждения данных (Torn Write Protection) для бинарных MemoryPack-структур.
+    /// </remarks>
+    public static async Task<(byte[]? Content, bool RecoveredFromBackup)> ReadBytesWithFallbackAsync(
+        string targetPath,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(targetPath))
+            return (null, false);
+
+        var backupPath = string.Concat(targetPath, ".bak");
+
+        // 1. Попытка чтения основного файла
+        if (File.Exists(targetPath))
+        {
+            try
+            {
+                var fi = new FileInfo(targetPath);
+                if (fi.Length > 0)
+                {
+                    var bytes = await File.ReadAllBytesAsync(targetPath, ct).ConfigureAwait(false);
+                    return (bytes, false);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Warn($"[AtomicFile] Primary binary file read failed for '{targetPath}': {ex.Message}");
+            }
+        }
+
+        // 2. Fallback на резервную копию
+        if (File.Exists(backupPath))
+        {
+            try
+            {
+                var fi = new FileInfo(backupPath);
+                if (fi.Length > 0)
+                {
+                    var backupBytes = await File.ReadAllBytesAsync(backupPath, ct).ConfigureAwait(false);
+                    TryAutoHeal(backupPath, targetPath);
+                    Log.Warn($"[AtomicFile] ⚠️ Successfully recovered binary '{targetPath}' from backup (.bak)");
+                    return (backupBytes, true);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Error($"[AtomicFile] Backup binary file read failed for '{backupPath}': {ex.Message}");
+            }
+        }
+
+        return (null, false);
     }
 
     #endregion

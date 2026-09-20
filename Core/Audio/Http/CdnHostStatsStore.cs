@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MemoryPack;
 
 namespace LMP.Core.Audio.Http;
 
@@ -8,7 +9,8 @@ namespace LMP.Core.Audio.Http;
 /// Статистика одного CDN-кластера YouTube.
 /// Кластер = группа ingress-нод с общим <c>sn-XXXXXXXX</c> суффиксом.
 /// </summary>
-public sealed class CdnClusterStats
+[MemoryPackable]
+public sealed partial class CdnClusterStats
 {
     /// <summary>
     /// Идентификатор кластера, извлечённый из hostname.
@@ -42,7 +44,8 @@ public sealed class CdnClusterStats
 /// <summary>
 /// Конверт JSON-файла статистики CDN-кластеров.
 /// </summary>
-public sealed class CdnHostStatsEnvelope
+[MemoryPackable]
+public sealed partial class CdnHostStatsEnvelope
 {
     /// <summary>Статистика по известным CDN-кластерам.</summary>
     public List<CdnClusterStats> Clusters { get; set; } = [];
@@ -104,34 +107,81 @@ internal static class CdnHostStatsStore
         _lastSaveTime = DateTime.UtcNow;
         try
         {
-            var path = G.FilePath.CdnHostStats;
-            var json = AtomicFile.ReadTextWithFallback(path, out bool recovered);
-            if (string.IsNullOrWhiteSpace(json))
-                return;
+            var binPath = G.FilePath.CdnHostStats;
+            var binary = AtomicFile.ReadBytesWithFallback(binPath, out bool recovered);
 
             if (recovered)
                 Log.Warn("[CdnHostStats] Recovered CDN host stats from backup (.bak)");
 
-            var envelope = JsonSerializer.Deserialize(
-                json,
-                AppJsonContext.DefaultCompact.CdnHostStatsEnvelope);
-
-            if (envelope is null)
-                return;
-
-            lock (_lock)
+            if (binary != null && binary.Length > 0)
             {
-                _data = envelope;
-                EvictStaleClustersMustHoldLock();
+                var envelope = MemoryPackSerializer.Deserialize<CdnHostStatsEnvelope>(binary);
+                if (envelope != null)
+                {
+                    lock (_lock)
+                    {
+                        _data = envelope;
+                        EvictStaleClustersMustHoldLock();
+                    }
+
+                    Log.Debug($"[CdnHostStats] Loaded {_data.Clusters.Count} cluster(s) from binary store, totalHits={_data.TotalHits}");
+                    return;
+                }
             }
 
-            Log.Debug($"[CdnHostStats] Loaded {_data.Clusters.Count} cluster(s), totalHits={_data.TotalHits}");
+            var legacyJsonPath = Path.ChangeExtension(binPath, ".json");
+            if (File.Exists(legacyJsonPath))
+            {
+                MigrateLegacyJsonIfPresent(legacyJsonPath);
+            }
         }
         catch (Exception ex)
         {
             Log.Warn($"[CdnHostStats] Load failed (starting fresh): {ex.Message}");
             lock (_lock) { _data = new CdnHostStatsEnvelope(); }
         }
+    }
+
+    /// <summary>
+    /// Изолированная миграция статистики CDN-нод из legacy JSON в бинарный MemoryPack.
+    /// </summary>
+    private static void MigrateLegacyJsonIfPresent(string legacyJsonPath)
+    {
+        var json = AtomicFile.ReadTextWithFallback(legacyJsonPath, out bool jsonRecovered);
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+
+        if (jsonRecovered)
+            Log.Warn("[CdnHostStats] Recovered CDN host stats from backup (.bak)");
+
+        var legacyEnvelope = JsonSerializer.Deserialize(
+            json,
+            AppJsonContext.DefaultCompact.CdnHostStatsEnvelope);
+
+        if (legacyEnvelope is null)
+            return;
+
+        lock (_lock)
+        {
+            _data = legacyEnvelope;
+            EvictStaleClustersMustHoldLock();
+            _dirty = true;
+        }
+
+        Save();
+
+        try
+        {
+            var legacyBak = legacyJsonPath + ".bak";
+            if (File.Exists(legacyJsonPath) && !File.Exists(legacyBak))
+                File.Copy(legacyJsonPath, legacyBak, overwrite: true);
+
+            if (File.Exists(legacyJsonPath))
+                File.Delete(legacyJsonPath);
+        }
+        catch { }
+
+        Log.Info($"[CdnHostStats] Migrated {legacyEnvelope.Clusters.Count} cluster(s) from legacy JSON to MemoryPack");
     }
 
     /// <summary>
@@ -154,11 +204,9 @@ internal static class CdnHostStatsStore
 
         try
         {
-            var json = JsonSerializer.Serialize(
-                snapshot,
-                AppJsonContext.DefaultCompact.CdnHostStatsEnvelope);
-            AtomicFile.WriteText(G.FilePath.CdnHostStats, json, createBackup: true);
-            Log.Debug($"[CdnHostStats] Saved {snapshot.Clusters.Count} cluster(s)");
+            byte[] binary = MemoryPackSerializer.Serialize(snapshot);
+            AtomicFile.WriteBytes(G.FilePath.CdnHostStats, binary, createBackup: false);
+            Log.Debug($"[CdnHostStats] Saved {snapshot.Clusters.Count} cluster(s) [binary]");
         }
         catch (Exception ex)
         {

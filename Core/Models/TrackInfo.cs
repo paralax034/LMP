@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using LMP.Core.Audio.Normalization;
 using LMP.Core.Youtube.Search;
 using LMP.Core.Youtube.Utils;
+using MemoryPack;
 
 namespace LMP.Core.Models;
 
@@ -10,8 +11,10 @@ namespace LMP.Core.Models;
 /// Представляет музыкальный трек.
 /// string interning для ID, минимизированы аллокации.
 /// </summary>
+[MemoryPackable]
 public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchResult
 {
+    [MemoryPackIgnore]
     private static readonly ConditionalWeakTable<string, string> _idCache = [];
 
     #region Identity
@@ -114,9 +117,11 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     public bool IsMusic { get; set; }
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     public bool IsExplicitVideoClip => IsOfficialArtist && !IsMusic;
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     public bool HasThumbnail => !string.IsNullOrEmpty(ThumbnailUrl);
 
     #endregion
@@ -129,6 +134,7 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     [ObservableProperty] public partial bool IsCached { get; set; }
 
     [JsonIgnore]
+    [MemoryPackIgnore]
     public bool IsAvailableOffline => IsDownloaded || IsCached;
 
     [ObservableProperty] public partial string? LocalPath { get; set; }
@@ -170,14 +176,18 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     /// (например, при переключении качества).
     /// Не является кэшем resolved stream metadata.
     /// </summary>
-    [JsonIgnore] public AudioFormat? TransientFormat { get; set; }
+    [JsonIgnore]
+    [MemoryPackIgnore]
+    public AudioFormat? TransientFormat { get; set; }
 
     /// <summary>
     /// Временный битрейт, выбранный пользователем в текущей сессии
     /// (например, при переключении качества).
     /// Не является кэшем resolved stream metadata.
     /// </summary>
-    [JsonIgnore] public int TransientBitrate { get; set; }
+    [JsonIgnore]
+    [MemoryPackIgnore]
+    public int TransientBitrate { get; set; }
 
     #endregion
 
@@ -187,18 +197,21 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     /// Новое canonical-поле integrated loudness трека в LUFS.
     /// </summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public float IntegratedLufs { get; set; } = float.NaN;
 
     /// <summary>
     /// Источник значения <see cref="IntegratedLufs"/>.
     /// </summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public LoudnessSource IntegratedLufsSource { get; set; } = LoudnessSource.Unknown;
 
     /// <summary>
     /// <c>true</c> если integrated loudness измерена.
     /// </summary>
     [JsonIgnore]
+    [MemoryPackIgnore]
     public bool HasIntegratedLufs =>
         !float.IsNaN(IntegratedLufs) && float.IsFinite(IntegratedLufs);
 

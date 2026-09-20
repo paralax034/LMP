@@ -442,6 +442,31 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
+    /// Выполняет пакетное изменение порядка треков в облачном плейлисте YouTube.
+    /// </summary>
+    public async Task MoveTracksInPlaylistAsync(
+        string playlistId,
+        IReadOnlyList<(string SetVideoId, string? PredecessorSetVideoId, string? SuccessorSetVideoId)> moves,
+        CancellationToken ct = default)
+    {
+        if (AuthService?.IsAuthenticated != true || moves.Count == 0) return;
+
+        ThrowIfInCooldown();
+
+        try
+        {
+            await _youtube.Mutations.MoveTracksAsync(playlistId, moves, ct);
+            Log.Info($"[Music] Reordered {moves.Count} tracks in playlist {playlistId}");
+        }
+        catch (BotDetectionException) { throw; }
+        catch (Exception ex)
+        {
+            Log.Error($"[Music] Failed to reorder tracks in playlist {playlistId}: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Редактирует текстовое описание облачного плейлиста.
     /// </summary>
     public async Task EditPlaylistDescriptionAsync(string playlistId, string description)
