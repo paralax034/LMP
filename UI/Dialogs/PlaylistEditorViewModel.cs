@@ -3,7 +3,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using LMP.Core.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Dialogs;
 
@@ -220,6 +220,10 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     private readonly DispatcherTimer _thumbnailDebounceTimer;
     private readonly DispatcherTimer _colorDebounceTimer;
 
+    /// <summary>
+    /// Инициализирует новый экземпляр редактора плейлиста.
+    /// Автоматически активирует режим выбора обложки из треков, если плейлист не имеет обложки, но содержит треки.
+    /// </summary>
     public PlaylistEditorViewModel(
         string name = "",
         string? thumbnailUrl = null,
@@ -238,9 +242,9 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         DominantColorService? dominantColorService = null,
         Lazy<YoutubeProvider>? youtube = null)
     {
-        _networkManager = networkManager;
-        _dominantColorService = dominantColorService;
-        _youtube = youtube;
+        _networkManager = networkManager ?? AppEntry.Services.GetService<INetworkManager>();
+        _dominantColorService = dominantColorService ?? AppEntry.Services.GetService<DominantColorService>();
+        _youtube = youtube ?? AppEntry.Services.GetService<Lazy<YoutubeProvider>>();
         _originalDescription = description;
         _originalPlaylist = originalPlaylist;
         _isForEdit = isForEdit;
@@ -261,6 +265,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         {
             _thumbnailDebounceTimer.Stop();
             UpdateThumbnailPreview(ThumbnailUrl);
+            _ = AutoRecalculateColorAsync();
         };
 
         _colorDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
@@ -270,7 +275,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             ColorPreviewBrush = TryParseColor(CustomColor);
         };
 
-        HasTracksCoverOption = playlistTracks != null && playlistTracks.Any(t => t.HasThumbnail);
+        HasTracksCoverOption = playlistTracks != null && playlistTracks.Any(t => t.HasThumbnail) && _networkManager != null;
         if (HasTracksCoverOption && _networkManager != null)
         {
             CoverPicker = new PlaylistCoverPickerViewModel(playlistTracks!, _networkManager);
@@ -305,9 +310,29 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         CustomColor = customColor;
         Description = description;
 
+        // Автоматически открываем мозаику из треков, если своей обложки у плейлиста еще нет
+        if (string.IsNullOrWhiteSpace(thumbnailUrl) && HasTracksCoverOption)
+        {
+            SelectedCoverMode = CoverMode.FromTracks;
+        }
+        else
+        {
+            SelectedCoverMode = CoverMode.Url;
+        }
+
+        // Синхронизируем булевы флаги видимости вкладок в соответствии с выбранным режимом
+        IsCoverModeUrl = SelectedCoverMode == CoverMode.Url;
+        IsCoverModeFromTracks = SelectedCoverMode == CoverMode.FromTracks;
+        IsCoverModeFile = SelectedCoverMode == CoverMode.File;
+
         UpdateValidation();
         UpdateUploadButtonVisibility();
         UpdateThumbnailPreview(ThumbnailUrl);
+
+        if (string.IsNullOrEmpty(computedColor) && !string.IsNullOrWhiteSpace(thumbnailUrl) && IsValidUri(thumbnailUrl))
+        {
+            _ = AutoRecalculateColorAsync();
+        }
     }
 
     partial void OnSelectedCoverModeChanged(CoverMode value)
@@ -469,6 +494,23 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     #endregion
 
     #region Recalculate Color
+
+    /// <summary>
+    /// Автоматически пересчитывает доминантный цвет при изменении обложки плейлиста.
+    /// Сбрасывает цвет в прозрачный при пустом или невалидном пути обложки.
+    /// </summary>
+    /// <returns>Асинхронная задача.</returns>
+    private async Task AutoRecalculateColorAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ThumbnailUrl) || !IsValidUri(ThumbnailUrl))
+        {
+            ComputedColor = null;
+            ComputedColorPreviewBrush = Brushes.Transparent;
+            return;
+        }
+
+        await RecalculateColorFromCoverAsync(CancellationToken.None).ConfigureAwait(true);
+    }
 
     /// <summary>
     /// Пересчитывает доминантный цвет из текущей обложки.
@@ -654,6 +696,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         SelectedFilePath = filePath;
         ThumbnailUrl = filePath;
         UpdateThumbnailPreview(filePath);
+        _ = AutoRecalculateColorAsync();
     }
 
     private static TopLevel? GetTopLevel()

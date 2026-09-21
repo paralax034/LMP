@@ -341,8 +341,7 @@ public sealed partial class CachingStreamSource
             {
                 _currentUrl = resolvedUrl;
 
-                if (_cacheEntry != null)
-                    _cacheEntry.OriginalUrl = resolvedUrl;
+                _cacheEntry?.OriginalUrl = resolvedUrl;
 
                 Log.Info($"[CachingSource] [{_trackId}] Continuation URL resolved via single-flight");
             }

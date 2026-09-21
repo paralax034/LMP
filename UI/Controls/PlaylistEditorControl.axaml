@@ -124,6 +124,7 @@
 
                     <!-- ═══ Из треков ═══ -->
                     <Border IsVisible="{Binding IsCoverModeFromTracks}"
+                        MinHeight="220"
                         MaxHeight="220">
                         <controls:PlaylistCoverPicker DataContext="{Binding CoverPicker}" />
                     </Border>

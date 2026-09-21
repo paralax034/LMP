@@ -142,6 +142,11 @@ public abstract class TrackListReorderableViewModel
         });
     }
 
+    /// <summary>
+    /// Выполняет фоновую гидратацию статуса кэширования для загруженных треков.
+    /// </summary>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Асинхронная задача.</returns>
     protected async Task HydrateCacheStatusAsync(CancellationToken ct = default)
     {
         var cache = AudioSourceFactory.GlobalCache;
@@ -149,9 +154,8 @@ public abstract class TrackListReorderableViewModel
 
         try
         {
-            var tracks = new List<TrackInfo>(_sources.Count);
-            foreach (var track in _sources.Values)
-                tracks.Add(track);
+            var tracks = GetLoadedItemsSnapshot();
+            if (tracks.Count == 0) return;
 
             await Task.Run(() => cache.HydrateCacheStatus(tracks), ct).ConfigureAwait(false);
         }

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
-using LMP.Core.Services;
 
 namespace LMP.UI.Dialogs;
 

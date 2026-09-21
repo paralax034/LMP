@@ -14,6 +14,9 @@ namespace LMP.Core.Data.Repositories;
 /// </summary>
 public sealed partial class TrackRepository : ITrackRepository
 {
+    private static readonly string[] ParameterNames500 = GenerateParameterNames(500);
+    private static readonly string QueryChunk500 = $"SELECT {TrackColumnsSelect} FROM Tracks t WHERE t.Id IN ({string.Join(',', ParameterNames500)});";
+
     private readonly ISqliteConnectionFactory _factory;
 
     private const string TrackColumnsSelect = """
@@ -32,12 +35,6 @@ public sealed partial class TrackRepository : ITrackRepository
         ArgumentNullException.ThrowIfNull(factory);
         _factory = factory;
     }
-
-    /// <summary>
-    /// Вспомогательный предикат для выявления гостевой или пустой сессии, подлежащих слиянию в единый профиль.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsGuest(string ownerId) => string.IsNullOrEmpty(ownerId) || ownerId == "guest";
 
     #region Read
 
@@ -83,15 +80,26 @@ public sealed partial class TrackRepository : ITrackRepository
             int count = Math.Min(chunkSize, idList.Count - i);
             await using var cmd = connection.CreateCommand();
 
-            var paramNames = new string[count];
-            for (int j = 0; j < count; j++)
+            if (count == chunkSize)
             {
-                var paramName = $"@p{j}";
-                paramNames[j] = paramName;
-                AddParameter(cmd, paramName, idList[i + j]);
+                cmd.CommandText = QueryChunk500;
+                for (int j = 0; j < chunkSize; j++)
+                {
+                    AddParameter(cmd, ParameterNames500[j], idList[i + j]);
+                }
             }
+            else
+            {
+                var paramNames = new string[count];
+                for (int j = 0; j < count; j++)
+                {
+                    var paramName = ParameterNames500[j];
+                    paramNames[j] = paramName;
+                    AddParameter(cmd, paramName, idList[i + j]);
+                }
 
-            cmd.CommandText = $"SELECT {TrackColumnsSelect} FROM Tracks t WHERE t.Id IN ({string.Join(',', paramNames)});";
+                cmd.CommandText = $"SELECT {TrackColumnsSelect} FROM Tracks t WHERE t.Id IN ({string.Join(',', paramNames)});";
+            }
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -641,6 +649,20 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     #region Helpers
+
+    /// <summary>
+    /// Вспомогательный предикат для выявления гостевой или пустой сессии, подлежащих слиянию в единый профиль.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsGuest(string ownerId) => string.IsNullOrEmpty(ownerId) || ownerId == "guest";
+
+    private static string[] GenerateParameterNames(int count)
+    {
+        var names = new string[count];
+        for (int i = 0; i < count; i++)
+            names[i] = $"@p{i}";
+        return names;
+    }
 
     /// <summary>
     /// Вычитывает модель трека <see cref="TrackInfo"/> напрямую из активного чтения <see cref="DbDataReader"/>.

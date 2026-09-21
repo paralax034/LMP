@@ -1,275 +1,278 @@
-using Avalonia.Collections;
+using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using LMP.UI.Features.Shared;
-using LMP.UI.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Queue;
 
 /// <summary>
-/// ViewModel панели очереди воспроизведения.
+/// ViewModel экрана текущей очереди воспроизведения.
+/// Синхронизирует состав очереди с <see cref="AudioEngine"/> и активное состояние треков с <see cref="PlayerControlService"/>.
 /// </summary>
-public sealed partial class QueueViewModel : TrackListReorderableViewModel
+public sealed partial class QueueViewModel : ViewModelBase
 {
-    #region Fields
-
-    private readonly DownloadService _downloads;
+    private readonly AudioEngine _audio;
+    private readonly PlayerControlService _playerControl;
+    private readonly PlaylistService _playlistService;
+    private readonly CookieAuthService _auth;
     private readonly DialogService _dialog;
-    private readonly PlaylistSyncService _syncService;
-    private readonly LibraryService _library;
+    private readonly TrackViewModelFactory _vmFactory;
+    private readonly DownloadService _downloads;
 
-    private DispatcherTimer? _queueChangedDebounceTimer;
-    private bool _isMovingInternally;
-    private volatile bool _isSuspended;
-    private bool _isDisposed;
+    private TrackItemViewModel? _currentActiveVm;
 
-    #endregion
+    public ObservableCollection<TrackItemViewModel> QueueItems { get; } = [];
+    public ObservableCollection<TrackItemViewModel> QueueTracks => QueueItems;
 
-    #region Properties
-
-    /// <summary>True когда очередь пуста (нет треков вообще).</summary>
-    [ObservableProperty] public partial bool IsEmpty { get; private set; } = true;
-
-    /// <summary>True когда очередь не пуста, но фильтр не нашёл совпадений.</summary>
+    [ObservableProperty] public partial int TotalCount { get; private set; }
+    [ObservableProperty] public partial string FormattedTotalDuration { get; private set; } = "";
+    [ObservableProperty] public partial bool IsLoading { get; set; }
+    [ObservableProperty] public partial string FilterQuery { get; set; } = string.Empty;
     [ObservableProperty] public partial bool IsFilterEmpty { get; private set; }
 
-    [ObservableProperty] public partial bool CanReorderItems { get; private set; } = true;
-
-    /// <summary>
-    /// Псевдоним для Items, сохраняющий совместимость с биндингом в QueueView.axaml.
-    /// </summary>
-    public AvaloniaList<TrackItemViewModel> QueueItems => Items;
-
-    partial void OnIsEmptyChanged(bool value)
-    {
-        SaveQueueToPlaylistCommand.NotifyCanExecuteChanged();
-    }
-
-    #endregion
-
-    #region Commands
+    public bool IsEmpty => TotalCount == 0;
+    public bool CanReorderItems => string.IsNullOrWhiteSpace(FilterQuery) && TotalCount > 1;
 
     public IRelayCommand ClearQueueCommand { get; }
     public IRelayCommand ShuffleQueueCommand { get; }
-    public IRelayCommand DownloadAllCommand { get; }
-    public IRelayCommand<TrackItemViewModel> RemoveTrackCommand { get; }
-    public IAsyncRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
+    public IAsyncRelayCommand DownloadAllCommand { get; }
     public IAsyncRelayCommand SaveQueueToPlaylistCommand { get; }
+    public IRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
 
-    #endregion
-
-    #region Constructor
-
+    /// <summary>
+    /// Инициализирует новый экземпляр <see cref="QueueViewModel"/>.
+    /// </summary>
+    /// <param name="audio">Низкоуровневый звуковой движок.</param>
+    /// <param name="playlistService">Служба управления плейлистами.</param>
+    /// <param name="auth">Служба авторизации YouTube.</param>
+    /// <param name="dialog">Служба модальных диалогов.</param>
+    /// <param name="vmFactory">Фабрика создания моделей представления треков.</param>
+    /// <param name="downloads">Служба загрузки треков.</param>
+    /// <param name="playerControl">Единый координатор состояния воспроизведения.</param>
     public QueueViewModel(
         AudioEngine audio,
-        DownloadService downloads,
+        PlaylistService playlistService,
+        CookieAuthService auth,
         DialogService dialog,
-        PlaylistSyncService syncService,
-        LibraryService library,
-        TrackViewModelFactory vmFactory)
-        : base(audio, downloads, vmFactory)
+        TrackViewModelFactory vmFactory,
+        DownloadService downloads,
+        PlayerControlService? playerControl = null)
     {
-        _downloads = downloads;
+        _audio = audio;
+        _playerControl = playerControl ?? AppEntry.Services.GetRequiredService<PlayerControlService>();
+        _playlistService = playlistService;
+        _auth = auth;
         _dialog = dialog;
-        _syncService = syncService;
-        _library = library;
+        _vmFactory = vmFactory;
+        _downloads = downloads;
 
-        ClearQueueCommand = new RelayCommand(() => Audio.ClearQueue());
-        ShuffleQueueCommand = new RelayCommand(() => Audio.ShuffleQueue());
-        DownloadAllCommand = new RelayCommand(OnDownloadAll);
+        ClearQueueCommand = new RelayCommand(_audio.ClearQueue, () => TotalCount > 0);
+        ShuffleQueueCommand = new RelayCommand(_audio.ShuffleQueue, () => TotalCount > 1);
+        DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TotalCount > 0);
+        SaveQueueToPlaylistCommand = new AsyncRelayCommand(SaveQueueToPlaylistAsync, () => TotalCount > 0);
 
-        RemoveTrackCommand = new RelayCommand<TrackItemViewModel>(item =>
+        MoveItemCommand = new RelayCommand<(int oldIndex, int newIndex)>(tuple =>
         {
-            if (item?.Track != null) Audio.RemoveFromQueue(item.Track);
+            if (!CanReorderItems) return;
+            _audio.MoveQueueItem(tuple.oldIndex, tuple.newIndex);
         });
 
-        MoveItemCommand = new AsyncRelayCommand<(int oldIndex, int newIndex)>(
-            t => CanReorderItems ? MoveItemAsync(t.oldIndex, t.newIndex) : Task.CompletedTask);
+        _audio.OnQueueChanged += OnAudioQueueChanged;
+        _playerControl.CurrentTrackChanged += OnPlayerControlTrackChanged;
+        _playerControl.IsPlayingChanged += OnPlayerControlIsPlayingChanged;
+        _playerControl.ForceSyncTriggered += OnPlayerControlForceSyncTriggered;
 
-        SaveQueueToPlaylistCommand = new AsyncRelayCommand(
-            SaveQueueToPlaylistAsync,
-            () => !IsEmpty);
+        SyncWithAudioQueue();
+    }
 
-        Audio.OnQueueChanged += OnAudioQueueChanged;
-
-        RefreshFromAudioEngine();
+    partial void OnFilterQueryChanged(string value)
+    {
+        UpdateFilterState();
+        OnPropertyChanged(nameof(CanReorderItems));
     }
 
     private void OnAudioQueueChanged()
     {
-        if (_isMovingInternally || _isSuspended || _isDisposed) return;
+        if (Dispatcher.UIThread.CheckAccess())
+            SyncWithAudioQueue();
+        else
+            Dispatcher.UIThread.Post(SyncWithAudioQueue);
+    }
 
-        _queueChangedDebounceTimer?.Stop();
-        _queueChangedDebounceTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(80),
-            DispatcherPriority.Normal,
-            (_, _) =>
+    private void OnPlayerControlTrackChanged(TrackInfo? track)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            UpdatePlaybackState(track, _playerControl.IsPlaying);
+        else
+            Dispatcher.UIThread.Post(() => UpdatePlaybackState(track, _playerControl.IsPlaying));
+    }
+
+    private void OnPlayerControlIsPlayingChanged(bool isPlaying)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            UpdatePlaybackState(_playerControl.CurrentTrack, isPlaying);
+        else
+            Dispatcher.UIThread.Post(() => UpdatePlaybackState(_playerControl.CurrentTrack, isPlaying));
+    }
+
+    private void OnPlayerControlForceSyncTriggered()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            UpdatePlaybackState(_playerControl.CurrentTrack, _playerControl.IsPlaying);
+        else
+            Dispatcher.UIThread.Post(() => UpdatePlaybackState(_playerControl.CurrentTrack, _playerControl.IsPlaying));
+    }
+
+    /// <summary>
+    /// Централизованно обновляет флаги активности и воспроизведения для моделей представления элементов очереди.
+    /// </summary>
+    /// <param name="currentTrack">Текущий воспроизводимый трек.</param>
+    /// <param name="isPlaying">Флаг активного физического воспроизведения.</param>
+    private void UpdatePlaybackState(TrackInfo? currentTrack, bool isPlaying)
+    {
+        if (_currentActiveVm != null && _currentActiveVm.Id != currentTrack?.Id)
+        {
+            _currentActiveVm.SetActive(false, false);
+            _currentActiveVm = null;
+        }
+
+        if (currentTrack is null) return;
+
+        if (_currentActiveVm == null)
+        {
+            for (int i = 0; i < QueueItems.Count; i++)
             {
-                _queueChangedDebounceTimer?.Stop();
-                if (!_isMovingInternally && !_isSuspended && !_isDisposed)
-                    RefreshFromAudioEngine();
-            });
-        _queueChangedDebounceTimer.Start();
-    }
-
-    #endregion
-
-    #region Overrides
-
-    protected override void RebuildVisibleItems()
-    {
-        CanReorderItems = string.IsNullOrWhiteSpace(FilterQuery);
-        base.RebuildVisibleItems();
-
-        IsEmpty = TotalCount == 0;
-        IsFilterEmpty = !IsEmpty && !string.IsNullOrWhiteSpace(FilterQuery) && Items.Count == 0;
-    }
-
-    protected override TrackItemViewModel CreateViewModel(TrackInfo track)
-    {
-        var vm = VmFactory.CreateForQueue(track, PlayFromQueue);
-
-        if (Audio.CurrentTrack?.Id == track.Id)
-        {
-            vm.SetActive(true, Audio.IsPlaying);
-            CurrentActiveVm = vm;
+                if (string.Equals(QueueItems[i].Id, currentTrack.Id, StringComparison.Ordinal))
+                {
+                    _currentActiveVm = QueueItems[i];
+                    break;
+                }
+            }
         }
 
-        return vm;
+        _currentActiveVm?.SetActive(true, isPlaying);
     }
 
-    protected override Task SaveMoveAsync(int fromIndex, int toIndex, CancellationToken ct)
+    private void SyncWithAudioQueue()
     {
-        try
+        var rawQueue = _audio.Queue;
+        TotalCount = rawQueue.Count;
+
+        TimeSpan duration = TimeSpan.Zero;
+        for (int i = 0; i < rawQueue.Count; i++)
+            duration += rawQueue[i].Duration;
+
+        FormattedTotalDuration = duration.TotalHours >= 1
+            ? duration.ToString(@"h\:mm\:ss")
+            : duration.ToString(@"m\:ss");
+
+        for (int i = 0; i < QueueItems.Count; i++)
+            QueueItems[i].Dispose();
+
+        QueueItems.Clear();
+        _currentActiveVm = null;
+
+        var currentTrack = _playerControl.CurrentTrack;
+        bool isPlaying = _playerControl.IsPlaying;
+
+        for (int i = 0; i < rawQueue.Count; i++)
         {
-            _isMovingInternally = true;
-            Audio.MoveQueueItem(fromIndex, toIndex);
+            var item = rawQueue[i];
+            var vm = _vmFactory.CreateForQueue(item, t => _ = _audio.PlayTrackAsync(t));
+            if (_currentActiveVm == null && currentTrack != null && string.Equals(item.Id, currentTrack.Id, StringComparison.Ordinal))
+            {
+                vm.SetActive(true, isPlaying);
+                _currentActiveVm = vm;
+            }
+            QueueItems.Add(vm);
         }
-        finally
+
+        UpdateFilterState();
+
+        OnPropertyChanged(nameof(IsEmpty));
+        OnPropertyChanged(nameof(CanReorderItems));
+
+        ClearQueueCommand.NotifyCanExecuteChanged();
+        ShuffleQueueCommand.NotifyCanExecuteChanged();
+        DownloadAllCommand.NotifyCanExecuteChanged();
+        SaveQueueToPlaylistCommand.NotifyCanExecuteChanged();
+    }
+
+    private void UpdateFilterState()
+    {
+        if (string.IsNullOrWhiteSpace(FilterQuery))
         {
-            _isMovingInternally = false;
+            IsFilterEmpty = false;
+            return;
+        }
+
+        var query = FilterQuery.Trim();
+        bool hasMatch = false;
+
+        for (int i = 0; i < QueueItems.Count; i++)
+        {
+            var item = QueueItems[i];
+            if (item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.Author.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                hasMatch = true;
+                break;
+            }
+        }
+
+        IsFilterEmpty = !hasMatch;
+    }
+
+    private Task DownloadAllAsync()
+    {
+        var rawQueue = _audio.Queue;
+        for (int i = 0; i < rawQueue.Count; i++)
+        {
+            var track = rawQueue[i];
+            if (!track.IsDownloaded)
+                _downloads.StartDownload(track);
         }
         return Task.CompletedTask;
     }
 
-    protected override void OnPlay(TrackInfo track) => PlayFromQueue(track);
-
-    protected override Task<List<TrackInfo>> LoadTracksAsync(IEnumerable<string> ids, CancellationToken ct)
-    {
-        return Task.FromResult(Audio.Queue.ToList());
-    }
-
-    #endregion
-
-    #region Queue Management
-
-    private void RefreshFromAudioEngine()
-    {
-        var queue = Audio.Queue;
-        if (queue.Count == 0)
-        {
-            UpdateMasterData([]);
-            return;
-        }
-
-        var seen = new HashSet<string>(queue.Count, StringComparer.Ordinal);
-        var uniqueTracks = new List<TrackInfo>(queue.Count);
-
-        for (int i = 0; i < queue.Count; i++)
-        {
-            var track = queue[i];
-            if (track != null && seen.Add(track.Id))
-            {
-                uniqueTracks.Add(track);
-            }
-        }
-
-        UpdateMasterData(uniqueTracks);
-    }
-
-    private void OnDownloadAll()
-    {
-        var items = Items;
-        for (int i = 0; i < items.Count; i++)
-        {
-            var item = items[i];
-            if (!item.IsDownloading && !item.Track.IsDownloaded)
-            {
-                _downloads.StartDownload(item.Track);
-            }
-        }
-    }
-
-    private void PlayFromQueue(TrackInfo track) => _ = Audio.PlayTrackAsync(track);
-
-    #endregion
-
-    #region Lifecycle
-
-    protected override void OnSuspend()
-    {
-        _isSuspended = true;
-        Log.Debug("[QueueVM] Suspended");
-    }
-
-    protected override void OnResume()
-    {
-        _isSuspended = false;
-        Log.Debug("[QueueVM] Resumed");
-        RefreshFromAudioEngine();
-    }
-
-    public override async Task OnNavigatedToAsync()
-    {
-        await base.OnNavigatedToAsync().ConfigureAwait(false);
-        RefreshFromAudioEngine();
-    }
-
-    protected override void OnAccountChanged()
-    {
-        base.OnAccountChanged();
-        RefreshFromAudioEngine();
-        Log.Info("[Queue] Playback queue view synchronized with new account state.");
-    }
-
-    #endregion
-
-    #region Commands Implementation
-
+    /// <summary>
+    /// Сохраняет текущую воспроизводимую очередь в новый плейлист с опциональной привязкой к YouTube Music.
+    /// </summary>
     private async Task SaveQueueToPlaylistAsync()
     {
-        var tracks = GetLoadedItemsSnapshot();
-        if (tracks.Count == 0) return;
-
         var result = await _dialog.ShowCreatePlaylistDialogAsync();
-        if (result is null || string.IsNullOrWhiteSpace(result.Name)) return;
+        if (result == null || string.IsNullOrWhiteSpace(result.Name)) return;
 
-        var playlist = await _library.CreatePlaylistAsync(result.Name.Trim());
+        var trimmedName = result.Name.Trim();
+        var playlist = await _playlistService.CreatePlaylistAsync(trimmedName);
 
-        foreach (var track in tracks)
-            await _syncService.AddTrackToPlaylistAsync(playlist.Id, track);
+        var tracks = _audio.Queue.ToList();
+        if (tracks.Count > 0)
+        {
+            await _playlistService.AddTracksToPlaylistAsync(playlist.Id, tracks);
+        }
 
-        Log.Info($"[Queue] Saved {tracks.Count} tracks to playlist '{result.Name}'");
+        if (result.SyncToCloud && _auth.IsAuthenticated)
+        {
+            await _playlistService.LinkToCloudAsync(playlist.Id);
+        }
     }
-
-    #endregion
-
-    #region IDisposable
 
     protected override void Dispose(bool disposing)
     {
-        if (_isDisposed) return;
-
         if (disposing)
         {
-            Log.Debug("[QueueVM] Disposing");
-            Audio.OnQueueChanged -= OnAudioQueueChanged;
-            _queueChangedDebounceTimer?.Stop();
-            _queueChangedDebounceTimer = null;
+            _audio.OnQueueChanged -= OnAudioQueueChanged;
+            _playerControl.CurrentTrackChanged -= OnPlayerControlTrackChanged;
+            _playerControl.IsPlayingChanged -= OnPlayerControlIsPlayingChanged;
+            _playerControl.ForceSyncTriggered -= OnPlayerControlForceSyncTriggered;
+
+            for (int i = 0; i < QueueItems.Count; i++)
+                QueueItems[i].Dispose();
+
+            QueueItems.Clear();
+            _currentActiveVm = null;
         }
-
         base.Dispose(disposing);
-        _isDisposed = true;
     }
-
-    #endregion
 }

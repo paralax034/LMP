@@ -36,7 +36,6 @@ public partial class YoutubeProvider : IDisposable
     private readonly SigCipherDecryptor _sigCipherDecryptor;
     private readonly TrackRegistry _trackRegistry;
     private readonly LibraryService? _libraryService;
-    private readonly YoutubeUserDataService _userDataService;
     private PoTokenProvider? _poTokenProvider;
 
     /// <summary>
@@ -88,8 +87,7 @@ public partial class YoutubeProvider : IDisposable
         LibraryService? libraryService,
         CookieAuthService cookieAuth,
         NTokenDecryptor nTokenDecryptor,
-        SigCipherDecryptor sigCipherDecryptor,
-        YoutubeUserDataService userDataService)
+        SigCipherDecryptor sigCipherDecryptor)
     {
         _networkManager = networkManager;
         _trackRegistry = trackRegistry;
@@ -97,7 +95,6 @@ public partial class YoutubeProvider : IDisposable
         AuthService = cookieAuth;
         _nTokenDecryptor = nTokenDecryptor;
         _sigCipherDecryptor = sigCipherDecryptor;
-        _userDataService = userDataService;
         _poTokenProvider = new PoTokenProvider(() => _networkManager.AudioClient);
 
         // Связываем централизованный утилитный класс с куками сессии
@@ -107,8 +104,7 @@ public partial class YoutubeProvider : IDisposable
 
         ReloadClient();
 
-        if (AuthService != null)
-            AuthService.OnAuthStateChanged += ReloadClient;
+        AuthService?.OnAuthStateChanged += ReloadClient;
 
         _networkManager.NetworkRebuilt += ReloadClient;
     }
@@ -1631,11 +1627,22 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Получает список облачных плейлистов текущего авторизованного пользователя.
+    /// Получает список облачных плейлистов текущего авторизованного пользователя напрямую из API YouTube Music.
     /// </summary>
+    /// <returns>Список моделей плейлистов <see cref="Playlist"/>.</returns>
     public async Task<List<Playlist>> GetUserPlaylistsByAuthAsync()
     {
-        return await _userDataService.GetMyPlaylistsAsync();
+        if (AuthService?.IsAuthenticated != true) return [];
+
+        try
+        {
+            return await GetClient().Music.GetLibraryPlaylistsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[Sync] Failed to get user playlists: {ex.Message}");
+            return [];
+        }
     }
 
     /// <summary>
@@ -2215,8 +2222,7 @@ public partial class YoutubeProvider : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (AuthService != null)
-            AuthService.OnAuthStateChanged -= ReloadClient;
+        AuthService?.OnAuthStateChanged -= ReloadClient;
 
         _networkManager.NetworkRebuilt -= ReloadClient;
 

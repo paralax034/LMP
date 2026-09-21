@@ -1,4 +1,4 @@
-using LMP.Core.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Dialogs;
 
@@ -19,6 +19,16 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
     public IRelayCommand SaveCommand { get; }
     public IRelayCommand CancelCommand { get; }
 
+    /// <summary>
+    /// Инициализирует новый экземпляр ViewModel диалога редактирования плейлиста.
+    /// Обеспечивает гарантированное разрешение сетевых и доменных служб из DI-контейнера при их отсутствии в параметрах.
+    /// </summary>
+    /// <param name="playlist">Редактируемый плейлист.</param>
+    /// <param name="isAuthenticated">Флаг авторизации текущей сессии в YouTube.</param>
+    /// <param name="playlistTracks">Список треков плейлиста для мозаики обложек.</param>
+    /// <param name="networkManager">Централизованный сетевой менеджер (опционально, разрешается из DI при null).</param>
+    /// <param name="dominantColorService">Служба извлечения палитры (опционально, разрешается из DI при null).</param>
+    /// <param name="youtube">Провайдер YouTube API (опционально, разрешается из DI при null).</param>
     public EditPlaylistDialogViewModel(
         Playlist playlist,
         bool isAuthenticated,
@@ -27,6 +37,10 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
         DominantColorService? dominantColorService = null,
         Lazy<YoutubeProvider>? youtube = null)
     {
+        networkManager ??= AppEntry.Services.GetService<INetworkManager>();
+        dominantColorService ??= AppEntry.Services.GetService<DominantColorService>();
+        youtube ??= AppEntry.Services.GetService<Lazy<YoutubeProvider>>();
+
         Editor = PlaylistEditorViewModel.ForEdit(
             playlist,
             isAuthenticated,

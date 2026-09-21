@@ -6,7 +6,7 @@ namespace LMP.Tests.Integration;
 
 /// <summary>
 /// Диагностический и регрессионный набор тестов порядка следования треков,
-/// корректности извлечения <c>setVideoId</c>, CRUD-операций и синхронизации плейлистов.
+/// корректности извлечения <c>setVideoId</c>, CRUD-операций и синхронизации плейлистов через <see cref="PlaylistService"/>.
 /// </summary>
 public static class PlaylistOrderTests
 {
@@ -54,17 +54,17 @@ public static class PlaylistOrderTests
     }
 
     /// <summary>
-    /// Проверяет строгий инвариант порядка выборки: <see cref="LibraryService.GetPlaylistTracksAsync(string, CancellationToken)"/>
-    /// обязан возвращать объекты треков в идентичной последовательности, что и <see cref="LibraryService.GetPlaylistTrackIdsAsync(string, CancellationToken)"/>.
+    /// Проверяет строгий инвариант порядка выборки: <see cref="PlaylistService.GetPlaylistTracksAsync(string, CancellationToken)"/>
+    /// обязан возвращать объекты треков в идентичной последовательности, что и <see cref="PlaylistService.GetPlaylistTrackIdsAsync(string, CancellationToken)"/>.
     /// </summary>
     /// <param name="services">DI-контейнер приложения.</param>
     /// <returns>Асинхронная задача выполнения теста.</returns>
     [TestMethod(TestCategory.Integration, "Playlist: Registry Order Preservation", Group = TestGroups.Pipeline, Order = 50)]
     public static async Task TestRegistryOrderPreservationAsync(IServiceProvider services)
     {
-        var library = services.GetRequiredService<LibraryService>();
+        var playlistService = services.GetRequiredService<PlaylistService>();
 
-        var playlists = await library.GetAllPlaylistsWithCountsAsync().ConfigureAwait(false);
+        var playlists = await playlistService.GetAllPlaylistsWithCountsAsync().ConfigureAwait(false);
         var target = playlists.Find(p => p.TrackCount > 1);
 
         if (target.Playlist is null)
@@ -74,8 +74,8 @@ public static class PlaylistOrderTests
         }
 
         var playlistId = target.Playlist.Id;
-        var expectedIds = await library.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
-        var hydratedTracks = await library.GetPlaylistTracksAsync(playlistId).ConfigureAwait(false);
+        var expectedIds = await playlistService.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
+        var hydratedTracks = await playlistService.GetPlaylistTracksAsync(playlistId).ConfigureAwait(false);
 
         Assert(expectedIds.Count == hydratedTracks.Count,
             $"Track count mismatch: IDs={expectedIds.Count}, Hydrated={hydratedTracks.Count}");
@@ -107,8 +107,9 @@ public static class PlaylistOrderTests
             return;
         }
 
+        var youtubeProvider = services.GetRequiredService<YoutubeProvider>();
         var userData = services.GetRequiredService<YoutubeUserDataService>();
-        var likedTracks = await userData.GetLikedTracksAsync(LikeSyncMode.MusicOnly).ConfigureAwait(false);
+        var likedTracks = await userData.GetLikedTracksAsync(youtubeProvider, LikeSyncMode.MusicOnly).ConfigureAwait(false);
 
         Assert(likedTracks.Count > 0, "Liked tracks API returned empty list for authenticated user.");
 
@@ -130,7 +131,7 @@ public static class PlaylistOrderTests
     [TestMethod(TestCategory.Integration, "Playlist: Liked Monotonic Ordering", Group = TestGroups.Pipeline, Order = 53)]
     public static async Task TestLikedTracksMonotonicOrderingAsync(IServiceProvider services)
     {
-        var library = services.GetRequiredService<LibraryService>();
+        var playlistService = services.GetRequiredService<PlaylistService>();
 
         var testTracks = new List<TrackInfo>
         {
@@ -141,9 +142,9 @@ public static class PlaylistOrderTests
 
         try
         {
-            await library.AddTracksToPlaylistAsync(testTracks, LibraryService.LikedPlaylistId).ConfigureAwait(false);
+            await playlistService.AddTracksToPlaylistAsync(LibraryService.LikedPlaylistId, testTracks).ConfigureAwait(false);
 
-            var trackIds = await library.GetPlaylistTrackIdsAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
+            var trackIds = await playlistService.GetPlaylistTrackIdsAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
 
             int idxAlpha = trackIds.IndexOf("yt_test_like_alpha");
             int idxBeta = trackIds.IndexOf("yt_test_like_beta");
@@ -159,13 +160,13 @@ public static class PlaylistOrderTests
         {
             for (int i = 0; i < testTracks.Count; i++)
             {
-                await library.RemoveTrackFromPlaylistAsync(testTracks[i].Id, LibraryService.LikedPlaylistId).ConfigureAwait(false);
+                await playlistService.RemoveTrackFromPlaylistAsync(LibraryService.LikedPlaylistId, testTracks[i].Id).ConfigureAwait(false);
             }
         }
     }
 
     /// <summary>
-    /// Тестирует полный цикл локальных CRUD-операций с проверкой сохранения порядка:
+    /// Тестирует полный цикл локальных CRUD-операций через <see cref="PlaylistService"/> с проверкой сохранения порядка:
     /// создание плейлиста, добавление треков, перемещение (0 → 1), удаление трека и удаление плейлиста.
     /// </summary>
     /// <param name="services">DI-контейнер приложения.</param>
@@ -173,9 +174,9 @@ public static class PlaylistOrderTests
     [TestMethod(TestCategory.Integration, "Playlist: Local CRUD Order & Compaction", Group = TestGroups.Pipeline, Order = 54)]
     public static async Task TestPlaylistCrudOrderAndCompactionAsync(IServiceProvider services)
     {
-        var library = services.GetRequiredService<LibraryService>();
+        var playlistService = services.GetRequiredService<PlaylistService>();
 
-        var playlist = await library.CreatePlaylistAsync("LMP_Automated_Order_Test").ConfigureAwait(false);
+        var playlist = await playlistService.CreatePlaylistAsync("LMP_Automated_Order_Test").ConfigureAwait(false);
         var playlistId = playlist.Id;
 
         var tA = new TrackInfo { Id = "yt_crud_track_a", Title = "Track A", Author = "Author" };
@@ -184,23 +185,23 @@ public static class PlaylistOrderTests
 
         try
         {
-            await library.AddTrackToPlaylistAsync(tA, playlistId).ConfigureAwait(false);
-            await library.AddTrackToPlaylistAsync(tB, playlistId).ConfigureAwait(false);
-            await library.AddTrackToPlaylistAsync(tC, playlistId).ConfigureAwait(false);
+            await playlistService.AddTrackToPlaylistAsync(playlistId, tA).ConfigureAwait(false);
+            await playlistService.AddTrackToPlaylistAsync(playlistId, tB).ConfigureAwait(false);
+            await playlistService.AddTrackToPlaylistAsync(playlistId, tC).ConfigureAwait(false);
 
-            var initialIds = await library.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
+            var initialIds = await playlistService.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
             Assert(initialIds.Count == 3, $"Expected 3 tracks, got {initialIds.Count}");
             Assert(initialIds[0] == tA.Id && initialIds[1] == tB.Id && initialIds[2] == tC.Id, "Initial insertion order violated.");
 
             // Перемещаем элемент 0 на позицию 1: ожидаем [B, A, C]
-            await library.MoveTrackInPlaylistAsync(playlistId, 0, 1).ConfigureAwait(false);
-            var movedIds = await library.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
+            await playlistService.MovePlaylistTrackAsync(playlistId, 0, 1).ConfigureAwait(false);
+            var movedIds = await playlistService.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
             Assert(movedIds[0] == tB.Id && movedIds[1] == tA.Id && movedIds[2] == tC.Id,
                 $"Move failed. Expected [B, A, C], got [{movedIds[0]}, {movedIds[1]}, {movedIds[2]}]");
 
             // Удаляем средний элемент A: ожидаем [B, C] без пробелов в индексах
-            await library.RemoveTrackFromPlaylistAsync(tA.Id, playlistId).ConfigureAwait(false);
-            var afterRemoveIds = await library.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
+            await playlistService.RemoveTrackFromPlaylistAsync(playlistId, tA.Id).ConfigureAwait(false);
+            var afterRemoveIds = await playlistService.GetPlaylistTrackIdsAsync(playlistId).ConfigureAwait(false);
             Assert(afterRemoveIds.Count == 2, $"Expected 2 tracks after removal, got {afterRemoveIds.Count}");
             Assert(afterRemoveIds[0] == tB.Id && afterRemoveIds[1] == tC.Id,
                 $"Removal compaction failed. Expected [B, C], got [{afterRemoveIds[0]}, {afterRemoveIds[1]}]");
@@ -209,7 +210,7 @@ public static class PlaylistOrderTests
         }
         finally
         {
-            await library.DeletePlaylistAsync(playlistId).ConfigureAwait(false);
+            await playlistService.DeletePlaylistAsync(playlistId).ConfigureAwait(false);
         }
     }
 
@@ -226,13 +227,13 @@ public static class PlaylistOrderTests
         Console.WriteLine("  PLAYLIST ORDER DIAGNOSTIC SUITE");
         Console.WriteLine(new string('=', 70));
 
-        var library = services.GetRequiredService<LibraryService>();
+        var playlistService = services.GetRequiredService<PlaylistService>();
 
         if (string.IsNullOrWhiteSpace(playlistUrl))
         {
             Console.WriteLine("\n[1/2] Auditing Local 'Liked' Playlist IDs vs Hydrated Objects...");
-            var likedIds = await library.GetPlaylistTrackIdsAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
-            var likedTracks = await library.GetPlaylistTracksAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
+            var likedIds = await playlistService.GetPlaylistTrackIdsAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
+            var likedTracks = await playlistService.GetPlaylistTracksAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
 
             Console.WriteLine($"Total Liked IDs: {likedIds.Count} | Total Hydrated: {likedTracks.Count}");
             int compareCount = Math.Min(likedIds.Count, likedTracks.Count);

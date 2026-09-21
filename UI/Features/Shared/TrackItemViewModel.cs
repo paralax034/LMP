@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia.Media;
-using LMP.UI.Services;
 
 namespace LMP.UI.Features.Shared;
 
@@ -59,14 +58,13 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     private readonly AudioEngine _audio;
     private readonly PlayerControlService _playerControl;
-    private readonly PlaylistSyncService _syncService;
+    private readonly PlaylistService _playlistService;
     private readonly DownloadService _downloads;
     private readonly DialogService _dialog;
     private readonly LibraryService _library;
 
     private Action<TrackInfo>? _onPlay;
 
-    // Ленивые поля для команд контекстного меню (минимизация аллокаций при загрузке списков)
     private ICommand? _addToQueueCommand;
     private ICommand? _startRadioCommand;
     private ICommand? _saveToDownloadsCommand;
@@ -101,22 +99,12 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     [ObservableProperty] public partial bool IsQueueContext { get; set; }
 
     public bool ShowAddToQueue => !IsQueueContext;
-
-    /// <summary>
-    /// Флаг отображения иконки состояния кэша.
-    /// </summary>
     public bool HasCacheIcon => !IsDownloading && (Track.IsDownloaded || Track.IsCached);
 
-    /// <summary>
-    /// Геометрия иконки кэша из статического кэша.
-    /// </summary>
     public StreamGeometry? CacheIconGeometry => Track.IsDownloaded
         ? CheckCircleGeometry
         : (Track.IsCached ? CloudCheckGeometry : null);
 
-    /// <summary>
-    /// Подсказка для иконки кэша.
-    /// </summary>
     public string? CacheIconTooltip => Track.IsDownloaded
         ? L["Track_Downloaded"]
         : (Track.IsCached ? L["Track_Cached"] : null);
@@ -163,7 +151,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         TrackInfo track,
         AudioEngine audio,
         PlayerControlService playerControl,
-        PlaylistSyncService syncService,
+        PlaylistService playlistService,
         DownloadService downloads,
         DialogService dialog,
         LibraryService library,
@@ -172,7 +160,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         Track = track;
         _audio = audio;
         _playerControl = playerControl;
-        _syncService = syncService;
+        _playlistService = playlistService;
         _downloads = downloads;
         _dialog = dialog;
         _library = library;
@@ -293,8 +281,8 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         var selectedIds = await _dialog.ShowAddToPlaylistDialogAsync(Track);
         if (selectedIds.Count == 0) return;
 
-        foreach (var playlistId in selectedIds)
-            await _syncService.AddTrackToPlaylistAsync(playlistId, Track);
+        for (int i = 0; i < selectedIds.Count; i++)
+            await _playlistService.AddTrackToPlaylistAsync(selectedIds[i], Track);
     }
 
     private async Task CopyLinkAsync()

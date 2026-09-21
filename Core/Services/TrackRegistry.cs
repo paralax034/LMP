@@ -10,14 +10,10 @@ namespace LMP.Core.Services;
 /// Реестр треков (Identity Map / L1 Cache) для управления экземплярами <see cref="TrackInfo"/> в памяти.
 /// Гарантирует уникальность ссылки на объект трека при параллельных запросах.
 /// </summary>
-/// <remarks>
-/// <para>Использует комбинацию слабых ссылок (<see cref="WeakReference{T}"/>) для неиспользуемых треков 
-/// и жесткого закрепления (<see cref="_pinned"/>) для активных, лайкнутых или загруженных на устройство элементов.
-/// Позволяет минимизировать накладные расходы сборщика мусора (GC) и избежать дублирования объектов.</para>
-/// <para>Интегрирован с механизмом изоляции мультиаккаунтов через обращение к <see cref="CookieAuthService"/></para>
-/// </remarks>
 public sealed class TrackRegistry
 {
+    private const int CleanupThreshold = 512;
+
     private readonly ConcurrentDictionary<string, WeakReference<TrackInfo>> _cache =
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TrackInfo> _pinned =
@@ -26,6 +22,8 @@ public sealed class TrackRegistry
     private readonly ITrackRepository? _repository;
     private readonly IPlaylistRepository? _playlists;
     private readonly CookieAuthService? _auth;
+
+    private int _cleanupCounter;
 
     /// <summary>
     /// Инициализирует новый экземпляр реестра треков.
@@ -63,6 +61,11 @@ public sealed class TrackRegistry
     public TrackInfo RegisterOrUpdate(TrackInfo incoming)
     {
         if (string.IsNullOrEmpty(incoming.Id)) return incoming;
+
+        if ((Interlocked.Increment(ref _cleanupCounter) & (CleanupThreshold - 1)) == 0)
+        {
+            Task.Run(CleanupDeadReferences);
+        }
 
         var audioCache = GetAudioCache();
 
@@ -159,52 +162,6 @@ public sealed class TrackRegistry
         UpdatePinStatusInternal(canonical);
 
         return canonical;
-    }
-
-    /// <summary>
-    /// Массово предварительно загружает группу треков в память, снижая накладные расходы на единичные SQL-вызовы.
-    /// </summary>
-    /// <param name="ids">Коллекция идентификаторов треков для предварительной загрузки.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    public async Task PreloadAsync(IEnumerable<string> ids, CancellationToken ct = default)
-    {
-        if (_repository == null) return;
-
-        var toLoadSet = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var id in ids)
-        {
-            if (TryGet(id) == null)
-                toLoadSet.Add(id);
-        }
-
-        if (toLoadSet.Count == 0) return;
-
-        var loaded = await _repository.GetByIdsAsync(toLoadSet, CurrentOwnerId, ct);
-        if (loaded.Count == 0) return;
-
-        Dictionary<string, HashSet<string>>? playlistsMap = null;
-        if (_playlists != null)
-        {
-            var loadedIds = new List<string>(loaded.Count);
-            for (int i = 0; i < loaded.Count; i++)
-                loadedIds.Add(loaded[i].Id);
-
-            playlistsMap = await _playlists.GetPlaylistsForTracksAsync(loadedIds, CurrentOwnerId, ct);
-        }
-
-        for (int i = 0; i < loaded.Count; i++)
-        {
-            var track = loaded[i];
-
-            if (playlistsMap != null && playlistsMap.TryGetValue(track.Id, out var pls))
-            {
-                track.InPlaylists = pls;
-            }
-
-            var canonical = RegisterOrUpdate(track);
-            UpdatePinStatusInternal(canonical);
-        }
     }
 
     /// <summary>

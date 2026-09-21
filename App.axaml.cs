@@ -195,13 +195,13 @@ public partial class App : Application
 
             // YouTube Provider
             _splash?.UpdateStatus(L["Splash_ConnectingYouTube"]);
-            var youtube = AppEntry.Services.GetRequiredService<Lazy<YoutubeProvider>>();
+            var youtube = AppEntry.Services.GetRequiredService<YoutubeProvider>();
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await youtube.Value.InitializeAsync().ConfigureAwait(false);
+                    await youtube.InitializeAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

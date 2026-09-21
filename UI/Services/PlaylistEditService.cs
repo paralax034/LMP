@@ -1,171 +1,103 @@
+using Avalonia.Threading;
 using LMP.UI.Dialogs;
 
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Централизованный сервис редактирования плейлистов.
-///
-/// <para><b>Зачем нужен:</b></para>
-/// <para>
-/// Логика редактирования плейлиста (переименование, обложка, цвет, привязка/отвязка YouTube)
-/// ранее дублировалась в <c>LibraryViewModel.EditPlaylistFromCardAsync</c> и
-/// <c>PlaylistViewModel.EditPlaylistAsync</c> (~80% одинакового кода).
-/// Этот сервис — единый источник истины (Single Source of Truth).
-/// </para>
-///
-/// <para><b>Принцип работы:</b></para>
-/// <list type="number">
-///   <item>Загружает актуальное состояние плейлиста из БД</item>
-///   <item>Показывает диалог редактирования</item>
-///   <item>Применяет изменения: sync → name → thumbnail → description → color</item>
-///   <item>Сохраняет в БД (что триггерит <c>OnPlaylistChanged</c>)</item>
-/// </list>
-///
-/// <para><b>Зависимости:</b></para>
-/// <para>Не знает о UI-страницах. Навигационную блокировку получает через callback-и.</para>
+/// UI-сервис редактирования плейлистов: показ диалогов и координация UI-потока.
+/// Доменная логика (клонирование, привязка, отвязка) строго делегирована в <see cref="PlaylistService"/>.
 /// </summary>
 public sealed class PlaylistEditService
 {
-    private readonly LibraryService _library;
-    private readonly YoutubeProvider _youtube;
+    private readonly PlaylistService _playlistService;
     private readonly CookieAuthService _auth;
     private readonly DialogService _dialog;
-    private readonly PlaylistSyncService _syncService;
     private readonly NotificationService _notifications;
 
-    /// <summary>Быстрый доступ к локализации.</summary>
     private static LocalizationService SL => LocalizationService.Instance;
 
-    /// <param name="library">Сервис библиотеки для чтения/записи данных.</param>
-    /// <param name="youtube">Провайдер YouTube API для облачных операций.</param>
-    /// <param name="auth">Сервис авторизации для проверки доступа к YouTube.</param>
-    /// <param name="syncService">Сервис синхронизации плейлистов.</param>
-    /// <param name="notifications">Сервис уведомлений для toast-сообщений.</param>
-    /// <param name="dialog">Сервис диалогов для показа UI.</param>
     public PlaylistEditService(
-        LibraryService library,
-        YoutubeProvider youtube,
+        PlaylistService playlistService,
         CookieAuthService auth,
-        PlaylistSyncService syncService,
         NotificationService notifications,
         DialogService dialog)
     {
-        _library = library;
-        _youtube = youtube;
+        _playlistService = playlistService;
         _auth = auth;
-        _syncService = syncService;
         _notifications = notifications;
         _dialog = dialog;
     }
 
-    /// <summary>
-    /// Результат операции редактирования.
-    /// </summary>
-    /// <param name="Changed">Были ли фактические изменения в плейлисте.</param>
-    /// <param name="Playlist">Обновлённый объект плейлиста.</param>
+    private static void RunOnUi(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            action();
+        else
+            Dispatcher.UIThread.Post(action);
+    }
+
+    private static void RunOnUi<T>(Action<T> action, T arg)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            action(arg);
+        else
+            Dispatcher.UIThread.Post(() => action(arg));
+    }
+
     public sealed record EditResult(bool Changed, Playlist Playlist);
 
     /// <summary>
-    /// Выполняет полный цикл редактирования плейлиста.
-    ///
-    /// <para><b>Алгоритм:</b></para>
-    /// <list type="number">
-    ///   <item>Загружает свежее состояние из БД (чтобы не работать с устаревшими данными)</item>
-    ///   <item>Показывает диалог <see cref="EditPlaylistDialogViewModel"/></item>
-    ///   <item>Если запрошена копия — делегирует в <see cref="CreateCopyAsync"/></item>
-    ///   <item>Обрабатывает изменение синхронизации (link/unlink YouTube)</item>
-    ///   <item>Обрабатывает переименование — пропускается для системных плейлистов</item>
-    ///   <item>Обрабатывает обложку (валидация URI + локальные пути для мозаик)</item>
-    ///   <item>Обрабатывает описание</item>
-    ///   <item>Обрабатывает цвет (CustomColor + ComputedColor)</item>
-    ///   <item>Сохраняет всё одним вызовом в БД</item>
-    /// </list>
-    ///
-    /// <para><b>Порядок шагов важен:</b> sync toggle обрабатывается ПЕРЕД rename,
-    /// потому что после привязки к YouTube переименование должно идти через API.</para>
+    /// Координирует процесс редактирования метаданных и облачной привязки плейлиста.
     /// </summary>
-    /// <param name="playlistId">ID плейлиста для редактирования.</param>
-    /// <param name="lockNavigation">
-    /// Callback для блокировки навигации на время сетевых операций.
-    /// </param>
-    /// <param name="unlockNavigation">Callback для разблокировки навигации.</param>
-    /// <returns>
-    /// <see cref="EditResult"/> с флагом изменений и обновлённым плейлистом.
-    /// <c>null</c> если пользователь отменил диалог или плейлист не найден.
-    /// </returns>
+    /// <param name="playlistId">Идентификатор редактируемого плейлиста.</param>
+    /// <param name="lockNavigation">Делегат блокировки UI-навигации при длительных сетевых операциях.</param>
+    /// <param name="unlockNavigation">Делегат снятия блокировки UI-навигации.</param>
+    /// <returns>Результат редактирования с актуальной моделью плейлиста либо <c>null</c> при отмене.</returns>
     public async Task<EditResult?> EditPlaylistAsync(
-            string playlistId,
-            Action<string> lockNavigation,
-            Action unlockNavigation)
+        string playlistId,
+        Action<string> lockNavigation,
+        Action unlockNavigation)
     {
-        var playlist = await _library.GetPlaylistAsync(playlistId);
+        var playlist = await _playlistService.GetPlaylistAsync(playlistId).ConfigureAwait(false);
         if (playlist == null) return null;
 
-        // Mutation guard: read-only плейлисты не редактируются
         if (!playlist.IsEditable)
         {
             var message = !string.IsNullOrEmpty(playlist.Author)
-                ? string.Format(
-                    SL["Playlist_ReadOnly_ByAuthor"] ?? "Playlist by {0} is read-only",
-                    playlist.Author)
+                ? string.Format(SL["Playlist_ReadOnly_ByAuthor"] ?? "Playlist by {0} is read-only", playlist.Author)
                 : SL["Playlist_ReadOnly"] ?? "This playlist is read-only";
 
-            await _dialog.ShowInfoAsync(
-                SL["Dialog_Warning_Title"] ?? "Warning",
-                message);
-
+            await _dialog.ShowInfoAsync(SL["Dialog_Warning_Title"] ?? "Warning", message);
             return null;
         }
 
-        // Загружаем треки плейлиста для работы вкладки «Из треков» (мозаика)
-        var tracks = await _library.GetPlaylistTracksAsync(playlistId);
-
+        var tracks = await _playlistService.GetPlaylistTracksAsync(playlistId).ConfigureAwait(false);
         var result = await _dialog.ShowEditPlaylistDialogAsync(playlist, tracks);
         if (result == null) return null;
 
-        // CREATE COPY: обрабатываем до всех остальных шагов
-        // Создаём новый локальный плейлист с данными из редактора и копируем треки.
-        // Оригинальный плейлист остаётся нетронутым.
         if (result.ShouldCreateCopy)
-            return await CreateCopyAsync(playlist, result, lockNavigation, unlockNavigation);
+            return await CreateCopyAsync(playlist, result, lockNavigation, unlockNavigation).ConfigureAwait(false);
 
         bool changed = false;
 
-        // STEP 1: Sync toggle
-        if (result.SyncToCloud.HasValue && result.SyncToCloud.Value != playlist.IsFromAccount)
-        {
-            bool wantsSync = result.SyncToCloud.Value;
-
-            if (wantsSync && !playlist.IsFromAccount && _auth.IsAuthenticated)
-            {
-                changed |= await TryLinkToCloudAsync(
-                    playlist, playlistId, lockNavigation, unlockNavigation);
-            }
-            else if (!wantsSync && playlist.IsFromAccount)
-            {
-                changed |= await TryUnlinkFromCloudAsync(playlist);
-            }
-        }
-
-        // STEP 2: Rename
+        // 1. Rename
         if (!LibraryService.IsSystemPlaylist(playlistId))
         {
             var newName = result.Name?.Trim();
             if (!string.IsNullOrWhiteSpace(newName) &&
                 !string.Equals(newName, playlist.Name, StringComparison.Ordinal))
             {
-                // Убрана автоматическая отправка на YouTube
                 playlist.Name = newName;
                 changed = true;
             }
         }
 
-        // STEP 3: Thumbnail
+        // 2. Thumbnail
         if (!string.Equals(result.ThumbnailUrl, playlist.ThumbnailUrl, StringComparison.Ordinal))
         {
             if (!string.IsNullOrWhiteSpace(result.ThumbnailUrl))
             {
-                if (IsValidThumbnail(result.ThumbnailUrl))
+                if (PlaylistEditorViewModel.IsValidUri(result.ThumbnailUrl))
                 {
                     playlist.ThumbnailUrl = result.ThumbnailUrl;
                     playlist.ComputedColor = null;
@@ -189,22 +121,21 @@ public sealed class PlaylistEditService
             }
         }
 
-        // STEP 3.5: Description
+        // 3. Description
         if (!string.Equals(result.Description?.Trim(), playlist.Description?.Trim(), StringComparison.Ordinal))
         {
-            // Убрана автоматическая отправка на YouTube
             playlist.Description = result.Description?.Trim();
             changed = true;
         }
 
-        // STEP 4: Custom Color
+        // 4. Custom Color
         if (!string.Equals(result.CustomColor, playlist.CustomColor, StringComparison.Ordinal))
         {
             playlist.CustomColor = result.CustomColor;
             changed = true;
         }
 
-        // STEP 4.5: Computed Color
+        // 5. Computed Color
         if (result.ComputedColor != null &&
             !string.Equals(result.ComputedColor, playlist.ComputedColor, StringComparison.OrdinalIgnoreCase))
         {
@@ -212,17 +143,46 @@ public sealed class PlaylistEditService
             changed = true;
         }
 
-        // STEP 5: Save
+        // Сохраняем отредактированные метаданные до изменения статуса привязки
         if (changed)
         {
             playlist.UpdatedAt = DateTime.Now;
-            await _library.AddOrUpdatePlaylistAsync(playlist);
+            await _playlistService.AddOrUpdatePlaylistAsync(playlist).ConfigureAwait(false);
+        }
 
-            Log.Info($"[PlaylistEdit] Saved: Id={playlist.Id}, " +
-                     $"SyncMode={playlist.SyncMode}, " +
-                     $"YoutubeId={playlist.YoutubeId ?? "null"}, " +
-                     $"Name={playlist.Name}");
+        // 6. Sync toggle: выполняется строго после фиксации метаданных, чтобы не затереть облачные идентификаторы
+        if (result.SyncToCloud.HasValue && result.SyncToCloud.Value != playlist.IsFromAccount)
+        {
+            bool wantsSync = result.SyncToCloud.Value;
 
+            if (wantsSync && !playlist.IsFromAccount && _auth.IsAuthenticated)
+            {
+                bool linked = await TryLinkToCloudAsync(playlistId, lockNavigation, unlockNavigation).ConfigureAwait(false);
+                if (linked)
+                {
+                    var fresh = await _playlistService.GetPlaylistAsync(playlistId).ConfigureAwait(false);
+                    if (fresh != null)
+                    {
+                        playlist.YoutubeId = fresh.YoutubeId;
+                        playlist.SyncMode = fresh.SyncMode;
+                    }
+                    changed = true;
+                }
+            }
+            else if (!wantsSync && playlist.IsFromAccount)
+            {
+                bool unlinked = await TryUnlinkFromCloudAsync(playlist).ConfigureAwait(false);
+                if (unlinked)
+                {
+                    playlist.YoutubeId = null;
+                    playlist.SyncMode = PlaylistSyncMode.LocalOnly;
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
+        {
             await _notifications.ShowToastAsync(
                 titleKey: "EditPlaylist_Saved",
                 messageKey: "EditPlaylist_Saved",
@@ -235,71 +195,29 @@ public sealed class PlaylistEditService
         return new EditResult(changed, playlist);
     }
 
-    /// <summary>
-    /// Создаёт локальную копию плейлиста с данными из редактора.
-    ///
-    /// <para><b>Алгоритм:</b></para>
-    /// <list type="number">
-    ///   <item>Создаёт новый плейлист с данными из редактора (имя, обложка, цвет, описание)</item>
-    ///   <item>Копирует все треки из оригинала в новый плейлист</item>
-    ///   <item>Сохраняет в БД</item>
-    /// </list>
-    ///
-    /// <para><b>Ограничения:</b> копия всегда локальная, без привязки к YouTube,
-    /// независимо от статуса оригинала.</para>
-    /// </summary>
     private async Task<EditResult?> CreateCopyAsync(
         Playlist original,
         EditPlaylistResult editorResult,
         Action<string> lockNavigation,
         Action unlockNavigation)
     {
-        lockNavigation(SL["Playlist_CreatingCopy"] ?? "Creating copy...");
+        RunOnUi(lockNavigation, SL["Playlist_CreatingCopy"] ?? "Creating copy...");
         try
         {
             var copyName = string.IsNullOrWhiteSpace(editorResult.Name)
                 ? original.Name
                 : editorResult.Name.Trim();
 
-            // Суффикс добавляем только если имя не менялось
             if (string.Equals(copyName, original.Name, StringComparison.Ordinal))
                 copyName = $"{copyName} ({SL["Playlist_CopySuffix"] ?? "copy"})";
 
-            var copy = new Playlist
-            {
-                Name = copyName,
-                ThumbnailUrl = editorResult.ThumbnailUrl,
-                CustomColor = editorResult.CustomColor,
-                Description = editorResult.Description,
-                ComputedColor = editorResult.ComputedColor,
-                SyncMode = PlaylistSyncMode.LocalOnly,
-                YoutubeId = null,
-                CreatedAt = DateTime.Now,
-                UpdatedAt = DateTime.Now
-            };
-
-            await _library.AddOrUpdatePlaylistAsync(copy);
-
-            var originalTrackIds = await _library.GetPlaylistTrackIdsAsync(original.Id);
-            if (originalTrackIds.Count > 0)
-            {
-                // Переиспользуем AddOrUpdatePlaylistAsync с TrackIds для батчевой вставки треков
-                await _library.AddOrUpdatePlaylistAsync(new Playlist
-                {
-                    Id = copy.Id,
-                    Name = copy.Name,
-                    ThumbnailUrl = copy.ThumbnailUrl,
-                    CustomColor = copy.CustomColor,
-                    Description = copy.Description,
-                    ComputedColor = copy.ComputedColor,
-                    SyncMode = PlaylistSyncMode.LocalOnly,
-                    TrackIds = [.. originalTrackIds],
-                    UpdatedAt = DateTime.Now
-                });
-            }
-
-            Log.Info($"[PlaylistEdit] Copy created: '{copy.Name}' (id={copy.Id}), " +
-                     $"tracks={originalTrackIds.Count}, source={original.Id}");
+            var copy = await _playlistService.CreateCopyAsync(
+                original.Id,
+                copyName,
+                editorResult.Description,
+                editorResult.CustomColor,
+                editorResult.ComputedColor,
+                editorResult.ThumbnailUrl).ConfigureAwait(false);
 
             await _notifications.ShowToastAsync(
                 titleKey: "EditPlaylist_CopyCreated",
@@ -308,7 +226,6 @@ public sealed class PlaylistEditService
                 durationMs: 2500);
 
             NotificationService.PlaySuccessSound();
-
             return new EditResult(true, copy);
         }
         catch (Exception ex)
@@ -326,70 +243,20 @@ public sealed class PlaylistEditService
         }
         finally
         {
-            unlockNavigation();
+            RunOnUi(unlockNavigation);
         }
     }
 
-    /// <summary>
-    /// Проверяет валидность значения обложки.
-    ///
-    /// <para>Допустимые форматы:</para>
-    /// <list type="bullet">
-    ///   <item>HTTP/HTTPS URL — обложка из интернета</item>
-    ///   <item><c>avares://</c> URI — встроенный ресурс приложения</item>
-    ///   <item>Абсолютный путь к существующему файлу — мозаика или выбранный файл</item>
-    ///   <item><c>file://</c> URI — локальный файл</item>
-    /// </list>
-    /// </summary>
-    private static bool IsValidThumbnail(string? thumbnailValue)
-    {
-        if (string.IsNullOrWhiteSpace(thumbnailValue)) return false;
-
-        if (thumbnailValue.StartsWith(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-            thumbnailValue.StartsWith(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (thumbnailValue.StartsWith("avares://", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (thumbnailValue.StartsWith(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
-        {
-            if (Uri.TryCreate(thumbnailValue, UriKind.Absolute, out var fileUri))
-                return File.Exists(fileUri.LocalPath);
-            return false;
-        }
-
-        if (Path.IsPathRooted(thumbnailValue))
-            return File.Exists(thumbnailValue);
-
-        return false;
-    }
-
-    /// <summary>
-    /// Привязывает локальный плейлист к YouTube Music.
-    ///
-    /// <para><b>Алгоритм:</b></para>
-    /// <list type="number">
-    ///   <item>Блокирует навигацию (показывает спиннер)</item>
-    ///   <item>Создаёт пустой плейлист в YouTube через API</item>
-    ///   <item>Устанавливает <c>YoutubeId</c> и <c>SyncMode=TwoWaySync</c></item>
-    ///   <item>Сохраняет плейлист (чтобы YoutubeId был в БД)</item>
-    ///   <item>Запускает синхронизацию треков через PlaylistSyncService</item>
-    /// </list>
-    /// </summary>
-    /// <returns><c>true</c> если привязка успешна.</returns>
     private async Task<bool> TryLinkToCloudAsync(
-        Playlist playlist,
         string localPlaylistId,
         Action<string> lockNavigation,
         Action unlockNavigation)
     {
-        lockNavigation(SL["Playlist_LinkingToCloud"] ?? "Linking to YouTube Music...");
+        RunOnUi(lockNavigation, SL["Playlist_LinkingToCloud"] ?? "Linking to YouTube Music...");
         try
         {
-            var ytId = await _youtube.CreatePlaylistAsync(playlist.Name);
-
-            if (string.IsNullOrEmpty(ytId))
+            bool success = await _playlistService.LinkToCloudAsync(localPlaylistId).ConfigureAwait(false);
+            if (!success)
             {
                 await _notifications.ShowToastAsync(
                     titleKey: "Dialog_Error_Title",
@@ -400,35 +267,6 @@ public sealed class PlaylistEditService
                 return false;
             }
 
-            playlist.YoutubeId = ytId;
-            playlist.SyncMode = PlaylistSyncMode.TwoWaySync;
-            playlist.UpdatedAt = DateTime.Now;
-            await _library.AddOrUpdatePlaylistAsync(playlist);
-
-            Log.Info($"[PlaylistEdit] Linked to YouTube: {ytId}");
-
-            unlockNavigation();
-
-            var trackIds = await _library.GetPlaylistTrackIdsAsync(localPlaylistId);
-            if (trackIds.Count > 0)
-            {
-                var syncOptions = new PlaylistSyncOptions
-                {
-                    Strategy = PlaylistSyncStrategy.ReplaceCloud,
-                    SyncName = false,
-                    SyncDescription = false,
-                    SyncThumbnail = false,
-                    SyncTracks = true
-                };
-
-                var syncResult = await _syncService.SyncDirectAsync(localPlaylistId, syncOptions);
-
-                if (syncResult.Success)
-                    Log.Info($"[PlaylistEdit] Tracks synced after link: {syncResult.TracksAddedToCloud}");
-                else
-                    Log.Warn($"[PlaylistEdit] Track sync after link failed: {syncResult.ErrorMessage}");
-            }
-
             await _notifications.ShowToastAsync(
                 titleKey: "EditPlaylist_Linked",
                 messageKey: "EditPlaylist_Linked",
@@ -436,7 +274,6 @@ public sealed class PlaylistEditService
                 durationMs: 3000);
 
             NotificationService.PlaySuccessSound();
-
             return true;
         }
         catch (Exception ex)
@@ -451,22 +288,14 @@ public sealed class PlaylistEditService
                 durationMs: 5000);
 
             _notifications.TryPlayErrorSound();
-
             return false;
         }
         finally
         {
-            unlockNavigation();
+            RunOnUi(unlockNavigation);
         }
     }
 
-    /// <summary>
-    /// Отвязывает плейлист от YouTube Music.
-    ///
-    /// <para><b>Важно:</b> плейлист НЕ удаляется из YouTube-аккаунта,
-    /// просто локальная копия перестаёт синхронизироваться.</para>
-    /// </summary>
-    /// <returns><c>true</c> если пользователь подтвердил отвязку.</returns>
     private async Task<bool> TryUnlinkFromCloudAsync(Playlist playlist)
     {
         var confirm = await _dialog.ConfirmAsync(
@@ -480,10 +309,7 @@ public sealed class PlaylistEditService
 
         if (!confirm) return false;
 
-        playlist.SyncMode = PlaylistSyncMode.LocalOnly;
-        playlist.YoutubeId = null;
-
-        Log.Info($"[PlaylistEdit] Unlinked from YouTube: {playlist.Id}");
+        await _playlistService.UnlinkFromCloudAsync(playlist.Id).ConfigureAwait(false);
 
         await _notifications.ShowToastAsync(
             titleKey: "EditPlaylist_Unlinked",

@@ -66,6 +66,8 @@
         <!-- Row 1: Виртуализированная сетка обложек -->
         <ScrollViewer Grid.Row="1"
             VerticalScrollBarVisibility="Auto"
+            Height="140"
+            MinHeight="140"
             MaxHeight="140">
             <ItemsRepeater ItemsSource="{Binding TrackCovers}">
                 <ItemsRepeater.Layout>

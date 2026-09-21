@@ -5,7 +5,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using Avalonia.Threading;
 using LMP.Core.Helpers.Extensions;
 
 namespace LMP.UI.Features.Search;

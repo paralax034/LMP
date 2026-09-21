@@ -31,10 +31,6 @@ public static class MosaicGenerator
 
     /// <summary>
     /// Генерирует мозаику из переданных изображений и сохраняет как PNG.
-    /// 
-    /// <para><b>Потокобезопасность:</b> метод запускает рендер на UI-потоке
-    /// (Avalonia требует это для RenderTargetBitmap), но подготовку выполняет
-    /// на текущем потоке.</para>
     /// </summary>
     /// <param name="bitmaps">
     /// Список загруженных изображений (1-4 штуки).
@@ -68,11 +64,24 @@ public static class MosaicGenerator
         ct.ThrowIfCancellationRequested();
 
         // Рендер мозаики — должен выполняться на UI-потоке (Avalonia rendering)
+        using var memoryStream = new MemoryStream();
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
             using var target = RenderMosaic(bitmaps);
-            target.Save(filePath, PngBitmapEncoderOptions.Default);
+            target.Save(memoryStream, PngBitmapEncoderOptions.Default);
         });
+
+        memoryStream.Position = 0;
+        await using (var fileStream = new FileStream(
+            filePath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 81920,
+            useAsync: true))
+        {
+            await memoryStream.CopyToAsync(fileStream, ct).ConfigureAwait(false);
+        }
 
         return filePath;
     }

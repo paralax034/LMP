@@ -245,7 +245,7 @@ public sealed class Playlist : IBatchItem, ISearchResult
     /// Текущий пользователь может синхронизировать изменения обратно в YouTube.
     /// </summary>
     [JsonIgnore]
-    public bool CanSyncToCloud => IsMine && HasCloudLink && SyncMode == PlaylistSyncMode.TwoWaySync;
+    public bool CanSyncToCloud => (IsMine || Ownership == PlaylistOwnership.Unknown) && HasCloudLink && SyncMode == PlaylistSyncMode.TwoWaySync;
 
     /// <summary>
     /// Можно получить свежие данные из YouTube.

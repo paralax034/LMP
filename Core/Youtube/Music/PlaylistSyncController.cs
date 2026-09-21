@@ -349,33 +349,6 @@ internal sealed class PlaylistSyncController(HttpClient http)
         return new RemotePlaylistInfo(contentId, title, trackCount, thumbUrl);
     }
 
-    /// <summary>
-    /// Проверяет, является ли строка относительным форматом указания времени.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool IsRelativeDate(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return false;
-
-        var span = text.AsSpan();
-        return span.Contains("сегодня".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("today".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("вчера".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("yesterday".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("назад".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("ago".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("час".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("hour".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("минут".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("minute".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("день".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("day".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("недел".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("week".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("месяц".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("month".AsSpan(), StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string? ExtractWebContinuationToken(JsonElement root)
     {
         var commands = root.GetPropertyOrNull("onResponseReceivedCommands");

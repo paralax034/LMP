@@ -2,7 +2,6 @@
 using AsyncImageLoader;
 using Avalonia;
 using LMP.Core.Audio.Cache;
-using LMP.Core.Audio.Http;
 using LMP.Core.Data;
 using LMP.Core.Data.Repositories;
 using LMP.Core.Diagnostics;
@@ -470,12 +469,13 @@ public sealed class AppEntry
             new CachedImageLoader(sp.GetRequiredService<ImageCacheService>(), ImageQuality.Low));
 
         services.AddSingleton<LibraryService>();
+        services.AddSingleton<PlaylistService>();
         services.AddSingleton<ThemeManagerService>();
         services.AddSingleton<CookieAuthService>();
         services.AddSingleton<LocalAuthServer>();
+        services.AddSingleton<YoutubeUserDataService>();
         services.AddSingleton<YoutubeProvider>();
         services.AddTransient(sp => new Lazy<YoutubeProvider>(sp.GetRequiredService<YoutubeProvider>));
-        services.AddSingleton<YoutubeUserDataService>();
 
         services.AddSingleton<DialogHostViewModel>();
 
@@ -515,7 +515,6 @@ public sealed class AppEntry
             return new SigCipherDecryptor(jsService, G.FilePath.SigCipherCache);
         });
 
-        services.AddSingleton<PlaylistSyncService>();
         services.AddSingleton<PlaylistEditService>();
 
         services.AddSingleton<SearchCacheService>();

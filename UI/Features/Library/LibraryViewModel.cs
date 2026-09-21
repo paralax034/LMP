@@ -4,20 +4,11 @@ using Avalonia.Threading;
 using LMP.Core.Youtube.Search;
 using LMP.UI.Dialogs;
 using LMP.UI.Features.Shell;
-using LMP.UI.Services;
 
 namespace LMP.UI.Features.Library;
 
 /// <summary>
 /// ViewModel страницы «Библиотека» — управление плейлистами пользователя.
-/// 
-/// <para><b>Оптимизации:</b></para>
-/// <list type="bullet">
-///   <item>UI-Yielding через Dispatcher.InvokeAsync для плавного рендера</item>
-///   <item>Батчинг карточек: первые 12 мгновенно, остальные по 4 с задержкой</item>
-///   <item>Подписки на события только в конструкторе (без дублирования)</item>
-///   <item>O(1) запрос длительности вместо N+1</item>
-/// </list>
 /// </summary>
 public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionViewModel
 {
@@ -25,11 +16,11 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
+    private readonly PlaylistService _playlistService;
     private readonly YoutubeProvider _youtube;
     private readonly CookieAuthService _auth;
     private readonly DialogService _dialog;
     private readonly MainWindowViewModel _mainWindow;
-    private readonly PlaylistSyncService _syncService;
     private readonly PlaylistEditService _editService;
     private readonly NotificationService _notifications;
     private readonly PlayerControlService _playerControl;
@@ -46,16 +37,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     private int _prevPlaylistCount;
     private int _prevTrackCount;
 
-    /// <summary>
-    /// Локальный признак наличия данных в памяти.
-    /// </summary>
     private bool _isDataLoaded;
-
-    /// <summary>
-    /// Идентификатор владельца, для которого последний раз была загружена страница.
-    /// Защищает от повторного использования stale-кэша после смены аккаунта,
-    /// даже если broadcast был пропущен или страница уже находилась в кеше навигации.
-    /// </summary>
     private string _loadedOwnerId = string.Empty;
 
     #endregion
@@ -73,13 +55,9 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     partial void OnIsSyncingChanged(bool value)
     {
         if (Dispatcher.UIThread.CheckAccess())
-        {
             SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
-        }
         else
-        {
             Dispatcher.UIThread.Post(() => SyncAccountPlaylistsCommand.NotifyCanExecuteChanged());
-        }
     }
 
     #endregion
@@ -106,18 +84,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     #endregion
 
-    #region Конструктор
-
-    /// <inheritdoc />
     protected override bool HandlesAccountChanges => true;
 
     public LibraryViewModel(
         LibraryService library,
+        PlaylistService playlistService,
         YoutubeProvider youtube,
         CookieAuthService auth,
         MainWindowViewModel mainWindow,
         DialogService dialog,
-        PlaylistSyncService syncService,
         AudioEngine audio,
         NotificationService notifications,
         PlaylistEditService editService,
@@ -125,11 +100,11 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     {
         _audio = audio;
         _library = library;
+        _playlistService = playlistService;
         _youtube = youtube;
         _auth = auth;
         _dialog = dialog;
         _mainWindow = mainWindow;
-        _syncService = syncService;
         _notifications = notifications;
         _editService = editService;
         _playerControl = playerControl;
@@ -148,26 +123,16 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         RefreshCommand = new AsyncRelayCommand(LoadPlaylistsAsync);
 
-        SubscribeToLibraryEvents();
+        SubscribeToEvents();
         Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
         HasPlaylists = Playlists.Count > 0;
     }
 
-    #endregion
-
-    #region ISmoothTransitionViewModel
-
-    /// <inheritdoc />
     public void PrepareForTransition()
     {
-        // Если данные уже в памяти, НЕ сбрасываем контент в скелетон — сохраняем плавность
         if (!_isDataLoaded)
             IsContentReady = false;
     }
-
-    #endregion
-
-    #region Навигация
 
     public override async Task OnNavigatedToAsync()
     {
@@ -180,7 +145,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             return;
         }
 
-        // Загрузка в фоне без блокировки UI-потока
         await LoadPlaylistsAsync().ConfigureAwait(false);
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -192,31 +156,82 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         });
     }
 
-    #endregion
-
-    #region Подписки на события
-
     /// <summary>
-    /// Подписывается на события LibraryService.
-    /// Вызывается ТОЛЬКО из конструктора — предотвращает дублирование подписок.
+    /// Оформляет подписки на события сервисов библиотеки и плейлистов.
     /// </summary>
-    private void SubscribeToLibraryEvents()
+    private void SubscribeToEvents()
     {
-        _library.OnPlaylistChanged += OnLibraryPlaylistChanged;
-        _library.OnPlaylistRemoved += OnLibraryPlaylistRemoved;
+        _playlistService.OnPlaylistChanged += OnPlaylistChangedIncremental;
+        _playlistService.OnPlaylistRemoved += OnPlaylistRemovedIncremental;
         _library.OnDataChanged += OnLibraryDataChanged;
+        _library.OnTrackUpdated += OnLibraryTrackUpdated;
     }
 
-    private void OnLibraryPlaylistChanged(Core.Models.Playlist playlist)
+    private void OnPlaylistChangedIncremental(Core.Models.Playlist playlist)
     {
         if (_isDisposed || IsSyncing) return;
-        Dispatcher.UIThread.Post(() => OnPlaylistChangedIncremental(playlist));
+        Dispatcher.UIThread.Post(async () =>
+        {
+            var result = await _playlistService.GetPlaylistWithCountAsync(playlist.Id);
+            if (result == null) return;
+
+            var (freshPlaylist, trackCount) = result.Value;
+            var existingVm = Playlists.FirstOrDefault(vm => vm.Id == playlist.Id);
+
+            if (existingVm != null)
+            {
+                existingVm.UpdateFrom(freshPlaylist, trackCount);
+            }
+            else
+            {
+                var vm = CreatePlaylistCardVm(freshPlaylist, trackCount);
+                int insertIndex = CalculateInsertIndex(freshPlaylist);
+
+                if (insertIndex >= Playlists.Count)
+                    Playlists.Add(vm);
+                else
+                    Playlists.Insert(insertIndex, vm);
+
+                await Task.Delay(50);
+                vm.Show();
+            }
+
+            UpdateStatsInBackground();
+        });
     }
 
-    private void OnLibraryPlaylistRemoved(string playlistId)
+    private void OnPlaylistRemovedIncremental(string playlistId)
     {
         if (_isDisposed || IsSyncing) return;
-        Dispatcher.UIThread.Post(() => OnPlaylistRemovedIncremental(playlistId));
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = Playlists.FirstOrDefault(x => x.Id == playlistId);
+            if (vm != null)
+            {
+                vm.Dispose();
+                Playlists.Remove(vm);
+                UpdateStatsInBackground();
+            }
+        });
+    }
+
+    private void OnLibraryTrackUpdated(TrackInfo track)
+    {
+        if (_isDisposed || IsSyncing) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            var likedCard = Playlists.FirstOrDefault(p => p.IsLikedPlaylist);
+            if (likedCard != null)
+            {
+                int newCount = track.IsLiked ? likedCard.TrackCount + 1 : Math.Max(0, likedCard.TrackCount - 1);
+                if (likedCard.TrackCount != newCount)
+                {
+                    likedCard.TrackCount = newCount;
+                    UpdateStatsInBackground();
+                }
+            }
+        });
     }
 
     private void OnLibraryDataChanged()
@@ -244,70 +259,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     private async void UpdateStatsInBackground()
     {
-        try
-        {
-            await UpdateStatsAnimatedAsync();
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[Library] Ошибка обновления статистики: {ex.Message}");
-        }
-    }
-
-    #endregion
-
-    #region Инкрементальные обновления
-
-    private async void OnPlaylistChangedIncremental(Core.Models.Playlist playlist)
-    {
-        if (_isDisposed) return;
-
-        try
-        {
-            var result = await _library.GetPlaylistWithCountAsync(playlist.Id);
-            if (result == null) return;
-
-            var (freshPlaylist, trackCount) = result.Value;
-            var existingVm = Playlists.FirstOrDefault(vm => vm.Id == playlist.Id);
-
-            if (existingVm != null)
-            {
-                existingVm.UpdateFrom(freshPlaylist, trackCount);
-            }
-            else
-            {
-                var vm = CreatePlaylistCardVm(freshPlaylist, trackCount);
-                int insertIndex = CalculateInsertIndex(freshPlaylist);
-
-                if (insertIndex >= Playlists.Count)
-                    Playlists.Add(vm);
-                else
-                    Playlists.Insert(insertIndex, vm);
-
-                await Task.Delay(50);
-                vm.Show();
-            }
-
-            UpdateStatsInBackground();
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Library] Ошибка инкрементального обновления: {ex.Message}");
-            await LoadPlaylistsAsync();
-        }
-    }
-
-    private void OnPlaylistRemovedIncremental(string playlistId)
-    {
-        if (_isDisposed) return;
-
-        var vm = Playlists.FirstOrDefault(x => x.Id == playlistId);
-        if (vm != null)
-        {
-            vm.Dispose();
-            Playlists.Remove(vm);
-            UpdateStatsInBackground();
-        }
+        try { await UpdateStatsAnimatedAsync(); }
+        catch (Exception ex) { Log.Warn($"[Library] Update stats error: {ex.Message}"); }
     }
 
     private int CalculateInsertIndex(Core.Models.Playlist playlist)
@@ -318,10 +271,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         foreach (var vm in Playlists)
         {
             if (vm.IsLikedPlaylist) { index++; continue; }
-
             if (playlist.IsLocal && !vm.IsLocal) break;
             if (!playlist.IsLocal && vm.IsLocal) { index++; continue; }
-
             if (string.Compare(playlist.Name, vm.Name, StringComparison.Ordinal) < 0) break;
             index++;
         }
@@ -329,10 +280,9 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         return index;
     }
 
-    #endregion
-
-    #region Создание плейлиста
-
+    /// <summary>
+    /// Открывает диалог создания плейлиста и передает управление в доменный сервис.
+    /// </summary>
     private async Task OpenCreateDialogAsync()
     {
         if (_isDisposed) return;
@@ -341,114 +291,53 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (result == null || string.IsNullOrWhiteSpace(result.Name)) return;
 
         var trimmedName = result.Name.Trim();
-        bool wantsCloud = result.SyncToCloud && _auth.IsAuthenticated;
-        string? youtubeId = null;
+        var playlist = await _playlistService.CreatePlaylistAsync(trimmedName);
 
-        if (wantsCloud)
+        if (result.SyncToCloud && _auth.IsAuthenticated)
         {
-            _mainWindow.LockNavigation(SL["Playlist_CreatingCloud"] ?? "Создание в облаке...");
+            _mainWindow.LockNavigation(SL["Playlist_CreatingCloud"] ?? "Creating on cloud...");
             try
             {
-                youtubeId = await _youtube.CreatePlaylistAsync(trimmedName);
-
-                if (string.IsNullOrEmpty(youtubeId))
+                bool success = await _playlistService.LinkToCloudAsync(playlist.Id);
+                if (!success)
                 {
-                    wantsCloud = false;
-                    var createLocal = await OfferLocalFallbackAsync(
-                        SL["Playlist_CloudCreateFailed_AskLocal"]
-                            ?? "Не удалось создать плейлист в YouTube Music. Создать локально?");
-                    if (!createLocal) return;
+                    await _notifications.ShowToastAsync(
+                        titleKey: "Dialog_Warning_Title",
+                        messageKey: "Playlist_CloudCreateFailed",
+                        severity: NotificationSeverity.Warning);
                 }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[Library] Ошибка создания облачного плейлиста: {ex.Message}");
-                wantsCloud = false;
-
-                var createLocal = await OfferLocalFallbackAsync(
-                    string.Format(
-                        SL["Playlist_CloudError_AskLocal"]
-                            ?? "Ошибка YouTube API: {0}\n\nСоздать локально?",
-                        ex.Message));
-                if (!createLocal) return;
             }
             finally
             {
                 _mainWindow.UnlockNavigation();
             }
         }
-
-        var playlist = await _library.CreatePlaylistAsync(trimmedName);
-
-        if (wantsCloud && !string.IsNullOrEmpty(youtubeId))
-        {
-            playlist.YoutubeId = youtubeId;
-            playlist.SyncMode = PlaylistSyncMode.TwoWaySync;
-        }
-        else
-        {
-            playlist.SyncMode = PlaylistSyncMode.LocalOnly;
-        }
-
-        await _library.AddOrUpdatePlaylistAsync(playlist);
-
-        Log.Info($"[Library] Создан плейлист '{trimmedName}' " +
-                 $"(Sync={playlist.SyncMode}, YtId={playlist.YoutubeId ?? "none"})");
     }
 
-    private async Task<bool> OfferLocalFallbackAsync(string message)
-    {
-        return await _dialog.ConfirmAsync(
-            SL["Dialog_Warning_Title"] ?? "Предупреждение",
-            message,
-            SL["Playlist_CreateLocal"] ?? "Создать локально",
-            SL["Button_Cancel"] ?? "Отмена");
-    }
-
-    #endregion
-
-    #region Обработчики событий
-
-    /// <summary>
-    /// Вызывается из <see cref="CookieAuthService.OnAuthStateChanged"/>.
-    /// Событие может стрелять с сетевого/таймерного потока — диспатчим на UI.
-    /// </summary>
     private void OnAuthChanged()
     {
         if (_isDisposed) return;
-        Dispatcher.UIThread.Post(
-            () => IsAuthenticated = _auth.IsAuthenticated,
-            DispatcherPriority.Background);
+        Dispatcher.UIThread.Post(() => IsAuthenticated = _auth.IsAuthenticated, DispatcherPriority.Background);
     }
 
-    /// <inheritdoc />
     protected override void OnAccountChanged()
     {
         base.OnAccountChanged();
-
         bool wasActive = IsContentReady;
-
         _isDataLoaded = false;
         _loadedOwnerId = string.Empty;
         IsContentReady = false;
         Playlists.Clear();
 
         if (wasActive)
-        {
-            Log.Info("[Library] Account changed while page was visible. Re-rendering lists immediately.");
             _ = ReloadAfterAccountChangeAsync();
-        }
     }
 
-    /// <summary>
-    /// Полная перезагрузка списка плейлистов после смены аккаунта.
-    /// </summary>
     private async Task ReloadAfterAccountChangeAsync()
     {
         try
         {
             await LoadPlaylistsAsync();
-
             if (!_isDisposed)
             {
                 _isDataLoaded = true;
@@ -458,18 +347,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
         catch (Exception ex)
         {
-            Log.Error($"[Library] Failed to reload after account change: {ex.Message}");
+            Log.Error($"[Library] Failed to reload: {ex.Message}");
         }
     }
 
-    #endregion
-
-    #region Синхронизация с YouTube
-
-    /// <summary>
-    /// Выполняет синхронизацию плейлистов и любимых треков с аккаунтом YouTube Music.
-    /// Гарантирует двустороннюю сверку сирот и кэширование SetVideoId в существующие плейлисты при слиянии.
-    /// </summary>
     private async Task SyncAccountPlaylistsAsync()
     {
         if (_isDisposed) return;
@@ -488,7 +369,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         try
         {
             List<PlaylistSearchResult> playlistsToImport = [];
-
             if (!_auth.IsAuthenticated)
             {
                 await _dialog.ShowInfoAsync(SL["Library_SyncYoutube"], SL["Auth_NotSignedIn"]);
@@ -503,11 +383,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 SyncProgress = 0.1;
 
                 var filtered = ytPlaylists
-                    .Where(p =>
-                        !string.IsNullOrEmpty(p.YoutubeId) &&
-                        p.YoutubeId != "LM" &&
-                        p.YoutubeId != "VLLM" &&
-                        !p.YoutubeId.StartsWith("RD"))
+                    .Where(p => !string.IsNullOrEmpty(p.YoutubeId) && p.YoutubeId != "LM" && p.YoutubeId != "VLLM" && !p.YoutubeId.StartsWith("RD"))
                     .ToList();
 
                 playlistsToImport = [.. filtered.Select(p =>
@@ -523,19 +399,13 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             catch (Exception ex)
             {
                 if (!_isDisposed)
-                {
-                    await _dialog.ShowInfoAsync(
-                        SL["Dialog_Error_Title"],
-                        SL["Sync_Error_API"] + ": " + ex.Message);
-                }
+                    await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], SL["Sync_Error_API"] + ": " + ex.Message);
                 return;
             }
 
             SyncProgress = 0.15;
+            var allPlaylists = await _playlistService.GetAllPlaylistsAsync(ct);
 
-            var allPlaylists = await _library.GetAllPlaylistsAsync(ct);
-
-            // Двусторонняя сверка: выявление и отвязка плейлистов, физически удаленных на YouTube
             var cloudPlaylistIds = new HashSet<string>(
                 ytPlaylists.Select(p => p.YoutubeId).Where(id => !string.IsNullOrEmpty(id))!,
                 StringComparer.Ordinal);
@@ -552,9 +422,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                     localPl.SyncMode = PlaylistSyncMode.LocalOnly;
                     localPl.YoutubeId = null;
                     localPl.IsCloudUnavailable = false;
-                    await _library.AddOrUpdatePlaylistAsync(localPl, ct);
+                    await _playlistService.AddOrUpdatePlaylistAsync(localPl, ct);
                     orphansCleaned++;
-                    Log.Info($"[Sync] Orphan cloud playlist '{localPl.Name}' (ID: {localPl.Id}) converted to LocalOnly because it was deleted on YouTube.");
                 }
             }
 
@@ -571,18 +440,18 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             if (playlistsToImport.Count == 0)
             {
                 var confirmSyncLikes = await _dialog.ConfirmAsync(
-                    SL["Sync_ConfirmLikedOnly"] ?? "Плейлисты не найдены",
-                    SL["Sync_NoPlaylistsFound_AskLiked"] ?? "Синхронизировать лайки?",
-                    SL["Common_Yes"] ?? "Да",
-                    SL["Common_No"] ?? "Нет");
+                    SL["Sync_ConfirmLikedOnly"] ?? "No playlists found",
+                    SL["Sync_NoPlaylistsFound_AskLiked"] ?? "Sync liked songs?",
+                    SL["Common_Yes"] ?? "Yes",
+                    SL["Common_No"] ?? "No");
 
                 if (confirmSyncLikes)
                 {
                     SyncStatus = SL["Sync_LikedSongs"];
-                    await _syncService.SyncLikedTracksAsync(ct);
+                    await _playlistService.SyncLikedTracksAsync(ct);
                     await _dialog.ShowInfoAsync(
                         SL["Dialog_Done_Title"],
-                        SL["Sync_Success_Msg_LikedOnly"] ?? "Понравившиеся песни синхронизированы.");
+                        SL["Sync_Success_Msg_LikedOnly"] ?? "Liked songs synchronized.");
                 }
 
                 return;
@@ -630,18 +499,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
                 if (decision.Action == MergeAction.Merge && existing != null)
                 {
-                    var existingTrackIds = await _library.GetPlaylistTrackIdsAsync(existing.Id, ct);
+                    var existingTrackIds = await _playlistService.GetPlaylistTrackIdsAsync(existing.Id, ct);
                     var existingTrackSet = new HashSet<string>(existingTrackIds, StringComparer.Ordinal);
 
                     bool tracksChanged = false;
-
-                    // Cloud metadata / ownership / visibility / link-state
                     bool metadataChanged = ApplyMergedCloudMetadata(existing, fullPlaylist);
 
                     for (int i = 0; i < fullPlaylist.TrackIds.Count; i++)
                     {
                         var trackId = fullPlaylist.TrackIds[i];
-
                         if (existingTrackSet.Add(trackId))
                         {
                             existing.TrackIds.Add(trackId);
@@ -656,38 +522,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                         }
                     }
 
-                    // Перенос актуальных SetVideoId в существующий плейлист библиотеки для исключения browse при будущем удалении
-                    if (_auth.IsAuthenticated && !string.IsNullOrEmpty(existing.YoutubeId))
-                    {
-                        try
-                        {
-                            var fullData = await _youtube.GetFullPlaylistDataAsync(existing.YoutubeId, ct);
-                            if (fullData?.Tracks is { Count: > 0 } remoteTracks)
-                            {
-                                var mappings = new List<(string TrackId, string SetVideoId)>(remoteTracks.Count);
-                                for (int i = 0; i < remoteTracks.Count; i++)
-                                {
-                                    var r = remoteTracks[i];
-                                    if (!string.IsNullOrEmpty(r.SetVideoId))
-                                        mappings.Add(("yt_" + r.VideoId, r.SetVideoId));
-                                }
-
-                                if (mappings.Count > 0)
-                                    await _library.UpdateSetVideoIdsAsync(existing.Id, mappings, ct);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Warn($"[Sync] Failed to mirror setVideoIds to existing playlist {existing.Id}: {ex.Message}");
-                        }
-                    }
-
-                    // Важно: сохраняем не только при track delta, но и при metadata/link delta.
-                    // Иначе новые поля модели так и не попадут в БД.
                     if (tracksChanged || metadataChanged)
-                    {
-                        await _library.AddOrUpdatePlaylistAsync(existing, ct);
-                    }
+                        await _playlistService.AddOrUpdatePlaylistAsync(existing, ct);
 
                     mergedCount++;
                 }
@@ -702,7 +538,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                         fullPlaylist.YoutubeId = decision.Playlist.Id.Value;
                     }
 
-                    await _library.AddOrUpdatePlaylistAsync(fullPlaylist, ct);
+                    await _playlistService.AddOrUpdatePlaylistAsync(fullPlaylist, ct);
                     importedCount++;
                 }
 
@@ -710,11 +546,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 SyncProgress = 0.2 + (0.65 * processed / totalToProcess);
             }
 
-            // Синхронизация любимых треков при общей синхронизации библиотеки (строго на UI-потоке)
             ct.ThrowIfCancellationRequested();
             SyncStatus = SL["Sync_LikedSongs"];
             SyncProgress = 0.9;
-            await _syncService.SyncLikedTracksAsync(ct);
+            await _playlistService.SyncLikedTracksAsync(ct);
 
             SyncProgress = 1.0;
             SyncStatus = SL["Sync_Complete"];
@@ -748,159 +583,92 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
         finally
         {
-            try
-            {
-                await Task.Delay(300);
-            }
-            catch
-            {
-            }
-
+            await Task.Delay(300);
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                try
-                {
-                    _mainWindow.UnlockNavigation();
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[Library] UnlockNavigation error: {ex.Message}");
-                }
+                try { _mainWindow.UnlockNavigation(); } catch { }
 
                 if (!_isDisposed)
                 {
                     IsSyncing = false;
                     SyncProgress = 0;
                     SyncStatus = string.Empty;
-
-                    try
-                    {
-                        await LoadPlaylistsAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warn($"[Library] Post-sync reload error: {ex.Message}");
-                    }
+                    try { await LoadPlaylistsAsync(); } catch { }
                 }
             });
         }
     }
 
-    /// <summary>
-    /// Применяет к существующему локальному плейлисту облачные метаданные,
-    /// полученные при импорте/синхронизации из YouTube.
-    /// Возвращает <c>true</c>, если были изменены хотя бы какие-либо поля.
-    /// </summary>
-    /// <param name="existing">Локальный плейлист из базы данных.</param>
-    /// <param name="incoming">Импортированный/облачный плейлист со свежими метаданными.</param>
-    /// <returns><c>true</c>, если метаданные были обновлены; иначе <c>false</c>.</returns>
-    private bool ApplyMergedCloudMetadata(
-        Core.Models.Playlist existing,
-        Core.Models.Playlist incoming)
+    private static bool ApplyMergedCloudMetadata(Core.Models.Playlist existing, Core.Models.Playlist incoming)
     {
         bool changed = false;
 
-        // 1. Автор плейлиста
         if (!string.Equals(existing.Author, incoming.Author, StringComparison.Ordinal))
         {
             existing.Author = incoming.Author;
             changed = true;
         }
 
-        // 2. Ссылка на YouTube-канал владельца
         if (!string.Equals(existing.OwnerChannelId, incoming.OwnerChannelId, StringComparison.Ordinal))
         {
             existing.OwnerChannelId = incoming.OwnerChannelId;
             changed = true;
         }
 
-        // 3. Статус владения (Mine, Foreign, System)
         if (existing.Ownership != incoming.Ownership)
         {
             existing.Ownership = incoming.Ownership;
             changed = true;
         }
 
-        // 4. Статус приватности (Public, Private, Unlisted)
         if (existing.Visibility != incoming.Visibility)
         {
             existing.Visibility = incoming.Visibility;
             changed = true;
         }
 
-        // 5. Ожидаемое количество треков в облаке
         if (existing.CloudTrackCount != incoming.CloudTrackCount)
         {
             existing.CloudTrackCount = incoming.CloudTrackCount;
             changed = true;
         }
 
-        // 6. Количество просмотров на YouTube / YouTube Music
         if (existing.ViewCount != incoming.ViewCount)
         {
             existing.ViewCount = incoming.ViewCount;
             changed = true;
         }
 
-        // 7. Дата последнего обновления плейлиста
         if (existing.ReleaseDate != incoming.ReleaseDate)
         {
             existing.ReleaseDate = incoming.ReleaseDate;
             changed = true;
         }
 
-        // 8. Обложка плейлиста (YouTube меняет query-параметры обложек, но базовые URL совпадают)
         if (!string.Equals(existing.ThumbnailUrl, incoming.ThumbnailUrl, StringComparison.Ordinal))
         {
             existing.ThumbnailUrl = incoming.ThumbnailUrl;
             changed = true;
         }
 
-        // 9. Описание плейлиста
         if (!string.Equals(existing.Description, incoming.Description, StringComparison.Ordinal))
         {
             existing.Description = incoming.Description;
             changed = true;
         }
 
-        // 10. Облачная привязка и режим синхронизации при наличии авторизации
-        if (_auth.IsAuthenticated)
-        {
-            if (!string.Equals(existing.YoutubeId, incoming.YoutubeId, StringComparison.Ordinal))
-            {
-                existing.YoutubeId = incoming.YoutubeId;
-                changed = true;
-            }
-
-            if (existing.SyncMode != PlaylistSyncMode.TwoWaySync)
-            {
-                existing.SyncMode = PlaylistSyncMode.TwoWaySync;
-                changed = true;
-            }
-        }
-
-        // 11. Сброс флага недоступности облака
         if (existing.IsCloudUnavailable)
         {
             existing.IsCloudUnavailable = false;
             changed = true;
         }
 
-        // Временные метки обновляются при каждом факте сверки/синхронизации
         existing.LastSyncedAtUtc = DateTime.UtcNow;
         existing.UpdatedAt = DateTime.Now;
 
         return changed;
     }
 
-    #endregion
-
-    #region Статистика
-
-    /// <summary>
-    /// Анимирует статистику от предыдущих значений к текущим с плавной интерполяцией.
-    /// ИСПОЛЬЗУЕТ ОПТИМИЗИРОВАННЫЙ O(1) ЗАПРОС длительности!
-    /// </summary>
     private async Task UpdateStatsAnimatedAsync()
     {
         if (_isDisposed) return;
@@ -913,34 +681,26 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         var targetPlaylists = Playlists.Count;
         var targetTracks = Playlists.Sum(p => p.TrackCount);
 
-        // ═══ O(1) ЗАПРОС вместо N+1 ═══
         long totalTicks = 0;
         try
         {
-            totalTicks = await _library.GetTotalLibraryDurationAsync(ct);
+            totalTicks = await _library.GetTotalLibraryDurationAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            Log.Error($"[Library] Ошибка при расчете длительности: {ex.Message}");
+            Log.Error($"[Library] Duration query error: {ex.Message}");
         }
 
         if (ct.IsCancellationRequested || _isDisposed) return;
         var totalDuration = TimeSpan.FromTicks(totalTicks);
 
-        var avgTrack = targetTracks > 0
-            ? TimeSpan.FromTicks(totalDuration.Ticks / targetTracks)
-            : TimeSpan.Zero;
-        var avgPlaylist = targetPlaylists > 0
-            ? TimeSpan.FromTicks(totalDuration.Ticks / targetPlaylists)
-            : TimeSpan.Zero;
+        var avgTrack = targetTracks > 0 ? TimeSpan.FromTicks(totalDuration.Ticks / targetTracks) : TimeSpan.Zero;
+        var avgPlaylist = targetPlaylists > 0 ? TimeSpan.FromTicks(totalDuration.Ticks / targetPlaylists) : TimeSpan.Zero;
 
         IsStatsVisible = true;
-
         int startPlaylists = _prevPlaylistCount;
         int startTracks = _prevTrackCount;
-
-        int diff = Math.Abs(targetPlaylists - startPlaylists)
-                 + Math.Abs(targetTracks - startTracks);
+        int diff = Math.Abs(targetPlaylists - startPlaylists) + Math.Abs(targetTracks - startTracks);
 
         if (diff == 0)
         {
@@ -963,14 +723,11 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 double t = (double)i / steps;
                 double ease = 1 - Math.Pow(1 - t, 3);
 
-                int currentPlaylists = startPlaylists
-                    + (int)Math.Round((targetPlaylists - startPlaylists) * ease);
-                int currentTracks = startTracks
-                    + (int)Math.Round((targetTracks - startTracks) * ease);
+                int currentPlaylists = startPlaylists + (int)Math.Round((targetPlaylists - startPlaylists) * ease);
+                int currentTracks = startTracks + (int)Math.Round((targetTracks - startTracks) * ease);
 
                 PlaylistCountText = SL.GetPlural("Library_PlaylistWord", currentPlaylists);
                 TotalTracksText = SL.GetPlural("Library_TrackWord", currentTracks);
-
                 TotalDurationText = FormatDurationLocalized(totalDuration);
 
                 if (i == steps)
@@ -1016,25 +773,9 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         return $"{s} {SL["Time_Seconds_Short"]}";
     }
 
-    private static string FormatDurationShort(TimeSpan ts)
-    {
-        return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
-    }
+    private static string FormatDurationShort(TimeSpan ts) =>
+        ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
 
-    #endregion
-
-    #region Полная загрузка
-
-    /// <summary>
-    /// Полная перезагрузка списка плейлистов с diff-алгоритмом и UI-Yielding.
-    /// 
-    /// <para><b>Оптимизация рендера:</b></para>
-    /// <list type="bullet">
-    ///   <item>Первые 12 карточек появляются мгновенно (покрывают viewport)</item>
-    ///   <item>Остальные добавляются батчами по 4 с yield между ними</item>
-    ///   <item>Dispatcher.InvokeAsync(Background) реально отдаёт UI-поток</item>
-    /// </list>
-    /// </summary>
     private async Task LoadPlaylistsAsync()
     {
         if (_isDisposed) return;
@@ -1046,9 +787,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         IsStatsVisible = false;
 
-        // Выборка из SQLite строго в пуле потоков
         var allPlaylistsWithCounts = await Task.Run(
-            () => _library.GetAllPlaylistsWithCountsAsync(), ct).ConfigureAwait(false);
+            () => _playlistService.GetAllPlaylistsWithCountsAsync(ct), ct).ConfigureAwait(false);
 
         if (_isDisposed || ct.IsCancellationRequested) return;
 
@@ -1058,7 +798,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             .ThenBy(x => x.Playlist.Name)
             .ToList();
 
-        // Переключение на UI-поток только для обновления ObservableCollection
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (ct.IsCancellationRequested || _isDisposed) return;
@@ -1100,10 +839,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }, DispatcherPriority.Normal, ct);
     }
 
-    #endregion
-
-    private PlaylistCardViewModel CreatePlaylistCardVm(
-        Core.Models.Playlist playlist, int trackCount)
+    private PlaylistCardViewModel CreatePlaylistCardVm(Core.Models.Playlist playlist, int trackCount)
     {
         return new PlaylistCardViewModel(
             _auth,
@@ -1113,7 +849,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             onOpen: _mainWindow.NavigateToPlaylist,
             addToQueueAction: async (p) =>
             {
-                var tracks = await _library.GetPlaylistTracksAsync(p.Id);
+                var tracks = await _playlistService.GetPlaylistTracksAsync(p.Id);
                 _audio.EnqueuePlaylistWithNotification(tracks, p.Name);
             },
             playAction: async (p) =>
@@ -1124,7 +860,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                     return;
                 }
 
-                var tracks = await _library.GetPlaylistTracksAsync(p.Id);
+                var tracks = await _playlistService.GetPlaylistTracksAsync(p.Id);
                 if (tracks.Count > 0)
                 {
                     await _playerControl.PlayPlaylistAsync(p.Id, tracks, tracks[0], enableShuffle: false);
@@ -1133,8 +869,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             onDelete: DeletePlaylistAsync,
             onEdit: EditPlaylistFromCardAsync);
     }
-
-    #region Редактирование и удаление
 
     private async Task EditPlaylistFromCardAsync(Core.Models.Playlist playlist)
     {
@@ -1149,10 +883,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     private async Task DeletePlaylistAsync(string playlistId)
     {
         if (_isDisposed) return;
-        var playlist = await _library.GetPlaylistAsync(playlistId);
+        var playlist = await _playlistService.GetPlaylistAsync(playlistId);
         if (playlist == null) return;
 
-        if (playlistId == "liked")
+        if (playlistId == LibraryService.LikedPlaylistId)
         {
             await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], SL["Playlist_CannotDeleteLiked"]);
             return;
@@ -1168,9 +902,12 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _mainWindow.LockNavigation(SL["Playlist_Deleting"]);
         try
         {
-            await _syncService.DeletePlaylistAsync(playlistId, deleteFromCloud: true);
+            await _playlistService.DeletePlaylistAsync(playlistId, deleteFromCloud: true);
         }
-        finally { _mainWindow.UnlockNavigation(); }
+        finally
+        {
+            _mainWindow.UnlockNavigation();
+        }
     }
 
     private void OnPlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -1179,10 +916,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         HasPlaylists = Playlists.Count > 0;
     }
 
-    #endregion
-
-    #region Dispose
-
+    /// <summary>
+    /// Освобождает управляемые ресурсы и отписывается от событий сервисов.
+    /// </summary>
+    /// <param name="disposing">Флаг явного вызова Dispose.</param>
     protected override void Dispose(bool disposing)
     {
         if (_isDisposed) return;
@@ -1191,10 +928,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _isDisposed = true;
 
             Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
-
-            _library.OnPlaylistChanged -= OnLibraryPlaylistChanged;
-            _library.OnPlaylistRemoved -= OnLibraryPlaylistRemoved;
+            _playlistService.OnPlaylistChanged -= OnPlaylistChangedIncremental;
+            _playlistService.OnPlaylistRemoved -= OnPlaylistRemovedIncremental;
             _library.OnDataChanged -= OnLibraryDataChanged;
+            _library.OnTrackUpdated -= OnLibraryTrackUpdated;
 
             _dataChangedTimer?.Stop();
             _dataChangedTimer = null;
@@ -1205,8 +942,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _statsAnimCts?.Cancel();
             _statsAnimCts?.Dispose();
 
-            foreach (var vm in Playlists)
-                vm.Dispose();
+            for (int i = 0; i < Playlists.Count; i++)
+                Playlists[i].Dispose();
 
             Playlists.Clear();
 
@@ -1217,6 +954,4 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
         base.Dispose(disposing);
     }
-
-    #endregion
 }
