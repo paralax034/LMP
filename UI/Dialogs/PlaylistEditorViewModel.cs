@@ -387,6 +387,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// Загружает текущую обложку в YouTube через Scotty Upload Protocol.
     /// Используется для ручной загрузки без синхронизации всего плейлиста.
     /// </summary>
+    /// <returns>Асинхронная задача выполнения сетевой загрузки.</returns>
     private async Task UploadThumbnailAsync()
     {
         if (_originalPlaylist == null || string.IsNullOrEmpty(_originalPlaylist.YoutubeId))
@@ -457,7 +458,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             if (success)
             {
                 Log.Info($"[PlaylistEditor] Thumbnail uploaded for {_originalPlaylist.YoutubeId}");
-                ErrorMessage = "✓ " + (SL["PlaylistSync_ThumbnailUploaded"] ?? "Thumbnail uploaded to YouTube");
+                ErrorMessage = SL["PlaylistSync_ThumbnailUploaded"] ?? "Thumbnail uploaded to YouTube";
                 HasErrors = false;
                 _ = ClearSuccessMessageAsync();
             }
@@ -480,12 +481,13 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// <summary>
     /// Очищает сообщение об успехе через 3 секунды.
     /// </summary>
+    /// <returns>Асинхронная задача таймера очистки сообщения.</returns>
     private async Task ClearSuccessMessageAsync()
     {
         try
         {
             await Task.Delay(3000);
-            if (ErrorMessage?.StartsWith("✓") == true)
+            if (!HasErrors && ErrorMessage != null)
                 ErrorMessage = null;
         }
         catch { /* ignore */ }

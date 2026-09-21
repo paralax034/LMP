@@ -8,7 +8,7 @@ namespace LMP.Core.Models;
 /// Все цвета хранятся в HEX-формате (#RRGGBB или #AARRGGBB).
 /// </summary>
 [MemoryPackable]
-public sealed partial class ThemeSettings
+public sealed partial class ThemeSettings : IEquatable<ThemeSettings>
 {
     /// <summary>Имя темы для отображения</summary>
     public string Name { get; set; } = "Paralax Purple";
@@ -84,4 +84,22 @@ public sealed partial class ThemeSettings
     public bool IsBuiltIn { get; init; }
 
     public override string ToString() => Name;
+
+    /// <summary>
+    /// Определяет эквивалентность двух тем по их имени.
+    /// </summary>
+    /// <param name="other">Экземпляр темы для сравнения.</param>
+    /// <returns><c>true</c>, если имена тем совпадают без учёта регистра.</returns>
+    public bool Equals(ThemeSettings? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return string.Equals(Name, other.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => Equals(obj as ThemeSettings);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Name);
 }

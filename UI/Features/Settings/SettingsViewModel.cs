@@ -972,10 +972,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
         var saved = _themeManager.GetCurrentTheme();
         var isBuiltIn = ThemePresets.Any(p =>
-            string.Equals(p.AccentColor, saved.AccentColor, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(p.BgPrimary, saved.BgPrimary, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(p.BgSecondary, saved.BgSecondary, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(p.AccentHover, saved.AccentHover, StringComparison.OrdinalIgnoreCase));
+            string.Equals(p.Name, saved.Name, StringComparison.OrdinalIgnoreCase));
 
         if (!isBuiltIn && !saved.IsBuiltIn)
             ThemePresets.Add(saved);
@@ -990,11 +987,6 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             ApplyThemeToColorPickers(currentTheme);
 
             var matchingPreset = ThemePresets.FirstOrDefault(p =>
-                string.Equals(p.AccentColor, currentTheme.AccentColor, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(p.BgPrimary, currentTheme.BgPrimary, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(p.BgSecondary, currentTheme.BgSecondary, StringComparison.OrdinalIgnoreCase));
-
-            matchingPreset ??= ThemePresets.FirstOrDefault(p =>
                 string.Equals(p.Name, currentTheme.Name, StringComparison.OrdinalIgnoreCase));
 
             SelectedPreset = matchingPreset ?? ThemePresets.FirstOrDefault();

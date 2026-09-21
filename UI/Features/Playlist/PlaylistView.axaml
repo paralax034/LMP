@@ -287,35 +287,39 @@
             </Border>
 
             <!-- 3. Liked Playlist -->
-            <Border IsVisible="{Binding IsLikedPlaylist}" Padding="32,24,32,24">
-                <Border.Background>
-                    <LinearGradientBrush StartPoint="50%,0%" EndPoint="50%,100%">
-                        <GradientStop Color="{DynamicResource Accent}" Offset="0.0" />
-                        <GradientStop Color="{DynamicResource BgElevated}" Offset="1.0" />
-                    </LinearGradientBrush>
-                </Border.Background>
-                <Grid ColumnDefinitions="Auto, *">
-                    <!-- COVER: Liked -->
-                    <Border Grid.Column="0"
-                        Width="180" Height="180"
-                        CornerRadius="8" ClipToBounds="True"
-                        BoxShadow="{StaticResource CardShadow}"
-                        VerticalAlignment="Bottom">
-                        <Border Classes="liked-gradient">
-                            <PathIcon Data="{StaticResource Icon.Heart}"
-                                Width="72" Height="72"
-                                Foreground="{DynamicResource AccentButtonTextBrush}"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Opacity="0.9" />
+            <Panel IsVisible="{Binding IsLikedPlaylist}">
+                <Border Opacity="0.35">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="50%,0%" EndPoint="50%,100%">
+                            <GradientStop Color="{DynamicResource Accent}" Offset="0.0" />
+                            <GradientStop Color="{DynamicResource BgElevated}" Offset="1.0" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+                <Border Padding="32,24,32,24">
+                    <Grid ColumnDefinitions="Auto, *">
+                        <!-- COVER: Liked -->
+                        <Border Grid.Column="0"
+                            Width="180" Height="180"
+                            CornerRadius="8" ClipToBounds="True"
+                            BoxShadow="{StaticResource CardShadow}"
+                            VerticalAlignment="Bottom">
+                            <Border Classes="liked-gradient">
+                                <PathIcon Data="{StaticResource Icon.Heart}"
+                                    Width="72" Height="72"
+                                    Foreground="{DynamicResource AccentButtonTextBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Opacity="0.9" />
+                            </Border>
                         </Border>
-                    </Border>
 
-                    <!-- INFO & ACTIONS -->
-                    <ContentControl Grid.Column="1" Content="{Binding}"
-                        ContentTemplate="{StaticResource PlaylistHeaderInfoTemplate}" />
-                </Grid>
-            </Border>
+                        <!-- INFO & ACTIONS -->
+                        <ContentControl Grid.Column="1" Content="{Binding}"
+                            ContentTemplate="{StaticResource PlaylistHeaderInfoTemplate}" />
+                    </Grid>
+                </Border>
+            </Panel>
         </Panel>
 
         <!-- SPLITTER -->

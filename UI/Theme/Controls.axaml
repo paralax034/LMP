@@ -127,6 +127,10 @@
     </Style>
 
     <Style Selector="ComboBoxItem">
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <ControlTemplate TargetType="ComboBoxItem">
                 <Border Name="ItemBorder"
@@ -137,6 +141,7 @@
                     Padding="{TemplateBinding Padding}">
                     <ContentPresenter
                         Name="PART_ContentPresenter"
+                        Background="Transparent"
                         Content="{TemplateBinding Content}"
                         ContentTemplate="{TemplateBinding ContentTemplate}"
                         Foreground="{TemplateBinding Foreground}"
@@ -151,19 +156,32 @@
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
 
+    <Style Selector="ComboBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ComboBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="ComboBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style
+        Selector="ComboBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+
+    <!-- Подсветка только рамки ItemBorder -->
     <Style Selector="ComboBoxItem:pointerover /template/ Border#ItemBorder">
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
     </Style>
 
-    <Style Selector="ComboBoxItem:selected">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
-    </Style>
     <Style Selector="ComboBoxItem:selected /template/ Border#ItemBorder">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>

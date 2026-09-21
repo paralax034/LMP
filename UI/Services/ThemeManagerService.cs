@@ -330,75 +330,6 @@ public sealed class ThemeManagerService
         resources["ComboBoxItemBackgroundPointerOver"] = transparent;
         resources["ComboBoxItemBackgroundPressed"] = transparent;
         resources["ComboBoxItemBackgroundDisabled"] = transparent;
-        resources["ComboBoxItemBackgroundSelected"] = accent;
-        resources["ComboBoxItemBackgroundSelectedPointerOver"] = accentHover;
-        resources["ComboBoxItemBackgroundSelectedPressed"] = accent;
-
-        resources["ComboBoxItemForeground"] = textPrimary;
-        resources["ComboBoxItemForegroundPointerOver"] = textPrimary;
-        resources["ComboBoxItemForegroundPressed"] = textPrimary;
-        resources["ComboBoxItemForegroundDisabled"] = textSecondary;
-        resources["ComboBoxItemForegroundSelected"] = accentButtonText;
-        resources["ComboBoxItemForegroundSelectedPointerOver"] = accentButtonText;
-        resources["ComboBoxItemForegroundSelectedPressed"] = accentButtonText;
-
-        // LISTBOX
-        resources["ListBoxBackground"] = transparent;
-        resources["ListBoxBorderBrush"] = transparent;
-
-        resources["ListBoxItemBackground"] = transparent;
-        resources["ListBoxItemBackgroundPointerOver"] = transparent;
-        resources["ListBoxItemBackgroundPressed"] = transparent;
-        resources["ListBoxItemBackgroundDisabled"] = transparent;
-        resources["ListBoxItemBackgroundSelected"] = accent;
-        resources["ListBoxItemBackgroundSelectedPointerOver"] = accentHover;
-        resources["ListBoxItemBackgroundSelectedPressed"] = accent;
-        resources["ListBoxItemBackgroundSelectedDisabled"] = bgHighlight;
-
-        resources["ListBoxItemForeground"] = textPrimary;
-        resources["ListBoxItemForegroundPointerOver"] = textPrimary;
-        resources["ListBoxItemForegroundPressed"] = textPrimary;
-        resources["ListBoxItemForegroundDisabled"] = textSecondary;
-        resources["ListBoxItemForegroundSelected"] = accentButtonText;
-        resources["ListBoxItemForegroundSelectedPointerOver"] = accentButtonText;
-        resources["ListBoxItemForegroundSelectedPressed"] = accentButtonText;
-        resources["ListBoxItemForegroundSelectedDisabled"] = textSecondary;
-
-        // RADIOBUTTON
-        resources["RadioButtonBackground"] = transparent;
-        resources["RadioButtonBackgroundPointerOver"] = transparent;
-        resources["RadioButtonBackgroundPressed"] = transparent;
-        resources["RadioButtonBackgroundDisabled"] = transparent;
-
-        resources["RadioButtonForeground"] = textPrimary;
-        resources["RadioButtonForegroundPointerOver"] = textPrimary;
-        resources["RadioButtonForegroundPressed"] = textPrimary;
-        resources["RadioButtonForegroundDisabled"] = textSecondary;
-
-        resources["RadioButtonOuterEllipseFill"] = bgElevated;
-        resources["RadioButtonOuterEllipseFillPointerOver"] = bgElevated;
-        resources["RadioButtonOuterEllipseFillPressed"] = bgElevated;
-        resources["RadioButtonOuterEllipseFillDisabled"] = bgHighlight;
-
-        resources["RadioButtonOuterEllipseStroke"] = bgHighlight;
-        resources["RadioButtonOuterEllipseStrokePointerOver"] = accent;
-        resources["RadioButtonOuterEllipseStrokePressed"] = accent;
-        resources["RadioButtonOuterEllipseStrokeDisabled"] = bgHighlight;
-
-        resources["RadioButtonOuterEllipseCheckedFill"] = bgElevated;
-        resources["RadioButtonOuterEllipseCheckedFillPointerOver"] = bgElevated;
-        resources["RadioButtonOuterEllipseCheckedFillPressed"] = bgElevated;
-        resources["RadioButtonOuterEllipseCheckedFillDisabled"] = bgHighlight;
-
-        resources["RadioButtonOuterEllipseCheckedStroke"] = accent;
-        resources["RadioButtonOuterEllipseCheckedStrokePointerOver"] = accentHover;
-        resources["RadioButtonOuterEllipseCheckedStrokePressed"] = accent;
-        resources["RadioButtonOuterEllipseCheckedStrokeDisabled"] = bgHighlight;
-
-        resources["RadioButtonCheckGlyphFill"] = accent;
-        resources["RadioButtonCheckGlyphFillPointerOver"] = accentHover;
-        resources["RadioButtonCheckGlyphFillPressed"] = accent;
-        resources["RadioButtonCheckGlyphFillDisabled"] = textMuted;
 
         // BACKGROUNDS
         resources["SolidBackgroundFillColorBase"] = bgPrimary;
@@ -430,7 +361,7 @@ public sealed class ThemeManagerService
 
         // BUTTON
         resources["ButtonBackground"] = bgElevated;
-        resources["ButtonBackgroundPointerOver"] = bgElevated;
+        resources["ButtonBackgroundPointerOver"] = bgHover;
         resources["ButtonBackgroundPressed"] = bgHighlight;
         resources["ButtonBackgroundDisabled"] = bgHighlight;
 
