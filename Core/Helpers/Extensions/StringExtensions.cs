@@ -104,19 +104,6 @@ internal static class StringExtensions
         }
 
         /// <summary>
-        /// Меняет местами символы по индексам <paramref name="firstCharIndex"/> и <paramref name="secondCharIndex"/>.
-        /// </summary>
-        public string SwapChars(int firstCharIndex, int secondCharIndex)
-        {
-            return string.Create(str.Length, (str, firstCharIndex, secondCharIndex), static (span, state) =>
-            {
-                state.str.AsSpan().CopyTo(span);
-                (span[state.firstCharIndex], span[state.secondCharIndex]) =
-                    (span[state.secondCharIndex], span[state.firstCharIndex]);
-            });
-        }
-
-        /// <summary>
         /// Нормализует входную строку, заменяя любые управляющие символы и переводы строк на пробелы,
         /// схлопывая повторные пробелы и выполняя тримминг по краям.
         /// </summary>

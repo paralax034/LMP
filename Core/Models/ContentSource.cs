@@ -44,25 +44,3 @@ public enum LikeSyncMode
     /// </summary>
     LocalOnly
 }
-
-public static class ContentSourceExtensions
-{
-    public static string GetDisplayName(this ContentSource source) => source switch
-    {
-        ContentSource.YouTubeMusic => "YouTube Music",
-        ContentSource.YouTube => "YouTube",
-        ContentSource.Local => "Local Files",
-        _ => "Unknown"
-    };
-
-    public static string GetIcon(this ContentSource source) => source switch
-    {
-        ContentSource.YouTubeMusic => "Music",
-        ContentSource.YouTube => "Youtube",
-        ContentSource.Local => "DatabaseSearch",
-        _ => "Help"
-    };
-
-    public static bool RequiresNetwork(this ContentSource source) =>
-        source != ContentSource.Local;
-}

@@ -112,7 +112,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
         // 2. Дебаунс 200 мс для сетевого InnerTube/Suggest API
         _suggestDebounceTimer.Stop();
-        if (!string.IsNullOrWhiteSpace(value))
+        if (!string.IsNullOrWhiteSpace(value) && Source != ContentSource.Local)
         {
             _suggestDebounceTimer.Start();
         }
@@ -771,13 +771,18 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         }
     }
 
+    /// <summary>
+    /// Выполняет локальный поиск по всей базе данных SQLite (медиатеке пользователя)
+    /// с поддержкой как пустого запроса (выгрузка последних добавленных), так и фильтрации по названию и автору.
+    /// </summary>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
     private async Task HandleLocalSearchAsync(CancellationToken ct)
     {
         if (_isDisposed) return;
 
         var filtered = string.IsNullOrWhiteSpace(_currentQuery)
-            ? await LibService.GetLocalTracksAsync(MaxResults, 0, ct)
-            : await LibService.SearchLocalTracksAsync(_currentQuery, MaxResults, ct);
+            ? await LibService.GetAllTracksAsync(MaxResults, 0, ct)
+            : await LibService.SearchTracksAsync(_currentQuery, MaxResults, 0, ct);
 
         ct.ThrowIfCancellationRequested();
         if (_isDisposed) return;
@@ -787,7 +792,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
         if (!HasResults)
         {
-            var localCount = await LibService.GetLocalTrackCountAsync(ct);
+            var localCount = await LibService.GetTrackCountAsync(ct);
             ErrorMessage = localCount == 0 ? SL["Search_NoLocalFiles"] : SL["Search_NoResults"];
         }
     }
@@ -1107,7 +1112,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         var ct = _suggestCts.Token;
 
         var trimmed = query?.Trim() ?? string.Empty;
-        if (string.IsNullOrEmpty(trimmed) || YoutubeProvider.DetectQueryType(trimmed) != QueryType.Search)
+        if (string.IsNullOrEmpty(trimmed) || Source == ContentSource.Local || YoutubeProvider.DetectQueryType(trimmed) != QueryType.Search)
             return;
 
         _ = FetchAndMergeRemoteSuggestionsAsync(trimmed, ct);

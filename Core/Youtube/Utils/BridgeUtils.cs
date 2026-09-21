@@ -76,14 +76,4 @@ internal static class BridgeUtils
 
         return null;
     }
-
-    /// <summary>
-    /// Выполняет рекурсивный поиск токена продолжения по всему документу в случае нестандартного лейаута.
-    /// </summary>
-    /// <param name="root">Корневой элемент JSON.</param>
-    /// <returns>Строка токена или null.</returns>
-    public static string? FindContinuationTokenFallback(JsonElement root) =>
-        root.FindFirstDescendantProperty("continuationCommand"u8)
-            ?.GetPropertyOrNull("token"u8)
-            ?.GetStringOrNull();
 }

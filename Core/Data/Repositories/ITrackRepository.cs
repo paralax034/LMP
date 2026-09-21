@@ -139,8 +139,18 @@ public interface ITrackRepository
     /// <param name="id">Уникальный идентификатор трека.</param>
     /// <param name="ownerId">Идентификатор владельца (аккаунта).</param>
     /// <param name="liked"><c>true</c>, если трек отмечен как понравившийся; иначе — <c>false</c>.</param>
+    /// <param name="likedAt">Опциональная метка времени добавления отметки. Если не указана, используется текущее время UtcNow.</param>
     /// <param name="ct">Токен отмены асинхронной операции.</param>
-    Task SetLikedAsync(string id, string ownerId, bool liked, CancellationToken ct = default);
+    Task SetLikedAsync(string id, string ownerId, bool liked, DateTime? likedAt = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Пакетно фиксирует отметки «Мне нравится» для набора треков в рамках единой транзакции базы данных.
+    /// </summary>
+    /// <param name="trackIds">Упорядоченная коллекция идентификаторов треков (индекс 0 — самый свежий лайк).</param>
+    /// <param name="ownerId">Идентификатор владельца (аккаунта).</param>
+    /// <param name="preserveOrder">Сохранять ли исходный порядок коллекции через монотонно убывающие временные метки.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    Task SetLikedBatchAsync(IReadOnlyList<string> trackIds, string ownerId, bool preserveOrder = true, CancellationToken ct = default);
 
     /// <summary>
     /// Обновляет локальный статус загрузки трека и физический путь к файлу на устройстве.

@@ -70,16 +70,6 @@ public static class Log
         _isInitialized = false;
     }
 
-    /// <summary>Асинхронное завершение работы.</summary>
-    public static async ValueTask ShutdownAsync()
-    {
-        if (!_isInitialized || _processor == null) return;
-        Info("=== LOGGER SHUTDOWN ===");
-        await _processor.DisposeAsync().ConfigureAwait(false);
-        _processor = null;
-        _isInitialized = false;
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Enqueue(LogLevel level, string message, Exception? ex = null)
     {

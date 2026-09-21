@@ -654,23 +654,6 @@ public sealed partial class CachingStreamSource : IAudioSource
     #region Public Seek Helpers
 
     /// <summary>
-    /// Проверяет, доступен ли диапазон для заданной позиции seek (для AudioPlayer).
-    /// </summary>
-    /// <param name="positionMs">Позиция в миллисекундах.</param>
-    /// <returns><c>true</c> если данные доступны в RAM или на диске.</returns>
-    public bool IsTargetChunkAvailable(long positionMs)
-    {
-        if (_parser == null || !_initialized) return false;
-
-        var seekInfo = _parser.FindSeekPosition(positionMs);
-        if (seekInfo == null) return false;
-
-        long targetBytePos = Math.Min(seekInfo.Value.BytePosition, Math.Max(0, _contentLength - 1));
-        int requiredLength = GetAlignedReadLength(targetBytePos, _config.MinRequestSizeBytes);
-        return IsRangeLocallyAvailable(targetBytePos, requiredLength);
-    }
-
-    /// <summary>
     /// Проверяет, достаточно ли contiguous-данных для безопасного старта decoder
     /// после ранее выполненного seek (для AudioPlayer polling).
     /// </summary>

@@ -15,14 +15,4 @@ public sealed class BotDetectionException(string message, TimeSpan remaining) : 
     /// Время когда cooldown закончится.
     /// </summary>
     public DateTime CooldownEndsAt { get; } = DateTime.UtcNow + remaining;
-
-    /// <summary>
-    /// Форматирует оставшееся время для отображения.
-    /// </summary>
-    public string FormatRemainingTime()
-    {
-        return RemainingCooldown.TotalSeconds >= 60
-            ? $"{RemainingCooldown.Minutes}:{RemainingCooldown.Seconds:D2}"
-            : $"{RemainingCooldown.TotalSeconds:F0}s";
-    }
 }

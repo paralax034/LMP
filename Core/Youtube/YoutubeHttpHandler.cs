@@ -312,7 +312,4 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
         return clone;
     }
-
-    [GeneratedRegex(@"Cg[A-Za-z0-9%_\-]{40,}")]
-    private static partial Regex VisitorExtractRegex();
 }

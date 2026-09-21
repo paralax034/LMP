@@ -199,12 +199,6 @@ internal static class UrlEx
         return DateTime.UtcNow.Add(margin) >= expireUtc;
     }
 
-    public static bool ContainsQueryParameter(string url, string key)
-    {
-        var (keyStart, _, _) = FindParameterBounds(url.AsSpan(), key);
-        return keyStart >= 0;
-    }
-
     public static IReadOnlyDictionary<string, string> GetQueryParameters(string url)
     {
         var dict = new Dictionary<string, string>(StringComparer.Ordinal);

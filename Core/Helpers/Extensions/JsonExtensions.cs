@@ -109,14 +109,6 @@ internal static class JsonExtensions
         public JsonElement.ArrayEnumerator EnumerateArrayOrEmpty() =>
             element.EnumerateArrayOrNull() ?? default;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public JsonElement.ObjectEnumerator? EnumerateObjectOrNull() =>
-            element.ValueKind == JsonValueKind.Object ? element.EnumerateObject() : null;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public JsonElement.ObjectEnumerator EnumerateObjectOrEmpty() =>
-            element.EnumerateObjectOrNull() ?? default;
-
         /// <summary>
         /// Возвращает элемент массива по индексу за O(1) или <see langword="null"/>.
         /// </summary>

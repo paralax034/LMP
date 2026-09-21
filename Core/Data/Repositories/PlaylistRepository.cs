@@ -37,21 +37,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
     /// <inheritdoc />
     public async Task<Playlist?> GetByIdAsync(string id, string ownerId, CancellationToken ct = default)
     {
-        if (id == LibraryService.LikedPlaylistId)
-        {
-            var trackIds = await GetTrackIdsAsync(id, ownerId, ct).ConfigureAwait(false);
-            return new Playlist
-            {
-                Id = LibraryService.LikedPlaylistId,
-                StoredName = "Liked",
-                SyncMode = PlaylistSyncMode.LocalOnly,
-                Ownership = PlaylistOwnership.System,
-                TrackIds = trackIds,
-                TrackCount = trackIds.Count,
-                OwnerId = ownerId
-            };
-        }
-
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         Playlist? playlist = null;
@@ -62,14 +47,13 @@ public sealed class PlaylistRepository : IPlaylistRepository
             cmd.CommandText = $"""
                 SELECT {PlaylistColumnsSelect}
                 FROM Playlists p
-                WHERE p.Id = @id AND p.Id != @likedId
+                WHERE p.Id = @id
                   AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
                     OR (@isGuest = 0 AND p.OwnerId = @ownerId))
                 LIMIT 1;
                 """;
 
             AddParameter(cmd, "@id", id);
-            AddParameter(cmd, "@likedId", LibraryService.LikedPlaylistId);
             AddParameter(cmd, "@isGuest", guest ? 1 : 0);
             AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
 
@@ -117,34 +101,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
         var list = new List<(Playlist Playlist, int TrackCount)>();
 
         // 1. Извлекаем количество лайкнутых треков системного плейлиста
-        int likedTrackCount = 0;
-        await using (var cmdLiked = connection.CreateCommand())
-        {
-            cmdLiked.CommandText = """
-                SELECT COUNT(*)
-                FROM LikedTracks
-                WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                   OR (@isGuest = 0 AND OwnerId = @ownerId);
-                """;
-
-            AddParameter(cmdLiked, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmdLiked, "@ownerId", ownerId ?? string.Empty);
-
-            var scalar = await cmdLiked.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            likedTrackCount = Convert.ToInt32(scalar);
-        }
-
-        var likedPlaylist = new Playlist
-        {
-            Id = LibraryService.LikedPlaylistId,
-            StoredName = "Liked",
-            SyncMode = PlaylistSyncMode.LocalOnly,
-            Ownership = PlaylistOwnership.System,
-            TrackCount = likedTrackCount,
-            OwnerChannelId = ownerId
-        };
-        list.Add((likedPlaylist, likedTrackCount));
-
         // 2. Извлекаем пользовательские плейлисты с агрегированным количеством треков
         await using (var cmd = connection.CreateCommand())
         {
@@ -152,13 +108,11 @@ public sealed class PlaylistRepository : IPlaylistRepository
                 SELECT {PlaylistColumnsSelect},
                        (SELECT COUNT(*) FROM PlaylistTracks pt WHERE pt.PlaylistId = p.Id) AS TrackCount
                 FROM Playlists p
-                WHERE p.Id != @likedId
-                  AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
+                WHERE ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
                     OR (@isGuest = 0 AND p.OwnerId = @ownerId))
                 ORDER BY p.Name;
                 """;
 
-            AddParameter(cmd, "@likedId", LibraryService.LikedPlaylistId);
             AddParameter(cmd, "@isGuest", guest ? 1 : 0);
             AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
 
@@ -195,34 +149,16 @@ public sealed class PlaylistRepository : IPlaylistRepository
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         var result = new List<string>();
-        bool guest = IsGuest(ownerId);
 
         await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT TrackId
+            FROM PlaylistTracks
+            WHERE PlaylistId = @playlistId
+            ORDER BY Position;
+            """;
 
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            cmd.CommandText = """
-                SELECT TrackId
-                FROM LikedTracks
-                WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                   OR (@isGuest = 0 AND OwnerId = @ownerId)
-                ORDER BY LikedAt DESC;
-                """;
-
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
-        else
-        {
-            cmd.CommandText = """
-                SELECT TrackId
-                FROM PlaylistTracks
-                WHERE PlaylistId = @playlistId
-                ORDER BY Position;
-                """;
-
-            AddParameter(cmd, "@playlistId", playlistId);
-        }
+        AddParameter(cmd, "@playlistId", playlistId);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -240,37 +176,17 @@ public sealed class PlaylistRepository : IPlaylistRepository
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         var result = new List<string>(limit);
-        bool guest = IsGuest(ownerId);
 
         await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT TrackId
+            FROM PlaylistTracks
+            WHERE PlaylistId = @playlistId
+            ORDER BY Position
+            LIMIT @limit OFFSET @offset;
+            """;
 
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            cmd.CommandText = """
-                SELECT TrackId
-                FROM LikedTracks
-                WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                   OR (@isGuest = 0 AND OwnerId = @ownerId)
-                ORDER BY LikedAt DESC
-                LIMIT @limit OFFSET @offset;
-                """;
-
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
-        else
-        {
-            cmd.CommandText = """
-                SELECT TrackId
-                FROM PlaylistTracks
-                WHERE PlaylistId = @playlistId
-                ORDER BY Position
-                LIMIT @limit OFFSET @offset;
-                """;
-
-            AddParameter(cmd, "@playlistId", playlistId);
-        }
-
+        AddParameter(cmd, "@playlistId", playlistId);
         AddParameter(cmd, "@limit", limit);
         AddParameter(cmd, "@offset", offset);
 
@@ -288,26 +204,9 @@ public sealed class PlaylistRepository : IPlaylistRepository
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
-
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            cmd.CommandText = """
-                SELECT COUNT(*)
-                FROM LikedTracks
-                WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                   OR (@isGuest = 0 AND OwnerId = @ownerId);
-                """;
-
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
-        else
-        {
-            cmd.CommandText = "SELECT COUNT(*) FROM PlaylistTracks WHERE PlaylistId = @playlistId;";
-            AddParameter(cmd, "@playlistId", playlistId);
-        }
+        cmd.CommandText = "SELECT COUNT(*) FROM PlaylistTracks WHERE PlaylistId = @playlistId;";
+        AddParameter(cmd, "@playlistId", playlistId);
 
         var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return Convert.ToInt32(scalar);
@@ -317,9 +216,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
     public async Task UpsertAsync(Playlist playlist, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(playlist);
-
-        if (playlist.Id == LibraryService.LikedPlaylistId)
-            return;
 
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
@@ -456,12 +352,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
     /// <inheritdoc />
     public async Task AddTrackAsync(string playlistId, string trackId, string ownerId, int? position = null, CancellationToken ct = default)
     {
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            await SetLikedDirectAsync(trackId, ownerId, true, ct).ConfigureAwait(false);
-            return;
-        }
-
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
@@ -542,57 +432,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
     /// <inheritdoc />
     public async Task<int> AddTracksAsync(string playlistId, IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default)
     {
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            var idList = trackIds as IList<string> ?? [.. trackIds];
-            if (idList.Count == 0) return 0;
-
-            await using var likedConn = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
-            await using var likedTx = (SqliteTransaction)await likedConn.BeginTransactionAsync(ct).ConfigureAwait(false);
-
-            try
-            {
-                var baseTime = DateTime.UtcNow;
-                int added = 0;
-
-                await using var cmd = likedConn.CreateCommand();
-                cmd.Transaction = likedTx;
-                cmd.CommandText = """
-                    INSERT OR IGNORE INTO LikedTracks (OwnerId, TrackId, LikedAt)
-                    VALUES (@ownerId, @trackId, @likedAt);
-                    """;
-
-                var pOwner = cmd.CreateParameter();
-                pOwner.ParameterName = "@ownerId";
-                pOwner.Value = ownerId ?? string.Empty;
-                cmd.Parameters.Add(pOwner);
-
-                var pTrack = cmd.CreateParameter();
-                pTrack.ParameterName = "@trackId";
-                cmd.Parameters.Add(pTrack);
-
-                var pLikedAt = cmd.CreateParameter();
-                pLikedAt.ParameterName = "@likedAt";
-                cmd.Parameters.Add(pLikedAt);
-
-                for (int i = 0; i < idList.Count; i++)
-                {
-                    pTrack.Value = idList[i];
-                    // Монотонно убывающий timestamp: idList[0] (самый свежий) получает наибольший timestamp
-                    pLikedAt.Value = baseTime.AddMilliseconds(-i).ToString("o", CultureInfo.InvariantCulture);
-                    added += await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
-
-                await likedTx.CommitAsync(ct).ConfigureAwait(false);
-                return added;
-            }
-            catch
-            {
-                await likedTx.RollbackAsync(ct).ConfigureAwait(false);
-                throw;
-            }
-        }
-
+        // Монотонно убывающий timestamp: idList[0] (самый свежий) получает наибольший timestamp
         var trackIdList = trackIds as IList<string> ?? [.. trackIds];
         if (trackIdList.Count == 0) return 0;
 
@@ -726,12 +566,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
     /// <inheritdoc />
     public async Task RemoveTrackAsync(string playlistId, string trackId, string ownerId, CancellationToken ct = default)
     {
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            await SetLikedDirectAsync(trackId, ownerId, false, ct).ConfigureAwait(false);
-            return;
-        }
-
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
@@ -855,29 +689,10 @@ public sealed class PlaylistRepository : IPlaylistRepository
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
-
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            cmd.CommandText = """
-                SELECT 1 FROM LikedTracks
-                WHERE TrackId = @tId
-                  AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                    OR (@isGuest = 0 AND OwnerId = @ownerId))
-                LIMIT 1;
-                """;
-
-            AddParameter(cmd, "@tId", trackId);
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
-        else
-        {
-            cmd.CommandText = "SELECT 1 FROM PlaylistTracks WHERE PlaylistId = @pId AND TrackId = @tId LIMIT 1;";
-            AddParameter(cmd, "@pId", playlistId);
-            AddParameter(cmd, "@tId", trackId);
-        }
+        cmd.CommandText = "SELECT 1 FROM PlaylistTracks WHERE PlaylistId = @pId AND TrackId = @tId LIMIT 1;";
+        AddParameter(cmd, "@pId", playlistId);
+        AddParameter(cmd, "@tId", trackId);
 
         var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return scalar != null && scalar != DBNull.Value;
@@ -898,13 +713,11 @@ public sealed class PlaylistRepository : IPlaylistRepository
                 FROM PlaylistTracks pt
                 INNER JOIN Playlists p ON pt.PlaylistId = p.Id
                 WHERE pt.TrackId = @tId
-                  AND pt.PlaylistId != @likedId
                   AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
                     OR (@isGuest = 0 AND p.OwnerId = @ownerId));
                 """;
 
             AddParameter(cmd, "@tId", trackId);
-            AddParameter(cmd, "@likedId", LibraryService.LikedPlaylistId);
             AddParameter(cmd, "@isGuest", guest ? 1 : 0);
             AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
 
@@ -916,27 +729,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
         }
 
         // Проверка на статус Liked
-        await using (var cmdLiked = connection.CreateCommand())
-        {
-            cmdLiked.CommandText = """
-                SELECT 1 FROM LikedTracks
-                WHERE TrackId = @tId
-                  AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                    OR (@isGuest = 0 AND OwnerId = @ownerId))
-                LIMIT 1;
-                """;
-
-            AddParameter(cmdLiked, "@tId", trackId);
-            AddParameter(cmdLiked, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmdLiked, "@ownerId", ownerId ?? string.Empty);
-
-            var scalar = await cmdLiked.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (scalar != null && scalar != DBNull.Value)
-            {
-                set.Add(LibraryService.LikedPlaylistId);
-            }
-        }
-
         return set;
     }
 
@@ -973,12 +765,10 @@ public sealed class PlaylistRepository : IPlaylistRepository
                     FROM PlaylistTracks pt
                     INNER JOIN Playlists p ON pt.PlaylistId = p.Id
                     WHERE pt.TrackId IN ({string.Join(',', paramNames)})
-                      AND pt.PlaylistId != @likedId
                       AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
                         OR (@isGuest = 0 AND p.OwnerId = @ownerId));
                     """;
 
-                AddParameter(cmd, "@likedId", LibraryService.LikedPlaylistId);
                 AddParameter(cmd, "@isGuest", guest ? 1 : 0);
                 AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
 
@@ -997,39 +787,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
             }
 
             // Выборка лайков для переданных ID
-            await using (var cmdLiked = connection.CreateCommand())
-            {
-                var paramNames = new string[count];
-                for (int j = 0; j < count; j++)
-                {
-                    var paramName = $"@lt{j}";
-                    paramNames[j] = paramName;
-                    AddParameter(cmdLiked, paramName, ids[i + j]);
-                }
-
-                cmdLiked.CommandText = $"""
-                    SELECT TrackId
-                    FROM LikedTracks
-                    WHERE TrackId IN ({string.Join(',', paramNames)})
-                      AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                        OR (@isGuest = 0 AND OwnerId = @ownerId));
-                    """;
-
-                AddParameter(cmdLiked, "@isGuest", guest ? 1 : 0);
-                AddParameter(cmdLiked, "@ownerId", ownerId ?? string.Empty);
-
-                await using var readerLiked = await cmdLiked.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                while (await readerLiked.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    var tid = readerLiked.GetString(0);
-                    if (!result.TryGetValue(tid, out var set))
-                    {
-                        set = new HashSet<string>(StringComparer.Ordinal);
-                        result[tid] = set;
-                    }
-                    set.Add(LibraryService.LikedPlaylistId);
-                }
-            }
         }
 
         return result;
@@ -1043,37 +800,19 @@ public sealed class PlaylistRepository : IPlaylistRepository
         bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
 
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            cmd.CommandText = """
-                SELECT COALESCE(SUM(t.DurationTicks), 0)
-                FROM LikedTracks lt
-                INNER JOIN Tracks t ON lt.TrackId = t.Id
-                WHERE (@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest'))
-                   OR (@isGuest = 0 AND lt.OwnerId = @ownerId);
-                """;
+        cmd.CommandText = """
+            SELECT COALESCE(SUM(t.DurationTicks), 0)
+            FROM PlaylistTracks pt
+            INNER JOIN Playlists p ON pt.PlaylistId = p.Id
+            INNER JOIN Tracks t ON pt.TrackId = t.Id
+            WHERE pt.PlaylistId = @pId
+              AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
+                OR (@isGuest = 0 AND p.OwnerId = @ownerId));
+            """;
 
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
-        else
-        {
-            cmd.CommandText = """
-                SELECT COALESCE(SUM(t.DurationTicks), 0)
-                FROM PlaylistTracks pt
-                INNER JOIN Playlists p ON pt.PlaylistId = p.Id
-                INNER JOIN Tracks t ON pt.TrackId = t.Id
-                WHERE pt.PlaylistId = @pId
-                  AND pt.PlaylistId != @likedId
-                  AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
-                    OR (@isGuest = 0 AND p.OwnerId = @ownerId));
-                """;
-
-            AddParameter(cmd, "@pId", playlistId);
-            AddParameter(cmd, "@likedId", LibraryService.LikedPlaylistId);
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
+        AddParameter(cmd, "@pId", playlistId);
+        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
+        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
 
         var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return Convert.ToInt64(scalar);
@@ -1094,8 +833,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
                 SELECT pt.TrackId
                 FROM PlaylistTracks pt
                 INNER JOIN Playlists p ON pt.PlaylistId = p.Id
-                WHERE pt.PlaylistId != @likedId
-                  AND ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
+                WHERE ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
                     OR (@isGuest = 0 AND p.OwnerId = @ownerId))
                 UNION
                 SELECT lt.TrackId
@@ -1105,7 +843,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
             );
             """;
 
-        AddParameter(cmd, "@likedId", LibraryService.LikedPlaylistId);
         AddParameter(cmd, "@isGuest", guest ? 1 : 0);
         AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
 
@@ -1140,41 +877,6 @@ public sealed class PlaylistRepository : IPlaylistRepository
         }
 
         return adopted;
-    }
-
-    private async Task SetLikedDirectAsync(string trackId, string ownerId, bool liked, CancellationToken ct)
-    {
-        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
-
-        bool guest = IsGuest(ownerId);
-        await using var cmd = connection.CreateCommand();
-
-        if (liked)
-        {
-            cmd.CommandText = """
-                INSERT OR IGNORE INTO LikedTracks (OwnerId, TrackId, LikedAt)
-                VALUES (@ownerId, @trackId, @likedAt);
-                """;
-
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-            AddParameter(cmd, "@trackId", trackId);
-            AddParameter(cmd, "@likedAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
-        }
-        else
-        {
-            cmd.CommandText = """
-                DELETE FROM LikedTracks
-                WHERE TrackId = @trackId
-                  AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                    OR (@isGuest = 0 AND OwnerId = @ownerId));
-                """;
-
-            AddParameter(cmd, "@trackId", trackId);
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
-        }
-
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     #region SetVideoId

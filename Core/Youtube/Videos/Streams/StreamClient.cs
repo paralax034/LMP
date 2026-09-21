@@ -338,22 +338,6 @@ public sealed class StreamClient
     }
 
     /// <summary>
-    /// Загружает аудио-поток в файл.
-    /// </summary>
-    public async ValueTask DownloadAsync(
-        IStreamInfo streamInfo,
-        string filePath,
-        IProgress<double>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        using var destination = File.Create(filePath);
-        using var input = new MediaStream(_http, streamInfo);
-
-        await input.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        await input.CopyToAsync(destination, progress, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// Инвалидирует CipherManifest и signatureTimestamp.
     /// </summary>
     public void InvalidateCipherManifest()

@@ -126,37 +126,6 @@ public sealed class JsDecryptionService : IDisposable
     }
 
     /// <summary>
-    /// Выполняет произвольный JavaScript в persistent context.
-    /// <para>
-    /// Предназначен для POT token bootstrap: шаги 3 и 5 пайплайна BotGuard
-    /// требуют async/await с сохранением состояния между вызовами.
-    /// Глобальные переменные (VM object, webPoSignalOutput) сохраняются между вызовами.
-    /// </para>
-    /// </summary>
-    /// <param name="code">JavaScript-код для выполнения.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>
-    /// Строка результата, <c>null</c> если <c>undefined</c>,
-    /// или строка с префиксом <c>"__err:"</c> при JS-ошибке.
-    /// </returns>
-    public async ValueTask<string?> EvalAsync(string code, CancellationToken ct = default)
-    {
-        if (_disposed) return null;
-
-        await EnsureInitializedAsync(ct).ConfigureAwait(false);
-
-        await _callLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            return QuickJsNative.Eval(_handle, code);
-        }
-        finally
-        {
-            _callLock.Release();
-        }
-    }
-
-    /// <summary>
     /// Принудительно реинициализирует нативный контекст с новым плеером.
     /// Вызывается при ротации версий YouTube или при восстановлении после 403 ошибки.
     /// </summary>

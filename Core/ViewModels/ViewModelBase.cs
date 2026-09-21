@@ -144,18 +144,6 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
         return command;
     }
 
-    /// <summary>
-    /// Регистрирует произвольный ресурс для автоматического освобождения при Dispose.
-    /// </summary>
-    protected T TrackDisposable<T>(T disposable) where T : IDisposable
-    {
-        lock (_disposablesLock)
-        {
-            Disposables.Add(disposable);
-        }
-        return disposable;
-    }
-
     #endregion
 
     #region Static Lifecycle Broadcasts

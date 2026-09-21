@@ -53,25 +53,3 @@ public sealed record IntegrityTokenData
     /// </summary>
     public bool IsFallbackToken { get; init; }
 }
-
-/// <summary>Готовый PoToken с метаданными для кеширования.</summary>
-public sealed record PoTokenResult
-{
-    public required string Token { get; init; }
-
-    /// <summary>Идентификатор, с которым был заминчен токен (visitorId или videoId).</summary>
-    public required string Identifier { get; init; }
-
-    public DateTimeOffset ExpiresAt { get; init; }
-
-    public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
-}
-
-/// <summary>Сериализуемая запись PoToken для disk-кэша.</summary>
-public sealed class PoTokenCacheEntry
-{
-    public string Token { get; set; } = "";
-    public string Identifier { get; set; } = "";
-    public DateTimeOffset ExpiresAt { get; set; }
-    public DateTimeOffset CachedAt { get; set; }
-}

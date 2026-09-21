@@ -133,20 +133,6 @@ public sealed class SearchClient(HttpClient http)
             or SearchFilter.Playlist
             or SearchFilter.MusicPlaylist;
 
-    /// <summary>
-    /// Возвращает результаты поиска через WEB_REMIX с фильтром MusicSong.
-    /// Исключает нерелевантный контент (туториалы, геймплей) силами YTM.
-    /// </summary>
-    public IAsyncEnumerable<ISearchResult> GetResultsAsync(
-        string query, CancellationToken ct = default) =>
-        GetResultBatchesAsync(query, SearchFilter.MusicSong, ct).FlattenAsync();
-
     public IAsyncEnumerable<TrackInfo> GetVideosAsync(string query, CancellationToken ct = default) =>
-        GetResultBatchesAsync(query, SearchFilter.Video, ct).FlattenAsync().OfTypeAsync<TrackInfo>();
-
-    public IAsyncEnumerable<TrackInfo> GetMusicAsync(string query, CancellationToken ct = default) =>
-        GetResultBatchesAsync(query, SearchFilter.MusicSong, ct).FlattenAsync().OfTypeAsync<TrackInfo>();
-
-    public IAsyncEnumerable<Playlist> GetPlaylistsAsync(string query, CancellationToken ct = default) =>
-        GetResultBatchesAsync(query, SearchFilter.Playlist, ct).FlattenAsync().OfTypeAsync<Playlist>();
+        GetResultBatchesAsync(query, SearchFilter.Video, ct).FlattenAsync().OfTypeAsync<TrackInfo>(ct);
 }

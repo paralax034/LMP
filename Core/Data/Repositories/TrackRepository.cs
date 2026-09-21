@@ -134,6 +134,9 @@ public sealed partial class TrackRepository : ITrackRepository
 
         var models = new List<TrackInfo>(limit);
         var pattern = $"%{query}%";
+        var patternLower = $"%{query.ToLowerInvariant()}%";
+        var patternUpper = $"%{query.ToUpperInvariant()}%";
+        var patternTitle = $"%{CultureInfo.InvariantCulture.TextInfo.ToTitleCase(query.ToLowerInvariant())}%";
 
         await using (var cmd = connection.CreateCommand())
         {
@@ -141,11 +144,17 @@ public sealed partial class TrackRepository : ITrackRepository
                 SELECT {TrackColumnsSelect}
                 FROM Tracks t
                 WHERE t.Title LIKE @pattern OR t.Author LIKE @pattern
+                   OR t.Title LIKE @patternLower OR t.Author LIKE @patternLower
+                   OR t.Title LIKE @patternUpper OR t.Author LIKE @patternUpper
+                   OR t.Title LIKE @patternTitle OR t.Author LIKE @patternTitle
                 ORDER BY t.Title
                 LIMIT @limit OFFSET @offset;
                 """;
 
             AddParameter(cmd, "@pattern", pattern);
+            AddParameter(cmd, "@patternLower", patternLower);
+            AddParameter(cmd, "@patternUpper", patternUpper);
+            AddParameter(cmd, "@patternTitle", patternTitle);
             AddParameter(cmd, "@limit", limit);
             AddParameter(cmd, "@offset", offset);
 
@@ -381,9 +390,8 @@ public sealed partial class TrackRepository : ITrackRepository
         AddParameter(cmd, "@id", id);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
-
     /// <inheritdoc />
-    public async Task SetLikedAsync(string id, string ownerId, bool liked, CancellationToken ct = default)
+    public async Task SetLikedAsync(string id, string ownerId, bool liked, DateTime? likedAt = null, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
@@ -393,12 +401,13 @@ public sealed partial class TrackRepository : ITrackRepository
         if (liked)
         {
             cmd.CommandText = """
-                INSERT OR IGNORE INTO LikedTracks (OwnerId, TrackId, LikedAt)
+                INSERT OR REPLACE INTO LikedTracks (OwnerId, TrackId, LikedAt)
                 VALUES (@ownerId, @id, @likedAt);
                 """;
             AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
             AddParameter(cmd, "@id", id);
-            AddParameter(cmd, "@likedAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+            var timestamp = (likedAt ?? DateTime.UtcNow).ToString("o", CultureInfo.InvariantCulture);
+            AddParameter(cmd, "@likedAt", timestamp);
         }
         else
         {
@@ -414,6 +423,63 @@ public sealed partial class TrackRepository : ITrackRepository
         }
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task SetLikedBatchAsync(
+        IReadOnlyList<string> trackIds,
+        string ownerId,
+        bool preserveOrder = true,
+        CancellationToken ct = default)
+    {
+        if (trackIds.Count == 0) return;
+
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                INSERT OR REPLACE INTO LikedTracks (OwnerId, TrackId, LikedAt)
+                VALUES (@ownerId, @id, @likedAt);
+                """;
+
+            var pOwner = cmd.CreateParameter();
+            pOwner.ParameterName = "@ownerId";
+            pOwner.Value = ownerId ?? string.Empty;
+            cmd.Parameters.Add(pOwner);
+
+            var pId = cmd.CreateParameter();
+            pId.ParameterName = "@id";
+            cmd.Parameters.Add(pId);
+
+            var pLikedAt = cmd.CreateParameter();
+            pLikedAt.ParameterName = "@likedAt";
+            cmd.Parameters.Add(pLikedAt);
+
+            var baseTime = DateTime.UtcNow;
+
+            for (int i = 0; i < trackIds.Count; i++)
+            {
+                pId.Value = trackIds[i];
+
+                var timestamp = preserveOrder
+                    ? baseTime.AddSeconds(-i)
+                    : baseTime;
+
+                pLikedAt.Value = timestamp.ToString("o", CultureInfo.InvariantCulture);
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <inheritdoc />

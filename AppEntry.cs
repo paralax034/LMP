@@ -220,7 +220,6 @@ public sealed class AppEntry
                 connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
 
                 Log.Info($"[DB] Schema upgrade complete (Version: {DatabaseExtensions.CurrentDbVersion})");
@@ -229,7 +228,6 @@ public sealed class AppEntry
             {
                 connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
 
                 Log.Info($"[DB] Database schema is current (Version: {dbVersion})");
             }
@@ -252,7 +250,6 @@ public sealed class AppEntry
             connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
             connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
             connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-            connection.EnsureFtsTablesAsync(CancellationToken.None).GetAwaiter().GetResult();
             connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
 
             Log.Info($"[DB] Fresh database created (Version: {DatabaseExtensions.CurrentDbVersion})");
@@ -468,7 +465,9 @@ public sealed class AppEntry
         services.AddSingleton<IAsyncImageLoader>(sp =>
             new CachedImageLoader(sp.GetRequiredService<ImageCacheService>(), ImageQuality.Low));
 
+        services.AddSingleton<LegacyMigrationService>();
         services.AddSingleton<LibraryService>();
+        services.AddSingleton<PlaylistSyncService>();
         services.AddSingleton<PlaylistService>();
         services.AddSingleton<ThemeManagerService>();
         services.AddSingleton<CookieAuthService>();

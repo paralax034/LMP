@@ -1,5 +1,4 @@
-﻿using LMP.Core.Youtube;
-using LMP.Core.Youtube.Playlists;
+﻿using LMP.Core.Youtube.Playlists;
 using LMP.Core.Helpers.Extensions;
 
 namespace LMP.Core.Services;

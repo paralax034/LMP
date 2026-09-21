@@ -197,8 +197,6 @@ public sealed class LocalizationService : INotifyPropertyChanged
         return _resources.TryGetValue(key, out var value) ? value : fallback ?? $"[{key}]";
     }
 
-    public string RawGet(string key) => _resources.TryGetValue(key, out var v) ? v : key;
-
     public string GetPlural(string key, int count)
     {
         if (!_isInitialized) return $"{count}";

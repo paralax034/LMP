@@ -3,14 +3,12 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using LMP.Core.Youtube;
-using LMP.Core.Youtube.Channels;
 using LMP.Core.Youtube.Music;
 using LMP.Core.Youtube.Playlists;
 using LMP.Core.Youtube.Search;
 using LMP.Core.Youtube.Videos;
 using LMP.Core.Youtube.Videos.Streams;
 using LMP.Core.Youtube.Utils;
-using LMP.Core.Helpers.Extensions;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Bridge.NToken;
 using LMP.Core.Youtube.Bridge.SigCipher;
@@ -111,36 +109,6 @@ public partial class YoutubeProvider : IDisposable
 
     #endregion
 
-    #region Bot Detection — Stateless Helpers
-
-    /// <summary>
-    /// Проверяет, доступен ли трек для оффлайн-воспроизведения без обращения к сети.
-    /// </summary>
-    public static bool CanPlayOffline(TrackInfo track)
-    {
-        if (string.IsNullOrEmpty(track.Id))
-            return false;
-
-        var rawId = track.GetRawIdSpan().ToString();
-        if (string.IsNullOrEmpty(rawId))
-            return false;
-
-        var cached = AudioSourceFactory.FindAnyCachedTrack(rawId);
-        return cached != null;
-    }
-
-    /// <summary>
-    /// Проверяет, можно ли выполнять сетевые операции на YouTube без риска блокировки.
-    /// </summary>
-    public static bool CanPerformNetworkOperation() => !VideoController.IsInCooldown;
-
-    /// <summary>
-    /// Выбрасывает исключение, если система находится в режиме ожидания из-за детекции автоматизированных запросов.
-    /// </summary>
-    public static void ThrowIfInCooldown() => VideoController.ThrowIfInCooldown();
-
-    #endregion
-
     #region Client Initialization
 
     /// <summary>
@@ -223,78 +191,6 @@ public partial class YoutubeProvider : IDisposable
 
     #endregion
 
-    #region Personalization
-
-    /// <summary>
-    /// Загружает персонализированную домашнюю страницу YouTube Music для авторизованного пользователя.
-    /// </summary>
-    public async Task<List<HomeSection>> GetPersonalizedHomeAsync(CancellationToken ct = default)
-    {
-        if (AuthService?.IsAuthenticated != true) return [];
-
-        ThrowIfInCooldown();
-
-        try
-        {
-            var shelves = await _youtube.Music.GetPersonalizedHomeAsync(ct);
-            var sections = new List<HomeSection>(shelves.Count);
-
-            foreach (var shelf in shelves)
-            {
-                if (VideoController.IsInCooldown)
-                {
-                    Log.Warn("[YouTube] Home loading interrupted by bot detection");
-                    break;
-                }
-
-                var section = new HomeSection { Title = shelf.Title };
-
-                for (int i = 0; i < shelf.Items.Count; i++)
-                {
-                    var item = shelf.Items[i];
-
-                    string thumbUrl = ThumbnailUtils.GetBestUrlOrDefault(item.Thumbnails, $"https://i.ytimg.com/vi/{item.Id}/mqdefault.jpg");
-
-                    bool isMusicContent = string.Equals(item.Type, "Song", StringComparison.OrdinalIgnoreCase);
-
-                    var track = new TrackInfo
-                    {
-                        Id = item.Id,
-                        Title = item.Title,
-                        Author = item.Author ?? "Unknown",
-                        ThumbnailUrl = thumbUrl,
-                        Duration = item.Duration ?? TimeSpan.Zero,
-                        IsMusic = isMusicContent,
-                        Url = $"https://music.youtube.com/watch?v={item.Id}"
-                    };
-
-                    if (item.Type is "Playlist" or "Album")
-                        track.Id = $"yt_pl_{item.Id}";
-                    else
-                        track = _trackRegistry.RegisterOrUpdate(track);
-
-                    section.Tracks.Add(track);
-                }
-
-                if (section.Tracks.Count > 0)
-                    sections.Add(section);
-            }
-
-            return sections;
-        }
-        catch (BotDetectionException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Music] Failed to get home: {ex.Message}");
-            throw;
-        }
-    }
-
-    #endregion
-
     #region Edit YouTube Data
 
     /// <summary>
@@ -326,7 +222,7 @@ public partial class YoutubeProvider : IDisposable
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot create cloud playlist: user is not authenticated.");
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -380,7 +276,7 @@ public partial class YoutubeProvider : IDisposable
     {
         if (AuthService?.IsAuthenticated != true) return [];
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -407,7 +303,7 @@ public partial class YoutubeProvider : IDisposable
     {
         if (AuthService?.IsAuthenticated != true) return;
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -430,7 +326,7 @@ public partial class YoutubeProvider : IDisposable
     {
         if (AuthService?.IsAuthenticated != true) return;
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -455,7 +351,7 @@ public partial class YoutubeProvider : IDisposable
     {
         if (AuthService?.IsAuthenticated != true || moves.Count == 0) return;
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -481,7 +377,7 @@ public partial class YoutubeProvider : IDisposable
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot edit cloud playlist: user is not authenticated.");
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -509,7 +405,7 @@ public partial class YoutubeProvider : IDisposable
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot upload thumbnail: user is not authenticated.");
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -542,7 +438,7 @@ public partial class YoutubeProvider : IDisposable
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot rename cloud playlist: user is not authenticated.");
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -568,7 +464,7 @@ public partial class YoutubeProvider : IDisposable
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot delete cloud playlist: user is not authenticated.");
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -592,7 +488,7 @@ public partial class YoutubeProvider : IDisposable
     {
         if (AuthService?.IsAuthenticated != true) return null;
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -608,30 +504,6 @@ public partial class YoutubeProvider : IDisposable
         {
             Log.Error($"[Music] Failed to fetch full playlist data: {ex.Message}");
             return null;
-        }
-    }
-
-    /// <summary>
-    /// Выполняет аварийный сброс и очистку кэшей обходных движков при обнаружении фатальной ошибки 403 Forbidden.
-    /// Предотвращает циклические блокировки при ротации шифров YouTube.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.Synchronized)]
-    public void HandlePlayback403Fatal()
-    {
-        Log.Warn("[YouTube] Fatal 403 Forbidden detected. Triggering self-healing bypass reset...");
-        try
-        {
-            _nTokenDecryptor.InvalidateCache();
-            _sigCipherDecryptor.InvalidateCache();
-            _nTokenDecryptor.PlayerManager.InvalidateContext();
-            _youtube.Videos.Streams.InvalidateCipherManifest();
-            _poTokenProvider?.Invalidate();
-            _ = YoutubeClientUtils.EnsureVisitorDataAsync(forceRefresh: true);
-            ClearCache();
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[YouTube] Self-healing reset failed: {ex.Message}");
         }
     }
 
@@ -725,7 +597,7 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
-        ThrowIfInCooldown();
+        VideoController.ThrowIfInCooldown();
 
         try
         {
@@ -1009,18 +881,6 @@ public partial class YoutubeProvider : IDisposable
         try { return VideoId.TryParse(url)?.Value; } catch { return null; }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsValidYoutubeIdChars(ReadOnlySpan<char> id)
-    {
-        for (int i = 0; i < id.Length; i++)
-        {
-            var c = id[i];
-            if (!char.IsLetterOrDigit(c) && c != '_' && c != '-')
-                return false;
-        }
-        return true;
-    }
-
     /// <summary>
     /// Загружает подробные метаданные трека по его прямой ссылке.
     /// </summary>
@@ -1035,7 +895,7 @@ public partial class YoutubeProvider : IDisposable
         }
         catch (Exception ex)
         {
-            NotifyError($"[YouTube] GetTrackByUrlAsync error: {ex.Message}");
+            Log.Error($"[YouTube] GetTrackByUrlAsync error: {ex.Message}");
             return null;
         }
     }
@@ -1054,11 +914,11 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            ThrowIfInCooldown();
+            VideoController.ThrowIfInCooldown();
         }
         catch (BotDetectionException ex)
         {
-            NotifyError($"[YouTube] Search blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
+            Log.Error($"[YouTube] Search blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
             yield break;
         }
 
@@ -1115,11 +975,11 @@ public partial class YoutubeProvider : IDisposable
     {
         try
         {
-            ThrowIfInCooldown();
+            VideoController.ThrowIfInCooldown();
         }
         catch (BotDetectionException ex)
         {
-            NotifyError($"[YouTube] Search blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
+            Log.Error($"[YouTube] Search blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
             return [];
         }
 
@@ -1140,7 +1000,7 @@ public partial class YoutubeProvider : IDisposable
         catch (BotDetectionException) { }
         catch (Exception ex)
         {
-            NotifyError($"[YouTube] SearchFastAsync error: {ex.Message}");
+            Log.Error($"[YouTube] SearchFastAsync error: {ex.Message}");
         }
 
         return results;
@@ -1531,11 +1391,11 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            ThrowIfInCooldown();
+            VideoController.ThrowIfInCooldown();
         }
         catch (BotDetectionException ex)
         {
-            NotifyError($"[YouTube] Playlist blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
+            Log.Error($"[YouTube] Playlist blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
             return null;
         }
 
@@ -1559,70 +1419,8 @@ public partial class YoutubeProvider : IDisposable
         }
         catch (Exception ex)
         {
-            NotifyError($"[YouTube] GetPlaylistAsync error: {ex.Message}");
+            Log.Error($"[YouTube] GetPlaylistAsync error: {ex.Message}");
             return null;
-        }
-    }
-
-    /// <summary>
-    /// Загружает метаданные всех плейлистов канала для последующей синхронизации.
-    /// </summary>
-    public async Task<(string ChannelName, List<PlaylistSearchResult> Playlists)?> GetChannelPlaylistsForSyncAsync(
-     string channelUrl, CancellationToken ct = default)
-    {
-        try
-        {
-            ThrowIfInCooldown();
-        }
-        catch (BotDetectionException ex)
-        {
-            NotifyError($"[YouTube] Sync blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
-            return null;
-        }
-
-        var channel = await GetChannelFromUrlAsync(channelUrl, ct);
-        if (channel is null) return null;
-
-        Log.Info($"[YouTube] Fetching playlists from: {channel.Title}...");
-
-        try
-        {
-            var results = new List<PlaylistSearchResult>();
-
-            await foreach (var pl in _youtube.Channels.GetPlaylistsAsync(channel.Id, ct))
-            {
-                if (VideoController.IsInCooldown)
-                {
-                    Log.Warn("[YouTube] Channel sync interrupted by bot detection");
-                    break;
-                }
-
-                if (pl.Name.Equals("Uploads", StringComparison.OrdinalIgnoreCase)) continue;
-
-                var thumbs = new List<Thumbnail>();
-                if (!string.IsNullOrEmpty(pl.ThumbnailUrl))
-                    thumbs.Add(new Thumbnail(pl.ThumbnailUrl, new Resolution(0, 0)));
-
-                var auth = pl.Author != null
-                    ? new Author(new ChannelId(channel.Id.Value), pl.Author)
-                    : null;
-
-                results.Add(new PlaylistSearchResult(
-                    new PlaylistId(pl.YoutubeId ?? ""),
-                    pl.Name, auth, thumbs));
-            }
-
-            Log.Info($"[YouTube] Found {results.Count} playlists.");
-            return (channel.Title, results);
-        }
-        catch (BotDetectionException)
-        {
-            return (channel.Title, []);
-        }
-        catch (Exception ex)
-        {
-            NotifyError($"[YouTube] Error parsing channel playlists: {ex.Message}");
-            return (channel.Title, []);
         }
     }
 
@@ -1654,11 +1452,11 @@ public partial class YoutubeProvider : IDisposable
     {
         try
         {
-            ThrowIfInCooldown();
+            VideoController.ThrowIfInCooldown();
         }
         catch (BotDetectionException ex)
         {
-            NotifyError($"[YouTube] Import blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
+            Log.Error($"[YouTube] Import blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
             return null;
         }
 
@@ -1731,7 +1529,7 @@ public partial class YoutubeProvider : IDisposable
         }
         catch (Exception ex)
         {
-            NotifyError($"[YouTube] Error importing playlist '{playlistId}': {ex.Message}");
+            Log.Error($"[YouTube] Error importing playlist '{playlistId}': {ex.Message}");
             return null;
         }
     }
@@ -1772,229 +1570,6 @@ public partial class YoutubeProvider : IDisposable
         // Для чужих плейлистов из библиотеки fallback на Public только если privacy не распознали
         if (playlist.IsForeign && playlist.Visibility == PlaylistVisibility.Unknown)
             playlist.Visibility = PlaylistVisibility.Public;
-    }
-
-    /// <summary>
-    /// Загружает информацию об авторе канала (название и ссылка на аватар максимального разрешения).
-    /// </summary>
-    public async Task<(string Name, string AvatarUrl)?> GetChannelInfoAsync(
-        string url, CancellationToken ct = default)
-    {
-        var channel = await GetChannelFromUrlAsync(url, ct);
-        if (channel == null) return null;
-
-        string avatar = "";
-        int maxWidth = 0;
-        for (int i = 0; i < channel.Thumbnails.Count; i++)
-        {
-            if (channel.Thumbnails[i].Resolution.Width > maxWidth)
-            {
-                maxWidth = channel.Thumbnails[i].Resolution.Width;
-                avatar = channel.Thumbnails[i].Url ?? "";
-            }
-        }
-
-        return (channel.Title, avatar);
-    }
-
-    private async Task<Channel?> GetChannelFromUrlAsync(string url, CancellationToken ct = default)
-    {
-        try
-        {
-            var span = url.AsSpan();
-
-            if (TryExtractSegment(span, "/channel/", out var channelId))
-                return await _youtube.Channels.GetAsync(new ChannelId(channelId), ct);
-
-            if (TryExtractSegment(span, "/@", out var handle))
-                return await _youtube.Channels.GetByHandleAsync(new ChannelHandle(handle), ct);
-
-            if (TryExtractSegment(span, "/c/", out var slug))
-                return await _youtube.Channels.GetBySlugAsync(new ChannelSlug(slug), ct);
-
-            if (TryExtractSegment(span, "/user/", out var user))
-                return await _youtube.Channels.GetByUserAsync(new UserName(user), ct);
-
-            NotifyError("[YouTube] Unrecognized channel URL format.");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            NotifyError($"[YouTube] Error getting channel info: {ex.Message}");
-            return null;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool TryExtractSegment(ReadOnlySpan<char> url, ReadOnlySpan<char> pattern, out string result)
-    {
-        int idx = url.IndexOf(pattern);
-        if (idx < 0)
-        {
-            result = "";
-            return false;
-        }
-
-        var after = url[(idx + pattern.Length)..];
-
-        int endSlash = after.IndexOf('/');
-        int endQuery = after.IndexOf('?');
-
-        int end = (endSlash, endQuery) switch
-        {
-            ( >= 0, >= 0) => Math.Min(endSlash, endQuery),
-            ( >= 0, _) => endSlash,
-            (_, >= 0) => endQuery,
-            _ => after.Length
-        };
-
-        result = after[..end].ToString();
-        return result.Length > 0;
-    }
-
-    /// <summary>
-    /// Генерирует бесконечное радио-микс на основе переданного трека (RD-список).
-    /// </summary>
-    public async Task<List<TrackInfo>> GetRadioAsync(TrackInfo sourceTrack, int count = 25)
-    {
-        if (!IsReady || string.IsNullOrEmpty(sourceTrack.Url))
-            return [];
-
-        try
-        {
-            ThrowIfInCooldown();
-        }
-        catch (BotDetectionException ex)
-        {
-            NotifyError($"[YouTube] Radio blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
-            return [];
-        }
-
-        try
-        {
-            var videoIdSpan = sourceTrack.GetRawIdSpan();
-            if (videoIdSpan.IsEmpty) return [];
-
-            var videoId = videoIdSpan.ToString();
-            var mixUrl = $"https://www.youtube.com/watch?v={videoId}&list=RD{videoId}";
-
-            var result = await GetPlaylistAsync(mixUrl);
-            if (result == null) return [];
-
-            var tracks = result.Value.Tracks;
-            int take = Math.Min(count, tracks.Count);
-            var output = new List<TrackInfo>(take);
-
-            for (int i = 0; i < take; i++)
-            {
-                tracks[i].RadioSeedId = sourceTrack.Id;
-                output.Add(tracks[i]);
-            }
-
-            return output;
-        }
-        catch (BotDetectionException)
-        {
-            return [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// Загружает список популярных треков (тренды) в текущем регионе.
-    /// </summary>
-    public async Task<List<TrackInfo>> GetTrendingAsync(int count = 20)
-    {
-        try
-        {
-            ThrowIfInCooldown();
-        }
-        catch (BotDetectionException ex)
-        {
-            NotifyError($"[YouTube] Trending blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
-            return [];
-        }
-
-        try
-        {
-            var url = "https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs";
-            var result = await GetPlaylistAsync(url);
-
-            if (result != null)
-            {
-                var tracks = result.Value.Tracks;
-                int take = Math.Min(count, tracks.Count);
-                return tracks.GetRange(0, take);
-            }
-
-            return await SearchAsync("top music 2024", count);
-        }
-        catch (BotDetectionException)
-        {
-            return [];
-        }
-        catch
-        {
-            return await SearchAsync("top music 2024", count);
-        }
-    }
-
-    /// <summary>
-    /// Скачивает аудиодорожку трека на локальный диск в максимальном качестве.
-    /// После успешной загрузки регистрирует файл в дисковом кэше LMP.
-    /// </summary>
-    public async Task<string?> DownloadTrackAsync(
-      TrackInfo track,
-      IProgress<float>? progress = null,
-      CancellationToken ct = default)
-    {
-        if (!IsReady || string.IsNullOrEmpty(track.Url)) return null;
-
-        try
-        {
-            ThrowIfInCooldown();
-        }
-        catch (BotDetectionException ex)
-        {
-            NotifyError($"[YouTube] Download blocked: wait {ex.RemainingCooldown.TotalSeconds:F0}s");
-            return null;
-        }
-
-        try
-        {
-            var videoIdSpan = track.GetRawIdSpan();
-            if (videoIdSpan.IsEmpty) return null;
-
-            var vId = VideoId.Parse(videoIdSpan.ToString());
-            var manifest = await _youtube.Videos.Streams.GetManifestAsync(vId, ct);
-            var stream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
-
-            if (stream == null) return null;
-
-            var fileName = SanitizeFileName($"{track.Author} - {track.Title}.{stream.Container.Name}");
-            var filePath = Path.Combine(G.Folder.Downloads, fileName);
-
-            var prog = progress != null
-                ? new Progress<double>(p => progress.Report((float)p))
-                : null;
-
-            await _youtube.Videos.Streams.DownloadAsync(stream, filePath, progress: prog, cancellationToken: ct);
-            Log.Info($"[YouTube] Downloaded: {fileName}");
-
-            return filePath;
-        }
-        catch (BotDetectionException)
-        {
-            return null;
-        }
-        catch (Exception ex)
-        {
-            NotifyError($"[YouTube] Download error: {ex.Message}");
-            return null;
-        }
     }
 
     #endregion
@@ -2177,12 +1752,6 @@ public partial class YoutubeProvider : IDisposable
 
         return new string(buffer[..pos]);
     }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void NotifyStatus(string message) => Log.Info(message);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void NotifyError(string message) => Log.Error(message);
 
     /// <summary>
     /// Пытается быстро получить дескриптор потока из RAM-кэша манифестов без дисковых или сетевых запросов.

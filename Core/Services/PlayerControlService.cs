@@ -1,5 +1,3 @@
-using LMP.Core.Youtube.Utils;
-
 namespace LMP.Core.Services;
 
 /// <summary>
@@ -264,23 +262,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Устанавливает ID плейлиста-источника текущей очереди.
-    /// Null = очередь запущена не из плейлиста.
-    /// </summary>
-    public void SetActivePlaylistId(string? playlistId)
-    {
-        if (ActivePlaylistId == playlistId) return;
-
-        ActivePlaylistId = playlistId;
-        _activePlaylistTrackIds.Clear();
-        _expectedPlaylistTrackCount = 0;
-
-        ActivePlaylistIdChanged?.Invoke(playlistId);
-        UpdatePurityState();
-        Log.Debug($"[PlayerControl] ActivePlaylistId = {playlistId ?? "null"}");
-    }
-
-    /// <summary>
     /// Запускает воспроизведение плейлиста с полной регистрацией его состава для отслеживания чистоты очереди в памяти.
     /// Гарантирует наличие стартового трека в очереди воспроизведения даже при его внешнем удалении из источника данных.
     /// </summary>
@@ -394,15 +375,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     /// Возвращает текущую громкость из AudioEngine (округлённую до int).
     /// </summary>
     public int GetCurrentVolume() => (int)Math.Round(_audio.GetVolume());
-
-    /// <summary>
-    /// Возвращает максимальную громкость из настроек.
-    /// </summary>
-    public int GetMaxVolume()
-    {
-        int max = _library.Settings.MaxVolumeLimit;
-        return max > 0 ? max : 100;
-    }
 
     /// <summary>
     /// Запрашивает Resume у MainWindow (через OnResumeRequested).

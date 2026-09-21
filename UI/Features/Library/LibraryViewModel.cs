@@ -39,6 +39,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     private bool _isDataLoaded;
     private string _loadedOwnerId = string.Empty;
+    private bool _isDirty;
+    private bool _isViewActive = true;
 
     #endregion
 
@@ -138,10 +140,19 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     {
         if (_isDisposed) return;
 
+        _isViewActive = true;
+
         var currentOwnerId = _auth.State.DisplayId;
         if (_isDataLoaded && string.Equals(_loadedOwnerId, currentOwnerId, StringComparison.Ordinal))
         {
             IsContentReady = true;
+
+            if (_isDirty)
+            {
+                _isDirty = false;
+                UpdateStatsInBackground();
+            }
+
             return;
         }
 
@@ -152,8 +163,21 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             if (_isDisposed) return;
             _isDataLoaded = true;
             _loadedOwnerId = _auth.State.DisplayId;
+            _isDirty = false;
             IsContentReady = true;
         });
+    }
+
+    protected override void OnSuspend() => _isViewActive = false;
+
+    protected override void OnResume()
+    {
+        _isViewActive = true;
+        if (_isDirty)
+        {
+            _isDirty = false;
+            UpdateStatsInBackground();
+        }
     }
 
     /// <summary>
@@ -164,12 +188,17 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _playlistService.OnPlaylistChanged += OnPlaylistChangedIncremental;
         _playlistService.OnPlaylistRemoved += OnPlaylistRemovedIncremental;
         _library.OnDataChanged += OnLibraryDataChanged;
-        _library.OnTrackUpdated += OnLibraryTrackUpdated;
     }
 
     private void OnPlaylistChangedIncremental(Core.Models.Playlist playlist)
     {
         if (_isDisposed || IsSyncing) return;
+
+        if (!_isViewActive)
+        {
+            _isDirty = true;
+        }
+
         Dispatcher.UIThread.Post(async () =>
         {
             var result = await _playlistService.GetPlaylistWithCountAsync(playlist.Id);
@@ -203,6 +232,12 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     private void OnPlaylistRemovedIncremental(string playlistId)
     {
         if (_isDisposed || IsSyncing) return;
+
+        if (!_isViewActive)
+        {
+            _isDirty = true;
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
             var vm = Playlists.FirstOrDefault(x => x.Id == playlistId);
@@ -215,28 +250,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         });
     }
 
-    private void OnLibraryTrackUpdated(TrackInfo track)
-    {
-        if (_isDisposed || IsSyncing) return;
-
-        Dispatcher.UIThread.Post(() =>
-        {
-            var likedCard = Playlists.FirstOrDefault(p => p.IsLikedPlaylist);
-            if (likedCard != null)
-            {
-                int newCount = track.IsLiked ? likedCard.TrackCount + 1 : Math.Max(0, likedCard.TrackCount - 1);
-                if (likedCard.TrackCount != newCount)
-                {
-                    likedCard.TrackCount = newCount;
-                    UpdateStatsInBackground();
-                }
-            }
-        });
-    }
-
     private void OnLibraryDataChanged()
     {
         if (_isDisposed || IsSyncing) return;
+
+        if (!_isViewActive)
+        {
+            _isDirty = true;
+            return;
+        }
 
         if (!Dispatcher.UIThread.CheckAccess())
         {
@@ -246,13 +268,24 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         _dataChangedTimer?.Stop();
         _dataChangedTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(500),
+            TimeSpan.FromMilliseconds(300),
             DispatcherPriority.Background,
-            (_, _) =>
+            async (_, _) =>
             {
                 _dataChangedTimer?.Stop();
-                if (!_isDisposed && !IsSyncing)
-                    UpdateStatsInBackground();
+                if (_isDisposed || IsSyncing) return;
+
+                var likedCard = Playlists.FirstOrDefault(p => p.IsLikedPlaylist);
+                if (likedCard != null)
+                {
+                    var countResult = await _playlistService.GetPlaylistWithCountAsync(LibraryService.LikedPlaylistId);
+                    if (countResult != null && likedCard.TrackCount != countResult.Value.TrackCount)
+                    {
+                        likedCard.TrackCount = countResult.Value.TrackCount;
+                    }
+                }
+
+                UpdateStatsInBackground();
             });
         _dataChangedTimer.Start();
     }
@@ -684,7 +717,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         long totalTicks = 0;
         try
         {
-            totalTicks = await _library.GetTotalLibraryDurationAsync(ct).ConfigureAwait(false);
+            totalTicks = await _library.GetTotalLibraryDurationAsync(ct);
         }
         catch (Exception ex)
         {
@@ -702,13 +735,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         int startTracks = _prevTrackCount;
         int diff = Math.Abs(targetPlaylists - startPlaylists) + Math.Abs(targetTracks - startTracks);
 
-        if (diff == 0)
+        if (!_isViewActive || diff == 0)
         {
             PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
             TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
             TotalDurationText = FormatDurationLocalized(totalDuration);
             AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
             AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
+            _prevPlaylistCount = targetPlaylists;
+            _prevTrackCount = targetTracks;
             return;
         }
 
@@ -749,7 +784,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
         finally
         {
-            if (!ct.IsCancellationRequested && !_isDisposed)
+            if (!_isDisposed)
             {
                 PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
                 TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
@@ -931,7 +966,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _playlistService.OnPlaylistChanged -= OnPlaylistChangedIncremental;
             _playlistService.OnPlaylistRemoved -= OnPlaylistRemovedIncremental;
             _library.OnDataChanged -= OnLibraryDataChanged;
-            _library.OnTrackUpdated -= OnLibraryTrackUpdated;
 
             _dataChangedTimer?.Stop();
             _dataChangedTimer = null;

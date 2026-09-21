@@ -311,19 +311,4 @@ public sealed class Mp4BinaryReader
     }
 
     #endregion
-
-    #region Debug
-
-    /// <summary>
-    /// Преобразует FourCC uint в строку для логирования. Аллоцирует string — только для диагностики.
-    /// </summary>
-    public static string FourCCToString(uint fourcc) =>
-        new([
-            (char)((fourcc >> 24) & 0xFF),
-            (char)((fourcc >> 16) & 0xFF),
-            (char)((fourcc >> 8) & 0xFF),
-            (char)(fourcc & 0xFF)
-        ]);
-
-    #endregion
 }

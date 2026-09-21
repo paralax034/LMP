@@ -439,18 +439,6 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
         });
     }
 
-    public void MarkAsRead(Notification notification)
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (notification.IsRead) return;
-
-            notification.IsRead = true;
-            _unreadCount = Math.Max(0, _unreadCount - 1);
-            RaiseUnreadProperties();
-        });
-    }
-
     /// <summary>
     /// Поднимает PropertyChanged для счётчика непрочитанных.
     /// Вызывается только после мутаций — не в горячем пути биндинга.

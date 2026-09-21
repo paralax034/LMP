@@ -191,40 +191,4 @@ public static class SharedHttpClient
 
         request.Headers.TryAddWithoutValidation("User-Agent", ua);
     }
-
-    /// <summary>Возвращает длину контента по URL через HEAD-подобный GET-запрос.</summary>
-    public static async Task<long> GetContentLengthAsync(string url, CancellationToken ct = default)
-    {
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Version = HttpVersion.Version11;
-            ApplyUserAgentFromUrl(request, url);
-
-            using var response = await Instance
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
-                .ConfigureAwait(false);
-
-            return response.Content.Headers.ContentLength ?? -1;
-        }
-        catch { return -1; }
-    }
-
-    /// <summary>Возвращает MIME-тип контента по URL.</summary>
-    public static async Task<string?> GetContentTypeAsync(string url, CancellationToken ct = default)
-    {
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Version = HttpVersion.Version11;
-            ApplyUserAgentFromUrl(request, url);
-
-            using var response = await Instance
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
-                .ConfigureAwait(false);
-
-            return response.Content.Headers.ContentType?.MediaType;
-        }
-        catch { return null; }
-    }
 }

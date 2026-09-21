@@ -457,9 +457,6 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         return null;
     }
 
-    public bool HasPartialCache(string cacheKey) =>
-        _entries.TryGetValue(cacheKey, out var entry) && entry.DownloadedBytes > 0;
-
     public AudioCacheEntry? GetCacheInfo(string cacheKey) =>
         _entries.TryGetValue(cacheKey, out var entry) ? entry : null;
 
@@ -518,24 +515,6 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
         AddToTrackIndex(trackId, cacheKey);
         return entry;
-    }
-
-    public void MarkComplete(string cacheKey, long? durationMs = null, int? bitrate = null)
-    {
-        if (!_entries.TryGetValue(cacheKey, out var entry)) return;
-
-        entry.MarkFullyDownloaded();
-        entry.IsComplete = true;
-        entry.CompletedAt = DateTime.UtcNow;
-        entry.LastAccessedAt = DateTime.UtcNow;
-
-        if (durationMs.HasValue) entry.DurationMs = durationMs.Value;
-        if (bitrate.HasValue) entry.Bitrate = bitrate.Value;
-
-        UpdateFileSizeCache(entry);
-        Log.Info($"[AudioCache] Track fully cached: {cacheKey}");
-        _ = SaveIndexAsync();
-        RaiseFormatCached(entry);
     }
 
     public void RemoveCache(string cacheKey)
@@ -686,26 +665,6 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
     }
 
-    public Stream? OpenCachedStream(string cacheKey)
-    {
-        if (!_entries.TryGetValue(cacheKey, out var entry)
-            || !entry.IsComplete
-            || !EnsureCacheFileIntegrity(entry))
-        {
-            return null;
-        }
-
-        Touch(cacheKey);
-
-        return new FileStream(
-            GetCachePath(cacheKey),
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete,
-            bufferSize: CacheFileBufferSize,
-            useAsync: false);
-    }
-
     public async Task CleanupAsync(CancellationToken ct = default)
     {
         var stats = GetStats();
@@ -854,9 +813,6 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
         return result;
     }
-
-    public bool IsFormatCached(string trackId, AudioFormat format, int bitrate) =>
-        IsFullyCached(AudioSourceFactory.BuildCacheKey(trackId, format, bitrate));
 
     #endregion
 
@@ -1727,19 +1683,6 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 _handle = null;
             }
             waiter?.TrySetResult();
-        }
-
-        public Task WaitForQuiescenceAsync(int timeoutMs)
-        {
-            lock (_lock)
-            {
-                if (_leaseCount <= 0 && _activeIoCount <= 0)
-                    return Task.CompletedTask;
-
-                _quiescenceWaiter ??= new TaskCompletionSource(
-                    TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-            return _quiescenceWaiter.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
         }
 
         private void TryCloseIfQuiescent()

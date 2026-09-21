@@ -17,7 +17,6 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(List<TrackInfo>))]
 [JsonSerializable(typeof(Playlist))]
 [JsonSerializable(typeof(List<Playlist>))]
-[JsonSerializable(typeof(PoTokenCacheEntry))]
 [JsonSerializable(typeof(AudioCacheManager.AudioCacheIndexEnvelope))]
 [JsonSerializable(typeof(AudioCacheEntry))]
 [JsonSerializable(typeof(List<AudioCacheEntry>))]

@@ -38,7 +38,7 @@
     <AssemblyName>LMP</AssemblyName>
 
     <!-- Исключаем папки субпроектов из корневого проекта на уровне файловой системы .NET -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Core/**;SharpJaad.AAC/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Core/**;SharpJaad.AAC/**;Tools/**</DefaultItemExcludes>
 
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/app.ico</ApplicationIcon>
@@ -113,7 +113,7 @@
     <DebugType>none</DebugType>
     <Optimize>true</Optimize>
 
-    <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**;Tools/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**</DefaultItemExcludes>
 
     <!-- Полный тримминг неиспользуемых сборок и IL-кода -->
     <PublishTrimmed>true</PublishTrimmed>

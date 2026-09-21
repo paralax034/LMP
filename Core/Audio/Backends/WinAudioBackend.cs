@@ -16,7 +16,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     private const int MMSYSERR_NOERROR = 0;
     private const uint WAVE_MAPPER = unchecked((uint)-1);
     private const uint CALLBACK_EVENT = 0x00050000;
-    private const int WHDR_DONE = 0x00000001;
     private const int WHDR_INQUEUE = 0x00000010;
 
     [StructLayout(LayoutKind.Sequential, Pack = 2)]
@@ -74,17 +73,12 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     [LibraryImport("winmm.dll")]
     private static partial int waveOutSetVolume(nint hwo, uint dwVolume);
 
-    [LibraryImport("winmm.dll")]
-    private static partial int waveOutGetVolume(nint hwo, out uint pdwVolume);
-
     #endregion
 
     #region Constants
 
     private const int DesiredLatencyMs = 300;
     private const int NumberOfBuffers = 3;
-    private const int IdleSleepMs = 10;
-    private const int ErrorSleepMs = 100;
     private const int PlaybackThreadJoinTimeoutMs = 500;
     private const int FadeFrames = 2400;
     private const int UnderrunLogThreshold = 50;
@@ -123,7 +117,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     private volatile bool _disposed;
 
     private readonly Lock _stateLock = new();
-    private int _flushGeneration;
 
     private int _consecutiveUnderrunCount;
     private int _playbackLoopIterations;
@@ -264,7 +257,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
         }
 
         Volatile.Write(ref _consecutiveUnderrunCount, 0);
-        Interlocked.Increment(ref _flushGeneration);
 
         if (sampleRate == _sampleRate && channels == _channels)
         {
@@ -608,7 +600,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
             _fadeGain = 0f;
         }
 
-        Interlocked.Increment(ref _flushGeneration);
         Volatile.Write(ref _consecutiveUnderrunCount, 0);
     }
 

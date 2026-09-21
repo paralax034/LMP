@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using LMP.Core.Data;
+﻿using LMP.Core.Data;
 using LMP.Core.Data.Repositories;
 using Microsoft.Data.Sqlite;
 
@@ -22,6 +21,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     private readonly ISettingsRepository _settings;
     private readonly ISqliteConnectionFactory _connectionFactory;
     private readonly CookieAuthService _auth;
+    private readonly LegacyMigrationService _migration;
 
     private readonly SemaphoreSlim _settingsLock = new(1, 1);
     private readonly Timer _saveDebounceTimer;
@@ -46,7 +46,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         IPlaylistRepository playlists,
         ISettingsRepository settings,
         ISqliteConnectionFactory connectionFactory,
-        CookieAuthService auth)
+        CookieAuthService auth,
+        LegacyMigrationService migration)
     {
         _registry = registry;
         _tracks = tracks;
@@ -54,6 +55,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         _settings = settings;
         _connectionFactory = connectionFactory;
         _auth = auth;
+        _migration = migration;
 
         _saveDebounceTimer = new Timer(OnSaveTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
@@ -153,7 +155,9 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         var jsonPath = G.FilePath.LegacyDatabase;
         if (File.Exists(jsonPath))
         {
-            await MigrateFromJsonAsync(jsonPath, ct).ConfigureAwait(false);
+            var migratedSettings = await _migration.MigrateFromJsonAsync(jsonPath, ct).ConfigureAwait(false);
+            if (migratedSettings != null)
+                Settings = migratedSettings;
         }
 
         var initialOwnerId = CurrentOwnerId;
@@ -173,87 +177,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         IsInitialized = true;
         OnInitialized?.Invoke();
     }
-
-    private async Task MigrateFromJsonAsync(string path, CancellationToken ct)
-    {
-        try
-        {
-            Log.Info("[Migration] Starting JSON -> SQLite migration...");
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-
-            var json = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
-            var legacy = JsonSerializer.Deserialize(json, AppJsonContext.Default.LegacyLibraryData);
-            if (legacy == null) return;
-
-            var migratedTrackIds = new HashSet<string>();
-
-            if (legacy.Tracks?.Count > 0)
-            {
-                foreach (var track in legacy.Tracks.Values)
-                {
-                    if (string.IsNullOrEmpty(track.Id)) continue;
-                    await _tracks.UpsertAsync(track, ct).ConfigureAwait(false);
-                    migratedTrackIds.Add(track.Id);
-                }
-            }
-
-            if (legacy.Playlists?.Count > 0)
-            {
-                foreach (var legacyPl in legacy.Playlists.Values)
-                {
-                    var playlist = legacyPl.ToPlaylist();
-                    playlist.OwnerId = CurrentOwnerId;
-                    await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
-
-                    var validTrackIds = legacyPl.TrackIds.Where(migratedTrackIds.Contains).ToList();
-                    await _playlists.AddTracksAsync(playlist.Id, validTrackIds, CurrentOwnerId, ct).ConfigureAwait(false);
-                }
-            }
-
-            if (legacy.RecentlyPlayedIds?.Count > 0)
-            {
-                foreach (var id in legacy.RecentlyPlayedIds.AsEnumerable().Reverse().Take(100))
-                {
-                    if (migratedTrackIds.Contains(id))
-                        await _tracks.AddToHistoryAsync(id, CurrentOwnerId, ct).ConfigureAwait(false);
-                }
-            }
-
-            Settings = MapLegacySettings(legacy);
-            await _settings.SetAsync("AppSettings", Settings, ct).ConfigureAwait(false);
-
-            var backup = path + $".migrated.{DateTime.Now:yyyyMMddHHmmss}";
-            File.Move(path, backup);
-
-            sw.Stop();
-            Log.Info($"[Migration] Complete in {sw.ElapsedMilliseconds}ms.");
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Migration] Failed: {ex.Message}");
-        }
-    }
-
-    private static AppSettings MapLegacySettings(LegacyLibraryData d) => new()
-    {
-        Volume = d.Volume > 0 && d.Volume <= 1.0f ? (int)(d.Volume * 100) : (int)d.Volume,
-        ShuffleEnabled = d.ShuffleEnabled,
-        RepeatMode = d.RepeatMode,
-        MaxVolumeLimit = d.MaxVolumeLimit,
-        TargetGainDb = d.TargetGainDb,
-        QualityPreference = d.QualityPreference,
-        RememberTrackFormat = d.RememberTrackFormat,
-        InternetProfile = d.InternetProfile,
-        LanguageCode = d.LanguageCode,
-        DownloadPath = d.DownloadPath,
-        DiscordRpcEnabled = d.DiscordRpcEnabled,
-        AutoPlayOnUrlPaste = d.AutoPlayOnUrlPaste,
-        LoadBatchSize = d.LoadBatchSize,
-        SearchBatchSize = d.SearchBatchSize,
-        EnableSearchCache = d.EnableSearchCache,
-        SearchCacheTtlMinutes = d.SearchCacheTtlMinutes,
-        PlaylistHeaderHeight = d.PlaylistHeaderHeight
-    };
 
     #endregion
 
@@ -355,37 +278,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         await _tracks.CountAsync(ct).ConfigureAwait(false);
 
     /// <summary>
-    /// Возвращает общее количество загруженных и локальных треков.
-    /// </summary>
-    public async Task<int> GetLocalTrackCountAsync(CancellationToken ct = default) =>
-        await _tracks.CountLocalAsync(ct).ConfigureAwait(false);
-
-    /// <summary>
-    /// Выполняет локальный поиск по загруженным и физическим аудиофайлам устройства.
-    /// </summary>
-    /// <param name="query">Поисковый запрос.</param>
-    /// <param name="limit">Максимальное число возвращаемых треков.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список отфильтрованных локальных треков.</returns>
-    public async Task<List<TrackInfo>> SearchLocalTracksAsync(string query, int limit = 100, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return await GetLocalTracksAsync(limit, 0, ct).ConfigureAwait(false);
-
-        var allLocal = await _tracks.GetLocalTracksAsync(CurrentOwnerId, limit * 2, 0, ct).ConfigureAwait(false);
-
-        var filtered = allLocal
-            .Where(t =>
-                t.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                t.Author.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .Take(limit)
-            .ToList();
-
-        await HydrateAndRegisterTracksAsync(filtered, ct).ConfigureAwait(false);
-        return filtered;
-    }
-
-    /// <summary>
     /// Сохраняет метаданные нормализации громкости (Integrated LUFS) для трека.
     /// </summary>
     public Task SaveTrackNormalizationMetadataAsync(
@@ -417,17 +309,12 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         if (isLiked) canonical.IsDisliked = false;
 
         await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+        await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, isLiked, ct: ct).ConfigureAwait(false);
 
         if (isLiked)
-        {
-            await _playlists.AddTrackAsync(LikedPlaylistId, canonical.Id, CurrentOwnerId, 0, ct).ConfigureAwait(false);
             canonical.InPlaylists.Add(LikedPlaylistId);
-        }
         else
-        {
-            await _playlists.RemoveTrackAsync(LikedPlaylistId, canonical.Id, CurrentOwnerId, ct).ConfigureAwait(false);
             canonical.InPlaylists.Remove(LikedPlaylistId);
-        }
 
         _registry.UpdatePinStatus(canonical);
 
@@ -448,14 +335,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         await HydrateAndRegisterTracksAsync(tracks, ct).ConfigureAwait(false);
         return tracks;
     }
-
-    /// <summary>
-    /// Возвращает общее количество понравившихся треков текущего пользователя.
-    /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Количество лайкнутых треков.</returns>
-    public async Task<int> GetLikedCountAsync(CancellationToken ct = default) =>
-        await _tracks.CountLikedAsync(CurrentOwnerId, ct).ConfigureAwait(false);
 
     /// <summary>
     /// Проверяет, является ли переданный идентификатор системным плейлистом «Понравившиеся».
@@ -500,41 +379,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     public Task UpdateSetVideoIdsAsync(string playlistId, IReadOnlyList<(string TrackId, string SetVideoId)> mappings, CancellationToken ct = default) =>
         _playlists.UpdateSetVideoIdsAsync(playlistId, mappings, ct);
-
-    public Task<List<string>> GetPlaylistTrackIdsAsync(string playlistId, CancellationToken ct = default) =>
-        _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct);
-
-    public async Task<List<TrackInfo>> GetPlaylistTracksAsync(string playlistId, CancellationToken ct = default)
-    {
-        var trackIds = await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
-        if (trackIds.Count == 0) return [];
-        return await _registry.PreloadAndReturnAsync(trackIds, ct).ConfigureAwait(false);
-    }
-
-    public async Task<List<TrackInfo>> GetPlaylistTracksAsync(string playlistId, int limit, int offset = 0, CancellationToken ct = default)
-    {
-        var trackIds = await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, limit, offset, ct).ConfigureAwait(false);
-        if (trackIds.Count == 0) return [];
-        return await _registry.PreloadAndReturnAsync(trackIds, ct).ConfigureAwait(false);
-    }
-
-    public async Task<TimeSpan> GetPlaylistTotalDurationAsync(string playlistId, CancellationToken ct = default)
-    {
-        var ticks = await _playlists.GetTotalDurationTicksAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
-        return TimeSpan.FromTicks(ticks);
-    }
-
-    public Task<Playlist?> GetPlaylistAsync(string id, CancellationToken ct = default) =>
-        _playlists.GetByIdAsync(id, CurrentOwnerId, ct);
-
-    public Task<List<Playlist>> GetAllPlaylistsAsync(CancellationToken ct = default) =>
-        _playlists.GetAllAsync(CurrentOwnerId, ct);
-
-    public Task<List<(Playlist Playlist, int TrackCount)>> GetAllPlaylistsWithCountsAsync(CancellationToken ct = default) =>
-        _playlists.GetAllWithCountsAsync(CurrentOwnerId, ct);
-
-    public Task<bool> IsTrackInPlaylistAsync(string trackId, string playlistId, CancellationToken ct = default) =>
-        _playlists.ContainsTrackAsync(playlistId, trackId, CurrentOwnerId, ct);
 
     #endregion
 
@@ -637,7 +481,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         await connection.EnsureTablesCreatedAsync(ct).ConfigureAwait(false);
         await connection.MigrateSchemaAsync(ct).ConfigureAwait(false);
         await connection.OptimizeAsync(ct).ConfigureAwait(false);
-        await connection.EnsureFtsTablesAsync(ct).ConfigureAwait(false);
         await connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, ct).ConfigureAwait(false);
 
         Settings = new AppSettings();

@@ -77,36 +77,6 @@ public sealed partial class DecryptorCache
         return false;
     }
 
-    /// <summary>
-    /// Точечно удаляет все записи с указанным расшифрованным значением.
-    /// </summary>
-    public void RemoveByValue(string value)
-    {
-        var keysToRemove = new List<string>();
-        foreach (var kvp in _memory)
-        {
-            if (string.Equals(kvp.Value.Value, value, StringComparison.Ordinal))
-            {
-                keysToRemove.Add(kvp.Key);
-            }
-        }
-
-        bool removedAny = false;
-        for (int i = 0; i < keysToRemove.Count; i++)
-        {
-            if (_memory.TryRemove(keysToRemove[i], out _))
-            {
-                removedAny = true;
-            }
-        }
-
-        if (removedAny)
-        {
-            Volatile.Write(ref _isDirty, 1);
-            _ = Task.Run(SaveAsync);
-        }
-    }
-
     public async Task LoadAsync(string playerVersion)
     {
         _playerVersion = playerVersion;

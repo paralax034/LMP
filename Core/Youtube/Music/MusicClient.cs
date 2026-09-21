@@ -67,13 +67,6 @@ public sealed class MusicClient(HttpClient http)
         }
         return result;
     }
-    public async Task<List<MusicShelf>> GetPersonalizedHomeAsync(
-        CancellationToken cancellationToken = default)
-    {
-        var response = await _controller.GetBrowseAsync(
-            browseId: "FEmusic_home", cancellationToken: cancellationToken);
-        return response.Shelves;
-    }
 
     private static void ProcessShelves(List<MusicShelf> shelves, List<TrackInfo> targetList)
     {

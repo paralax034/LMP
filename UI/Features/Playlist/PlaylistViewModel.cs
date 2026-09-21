@@ -265,7 +265,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         });
 
         LibService.OnDataChanged += OnLibraryDataChanged;
-        LibService.OnTrackUpdated += OnLibraryTrackUpdated;
         _playlistService.OnPlaylistChanged += OnServicePlaylistChanged;
         _playerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
     }
@@ -310,45 +309,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
             });
         _dataChangedDebounceTimer.Start();
-    }
-
-    private void OnLibraryTrackUpdated(TrackInfo track)
-    {
-        if (_isSuspended) return;
-
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => OnLibraryTrackUpdated(track));
-            return;
-        }
-
-        InvalidateAllTracksCache();
-
-        if (IsLikedPlaylist)
-        {
-            if (track.IsLiked)
-            {
-                TrackCount++;
-                if (track.Duration > TimeSpan.Zero)
-                {
-                    TotalDuration += track.Duration;
-                    FormatDuration();
-                }
-            }
-            else
-            {
-                TrackCount = Math.Max(0, TrackCount - 1);
-                if (track.Duration > TimeSpan.Zero)
-                {
-                    TotalDuration = TotalDuration > track.Duration
-                        ? TotalDuration - track.Duration
-                        : TimeSpan.Zero;
-                    FormatDuration();
-                }
-            }
-
-            OnPropertyChanged(nameof(FormattedTrackCount));
-        }
     }
 
     #region ISmoothTransitionViewModel
@@ -933,7 +893,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         {
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
             LibService.OnDataChanged -= OnLibraryDataChanged;
-            LibService.OnTrackUpdated -= OnLibraryTrackUpdated;
             _playlistService.OnPlaylistChanged -= OnServicePlaylistChanged;
 
             _dataChangedDebounceTimer?.Stop();

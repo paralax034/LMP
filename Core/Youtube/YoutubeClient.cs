@@ -1,7 +1,6 @@
 using LMP.Core.Youtube.Bridge.NToken;
 using LMP.Core.Youtube.Bridge.PoToken;
 using LMP.Core.Youtube.Bridge.SigCipher;
-using LMP.Core.Youtube.Channels;
 using LMP.Core.Youtube.Music;
 using LMP.Core.Youtube.Playlists;
 using LMP.Core.Youtube.Search;
@@ -50,7 +49,6 @@ public sealed class YoutubeClient : IDisposable
             poTokenProvider);
 
         Playlists = new PlaylistClient(_youtubeHttp);
-        Channels = new ChannelClient(_youtubeHttp);
         Search = new SearchClient(_youtubeHttp);
         Music = new MusicClient(_youtubeHttp);
         Mutations = new PlaylistMutationController(_youtubeHttp);
@@ -62,9 +60,6 @@ public sealed class YoutubeClient : IDisposable
 
     /// <summary>Клиент для работы с плейлистами.</summary>
     public PlaylistClient Playlists { get; }
-
-    /// <summary>Клиент для работы с каналами.</summary>
-    public ChannelClient Channels { get; }
 
     /// <summary>Клиент для поиска.</summary>
     public SearchClient Search { get; }

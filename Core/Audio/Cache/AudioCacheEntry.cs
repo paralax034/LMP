@@ -338,39 +338,6 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Проверяет, был ли выровненный диапазон помечен как повреждённый в оффлайне.
-    /// </summary>
-    public bool IsRangeCorruptedOffline(long alignedStart) =>
-        _corruptedOfflineRanges != null && _corruptedOfflineRanges.ContainsKey(alignedStart);
-
-    /// <summary>
-    /// Подготавливает сериализуемое состояние перед сохранением индекса.
-    /// </summary>
-    public void PrepareForSave()
-    {
-        lock (_rangesLock)
-        {
-            if (_downloadedRanges is not { Count: > 0 })
-            {
-                DownloadedRangesData = null;
-                return;
-            }
-
-            var data = new List<SerializedDownloadedRange>(_downloadedRanges.Count);
-            for (int i = 0; i < _downloadedRanges.Count; i++)
-            {
-                data.Add(new SerializedDownloadedRange
-                {
-                    Start = _downloadedRanges[i].Start,
-                    EndExclusive = _downloadedRanges[i].EndExclusive
-                });
-            }
-
-            DownloadedRangesData = data;
-        }
-    }
-
-    /// <summary>
     /// Восстанавливает runtime-состояние после загрузки из JSON.
     /// </summary>
     public void RestoreAfterLoad()
