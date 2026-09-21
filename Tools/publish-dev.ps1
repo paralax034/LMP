@@ -47,12 +47,11 @@ if (Test-Path $ArtifactsDir) {
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Resolve-7Zip {
-    if (Get-Command 7z -ErrorAction SilentlyContinue) { return }
-
     $knownPaths = @(
         "C:\Program Files\7-Zip\7z.exe",
-        "C:\Program Files (x86)\7-Zip\7z.exe",
-        "$env:LOCALAPPDATA\Programs\7-Zip\7z.exe"
+        "$env:ProgramFiles\7-Zip\7z.exe",
+        "$env:LOCALAPPDATA\Programs\7-Zip\7z.exe",
+        "C:\Program Files (x86)\7-Zip\7z.exe"
     )
 
     foreach ($path in $knownPaths) {
@@ -61,6 +60,8 @@ function Resolve-7Zip {
             return
         }
     }
+
+    if (Get-Command 7z -ErrorAction SilentlyContinue) { return }
 
     Write-Error "7-Zip не найден. Установите 7-Zip или добавьте 7z.exe в PATH."
     exit 1
@@ -182,8 +183,8 @@ $debugDir   = Join-Path $RepoRoot "bin\Debug\net11.0"
 
 # 4.1. Версионированные архивы (для истории)
 $versionedReleaseArchive = Join-Path $ArtifactsDir "LMP-Release-v$fullVersion.7z"
-Write-Host ">>> Упаковка Release-снапшота..." -ForegroundColor Yellow
-7z a -t7z -mx=9 $versionedReleaseArchive "$publishDir/*" | Out-Null
+Write-Host ">>> Упаковка Release-снапшота (LZMA2 Ultra, 64MB dict)..." -ForegroundColor Yellow
+7z a -t7z -m0=lzma2 -mx=9 -md=64m -mfb=64 -ms=on -mmt=8 $versionedReleaseArchive "$publishDir/*" | Out-Null
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $versionedArchives = [System.Collections.Generic.List[string]]::new()
@@ -192,8 +193,8 @@ $versionedArchives.Add($versionedReleaseArchive)
 $versionedDebugArchive = ""
 if (-not $ReleaseOnly -and (Test-Path $debugDir)) {
     $versionedDebugArchive = Join-Path $ArtifactsDir "LMP-Debug-v$fullVersion.7z"
-    Write-Host ">>> Упаковка Debug-снапшота..." -ForegroundColor Yellow
-    7z a -t7z -mx=9 $versionedDebugArchive "$debugDir/*" | Out-Null
+    Write-Host ">>> Упаковка Debug-снапшота (LZMA2 Fast, 16MB dict)..." -ForegroundColor Yellow
+    7z a -t7z -m0=lzma2 -mx=5 -md=16m -ms=on -mmt=8 $versionedDebugArchive "$debugDir/*" | Out-Null
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $versionedArchives.Add($versionedDebugArchive)
 }

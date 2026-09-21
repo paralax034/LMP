@@ -51,7 +51,7 @@ jobs:
                   }
 
                   $archiveName = "LMP-v${{ env.FULL_VERSION }}.7z"
-                  7z a -t7z -mx=9 $archiveName "publish/*"
+                  7z a -t7z -m0=lzma2 -mx=9 -md=64m -ms=on $archiveName "publish/*"
 
                   Write-Host "Created: $archiveName"
 

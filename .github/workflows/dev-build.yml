@@ -60,7 +60,7 @@ jobs:
                     Write-Error "Debug build folder not found at $debugPath"
                     exit 1
                   }
-                  7z a -t7z -mx=9 "LMP-Debug-v${{ env.FULL_VERSION }}.7z" "$debugPath/*"
+                  7z a -t7z -m0=lzma2 -mx=5 -md=16m -ms=on "LMP-Debug-v${{ env.FULL_VERSION }}.7z" "$debugPath/*"
                   Write-Host "Created: LMP-Debug-v${{ env.FULL_VERSION }}.7z"
 
             - name: Archive Release Build
@@ -70,7 +70,7 @@ jobs:
                     Write-Error "Publish folder not found!"
                     exit 1
                   }
-                  7z a -t7z -mx=9 "LMP-Release-v${{ env.FULL_VERSION }}.7z" "publish/*"
+                  7z a -t7z -m0=lzma2 -mx=9 -md=64m -ms=on "LMP-Release-v${{ env.FULL_VERSION }}.7z" "publish/*"
                   Write-Host "Created: LMP-Release-v${{ env.FULL_VERSION }}.7z"
 
             # === Артефакты для Actions ===
