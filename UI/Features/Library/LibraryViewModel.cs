@@ -130,12 +130,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         HasPlaylists = Playlists.Count > 0;
     }
 
+    /// <inheritdoc />
     public void PrepareForTransition()
     {
+        _isViewActive = false;
         if (!_isDataLoaded)
             IsContentReady = false;
     }
 
+    /// <inheritdoc />
     public override async Task OnNavigatedToAsync()
     {
         if (_isDisposed) return;
@@ -147,7 +150,12 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         {
             IsContentReady = true;
 
-            if (_isDirty)
+            await RefreshLikedTrackCountAsync().ConfigureAwait(false);
+
+            int currentPlaylists = Playlists.Count;
+            int currentTracks = Playlists.Sum(p => p.TrackCount);
+
+            if (_isDirty || currentPlaylists != _prevPlaylistCount || currentTracks != _prevTrackCount)
             {
                 _isDirty = false;
                 UpdateStatsInBackground();
@@ -168,14 +176,18 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         });
     }
 
+    /// <inheritdoc />
     protected override void OnSuspend() => _isViewActive = false;
 
-    protected override void OnResume()
+    /// <inheritdoc />
+    protected override async void OnResume()
     {
+        base.OnResume();
         _isViewActive = true;
         if (_isDirty)
         {
             _isDirty = false;
+            await RefreshLikedTrackCountAsync().ConfigureAwait(false);
             UpdateStatsInBackground();
         }
     }
@@ -225,7 +237,14 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 vm.Show();
             }
 
-            UpdateStatsInBackground();
+            if (_isViewActive)
+            {
+                UpdateStatsInBackground();
+            }
+            else
+            {
+                _isDirty = true;
+            }
         });
     }
 
@@ -245,7 +264,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             {
                 vm.Dispose();
                 Playlists.Remove(vm);
-                UpdateStatsInBackground();
+
+                if (_isViewActive)
+                {
+                    UpdateStatsInBackground();
+                }
+                else
+                {
+                    _isDirty = true;
+                }
             }
         });
     }
@@ -275,16 +302,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 _dataChangedTimer?.Stop();
                 if (_isDisposed || IsSyncing) return;
 
-                var likedCard = Playlists.FirstOrDefault(p => p.IsLikedPlaylist);
-                if (likedCard != null)
-                {
-                    var countResult = await _playlistService.GetPlaylistWithCountAsync(LibraryService.LikedPlaylistId);
-                    if (countResult != null && likedCard.TrackCount != countResult.Value.TrackCount)
-                    {
-                        likedCard.TrackCount = countResult.Value.TrackCount;
-                    }
-                }
-
+                await RefreshLikedTrackCountAsync().ConfigureAwait(false);
                 UpdateStatsInBackground();
             });
         _dataChangedTimer.Start();
@@ -702,9 +720,13 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         return changed;
     }
 
+    /// <summary>
+    /// Анимированно интерполирует значения счетчиков статистики библиотеки.
+    /// Анимация счетчиков плейлистов и треков запускается немедленно, параллельно с запросом длительности из БД.
+    /// </summary>
     private async Task UpdateStatsAnimatedAsync()
     {
-        if (_isDisposed) return;
+        if (_isDisposed || !_isViewActive) return;
 
         _statsAnimCts?.Cancel();
         _statsAnimCts?.Dispose();
@@ -714,36 +736,36 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         var targetPlaylists = Playlists.Count;
         var targetTracks = Playlists.Sum(p => p.TrackCount);
 
-        long totalTicks = 0;
-        try
-        {
-            totalTicks = await _library.GetTotalLibraryDurationAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Library] Duration query error: {ex.Message}");
-        }
-
-        if (ct.IsCancellationRequested || _isDisposed) return;
-        var totalDuration = TimeSpan.FromTicks(totalTicks);
-
-        var avgTrack = targetTracks > 0 ? TimeSpan.FromTicks(totalDuration.Ticks / targetTracks) : TimeSpan.Zero;
-        var avgPlaylist = targetPlaylists > 0 ? TimeSpan.FromTicks(totalDuration.Ticks / targetPlaylists) : TimeSpan.Zero;
-
-        IsStatsVisible = true;
         int startPlaylists = _prevPlaylistCount;
         int startTracks = _prevTrackCount;
         int diff = Math.Abs(targetPlaylists - startPlaylists) + Math.Abs(targetTracks - startTracks);
 
-        if (!_isViewActive || diff == 0)
+        // Запускаем фоновый подсчет общей длительности параллельно с тиками анимации
+        var durationTask = _library.GetTotalLibraryDurationAsync(ct);
+
+        if (diff == 0)
         {
-            PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
-            TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
-            TotalDurationText = FormatDurationLocalized(totalDuration);
-            AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
-            AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
-            _prevPlaylistCount = targetPlaylists;
-            _prevTrackCount = targetTracks;
+            long ticks = 0;
+            try { ticks = await durationTask.ConfigureAwait(false); } catch { }
+
+            if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
+
+            var duration = TimeSpan.FromTicks(ticks);
+            var avgTrk = targetTracks > 0 ? TimeSpan.FromTicks(duration.Ticks / targetTracks) : TimeSpan.Zero;
+            var avgPl = targetPlaylists > 0 ? TimeSpan.FromTicks(duration.Ticks / targetPlaylists) : TimeSpan.Zero;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
+                PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
+                TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
+                TotalDurationText = FormatDurationLocalized(duration);
+                AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrk)}";
+                AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPl)}";
+                _prevPlaylistCount = targetPlaylists;
+                _prevTrackCount = targetTracks;
+                IsStatsVisible = true;
+            }, DispatcherPriority.Normal, ct);
             return;
         }
 
@@ -753,7 +775,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         {
             for (int i = 1; i <= steps; i++)
             {
-                if (ct.IsCancellationRequested || _isDisposed) return;
+                if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
                 double t = (double)i / steps;
                 double ease = 1 - Math.Pow(1 - t, 3);
@@ -761,40 +783,63 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 int currentPlaylists = startPlaylists + (int)Math.Round((targetPlaylists - startPlaylists) * ease);
                 int currentTracks = startTracks + (int)Math.Round((targetTracks - startTracks) * ease);
 
-                PlaylistCountText = SL.GetPlural("Library_PlaylistWord", currentPlaylists);
-                TotalTracksText = SL.GetPlural("Library_TrackWord", currentTracks);
-                TotalDurationText = FormatDurationLocalized(totalDuration);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
-                if (i == steps)
-                {
-                    PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
-                    TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
-                    AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
-                    AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
-                }
-                else
-                {
-                    AvgTrackDurationText = "";
-                    AvgPlaylistDurationText = "";
-                }
+                    PlaylistCountText = SL.GetPlural("Library_PlaylistWord", currentPlaylists);
+                    TotalTracksText = SL.GetPlural("Library_TrackWord", currentTracks);
+
+                    if (!IsStatsVisible)
+                        IsStatsVisible = true;
+                }, DispatcherPriority.Normal, ct);
 
                 try { await Task.Delay(16, ct); }
                 catch (OperationCanceledException) { break; }
             }
-        }
-        finally
-        {
-            if (!_isDisposed)
+
+            long totalTicks = 0;
+            try { totalTicks = await durationTask.ConfigureAwait(false); } catch { }
+
+            if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
+
+            var finalDuration = TimeSpan.FromTicks(totalTicks);
+            var finalAvgTrack = targetTracks > 0 ? TimeSpan.FromTicks(finalDuration.Ticks / targetTracks) : TimeSpan.Zero;
+            var finalAvgPlaylist = targetPlaylists > 0 ? TimeSpan.FromTicks(finalDuration.Ticks / targetPlaylists) : TimeSpan.Zero;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
+
                 PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
                 TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
-                TotalDurationText = FormatDurationLocalized(totalDuration);
-                AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrack)}";
-                AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPlaylist)}";
+                TotalDurationText = FormatDurationLocalized(finalDuration);
+                AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(finalAvgTrack)}";
+                AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(finalAvgPlaylist)}";
                 _prevPlaylistCount = targetPlaylists;
                 _prevTrackCount = targetTracks;
-            }
+                IsStatsVisible = true;
+            }, DispatcherPriority.Normal, ct);
         }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshLikedTrackCountAsync()
+    {
+        if (_isDisposed) return;
+
+        var countResult = await _playlistService.GetPlaylistWithCountAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
+        if (countResult == null) return;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (_isDisposed) return;
+            var likedCard = Playlists.FirstOrDefault(p => p.IsLikedPlaylist);
+            if (likedCard != null && likedCard.TrackCount != countResult.Value.TrackCount)
+            {
+                likedCard.TrackCount = countResult.Value.TrackCount;
+            }
+        });
     }
 
     private static string FormatDurationLocalized(TimeSpan ts)
@@ -820,7 +865,11 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _staggerCts = new CancellationTokenSource();
         var ct = _staggerCts.Token;
 
-        IsStatsVisible = false;
+        // Скрываем плашку только если данные еще ни разу не были загружены
+        if (!_isDataLoaded)
+        {
+            IsStatsVisible = false;
+        }
 
         var allPlaylistsWithCounts = await Task.Run(
             () => _playlistService.GetAllPlaylistsWithCountsAsync(ct), ct).ConfigureAwait(false);

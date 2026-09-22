@@ -31,6 +31,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     private readonly NotificationService? _notificationService;
     private readonly YoutubeProvider? _youtube;
     private readonly CookieAuthService? _auth;
+    private readonly TrackRegistry? _trackRegistry;
 
     private readonly HashSet<string> _activePlaylistTrackIds = new(StringComparer.Ordinal);
     private int _expectedPlaylistTrackCount;
@@ -112,13 +113,15 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         LibraryService library,
         NotificationService? notificationService = null,
         YoutubeProvider? youtube = null,
-        CookieAuthService? auth = null)
+        CookieAuthService? auth = null,
+        TrackRegistry? trackRegistry = null)
     {
         _audio = audio;
         _library = library;
         _notificationService = notificationService;
         _youtube = youtube;
         _auth = auth;
+        _trackRegistry = trackRegistry;
 
         CurrentTrack = _audio.CurrentTrack;
         IsPlaying = _audio.IsPlaying;
@@ -309,17 +312,27 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     /// </summary>
     /// <param name="track">Экземпляр трека.</param>
     /// <param name="ct">Токен отмены.</param>
+    /// <remarks>
+    /// Выполняет поиск канонического экземпляра в реестре, гарантируя согласованность
+    /// флага во всех представлениях и коллекциях пользовательского интерфейса.
+    /// </remarks>
     public async Task ToggleLikeAsync(TrackInfo track, CancellationToken ct = default)
     {
-        var canonical = _library.GetTrack(track.Id) ?? track;
+        var canonical = _trackRegistry?.RegisterOrUpdate(track, hasUserContext: true)
+            ?? _library.GetTrack(track.Id)
+            ?? track;
+
         bool targetLikedState = !canonical.IsLiked;
+
+        canonical.SetLikedState(targetLikedState);
+        _trackRegistry?.UpdatePinStatus(canonical);
 
         if (_auth?.IsAuthenticated == true && _youtube != null)
         {
             try
             {
-                await _youtube.LikeTrackAsync(track.Id, targetLikedState).ConfigureAwait(false);
-                Log.Info($"[PlayerControl] Track {track.Id} liked={targetLikedState} synced to YouTube");
+                await _youtube.LikeTrackAsync(canonical.Id, targetLikedState).ConfigureAwait(false);
+                Log.Info($"[PlayerControl] Track {canonical.Id} liked={targetLikedState} synced to YouTube");
             }
             catch (Exception ex)
             {
@@ -327,7 +340,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
             }
         }
 
-        await _library.SetLikeStateAsync(track, targetLikedState, ct).ConfigureAwait(false);
+        await _library.SetLikeStateAsync(canonical, targetLikedState, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -366,9 +379,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
             CurrentVolume = clamped;
             VolumeChanged?.Invoke(clamped);
         }
-
-        // Обновляем настройки; дебаунсер в LibraryService сам запишет их на диск без фризов UI
-        _library.UpdateSettings(s => s.Volume = clamped);
     }
 
     /// <summary>

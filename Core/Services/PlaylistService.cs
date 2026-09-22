@@ -327,27 +327,36 @@ public sealed class PlaylistService
     {
         if (playlistId == LibraryService.LikedPlaylistId)
         {
-            await _tracks.SetLikedAsync(track.Id, CurrentOwnerId, true, ct: ct).ConfigureAwait(false);
-            track.IsLiked = true;
-            track.InPlaylists.Add(LibraryService.LikedPlaylistId);
-            _registry.UpdatePinStatus(track);
+            var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
+            canonical.SetLikedState(true);
+            canonical.InPlaylists.Add(LibraryService.LikedPlaylistId);
+
+            await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+            await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, true, ct: ct).ConfigureAwait(false);
+
+            _registry.UpdatePinStatus(canonical);
+
+            var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
+            if (likedPlaylist != null)
+                OnPlaylistChanged?.Invoke(likedPlaylist);
+
             return;
         }
 
         var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
         if (playlist == null || !playlist.CanEditTracks) return;
 
-        var canonical = _registry.RegisterOrUpdate(track);
-        await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+        var canonicalTrack = _registry.RegisterOrUpdate(track);
+        await _tracks.UpsertAsync(canonicalTrack, ct).ConfigureAwait(false);
 
-        bool alreadyIn = await _playlists.ContainsTrackAsync(playlistId, canonical.Id, CurrentOwnerId, ct).ConfigureAwait(false);
+        bool alreadyIn = await _playlists.ContainsTrackAsync(playlistId, canonicalTrack.Id, CurrentOwnerId, ct).ConfigureAwait(false);
         if (!alreadyIn)
         {
-            await _playlists.AddTrackAsync(playlistId, canonical.Id, CurrentOwnerId, null, ct).ConfigureAwait(false);
-            canonical.InPlaylists.Add(playlistId);
-            _registry.UpdatePinStatus(canonical);
+            await _playlists.AddTrackAsync(playlistId, canonicalTrack.Id, CurrentOwnerId, null, ct).ConfigureAwait(false);
+            canonicalTrack.InPlaylists.Add(playlistId);
+            _registry.UpdatePinStatus(canonicalTrack);
 
-            await _syncService.AddTrackToCloudAsync(playlist, canonical.Id, ct).ConfigureAwait(false);
+            await _syncService.AddTrackToCloudAsync(playlist, canonicalTrack.Id, ct).ConfigureAwait(false);
         }
 
         OnPlaylistChanged?.Invoke(playlist);
@@ -409,10 +418,15 @@ public sealed class PlaylistService
             var trackInfo = _registry.TryGet(trackId);
             if (trackInfo != null)
             {
-                trackInfo.IsLiked = false;
+                trackInfo.SetLikedState(false);
                 trackInfo.InPlaylists.Remove(LibraryService.LikedPlaylistId);
                 _registry.UpdatePinStatus(trackInfo);
             }
+
+            var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
+            if (likedPlaylist != null)
+                OnPlaylistChanged?.Invoke(likedPlaylist);
+
             return;
         }
 

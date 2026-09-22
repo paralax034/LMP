@@ -77,7 +77,12 @@ public sealed partial class QueueViewModel : ViewModelBase
             _audio.MoveQueueItem(tuple.oldIndex, tuple.newIndex);
         });
 
+        _audio.OnQueueItemMoved += OnAudioQueueItemMoved;
+        _audio.OnQueueItemInserted += OnAudioQueueItemInserted;
+        _audio.OnQueueItemRemoved += OnAudioQueueItemRemoved;
+        _audio.OnQueueRangeInserted += OnAudioQueueRangeInserted;
         _audio.OnQueueChanged += OnAudioQueueChanged;
+
         _playerControl.CurrentTrackChanged += OnPlayerControlTrackChanged;
         _playerControl.IsPlayingChanged += OnPlayerControlIsPlayingChanged;
         _playerControl.ForceSyncTriggered += OnPlayerControlForceSyncTriggered;
@@ -89,6 +94,72 @@ public sealed partial class QueueViewModel : ViewModelBase
     {
         UpdateFilterState();
         OnPropertyChanged(nameof(CanReorderItems));
+    }
+
+    private void OnAudioQueueItemMoved(int from, int to)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnAudioQueueItemMoved(from, to));
+            return;
+        }
+
+        if (from >= 0 && from < QueueItems.Count && to >= 0 && to < QueueItems.Count && from != to)
+        {
+            QueueItems.Move(from, to);
+        }
+    }
+
+    private void OnAudioQueueItemInserted(int index, TrackInfo track)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnAudioQueueItemInserted(index, track));
+            return;
+        }
+
+        if (index >= 0 && index <= QueueItems.Count)
+        {
+            var vm = _vmFactory.CreateForQueue(track, t => _ = _audio.PlayTrackAsync(t));
+            QueueItems.Insert(index, vm);
+        }
+    }
+
+    private void OnAudioQueueItemRemoved(int index, TrackInfo track)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnAudioQueueItemRemoved(index, track));
+            return;
+        }
+
+        if (index >= 0 && index < QueueItems.Count)
+        {
+            var vm = QueueItems[index];
+            QueueItems.RemoveAt(index);
+            vm.Dispose();
+        }
+    }
+
+    private void OnAudioQueueRangeInserted(int startIndex, int count)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnAudioQueueRangeInserted(startIndex, count));
+            return;
+        }
+
+        var rawQueue = _audio.Queue;
+        for (int i = 0; i < count; i++)
+        {
+            int targetIndex = startIndex + i;
+            if (targetIndex >= 0 && targetIndex < rawQueue.Count)
+            {
+                var track = rawQueue[targetIndex];
+                var vm = _vmFactory.CreateForQueue(track, t => _ = _audio.PlayTrackAsync(t));
+                QueueItems.Insert(targetIndex, vm);
+            }
+        }
     }
 
     private void OnAudioQueueChanged()
@@ -166,6 +237,28 @@ public sealed partial class QueueViewModel : ViewModelBase
             ? duration.ToString(@"h\:mm\:ss")
             : duration.ToString(@"m\:ss");
 
+        if (QueueItems.Count == rawQueue.Count)
+        {
+            bool match = true;
+            for (int i = 0; i < rawQueue.Count; i++)
+            {
+                if (!string.Equals(QueueItems[i].Id, rawQueue[i].Id, StringComparison.Ordinal))
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                UpdateFilterState();
+                OnPropertyChanged(nameof(IsEmpty));
+                OnPropertyChanged(nameof(CanReorderItems));
+                NotifyCommandStates();
+                return;
+            }
+        }
+
         for (int i = 0; i < QueueItems.Count; i++)
             QueueItems[i].Dispose();
 
@@ -191,7 +284,11 @@ public sealed partial class QueueViewModel : ViewModelBase
 
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(CanReorderItems));
+        NotifyCommandStates();
+    }
 
+    private void NotifyCommandStates()
+    {
         ClearQueueCommand.NotifyCanExecuteChanged();
         ShuffleQueueCommand.NotifyCanExecuteChanged();
         DownloadAllCommand.NotifyCanExecuteChanged();
@@ -262,7 +359,12 @@ public sealed partial class QueueViewModel : ViewModelBase
     {
         if (disposing)
         {
+            _audio.OnQueueItemMoved -= OnAudioQueueItemMoved;
+            _audio.OnQueueItemInserted -= OnAudioQueueItemInserted;
+            _audio.OnQueueItemRemoved -= OnAudioQueueItemRemoved;
+            _audio.OnQueueRangeInserted -= OnAudioQueueRangeInserted;
             _audio.OnQueueChanged -= OnAudioQueueChanged;
+
             _playerControl.CurrentTrackChanged -= OnPlayerControlTrackChanged;
             _playerControl.IsPlayingChanged -= OnPlayerControlIsPlayingChanged;
             _playerControl.ForceSyncTriggered -= OnPlayerControlForceSyncTriggered;

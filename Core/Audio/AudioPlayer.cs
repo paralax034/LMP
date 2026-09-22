@@ -121,9 +121,9 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             int bufferedSamples = pipeline.BackendBufferedSamples;
             long played = Math.Max(0, pipeline.PlayedSamples - bufferedSamples);
 
-            if (played != _lastRawPlayedSamples)
+            if (played != Volatile.Read(ref _lastRawPlayedSamples))
             {
-                _lastRawPlayedSamples = played;
+                Volatile.Write(ref _lastRawPlayedSamples, played);
                 _sharedState.Update(
                     played,
                     bufferedSamples,

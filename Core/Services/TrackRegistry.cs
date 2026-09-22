@@ -58,7 +58,21 @@ public sealed class TrackRegistry
     /// <param name="incoming">Входящий экземпляр трека с новыми метаданными.</param>
     /// <returns>Канонический (уникальный) экземпляр трека из кэша памяти.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TrackInfo RegisterOrUpdate(TrackInfo incoming)
+    public TrackInfo RegisterOrUpdate(TrackInfo incoming) =>
+        RegisterOrUpdate(incoming, hasUserContext: false);
+
+    /// <summary>
+    /// Регистрирует новый трек в кэше или обновляет метаданные существующего канонического экземпляра с учетом контекста пользователя.
+    /// </summary>
+    /// <param name="incoming">Входящий экземпляр трека с новыми метаданными.</param>
+    /// <param name="hasUserContext">Указывает, получены ли данные из доверенного источника с авторизованным контекстом пользователя (БД, синхронизация лайков).</param>
+    /// <returns>Канонический (уникальный) экземпляр трека из кэша памяти.</returns>
+    /// <remarks>
+    /// Выполняет синхронизацию закрепления трека в сильной памяти: если трек теряет статус лайкнутого, скачанного или добавленного в плейлист,
+    /// он автоматически исключается из словаря сильных ссылок и переходит в weak-кэш для своевременной сборки мусора.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public TrackInfo RegisterOrUpdate(TrackInfo incoming, bool hasUserContext)
     {
         if (string.IsNullOrEmpty(incoming.Id)) return incoming;
 
@@ -71,20 +85,23 @@ public sealed class TrackRegistry
 
         if (_pinned.TryGetValue(incoming.Id, out var pinned))
         {
-            pinned.UpdateMetadata(incoming);
+            pinned.UpdateMetadata(incoming, hasUserContext);
             HydrateTrackFromAudioCache(pinned, audioCache);
+            UpdatePinStatusInternal(pinned);
             return pinned;
         }
 
         if (_cache.TryGetValue(incoming.Id, out var weakRef) && weakRef.TryGetTarget(out var cached))
         {
-            cached.UpdateMetadata(incoming);
+            cached.UpdateMetadata(incoming, hasUserContext);
             HydrateTrackFromAudioCache(cached, audioCache);
+            UpdatePinStatusInternal(cached);
             return cached;
         }
 
         _cache[incoming.Id] = new WeakReference<TrackInfo>(incoming);
         HydrateTrackFromAudioCache(incoming, audioCache);
+        UpdatePinStatusInternal(incoming);
         return incoming;
     }
 
@@ -150,15 +167,15 @@ public sealed class TrackRegistry
 
         if (_repository == null) return null;
 
-        var fromDb = await _repository.GetByIdAsync(id, CurrentOwnerId, ct);
+        var fromDb = await _repository.GetByIdAsync(id, CurrentOwnerId, ct).ConfigureAwait(false);
         if (fromDb == null) return null;
 
         if (_playlists != null)
         {
-            fromDb.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(id, CurrentOwnerId, ct);
+            fromDb.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(id, CurrentOwnerId, ct).ConfigureAwait(false);
         }
 
-        var canonical = RegisterOrUpdate(fromDb);
+        var canonical = RegisterOrUpdate(fromDb, hasUserContext: true);
         UpdatePinStatusInternal(canonical);
 
         return canonical;
@@ -216,7 +233,7 @@ public sealed class TrackRegistry
                 if (playlistsMap?.TryGetValue(track.Id, out var pls) == true)
                     track.InPlaylists = pls;
 
-                var canonical = RegisterOrUpdate(track);
+                var canonical = RegisterOrUpdate(track, hasUserContext: true);
                 UpdatePinStatusInternal(canonical);
                 found[canonical.Id] = canonical;
             }
@@ -283,7 +300,7 @@ public sealed class TrackRegistry
         var downloadTask = _repository.GetDownloadedAsync(CurrentOwnerId, 1000, 0, ct);
         var recentTask = _repository.GetRecentlyPlayedAsync(CurrentOwnerId, 100, ct);
 
-        await Task.WhenAll(likedTask, downloadTask, recentTask);
+        await Task.WhenAll(likedTask, downloadTask, recentTask).ConfigureAwait(false);
 
         var pinnedCandidates = new List<TrackInfo>(
             likedTask.Result.Count + downloadTask.Result.Count);
@@ -303,7 +320,7 @@ public sealed class TrackRegistry
 
         Dictionary<string, HashSet<string>>? playlistsMap = null;
         if (_playlists != null && allIds.Count > 0)
-            playlistsMap = await _playlists.GetPlaylistsForTracksAsync(allIds, CurrentOwnerId, ct);
+            playlistsMap = await _playlists.GetPlaylistsForTracksAsync(allIds, CurrentOwnerId, ct).ConfigureAwait(false);
 
         for (int i = 0; i < pinnedCandidates.Count; i++)
         {
@@ -312,7 +329,7 @@ public sealed class TrackRegistry
             if (playlistsMap != null && playlistsMap.TryGetValue(t.Id, out var pls))
                 t.InPlaylists = pls;
 
-            var canonical = RegisterOrUpdate(t);
+            var canonical = RegisterOrUpdate(t, hasUserContext: true);
             UpdatePinStatusInternal(canonical);
         }
 
@@ -323,7 +340,7 @@ public sealed class TrackRegistry
             if (playlistsMap != null && playlistsMap.TryGetValue(t.Id, out var pls))
                 t.InPlaylists = pls;
 
-            var canonical = RegisterOrUpdate(t);
+            var canonical = RegisterOrUpdate(t, hasUserContext: true);
 
             if (canonical.IsLiked || canonical.IsDownloaded ||
                 canonical.IsDisliked || canonical.InPlaylists.Count > 0)
@@ -352,7 +369,7 @@ public sealed class TrackRegistry
 
         try
         {
-            await _repository.UpsertBatchAsync(tracks, ct);
+            await _repository.UpsertBatchAsync(tracks, ct).ConfigureAwait(false);
             Log.Info($"[TrackRegistry] Flushed {tracks.Count} tracks to database");
         }
         catch (Exception ex)

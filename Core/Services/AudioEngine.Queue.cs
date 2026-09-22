@@ -4,6 +4,22 @@ namespace LMP.Core.Services;
 
 public sealed partial class AudioEngine
 {
+    #region Granular Queue Events
+
+    /// <summary>Событие перемещения элемента в очереди. Параметры: (старый индекс, новый индекс).</summary>
+    public event Action<int, int>? OnQueueItemMoved;
+
+    /// <summary>Событие вставки одиночного элемента в очередь. Параметры: (индекс вставки, вставленный трек).</summary>
+    public event Action<int, TrackInfo>? OnQueueItemInserted;
+
+    /// <summary>Событие удаления одиночного элемента из очереди. Параметры: (индекс удаленного элемента, удаленный трек).</summary>
+    public event Action<int, TrackInfo>? OnQueueItemRemoved;
+
+    /// <summary>Событие пакетной вставки диапазона элементов. Параметры: (начальный индекс вставки, количество элементов).</summary>
+    public event Action<int, int>? OnQueueRangeInserted;
+
+    #endregion
+
     #region Queue State
 
     private readonly List<TrackInfo> _queue = new(64);
@@ -36,6 +52,7 @@ public sealed partial class AudioEngine
     public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks)
     {
         int addedCount = 0;
+        int startIndex = -1;
         TrackInfo? playbackTrack = null;
         bool shouldAutoplay = false;
 
@@ -55,6 +72,7 @@ public sealed partial class AudioEngine
 
             if (unique.Count > 0)
             {
+                startIndex = _queue.Count;
                 _queue.AddRange(unique);
                 InvalidateQueueSnapshot();
 
@@ -69,7 +87,13 @@ public sealed partial class AudioEngine
 
         if (addedCount > 0)
         {
-            RaiseOnUI(() => OnQueueChanged?.Invoke());
+            RaiseOnUI(() =>
+            {
+                if (startIndex >= 0)
+                    OnQueueRangeInserted?.Invoke(startIndex, addedCount);
+
+                OnQueueChanged?.Invoke();
+            });
 
             if (shouldAutoplay && playbackTrack != null)
             {
@@ -86,11 +110,13 @@ public sealed partial class AudioEngine
     {
         TrackInfo? playbackTrack = null;
         bool shouldAutoplay = false;
+        int insertedIndex = -1;
 
         lock (_queueLock)
         {
             if (_queue.Any(t => t.Id == track.Id)) return;
             _queue.Add(track);
+            insertedIndex = _queue.Count - 1;
             InvalidateQueueSnapshot();
 
             if (CurrentTrack == null && !IsPlaying && !IsLoading)
@@ -101,7 +127,13 @@ public sealed partial class AudioEngine
             }
         }
 
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+        RaiseOnUI(() =>
+        {
+            if (insertedIndex >= 0)
+                OnQueueItemInserted?.Invoke(insertedIndex, track);
+
+            OnQueueChanged?.Invoke();
+        });
 
         if (shouldAutoplay && playbackTrack != null)
         {
@@ -113,8 +145,25 @@ public sealed partial class AudioEngine
 
     public void EnqueueRange(IEnumerable<TrackInfo> tracks)
     {
-        lock (_queueLock) { _queue.AddRange(tracks); InvalidateQueueSnapshot(); }
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+        int startIndex;
+        int count;
+
+        lock (_queueLock)
+        {
+            startIndex = _queue.Count;
+            var list = tracks as IList<TrackInfo> ?? tracks.ToList();
+            count = list.Count;
+            if (count == 0) return;
+
+            _queue.AddRange(list);
+            InvalidateQueueSnapshot();
+        }
+
+        RaiseOnUI(() =>
+        {
+            OnQueueRangeInserted?.Invoke(startIndex, count);
+            OnQueueChanged?.Invoke();
+        });
     }
 
     public void ShuffleQueue()
@@ -143,24 +192,38 @@ public sealed partial class AudioEngine
     public void RemoveFromQueue(TrackInfo track)
     {
         bool needStop = false;
+        int removedIndex = -1;
+
         lock (_queueLock)
         {
             int idx = _queue.FindIndex(t => t.Id == track.Id);
             if (idx == -1) return;
+            removedIndex = idx;
             if (idx == _currentIndex) { needStop = _queue.Count == 1; if (idx == _queue.Count - 1) _currentIndex--; }
             else if (idx < _currentIndex) _currentIndex--;
             _queue.RemoveAt(idx);
             InvalidateQueueSnapshot();
         }
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+
+        if (removedIndex >= 0)
+        {
+            RaiseOnUI(() =>
+            {
+                OnQueueItemRemoved?.Invoke(removedIndex, track);
+                OnQueueChanged?.Invoke();
+            });
+        }
+
         if (needStop) Stop();
     }
 
     public void MoveQueueItem(int from, int to)
     {
+        bool moved = false;
+
         lock (_queueLock)
         {
-            if (from < 0 || from >= _queue.Count || to < 0 || to >= _queue.Count) return;
+            if (from < 0 || from >= _queue.Count || to < 0 || to >= _queue.Count || from == to) return;
             var item = _queue[from];
             _queue.RemoveAt(from);
             _queue.Insert(to, item);
@@ -168,8 +231,17 @@ public sealed partial class AudioEngine
             else if (from < _currentIndex && to >= _currentIndex) _currentIndex--;
             else if (from > _currentIndex && to <= _currentIndex) _currentIndex++;
             InvalidateQueueSnapshot();
+            moved = true;
         }
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+
+        if (moved)
+        {
+            RaiseOnUI(() =>
+            {
+                OnQueueItemMoved?.Invoke(from, to);
+                OnQueueChanged?.Invoke();
+            });
+        }
     }
 
     #endregion

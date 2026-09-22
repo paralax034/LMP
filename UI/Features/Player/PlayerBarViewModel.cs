@@ -494,15 +494,17 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         });
 
         ToggleLikeCommand = new AsyncRelayCommand(async () =>
-        {
-            if (CurrentTrack != null)
-            {
-                await _playerControl.ToggleLikeAsync(CurrentTrack);
-                ShowHint(
-                    v => IsLikeHintVisible = v,
-                    () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);
-            }
-        }, () => HasTrack);
+                {
+                    if (CurrentTrack != null)
+                    {
+                        await _playerControl.ToggleLikeAsync(CurrentTrack);
+                        IsLiked = CurrentTrack.IsLiked;
+                        OnPropertyChanged(nameof(LikeTooltip));
+                        ShowHint(
+                            v => IsLikeHintVisible = v,
+                            () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);
+                    }
+                }, () => HasTrack);
 
         LoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: false));
         ForceLoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: true));
@@ -625,9 +627,21 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         if (CurrentTrack != null && t.Id == CurrentTrack.Id)
         {
-            IsLiked = t.IsLiked;
-            CurrentTrack.IsLiked = t.IsLiked;
-            OnPropertyChanged(nameof(LikeTooltip));
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                IsLiked = t.IsLiked;
+                CurrentTrack.IsLiked = t.IsLiked;
+                OnPropertyChanged(nameof(LikeTooltip));
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    IsLiked = t.IsLiked;
+                    CurrentTrack.IsLiked = t.IsLiked;
+                    OnPropertyChanged(nameof(LikeTooltip));
+                });
+            }
         }
     }
 

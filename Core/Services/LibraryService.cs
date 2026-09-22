@@ -300,17 +300,14 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     /// <param name="ct">Токен отмены асинхронной операции.</param>
     public async Task SetLikeStateAsync(TrackInfo track, bool isLiked, CancellationToken ct = default)
     {
-        track.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(track.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-        var canonical = _registry.RegisterOrUpdate(track);
+        var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
 
-        if (canonical.IsLiked == isLiked) return;
-
-        canonical.IsLiked = isLiked;
-        if (isLiked) canonical.IsDisliked = false;
+        canonical.SetLikedState(isLiked);
 
         await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
         await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, isLiked, ct: ct).ConfigureAwait(false);
 
+        canonical.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(canonical.Id, CurrentOwnerId, ct).ConfigureAwait(false);
         if (isLiked)
             canonical.InPlaylists.Add(LikedPlaylistId);
         else

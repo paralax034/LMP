@@ -255,8 +255,10 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     /// Игнорирует пустые значения и предотвращает затирание статуса лайка
     /// ответами API, не содержащими пользовательского контекста.
     /// </summary>
+    /// <param name="fresh">Свежий экземпляр трека с актуальными метаданными.</param>
+    /// <param name="includeUserState">Указывает, содержит ли входящий объект авторизованный контекст пользователя (лайки, локальный путь, статус загрузки).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void UpdateMetadata(TrackInfo fresh)
+    public void UpdateMetadata(TrackInfo fresh, bool includeUserState = false)
     {
         if (!string.IsNullOrEmpty(fresh.Title) && fresh.Title != Title)
             Title = fresh.Title;
@@ -282,11 +284,35 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
         if (!string.IsNullOrEmpty(fresh.ChannelId) && fresh.ChannelId != ChannelId)
             ChannelId = fresh.ChannelId;
 
-        if (fresh.IsLiked && !IsLiked)
-            IsLiked = true;
+        if (includeUserState)
+        {
+            if (IsLiked != fresh.IsLiked)
+                IsLiked = fresh.IsLiked;
 
-        if (fresh.IsDisliked && !IsDisliked)
-            IsDisliked = true;
+            if (IsDisliked != fresh.IsDisliked)
+                IsDisliked = fresh.IsDisliked;
+
+            if (IsDownloaded != fresh.IsDownloaded)
+                IsDownloaded = fresh.IsDownloaded;
+
+            if (!string.IsNullOrEmpty(fresh.LocalPath) && fresh.LocalPath != LocalPath)
+                LocalPath = fresh.LocalPath;
+
+            if (fresh.InPlaylists.Count > 0)
+            {
+                InPlaylists.Clear();
+                foreach (var playlistId in fresh.InPlaylists)
+                    InPlaylists.Add(playlistId);
+            }
+        }
+        else
+        {
+            if (fresh.IsLiked && !IsLiked)
+                IsLiked = true;
+
+            if (fresh.IsDisliked && !IsDisliked)
+                IsDisliked = true;
+        }
 
         if (fresh.HasIntegratedLufs)
             SetIntegratedLufs(fresh.IntegratedLufs, fresh.IntegratedLufsSource);
@@ -300,6 +326,20 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
 
         if (fresh.TransientBitrate > 0 && fresh.TransientBitrate != TransientBitrate)
             TransientBitrate = fresh.TransientBitrate;
+    }
+
+    /// <summary>
+    /// Принудительно устанавливает статус отметки «Мне нравится» для канонического экземпляра.
+    /// </summary>
+    /// <param name="isLiked">Целевой статус лайка.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void SetLikedState(bool isLiked)
+    {
+        if (IsLiked == isLiked) return;
+
+        IsLiked = isLiked;
+        if (isLiked && IsDisliked)
+            IsDisliked = false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

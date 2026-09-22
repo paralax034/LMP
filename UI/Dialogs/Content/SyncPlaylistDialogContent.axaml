@@ -30,7 +30,7 @@
                 Padding="0,0,6,0">
                 <StackPanel Spacing="14">
 
-                    <!-- ═══ Diff Preview ═══ -->
+                    <!-- Diff Preview -->
                     <Border Background="{DynamicResource BgElevatedBrush}"
                         CornerRadius="8" Padding="14,12">
                         <StackPanel Spacing="10">
@@ -97,9 +97,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ═══ Thumbnail Diff ═══ -->
-                    <!-- Показываем всегда когда есть хотя бы одна обложка.
-                         Если обложки одинаковы — показывает одну обложку без diff-лейблов. -->
+                    <!-- Thumbnail Diff -->
                     <Border Background="{DynamicResource BgElevatedBrush}"
                         CornerRadius="8" Padding="14,12"
                         IsVisible="{Binding HasThumbnailSection}">
@@ -190,7 +188,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ═══ Strategy selector ═══ -->
+                    <!-- Strategy selector -->
                     <StackPanel Spacing="5">
                         <TextBlock Text="{Binding L[Playlist_SyncStrategy]}"
                             FontSize="13" FontWeight="SemiBold"
@@ -229,7 +227,7 @@
                             Margin="0,2,0,0" />
                     </StackPanel>
 
-                    <!-- ═══ Field checkboxes ═══ -->
+                    <!-- Field checkboxes -->
                     <StackPanel Spacing="5">
                         <TextBlock Text="{Binding L[Playlist_SyncFields]}"
                             FontSize="13" FontWeight="SemiBold"

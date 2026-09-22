@@ -45,14 +45,14 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
         !string.IsNullOrEmpty(Preview.CloudThumbnailUrl);
 
     /// <summary>
-    /// Нормализованный локальный URL обложки для превью (без query string).
+    /// Локальный URL/путь обложки для превью.
     /// </summary>
-    public string? LocalThumbnailPreviewUrl => NormalizeThumbnailUrl(Preview.LocalThumbnailUrl);
+    public string? LocalThumbnailPreviewUrl => Preview.LocalThumbnailUrl;
 
     /// <summary>
-    /// Нормализованный облачный URL обложки для превью (без query string).
+    /// Облачный URL обложки для превью. Сохраняет query-параметры аутентификации CDN (sqp/rs).
     /// </summary>
-    public string? CloudThumbnailPreviewUrl => NormalizeThumbnailUrl(Preview.CloudThumbnailUrl);
+    public string? CloudThumbnailPreviewUrl => Preview.CloudThumbnailUrl;
 
     /// <summary>
     /// Обложки отличаются. Использует единую логику сравнения из снимка превью.
@@ -142,21 +142,5 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedStrategy));
         OnPropertyChanged(nameof(StrategyDescription));
         OnPropertyChanged(nameof(CanSyncThumbnail));
-    }
-
-    /// <summary>
-    /// Нормализует URL обложки: убирает query string (sqp=...) для стабильного сравнения.
-    /// </summary>
-    private static string? NormalizeThumbnailUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return null;
-
-        if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            var queryIndex = url.IndexOf('?');
-            return queryIndex >= 0 ? url[..queryIndex] : url;
-        }
-
-        return url;
     }
 }

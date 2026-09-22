@@ -69,15 +69,17 @@ public sealed class PlaylistSyncService
         await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
 
         var trackIds = await _playlists.GetTrackIdsAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-        if (trackIds.Count > 0)
+        bool hasThumbnail = !string.IsNullOrEmpty(playlist.ThumbnailUrl);
+
+        if (trackIds.Count > 0 || hasThumbnail)
         {
             var syncOptions = new PlaylistSyncOptions
             {
                 Strategy = PlaylistSyncStrategy.ReplaceCloud,
                 SyncName = false,
-                SyncDescription = false,
-                SyncThumbnail = false,
-                SyncTracks = true
+                SyncDescription = !string.IsNullOrWhiteSpace(playlist.Description),
+                SyncThumbnail = hasThumbnail,
+                SyncTracks = trackIds.Count > 0
             };
 
             await SyncDirectAsync(playlist, syncOptions, ct).ConfigureAwait(false);
@@ -271,8 +273,8 @@ public sealed class PlaylistSyncService
 
             for (int i = 0; i < likedTracks.Count; i++)
             {
-                likedTracks[i].IsLiked = true;
-                _registry.RegisterOrUpdate(likedTracks[i]);
+                likedTracks[i].SetLikedState(true);
+                _registry.RegisterOrUpdate(likedTracks[i], hasUserContext: true);
             }
 
             // Пакетное сохранение метаданных за 1 транзакцию
@@ -567,13 +569,13 @@ public sealed class PlaylistSyncService
     }
 
     private async Task<bool> SyncMetadataAsync(
-        Playlist playlist,
-        PlaylistSyncPreview preview,
-        PlaylistSyncOptions options,
-        CancellationToken ct)
+          Playlist playlist,
+          PlaylistSyncPreview preview,
+          PlaylistSyncOptions options,
+          CancellationToken ct)
     {
         bool changed = false;
-        bool isCloudSource = options.Strategy != PlaylistSyncStrategy.ReplaceCloud;
+        bool isCloudSource = options.Strategy == PlaylistSyncStrategy.ReplaceLocal;
 
         if (options.SyncName && preview.NameDiffers)
         {
@@ -609,6 +611,8 @@ public sealed class PlaylistSyncService
 
         if (options.SyncThumbnail && preview.ThumbnailDiffers)
         {
+            // При ReplaceLocal явно берем облачную обложку.
+            // При ReplaceCloud или Merge (при наличии локальной) отдаем приоритет локальной обложке и пушим ее в YouTube.
             if (isCloudSource)
             {
                 if (!string.IsNullOrEmpty(preview.CloudThumbnailUrl))
@@ -623,13 +627,18 @@ public sealed class PlaylistSyncService
                 try
                 {
                     var uploaded = await UploadThumbnailToYoutubeAsync(playlist.YoutubeId!, playlist.ThumbnailUrl, ct).ConfigureAwait(false);
-                    if (uploaded && !string.IsNullOrEmpty(preview.CloudThumbnailUrl))
+                    if (uploaded)
                     {
-                        playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
                         changed = true;
                     }
                 }
                 catch (Exception ex) { Log.Error($"[PlaylistSync] Thumbnail upload failed: {ex.Message}"); }
+            }
+            else if (string.IsNullOrEmpty(playlist.ThumbnailUrl) && !string.IsNullOrEmpty(preview.CloudThumbnailUrl))
+            {
+                playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
+                playlist.ComputedColor = null;
+                changed = true;
             }
         }
 

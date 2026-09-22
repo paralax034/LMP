@@ -36,9 +36,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     private DateTime _lastLocalMutationTime = DateTime.MinValue;
     private const int LocalMutationDebounceMs = 1500;
 
-    private List<TrackInfo>? _allTracksCache;
-    private bool _allTracksCacheValid;
-
     private volatile bool _isSuspended;
     private int _syncInProgressGate;
 
@@ -238,7 +235,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         {
             if (!CanReorderItems) return;
             _lastLocalMutationTime = DateTime.Now;
-            InvalidateAllTracksCache();
             await MoveItemAsync(tuple.oldIndex, tuple.newIndex);
         });
 
@@ -303,7 +299,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 _dataChangedDebounceTimer?.Stop();
                 if (_isSuspended) return;
 
-                InvalidateAllTracksCache();
                 if (string.IsNullOrEmpty(_currentPlaylistId)) return;
 
                 _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
@@ -328,7 +323,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     protected override void OnResume()
     {
         _isSuspended = false;
-        InvalidateAllTracksCache();
         UpdatePlaybackState();
         OnPropertyChanged(nameof(FormattedTrackCount));
     }
@@ -349,7 +343,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             if (!CanEdit) return;
 
             _lastLocalMutationTime = DateTime.Now;
-            InvalidateAllTracksCache();
             RemoveItemLocally(t.Id);
 
             TrackCount = Math.Max(0, TrackCount - 1);
@@ -405,7 +398,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var loadCt = loadCts.Token;
 
         _currentPlaylistId = playlistId;
-        InvalidateAllTracksCache();
         IsLoading = showLoader;
 
         try
@@ -561,6 +553,12 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     #region Playback
 
+    private List<TrackInfo> GetPlaylistTracksSnapshot()
+    {
+        var snapshot = GetLoadedItemsSnapshot();
+        return snapshot.Count > 0 ? snapshot : [];
+    }
+
     private async Task PlayAllAsync()
     {
         if (TrackCount == 0) return;
@@ -571,7 +569,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             return;
         }
 
-        var allTracks = await GetAllTracksAsync();
+        var allTracks = GetPlaylistTracksSnapshot();
         if (allTracks.Count == 0) return;
 
         IsShuffleActive = false;
@@ -581,7 +579,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     private async Task ShufflePlayAsync()
     {
         if (TrackCount == 0) return;
-        var allTracks = await GetAllTracksAsync();
+        var allTracks = GetPlaylistTracksSnapshot();
         if (allTracks.Count == 0) return;
 
         await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, enableShuffle: true);
@@ -604,7 +602,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         try
         {
             IsShuffleActive = false;
-            var allTracks = await GetAllTracksAsync();
+            var allTracks = GetPlaylistTracksSnapshot();
 
             if (!allTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
             {
@@ -627,7 +625,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     private async Task DownloadAllAsync()
     {
         IsDownloadingActive = true;
-        var allTracks = await GetAllTracksAsync();
+        var allTracks = GetPlaylistTracksSnapshot();
         foreach (var track in allTracks.Where(static t => !t.IsDownloaded))
             Downloads.StartDownload(track);
 
@@ -681,7 +679,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             if (IsLikedPlaylist)
             {
                 await _playlistService.SyncLikedTracksAsync();
-                InvalidateAllTracksCache();
                 await LoadPlaylistAsync(_currentPlaylistId);
 
                 await notifications.ShowToastAsync(
@@ -712,7 +709,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
                 if (result.Success)
                 {
-                    InvalidateAllTracksCache();
                     await LoadPlaylistAsync(_currentPlaylistId);
 
                     if (result.TracksAddedLocally > 0 || result.TracksAddedToCloud > 0 ||
@@ -799,26 +795,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 ok ? SL["Dialog_Success"] : SL["Dialog_Error_Title"],
                 ok ? SL["Merge_Success_Msg"] : SL["Merge_Error_Msg"]);
         }
-    }
-
-    #endregion
-
-    #region Cache & Helpers
-
-    private async Task<List<TrackInfo>> GetAllTracksAsync()
-    {
-        if (_allTracksCacheValid && _allTracksCache is not null)
-            return _allTracksCache;
-
-        _allTracksCache = await _playlistService.GetPlaylistTracksAsync(_currentPlaylistId);
-        _allTracksCacheValid = true;
-        return _allTracksCache;
-    }
-
-    private void InvalidateAllTracksCache()
-    {
-        _allTracksCacheValid = false;
-        _allTracksCache = null;
     }
 
     #endregion
@@ -910,7 +886,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             _playlistLoadCts?.Dispose();
             _playlistLoadCts = null;
 
-            InvalidateAllTracksCache();
             _currentPlaylist = null;
         }
         base.Dispose(disposing);

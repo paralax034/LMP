@@ -3,54 +3,75 @@ namespace LMP.Core.Audio;
 public partial class AudioPlayer
 {
     /// <summary>
+    /// Неизменяемый снимок состояния физического воспроизведения для атомарного обмена ссылками.
+    /// </summary>
+    /// <param name="BaseSamples">Количество фактически воспроизведенных сэмплов драйвером.</param>
+    /// <param name="BufferedSamples">Количество сэмплов, находящихся в буфере звукового устройства.</param>
+    /// <param name="BaseTimestamp">Временная метка фиксации отсчета (Stopwatch ticks).</param>
+    /// <param name="SampleRate">Частота дискретизации аудиопотока.</param>
+    /// <param name="Channels">Число аудиоканалов.</param>
+    /// <param name="IsPlaying">Флаг активного физического воспроизведения.</param>
+    /// <param name="DurationMs">Общая длительность трека в миллисекундах.</param>
+    private sealed record PlaybackSnapshot(
+        long BaseSamples,
+        int BufferedSamples,
+        long BaseTimestamp,
+        int SampleRate,
+        int Channels,
+        bool IsPlaying,
+        long DurationMs);
+
+    /// <summary>
     /// Атомарное, сверхбыстрое lock-free хранилище для бесшовной интерполяции положения воспроизведения.
     /// Позволяет UI-потоку "вытягивать" позицию на любой частоте (например, 60 FPS) с идеальной плавностью.
     /// </summary>
     private sealed class SharedPlaybackState
     {
-        private long _baseSamples;
-        private int _bufferedSamples;
-        private long _baseTimestamp;
-        private int _sampleRate;
-        private int _channels;
-        private int _isPlaying;
-        private long _durationMs;
+        private PlaybackSnapshot _snapshot = new(0, 0, 0, 0, 0, false, 0);
         private double _lastReturnedSeconds;
 
         /// <summary>
         /// Атомарно обновляет базовые показатели физического воспроизведения.
         /// </summary>
+        /// <param name="baseSamples">Сырые воспроизведенные сэмплы за вычетом буфера драйвера.</param>
+        /// <param name="bufferedSamples">Сэмплы в кольцевом буфере бэкенда.</param>
+        /// <param name="sampleRate">Частота дискретизации.</param>
+        /// <param name="channels">Количество каналов.</param>
+        /// <param name="isPlaying">Флаг воспроизведения.</param>
+        /// <param name="durationMs">Длительность текущего трека.</param>
+        /// <remarks>
+        /// Создает согласованный неизменяемый снимок данных и подменяет ссылку одной атомарной инструкцией,
+        /// полностью исключая эффект разорванного чтения (Torn Reads) со стороны UI-потока.
+        /// </remarks>
         public void Update(long baseSamples, int bufferedSamples, int sampleRate, int channels, bool isPlaying, long durationMs)
         {
-            Volatile.Write(ref _baseSamples, baseSamples);
-            Volatile.Write(ref _bufferedSamples, bufferedSamples);
-            Volatile.Write(ref _baseTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
-            Volatile.Write(ref _sampleRate, sampleRate);
-            Volatile.Write(ref _channels, channels);
-            Volatile.Write(ref _isPlaying, isPlaying ? 1 : 0);
-            Volatile.Write(ref _durationMs, durationMs);
+            var nextSnapshot = new PlaybackSnapshot(
+                baseSamples,
+                bufferedSamples,
+                System.Diagnostics.Stopwatch.GetTimestamp(),
+                sampleRate,
+                channels,
+                isPlaying,
+                durationMs);
+
+            Volatile.Write(ref _snapshot, nextSnapshot);
         }
 
         /// <summary>
         /// Возвращает экстраполированное монотонное время с защитой от микро-вибраций таймера
         /// </summary>
+        /// <returns>Вычисленная текущая позиция воспроизведения.</returns>
         public TimeSpan GetCurrentPosition()
         {
-            long baseSamples = Interlocked.Read(ref _baseSamples);
-            int bufferedSamples = Volatile.Read(ref _bufferedSamples);
-            long baseTimestamp = Interlocked.Read(ref _baseTimestamp);
-            int sampleRate = Volatile.Read(ref _sampleRate);
-            int channels = Volatile.Read(ref _channels);
-            bool isPlaying = Volatile.Read(ref _isPlaying) == 1;
-            long durationMs = Interlocked.Read(ref _durationMs);
+            var snap = Volatile.Read(ref _snapshot);
 
-            if (sampleRate <= 0 || channels <= 0) return TimeSpan.Zero;
+            if (snap.SampleRate <= 0 || snap.Channels <= 0) return TimeSpan.Zero;
 
-            double baseSeconds = (double)baseSamples / (sampleRate * channels);
-            double maxExtrapolation = baseSeconds + ((double)bufferedSamples / (sampleRate * channels));
-            double maxSeconds = durationMs / 1000.0;
+            double baseSeconds = (double)snap.BaseSamples / (snap.SampleRate * snap.Channels);
+            double maxExtrapolation = baseSeconds + ((double)snap.BufferedSamples / (snap.SampleRate * snap.Channels));
+            double maxSeconds = snap.DurationMs / 1000.0;
 
-            if (!isPlaying)
+            if (!snap.IsPlaying)
             {
                 double finalSec = Math.Clamp(baseSeconds, 0.0, maxSeconds);
                 _lastReturnedSeconds = finalSec;
@@ -58,7 +79,7 @@ public partial class AudioPlayer
             }
 
             long currentTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
-            double elapsedSeconds = (double)(currentTimestamp - baseTimestamp) / System.Diagnostics.Stopwatch.Frequency;
+            double elapsedSeconds = (double)(currentTimestamp - snap.BaseTimestamp) / System.Diagnostics.Stopwatch.Frequency;
             double extrapolated = baseSeconds + elapsedSeconds;
 
             // HARD CLAMP: Prevent slider ghosting during network starvation.

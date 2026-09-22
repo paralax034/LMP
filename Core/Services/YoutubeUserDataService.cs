@@ -9,14 +9,26 @@ namespace LMP.Core.Services;
 public partial class YoutubeUserDataService
 {
     private readonly CookieAuthService _auth;
+    private readonly TrackRegistry? _trackRegistry;
 
     /// <summary>
     /// Инициализирует новый экземпляр службы работы с профилем пользователя.
     /// </summary>
     /// <param name="auth">Служба управления аутентификацией и куками.</param>
     public YoutubeUserDataService(CookieAuthService auth)
+        : this(auth, null)
+    {
+    }
+
+    /// <summary>
+    /// Инициализирует новый экземпляр службы работы с профилем пользователя с поддержкой реестра Identity Map.
+    /// </summary>
+    /// <param name="auth">Служба управления аутентификацией и куками.</param>
+    /// <param name="trackRegistry">Реестр канонических моделей треков для обеспечения единого источника истины.</param>
+    public YoutubeUserDataService(CookieAuthService auth, TrackRegistry? trackRegistry)
     {
         _auth = auth;
+        _trackRegistry = trackRegistry;
     }
 
     #region Лайки YouTube
@@ -72,7 +84,13 @@ public partial class YoutubeUserDataService
 
             for (int i = 0; i < likedTracks.Count; i++)
             {
-                likedTracks[i].IsLiked = true;
+                var track = likedTracks[i];
+                track.IsLiked = true;
+
+                if (_trackRegistry != null)
+                {
+                    likedTracks[i] = _trackRegistry.RegisterOrUpdate(track, hasUserContext: true);
+                }
             }
 
             Log.Info($"[Sync] Total liked tracks: {likedTracks.Count}");
