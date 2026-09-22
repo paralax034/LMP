@@ -22,12 +22,12 @@ public partial class CopyLinkButton : UserControl
     private PathIcon? _hintIcon;
     private TextBlock? _hintText;
 
-    private const int FadeDurationMs  = 150;
+    private const int FadeDurationMs = 150;
     private const int StateDurationMs = 1200;
 
-    private const string IdleIconKey    = "Icon.LinkVariant";
+    private const string IdleIconKey = "Icon.LinkVariant";
     private const string SuccessIconKey = "Icon.Check";
-    private const string ErrorIconKey   = "Icon.Close";
+    private const string ErrorIconKey = "Icon.Close";
 
     #region Styled Properties
 
@@ -102,10 +102,10 @@ public partial class CopyLinkButton : UserControl
     {
         base.OnAttachedToVisualTree(e);
 
-        _icon      = this.FindControl<PathIcon>("LinkIcon");
+        _icon = this.FindControl<PathIcon>("LinkIcon");
         _hintPopup = this.FindControl<Popup>("HintPopup");
-        _hintIcon  = this.FindControl<PathIcon>("HintIcon");
-        _hintText  = this.FindControl<TextBlock>("HintText");
+        _hintIcon = this.FindControl<PathIcon>("HintIcon");
+        _hintText = this.FindControl<TextBlock>("HintText");
 
         // Idle-состояние (Data + Foreground) задано статически в AXAML через
         // StaticResource / DynamicResource — code-behind не трогает его при attach.
@@ -147,8 +147,8 @@ public partial class CopyLinkButton : UserControl
             await Task.Delay(FadeDurationMs, cts.Token);
 
             SetIconState(
-                success ? SuccessIconKey : ErrorIconKey,
-                success ? "AccentBrush"  : "SystemErrorRedBrush");
+                            success ? SuccessIconKey : ErrorIconKey,
+                            success ? "AccentBrush" : "SystemErrorBrush");
 
             _icon?.Opacity = 1;
 
@@ -174,13 +174,13 @@ public partial class CopyLinkButton : UserControl
     {
         if (_hintPopup is null || _hintIcon is null || _hintText is null) return;
 
-        var app   = Application.Current;
+        var app = Application.Current;
         var theme = app?.ActualThemeVariant;
 
         if (app != null && theme != null)
         {
-            string iconKey  = success ? SuccessIconKey : ErrorIconKey;
-            string brushKey = success ? "AccentBrush"  : "SystemErrorRedBrush";
+            string iconKey = success ? SuccessIconKey : ErrorIconKey;
+            string brushKey = success ? "AccentBrush" : "SystemErrorBrush";
 
             if (app.Resources.TryGetResource(iconKey, theme, out var geo) && geo is StreamGeometry sg)
                 _hintIcon.Data = sg;
@@ -211,7 +211,7 @@ public partial class CopyLinkButton : UserControl
     {
         if (_icon is null) return;
 
-        var app   = Application.Current;
+        var app = Application.Current;
         var theme = app?.ActualThemeVariant;
 
         if (app is null || theme is null)
@@ -237,7 +237,7 @@ public partial class CopyLinkButton : UserControl
     {
         if (_icon is null) return;
 
-        var app   = Application.Current;
+        var app = Application.Current;
         var theme = app?.ActualThemeVariant;
         if (app is null || theme is null) return;
 
@@ -255,11 +255,11 @@ public partial class CopyLinkButton : UserControl
     {
         _stateCts?.Cancel();
         _stateCts?.Dispose();
-        _stateCts  = null;
-        _icon      = null;
+        _stateCts = null;
+        _icon = null;
         _hintPopup = null;
-        _hintIcon  = null;
-        _hintText  = null;
+        _hintIcon = null;
+        _hintText = null;
         base.OnUnloaded(e);
     }
 }

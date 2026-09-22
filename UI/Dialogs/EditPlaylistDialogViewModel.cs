@@ -4,11 +4,13 @@ namespace LMP.UI.Dialogs;
 
 /// <summary>
 /// ViewModel диалога редактирования плейлиста.
-/// Оборачивает <see cref="PlaylistEditorViewModel"/> и обрабатывает
-/// три возможных исхода: сохранение, создание копии, отмена.
+/// Выполняет отложенную сборку мозаики без требования промежуточного применения пользователем.
 /// </summary>
 public sealed class EditPlaylistDialogViewModel : ViewModelBase
 {
+    /// <summary>
+    /// Дочерняя модель редактора параметров плейлиста.
+    /// </summary>
     public PlaylistEditorViewModel Editor { get; }
 
     /// <summary>
@@ -16,42 +18,41 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
     /// </summary>
     public Action<EditPlaylistResult?>? OnResult { get; set; }
 
-    public IRelayCommand SaveCommand { get; }
+    /// <summary>
+    /// Команда сохранения изменений плейлиста.
+    /// </summary>
+    public IAsyncRelayCommand SaveCommand { get; }
+
+    /// <summary>
+    /// Команда отмены редактирования и закрытия диалога.
+    /// </summary>
     public IRelayCommand CancelCommand { get; }
 
     /// <summary>
-    /// Инициализирует новый экземпляр ViewModel диалога редактирования плейлиста.
-    /// Обеспечивает гарантированное разрешение сетевых и доменных служб из DI-контейнера при их отсутствии в параметрах.
+    /// Инициализирует модель диалога редактирования плейлиста.
     /// </summary>
     /// <param name="playlist">Редактируемый плейлист.</param>
-    /// <param name="isAuthenticated">Флаг авторизации текущей сессии в YouTube.</param>
+    /// <param name="isAuthenticated">Флаг авторизации сессии в YouTube.</param>
     /// <param name="playlistTracks">Список треков плейлиста для мозаики обложек.</param>
-    /// <param name="networkManager">Централизованный сетевой менеджер (опционально, разрешается из DI при null).</param>
-    /// <param name="dominantColorService">Служба извлечения палитры (опционально, разрешается из DI при null).</param>
-    /// <param name="youtube">Провайдер YouTube API (опционально, разрешается из DI при null).</param>
+    /// <param name="networkManager">Менеджер сетевых запросов.</param>
+    /// <param name="dominantColorService">Служба палитры цветов.</param>
     public EditPlaylistDialogViewModel(
         Playlist playlist,
         bool isAuthenticated,
         IReadOnlyList<TrackInfo>? playlistTracks = null,
         INetworkManager? networkManager = null,
-        DominantColorService? dominantColorService = null,
-        Lazy<YoutubeProvider>? youtube = null)
+        DominantColorService? dominantColorService = null)
     {
         networkManager ??= AppEntry.Services.GetService<INetworkManager>();
         dominantColorService ??= AppEntry.Services.GetService<DominantColorService>();
-        youtube ??= AppEntry.Services.GetService<Lazy<YoutubeProvider>>();
 
         Editor = PlaylistEditorViewModel.ForEdit(
             playlist,
             isAuthenticated,
             playlistTracks,
             networkManager,
-            dominantColorService,
-            youtube);
+            dominantColorService);
 
-        // Провязка callback создания копии.
-        // Собираем текущие данные редактора и возвращаем результат с флагом ShouldCreateCopy.
-        // PlaylistEditService создаст новый локальный плейлист вместо редактирования оригинала.
         Editor.OnCreateCopy = () =>
         {
             var result = Editor.ToResult();
@@ -59,15 +60,7 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
             OnResult?.Invoke(result);
         };
 
-        SaveCommand = new RelayCommand(() =>
-        {
-            var result = Editor.ToResult();
-
-            if (Editor.SyncStateChanged)
-                result.SyncToCloud = Editor.IsSyncedToCloud;
-
-            OnResult?.Invoke(result);
-        }, () => Editor.CanSave);
+        SaveCommand = new AsyncRelayCommand(SaveAsync, () => Editor.CanSave);
 
         CancelCommand = new RelayCommand(() =>
         {
@@ -81,5 +74,27 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
                 SaveCommand.NotifyCanExecuteChanged();
             }
         };
+    }
+
+    /// <summary>
+    /// Асинхронно сохраняет состояние редактора, компилируя мозаику в файл при необходимости.
+    /// </summary>
+    /// <param name="ct">Токен отмены операции.</param>
+    private async Task SaveAsync(CancellationToken ct)
+    {
+        if (Editor.SelectedCoverMode == CoverMode.FromTracks && Editor.CoverPicker != null)
+        {
+            var mosaicPath = await Editor.CoverPicker.PersistMosaicAsync(ct).ConfigureAwait(true);
+            if (!string.IsNullOrEmpty(mosaicPath))
+            {
+                Editor.ThumbnailUrl = mosaicPath;
+            }
+        }
+
+        var result = Editor.ToResult();
+        if (Editor.SyncStateChanged)
+            result.SyncToCloud = Editor.IsSyncedToCloud;
+
+        OnResult?.Invoke(result);
     }
 }

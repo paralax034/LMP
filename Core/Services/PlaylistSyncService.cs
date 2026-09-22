@@ -59,37 +59,52 @@ public sealed class PlaylistSyncService
 
         if (!_auth.IsAuthenticated) return false;
 
-        var ytId = await _youtube.CreatePlaylistAsync(playlist.Name).ConfigureAwait(false);
-        if (string.IsNullOrEmpty(ytId)) return false;
-
-        playlist.YoutubeId = ytId;
-        playlist.SyncMode = PlaylistSyncMode.TwoWaySync;
-        playlist.Ownership = PlaylistOwnership.Mine;
-        playlist.UpdatedAt = DateTime.Now;
-        await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
-
-        var trackIds = await _playlists.GetTrackIdsAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-        bool hasThumbnail = !string.IsNullOrEmpty(playlist.ThumbnailUrl);
-
-        if (trackIds.Count > 0 || hasThumbnail)
+        try
         {
-            var syncOptions = new PlaylistSyncOptions
+            var ytId = await _youtube.CreatePlaylistAsync(
+                playlist.Name,
+                videoIds: null,
+                description: playlist.Description).ConfigureAwait(false);
+
+            if (string.IsNullOrEmpty(ytId)) return false;
+
+            playlist.YoutubeId = ytId;
+            playlist.SyncMode = PlaylistSyncMode.TwoWaySync;
+            playlist.Ownership = PlaylistOwnership.Mine;
+            playlist.UpdatedAt = DateTime.Now;
+            await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+
+            var trackIds = await _playlists.GetTrackIdsAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
+            bool hasThumbnail = !string.IsNullOrEmpty(playlist.ThumbnailUrl);
+            bool hasDescription = !string.IsNullOrWhiteSpace(playlist.Description);
+
+            if (trackIds.Count > 0 || hasThumbnail || hasDescription)
             {
-                Strategy = PlaylistSyncStrategy.ReplaceCloud,
-                SyncName = false,
-                SyncDescription = !string.IsNullOrWhiteSpace(playlist.Description),
-                SyncThumbnail = hasThumbnail,
-                SyncTracks = trackIds.Count > 0
-            };
+                var syncOptions = new PlaylistSyncOptions
+                {
+                    Strategy = PlaylistSyncStrategy.ReplaceCloud,
+                    SyncName = false,
+                    SyncDescription = hasDescription,
+                    SyncThumbnail = hasThumbnail,
+                    SyncTracks = trackIds.Count > 0
+                };
 
-            await SyncDirectAsync(playlist, syncOptions, ct).ConfigureAwait(false);
+                await SyncDirectAsync(playlist, syncOptions, ct).ConfigureAwait(false);
+            }
+
+            return true;
         }
-
-        return true;
+        catch (Exception ex)
+        {
+            Log.Error($"[PlaylistSync] LinkToCloud failed: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
     /// Формирует снимок различий между локальным плейлистом и удаленным представлением на YouTube.
+    /// При обнаружении удаления плейлиста на YouTube (404 Not Found или пустой ответ недоступности)
+    /// автоматически вызывает <see cref="DowngradeDeadCloudPlaylistAsync"/> для перевода в локальный режим.
     /// </summary>
     public async Task<PlaylistSyncPreview?> BuildPreviewAsync(Playlist playlist, CancellationToken ct = default)
     {
@@ -114,6 +129,14 @@ public sealed class PlaylistSyncService
             {
                 playlist.IsCloudUnavailable = true;
                 await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+                return null;
+            }
+
+            // Плейлист удален на YouTube (InnerTube вернул ответ без заголовка и треков)
+            if (string.IsNullOrEmpty(fullData.Title) && fullData.Tracks.Count == 0)
+            {
+                Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) has no metadata in cloud. Downgrading to LocalOnly...");
+                await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
                 return null;
             }
 
@@ -156,10 +179,22 @@ public sealed class PlaylistSyncService
                 CachedCloudData = fullData
             };
         }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) returned 404 Not Found. Downgrading to LocalOnly...");
+            await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
+            return null;
+        }
+        catch (PlaylistUnavailableException)
+        {
+            Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) is unavailable. Downgrading to LocalOnly...");
+            await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
+            return null;
+        }
         catch (Exception ex)
         {
             Log.Error($"[PlaylistSync] Preview failed: {ex.Message}");
-            if (ex is PlaylistUnavailableException or HttpRequestException)
+            if (ex is HttpRequestException)
             {
                 playlist.IsCloudUnavailable = true;
                 try { await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false); } catch { }
@@ -318,13 +353,29 @@ public sealed class PlaylistSyncService
                     rawVideoIds.Add(YoutubeIdHelper.ExtractRawId(id));
             }
 
-            var ytId = await _youtube.CreatePlaylistAsync(playlist.Name, rawVideoIds.Count > 0 ? rawVideoIds : null).ConfigureAwait(false);
+            var ytId = await _youtube.CreatePlaylistAsync(
+                playlist.Name,
+                rawVideoIds.Count > 0 ? rawVideoIds : null,
+                playlist.Description).ConfigureAwait(false);
+
             if (string.IsNullOrEmpty(ytId))
                 throw new InvalidOperationException("YouTube returned empty playlist ID.");
 
             playlist.YoutubeId = ytId;
             playlist.SyncMode = PlaylistSyncMode.TwoWaySync;
             await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+
+            if (!string.IsNullOrEmpty(playlist.ThumbnailUrl))
+            {
+                try
+                {
+                    await UploadThumbnailToYoutubeAsync(ytId, playlist.ThumbnailUrl, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[PlaylistSync] Failed to upload thumbnail after upload: {ex.Message}");
+                }
+            }
 
             if (rawVideoIds.Count > 0)
             {
@@ -889,29 +940,59 @@ public sealed class PlaylistSyncService
         Url = $"https://music.youtube.com/watch?v={remote.VideoId}"
     };
 
+    /// <summary>
+    /// Выполняет загрузку пользовательской обложки плейлиста на серверы YouTube через Scotty Upload Protocol.
+    /// Игнорирует изображения, уже размещенные на CDN YouTube, и безопасно обрабатывает ошибки недоступности источника.
+    /// </summary>
     private async Task<bool> UploadThumbnailToYoutubeAsync(string youtubePlaylistId, string thumbnailUrl, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(thumbnailUrl) || string.IsNullOrWhiteSpace(youtubePlaylistId))
+            return false;
+
+        // Обложки YouTube CDN (ytimg, ggpht, gstatic) уже находятся на серверах Google и не подлежат повторной Scotty-выгрузке
+        if (thumbnailUrl.Contains("ytimg.com", StringComparison.OrdinalIgnoreCase) ||
+            thumbnailUrl.Contains("ggpht.com", StringComparison.OrdinalIgnoreCase) ||
+            thumbnailUrl.Contains("gstatic.com", StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Debug($"[PlaylistSync] Skipping upload for YouTube-hosted thumbnail on playlist {youtubePlaylistId}");
+            return false;
+        }
+
         byte[] imageData;
 
-        if (thumbnailUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-            imageData = await _networkManager.ImageClient.GetByteArrayAsync(thumbnailUrl, linkedCts.Token).ConfigureAwait(false);
+            if (thumbnailUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                thumbnailUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+                imageData = await _networkManager.ImageClient.GetByteArrayAsync(thumbnailUrl, linkedCts.Token).ConfigureAwait(false);
+            }
+            else if (thumbnailUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                var uri = new Uri(thumbnailUrl);
+                var localPath = uri.LocalPath;
+                if (!File.Exists(localPath)) return false;
+                imageData = await File.ReadAllBytesAsync(localPath, ct).ConfigureAwait(false);
+            }
+            else if (Path.IsPathRooted(thumbnailUrl) && File.Exists(thumbnailUrl))
+            {
+                imageData = await File.ReadAllBytesAsync(thumbnailUrl, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                return false;
+            }
         }
-        else if (thumbnailUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        catch (HttpRequestException ex)
         {
-            var uri = new Uri(thumbnailUrl);
-            var localPath = uri.LocalPath;
-            if (!File.Exists(localPath)) return false;
-            imageData = await File.ReadAllBytesAsync(localPath, ct).ConfigureAwait(false);
+            Log.Warn($"[PlaylistSync] Thumbnail source unavailable (HTTP {(int?)ex.StatusCode}): {ex.Message}");
+            return false;
         }
-        else if (Path.IsPathRooted(thumbnailUrl) && File.Exists(thumbnailUrl))
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            imageData = await File.ReadAllBytesAsync(thumbnailUrl, ct).ConfigureAwait(false);
-        }
-        else
-        {
+            Log.Warn($"[PlaylistSync] Failed to read thumbnail data for upload: {ex.Message}");
             return false;
         }
 

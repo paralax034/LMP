@@ -613,7 +613,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                     allTracks = [track, .. allTracks];
             }
 
-            await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: false);
+            await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: null);
             _ = LibService.AddToRecentlyPlayedAsync(track);
         }
         catch (Exception ex)
@@ -692,6 +692,14 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 var preview = await _playlistService.BuildPreviewAsync(_currentPlaylistId);
                 if (preview == null)
                 {
+                    // Если плейлист был автоматически переведен в LocalOnly (404 Not Found), обновляем UI и выходим
+                    var current = await _playlistService.GetPlaylistAsync(_currentPlaylistId);
+                    if (current is { SyncMode: PlaylistSyncMode.LocalOnly })
+                    {
+                        await LoadPlaylistAsync(_currentPlaylistId);
+                        return;
+                    }
+
                     await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"] ?? "Error", SL["Playlist_SyncFetchFailed"] ?? "Failed to fetch cloud preview");
                     return;
                 }

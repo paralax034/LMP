@@ -5,214 +5,335 @@
     x:Class="LMP.UI.Dialogs.Content.SyncSelectionDialogContent"
     x:DataType="dialogs:SyncSelectionViewModel">
 
+    <UserControl.Styles>
+        <!-- Тонкое поле ввода без иконок и фоновых подложек -->
+        <Style Selector="Border.minimal-search-box">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.minimal-search-box:focus-within">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+
+        <Style Selector="TextBox.flat-search-box">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TextBox.flat-search-box /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.flat-search-box:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="TextBox.flat-search-box:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <!-- Элемент списка плейлистов: прозрачная подложка, чистые контуры и ховер -->
+        <Style Selector="Border.sync-tile">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="7" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.sync-tile:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        </Style>
+        <Style Selector="Border.sync-tile.has-conflict">
+            <Setter Property="BorderBrush" Value="#FFB86C" />
+            <Setter Property="BorderThickness" Value="1.5" />
+        </Style>
+        <Style Selector="Border.sync-tile.has-conflict:pointerover">
+            <Setter Property="BorderBrush" Value="#FFAA44" />
+        </Style>
+        <Style Selector="Border.sync-tile.is-highlighted">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="BorderThickness" Value="2" />
+        </Style>
+
+        <!-- Кнопки быстрого выбора действия внутри плитки -->
+        <Style Selector="Button.action-chip">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                    <BrushTransition Property="Foreground" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.action-chip:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        </Style>
+        <Style Selector="Button.action-chip.selected">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.action-chip /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.action-chip:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+    </UserControl.Styles>
+
     <Border Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
         BorderThickness="1"
-        CornerRadius="8"
-        Padding="20"
-        Width="720"
-        MinHeight="500"
-        MaxHeight="800">
+        CornerRadius="12"
+        BoxShadow="0 24 56 0 #70000000"
+        Padding="22"
+        Width="920"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center">
 
-        <Grid RowDefinitions="Auto, Auto, Auto, *, Auto">
+        <Grid RowDefinitions="Auto, Auto, *, Auto">
 
             <!-- Row 0: Компактный Header со статистикой справа -->
-            <Grid Grid.Row="0" ColumnDefinitions="Auto, *, Auto" Margin="0,0,0,12">
-                <!-- Заголовок -->
-                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock Text="{Binding L[Sync_Title]}"
-                        FontSize="20" FontWeight="Bold"
-                        Foreground="{DynamicResource TextPrimaryBrush}" />
-                    <TextBlock Text="{Binding L[Sync_Subtitle]}"
-                        FontSize="12"
-                        Foreground="{DynamicResource TextMutedBrush}" />
-                </StackPanel>
+            <Border Grid.Row="0" Margin="0,0,0,12" Padding="0,0,0,10"
+                BorderBrush="{DynamicResource BgHighlightBrush}"
+                BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="Auto, *, Auto">
+                    <!-- Заголовок -->
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="{Binding L[Sync_Title]}"
+                            FontSize="20" FontWeight="Bold"
+                            Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="{Binding L[Sync_Subtitle]}"
+                            FontSize="12"
+                            Foreground="{DynamicResource TextMutedBrush}" />
+                    </StackPanel>
 
-                <!-- Статистика справа (компактная) -->
-                <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2"
-                    HorizontalAlignment="Right">
-                    <TextBlock Text="{Binding TotalSummary}"
-                        FontSize="12"
-                        Foreground="{DynamicResource TextMutedBrush}"
-                        TextAlignment="Right"
-                        ToolTip.Tip="{Binding TotalSummary}" />
-                    <TextBlock Text="{Binding SelectedSummary}"
-                        FontSize="13"
-                        FontWeight="SemiBold"
-                        Foreground="{DynamicResource AccentBrush}"
-                        TextAlignment="Right"
-                        ToolTip.Tip="{Binding SelectedSummary}" />
-                </StackPanel>
-            </Grid>
-
-            <!-- Row 1: Поиск -->
-            <Border Grid.Row="1" Margin="0,0,0,10"
-                Background="{DynamicResource BgElevatedBrush}"
-                CornerRadius="6" Padding="10,6"
-                ToolTip.Tip="{Binding L[Sync_Tooltip_Search]}">
-                <Grid ColumnDefinitions="Auto, *">
-                    <!-- Поиск: иконка лупы -->
-                    <PathIcon Grid.Column="0"
-                        Data="{StaticResource Icon.Search}"
-                        Width="18" Height="18"
-                        Foreground="{DynamicResource TextMutedBrush}"
-                        VerticalAlignment="Center"
-                        Margin="0,0,8,0" />
-                    <TextBox Grid.Column="1"
-                        Text="{Binding SearchQuery, Mode=TwoWay}"
-                        PlaceholderText="{Binding L[Sync_SearchPlaceholder]}"
-                        Background="Transparent"
-                        BorderThickness="0"
-                        FontSize="13"
-                        VerticalAlignment="Center" />
+                    <!-- Статистика справа (компактная) -->
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2"
+                        HorizontalAlignment="Right">
+                        <TextBlock Text="{Binding TotalSummary}"
+                            FontSize="12"
+                            Foreground="{DynamicResource TextMutedBrush}"
+                            TextAlignment="Right"
+                            ToolTip.Tip="{Binding TotalSummary}" />
+                        <TextBlock Text="{Binding SelectedSummary}"
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            Foreground="{DynamicResource AccentBrush}"
+                            TextAlignment="Right"
+                            ToolTip.Tip="{Binding SelectedSummary}" />
+                    </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Row 2: Глобальные шаблоны -->
-            <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,0,0,10">
-                <!-- Шаблон конфликтов -->
-                <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
-                    <!-- Шаблон конфликтов: иконка предупреждения -->
-                    <StackPanel Orientation="Horizontal" Spacing="4">
+            <!-- Панель фильтров: поиск слева, шаблоны справа -->
+            <Grid Grid.Row="1" ColumnDefinitions="260, *, Auto" Margin="0,0,0,12">
+                <!-- Row 1: Поиск -->
+                <Border Grid.Column="0"
+                    Classes="minimal-search-box"
+                    ToolTip.Tip="{Binding L[Sync_Tooltip_Search]}">
+                    <!-- Поиск: иконка лупы -->
+                    <TextBox Classes="flat-search-box"
+                        Text="{Binding SearchQuery, Mode=TwoWay}"
+                        PlaceholderText="{Binding L[Sync_SearchPlaceholder]}"
+                        Height="32" />
+                </Border>
+
+                <!-- Row 2: Глобальные шаблоны -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16"
+                    VerticalAlignment="Center">
+                    <!-- Шаблон конфликтов -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <!-- Шаблон конфликтов: иконка предупреждения -->
                         <PathIcon Data="{StaticResource Icon.AlertCircleOutline}"
                             Width="14" Height="14"
                             Foreground="#FFB86C" />
                         <TextBlock Text="{Binding L[Sync_Template_Conflicts]}"
                             FontSize="12"
-                            Foreground="{DynamicResource TextSecondaryBrush}" />
+                            Foreground="{DynamicResource TextSecondaryBrush}"
+                            VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding ConflictTemplates}"
+                            SelectedItem="{Binding SelectedConflictTemplate}"
+                            MinWidth="140" Height="32" FontSize="12"
+                            ToolTip.Tip="{Binding L[Sync_Tooltip_Template_Conflicts]}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="dialogs:SyncActionOption">
+                                    <TextBlock Text="{Binding DisplayName}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                     </StackPanel>
-                    <ComboBox ItemsSource="{Binding ConflictTemplates}"
-                        SelectedItem="{Binding SelectedConflictTemplate}"
-                        HorizontalAlignment="Stretch" FontSize="13"
-                        ToolTip.Tip="{Binding L[Sync_Tooltip_Template_Conflicts]}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="dialogs:SyncActionOption">
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </StackPanel>
 
-                <!-- Шаблон новых -->
-                <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
-                    <!-- Шаблон новых: иконка галочки в круге -->
-                    <StackPanel Orientation="Horizontal" Spacing="4">
+                    <!-- Шаблон новых -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <!-- Шаблон новых: иконка галочки в круге -->
                         <PathIcon Data="{StaticResource Icon.CheckCircleOutline}"
                             Width="14" Height="14"
                             Foreground="{DynamicResource AccentBrush}" />
                         <TextBlock Text="{Binding L[Sync_Template_New]}"
                             FontSize="12"
-                            Foreground="{DynamicResource TextSecondaryBrush}" />
+                            Foreground="{DynamicResource TextSecondaryBrush}"
+                            VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding NewTemplates}"
+                            SelectedItem="{Binding SelectedNewTemplate}"
+                            MinWidth="140" Height="32" FontSize="12"
+                            ToolTip.Tip="{Binding L[Sync_Tooltip_Template_New]}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="dialogs:SyncActionOption">
+                                    <TextBlock Text="{Binding DisplayName}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                     </StackPanel>
-                    <ComboBox ItemsSource="{Binding NewTemplates}"
-                        SelectedItem="{Binding SelectedNewTemplate}"
-                        HorizontalAlignment="Stretch" FontSize="13"
-                        ToolTip.Tip="{Binding L[Sync_Tooltip_Template_New]}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="dialogs:SyncActionOption">
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
                 </StackPanel>
             </Grid>
 
             <!-- Row 3: Список плейлистов -->
-            <ScrollViewer Grid.Row="3">
-                <ItemsControl ItemsSource="{Binding Items}">
-                    <ItemsControl.ItemTemplate>
+            <ScrollViewer Grid.Row="2"
+                VerticalScrollBarVisibility="Auto"
+                Height="424"
+                Padding="0,0,6,2">
+                <ItemsRepeater ItemsSource="{Binding Items}">
+                    <ItemsRepeater.Layout>
+                        <UniformGridLayout MinItemWidth="160"
+                            MinColumnSpacing="10"
+                            MinRowSpacing="10"
+                            ItemsStretch="Uniform" />
+                    </ItemsRepeater.Layout>
+                    <ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="dialogs:SyncItemViewModel">
-                            <Border Margin="0,0,0,6" Padding="10" CornerRadius="6"
-                                Background="{DynamicResource BgElevatedBrush}"
-                                BorderThickness="1"
-                                BorderBrush="{Binding IsHighlighted,
-                                        Converter={StaticResource BoolToSelector},
-                                        ConverterParameter='AccentBrush|Transparent'}">
-                                <Grid ColumnDefinitions="56, *, Auto, Auto, Auto">
+                            <Border Classes="sync-tile"
+                                Classes.has-conflict="{Binding HasConflict}"
+                                Classes.is-highlighted="{Binding IsHighlighted}">
+                                <Grid RowDefinitions="Auto, Auto, Auto">
 
                                     <!-- Обложка -->
-                                    <Border Grid.Column="0"
-                                        Width="48" Height="48"
-                                        CornerRadius="4" ClipToBounds="True"
+                                    <Border Grid.Row="0"
+                                        Height="140"
+                                        CornerRadius="6" ClipToBounds="True"
                                         Background="{DynamicResource BgSkeletonBrush}">
                                         <Panel>
                                             <!-- Список: заглушка плейлиста без обложки -->
                                             <PathIcon Data="{StaticResource Icon.PlaylistMusic}"
-                                                Width="24" Height="24"
+                                                Width="40" Height="40"
                                                 Foreground="{DynamicResource TextMutedBrush}"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 IsVisible="{Binding !HasThumbnail}" />
                                             <Image
                                                 controls:SmartImage.Source="{Binding ThumbnailUrl}"
-                                                controls:SmartImage.Quality="Low"
-                                                controls:SmartImage.Debounce="80"
+                                                controls:SmartImage.Quality="Medium"
+                                                controls:SmartImage.Debounce="60"
                                                 Stretch="UniformToFill"
                                                 IsVisible="{Binding HasThumbnail}" />
                                         </Panel>
                                     </Border>
 
                                     <!-- Название + Автор + Кол-во треков -->
-                                    <StackPanel Grid.Column="1" Margin="12,0,8,0"
-                                        VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                            FontSize="14" TextTrimming="CharacterEllipsis" />
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="{Binding Author}" FontSize="12"
-                                                Foreground="{DynamicResource TextMutedBrush}"
-                                                IsVisible="{Binding Author, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                            <TextBlock Text="•" FontSize="12"
-                                                Foreground="{DynamicResource TextMutedBrush}"
-                                                IsVisible="{Binding HasTrackCount}" />
-                                            <TextBlock Text="{Binding FormattedTrackCount}"
-                                                FontSize="12"
-                                                Foreground="{DynamicResource TextMutedBrush}"
-                                                IsVisible="{Binding HasTrackCount}" />
-                                        </StackPanel>
-                                    </StackPanel>
+                                    <TextBlock Grid.Row="1"
+                                        Text="{Binding Name}"
+                                        FontWeight="SemiBold"
+                                        FontSize="12"
+                                        TextTrimming="CharacterEllipsis"
+                                        ToolTip.Tip="{Binding Name}"
+                                        Margin="0,6,0,6" />
 
                                     <!-- Бейдж конфликта -->
-                                    <Border Grid.Column="2" IsVisible="{Binding HasConflict}"
-                                        Background="#FFB86C" CornerRadius="4" Padding="6,2"
-                                        Margin="0,0,8,0" VerticalAlignment="Center" Opacity="0.9">
-                                        <TextBlock Text="{Binding L[Sync_Conflict]}"
-                                            FontSize="10" Foreground="#1E1E1E"
-                                            FontWeight="SemiBold" />
-                                    </Border>
-
-                                    <!-- Кнопка копирования ссылки -->
-                                    <controls:CopyLinkButton Grid.Column="3"
-                                        CopyUrl="{Binding PlaylistUrl}"
-                                        SuccessText="{Binding L[Track_Copied]}"
-                                        ToolTipText="{Binding L[Sync_Tooltip_CopyLink]}"
-                                        ButtonSize="32" IconSize="16"
-                                        ShowHoverRing="False" />
-
                                     <!-- ComboBox действия -->
-                                    <ComboBox Grid.Column="4"
-                                        ItemsSource="{Binding AvailableActions}"
-                                        SelectedItem="{Binding SelectedOption}"
-                                        MinWidth="140" VerticalAlignment="Center" FontSize="13">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate x:DataType="dialogs:SyncActionOption">
-                                                <TextBlock Text="{Binding DisplayName}" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
+                                    <Grid Grid.Row="2" ColumnDefinitions="Auto, Auto, Auto, *, Auto">
+                                        <!-- Кнопка 1: Объединить (только если конфликт) -->
+                                        <Button Grid.Column="0"
+                                            Classes="action-chip"
+                                            Classes.selected="{Binding IsMergeSelected}"
+                                            IsVisible="{Binding CanMerge}"
+                                            Command="{Binding SelectMergeCommand}"
+                                            ToolTip.Tip="{Binding L[Sync_Action_Merge]}">
+                                            <PathIcon Data="{StaticResource Icon.SwapHorizontal}"
+                                                Width="13" Height="13" />
+                                        </Button>
+
+                                        <!-- Кнопка 2: Создать копию / Импортировать -->
+                                        <Button Grid.Column="1"
+                                            Classes="action-chip"
+                                            Classes.selected="{Binding IsDuplicateSelected}"
+                                            Command="{Binding SelectDuplicateCommand}"
+                                            ToolTip.Tip="{Binding DuplicateActionTooltip}">
+                                            <Panel>
+                                                <PathIcon Data="{StaticResource Icon.ContentCopy}"
+                                                    Width="12" Height="12"
+                                                    IsVisible="{Binding HasConflict}" />
+                                                <PathIcon Data="{StaticResource Icon.CloudDownload}"
+                                                    Width="12" Height="12"
+                                                    IsVisible="{Binding !HasConflict}" />
+                                            </Panel>
+                                        </Button>
+
+                                        <!-- Кнопка 3: Пропустить -->
+                                        <Button Grid.Column="2"
+                                            Classes="action-chip"
+                                            Classes.selected="{Binding IsSkipSelected}"
+                                            Command="{Binding SelectSkipCommand}"
+                                            ToolTip.Tip="{Binding L[Sync_Action_Skip]}">
+                                            <PathIcon Data="{StaticResource Icon.Close}" Width="11"
+                                                Height="11" />
+                                        </Button>
+
+                                        <!-- Кнопка копирования ссылки -->
+                                        <controls:CopyLinkButton Grid.Column="4"
+                                            CopyUrl="{Binding PlaylistUrl}"
+                                            SuccessText="{Binding L[Track_Copied]}"
+                                            ToolTipText="{Binding L[Sync_Tooltip_CopyLink]}"
+                                            ButtonSize="26" IconSize="13"
+                                            ShowHoverRing="False" />
+                                    </Grid>
                                 </Grid>
                             </Border>
                         </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
             </ScrollViewer>
 
             <!-- Row 4: Кнопки -->
-            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right"
+            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
                 Spacing="12" Margin="0,14,0,0">
                 <Button Content="{Binding L[Common_Cancel]}" Command="{Binding CancelCommand}"
-                    Background="Transparent" />
+                    Background="Transparent" MinWidth="85" Height="34" />
                 <Button Content="{Binding L[Common_OK]}" Command="{Binding ConfirmCommand}"
-                    Classes="accent accent-base" />
+                    Classes="accent accent-base" MinWidth="85" Height="34" />
             </StackPanel>
         </Grid>
     </Border>

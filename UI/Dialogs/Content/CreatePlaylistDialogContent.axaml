@@ -1,66 +1,42 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:dialogs="using:LMP.UI.Dialogs"
-             xmlns:controls="using:LMP.UI.Controls"
-             x:Class="LMP.UI.Dialogs.Content.CreatePlaylistDialogContent"
-             x:DataType="dialogs:CreatePlaylistDialogViewModel">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:LMP.UI.Dialogs"
+    xmlns:controls="using:LMP.UI.Controls"
+    x:Class="LMP.UI.Dialogs.Content.CreatePlaylistDialogContent"
+    x:DataType="dialogs:CreatePlaylistDialogViewModel">
 
     <Border Background="{DynamicResource BgPrimaryBrush}"
-            BorderBrush="{DynamicResource BgHighlightBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
-            Padding="25"
-            MinWidth="500"
-            MaxWidth="700"
-            MinHeight="500"
-            MaxHeight="750">
+        BorderBrush="{DynamicResource BgHighlightBrush}"
+        BorderThickness="1"
+        CornerRadius="12"
+        BoxShadow="0 20 48 0 #66000000"
+        Padding="22"
+        Width="700"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center">
 
-        <Grid RowDefinitions="Auto, *, Auto, Auto">
+        <Grid RowDefinitions="Auto, Auto, Auto">
 
-            <!-- Title -->
+            <!-- Заголовок -->
             <TextBlock Grid.Row="0"
-                       Text="{Binding L[Library_CreatePlaylist]}"
-                       FontSize="20" FontWeight="Bold"
-                       Margin="0,0,0,20" />
+                Text="{Binding L[Library_CreatePlaylist]}"
+                FontSize="18" FontWeight="Bold"
+                Margin="0,0,0,16" />
 
-            <!-- Editor -->
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                <controls:PlaylistEditorControl DataContext="{Binding Editor}" />
-            </ScrollViewer>
+            <!-- Тело редактора -->
+            <controls:PlaylistEditorControl Grid.Row="1"
+                DataContext="{Binding Editor}" />
 
-            <!-- Sync Toggle -->
-            <Border Grid.Row="2"
-                    IsVisible="{Binding ShowSyncToggle}"
-                    Background="{DynamicResource BgElevatedBrush}"
-                    CornerRadius="6"
-                    Padding="12,10"
-                    Margin="0,16,0,0">
-                <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="{Binding L[Playlist_SyncToCloud]}"
-                                   FontSize="14" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding L[Playlist_SyncToCloud_Desc]}"
-                                   FontSize="11"
-                                   Foreground="{DynamicResource TextMutedBrush}"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1"
-                                  IsChecked="{Binding SyncToCloud, Mode=TwoWay}"
-                                  VerticalAlignment="Center"
-                                  Margin="12,0,0,0" />
-                </Grid>
-            </Border>
-
-            <!-- Buttons -->
-            <StackPanel Grid.Row="3" Orientation="Horizontal"
-                        HorizontalAlignment="Right" Spacing="12"
-                        Margin="0,20,0,0">
+            <!-- Кнопки действий -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="12"
+                Margin="0,16,0,0">
                 <Button Content="{Binding L[Common_Cancel]}"
-                        Command="{Binding CancelCommand}"
-                        Background="Transparent" />
+                    Command="{Binding CancelCommand}"
+                    Background="Transparent" />
                 <Button Content="{Binding L[Button_Create]}"
-                        Command="{Binding ConfirmCommand}"
-                        Classes="accent accent-base" />
+                    Command="{Binding ConfirmCommand}"
+                    Classes="accent accent-base" />
             </StackPanel>
         </Grid>
     </Border>

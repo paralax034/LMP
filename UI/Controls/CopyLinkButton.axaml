@@ -72,11 +72,6 @@
             </Grid>
         </Button>
 
-        <!--
-            Hint popup над кнопкой — идентичен по структуре остальным hint-popup в PlayerBar.
-            Topmost="True" гарантирует отображение поверх hover-слоёв.
-            HorizontalOffset центрирует popup относительно кнопки из code-behind.
-        -->
         <Popup x:Name="HintPopup"
             Placement="Top"
             PlacementTarget="{Binding #CopyButton}"
@@ -85,12 +80,12 @@
             Topmost="True"
             VerticalOffset="-8">
             <Border x:Name="HintBorder"
-                Padding="10,7"
-                Background="{DynamicResource BgElevatedBrush}"
+                Padding="10,6"
+                Background="{DynamicResource BgPrimaryBrush}"
                 BorderBrush="{DynamicResource BgHighlightBrush}"
                 BorderThickness="1"
-                BoxShadow="0 4 16 0 #50000000"
-                CornerRadius="8">
+                BoxShadow="{StaticResource CardShadow}"
+                CornerRadius="6">
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <PathIcon x:Name="HintIcon"
                         Width="13" Height="13"
@@ -98,7 +93,7 @@
                         Data="{StaticResource Icon.Check}"
                         Foreground="{DynamicResource AccentBrush}" />
                     <TextBlock x:Name="HintText"
-                        FontSize="12" FontWeight="SemiBold"
+                        FontSize="11" FontWeight="Medium"
                         VerticalAlignment="Center"
                         Foreground="{DynamicResource TextPrimaryBrush}" />
                 </StackPanel>

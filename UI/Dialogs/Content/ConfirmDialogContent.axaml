@@ -1,47 +1,49 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:content="using:LMP.UI.Dialogs.Content"
-             x:Class="LMP.UI.Dialogs.Content.ConfirmDialogContent"
-             x:DataType="content:ConfirmDialogContent">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:content="using:LMP.UI.Dialogs.Content"
+    x:Class="LMP.UI.Dialogs.Content.ConfirmDialogContent"
+    x:DataType="content:ConfirmDialogContent">
 
     <Border Background="{DynamicResource BgPrimaryBrush}"
-            BorderBrush="{DynamicResource BgHighlightBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
-            Padding="24"
-            MinWidth="400"
-            MaxWidth="500">
+        BorderBrush="{DynamicResource BgHighlightBrush}"
+        BorderThickness="1"
+        CornerRadius="12"
+        BoxShadow="0 20 48 0 #66000000"
+        Padding="24"
+        MinWidth="420"
+        MaxWidth="520">
 
         <Grid RowDefinitions="Auto, *, Auto">
 
             <!-- Заголовок -->
             <TextBlock Grid.Row="0"
-                       Text="{Binding Title}"
-                       FontSize="18" FontWeight="Bold"
-                       Foreground="{DynamicResource TextPrimaryBrush}"
-                       Margin="0,0,0,16" />
+                Text="{Binding Title}"
+                FontSize="18" FontWeight="Bold"
+                Foreground="{DynamicResource TextPrimaryBrush}"
+                Margin="0,0,0,16" />
 
             <!-- Сообщение -->
             <ScrollViewer Grid.Row="1" MaxHeight="200"
-                          VerticalScrollBarVisibility="Auto">
+                VerticalScrollBarVisibility="Auto">
                 <TextBlock Text="{Binding Message}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                    TextWrapping="Wrap"
+                    Foreground="{DynamicResource TextSecondaryBrush}" />
             </ScrollViewer>
 
             <!-- Кнопки -->
             <StackPanel Grid.Row="2"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Right"
-                        Spacing="12"
-                        Margin="0,24,0,0">
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Spacing="12"
+                Margin="0,24,0,0">
                 <Button Content="{Binding CancelText}"
-                        Command="{Binding CancelCommand}"
-                        MinWidth="80" />
+                    Command="{Binding CancelCommand}"
+                    MinWidth="80"
+                    Background="Transparent" />
                 <Button Content="{Binding ConfirmText}"
-                        Command="{Binding ConfirmCommand}"
-                        MinWidth="80"
-                        Classes="accent accent-base" />
+                    Command="{Binding ConfirmCommand}"
+                    MinWidth="80"
+                    Classes="accent accent-base" />
             </StackPanel>
         </Grid>
     </Border>

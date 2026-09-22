@@ -12,8 +12,8 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="16" />
-        <Setter Property="Padding" Value="16,6" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="14,6" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="Medium" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -35,35 +35,36 @@
         </Setter>
         <Setter Property="Transitions">
             <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.2" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.2" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.2" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="RadioButton.chip:pointerover">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource TextMutedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="RadioButton.chip:checked">
-        <Setter Property="Background" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource BgPrimaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="RadioButton.chip:checked:pointerover">
-        <Setter Property="Background" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
     <!-- ═══ BUTTON CHIP ═══ -->
     <!-- Кнопка-чип для кликабельных тегов (история поиска и т.д.) -->
 
     <Style Selector="Button.chip">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="16" />
+        <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Padding" Value="12,4" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -78,12 +79,12 @@
         </Setter>
     </Style>
     <Style Selector="Button.chip:pointerover">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.chip:pressed">
-        <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
@@ -92,16 +93,20 @@
 
     <Style Selector="RadioButton.source-tab">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
         <Setter Property="Padding" Value="16,10" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="CornerRadius" Value="8,8,0,0" />
+        <Setter Property="CornerRadius" Value="0" />
         <Setter Property="Template">
             <ControlTemplate>
                 <Border Name="RootBorder"
                     Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
                     CornerRadius="{TemplateBinding CornerRadius}"
                     Padding="{TemplateBinding Padding}">
                     <ContentPresenter Name="PART_ContentPresenter"
@@ -115,15 +120,18 @@
             <Transitions>
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
                 <BrushTransition Property="Background" Duration="0:0:0.15" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="RadioButton.source-tab:pointerover">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
     </Style>
     <Style Selector="RadioButton.source-tab:checked">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
 </Styles>

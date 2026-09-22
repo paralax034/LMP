@@ -4,12 +4,34 @@
     x:Class="LMP.UI.Dialogs.Content.DeletePlaylistDialogContent"
     x:DataType="dialogs:DeletePlaylistDialogViewModel">
 
+    <UserControl.Styles>
+        <Style Selector="Border.option-card">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.option-card:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        </Style>
+    </UserControl.Styles>
+
     <Border Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
         BorderThickness="1"
-        CornerRadius="8"
+        CornerRadius="12"
+        BoxShadow="0 20 48 0 #66000000"
         Padding="24"
-        Width="420">
+        Width="440">
 
         <StackPanel Spacing="20">
 
@@ -41,14 +63,7 @@
 
             <!-- Опции удаления -->
             <StackPanel Spacing="8">
-                <Border Background="{DynamicResource BgElevatedBrush}"
-                    CornerRadius="8" Padding="12" Cursor="Hand">
-                    <Border.Styles>
-                        <Style Selector="Border:pointerover">
-                            <Setter Property="Background"
-                                Value="{DynamicResource BgHighlightBrush}" />
-                        </Style>
-                    </Border.Styles>
+                <Border Classes="option-card">
                     <!-- Опция: только локально -->
                     <RadioButton IsChecked="{Binding IsLocalOnly}" GroupName="DeleteMode">
                         <StackPanel Orientation="Horizontal" Spacing="12" Margin="8,0,0,0">
@@ -68,15 +83,8 @@
                     </RadioButton>
                 </Border>
 
-                <Border Background="{DynamicResource BgElevatedBrush}"
-                    CornerRadius="8" Padding="12" Cursor="Hand"
+                <Border Classes="option-card"
                     IsVisible="{Binding CanDeleteFromCloud}">
-                    <Border.Styles>
-                        <Style Selector="Border:pointerover">
-                            <Setter Property="Background"
-                                Value="{DynamicResource BgHighlightBrush}" />
-                        </Style>
-                    </Border.Styles>
                     <!-- Опция: везде (включая облако) -->
                     <RadioButton IsChecked="{Binding IsDeleteEverywhere}" GroupName="DeleteMode">
                         <StackPanel Orientation="Horizontal" Spacing="12" Margin="8,0,0,0">
@@ -103,6 +111,7 @@
                 <Button Grid.Column="1"
                     Content="{Binding L[Button_Cancel]}"
                     Command="{Binding CancelCommand}"
+                    Background="Transparent"
                     MinWidth="80" Margin="0,0,12,0" />
                 <Button Grid.Column="2"
                     Content="{Binding L[Button_Delete]}"

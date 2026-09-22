@@ -12,218 +12,249 @@ namespace LMP.UI.Dialogs;
 /// </summary>
 public enum CoverMode
 {
-    /// <summary>Ручной ввод URL.</summary>
+    /// <summary>Прямой ввод HTTP/HTTPS URL адреса.</summary>
     Url,
-    /// <summary>Выбор из обложек треков (мозаика).</summary>
+
+    /// <summary>Генерация мозаики из обложек треков текущего плейлиста.</summary>
     FromTracks,
-    /// <summary>Выбор локального файла.</summary>
+
+    /// <summary>Выбор локального файла изображения с файловой системы.</summary>
     File
 }
 
 /// <summary>
-/// ViewModel редактора плейлиста. Используется как для создания, так и для редактирования.
-/// Создаётся через фабричные методы <see cref="ForCreate"/> и <see cref="ForEdit"/>.
+/// ViewModel редактора метаданных плейлиста.
+/// Поддерживает двухколоночный макет, реактивное превью и автоматическую синхронизацию палитры.
 /// </summary>
 public sealed partial class PlaylistEditorViewModel : ViewModelBase
 {
     private readonly INetworkManager? _networkManager;
     private readonly DominantColorService? _dominantColorService;
-    private readonly Lazy<YoutubeProvider>? _youtube;
-
-    [ObservableProperty]
-    public partial string Name { get; set; } = "";
-
-    [ObservableProperty]
-    public partial string? ThumbnailUrl { get; set; }
-
-    [ObservableProperty]
-    public partial string? CustomColor { get; set; }
-
-    [ObservableProperty]
-    public partial string? Description { get; set; }
-
-    /// <summary>Исходное описание (для определения изменения).</summary>
     private readonly string? _originalDescription;
 
     /// <summary>
-    /// Оригинальный плейлист (для доступа к YoutubeId и SyncMode).
-    /// null для режима создания.
+    /// Название плейлиста.
     /// </summary>
-    private readonly Playlist? _originalPlaylist;
-
-    /// <summary>true если VM создана для редактирования (а не создания).</summary>
-    private readonly bool _isForEdit;
-
-    // ComputedColor
+    [ObservableProperty]
+    public partial string Name { get; set; } = "";
 
     /// <summary>
-    /// Автоматически вычисленный цвет из обложки (readonly, из БД).
-    /// Показывается в UI как информационное поле.
-    /// Обновляется при пересчёте через RecalculateColorCommand.
+    /// URL или локальный путь к обложке плейлиста.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? ThumbnailUrl { get; set; }
+
+    /// <summary>
+    /// Пользовательский акцентный цвет в формате HEX (например, #FF5500).
+    /// </summary>
+    [ObservableProperty]
+    public partial string? CustomColor { get; set; }
+
+    /// <summary>
+    /// Пользовательское текстовое описание плейлиста.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? Description { get; set; }
+
+    /// <summary>
+    /// Автоматически вычисленный доминантный цвет обложки в формате HEX.
     /// </summary>
     [ObservableProperty]
     public partial string? ComputedColor { get; set; }
 
-    /// <summary>Кисть превью вычисленного цвета.</summary>
+    /// <summary>
+    /// Кисть для отображения превью активного цвета.
+    /// </summary>
     [ObservableProperty]
     public partial IBrush ComputedColorPreviewBrush { get; set; } = Brushes.Transparent;
 
     /// <summary>
-    /// Идёт ли пересчёт цвета из обложки или загрузка обложки в YouTube.
-    /// Используется для блокировки UI во время длительных операций.
+    /// Текстовое представление активного цвета для отображения в компактной карточке палитры.
+    /// </summary>
+    [ObservableProperty]
+    public partial string EffectiveColorText { get; set; } = "Auto";
+
+    /// <summary>
+    /// Флаг выполнения асинхронного пересчёта доминантного цвета из изображения.
     /// </summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RecalculateColorCommand))]
-    [NotifyCanExecuteChangedFor(nameof(UploadThumbnailCommand))]
     public partial bool IsRecalculatingColor { get; set; }
 
-    /// <summary>Команда пересчёта доминантного цвета из текущей обложки.</summary>
+    /// <summary>
+    /// Команда принудительного пересчёта доминантного цвета из активной обложки.
+    /// </summary>
     public IAsyncRelayCommand RecalculateColorCommand { get; }
 
-    // System Playlist
-
     /// <summary>
-    /// true если редактируется системный плейлист (например «Понравившиеся»).
-    /// Для системных плейлистов имя задаётся локализацией и недоступно для ручного ввода.
+    /// Флаг системного неизменяемого плейлиста (например, «Любимые треки»).
     /// </summary>
     public bool IsSystemPlaylist { get; }
 
     /// <summary>
-    /// Разрешено ли редактировать имя плейлиста.
-    /// false для системных плейлистов — имя управляется <see cref="LocalizationService"/>.
+    /// Доступно ли имя для ручного редактирования.
     /// </summary>
     public bool IsNameEditable { get; }
 
-    // For Edit / Create Copy
-
     /// <summary>
-    /// true если VM создана для редактирования существующего плейлиста.
-    /// Используется в UI для отображения кнопки «Создать копию».
+    /// Флаг режима редактирования существующего плейлиста.
     /// </summary>
     public bool IsForEdit { get; }
 
     /// <summary>
-    /// Callback, вызываемый при нажатии кнопки «Создать копию».
-    /// Устанавливается в <see cref="EditPlaylistDialogViewModel"/>.
+    /// Делегат обратного вызова для запуска процесса создания локальной копии плейлиста.
     /// </summary>
     public Action? OnCreateCopy { get; set; }
 
     /// <summary>
-    /// Создаёт локальную копию плейлиста с текущими данными из редактора.
-    /// Копия всегда локальная (без привязки к YouTube).
+    /// Команда создания локальной копии плейлиста.
     /// </summary>
     public IRelayCommand CreateCopyCommand { get; }
 
-    // Cover Mode
-
-    /// <summary>Текущий режим выбора обложки: URL, из треков, или файл.</summary>
+    /// <summary>
+    /// Активный режим выбора источника обложки.
+    /// </summary>
     [ObservableProperty]
     public partial CoverMode SelectedCoverMode { get; set; } = CoverMode.Url;
 
-    /// <summary>true если выбран режим ручного URL.</summary>
+    /// <summary>
+    /// Флаг активности вкладки прямого URL.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsCoverModeUrl { get; set; } = true;
 
-    /// <summary>true если выбран режим "Из треков".</summary>
+    /// <summary>
+    /// Флаг активности вкладки мозаики из треков.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsCoverModeFromTracks { get; set; }
 
-    /// <summary>true если выбран режим "Файл".</summary>
+    /// <summary>
+    /// Флаг активности вкладки локального файла.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsCoverModeFile { get; set; }
 
     /// <summary>
-    /// ViewModel выбора обложки из треков. null если треки не предоставлены.
+    /// ViewModel выбора обложек для построения мозаики.
     /// </summary>
     [ObservableProperty]
     public partial PlaylistCoverPickerViewModel? CoverPicker { get; set; }
 
     /// <summary>
-    /// Показывать ли переключатель режима обложки.
-    /// Всегда true — минимум URL + File.
+    /// Флаг отображения переключателя режимов обложки.
     /// </summary>
     public bool ShowCoverModeSwitch { get; } = true;
 
-    /// <summary>Показывать ли вкладку "Из треков".</summary>
+    /// <summary>
+    /// Доступен ли режим создания мозаики из треков (требует наличия треков с обложками).
+    /// </summary>
     public bool HasTracksCoverOption { get; }
 
-    /// <summary>Путь выбранного файла (для отображения в UI).</summary>
+    /// <summary>
+    /// Путь к файлу, выбранному пользователем через системный диалог.
+    /// </summary>
     [ObservableProperty]
     public partial string? SelectedFilePath { get; set; }
 
-    /// <summary>Команда выбора файла через системный диалог.</summary>
+    /// <summary>
+    /// Команда вызова системного диалога открытия файла изображения.
+    /// </summary>
     public IAsyncRelayCommand SelectFileCommand { get; }
 
-    // Upload Thumbnail to YouTube
-
     /// <summary>
-    /// Показывать ли кнопку загрузки обложки в YouTube.
-    /// Видна только для TwoWaySync плейлистов с непустой обложкой.
+    /// Флаг видимости секции облачной синхронизации с YouTube Music.
     /// </summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(UploadThumbnailCommand))]
-    public partial bool ShowUploadThumbnailButton { get; set; }
-
-    /// <summary>Загрузить текущую обложку в YouTube.</summary>
-    public IAsyncRelayCommand UploadThumbnailCommand { get; }
-
-    // Sync
-
     [ObservableProperty]
     public partial bool ShowSyncSection { get; set; }
 
+    /// <summary>
+    /// Флаг включения двусторонней синхронизации с YouTube Music.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsSyncedToCloud { get; set; }
+
+    /// <summary>
+    /// Флаг авторизации текущей пользовательской сессии.
+    /// </summary>
     public bool IsAuthenticated { get; }
+
+    /// <summary>
+    /// Флаг наличия привязанного удалённого идентификатора YouTube.
+    /// </summary>
     public bool HasYoutubeBinding { get; }
+
+    /// <summary>
+    /// Исходное состояние флага синхронизации на момент открытия диалога.
+    /// </summary>
     public bool OriginalSyncState { get; }
 
-    // Validation
+    /// <summary>
+    /// Текст текущей ошибки валидации данных формы.
+    /// </summary>
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
+    /// <summary>
+    /// Флаг наличия ошибок валидации.
+    /// </summary>
     [ObservableProperty]
     public partial bool HasErrors { get; set; }
 
+    /// <summary>
+    /// Доступно ли сохранение формы в текущем состоянии.
+    /// </summary>
     public bool CanSave => !HasErrors;
 
-    // Preview
-
     /// <summary>
-    /// URL или путь для превью обложки (HTTP URL или локальный путь).
+    /// URL превью для загрузки по сети или из ресурсов приложения.
     /// </summary>
     [ObservableProperty]
     public partial string? ThumbnailPreviewUrl { get; set; }
 
-    /// <summary>Есть ли превью для отображения.</summary>
+    /// <summary>
+    /// Флаг наличия доступного превью обложки любого типа.
+    /// </summary>
     [ObservableProperty]
     public partial bool HasThumbnailPreview { get; set; }
 
-    /// <summary>Превью — это HTTP URL (для AsyncImageLoader).</summary>
+    /// <summary>
+    /// Флаг сетевого источника превью (HTTP/HTTPS/avares).
+    /// </summary>
     [ObservableProperty]
     public partial bool IsPreviewHttp { get; set; }
 
-    /// <summary>Превью — это локальный файл (для LocalFileImageConverter).</summary>
+    /// <summary>
+    /// Флаг локального источника превью (дисковый файл или ин-мемори растр).
+    /// </summary>
     [ObservableProperty]
     public partial bool IsPreviewLocal { get; set; }
 
     /// <summary>
-    /// Bitmap превью для локальных файлов (загружается напрямую).
-    /// Для HTTP URL остаётся null — используется AsyncImageLoader.
+    /// Локальный растровый снимок для мгновенного отображения мозаики или локального файла.
     /// </summary>
     [ObservableProperty]
     public partial Bitmap? LocalPreviewBitmap { get; set; }
 
-    [ObservableProperty]
-    public partial IBrush ColorPreviewBrush { get; set; } = Brushes.Transparent;
-
     private readonly DispatcherTimer _thumbnailDebounceTimer;
-    private readonly DispatcherTimer _colorDebounceTimer;
 
     /// <summary>
-    /// Инициализирует новый экземпляр редактора плейлиста.
-    /// Автоматически активирует режим выбора обложки из треков, если плейлист не имеет обложки, но содержит треки.
+    /// Инициализирует новый экземпляр <see cref="PlaylistEditorViewModel"/>.
     /// </summary>
+    /// <param name="name">Название плейлиста.</param>
+    /// <param name="thumbnailUrl">URL или путь к обложке.</param>
+    /// <param name="customColor">Пользовательский цвет в формате HEX.</param>
+    /// <param name="description">Описание плейлиста.</param>
+    /// <param name="computedColor">Ранее вычисленный доминантный цвет.</param>
+    /// <param name="showSync">Флаг доступности настройки синхронизации.</param>
+    /// <param name="isSynced">Исходное состояние синхронизации.</param>
+    /// <param name="isAuthenticated">Авторизован ли пользователь.</param>
+    /// <param name="hasYoutubeBinding">Имеет ли плейлист привязку к ID YouTube.</param>
+    /// <param name="playlistTracks">Коллекция треков плейлиста для мозаики.</param>
+    /// <param name="isForEdit">Создан ли редактор для существующего плейлиста.</param>
+    /// <param name="isSystemPlaylist">Является ли плейлист системным.</param>
+    /// <param name="networkManager">Менеджер сетевых запросов.</param>
+    /// <param name="dominantColorService">Сервис анализа цветовой палитры.</param>
     public PlaylistEditorViewModel(
         string name = "",
         string? thumbnailUrl = null,
@@ -235,19 +266,14 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         bool isAuthenticated = false,
         bool hasYoutubeBinding = false,
         IReadOnlyList<TrackInfo>? playlistTracks = null,
-        Playlist? originalPlaylist = null,
         bool isForEdit = false,
         bool isSystemPlaylist = false,
         INetworkManager? networkManager = null,
-        DominantColorService? dominantColorService = null,
-        Lazy<YoutubeProvider>? youtube = null)
+        DominantColorService? dominantColorService = null)
     {
         _networkManager = networkManager ?? AppEntry.Services.GetService<INetworkManager>();
         _dominantColorService = dominantColorService ?? AppEntry.Services.GetService<DominantColorService>();
-        _youtube = youtube ?? AppEntry.Services.GetService<Lazy<YoutubeProvider>>();
         _originalDescription = description;
-        _originalPlaylist = originalPlaylist;
-        _isForEdit = isForEdit;
         IsForEdit = isForEdit;
         IsSystemPlaylist = isSystemPlaylist;
         IsNameEditable = !isSystemPlaylist;
@@ -258,9 +284,9 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         IsAuthenticated = isAuthenticated;
         HasYoutubeBinding = hasYoutubeBinding;
 
-        ComputedColorPreviewBrush = TryParseColor(computedColor);
+        UpdateColorVisuals(computedColor, customColor);
 
-        _thumbnailDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _thumbnailDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _thumbnailDebounceTimer.Tick += (s, e) =>
         {
             _thumbnailDebounceTimer.Stop();
@@ -268,78 +294,67 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             _ = AutoRecalculateColorAsync();
         };
 
-        _colorDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
-        _colorDebounceTimer.Tick += (s, e) =>
-        {
-            _colorDebounceTimer.Stop();
-            ColorPreviewBrush = TryParseColor(CustomColor);
-        };
-
         HasTracksCoverOption = playlistTracks != null && playlistTracks.Any(t => t.HasThumbnail) && _networkManager != null;
         if (HasTracksCoverOption && _networkManager != null)
         {
             CoverPicker = new PlaylistCoverPickerViewModel(playlistTracks!, _networkManager);
-            CoverPicker.PropertyChanged += (s, e) =>
+            CoverPicker.OnPreviewUpdated += (bitmap) =>
             {
-                if (e.PropertyName == nameof(PlaylistCoverPickerViewModel.ResultPath) && CoverPicker?.ResultPath is { Length: > 0 } path)
+                if (SelectedCoverMode == CoverMode.FromTracks)
                 {
-                    ThumbnailUrl = path;
-                    SelectedCoverMode = CoverMode.Url;
+                    LocalPreviewBitmap = bitmap;
+                    HasThumbnailPreview = bitmap != null;
+                    IsPreviewLocal = bitmap != null;
+                    IsPreviewHttp = false;
                 }
             };
         }
 
         SelectFileCommand = new AsyncRelayCommand(SelectFileAsync);
-
         RecalculateColorCommand = new AsyncRelayCommand(
             RecalculateColorFromCoverAsync,
-            () => !string.IsNullOrWhiteSpace(ThumbnailUrl) && !IsRecalculatingColor);
+            () => (!string.IsNullOrWhiteSpace(ThumbnailUrl) || LocalPreviewBitmap != null) && !IsRecalculatingColor);
 
-        UploadThumbnailCommand = new AsyncRelayCommand(
-            UploadThumbnailAsync,
-            () => !string.IsNullOrEmpty(ThumbnailUrl) && !IsRecalculatingColor && ShowUploadThumbnailButton);
-
-        // Команда создания копии
-        CreateCopyCommand = new RelayCommand(() =>
-        {
-            OnCreateCopy?.Invoke();
-        });
+        CreateCopyCommand = new RelayCommand(() => OnCreateCopy?.Invoke());
 
         Name = name;
         ThumbnailUrl = thumbnailUrl;
         CustomColor = customColor;
         Description = description;
 
-        // Автоматически открываем мозаику из треков, если своей обложки у плейлиста еще нет
         if (string.IsNullOrWhiteSpace(thumbnailUrl) && HasTracksCoverOption)
-        {
             SelectedCoverMode = CoverMode.FromTracks;
-        }
         else
-        {
             SelectedCoverMode = CoverMode.Url;
-        }
 
-        // Синхронизируем булевы флаги видимости вкладок в соответствии с выбранным режимом
-        IsCoverModeUrl = SelectedCoverMode == CoverMode.Url;
-        IsCoverModeFromTracks = SelectedCoverMode == CoverMode.FromTracks;
-        IsCoverModeFile = SelectedCoverMode == CoverMode.File;
-
+        SyncCoverModes(SelectedCoverMode);
         UpdateValidation();
-        UpdateUploadButtonVisibility();
         UpdateThumbnailPreview(ThumbnailUrl);
-
-        if (string.IsNullOrEmpty(computedColor) && !string.IsNullOrWhiteSpace(thumbnailUrl) && IsValidUri(thumbnailUrl))
-        {
-            _ = AutoRecalculateColorAsync();
-        }
     }
 
-    partial void OnSelectedCoverModeChanged(CoverMode value)
+    partial void OnSelectedCoverModeChanged(CoverMode value) => SyncCoverModes(value);
+
+    private void SyncCoverModes(CoverMode mode)
     {
-        IsCoverModeUrl = value == CoverMode.Url;
-        IsCoverModeFromTracks = value == CoverMode.FromTracks;
-        IsCoverModeFile = value == CoverMode.File;
+        IsCoverModeUrl = mode == CoverMode.Url;
+        IsCoverModeFromTracks = mode == CoverMode.FromTracks;
+        IsCoverModeFile = mode == CoverMode.File;
+
+        if (mode == CoverMode.FromTracks && CoverPicker?.MosaicPreview != null)
+        {
+            LocalPreviewBitmap = CoverPicker.MosaicPreview;
+            HasThumbnailPreview = true;
+            IsPreviewLocal = true;
+            IsPreviewHttp = false;
+        }
+        else if (mode == CoverMode.Url)
+        {
+            UpdateThumbnailPreview(ThumbnailUrl);
+        }
+        else if (mode == CoverMode.File)
+        {
+            UpdateThumbnailPreview(SelectedFilePath);
+        }
     }
 
     partial void OnNameChanged(string value) => UpdateValidation();
@@ -347,10 +362,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     partial void OnThumbnailUrlChanged(string? value)
     {
         UpdateValidation();
-        UpdateUploadButtonVisibility();
         RecalculateColorCommand?.NotifyCanExecuteChanged();
-        UploadThumbnailCommand?.NotifyCanExecuteChanged();
-
         if (_thumbnailDebounceTimer is not null)
         {
             _thumbnailDebounceTimer.Stop();
@@ -358,323 +370,19 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         }
     }
 
-    partial void OnCustomColorChanged(string? value)
-    {
-        UpdateValidation();
-        if (_colorDebounceTimer is not null)
-        {
-            _colorDebounceTimer.Stop();
-            _colorDebounceTimer.Start();
-        }
-    }
+    /// <summary>Активирует режим ввода обложки по URL.</summary>
+    public void SetCoverModeUrl() => SelectedCoverMode = CoverMode.Url;
 
-    #region Upload Thumbnail to YouTube
+    /// <summary>Активирует режим формирования мозаики из треков.</summary>
+    public void SetCoverModeFromTracks() => SelectedCoverMode = CoverMode.FromTracks;
 
-    /// <summary>
-    /// Обновляет видимость кнопки загрузки обложки в YouTube.
-    /// Показываем только для TwoWaySync плейлистов с непустой обложкой.
-    /// </summary>
-    private void UpdateUploadButtonVisibility()
-    {
-        ShowUploadThumbnailButton =
-            _isForEdit &&
-            _originalPlaylist?.SyncMode == PlaylistSyncMode.TwoWaySync &&
-            !string.IsNullOrEmpty(_originalPlaylist.YoutubeId) &&
-            !string.IsNullOrEmpty(ThumbnailUrl);
-    }
+    /// <summary>Активирует режим выбора локального файла.</summary>
+    public void SetCoverModeFile() => SelectedCoverMode = CoverMode.File;
 
-    /// <summary>
-    /// Загружает текущую обложку в YouTube через Scotty Upload Protocol.
-    /// Используется для ручной загрузки без синхронизации всего плейлиста.
-    /// </summary>
-    /// <returns>Асинхронная задача выполнения сетевой загрузки.</returns>
-    private async Task UploadThumbnailAsync()
-    {
-        if (_originalPlaylist == null || string.IsNullOrEmpty(_originalPlaylist.YoutubeId))
-            return;
-
-        if (string.IsNullOrEmpty(ThumbnailUrl))
-        {
-            SetError(SL["EditPlaylist_NoThumbnail"] ?? "No thumbnail to upload");
-            return;
-        }
-
-        IsRecalculatingColor = true;
-        ClearError();
-
-        try
-        {
-            if (_youtube == null || _networkManager == null)
-            {
-                SetError("Required services not initialized");
-                return;
-            }
-
-            byte[] imageData;
-
-            if (IsHttpUrl(ThumbnailUrl))
-            {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                imageData = await _networkManager.ImageClient.GetByteArrayAsync(ThumbnailUrl, cts.Token);
-            }
-            else if (ThumbnailUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
-            {
-                var uri = new Uri(ThumbnailUrl);
-                var localPath = uri.LocalPath;
-
-                if (!File.Exists(localPath))
-                {
-                    SetError(SL["EditPlaylist_FileNotFound"] ?? "File not found");
-                    return;
-                }
-
-                imageData = await File.ReadAllBytesAsync(localPath);
-            }
-            else if (Path.IsPathRooted(ThumbnailUrl) && File.Exists(ThumbnailUrl))
-            {
-                imageData = await File.ReadAllBytesAsync(ThumbnailUrl);
-            }
-            else
-            {
-                SetError(SL["EditPlaylist_InvalidThumbnailUrl"] ?? "Invalid thumbnail URL");
-                return;
-            }
-
-            if (imageData.Length == 0)
-            {
-                SetError(SL["EditPlaylist_EmptyImage"] ?? "Image file is empty");
-                return;
-            }
-
-            if (imageData.Length > 20 * 1024 * 1024)
-            {
-                SetError(SL["PlaylistSync_ThumbnailTooLarge"] ?? "Image too large (max 20MB)");
-                return;
-            }
-
-            var success = await _youtube.Value.UploadPlaylistThumbnailAsync(
-                _originalPlaylist.YoutubeId, imageData);
-
-            if (success)
-            {
-                Log.Info($"[PlaylistEditor] Thumbnail uploaded for {_originalPlaylist.YoutubeId}");
-                ErrorMessage = SL["PlaylistSync_ThumbnailUploaded"] ?? "Thumbnail uploaded to YouTube";
-                HasErrors = false;
-                _ = ClearSuccessMessageAsync();
-            }
-            else
-            {
-                SetError(SL["EditPlaylist_UploadFailed"] ?? "Failed to upload thumbnail");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[PlaylistEditor] Thumbnail upload error: {ex.Message}");
-            SetError(ex.Message);
-        }
-        finally
-        {
-            IsRecalculatingColor = false;
-        }
-    }
-
-    /// <summary>
-    /// Очищает сообщение об успехе через 3 секунды.
-    /// </summary>
-    /// <returns>Асинхронная задача таймера очистки сообщения.</returns>
-    private async Task ClearSuccessMessageAsync()
-    {
-        try
-        {
-            await Task.Delay(3000);
-            if (!HasErrors && ErrorMessage != null)
-                ErrorMessage = null;
-        }
-        catch { /* ignore */ }
-    }
-
-    #endregion
-
-    #region Recalculate Color
-
-    /// <summary>
-    /// Автоматически пересчитывает доминантный цвет при изменении обложки плейлиста.
-    /// Сбрасывает цвет в прозрачный при пустом или невалидном пути обложки.
-    /// </summary>
-    /// <returns>Асинхронная задача.</returns>
-    private async Task AutoRecalculateColorAsync()
-    {
-        if (string.IsNullOrWhiteSpace(ThumbnailUrl) || !IsValidUri(ThumbnailUrl))
-        {
-            ComputedColor = null;
-            ComputedColorPreviewBrush = Brushes.Transparent;
-            return;
-        }
-
-        await RecalculateColorFromCoverAsync(CancellationToken.None).ConfigureAwait(true);
-    }
-
-    /// <summary>
-    /// Пересчитывает доминантный цвет из текущей обложки.
-    /// Результат записывается в ComputedColor (будет сохранён при Apply).
-    /// </summary>
-    private async Task RecalculateColorFromCoverAsync(CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(ThumbnailUrl)) return;
-        if (!IsValidUri(ThumbnailUrl)) return;
-
-        IsRecalculatingColor = true;
-        try
-        {
-            if (_dominantColorService == null)
-            {
-                Log.Warn("[PlaylistEditor] DominantColorService is not configured");
-                return;
-            }
-
-            var color = await _dominantColorService.GetDominantColorAsync(ThumbnailUrl, ct);
-
-            if (color.HasValue)
-            {
-                var hex = $"#{color.Value.R:X2}{color.Value.G:X2}{color.Value.B:X2}";
-                ComputedColor = hex;
-                ComputedColorPreviewBrush = new SolidColorBrush(color.Value);
-                Log.Info($"[PlaylistEditor] Recalculated color: {hex}");
-            }
-            else
-            {
-                Log.Warn("[PlaylistEditor] Could not extract dominant color");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[PlaylistEditor] Color recalculation failed: {ex.Message}");
-        }
-        finally
-        {
-            IsRecalculatingColor = false;
-        }
-    }
-
-    #endregion
-
-    #region Thumbnail Preview
-
-    /// <summary>Определяет, является ли URL HTTP/HTTPS ссылкой.</summary>
-    private static bool IsHttpUrl(string url) =>
-        url.StartsWith(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-        url.StartsWith(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Преобразует file:// URI или абсолютный путь в локальный путь.
-    /// </summary>
-    private static string? ResolveLocalPath(string url)
-    {
-        if (url.StartsWith(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
-        {
-            if (Uri.TryCreate(url, UriKind.Absolute, out var fileUri))
-                return fileUri.LocalPath;
-            return null;
-        }
-
-        if (Path.IsPathRooted(url))
-            return url;
-
-        return null;
-    }
-
-    /// <summary>
-    /// Обновляет превью обложки с автоматическим определением типа источника.
-    /// HTTP/HTTPS/avares → AsyncImageLoader, локальный файл → Bitmap напрямую.
-    /// </summary>
-    private void UpdateThumbnailPreview(string? url)
-    {
-        var oldBitmap = LocalPreviewBitmap;
-
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            HasThumbnailPreview = false;
-            IsPreviewHttp = false;
-            IsPreviewLocal = false;
-            ThumbnailPreviewUrl = null;
-            LocalPreviewBitmap = null;
-            oldBitmap?.Dispose();
-            return;
-        }
-
-        if (IsHttpUrl(url))
-        {
-            HasThumbnailPreview = true;
-            IsPreviewHttp = true;
-            IsPreviewLocal = false;
-            ThumbnailPreviewUrl = url;
-            LocalPreviewBitmap = null;
-            oldBitmap?.Dispose();
-            return;
-        }
-
-        if (url.StartsWith("avares://", StringComparison.OrdinalIgnoreCase))
-        {
-            HasThumbnailPreview = true;
-            IsPreviewHttp = true;
-            IsPreviewLocal = false;
-            ThumbnailPreviewUrl = url;
-            LocalPreviewBitmap = null;
-            oldBitmap?.Dispose();
-            return;
-        }
-
-        var localPath = ResolveLocalPath(url);
-        if (localPath != null && File.Exists(localPath))
-        {
-            try
-            {
-                using var stream = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                var bitmap = new Bitmap(stream);
-
-                HasThumbnailPreview = true;
-                IsPreviewHttp = false;
-                IsPreviewLocal = true;
-                ThumbnailPreviewUrl = null;
-                LocalPreviewBitmap = bitmap;
-                oldBitmap?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"[PlaylistEditor] Failed to load local preview '{localPath}': {ex.Message}");
-                HasThumbnailPreview = false;
-                IsPreviewHttp = false;
-                IsPreviewLocal = false;
-                ThumbnailPreviewUrl = null;
-                LocalPreviewBitmap = null;
-                oldBitmap?.Dispose();
-            }
-            return;
-        }
-
-        HasThumbnailPreview = false;
-        IsPreviewHttp = false;
-        IsPreviewLocal = false;
-        ThumbnailPreviewUrl = null;
-        LocalPreviewBitmap = null;
-        oldBitmap?.Dispose();
-    }
-
-    #endregion
-
-    #region File Selection
-
-    /// <summary>
-    /// Открывает системный диалог выбора файла изображения.
-    /// </summary>
     private async Task SelectFileAsync(CancellationToken ct)
     {
         var topLevel = GetTopLevel();
-        if (topLevel == null)
-        {
-            Log.Warn("[PlaylistEditor] Cannot open file picker: no TopLevel found");
-            return;
-        }
+        if (topLevel == null) return;
 
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
@@ -706,18 +414,144 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         if (Avalonia.Application.Current?.ApplicationLifetime
             is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
-            foreach (var window in desktop.Windows)
+            for (int i = 0; i < desktop.Windows.Count; i++)
             {
-                if (window.IsActive) return window;
+                if (desktop.Windows[i].IsActive) return desktop.Windows[i];
             }
             return desktop.MainWindow;
         }
         return null;
     }
 
-    #endregion
+    private void UpdateColorVisuals(string? comp, string? cust)
+    {
+        var active = !string.IsNullOrWhiteSpace(cust) ? cust : comp;
+        if (TryParseColor(active, out var brush, out var hex))
+        {
+            ComputedColorPreviewBrush = brush;
+            EffectiveColorText = hex;
+        }
+        else
+        {
+            ComputedColorPreviewBrush = Brushes.Transparent;
+            EffectiveColorText = "Auto";
+        }
+    }
 
-    #region Validation
+    private async Task AutoRecalculateColorAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ThumbnailUrl) || !IsValidUri(ThumbnailUrl))
+            return;
+
+        await RecalculateColorFromCoverAsync(CancellationToken.None).ConfigureAwait(true);
+    }
+
+    private async Task RecalculateColorFromCoverAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(ThumbnailUrl) && LocalPreviewBitmap == null) return;
+
+        IsRecalculatingColor = true;
+        try
+        {
+            if (_dominantColorService == null) return;
+
+            var targetSource = ThumbnailUrl;
+            if (string.IsNullOrEmpty(targetSource) && SelectedCoverMode == CoverMode.FromTracks && CoverPicker != null)
+                targetSource = await CoverPicker.PersistMosaicAsync(ct).ConfigureAwait(true);
+
+            if (string.IsNullOrEmpty(targetSource)) return;
+
+            var color = await _dominantColorService.GetDominantColorAsync(targetSource, ct);
+            if (color.HasValue)
+            {
+                var hex = $"#{color.Value.R:X2}{color.Value.G:X2}{color.Value.B:X2}";
+                ComputedColor = hex;
+                CustomColor = null;
+                UpdateColorVisuals(hex, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlaylistEditor] Color recalculation failed: {ex.Message}");
+        }
+        finally
+        {
+            IsRecalculatingColor = false;
+        }
+    }
+
+    private void UpdateThumbnailPreview(string? url)
+    {
+        var oldBitmap = LocalPreviewBitmap;
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            HasThumbnailPreview = false;
+            IsPreviewHttp = false;
+            IsPreviewLocal = false;
+            ThumbnailPreviewUrl = null;
+            LocalPreviewBitmap = null;
+            oldBitmap?.Dispose();
+            return;
+        }
+
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("avares://", StringComparison.OrdinalIgnoreCase))
+        {
+            HasThumbnailPreview = true;
+            IsPreviewHttp = true;
+            IsPreviewLocal = false;
+            ThumbnailPreviewUrl = url;
+            LocalPreviewBitmap = null;
+            oldBitmap?.Dispose();
+            return;
+        }
+
+        var localPath = ResolveLocalPath(url);
+        if (localPath != null && File.Exists(localPath))
+        {
+            try
+            {
+                using var stream = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var bitmap = new Bitmap(stream);
+                HasThumbnailPreview = true;
+                IsPreviewHttp = false;
+                IsPreviewLocal = true;
+                ThumbnailPreviewUrl = null;
+                LocalPreviewBitmap = bitmap;
+                oldBitmap?.Dispose();
+            }
+            catch
+            {
+                HasThumbnailPreview = false;
+                IsPreviewHttp = false;
+                IsPreviewLocal = false;
+                ThumbnailPreviewUrl = null;
+                LocalPreviewBitmap = null;
+                oldBitmap?.Dispose();
+            }
+            return;
+        }
+
+        HasThumbnailPreview = false;
+        IsPreviewHttp = false;
+        IsPreviewLocal = false;
+        ThumbnailPreviewUrl = null;
+        LocalPreviewBitmap = null;
+        oldBitmap?.Dispose();
+    }
+
+    private static string? ResolveLocalPath(string url)
+    {
+        if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out var fileUri))
+                return fileUri.LocalPath;
+            return null;
+        }
+        return Path.IsPathRooted(url) ? url : null;
+    }
 
     private void UpdateValidation()
     {
@@ -730,12 +564,6 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(ThumbnailUrl) && !IsValidUri(ThumbnailUrl))
         {
             SetError(SL["Error_InvalidUrl"] ?? "Invalid cover URL format");
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(CustomColor) && !IsValidColor(CustomColor))
-        {
-            SetError(SL["Error_InvalidColor"] ?? "Invalid HEX color (example: #FF5555)");
             return;
         }
 
@@ -756,101 +584,65 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanSave));
     }
 
-    #endregion
-
-    #region Helpers
-
     /// <summary>
-    /// Проверяет, является ли строка валидным источником изображения.
+    /// Проверяет, представляет ли переданная строка валидный локальный путь или поддерживаемый URI схемы.
     /// </summary>
-    internal static bool IsValidUri(string? url)
+    public static bool IsValidUri(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return false;
-
-        if (Path.IsPathRooted(url))
-            return true;
-
+        if (Path.IsPathRooted(url)) return true;
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
-            return uri.Scheme switch
-            {
-                "http" or "https" => true,
-                "avares" => true,
-                "file" => true,
-                _ => false
-            };
+            return uri.Scheme is "http" or "https" or "avares" or "file";
         }
-
         return false;
     }
 
-    private static bool IsValidColor(string? colorStr)
+    private static bool TryParseColor(string? colorStr, out IBrush brush, out string hex)
     {
+        brush = Brushes.Transparent;
+        hex = "Auto";
         if (string.IsNullOrWhiteSpace(colorStr)) return false;
-        try { Color.Parse(colorStr); return true; }
+        try
+        {
+            var parsed = Color.Parse(colorStr);
+            brush = new SolidColorBrush(parsed);
+            hex = $"#{parsed.R:X2}{parsed.G:X2}{parsed.B:X2}";
+            return true;
+        }
         catch { return false; }
     }
 
-    private static IBrush TryParseColor(string? colorStr)
-    {
-        if (IsValidColor(colorStr))
-            return new SolidColorBrush(Color.Parse(colorStr!));
-        return Brushes.Transparent;
-    }
-
-    #endregion
-
-    #region Cover Mode Commands
-
-    public void SetCoverModeUrl() => SelectedCoverMode = CoverMode.Url;
-    public void SetCoverModeFromTracks() => SelectedCoverMode = CoverMode.FromTracks;
-    public void SetCoverModeFile() => SelectedCoverMode = CoverMode.File;
-
-    #endregion
-
-    #region Factory Methods
-
     /// <summary>
-    /// Создаёт VM для создания нового плейлиста.
+    /// Создаёт модель редактора для сценария создания нового плейлиста.
     /// </summary>
     public static PlaylistEditorViewModel ForCreate(
+        bool isAuthenticated = false,
         INetworkManager? networkManager = null,
-        DominantColorService? dominantColorService = null,
-        Lazy<YoutubeProvider>? youtube = null) =>
+        DominantColorService? dominantColorService = null) =>
         new(name: "", thumbnailUrl: null, customColor: null, description: null,
             computedColor: null,
-            showSync: false, isSynced: false,
-            isAuthenticated: false, hasYoutubeBinding: false,
+            showSync: isAuthenticated,
+            isSynced: isAuthenticated,
+            isAuthenticated: isAuthenticated,
+            hasYoutubeBinding: false,
             playlistTracks: null,
-            originalPlaylist: null,
             isForEdit: false,
             isSystemPlaylist: false,
             networkManager: networkManager,
-            dominantColorService: dominantColorService,
-            youtube: youtube);
+            dominantColorService: dominantColorService);
 
     /// <summary>
-    /// Создаёт VM для редактирования существующего плейлиста.
+    /// Создаёт модель редактора для сценария редактирования существующего плейлиста.
     /// </summary>
-    /// <param name="playlist">Редактируемый плейлист из БД.</param>
-    /// <param name="isAuthenticated">Авторизован ли пользователь в YouTube.</param>
-    /// <param name="playlistTracks">
-    /// Треки плейлиста для <see cref="PlaylistCoverPickerViewModel"/>.
-    /// null — вкладка «Из треков» скрыта.
-    /// </param>
-    /// <param name="networkManager">Централизованный менеджер сети.</param>
-    /// <param name="dominantColorService">Сервис доминантных цветов.</param>
-    /// <param name="youtube">Провайдер YouTube.</param>
     public static PlaylistEditorViewModel ForEdit(
         Playlist playlist,
         bool isAuthenticated,
         IReadOnlyList<TrackInfo>? playlistTracks = null,
         INetworkManager? networkManager = null,
-        DominantColorService? dominantColorService = null,
-        Lazy<YoutubeProvider>? youtube = null)
+        DominantColorService? dominantColorService = null)
     {
         var isSystem = LibraryService.IsSystemPlaylist(playlist.Id);
-
         return new(
             name: playlist.Name,
             thumbnailUrl: playlist.ThumbnailUrl,
@@ -862,20 +654,14 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             isAuthenticated: isAuthenticated,
             hasYoutubeBinding: !string.IsNullOrEmpty(playlist.YoutubeId),
             playlistTracks: playlistTracks,
-            originalPlaylist: playlist,
             isForEdit: true,
             isSystemPlaylist: isSystem,
             networkManager: networkManager,
-            dominantColorService: dominantColorService,
-            youtube: youtube);
+            dominantColorService: dominantColorService);
     }
 
-    #endregion
-
-    #region Result
-
     /// <summary>
-    /// Собирает результат редактирования.
+    /// Экспортирует состояние полей формы в неизменяемый результат <see cref="EditPlaylistResult"/>.
     /// </summary>
     public EditPlaylistResult ToResult() => new()
     {
@@ -886,17 +672,25 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         ComputedColor = ComputedColor
     };
 
+    /// <summary>
+    /// Флаг изменения состояния облачной синхронизации относительно исходного.
+    /// </summary>
     public bool SyncStateChanged => IsSyncedToCloud != OriginalSyncState;
+
+    /// <summary>
+    /// Флаг изменения текстового описания относительно исходного значения.
+    /// </summary>
     public bool DescriptionChanged => !string.Equals(Description?.Trim(), _originalDescription?.Trim(), StringComparison.Ordinal);
 
-    #endregion
-
+    /// <summary>
+    /// Освобождает занятые ресурсы таймера, растровых превью и дочерней модели мозаики.
+    /// </summary>
+    /// <param name="disposing">Флаг вызова из Dispose.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
             _thumbnailDebounceTimer.Stop();
-            _colorDebounceTimer.Stop();
             LocalPreviewBitmap?.Dispose();
             CoverPicker?.Dispose();
         }

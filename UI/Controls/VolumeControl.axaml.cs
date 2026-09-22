@@ -159,7 +159,7 @@ public partial class VolumeControl : UserControl
         var accentBrush = (IBrush)(Application.Current?.Resources["AccentBrush"] ?? Brushes.Purple);
         var textMutedBrush = (IBrush)(Application.Current?.Resources["TextMutedBrush"] ?? Brushes.Gray);
         var textSecondaryBrush = (IBrush)(Application.Current?.Resources["TextSecondaryBrush"] ?? Brushes.LightGray);
-        var transparentBrush = (IBrush)(Application.Current?.Resources["AccentBrushTransparent"] ?? Brushes.Transparent);
+        var transparentBrush = (IBrush)(Application.Current?.Resources["AccentTransparentBrush"] ?? Brushes.Transparent);
 
         bool isPopupOpen = VolumePopup != null && VolumePopup.IsOpen;
 

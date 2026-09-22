@@ -12,14 +12,9 @@
     Focusable="True">
 
     <Window.Styles>
-        <!--
-            Базовый стиль элементов tray-меню.
-            BorderThickness="1" всегда — предотвращает layout shift (прыжок на 1px) при hover.
-            Hover = анимация только BorderBrush, без фоновых изменений и масштабов.
-        -->
         <Style Selector="Button.tray-menu-item">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="11,7" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -51,14 +46,17 @@
         <Style Selector="Button.tray-menu-item /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Button.tray-menu-item:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Style
+            Selector="Button.tray-menu-item:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         </Style>
-        <Style Selector="Button.tray-menu-item:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Style
+            Selector="Button.tray-menu-item:pressed /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Button.tray-menu-item:disabled /template/ ContentPresenter#PART_ContentPresenter">
+        <Style
+            Selector="Button.tray-menu-item:disabled /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
 

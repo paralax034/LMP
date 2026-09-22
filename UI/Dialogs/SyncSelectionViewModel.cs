@@ -292,6 +292,66 @@ public sealed partial class SyncItemViewModel : ObservableObject
     public MergeAction SelectedAction => SelectedOption?.Action ?? MergeAction.Skip;
     public static LocalizationService L => LocalizationService.Instance;
 
+    /// <summary>
+    /// Флаг доступности стратегии слияния (только для конфликтных элементов).
+    /// </summary>
+    public bool CanMerge => HasConflict;
+
+    /// <summary>
+    /// Активна ли стратегия слияния.
+    /// </summary>
+    public bool IsMergeSelected => SelectedAction == MergeAction.Merge;
+
+    /// <summary>
+    /// Активна ли стратегия создания копии / прямого импорта.
+    /// </summary>
+    public bool IsDuplicateSelected => SelectedAction == MergeAction.Duplicate;
+
+    /// <summary>
+    /// Активна ли стратегия пропуска элемента.
+    /// </summary>
+    public bool IsSkipSelected => SelectedAction == MergeAction.Skip;
+
+    /// <summary>
+    /// Подсказка для кнопки создания копии или импорта в зависимости от наличия конфликта.
+    /// </summary>
+    public string DuplicateActionTooltip => HasConflict
+        ? L["Sync_Action_CreateNew"]
+        : L["Sync_Action_Import"];
+
+    partial void OnSelectedOptionChanged(SyncActionOption? value)
+    {
+        OnPropertyChanged(nameof(SelectedAction));
+        OnPropertyChanged(nameof(IsMergeSelected));
+        OnPropertyChanged(nameof(IsDuplicateSelected));
+        OnPropertyChanged(nameof(IsSkipSelected));
+    }
+
+    /// <summary>
+    /// Выбирает действие слияния для плейлиста.
+    /// </summary>
+    [RelayCommand]
+    public void SelectMerge() => SetActionByKind(MergeAction.Merge);
+
+    /// <summary>
+    /// Выбирает действие дублирования / импорта для плейлиста.
+    /// </summary>
+    [RelayCommand]
+    public void SelectDuplicate() => SetActionByKind(MergeAction.Duplicate);
+
+    /// <summary>
+    /// Выбирает действие пропуска для плейлиста.
+    /// </summary>
+    [RelayCommand]
+    public void SelectSkip() => SetActionByKind(MergeAction.Skip);
+
+    private void SetActionByKind(MergeAction action)
+    {
+        var target = AvailableActions.Find(a => a.Action == action);
+        if (target != null)
+            SelectedOption = target;
+    }
+
     public SyncItemViewModel(
         PlaylistSearchResult original,
         bool hasConflict,

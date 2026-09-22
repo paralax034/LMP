@@ -45,7 +45,7 @@
 
     <!-- ═══ TRACK ROW — Border-only hover/active (no background change) ═══ -->
     <Style Selector="Border.track-row">
-        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
@@ -56,7 +56,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
@@ -95,6 +95,10 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
+    <Style Selector="Border.track-row.is-active.menu-open:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
     <Style Selector="Border.track-row.menu-open:pointerover">
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
     </Style>
@@ -104,7 +108,7 @@
         <Setter Property="FontWeight" Value="Normal" />
         <Setter Property="Transitions">
             <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.2" />
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
@@ -118,7 +122,7 @@
         <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <ControlTemplate TargetType="Button">
@@ -192,7 +196,7 @@
         <Setter Property="RenderTransform" Value="scale(1.05)" />
         <Setter Property="Transitions">
             <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.25"
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
                     Easing="BackEaseOut" />
             </Transitions>
         </Setter>
@@ -203,7 +207,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Transitions">
             <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.2" />
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
@@ -367,13 +371,14 @@
 
     <!-- Внутренняя карточка плейлиста -->
     <Style Selector="Border.playlist-card-inner">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="ClipToBounds" Value="True" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BoxShadow" Value="{StaticResource CardShadow}" />
         <!-- Стартовое состояние для stagger: невидима + сдвинута вниз -->
         <Setter Property="Opacity" Value="0" />
         <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
@@ -382,9 +387,10 @@
         </Setter>
         <Setter Property="Transitions">
             <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <DoubleTransition Property="Opacity" Duration="0:0:0.3" Easing="CubicEaseOut" />
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35"
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
                     Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
@@ -400,11 +406,13 @@
 
     <!-- Hover: border акцентный -->
     <Style Selector="Border.playlist-card-inner.visible:pointerover">
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
     <!-- Сохраняем акцентную рамку при открытом контекстном меню -->
     <Style Selector="Border.playlist-card-inner.menu-open">
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
@@ -429,7 +437,7 @@
     <!-- Обложка плейлиста -->
     <Style Selector="Border.playlist-cover">
         <Setter Property="Height" Value="220" />
-        <Setter Property="Background" Value="{DynamicResource BgSkeletonBrush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="CornerRadius" Value="8,8,0,0" />
         <Setter Property="ClipToBounds" Value="True" />
     </Style>
@@ -441,7 +449,7 @@
             <Setter.Value>
                 <LinearGradientBrush StartPoint="50%,0%" EndPoint="50%,100%">
                     <GradientStop Color="{DynamicResource Accent}" Offset="0.0" />
-                    <GradientStop Color="{DynamicResource BgElevated}" Offset="1.0" />
+                    <GradientStop Color="{DynamicResource BgPrimary}" Offset="1.0" />
                 </LinearGradientBrush>
             </Setter.Value>
         </Setter>
@@ -451,7 +459,9 @@
     <Style Selector="Border.playlist-skeleton">
         <Setter Property="Width" Value="220" />
         <Setter Property="Height" Value="290" />
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
     </Style>
 

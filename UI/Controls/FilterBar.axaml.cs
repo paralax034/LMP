@@ -6,7 +6,7 @@ namespace LMP.UI.Controls;
 
 public partial class FilterBar : UserControl
 {
-    // ═══ FILTER TEXT ═══
+    // FILTER TEXT
     public static readonly StyledProperty<string?> FilterTextProperty =
         AvaloniaProperty.Register<FilterBar, string?>(
             nameof(FilterText),
@@ -18,7 +18,7 @@ public partial class FilterBar : UserControl
         set => SetValue(FilterTextProperty, value);
     }
 
-    // ═══ WATERMARK ═══
+    // WATERMARK
     public static readonly StyledProperty<string?> WatermarkProperty =
         AvaloniaProperty.Register<FilterBar, string?>(nameof(Watermark), "Filter...");
 
@@ -28,7 +28,7 @@ public partial class FilterBar : UserControl
         set => SetValue(WatermarkProperty, value);
     }
 
-    // ═══ COMPACT MODE ═══
+    // COMPACT MODE
     public static readonly StyledProperty<bool> CompactProperty =
         AvaloniaProperty.Register<FilterBar, bool>(nameof(Compact), false);
 
@@ -52,7 +52,7 @@ public partial class FilterBar : UserControl
         set => SetValue(IconKeyProperty, value);
     }
 
-    // ═══ COMPUTED (Direct Properties для уведомления UI) ═══
+    // COMPUTED (Direct Properties для уведомления UI)
 
     public static readonly DirectProperty<FilterBar, double> BarHeightProperty =
         AvaloniaProperty.RegisterDirect<FilterBar, double>(nameof(BarHeight), o => o.BarHeight);
@@ -94,10 +94,10 @@ public partial class FilterBar : UserControl
 
         if (change.Property == CompactProperty)
         {
-            RaisePropertyChanged(BarHeightProperty,      default, BarHeight);
+            RaisePropertyChanged(BarHeightProperty, default, BarHeight);
             RaisePropertyChanged(BarCornerRadiusProperty, default, BarCornerRadius);
-            RaisePropertyChanged(TextFontSizeProperty,   default, TextFontSize);
-            RaisePropertyChanged(IconSizeProperty,       default, IconSize);
+            RaisePropertyChanged(TextFontSizeProperty, default, TextFontSize);
+            RaisePropertyChanged(IconSizeProperty, default, IconSize);
         }
         else if (change.Property == IconKeyProperty)
         {

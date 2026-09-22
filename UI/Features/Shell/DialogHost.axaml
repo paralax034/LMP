@@ -1,10 +1,10 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:shell="using:LMP.UI.Features.Shell"
-             xmlns:content="using:LMP.UI.Dialogs.Content"
-             xmlns:dialogs="using:LMP.UI.Dialogs"
-             x:Class="LMP.UI.Features.Shell.DialogHost"
-             x:DataType="shell:DialogHostViewModel">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:shell="using:LMP.UI.Features.Shell"
+    xmlns:content="using:LMP.UI.Dialogs.Content"
+    xmlns:dialogs="using:LMP.UI.Dialogs"
+    x:Class="LMP.UI.Features.Shell.DialogHost"
+    x:DataType="shell:DialogHostViewModel">
 
     <UserControl.Styles>
         <!-- Анимация появления диалога -->
@@ -29,7 +29,7 @@
             <Setter Property="Transitions">
                 <Transitions>
                     <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.2"
-                                                   Easing="CubicEaseOut" />
+                        Easing="CubicEaseOut" />
                     <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
                 </Transitions>
             </Setter>
@@ -44,20 +44,19 @@
 
     <!-- Полупрозрачный backdrop -->
     <Border Background="#80000000"
-            IsHitTestVisible="True"
-            Classes="dialog-backdrop"
-            Classes.visible="{Binding HasActiveDialog}">
+        IsHitTestVisible="True"
+        Classes="dialog-backdrop"
+        Classes.visible="{Binding HasActiveDialog}">
 
         <!-- Центрированный контейнер диалога -->
         <ContentControl Content="{Binding CurrentDialog}"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        MaxWidth="720"
-                        MaxHeight="{Binding $parent[Border].Bounds.Height, FallbackValue=680}"
-                        Margin="24"
-                        Classes="dialog-content"
-                        Classes.visible="{Binding HasActiveDialog}"
-                        RenderTransformOrigin="0.5,0.5">
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            MaxHeight="{Binding $parent[Border].Bounds.Height, FallbackValue=720}"
+            Margin="24"
+            Classes="dialog-content"
+            Classes.visible="{Binding HasActiveDialog}"
+            RenderTransformOrigin="0.5,0.5">
 
             <!-- DataTemplates для всех типов диалогов -->
             <ContentControl.DataTemplates>

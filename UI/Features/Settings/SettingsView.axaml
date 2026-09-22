@@ -12,193 +12,160 @@
         и устраняет дублирование ~70 строк стилей.
     -->
 
-    <Grid ColumnDefinitions="Auto, 4, *" Name="LayoutGrid">
+    <Grid ColumnDefinitions="46, *" Name="LayoutGrid">
 
         <!--
-            Sidebar
-            Panel-обёртка: ListBox + градиент снизу.
-            Градиент: BgPrimaryTransparent → BgPrimary (тот же RGB, альфа 0→255).
-            Правило anti-flash: transparent-стоп должен совпадать по RGB
-            с целевым цветом — иначе интерполяция даёт белую вспышку.
-            MinWidth/MaxWidth на ColumnDefinition[0] ограничивают GridSplitter.
-            IsSidebarExpanded управляет видимостью TextBlock — переключается
-            в code-behind когда ширина пересекает CollapsedThreshold (120px).
+            Модульная встроенная стойка (Left-Embedded Modular Rail)
+            Ширина строго 46px, прижата к левому краю.
+            Межиконочные и концевые разделители не анимируются и не меняют цвет.
         -->
         <Border Grid.Column="0"
-            Background="{DynamicResource BgSecondaryBrush}"
+            Width="46"
+            HorizontalAlignment="Left"
+            Background="Transparent"
+            BorderBrush="{DynamicResource BgHighlightBrush}"
+            BorderThickness="0,0,1,0"
             ClipToBounds="True">
 
-            <Panel>
+            <StackPanel Margin="0">
+                <!-- Верхняя концевая планка стойки -->
+                <Border Height="1" Background="{DynamicResource BgHighlightBrush}" Margin="0" />
+
                 <ListBox ItemsSource="{Binding SidebarItems}"
                     SelectedItem="{Binding SelectedSidebarItem}"
                     Name="SidebarList"
                     Classes="nav-sidebar"
-                    Margin="0,8">
+                    Margin="0">
 
                     <ListBox.DataTemplates>
 
                         <DataTemplate DataType="vm:AccountLanguageSidebarItem"
                             x:DataType="vm:AccountLanguageSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Account_Language]}">
                                 <PathIcon Data="{StaticResource Icon.Account}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Account_Language]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:NetworkSidebarItem"
                             x:DataType="vm:NetworkSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Network]}">
                                 <PathIcon Data="{StaticResource Icon.Web}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Network]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:StorageCacheSidebarItem"
                             x:DataType="vm:StorageCacheSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Storage_Data]}">
                                 <PathIcon Data="{StaticResource Icon.Database}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Storage_Data]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:MemorySidebarItem"
                             x:DataType="vm:MemorySidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Memory]}">
                                 <PathIcon Data="{StaticResource Icon.Memory}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Memory]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:AppearanceSidebarItem"
                             x:DataType="vm:AppearanceSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Appearance]}">
                                 <PathIcon Data="{StaticResource Icon.Palette}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Appearance]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:AudioSidebarItem"
                             x:DataType="vm:AudioSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Audio]}">
                                 <PathIcon Data="{StaticResource Icon.VolumeHigh}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Audio]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:PlaybackSidebarItem"
                             x:DataType="vm:PlaybackSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_Playback]}">
                                 <PathIcon Data="{StaticResource Icon.Play}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_Playback]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:WindowBehaviorSidebarItem"
                             x:DataType="vm:WindowBehaviorSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_WindowBehavior]}">
                                 <PathIcon Data="{StaticResource Icon.WindowRestore}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_WindowBehavior]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                         <DataTemplate DataType="vm:GeneralSidebarItem"
                             x:DataType="vm:GeneralSidebarItem">
-                            <StackPanel Orientation="Horizontal" Spacing="10"
-                                Margin="14,10"
+                            <Grid RowDefinitions="*, 1" Height="42"
                                 ToolTip.Tip="{Binding Owner.L[Settings_General]}">
                                 <PathIcon Data="{StaticResource Icon.Settings}"
                                     Width="18" Height="18"
+                                    HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Owner.L[Settings_General]}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding Owner.IsSidebarExpanded}" />
-                            </StackPanel>
+                                <Border Grid.Row="1" Height="1"
+                                    Background="{DynamicResource BgHighlightBrush}" />
+                            </Grid>
                         </DataTemplate>
 
                     </ListBox.DataTemplates>
                 </ListBox>
-
-                <Border Height="400"
-                    VerticalAlignment="Bottom"
-                    IsHitTestVisible="False">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                            <GradientStop Offset="0"
-                                Color="{DynamicResource BgPrimaryTransparent}" />
-                            <GradientStop Offset="1"
-                                Color="{DynamicResource BgPrimary}" />
-                        </LinearGradientBrush>
-                    </Border.Background>
-                </Border>
-            </Panel>
+            </StackPanel>
         </Border>
-
-        <!--
-            GridSplitter
-            Ширина 4px. Ограничения ширины Col0 заданы в code-behind
-            через ColumnDefinition.MinWidth / MaxWidth — GridSplitter их уважает.
-        -->
-        <GridSplitter Grid.Column="1"
-            Name="SidebarSplitter"
-            Width="4"
-            ResizeDirection="Columns"
-            ResizeBehavior="PreviousAndNext"
-            Background="Transparent"
-            Cursor="SizeWestEast" />
 
         <!--
             Content
             ScrollViewer сбрасывается в 0 при смене страницы (code-behind).
         -->
-        <ScrollViewer Grid.Column="2"
+        <ScrollViewer Grid.Column="1"
             Name="ContentScrollViewer"
             HorizontalScrollBarVisibility="Disabled">
             <ContentControl Content="{Binding SelectedSidebarItem}"

@@ -217,7 +217,8 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public async Task<string?> CreatePlaylistAsync(
         string title,
-        IReadOnlyList<string>? videoIds = null)
+        IReadOnlyList<string>? videoIds = null,
+        string? description = null)
     {
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot create cloud playlist: user is not authenticated.");
@@ -226,7 +227,7 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            var ytId = await _youtube.Mutations.CreatePlaylistAsync(title, videoIds);
+            var ytId = await _youtube.Mutations.CreatePlaylistAsync(title, videoIds, description);
             Log.Info($"[Music] Created playlist '{title}' → YT ID: {ytId}");
             return ytId;
         }
@@ -481,6 +482,7 @@ public partial class YoutubeProvider : IDisposable
 
     /// <summary>
     /// Извлекает полные синхронизационные данные плейлиста YouTube, включая треки, автора и приватность.
+    /// Пробрасывает исключения отсутствия ресурса (404 / PlaylistUnavailableException) для корректного даунгрейда.
     /// </summary>
     public async Task<FullPlaylistSyncData?> GetFullPlaylistDataAsync(
         string youtubePlaylistId,
@@ -500,6 +502,9 @@ public partial class YoutubeProvider : IDisposable
             return data;
         }
         catch (BotDetectionException) { throw; }
+        catch (HttpRequestException) { throw; }
+        catch (PlaylistUnavailableException) { throw; }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             Log.Error($"[Music] Failed to fetch full playlist data: {ex.Message}");
@@ -1426,6 +1431,7 @@ public partial class YoutubeProvider : IDisposable
 
     /// <summary>
     /// Получает список облачных плейлистов текущего авторизованного пользователя напрямую из API YouTube Music.
+    /// Пробрасывает исключения сетевого слоя вызывающей стороне, предотвращая ложное определение отсутствия плейлистов.
     /// </summary>
     /// <returns>Список моделей плейлистов <see cref="Playlist"/>.</returns>
     public async Task<List<Playlist>> GetUserPlaylistsByAuthAsync()
@@ -1439,7 +1445,7 @@ public partial class YoutubeProvider : IDisposable
         catch (Exception ex)
         {
             Log.Error($"[Sync] Failed to get user playlists: {ex.Message}");
-            return [];
+            throw;
         }
     }
 

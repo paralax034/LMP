@@ -27,6 +27,7 @@ public sealed class ThemeManagerService
     /// <summary>
     /// Применяет тему к ресурсам приложения
     /// </summary>
+    /// <param name="theme">Настройки темы для применения</param>
     public void ApplyTheme(ThemeSettings theme)
     {
         // ЗАЩИТА: проверка готовности Application
@@ -58,6 +59,7 @@ public sealed class ThemeManagerService
         SetColor(resources, "SystemErrorBg", theme.SystemErrorBg);
         SetColor(resources, "SystemInfoBlue", theme.SystemInfoBlue);
         SetColor(resources, "SystemWarnOrange", theme.SystemWarnOrange);
+        SetColor(resources, "SystemSuccessGreen", "#2ECC71");
 
         // Text
         SetColor(resources, "TextPrimary", theme.TextPrimary);
@@ -190,11 +192,11 @@ public sealed class ThemeManagerService
         resources["TextFillColorInverse"] = textDark;
 
         // CONTROL BACKGROUNDS
-        resources["ControlFillColorDefault"] = bgElevated;
-        resources["ControlFillColorSecondary"] = bgElevated;
+        resources["ControlFillColorDefault"] = transparent;
+        resources["ControlFillColorSecondary"] = transparent;
         resources["ControlFillColorTertiary"] = bgHighlight;
-        resources["ControlFillColorInputActive"] = bgHover;
-        resources["ControlFillColorDisabled"] = bgHighlight;
+        resources["ControlFillColorInputActive"] = transparent;
+        resources["ControlFillColorDisabled"] = transparent;
 
         resources["ControlStrokeColorDefault"] = bgHighlight;
         resources["ControlStrokeColorSecondary"] = bgHighlight;
@@ -308,10 +310,10 @@ public sealed class ThemeManagerService
         resources["SliderThumbBackgroundDisabled"] = textSecondary;
 
         // COMBOBOX
-        resources["ComboBoxBackground"] = bgElevated;
-        resources["ComboBoxBackgroundPointerOver"] = bgElevated;
-        resources["ComboBoxBackgroundPressed"] = bgElevated;
-        resources["ComboBoxBackgroundDisabled"] = bgHighlight;
+        resources["ComboBoxBackground"] = transparent;
+        resources["ComboBoxBackgroundPointerOver"] = transparent;
+        resources["ComboBoxBackgroundPressed"] = transparent;
+        resources["ComboBoxBackgroundDisabled"] = transparent;
 
         resources["ComboBoxBorderBrush"] = bgHighlight;
         resources["ComboBoxBorderBrushPointerOver"] = accent;
@@ -323,7 +325,7 @@ public sealed class ThemeManagerService
         resources["ComboBoxForegroundPressed"] = textPrimary;
         resources["ComboBoxForegroundDisabled"] = textSecondary;
 
-        resources["ComboBoxDropDownBackground"] = bgElevated;
+        resources["ComboBoxDropDownBackground"] = bgPrimary;
         resources["ComboBoxDropDownBorderBrush"] = bgHighlight;
 
         resources["ComboBoxItemBackground"] = transparent;
@@ -360,20 +362,20 @@ public sealed class ThemeManagerService
         resources["MenuFlyoutItemForegroundPointerOver"] = textPrimary;
 
         // BUTTON
-        resources["ButtonBackground"] = bgElevated;
-        resources["ButtonBackgroundPointerOver"] = bgHover;
-        resources["ButtonBackgroundPressed"] = bgHighlight;
-        resources["ButtonBackgroundDisabled"] = bgHighlight;
+        resources["ButtonBackground"] = transparent;
+        resources["ButtonBackgroundPointerOver"] = transparent;
+        resources["ButtonBackgroundPressed"] = transparent;
+        resources["ButtonBackgroundDisabled"] = transparent;
 
         resources["ButtonForeground"] = textPrimary;
         resources["ButtonForegroundPointerOver"] = textPrimary;
         resources["ButtonForegroundPressed"] = textPrimary;
         resources["ButtonForegroundDisabled"] = textSecondary;
 
-        resources["ButtonBorderBrush"] = bgHighlight;
-        resources["ButtonBorderBrushPointerOver"] = accent;
-        resources["ButtonBorderBrushPressed"] = accentHover;
-        resources["ButtonBorderBrushDisabled"] = bgHighlight;
+        resources["ButtonBorderBrush"] = transparent;
+        resources["ButtonBorderBrushPointerOver"] = transparent;
+        resources["ButtonBorderBrushPressed"] = transparent;
+        resources["ButtonBorderBrushDisabled"] = transparent;
 
         // CONTENT DIALOG
         resources["ContentDialogBackground"] = bgElevated;

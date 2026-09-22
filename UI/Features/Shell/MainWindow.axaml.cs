@@ -1172,7 +1172,7 @@ public partial class MainWindow : Window
         var (iconKey, brushKey) = kind switch
         {
             CopyHintKind.Warning => ("Icon.InformationOutline", "SystemWarnOrangeBrush"),
-            CopyHintKind.Error => ("Icon.Close", "SystemErrorRedBrush"),
+            CopyHintKind.Error => ("Icon.Close", "SystemErrorBrush"),
             _ => ("Icon.CheckCircle", "AccentBrush")
         };
 

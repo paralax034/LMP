@@ -9,7 +9,7 @@
 
     <!-- Заголовок страницы -->
     <Style Selector="TextBlock.h1">
-        <Setter Property="FontSize" Value="24" />
+        <Setter Property="FontSize" Value="22" />
         <Setter Property="FontWeight" Value="Bold" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="Margin" Value="0,0,0,20" />
@@ -25,15 +25,15 @@
 
     <!-- Метка настройки / поля -->
     <Style Selector="TextBlock.label">
-        <Setter Property="FontSize" Value="15" />
-        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
     <!-- Описание / подсказка -->
     <Style Selector="TextBlock.desc">
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Margin" Value="0,4,0,0" />
         <Setter Property="TextWrapping" Value="Wrap" />
@@ -41,7 +41,7 @@
 
     <!-- Моноширинное значение (слайдеры, числовые поля) -->
     <Style Selector="TextBlock.value-label">
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="13" />
         <Setter Property="FontFamily" Value="Consolas, monospace" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -56,9 +56,12 @@
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
     <Style Selector="Border.card">
-        <Setter Property="Background" Value="{DynamicResource BgSecondaryBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="24" />
+        <Setter Property="BoxShadow" Value="{StaticResource CardShadow}" />
     </Style>
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
@@ -75,7 +78,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Grid.color-row TextBlock.color-hint">
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Margin" Value="0,2,0,0" />
     </Style>
@@ -85,7 +88,9 @@
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
     <Style Selector="Border.feature-badge">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="4" />
         <Setter Property="Padding" Value="6,2" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -94,13 +99,21 @@
     <Style Selector="Border.feature-badge TextBlock">
         <Setter Property="FontSize" Value="10" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="Border.feature-badge.coming-soon">
-        <Setter Property="Background" Value="{DynamicResource SystemInfoBlueBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemInfoBlueBrush}" />
+    </Style>
+    <Style Selector="Border.feature-badge.coming-soon TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource SystemInfoBlueBrush}" />
     </Style>
     <Style Selector="Border.feature-badge.experimental">
-        <Setter Property="Background" Value="{DynamicResource SystemWarnOrangeBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemWarnOrangeBrush}" />
+    </Style>
+    <Style Selector="Border.feature-badge.experimental TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource SystemWarnOrangeBrush}" />
     </Style>
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->

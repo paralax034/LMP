@@ -5,37 +5,51 @@
     x:Class="LMP.UI.Dialogs.Content.SyncPlaylistDialogContent"
     x:DataType="dialogs:SyncPlaylistDialogViewModel">
 
+    <UserControl.Styles>
+        <Style Selector="Border.diff-section">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16,14" />
+        </Style>
+    </UserControl.Styles>
+
     <Border Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
         BorderThickness="1"
-        CornerRadius="8"
-        Padding="24"
-        Width="560"
-        MinHeight="420"
-        MaxHeight="720">
+        CornerRadius="12"
+        BoxShadow="0 24 56 0 #70000000"
+        Padding="24,20"
+        Width="710"
+        MinHeight="460"
+        MaxHeight="680"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center">
 
         <Grid RowDefinitions="Auto, *, Auto">
 
             <!-- Header: CloudSync + заголовок -->
-            <StackPanel Orientation="Horizontal" Spacing="10">
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,18">
                 <PathIcon Data="{StaticResource Icon.CloudSync}"
-                    Width="24" Height="24"
+                    Width="26" Height="26"
                     Foreground="{DynamicResource AccentBrush}" />
                 <TextBlock Text="{Binding L[Dialog_SyncPlaylist_Title]}"
-                    FontSize="20" FontWeight="Bold" />
+                    FontSize="20" FontWeight="Bold"
+                    Foreground="{DynamicResource TextPrimaryBrush}"
+                    VerticalAlignment="Center" />
             </StackPanel>
 
             <!-- Content -->
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                Padding="0,0,6,0">
-                <StackPanel Spacing="14">
+                Padding="0,0,8,0">
+                <StackPanel Spacing="16">
 
                     <!-- Diff Preview -->
-                    <Border Background="{DynamicResource BgElevatedBrush}"
-                        CornerRadius="8" Padding="14,12">
-                        <StackPanel Spacing="10">
+                    <Border Classes="diff-section">
+                        <StackPanel Spacing="12">
                             <TextBlock Text="{Binding L[Playlist_SyncDifferences]}"
-                                FontSize="13" FontWeight="SemiBold"
+                                FontSize="14" FontWeight="SemiBold"
                                 Foreground="{DynamicResource TextSecondaryBrush}" />
 
                             <!-- Название diff -->
@@ -43,67 +57,68 @@
                                 IsVisible="{Binding HasNameDiff}">
                                 <PathIcon Grid.Column="0"
                                     Data="{StaticResource Icon.FormatTitle}"
-                                    Width="16" Height="16" Margin="0,0,8,0"
+                                    Width="18" Height="18" Margin="0,0,10,0"
                                     Foreground="{DynamicResource TextMutedBrush}"
                                     VerticalAlignment="Center" />
-                                <StackPanel Grid.Column="1" Spacing="1" Margin="0,0,8,0">
+                                <StackPanel Grid.Column="1" Spacing="2" Margin="0,0,12,0">
                                     <TextBlock Text="{Binding L[Playlist_SyncField_Local]}"
-                                        FontSize="10"
+                                        FontSize="11" FontWeight="Medium"
                                         Foreground="{DynamicResource TextMutedBrush}" />
                                     <TextBlock Text="{Binding Preview.LocalName}"
-                                        FontSize="12" FontWeight="SemiBold"
+                                        FontSize="13" FontWeight="SemiBold"
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="2" Spacing="1">
+                                <StackPanel Grid.Column="2" Spacing="2">
                                     <TextBlock Text="{Binding L[Playlist_SyncField_Cloud]}"
-                                        FontSize="10"
+                                        FontSize="11" FontWeight="Medium"
                                         Foreground="{DynamicResource TextMutedBrush}" />
                                     <TextBlock Text="{Binding Preview.CloudName}"
-                                        FontSize="12" FontWeight="SemiBold"
+                                        FontSize="13" FontWeight="SemiBold"
                                         Foreground="{DynamicResource AccentBrush}"
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Grid>
 
                             <!-- Описание diff -->
-                            <StackPanel Orientation="Horizontal" Spacing="6"
+                            <StackPanel Orientation="Horizontal" Spacing="8"
                                 IsVisible="{Binding HasDescDiff}">
                                 <PathIcon Data="{StaticResource Icon.TextBoxOutline}"
-                                    Width="16" Height="16"
+                                    Width="18" Height="18"
                                     Foreground="{DynamicResource TextMutedBrush}"
                                     VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding L[Playlist_SyncDescChanged]}"
-                                    FontSize="12"
-                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    FontSize="13"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    VerticalAlignment="Center" />
                             </StackPanel>
 
                             <!-- Треки diff: иконка -->
-                            <StackPanel Orientation="Horizontal" Spacing="6"
+                            <StackPanel Orientation="Horizontal" Spacing="8"
                                 IsVisible="{Binding HasTrackDiff}">
                                 <PathIcon Data="{StaticResource Icon.MusicNote}"
-                                    Width="16" Height="16"
+                                    Width="18" Height="18"
                                     Foreground="{DynamicResource TextMutedBrush}"
                                     VerticalAlignment="Center" />
                                 <TextBlock Text="{Binding TrackDiffSummary}"
-                                    FontSize="12"
-                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    FontSize="13"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    VerticalAlignment="Center" />
                             </StackPanel>
 
                             <!-- Нет различий -->
                             <TextBlock Text="{Binding L[Playlist_SyncNoChanges]}"
-                                FontSize="12"
+                                FontSize="13"
                                 Foreground="{DynamicResource TextMutedBrush}"
                                 IsVisible="{Binding !Preview.HasAnyDifference}" />
                         </StackPanel>
                     </Border>
 
                     <!-- Thumbnail Diff -->
-                    <Border Background="{DynamicResource BgElevatedBrush}"
-                        CornerRadius="8" Padding="14,12"
+                    <Border Classes="diff-section"
                         IsVisible="{Binding HasThumbnailSection}">
-                        <StackPanel Spacing="10">
+                        <StackPanel Spacing="12">
                             <TextBlock Text="{Binding L[Playlist_SyncField_Thumbnail]}"
-                                FontSize="13" FontWeight="SemiBold"
+                                FontSize="14" FontWeight="SemiBold"
                                 Foreground="{DynamicResource TextSecondaryBrush}" />
 
                             <!-- Две обложки рядом когда diff есть -->
@@ -111,17 +126,17 @@
                                 IsVisible="{Binding ThumbnailDiffers}">
 
                                 <!-- Локальная обложка -->
-                                <StackPanel Grid.Column="0" Spacing="6" HorizontalAlignment="Center">
+                                <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
                                     <TextBlock Text="{Binding L[Playlist_SyncField_Local]}"
-                                        FontSize="10"
+                                        FontSize="11" FontWeight="Medium"
                                         Foreground="{DynamicResource TextMutedBrush}"
                                         HorizontalAlignment="Center" />
-                                    <Border Width="100" Height="100"
-                                        CornerRadius="6" ClipToBounds="True"
+                                    <Border Width="130" Height="130"
+                                        CornerRadius="8" ClipToBounds="True"
                                         Background="{DynamicResource BgSkeletonBrush}">
                                         <Panel>
                                             <PathIcon Data="{StaticResource Icon.ImageOutline}"
-                                                Width="32" Height="32"
+                                                Width="40" Height="40"
                                                 Foreground="{DynamicResource TextMutedBrush}"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
@@ -140,23 +155,23 @@
                                 <!-- Стрелка между обложками -->
                                 <PathIcon Grid.Column="1"
                                     Data="{StaticResource Icon.ArrowRight}"
-                                    Width="20" Height="20"
+                                    Width="24" Height="24"
                                     Foreground="{DynamicResource TextMutedBrush}"
                                     VerticalAlignment="Center"
-                                    Margin="12,16,12,0" />
+                                    Margin="16,24,16,0" />
 
                                 <!-- Облачная обложка -->
-                                <StackPanel Grid.Column="2" Spacing="6" HorizontalAlignment="Center">
+                                <StackPanel Grid.Column="2" Spacing="8" HorizontalAlignment="Center">
                                     <TextBlock Text="{Binding L[Playlist_SyncField_Cloud]}"
-                                        FontSize="10"
+                                        FontSize="11" FontWeight="Medium"
                                         Foreground="{DynamicResource AccentBrush}"
                                         HorizontalAlignment="Center" />
-                                    <Border Width="100" Height="100"
-                                        CornerRadius="6" ClipToBounds="True"
+                                    <Border Width="130" Height="130"
+                                        CornerRadius="8" ClipToBounds="True"
                                         Background="{DynamicResource BgSkeletonBrush}">
                                         <Panel>
                                             <PathIcon Data="{StaticResource Icon.ImageOutline}"
-                                                Width="32" Height="32"
+                                                Width="40" Height="40"
                                                 Foreground="{DynamicResource TextMutedBrush}"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
@@ -174,10 +189,10 @@
                             </Grid>
 
                             <!-- Одна обложка когда diff нет -->
-                            <StackPanel HorizontalAlignment="Center" Spacing="6"
+                            <StackPanel HorizontalAlignment="Center" Spacing="8"
                                 IsVisible="{Binding !ThumbnailDiffers}">
-                                <Border Width="100" Height="100"
-                                    CornerRadius="6" ClipToBounds="True"
+                                <Border Width="130" Height="130"
+                                    CornerRadius="8" ClipToBounds="True"
                                     Background="{DynamicResource BgSkeletonBrush}">
                                     <Image
                                         controls:SmartImage.Source="{Binding CloudThumbnailPreviewUrl}"
@@ -189,87 +204,94 @@
                     </Border>
 
                     <!-- Strategy selector -->
-                    <StackPanel Spacing="5">
+                    <StackPanel Spacing="6">
                         <TextBlock Text="{Binding L[Playlist_SyncStrategy]}"
-                            FontSize="13" FontWeight="SemiBold"
+                            FontSize="14" FontWeight="SemiBold"
                             Foreground="{DynamicResource TextSecondaryBrush}" />
                         <ComboBox SelectedIndex="{Binding SelectedStrategyIndex}"
-                            HorizontalAlignment="Stretch">
+                            HorizontalAlignment="Stretch"
+                            Height="36" FontSize="13">
                             <ComboBoxItem>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <PathIcon Data="{StaticResource Icon.SwapHorizontal}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="{Binding L[Playlist_SyncStrategy_Merge]}" />
+                                    <PathIcon Data="{StaticResource Icon.SwapHorizontal}" Width="18"
+                                        Height="18" />
+                                    <TextBlock Text="{Binding L[Playlist_SyncStrategy_Merge]}"
+                                        VerticalAlignment="Center" />
                                 </StackPanel>
                             </ComboBoxItem>
                             <ComboBoxItem>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <PathIcon Data="{StaticResource Icon.CloudDownload}" Width="16"
-                                        Height="16" />
+                                    <PathIcon Data="{StaticResource Icon.CloudDownload}" Width="18"
+                                        Height="18" />
                                     <TextBlock
-                                        Text="{Binding L[Playlist_SyncStrategy_ReplaceLocal]}" />
+                                        Text="{Binding L[Playlist_SyncStrategy_ReplaceLocal]}"
+                                        VerticalAlignment="Center" />
                                 </StackPanel>
                             </ComboBoxItem>
                             <ComboBoxItem>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <PathIcon Data="{StaticResource Icon.CloudUpload}" Width="16"
-                                        Height="16" />
+                                    <PathIcon Data="{StaticResource Icon.CloudUpload}" Width="18"
+                                        Height="18" />
                                     <TextBlock
-                                        Text="{Binding L[Playlist_SyncStrategy_ReplaceCloud]}" />
+                                        Text="{Binding L[Playlist_SyncStrategy_ReplaceCloud]}"
+                                        VerticalAlignment="Center" />
                                 </StackPanel>
                             </ComboBoxItem>
                         </ComboBox>
 
                         <TextBlock Text="{Binding StrategyDescription}"
-                            FontSize="11"
+                            FontSize="12"
                             Foreground="{DynamicResource TextMutedBrush}"
                             TextWrapping="Wrap"
-                            Margin="0,2,0,0" />
+                            Margin="0,3,0,0" />
                     </StackPanel>
 
                     <!-- Field checkboxes -->
-                    <StackPanel Spacing="5">
+                    <StackPanel Spacing="6">
                         <TextBlock Text="{Binding L[Playlist_SyncFields]}"
-                            FontSize="13" FontWeight="SemiBold"
+                            FontSize="14" FontWeight="SemiBold"
                             Foreground="{DynamicResource TextSecondaryBrush}" />
 
-                        <Border Background="{DynamicResource BgElevatedBrush}"
-                            CornerRadius="8" Padding="14,10">
-                            <StackPanel Spacing="8">
+                        <Border Classes="diff-section" Padding="16,12">
+                            <StackPanel Spacing="10">
                                 <!-- Field checkboxes -->
                                 <CheckBox IsChecked="{Binding SyncName}"
-                                    IsEnabled="{Binding HasNameDiff}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                    IsEnabled="{Binding HasNameDiff}"
+                                    FontSize="13">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
                                         <PathIcon Data="{StaticResource Icon.FormatTitle}"
-                                            Width="14" Height="14" />
+                                            Width="16" Height="16" />
                                         <TextBlock Text="{Binding L[Playlist_SyncField_Name]}" />
                                     </StackPanel>
                                 </CheckBox>
 
                                 <CheckBox IsChecked="{Binding SyncDescription}"
-                                    IsEnabled="{Binding HasDescDiff}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                    IsEnabled="{Binding HasDescDiff}"
+                                    FontSize="13">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
                                         <PathIcon Data="{StaticResource Icon.TextBoxOutline}"
-                                            Width="14" Height="14" />
+                                            Width="16" Height="16" />
                                         <TextBlock
                                             Text="{Binding L[Playlist_SyncField_Description]}" />
                                     </StackPanel>
                                 </CheckBox>
 
                                 <CheckBox IsChecked="{Binding SyncThumbnail}"
-                                    IsEnabled="{Binding CanSyncThumbnail}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                    IsEnabled="{Binding CanSyncThumbnail}"
+                                    FontSize="13">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
                                         <PathIcon Data="{StaticResource Icon.ImageOutline}"
-                                            Width="14" Height="14" />
+                                            Width="16" Height="16" />
                                         <TextBlock Text="{Binding L[Playlist_SyncField_Thumbnail]}" />
                                     </StackPanel>
                                 </CheckBox>
 
                                 <CheckBox IsChecked="{Binding SyncTracks}"
-                                    IsEnabled="{Binding HasTrackDiff}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <PathIcon Data="{StaticResource Icon.MusicNote}" Width="14"
-                                            Height="14" />
+                                    IsEnabled="{Binding HasTrackDiff}"
+                                    FontSize="13">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <PathIcon Data="{StaticResource Icon.MusicNote}" Width="16"
+                                            Height="16" />
                                         <TextBlock Text="{Binding L[Playlist_SyncField_Tracks]}" />
                                     </StackPanel>
                                 </CheckBox>
@@ -282,14 +304,16 @@
             <!-- Buttons -->
             <StackPanel Grid.Row="2" Orientation="Horizontal"
                 HorizontalAlignment="Right" Spacing="12"
-                Margin="0,16,0,0">
+                Margin="0,18,0,0">
                 <Button Content="{Binding L[Common_Cancel]}"
                     Command="{Binding CancelCommand}"
-                    Background="Transparent" />
+                    Background="Transparent"
+                    MinWidth="90" Height="36" FontSize="13" />
                 <!-- Кнопка Sync -->
-                <Button Command="{Binding SyncCommand}" Classes="accent accent-base">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <PathIcon Data="{StaticResource Icon.Sync}" Width="16" Height="16" />
+                <Button Command="{Binding SyncCommand}" Classes="accent accent-base"
+                    MinWidth="110" Height="36" FontSize="13">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <PathIcon Data="{StaticResource Icon.Sync}" Width="18" Height="18" />
                         <TextBlock Text="{Binding L[Playlist_SyncButton]}" />
                     </StackPanel>
                 </Button>

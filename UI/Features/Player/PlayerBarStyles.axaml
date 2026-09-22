@@ -1,9 +1,9 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- Section: Flyouts & Popups Instancy -->
     <Style Selector="FlyoutPresenter">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+        <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
@@ -24,7 +24,24 @@
         <Setter Property="Transitions" Value="{x:Null}" />
     </Style>
 
+    <Style Selector="Button.format-btn">
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button.format-btn:pointerover">
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
     <Style Selector="Button.format-btn.popup-open">
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         <!-- Мгновенный сброс цвета рамки при закрытии формата -->
         <Setter Property="Transitions" Value="{x:Null}" />
@@ -35,7 +52,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.2"
-                                               Easing="BackEaseOut" />
+                    Easing="BackEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -48,7 +65,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                                               Easing="CubicEaseOut" />
+                    Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -116,7 +133,7 @@
             <Transitions>
                 <BrushTransition Property="Fill" Duration="0:0:0.15" />
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12"
-                                               Easing="CubicEaseOut" />
+                    Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -184,20 +201,19 @@
     </Style>
 
     <Style Selector="Border.mode-hint">
-        <Setter Property="Background" Value="{DynamicResource BgSkeletonBrush}" />
+        <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Padding" Value="10,6" />
-        <Setter Property="BoxShadow" Value="0 4 12 0 #40000000" />
         <Setter Property="Opacity" Value="0" />
         <Setter Property="RenderTransformOrigin" Value="0.5,1" />
         <Setter Property="RenderTransform" Value="translateY(8px)" />
         <Setter Property="Transitions">
             <Transitions>
-                <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut" />
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.25"
-                                               Easing="CubicEaseOut" />
+                <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
+                    Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -206,40 +222,33 @@
         <Setter Property="RenderTransform" Value="translateY(0)" />
     </Style>
 
-    <Style Selector="FlyoutPresenter">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="Padding" Value="4" />
-    </Style>
-
     <Style Selector="Button.format-item-btn">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="10,8" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
         <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Transitions">
             <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="Button.format-item-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.format-item-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.format-item-btn.active">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>

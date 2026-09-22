@@ -5,12 +5,15 @@
     xmlns:vm="using:LMP.UI.Features.Player"
     xmlns:controls="using:LMP.UI.Controls"
     x:DataType="vm:PlayerBarViewModel"
-    Padding="0,5,0,0"
+    Padding="0"
     ClipToBounds="False"
     Focusable="True"
     UseLayoutRounding="True">
 
-    <Border Background="{DynamicResource BgSecondaryBrush}" UseLayoutRounding="True"
+    <Border Background="{DynamicResource BgPrimaryBrush}"
+        BorderBrush="{DynamicResource BgHighlightBrush}"
+        BorderThickness="0,1,0,0"
+        UseLayoutRounding="True"
         ClipToBounds="False">
         <Grid RowDefinitions="Auto,*">
 
@@ -196,7 +199,7 @@
                     <Border
                         Name="SeekTooltip"
                         Padding="8,4"
-                        Background="Transparent"
+                        Background="{DynamicResource BgPrimaryBrush}"
                         BorderBrush="{DynamicResource AccentBrush}"
                         BorderThickness="1"
                         CornerRadius="4"
@@ -221,7 +224,7 @@
                     <Border
                         Name="SeekHint"
                         Padding="8,4"
-                        Background="Transparent"
+                        Background="{DynamicResource BgPrimaryBrush}"
                         BorderBrush="{DynamicResource BgHighlightBrush}"
                         BorderThickness="1"
                         CornerRadius="4"
@@ -300,9 +303,9 @@
                     <Popup x:Name="ShufflePopup" IsLightDismissEnabled="False" Placement="Top"
                         PlacementTarget="{Binding #ShuffleButton}" Topmost="True"
                         VerticalOffset="-8">
-                        <Border Padding="10,7" Background="{DynamicResource BgElevatedBrush}"
+                        <Border Padding="10,7" Background="{DynamicResource BgPrimaryBrush}"
                             BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                            BoxShadow="0 4 16 0 #50000000" CornerRadius="8">
+                            CornerRadius="8">
                             <StackPanel Spacing="3" MinWidth="160">
                                 <StackPanel Orientation="Horizontal" Spacing="6"
                                     VerticalAlignment="Center">
@@ -367,9 +370,9 @@
                         IsOpen="{Binding IsRepeatHintVisible}" Placement="Top"
                         PlacementTarget="{Binding #RepeatButton}" Topmost="True" VerticalOffset="-8">
                         <Border Classes="mode-hint" Classes.visible="{Binding IsRepeatHintVisible}"
-                            Padding="10,7" Background="{DynamicResource BgElevatedBrush}"
+                            Padding="10,7" Background="{DynamicResource BgPrimaryBrush}"
                             BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                            BoxShadow="0 4 16 0 #50000000" CornerRadius="8">
+                            CornerRadius="8">
                             <StackPanel Orientation="Horizontal" Spacing="6"
                                 VerticalAlignment="Center">
                                 <PathIcon Width="13" Height="13" VerticalAlignment="Center"
@@ -421,8 +424,11 @@
                     Background="{DynamicResource BgHighlightBrush}" />
                 <Grid Grid.Column="2" VerticalAlignment="Center" ColumnDefinitions="Auto,*">
                     <Border Grid.Column="0" Width="52" Height="52" Margin="0,0,12,0"
-                        Background="{DynamicResource BgElevatedBrush}" ClipToBounds="True"
-                        CornerRadius="6">
+                        Background="Transparent"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1"
+                        ClipToBounds="True"
+                        CornerRadius="4">
                         <Panel>
                             <PathIcon Width="22" Height="22"
                                 Foreground="{DynamicResource TextMutedBrush}"
@@ -474,8 +480,8 @@
                         </StackPanel>
                     </Grid>
                     <Panel>
-                        <Button x:Name="FormatButton" Padding="6,3" HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center" Classes="sidebar-btn format-btn"
+                        <Button x:Name="FormatButton" Padding="8,4" HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center" Classes="format-btn"
                             Command="{Binding LoadFormatsCommand}"
                             IsVisible="{Binding ShowStreamInfo}">
                             <Button.Flyout>
@@ -498,7 +504,7 @@
                                                 ToolTip.Tip="{Binding L[Stream_RefreshFormats]}"
                                                 HorizontalAlignment="Right"
                                                 VerticalAlignment="Center"
-                                                CornerRadius="13">
+                                                CornerRadius="6">
                                                 <Panel Width="14" Height="14">
                                                     <PathIcon Width="14" Height="14"
                                                         Data="{StaticResource Icon.Refresh}"

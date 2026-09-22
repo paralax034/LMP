@@ -276,11 +276,16 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         string playlistId,
         IReadOnlyList<TrackInfo> tracks,
         TrackInfo? startTrack = null,
-        bool enableShuffle = false)
+        bool? enableShuffle = null)
     {
         if (tracks.Count == 0 && startTrack == null) return;
 
-        SetShuffleEnabled(enableShuffle);
+        if (enableShuffle.HasValue)
+        {
+            SetShuffleEnabled(enableShuffle.Value);
+        }
+
+        bool isShuffled = enableShuffle ?? ShuffleEnabled;
 
         IReadOnlyList<TrackInfo> effectiveTracks = tracks;
         if (startTrack != null && !tracks.Any(t => string.Equals(t.Id, startTrack.Id, StringComparison.Ordinal)))
@@ -301,7 +306,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
         ActivePlaylistIdChanged?.Invoke(playlistId);
 
-        var targetStartTrack = startTrack ?? (enableShuffle ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)] : effectiveTracks[0]);
+        var targetStartTrack = startTrack ?? (isShuffled ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)] : effectiveTracks[0]);
         await _audio.StartQueueAsync(effectiveTracks, targetStartTrack).ConfigureAwait(false);
 
         UpdatePurityState();

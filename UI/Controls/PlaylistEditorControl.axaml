@@ -5,325 +5,282 @@
     x:Class="LMP.UI.Controls.PlaylistEditorControl"
     x:DataType="d:PlaylistEditorViewModel">
 
-    <StackPanel Spacing="14">
+    <UserControl.Styles>
+        <Style Selector="Border.cover-frame">
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.cover-frame:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
 
-        <!-- ═══ Name ═══ -->
-        <StackPanel Spacing="5">
-            <TextBlock Text="{Binding L[EditPlaylist_Name]}"
-                FontSize="13" FontWeight="SemiBold"
-                Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBox Text="{Binding Name, Mode=TwoWay}"
-                PlaceholderText="{Binding L[Library_PlaylistNameHint]}"
-                IsReadOnly="{Binding IsSystemPlaylist}" />
-            <TextBlock Text="{Binding L[EditPlaylist_SystemNameHint]}"
-                FontSize="11"
-                Foreground="{DynamicResource TextMutedBrush}"
-                IsVisible="{Binding IsSystemPlaylist}" />
+        <!-- Чипы источников в фирменном стиле -->
+        <Style Selector="Button.source-chip">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                    <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.source-chip:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        </Style>
+        <Style Selector="Button.source-chip.selected">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.source-chip /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.source-chip:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid ColumnDefinitions="180, 20, *">
+
+        <!-- ЛЕВАЯ КОЛОНКА: ОБЛОЖКА И ЦВЕТ -->
+        <StackPanel Grid.Column="0" Spacing="12" VerticalAlignment="Top">
+            <!-- Квадратная обложка 200x200 -->
+            <Border Classes="cover-frame" Width="180" Height="180" HorizontalAlignment="Center">
+                <Panel>
+                    <PathIcon Data="{StaticResource Icon.PlaylistMusic}"
+                        Width="56" Height="56"
+                        Foreground="{DynamicResource TextMutedBrush}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding !HasThumbnailPreview}" />
+
+                    <Image Source="{Binding LocalPreviewBitmap}"
+                        Stretch="UniformToFill"
+                        IsVisible="{Binding IsPreviewLocal}" />
+
+                    <Image controls:SmartImage.Source="{Binding ThumbnailPreviewUrl}"
+                        controls:SmartImage.Quality="High"
+                        Stretch="UniformToFill"
+                        IsVisible="{Binding IsPreviewHttp}" />
+
+                    <!-- Спиннер расчёта цвета -->
+                    <Border Background="#80000000" IsVisible="{Binding IsRecalculatingColor}">
+                        <PathIcon Data="{StaticResource Icon.Sync}"
+                            Classes="spinning"
+                            Width="24" Height="24"
+                            Foreground="{DynamicResource AccentBrush}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+                    </Border>
+                </Panel>
+            </Border>
+
+            <!-- Фирменная карточка настройки цвета (без надписи Auto) -->
+            <StackPanel Spacing="4" Width="180">
+                <TextBlock Text="{Binding L[EditPlaylist_Color]}"
+                    FontSize="11" FontWeight="SemiBold"
+                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                <Grid ColumnDefinitions="*, Auto, Auto">
+                    <TextBox Grid.Column="0"
+                        Text="{Binding CustomColor, Mode=TwoWay}"
+                        PlaceholderText="#FF6B35"
+                        FontSize="11"
+                        Height="28" />
+                    <Border Grid.Column="1"
+                        Width="26" Height="26"
+                        CornerRadius="4"
+                        Margin="4,0,0,0"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1"
+                        Background="{Binding ComputedColorPreviewBrush}" />
+                    <Button Grid.Column="2"
+                        Command="{Binding RecalculateColorCommand}"
+                        Classes="ghost-btn"
+                        Width="26" Height="26"
+                        Padding="0"
+                        Margin="4,0,0,0"
+                        ToolTip.Tip="{Binding L[EditPlaylist_RecalculateColor]}">
+                        <PathIcon Data="{StaticResource Icon.Refresh}" Width="13" Height="13" />
+                    </Button>
+                </Grid>
+            </StackPanel>
         </StackPanel>
 
-        <!-- ═══ Description ═══ -->
-        <StackPanel Spacing="5">
-            <TextBlock Text="{Binding L[EditPlaylist_Description]}"
-                FontSize="13" FontWeight="SemiBold"
-                Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBox Text="{Binding Description, Mode=TwoWay}"
-                PlaceholderText="{Binding L[EditPlaylist_DescriptionHint]}"
-                AcceptsReturn="True"
-                TextWrapping="Wrap"
-                MinHeight="48"
-                MaxHeight="80"
-                FontSize="12" />
-        </StackPanel>
+        <!-- ПРАВАЯ КОЛОНКА: ИНПУТЫ И ИСТОЧНИК ОБЛОЖКИ -->
+        <StackPanel Grid.Column="2" Spacing="12">
 
-        <!-- ═══ Thumbnail Section ═══ -->
-        <StackPanel Spacing="5">
-            <TextBlock Text="{Binding L[EditPlaylist_Cover]}"
-                FontSize="13" FontWeight="SemiBold"
-                Foreground="{DynamicResource TextSecondaryBrush}" />
+            <!-- Название -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding L[EditPlaylist_Name]}"
+                    FontSize="12" FontWeight="SemiBold"
+                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding Name, Mode=TwoWay}"
+                    PlaceholderText="{Binding L[Library_PlaylistNameHint]}"
+                    IsReadOnly="{Binding IsSystemPlaylist}"
+                    Height="30" FontSize="12" />
+            </StackPanel>
 
-            <Border Background="{DynamicResource BgElevatedBrush}"
-                CornerRadius="8"
-                Padding="12">
-                <StackPanel Spacing="10">
+            <!-- Описание -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding L[EditPlaylist_Description]}"
+                    FontSize="12" FontWeight="SemiBold"
+                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBox Text="{Binding Description, Mode=TwoWay}"
+                    PlaceholderText="{Binding L[EditPlaylist_DescriptionHint]}"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap"
+                    Height="52"
+                    FontSize="11" />
+            </StackPanel>
 
-                    <!-- Переключатель вкладок -->
-                    <StackPanel Orientation="Horizontal" Spacing="4"
+            <!-- Источник обложки (Чипы + содержимое) -->
+            <StackPanel Spacing="5">
+                <Grid ColumnDefinitions="Auto, *">
+                    <TextBlock Grid.Column="0"
+                        Text="{Binding L[EditPlaylist_Cover]}"
+                        FontSize="12" FontWeight="SemiBold"
+                        Foreground="{DynamicResource TextSecondaryBrush}"
+                        VerticalAlignment="Center" />
+
+                    <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="5"
                         IsVisible="{Binding ShowCoverModeSwitch}">
-                        <!-- Вкладка URL -->
-                        <Button Padding="10,5" FontSize="11" CornerRadius="12"
-                            Command="{Binding SetCoverModeUrl}"
-                            Classes.ghost-btn="{Binding !IsCoverModeUrl}"
-                            Classes.accent="{Binding IsCoverModeUrl}"
-                            Classes.accent-base="{Binding IsCoverModeUrl}">
-                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                <PathIcon Data="{StaticResource Icon.Link}" Width="13" Height="13" />
-                                <TextBlock Text="URL" FontSize="11" />
+                        <Button Command="{Binding SetCoverModeUrl}"
+                            Classes="source-chip"
+                            Classes.selected="{Binding IsCoverModeUrl}">
+                            <StackPanel Orientation="Horizontal" Spacing="5"
+                                VerticalAlignment="Center">
+                                <PathIcon Data="{StaticResource Icon.Link}" Width="11" Height="11" />
+                                <TextBlock Text="URL" FontSize="10" />
                             </StackPanel>
                         </Button>
 
-                        <!-- Вкладка из треков -->
-                        <Button Padding="10,5" FontSize="11" CornerRadius="12"
-                            Command="{Binding SetCoverModeFromTracks}"
-                            IsVisible="{Binding HasTracksCoverOption}"
-                            Classes.ghost-btn="{Binding !IsCoverModeFromTracks}"
-                            Classes.accent="{Binding IsCoverModeFromTracks}"
-                            Classes.accent-base="{Binding IsCoverModeFromTracks}">
-                            <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Button Command="{Binding SetCoverModeFromTracks}"
+                            Classes="source-chip"
+                            Classes.selected="{Binding IsCoverModeFromTracks}"
+                            IsVisible="{Binding HasTracksCoverOption}">
+                            <StackPanel Orientation="Horizontal" Spacing="5"
+                                VerticalAlignment="Center">
                                 <PathIcon Data="{StaticResource Icon.ImageMultipleOutline}"
-                                    Width="13" Height="13" />
-                                <TextBlock Text="{Binding L[CoverPicker_Tab]}" FontSize="11" />
+                                    Width="11" Height="11" />
+                                <TextBlock Text="{Binding L[CoverPicker_Tab]}" FontSize="10" />
                             </StackPanel>
                         </Button>
 
-                        <!-- Вкладка файл -->
-                        <Button Padding="10,5" FontSize="11" CornerRadius="12"
-                            Command="{Binding SetCoverModeFile}"
-                            Classes.ghost-btn="{Binding !IsCoverModeFile}"
-                            Classes.accent="{Binding IsCoverModeFile}"
-                            Classes.accent-base="{Binding IsCoverModeFile}">
-                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                <PathIcon Data="{StaticResource Icon.FileImageOutline}" Width="13"
-                                    Height="13" />
-                                <TextBlock Text="{Binding L[CoverPicker_FileTab]}" FontSize="11" />
+                        <Button Command="{Binding SetCoverModeFile}"
+                            Classes="source-chip"
+                            Classes.selected="{Binding IsCoverModeFile}">
+                            <StackPanel Orientation="Horizontal" Spacing="5"
+                                VerticalAlignment="Center">
+                                <PathIcon Data="{StaticResource Icon.FileImageOutline}" Width="11"
+                                    Height="11" />
+                                <TextBlock Text="{Binding L[CoverPicker_FileTab]}" FontSize="10" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
+                </Grid>
 
-                    <!-- ═══ URL ═══ -->
-                    <Grid ColumnDefinitions="*, Auto"
-                        IsVisible="{Binding IsCoverModeUrl}">
+                <!-- Контейнер выбранного режима источника -->
+                <Panel MinHeight="32">
+                    <TextBox Text="{Binding ThumbnailUrl, Mode=TwoWay}"
+                        PlaceholderText="https://..."
+                        FontSize="11" Height="30"
+                        IsVisible="{Binding IsCoverModeUrl}" />
+
+                    <Grid ColumnDefinitions="*, Auto" IsVisible="{Binding IsCoverModeFile}">
                         <TextBox Grid.Column="0"
-                            Text="{Binding ThumbnailUrl, Mode=TwoWay}"
-                            PlaceholderText="https://..."
-                            FontSize="12" />
-                        <Border Grid.Column="1"
-                            Width="36" Height="36"
-                            CornerRadius="6" ClipToBounds="True"
-                            Margin="8,0,0,0"
-                            Background="{DynamicResource BgSkeletonBrush}">
-                            <Panel>
-                                <!-- Превью URL: заглушка без изображения -->
-                                <PathIcon Data="{StaticResource Icon.ImageOutline}"
-                                    Width="18" Height="18"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding !HasThumbnailPreview}" />
-                                <Image controls:SmartImage.Source="{Binding ThumbnailPreviewUrl}"
-                                    controls:SmartImage.Quality="Low"
-                                    Stretch="UniformToFill"
-                                    Width="36" Height="36"
-                                    IsVisible="{Binding IsPreviewHttp}" />
-                                <Image Source="{Binding LocalPreviewBitmap}"
-                                    Stretch="UniformToFill"
-                                    Width="36" Height="36"
-                                    IsVisible="{Binding IsPreviewLocal}" />
-                            </Panel>
-                        </Border>
+                            Text="{Binding SelectedFilePath, Mode=OneWay}"
+                            IsReadOnly="True"
+                            PlaceholderText="{Binding L[CoverPicker_FileHint]}"
+                            FontSize="11" Height="30" />
+                        <Button Grid.Column="1"
+                            Command="{Binding SelectFileCommand}"
+                            Padding="8,4" Margin="6,0,0,0"
+                            Classes="ghost-btn"
+                            ToolTip.Tip="{Binding L[CoverPicker_BrowseFile]}">
+                            <PathIcon Data="{StaticResource Icon.FolderOpen}" Width="15" Height="15" />
+                        </Button>
                     </Grid>
 
-                    <!-- ═══ Из треков ═══ -->
                     <Border IsVisible="{Binding IsCoverModeFromTracks}"
-                        MinHeight="220"
-                        MaxHeight="220">
+                        Background="Transparent"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="8"
+                        Height="186">
                         <controls:PlaylistCoverPicker DataContext="{Binding CoverPicker}" />
                     </Border>
+                </Panel>
+            </StackPanel>
 
-                    <!-- ═══ Файл ═══ -->
-                    <StackPanel IsVisible="{Binding IsCoverModeFile}" Spacing="8">
-                        <Grid ColumnDefinitions="*, Auto">
-                            <TextBox Grid.Column="0"
-                                Text="{Binding SelectedFilePath, Mode=OneWay}"
-                                IsReadOnly="True"
-                                PlaceholderText="{Binding L[CoverPicker_FileHint]}"
-                                FontSize="12" />
-                            <!-- Кнопка выбора файла -->
-                            <Button Grid.Column="1"
-                                Command="{Binding SelectFileCommand}"
-                                Padding="8,6"
-                                Margin="8,0,0,0"
-                                ToolTip.Tip="{Binding L[CoverPicker_BrowseFile]}">
-                                <PathIcon Data="{StaticResource Icon.FolderOpen}" Width="18"
-                                    Height="18" />
-                            </Button>
-                        </Grid>
-                        <Border Width="80" Height="80"
-                            CornerRadius="6" ClipToBounds="True"
-                            Background="{DynamicResource BgSkeletonBrush}"
-                            HorizontalAlignment="Left"
-                            IsVisible="{Binding IsPreviewLocal}">
-                            <Image Source="{Binding LocalPreviewBitmap}"
-                                Stretch="UniformToFill"
-                                Width="80" Height="80" />
-                        </Border>
-                    </StackPanel>
-
-                    <!-- Кнопка загрузки обложки в YouTube -->
-                    <Button Command="{Binding UploadThumbnailCommand}"
-                        IsVisible="{Binding ShowUploadThumbnailButton}"
-                        Padding="8,6"
-                        HorizontalAlignment="Left"
-                        Margin="0,4,0,0">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Panel>
-                                <PathIcon Data="{StaticResource Icon.CloudUpload}"
-                                    Width="14" Height="14"
-                                    IsVisible="{Binding !IsRecalculatingColor}" />
-                                <PathIcon Data="{StaticResource Icon.Sync}"
-                                    Width="14" Height="14"
-                                    IsVisible="{Binding IsRecalculatingColor}"
-                                    Classes="spinning" />
-                            </Panel>
-                            <TextBlock Text="{Binding L[EditPlaylist_UploadThumbnail]}"
-                                FontSize="12" />
-                        </StackPanel>
-                    </Button>
-
-                </StackPanel>
-            </Border>
-        </StackPanel>
-
-        <!-- ═══ Custom Color ═══ -->
-        <StackPanel Spacing="5">
-            <TextBlock Text="{Binding L[EditPlaylist_Color]}"
-                FontSize="13" FontWeight="SemiBold"
-                Foreground="{DynamicResource TextSecondaryBrush}" />
-            <Grid ColumnDefinitions="*, Auto">
-                <TextBox Grid.Column="0"
-                    Text="{Binding CustomColor, Mode=TwoWay}"
-                    PlaceholderText="#FF6B35"
-                    FontSize="12" />
-                <Border Grid.Column="1"
-                    Width="32" Height="32"
-                    CornerRadius="6"
-                    Margin="8,0,0,0"
-                    BorderBrush="{DynamicResource BgHighlightBrush}"
-                    BorderThickness="1"
-                    Background="{Binding ColorPreviewBrush}" />
-            </Grid>
-            <TextBlock Text="{Binding L[EditPlaylist_ColorHint]}"
-                FontSize="11"
-                Foreground="{DynamicResource TextMutedBrush}" />
-        </StackPanel>
-
-        <!-- ═══ Computed Color (readonly + кнопка пересчёта) ═══ -->
-        <StackPanel Spacing="5">
-            <TextBlock Text="{Binding L[EditPlaylist_ComputedColor]}"
-                FontSize="13" FontWeight="SemiBold"
-                Foreground="{DynamicResource TextSecondaryBrush}" />
-            <Grid ColumnDefinitions="*, Auto, Auto">
-                <TextBox Grid.Column="0"
-                    Text="{Binding ComputedColor, Mode=OneWay}"
-                    IsReadOnly="True"
-                    PlaceholderText="{Binding L[EditPlaylist_ComputedColorNone]}"
-                    FontSize="12"
-                    Foreground="{DynamicResource TextMutedBrush}" />
-                <Border Grid.Column="1"
-                    Width="32" Height="32"
-                    CornerRadius="6"
-                    Margin="8,0,0,0"
-                    BorderBrush="{DynamicResource BgHighlightBrush}"
-                    BorderThickness="1"
-                    Background="{Binding ComputedColorPreviewBrush}" />
-                <!-- Кнопка пересчёта цвета -->
-                <Button Grid.Column="2"
-                    Command="{Binding RecalculateColorCommand}"
-                    Padding="6"
-                    Margin="4,0,0,0"
-                    ToolTip.Tip="{Binding L[EditPlaylist_RecalculateColor]}">
-                    <Panel>
-                        <PathIcon Data="{StaticResource Icon.Refresh}"
-                            Width="18" Height="18"
-                            IsVisible="{Binding !IsRecalculatingColor}" />
-                        <PathIcon Data="{StaticResource Icon.Sync}"
-                            Width="18" Height="18"
-                            IsVisible="{Binding IsRecalculatingColor}"
-                            Classes="spinning" />
-                    </Panel>
-                </Button>
-            </Grid>
-            <TextBlock Text="{Binding L[EditPlaylist_ComputedColorHint]}"
-                FontSize="11"
-                Foreground="{DynamicResource TextMutedBrush}" />
-        </StackPanel>
-
-        <!-- ═══ YouTube Sync Section ═══ -->
-        <Border Background="{DynamicResource BgElevatedBrush}"
-            CornerRadius="8" Padding="14,12"
-            IsVisible="{Binding ShowSyncSection}">
-            <StackPanel Spacing="10">
+            <!-- Секция YouTube Sync -->
+            <Border Background="Transparent"
+                BorderBrush="{DynamicResource BgHighlightBrush}"
+                BorderThickness="1"
+                CornerRadius="6" Padding="10,8"
+                IsVisible="{Binding ShowSyncSection}">
                 <Grid ColumnDefinitions="Auto, *, Auto">
-                    <!-- YouTube Sync: иконка CloudSync -->
                     <PathIcon Grid.Column="0"
                         Data="{StaticResource Icon.CloudSync}"
-                        Width="20" Height="20"
+                        Width="16" Height="16"
                         Foreground="{DynamicResource AccentBrush}"
-                        VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        VerticalAlignment="Center" Margin="0,0,8,0" />
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                         <TextBlock Text="{Binding L[EditPlaylist_Sync]}"
-                            FontSize="13" FontWeight="SemiBold" />
+                            FontSize="12" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding L[EditPlaylist_SyncDesc]}"
-                            FontSize="11"
+                            FontSize="10"
                             Foreground="{DynamicResource TextMutedBrush}"
                             TextWrapping="Wrap" />
                     </StackPanel>
+
                     <ToggleSwitch Grid.Column="2"
                         IsChecked="{Binding IsSyncedToCloud, Mode=TwoWay}"
                         IsEnabled="{Binding IsAuthenticated}"
-                        VerticalAlignment="Center" Margin="12,0,0,0" />
+                        VerticalAlignment="Center"
+                        Margin="6,0,0,0" />
                 </Grid>
+            </Border>
 
-                <Border Padding="10,6" CornerRadius="4"
-                    IsVisible="{Binding HasYoutubeBinding}">
-                    <Border.Background>
-                        <SolidColorBrush Color="{DynamicResource AccentColor}" Opacity="0.1" />
-                    </Border.Background>
-                    <!-- Sync active badge -->
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <PathIcon Data="{StaticResource Icon.CheckCircleOutline}"
-                            Width="14" Height="14"
-                            Foreground="{DynamicResource AccentBrush}"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding L[EditPlaylist_SyncActive]}" FontSize="11"
-                            Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Border>
+            <!-- Кнопка создания копии -->
+            <Button Command="{Binding CreateCopyCommand}"
+                IsVisible="{Binding IsForEdit}"
+                HorizontalAlignment="Left"
+                Padding="6,4"
+                Classes="ghost-btn">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <PathIcon Data="{StaticResource Icon.ContentCopy}" Width="12" Height="12" />
+                    <TextBlock Text="{Binding L[EditPlaylist_CreateCopy]}" FontSize="11" />
+                </StackPanel>
+            </Button>
 
-                <Border Padding="10,6" CornerRadius="4"
-                    IsVisible="{Binding !IsAuthenticated}">
-                    <Border.Background>
-                        <SolidColorBrush Color="Orange" Opacity="0.1" />
-                    </Border.Background>
-                    <!-- Login required warning -->
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <PathIcon Data="{StaticResource Icon.AlertOutline}"
-                            Width="14" Height="14"
-                            Foreground="Orange" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding L[EditPlaylist_LoginRequired]}" FontSize="11"
-                            Foreground="Orange" VerticalAlignment="Center" TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-        </Border>
-
-        <!-- Create Copy кнопка -->
-        <Button Command="{Binding CreateCopyCommand}"
-            IsVisible="{Binding IsForEdit}"
-            HorizontalAlignment="Left"
-            Padding="10,6"
-            Margin="0,4,0,0"
-            Classes="ghost-btn">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <PathIcon Data="{StaticResource Icon.ContentCopy}" Width="14" Height="14" />
-                <TextBlock Text="{Binding L[EditPlaylist_CreateCopy]}" FontSize="12" />
-            </StackPanel>
-        </Button>
-
-        <!-- ═══ Validation Error / Success Message ═══ -->
-        <TextBlock Text="{Binding ErrorMessage}"
-            Foreground="{DynamicResource SystemError}"
-            IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-            FontSize="13" FontWeight="SemiBold"
-            TextWrapping="Wrap" Margin="0,4,0,0" />
-    </StackPanel>
+            <!-- Сообщение об ошибке -->
+            <TextBlock Text="{Binding ErrorMessage}"
+                Foreground="{DynamicResource SystemErrorBrush}"
+                IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                FontSize="11" FontWeight="SemiBold"
+                TextWrapping="Wrap" />
+        </StackPanel>
+    </Grid>
 </UserControl>

@@ -188,16 +188,28 @@ public sealed class PlaylistService
     #region Mutation CRUD API
 
     /// <summary>
-    /// Создает новый локальный плейлист с правами текущего пользователя.
+    /// Создает новый локальный плейлист с правами текущего пользователя и полным набором метаданных.
     /// </summary>
-    public async Task<Playlist> CreatePlaylistAsync(string name, CancellationToken ct = default)
+    public async Task<Playlist> CreatePlaylistAsync(
+        string name,
+        string? description = null,
+        string? thumbnailUrl = null,
+        string? customColor = null,
+        string? computedColor = null,
+        CancellationToken ct = default)
     {
         var playlist = new Playlist
         {
             Name = name,
+            Description = description,
+            ThumbnailUrl = thumbnailUrl,
+            CustomColor = customColor,
+            ComputedColor = computedColor,
             SyncMode = PlaylistSyncMode.LocalOnly,
             Ownership = PlaylistOwnership.Mine,
-            OwnerId = CurrentOwnerId
+            OwnerId = CurrentOwnerId,
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now
         };
 
         await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
@@ -233,14 +245,22 @@ public sealed class PlaylistService
     /// </summary>
     public async Task<bool> LinkToCloudAsync(string playlistId, CancellationToken ct = default)
     {
-        var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
-        if (playlist == null) return false;
+        try
+        {
+            var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
+            if (playlist == null) return false;
 
-        bool linked = await _syncService.LinkToCloudAsync(playlist, ct).ConfigureAwait(false);
-        if (linked)
-            OnPlaylistChanged?.Invoke(playlist);
+            bool linked = await _syncService.LinkToCloudAsync(playlist, ct).ConfigureAwait(false);
+            if (linked)
+                OnPlaylistChanged?.Invoke(playlist);
 
-        return linked;
+            return linked;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlaylistService] LinkToCloudAsync failed for '{playlistId}': {ex.Message}");
+            return false;
+        }
     }
 
     public async Task UnlinkFromCloudAsync(string playlistId, CancellationToken ct = default)

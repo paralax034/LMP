@@ -88,7 +88,7 @@
             <Setter Property="Margin" Value="0,0,0,6" />
         </Style>
         <Style Selector="TabItem /template/ Border#PART_SelectedPipe">
-            <Setter Property="Background" Value="{DynamicResource AccentBrushTransparent}" />
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
             <Setter Property="Height" Value="2" />
             <Setter Property="Margin" Value="0,0,0,2" />
             <Setter Property="Transitions">

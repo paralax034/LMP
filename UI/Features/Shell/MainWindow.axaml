@@ -356,18 +356,19 @@
             <notifications:NotificationPanel DataContext="{Binding NotificationPanel}" />
         </Popup>
 
-        <!-- TOAST CANVAS (ZIndex: 2000) — позиционируется у курсора -->
+        <!-- TOAST CANVAS (ZIndex: 2000) -->
         <Canvas x:Name="CopyHintCanvas"
             Grid.Row="0" Grid.RowSpan="3"
             ZIndex="2000"
             IsHitTestVisible="False">
 
             <Border x:Name="CopyHintOverlay"
-                Padding="12,8"
-                Background="{DynamicResource BgElevatedBrush}"
+                Padding="10,6"
+                Background="{DynamicResource BgPrimaryBrush}"
+                BorderBrush="{DynamicResource BgHighlightBrush}"
                 BorderThickness="1"
-                CornerRadius="8"
-                BoxShadow="0 4 20 0 #70000000"
+                CornerRadius="6"
+                BoxShadow="{StaticResource CardShadow}"
                 MaxWidth="450"
                 IsVisible="False"
                 Opacity="0">
@@ -376,12 +377,12 @@
                         <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
                     </Transitions>
                 </Border.Transitions>
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="6">
                     <PathIcon x:Name="CopyHintIcon"
-                        Width="14" Height="14"
+                        Width="13" Height="13"
                         VerticalAlignment="Center" />
                     <TextBlock x:Name="CopyHintText"
-                        FontSize="12" FontWeight="SemiBold"
+                        FontSize="11" FontWeight="Medium"
                         VerticalAlignment="Center"
                         Foreground="{DynamicResource TextPrimaryBrush}"
                         TextWrapping="Wrap" MaxWidth="380" />

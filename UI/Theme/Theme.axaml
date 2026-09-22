@@ -1,6 +1,33 @@
 <Styles xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!--
+        1. ФИЛОСОФИЯ: Контент — доминанта, UI — легкая рамка. Запрещены монолитные заливки
+           (BgElevatedBrush) на карточках. Глубина строится на 1px контурах (BgHighlightBrush),
+           полупрозрачном ховере (BgElevatedTransparentBrush).
+           Ключевое всё на обычных границах без заливок фона.
+        2. 1-CLICK ТАКТИЛЬНОСТЬ: Быстрые действия выносятся в компактные чипы (action-chip)
+           с тултипами. Выпадающие списки (ComboBox) — только для глобальных пресетов.
+        3. ТОКЕНЫ ЦВЕТА:
+           • BgPrimaryBrush — фон окон и диалогов.
+           • BgHighlightBrush — 1px контуры карточек и разделители шапок (0,0,0,1).
+           • AccentBrush / AccentTransparentBrush — фокус, активный чип, акцентные кнопки.
+           • #FFB86C — рамка карточки при конфликте/предупреждении (без текстовых бейджей).
+           • SystemErrorBrush — деструктивные действия и фатальные ошибки валидации.
+        4. ГЕОМЕТРИЯ И ДИАЛОГИ:
+           • CornerRadius: 12 (диалоги), 8 (карточки/обложки), 6 (чипы/инпуты), 4 (превью треков).
+           • Ширина модалок: 920px (массовый синк/таблицы), 700-740px (редакторы), 420-500px (алерты).
+        5. ТИПОГРАФИКА: 22/18 (Bold, заголовки), 14/13 (SemiBold/Regular, тело/инпуты),
+           12 (SemiBold, тайлы сетки), 11 (Regular, метаданные). Обязательны TextTrimming + ToolTip.
+        6. GPU ПЕРЕХОДЫ: Любой hover/selection анимируется через Transitions длительностью 0:0:0.12–0.15s.
+    -->
+
+    <Style>
+        <Style.Resources>
+            <BoxShadows x:Key="CardShadow">0 4 8 0 #40000000</BoxShadows>
+        </Style.Resources>
+    </Style>
+
     <!-- ПОДКЛЮЧАЕМ РАЗДЕЛЕННЫЕ ТЕМЫ -->
     <StyleInclude Source="avares://LMP/UI/Theme/Typography.axaml" />
     <StyleInclude Source="avares://LMP/UI/Theme/Buttons.axaml" />
@@ -8,13 +35,6 @@
     <StyleInclude Source="avares://LMP/UI/Theme/AppComponents.axaml" />
     <!-- PlayerBarStyles ПОСЛЕ AppComponents — переопределяет vol-* стили -->
     <StyleInclude Source="avares://LMP/UI/Features/Player/PlayerBarStyles.axaml" />
-
-    <Style>
-        <Style.Resources>
-            <BoxShadows x:Key="CardShadow">0 4 8 0 #40000000</BoxShadows>
-            <BoxShadows x:Key="SmallShadow">0 2 4 0 #40000000</BoxShadows>
-        </Style.Resources>
-    </Style>
 
     <Style Selector="Window">
         <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />

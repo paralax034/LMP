@@ -332,7 +332,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     }
 
     /// <summary>
-    /// Открывает диалог создания плейлиста и передает управление в доменный сервис.
+    /// Открывает диалог создания плейлиста и передает управление в доменный сервис с сохранением всех метаданных.
     /// </summary>
     private async Task OpenCreateDialogAsync()
     {
@@ -342,7 +342,12 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (result == null || string.IsNullOrWhiteSpace(result.Name)) return;
 
         var trimmedName = result.Name.Trim();
-        var playlist = await _playlistService.CreatePlaylistAsync(trimmedName);
+        var playlist = await _playlistService.CreatePlaylistAsync(
+            name: trimmedName,
+            description: result.Description,
+            thumbnailUrl: result.ThumbnailUrl,
+            customColor: result.CustomColor,
+            computedColor: result.ComputedColor);
 
         if (result.SyncToCloud && _auth.IsAuthenticated)
         {
@@ -449,6 +454,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             catch (OperationCanceledException) { return; }
             catch (Exception ex)
             {
+                Log.Error($"[Library] Failed to fetch account playlists: {ex.Message}");
                 if (!_isDisposed)
                     await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], SL["Sync_Error_API"] + ": " + ex.Message);
                 return;
@@ -456,37 +462,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
             SyncProgress = 0.15;
             var allPlaylists = await _playlistService.GetAllPlaylistsAsync(ct);
-
-            var cloudPlaylistIds = new HashSet<string>(
-                ytPlaylists.Select(p => p.YoutubeId).Where(id => !string.IsNullOrEmpty(id))!,
-                StringComparer.Ordinal);
-
-            int orphansCleaned = 0;
-            for (int i = 0; i < allPlaylists.Count; i++)
-            {
-                var localPl = allPlaylists[i];
-                if (localPl.SyncMode == PlaylistSyncMode.TwoWaySync
-                    && !string.IsNullOrEmpty(localPl.YoutubeId)
-                    && localPl.Id != LibraryService.LikedPlaylistId
-                    && !cloudPlaylistIds.Contains(localPl.YoutubeId))
-                {
-                    localPl.SyncMode = PlaylistSyncMode.LocalOnly;
-                    localPl.YoutubeId = null;
-                    localPl.IsCloudUnavailable = false;
-                    await _playlistService.AddOrUpdatePlaylistAsync(localPl, ct);
-                    orphansCleaned++;
-                }
-            }
-
-            if (orphansCleaned > 0)
-            {
-                await _notifications.ShowToastAsync(
-                    "Dialog_Warning_Title",
-                    "Playlist_OrphansCleaned",
-                    NotificationSeverity.Warning,
-                    durationMs: 4000,
-                    messageArgs: [orphansCleaned]);
-            }
 
             if (playlistsToImport.Count == 0)
             {

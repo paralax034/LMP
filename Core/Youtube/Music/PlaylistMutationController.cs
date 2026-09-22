@@ -184,15 +184,24 @@ internal sealed class PlaylistMutationController(HttpClient http)
     /// <summary>
     /// Creates a playlist with optional batch track addition.
     /// </summary>
+    /// <param name="title">Playlist title.</param>
+    /// <param name="videoIds">Optional list of video IDs to include initially.</param>
+    /// <param name="description">Optional playlist description.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>YouTube playlist ID.</returns>
     public async Task<string> CreatePlaylistAsync(
         string title,
         IReadOnlyList<string>? videoIds = null,
+        string? description = null,
         CancellationToken ct = default)
     {
         var root = await PostAsync(CreatePlaylistEndpoint, writer =>
         {
             writer.WriteString("title", title);
+            if (!string.IsNullOrEmpty(description))
+            {
+                writer.WriteString("description", description);
+            }
             writer.WriteString("params", "ICE%3D");
 
             if (videoIds is { Count: > 0 })
