@@ -478,7 +478,7 @@
           "Avalonia": "[12.1.1, )",
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Concentus": "[2.2.2, )",
-          "LMP.Decoders.AAC": "[1.0.0-dev, )",
+          "LMP.Decoders.AAC": "[0.0.369, )",
           "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.Sqlite": "[10.0.11, )",
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.*, )",

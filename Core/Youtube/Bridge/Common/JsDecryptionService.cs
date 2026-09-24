@@ -113,9 +113,19 @@ public sealed class JsDecryptionService : IDisposable
             var result = QuickJsNative.CallFunction(_handle, functionName, argument);
             sw.Stop();
 
-            Log.Debug(
-                $"[JsDecryptionService] {functionName}({Truncate(argument)}) → " +
-                $"{(result != null ? Truncate(result) : "null")} [{sw.Elapsed.TotalMilliseconds:F3}ms]");
+            if (result != null)
+            {
+                Log.Debug(
+                    $"[JsDecryptionService] {functionName}({Truncate(argument)}) → " +
+                    $"{Truncate(result)} [{sw.Elapsed.TotalMilliseconds:F3}ms]");
+            }
+            else
+            {
+                var nativeError = QuickJsNative.GetLastError(_handle);
+                Log.Warn(
+                    $"[JsDecryptionService] {functionName}({Truncate(argument)}) → null [{sw.Elapsed.TotalMilliseconds:F3}ms]. " +
+                    $"Native last error: {nativeError ?? "(none)"}");
+            }
 
             return result;
         }

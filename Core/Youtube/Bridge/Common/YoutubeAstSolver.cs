@@ -9,6 +9,27 @@ namespace LMP.Core.Youtube.Bridge.Common;
 /// Обеспечивает высокопроизводительный разбор и модификацию плеера на основе AST Acornima.
 /// Использует лексический анализатор областей видимости для достижения максимального сжатия JS кода (до 10-15 КБ).
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Архитектура деобфускации YouTube:</b>
+/// <list type="bullet">
+///   <item>
+///     <b>Конструктор URL (<c>expressionCode</c>):</b> Находится через AST-шаблон <see cref="AsdasdTemplate"/> 
+///     (маркер вызова <c>url.set("alr", "yes")</c>). Возвращает экземпляр <c>goog.Uri</c>.
+///   </item>
+///   <item>
+///     <b>Дешифрация подписи (Sig):</b> Выполняется синхронно прямо внутри вызова конструктора 
+///     при передаче зашифрованного токена третьим аргументом: <c>fn(url, "s", sig)</c>.
+///   </item>
+///   <item>
+///     <b>Дешифрация N-Token:</b> Токен устанавливается в объект через <c>url.set("n", n)</c>. 
+///     Алгоритм деобфускации n-токена встроен в один из анонимных методов прототипа созданного объекта. 
+///     Солвер зондирует методы объекта по цепочке прототипов (<c>url[key]()</c>) до момента изменения 
+///     значения <c>url.get("n")</c>, после чего немедленно прерывает перебор.
+///   </item>
+/// </list>
+/// </para>
+/// </remarks>
 public static partial class YoutubeAstSolver
 {
     private static readonly MatchTemplate IdentifierTemplate = new()
@@ -209,11 +230,12 @@ public static partial class YoutubeAstSolver
         var body = program.Body;
         Node? iifeNode = null;
         FunctionExpression? iifeFunc = null;
+        int iifeIndex = -1;
 
-        if (body.Count == 1)
+        for (int i = 0; i < body.Count; i++)
         {
-            var func = body[0];
-            if (func is ExpressionStatement es && es.Expression is CallExpression ce)
+            var node = body[i];
+            if (node is ExpressionStatement es && es.Expression is CallExpression ce)
             {
                 var callee = ce.Callee;
                 while (callee is ParenthesizedExpression pe)
@@ -222,25 +244,10 @@ public static partial class YoutubeAstSolver
                 }
                 if (callee is FunctionExpression fe && fe.Body is not null)
                 {
-                    iifeNode = func;
+                    iifeNode = node;
                     iifeFunc = fe;
-                }
-            }
-        }
-        else if (body.Count == 2)
-        {
-            var func = body[1];
-            if (func is ExpressionStatement es && es.Expression is CallExpression ce)
-            {
-                var callee = ce.Callee;
-                while (callee is ParenthesizedExpression pe)
-                {
-                    callee = pe.Expression;
-                }
-                if (callee is FunctionExpression fe && fe.Body is not null)
-                {
-                    iifeNode = func;
-                    iifeFunc = fe;
+                    iifeIndex = i;
+                    break;
                 }
             }
         }
@@ -277,16 +284,15 @@ public static partial class YoutubeAstSolver
         }
 
         // --- SCOPE-AWARE TREE SHAKING ---
-        var stmtToDeclared = new Dictionary<Statement, HashSet<string>>();
-        var declaredToStmt = new Dictionary<string, List<Statement>>(StringComparer.Ordinal);
+        var declaredToStmt = new Dictionary<string, List<Statement>>(plainStatements.Count, StringComparer.Ordinal);
+        var tempDeclared = new HashSet<string>(16, StringComparer.Ordinal);
 
         foreach (var stmt in plainStatements)
         {
-            var declared = new HashSet<string>(32, StringComparer.Ordinal);
-            CollectDeclaredIdentifiers(stmt, declared);
-            stmtToDeclared[stmt] = declared;
+            tempDeclared.Clear();
+            CollectDeclaredIdentifiers(stmt, tempDeclared);
 
-            foreach (var name in declared)
+            foreach (var name in tempDeclared)
             {
                 if (!declaredToStmt.TryGetValue(name, out var list))
                 {
@@ -308,7 +314,7 @@ public static partial class YoutubeAstSolver
         // #endif
 
         var requiredIdentifiers = new HashSet<string>(32, StringComparer.Ordinal);
-        var solverStatements = new List<Statement>();
+        var solverStatements = new List<Statement>(2);
 
         for (int i = 0; i < plainStatements.Count; i++)
         {
@@ -317,13 +323,7 @@ public static partial class YoutubeAstSolver
             if (solver is not null)
             {
                 solverStatements.Add(stmt);
-                if (stmtToDeclared.TryGetValue(stmt, out var declared))
-                {
-                    foreach (var name in declared)
-                    {
-                        requiredIdentifiers.Add(name);
-                    }
-                }
+                CollectDeclaredIdentifiers(stmt, requiredIdentifiers);
             }
         }
 
@@ -331,9 +331,10 @@ public static partial class YoutubeAstSolver
         if (solverStatements.Count > 0)
         {
             var topLevelNames = new HashSet<string>(declaredToStmt.Keys, StringComparer.Ordinal);
-            var includedStatements = new HashSet<Statement>();
+            var includedStatements = new HashSet<Statement>(plainStatements.Count);
             var queue = new Queue<string>(requiredIdentifiers);
             var visitedIdentifiers = new HashSet<string>(requiredIdentifiers, StringComparer.Ordinal);
+            var collector = new ScopeCollector(topLevelNames);
 
             while (queue.Count > 0)
             {
@@ -345,7 +346,6 @@ public static partial class YoutubeAstSolver
                     {
                         if (includedStatements.Add(stmt))
                         {
-                            var collector = new ScopeCollector(topLevelNames);
                             var referenced = collector.Analyze(stmt);
 
                             foreach (var refId in referenced)
@@ -379,15 +379,15 @@ public static partial class YoutubeAstSolver
 
         var (nSolvers, sigSolvers) = GetSolutions(shakenStatements, baseJs);
 
-        var sb = new StringBuilder(32 * 1024);
+        var sb = new StringBuilder(512 * 1024);
 
         sb.AppendLine($"globalThis.__sts = {sts};");
         sb.AppendLine(SetupScript);
 
-        if (body.Count == 2)
+        for (int i = 0; i < iifeIndex; i++)
         {
-            var stmt0 = body[0];
-            sb.Append(baseJs.AsSpan(stmt0.Start, stmt0.End - stmt0.Start)).AppendLine(";");
+            var stmt = body[i];
+            sb.Append(baseJs.AsSpan(stmt.Start, stmt.End - stmt.Start)).AppendLine(";");
         }
 
         int headerStart = iifeNode.Start;
@@ -551,27 +551,48 @@ public static partial class YoutubeAstSolver
         private readonly HashSet<string> _topLevelDeclared = topLevelDeclared;
         private readonly HashSet<string> _referenced = new(32, StringComparer.Ordinal);
         private readonly List<HashSet<string>> _scopes = [];
+        private int _scopeDepth;
 
         public HashSet<string> Analyze(Node node)
         {
+            _referenced.Clear();
+            _scopeDepth = 0;
             Visit(node);
             return _referenced;
         }
 
-        private void PushScope() => _scopes.Add(new HashSet<string>(StringComparer.Ordinal));
-        private void PopScope() => _scopes.RemoveAt(_scopes.Count - 1);
+        private void PushScope()
+        {
+            if (_scopeDepth < _scopes.Count)
+            {
+                _scopes[_scopeDepth].Clear();
+            }
+            else
+            {
+                _scopes.Add(new HashSet<string>(StringComparer.Ordinal));
+            }
+            _scopeDepth++;
+        }
+
+        private void PopScope()
+        {
+            if (_scopeDepth > 0)
+            {
+                _scopeDepth--;
+            }
+        }
 
         private void DeclareLocal(string name)
         {
-            if (_scopes.Count > 0)
+            if (_scopeDepth > 0)
             {
-                _scopes[^1].Add(name);
+                _scopes[_scopeDepth - 1].Add(name);
             }
         }
 
         private bool IsLocal(string name)
         {
-            for (int i = _scopes.Count - 1; i >= 0; i--)
+            for (int i = _scopeDepth - 1; i >= 0; i--)
             {
                 if (_scopes[i].Contains(name)) return true;
             }
@@ -800,10 +821,12 @@ public static partial class YoutubeAstSolver
           if ((decodedSig !== undefined && prevS !== decodedSig) || (n !== undefined && prevN !== n)) {
               // Constructor already decrypted the parameters
           } else {
-              for (const key of keys) {
-                if (["constructor", "set", "get", "clone", "toString", "toJSON"].includes(key)) continue;
-                if (typeof url[key] === "function") {
-                  try { 
+              const ignored = { constructor: 1, set: 1, get: 1, clone: 1, toString: 1, toJSON: 1 };
+              for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                if (ignored[key]) continue;
+                try {
+                  if (typeof url[key] === "function") {
                     url[key](); 
                     
                     const sAfter = url.get("s");
@@ -811,8 +834,8 @@ public static partial class YoutubeAstSolver
                     if ((decodedSig !== undefined && sAfter !== decodedSig) || (n !== undefined && nAfter !== n)) {
                         break; // CRITICAL: Stop calling subsequent functions to avoid re-scrambling!
                     }
-                  } catch (e) {}
-                }
+                  }
+                } catch (e) {}
               }
           }
           
