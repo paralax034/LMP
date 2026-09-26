@@ -8,7 +8,7 @@ namespace LMP.Core.Services;
 /// <summary>
 /// Централизованный сервис управления жизненным циклом сетевых клиентов и состоянием адаптеров.
 /// </summary>
-public sealed class NetworkManager
+public sealed class NetworkManager : IDisposable
 {
     private const int RebuildCooldownMs = 15_000;
     private const int ClientDrainTimeoutSeconds = 30;
@@ -174,8 +174,11 @@ public sealed class NetworkManager
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
             Proxy = effectiveProxy,
             UseProxy = true,
-            PooledConnectionLifetime = TimeSpan.FromSeconds(90),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+            // Отключаем клиентские таймауты. 
+            // Позволяем серверу YouTube самому закрыть соединение (TCP FIN). 
+            // Тогда чтение вернет 0 байт, и IOException не возникнет!
+            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
+            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             MaxConnectionsPerServer = 6,
             AutomaticDecompression = DecompressionMethods.All,
             UseCookies = false,
@@ -197,13 +200,13 @@ public sealed class NetworkManager
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
             Proxy = effectiveProxy,
             UseProxy = true,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15),
+            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
+            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             MaxConnectionsPerServer = 20,
             EnableMultipleHttp2Connections = true,
-            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(15),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
             ConnectTimeout = TimeSpan.FromSeconds(6),
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             AllowAutoRedirect = false,
@@ -222,12 +225,12 @@ public sealed class NetworkManager
             Proxy = effectiveProxy,
             UseProxy = true,
             MaxConnectionsPerServer = 8,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
+            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             EnableMultipleHttp2Connections = true,
             KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(15),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(5),
+            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
             ConnectTimeout = TimeSpan.FromSeconds(6)
         };
 
@@ -244,8 +247,8 @@ public sealed class NetworkManager
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
             Proxy = effectiveProxy,
             UseProxy = true,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(1),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15),
+            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
+            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             MaxConnectionsPerServer = 4,
             ConnectTimeout = TimeSpan.FromSeconds(4),
             AllowAutoRedirect = false
@@ -261,15 +264,30 @@ public sealed class NetworkManager
         return (audioClient, apiClient, imageClient, probeClient);
     }
 
+    /// <summary>
+    /// Неблокирующее мягкое освобождение старых пулов. Использование Timer вместо Task.Delay
+    /// позволяет избежать лишней State Machine аллокации.
+    /// </summary>
     private static void ScheduleDrainDisposal(params HttpClient[] oldClients)
     {
-        _ = Task.Delay(TimeSpan.FromSeconds(ClientDrainTimeoutSeconds)).ContinueWith(_ =>
+        Timer? timer = null;
+        timer = new Timer(_ =>
         {
-            foreach (var client in oldClients)
+            for (int i = 0; i < oldClients.Length; i++)
             {
-                try { client.Dispose(); } catch { }
+                try
+                {
+                    oldClients[i].CancelPendingRequests();
+                    oldClients[i].Dispose();
+                }
+                catch (ObjectDisposedException) { /* Игнорируем штатный dispose */ }
+                catch (Exception ex)
+                {
+                    Log.Debug($"[NetworkManager] Silent exception during graceful client disposal: {ex.Message}");
+                }
             }
-        }, TaskScheduler.Default);
+            timer?.Dispose();
+        }, null, TimeSpan.FromSeconds(ClientDrainTimeoutSeconds), Timeout.InfiniteTimeSpan);
     }
 
     #region Network Watchdog & Address Monitoring

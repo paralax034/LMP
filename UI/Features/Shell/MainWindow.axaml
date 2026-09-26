@@ -53,7 +53,7 @@
         RowDefinitions="Auto, *, Auto"
         Margin="{Binding $parent[Window].OffScreenMargin}">
 
-        <!-- ═══ TITLE BAR + NAVIGATION (46px) ═══ -->
+        <!-- TITLE BAR + NAVIGATION (46px) -->
         <Grid Grid.Row="0" Height="46" Background="{DynamicResource BgSecondaryBrush}"
             ColumnDefinitions="Auto, Auto, *, Auto, Auto" Name="TitleBar">
 
@@ -290,7 +290,7 @@
             </StackPanel>
         </Grid>
 
-        <!-- ═══ MAIN CONTENT ═══ -->
+        <!-- MAIN CONTENT -->
         <Border Grid.Row="1" Background="{DynamicResource BgPrimaryBrush}" ClipToBounds="True">
             <Panel>
                 <!--
@@ -331,7 +331,7 @@
                     </StackPanel>
                 </Border>
 
-                <!-- ═══ Dialog Host (ZIndex: 900) — над контентом, под TopBar ═══ -->
+                <!-- Dialog Host (ZIndex: 900) — над контентом, под TopBar -->
                 <shell:DialogHost DataContext="{Binding DialogHost}"
                     ZIndex="900"
                     IsVisible="{Binding HasActiveDialog}" />
@@ -347,6 +347,7 @@
 
         <!-- NOTIFICATION PANEL POPUP -->
         <Popup Grid.Row="0" Grid.RowSpan="3"
+            ShouldUseOverlayLayer="True"
             PlacementTarget="{Binding #NotificationButtonControl}"
             Placement="BottomEdgeAlignedRight"
             IsOpen="{Binding NotificationButton.IsPanelOpen, Mode=TwoWay}"

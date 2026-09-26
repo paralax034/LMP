@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using global::Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 
 namespace LMP.Core.Data;
 

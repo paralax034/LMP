@@ -24,7 +24,7 @@ public partial class VolumeControl : UserControl
         public const double PopupCornerRadius = 8.0;
         public const double ButtonCornerRadius = 19.0;
 
-        public const int PopupCloseDelayMs = 200;
+        public const int PopupCloseDelayMs = 150;
         public const byte Transparency70PercentAlpha = 76;
     }
 
@@ -105,6 +105,9 @@ public partial class VolumeControl : UserControl
     private int _lastVolumeBeforeMute = 50;
     private IDisposable? _closeTimer;
 
+    private IBrush? _cachedTransparentBg;
+    private Color _lastBaseColor;
+
     public VolumeControl()
     {
         InitializeComponent();
@@ -118,6 +121,13 @@ public partial class VolumeControl : UserControl
         UpdateDependentProperties();
     }
 
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _closeTimer?.Dispose();
+        _closeTimer = null;
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -127,6 +137,24 @@ public partial class VolumeControl : UserControl
             UpdateDependentProperties();
             UpdateVolumeVisual();
         }
+    }
+
+    private IBrush GetOrCreateTransparentBg()
+    {
+        var bgPrimaryBrush = (IBrush)(Application.Current?.Resources["BgPrimaryBrush"] ?? Brushes.Black);
+        var baseColor = bgPrimaryBrush is ISolidColorBrush scb ? scb.Color : Color.FromRgb(18, 18, 18);
+
+        if (_cachedTransparentBg == null || baseColor != _lastBaseColor)
+        {
+            _lastBaseColor = baseColor;
+            _cachedTransparentBg = new SolidColorBrush(Color.FromArgb(
+                VolumeConstants.Transparency70PercentAlpha,
+                baseColor.R,
+                baseColor.G,
+                baseColor.B));
+        }
+
+        return _cachedTransparentBg;
     }
 
     private void UpdateDependentProperties()
@@ -143,31 +171,28 @@ public partial class VolumeControl : UserControl
         int effectivePercent = (int)Math.Round((double)Volume / maxVol * 100);
         if (effectivePercent > 100) effectivePercent = 100;
 
+        bool isVolumeBoosted = Volume > VolumeConstants.DefaultMaxVolume;
         bool isMuted = Volume < 1;
-        bool isVolumeLow = Volume >= 1 && effectivePercent <= 33;
-        bool isVolumeMedium = !isMuted && effectivePercent > 33 && effectivePercent <= 66;
-        bool isVolumeHigh = !isMuted && effectivePercent > 66;
+        bool isVolumeLow = Volume >= 1 && !isVolumeBoosted && effectivePercent <= 33;
+        bool isVolumeMedium = !isMuted && !isVolumeBoosted && effectivePercent > 33 && effectivePercent <= 66;
+        bool isVolumeHigh = !isMuted && !isVolumeBoosted && effectivePercent > 66;
 
         IsMuted = isMuted;
         IsVolumeLow = isVolumeLow;
         IsVolumeMedium = isVolumeMedium;
         IsVolumeHigh = isVolumeHigh;
-        IsVolumeBoosted = Volume > VolumeConstants.DefaultMaxVolume;
+        IsVolumeBoosted = isVolumeBoosted;
 
         VolumePercentText = $"{Volume}";
+
+        VolumeThumb.Classes.Set("boosted", isVolumeBoosted);
+        VolumeBar.Classes.Set("boosted", isVolumeBoosted);
 
         // Прямое и безопасное получение системных ресурсов темы
         var accentBrush = (IBrush)(Application.Current?.Resources["AccentBrush"] ?? Brushes.Purple);
         var textMutedBrush = (IBrush)(Application.Current?.Resources["TextMutedBrush"] ?? Brushes.Gray);
         var textSecondaryBrush = (IBrush)(Application.Current?.Resources["TextSecondaryBrush"] ?? Brushes.LightGray);
-        var bgPrimaryBrush = (IBrush)(Application.Current?.Resources["BgPrimaryBrush"] ?? Brushes.Black);
-
-        var baseColor = bgPrimaryBrush is ISolidColorBrush scb ? scb.Color : Color.FromRgb(18, 18, 18);
-        var transparent70PercentBg = new SolidColorBrush(Color.FromArgb(
-            VolumeConstants.Transparency70PercentAlpha,
-            baseColor.R,
-            baseColor.G,
-            baseColor.B));
+        var transparent70PercentBg = GetOrCreateTransparentBg();
 
         PopupBorder.Background = transparent70PercentBg;
 
@@ -332,7 +357,6 @@ public partial class VolumeControl : UserControl
     {
         _isVolumeButtonHovered = false;
         TryScheduleVolumePopupClose();
-        UpdateDependentProperties();
     }
 
     public void OnVolumePopupContentEntered(object? sender, PointerEventArgs e)
@@ -347,7 +371,6 @@ public partial class VolumeControl : UserControl
     {
         _isVolumePopupHovered = false;
         if (!_isDraggingVolume) TryScheduleVolumePopupClose();
-        UpdateDependentProperties();
     }
 
     private void TryScheduleVolumePopupClose()

@@ -85,6 +85,7 @@
         </Button>
 
         <Popup x:Name="HintPopup"
+            ShouldUseOverlayLayer="True"
             Placement="Top"
             PlacementTarget="{Binding #CopyButton}"
             IsLightDismissEnabled="False"

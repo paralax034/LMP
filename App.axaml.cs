@@ -273,7 +273,7 @@ public partial class App : Application
                 Log.Info("[Memory] Post-startup GC compaction complete. Cold memory reclaimed.");
             });
 
-            // Shutdown Handler (исправленный детерминированный асинхронный цикл)
+            // Shutdown Handler
             bool isCleaningUp = false;
             desktop.ShutdownRequested += (sender, e) =>
             {
@@ -288,19 +288,23 @@ public partial class App : Application
                 {
                     try
                     {
-                        _appLifetimeCts.Cancel();
+                        Log.Info("Starting graceful shutdown...");
 
-                        // Сохраняем статистику до освобождения ресурсов менеджера кэша
+                        // СНАЧАЛА сохраняем статистику до освобождения ресурсов
                         CdnHostStatsStore.Save();
                         SessionCacheStore.Save();
+
+                        // МЯГКО высвобождаем аудиодвижок и кэш. 
+                        // Делаем это ДО отмены токена, чтобы потоки завершились штатно, без выброса IOException
+                        await audioEngine.DisposeAsync().ConfigureAwait(false);
+                        await audioCacheManager.DisposeAsync().ConfigureAwait(false);
+                        await library.DisposeAsync().ConfigureAwait(false);
 
                         LocalAuthServer.DisposeIfCreated();
                         MemoryCleanupHelper.Dispose();
 
-                        // Асинхронно высвобождаем аудиодвижок, кэш и гарантированно сбрасываем настройки в SQLite
-                        await audioEngine.DisposeAsync().ConfigureAwait(false);
-                        await audioCacheManager.DisposeAsync().ConfigureAwait(false);
-                        await library.DisposeAsync().ConfigureAwait(false);
+                        // Отменяем глобальный токен только когда активные сетевые операции уже мягко завершены
+                        _appLifetimeCts.Cancel();
                     }
                     catch (Exception ex)
                     {
@@ -309,9 +313,11 @@ public partial class App : Application
                     finally
                     {
                         _appLifetimeCts.Dispose();
+                        Log.Info("Shutdown complete. Exiting with code 0.");
 
-                        // Завершаем работу приложения (force shutdown в обход повторного вызова событий)
-                        desktop.Shutdown();
+                        // Гарантированный чистый выход с кодом 0.
+                        // Использование desktop.Shutdown() после отмены e.Cancel часто приводит к коду -1 в Avalonia.
+                        Environment.Exit(0);
                     }
                 }, DispatcherPriority.Normal);
             };

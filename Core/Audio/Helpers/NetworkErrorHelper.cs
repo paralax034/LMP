@@ -23,7 +23,7 @@ public static class NetworkErrorHelper
             return "none";
 
         System.Net.Sockets.SocketException? socketEx = null;
-        System.Net.Http.HttpRequestException? httpEx = null;
+        HttpRequestException? httpEx = null;
         IOException? ioEx = null;
 
         for (var current = exception; current is not null; current = current.InnerException)
@@ -33,7 +33,7 @@ public static class NetworkErrorHelper
                 case System.Net.Sockets.SocketException se:
                     socketEx = se;
                     break;
-                case System.Net.Http.HttpRequestException he:
+                case HttpRequestException he:
                     httpEx ??= he;
                     break;
                 case IOException io:

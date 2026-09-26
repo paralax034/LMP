@@ -15,18 +15,23 @@
             PointerWheelChanged="OnVolumeScroll">
             <Grid>
                 <PathIcon Width="24" Height="24"
+                    Transitions="{x:Null}"
                     Data="{StaticResource Icon.VolumeMute}"
                     IsVisible="{Binding IsMuted, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
+                    Transitions="{x:Null}"
                     Data="{StaticResource Icon.VolumeLow}"
                     IsVisible="{Binding IsVolumeLow, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
+                    Transitions="{x:Null}"
                     Data="{StaticResource Icon.VolumeMedium}"
                     IsVisible="{Binding IsVolumeMedium, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
+                    Transitions="{x:Null}"
                     Data="{StaticResource Icon.VolumeHigh}"
                     IsVisible="{Binding IsVolumeHigh, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
+                    Transitions="{x:Null}"
                     Data="{StaticResource Icon.VolumeVibrate}"
                     IsVisible="{Binding IsVolumeBoosted, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
             </Grid>
@@ -36,9 +41,10 @@
         <Popup
             x:Name="VolumePopup"
             IsLightDismissEnabled="False"
+            ShouldUseOverlayLayer="True"
             Placement="Top"
             PlacementTarget="{Binding #VolumeButton}"
-            VerticalOffset="2">
+            VerticalOffset="1">
             <Border
                 x:Name="PopupBorder"
                 DataContext="{Binding #rootVolumeControl}"

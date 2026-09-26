@@ -43,6 +43,7 @@
 
         <!-- Встроенный Popup -->
         <Popup x:Name="PickerPopup"
+            ShouldUseOverlayLayer="True"
             PlacementTarget="{Binding #ColorButton}"
             Placement="BottomEdgeAlignedRight"
             IsLightDismissEnabled="True"

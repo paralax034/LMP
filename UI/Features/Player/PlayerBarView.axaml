@@ -299,7 +299,8 @@
                                 IsVisible="{Binding AutoShuffleEnabled}" />
                         </Panel>
                     </Button>
-                    <Popup x:Name="ShufflePopup" IsLightDismissEnabled="False" Placement="Top"
+                    <Popup x:Name="ShufflePopup" ShouldUseOverlayLayer="True"
+                        IsLightDismissEnabled="False" Placement="Top"
                         PlacementTarget="{Binding #ShuffleButton}" Topmost="True"
                         VerticalOffset="-8">
                         <Border Padding="10,7" Background="{DynamicResource BgPrimaryBrush}"
@@ -364,7 +365,8 @@
                                 IsVisible="{Binding IsRepeatAll}" />
                         </Grid>
                     </Button>
-                    <Popup HorizontalOffset="0" IsLightDismissEnabled="False"
+                    <Popup ShouldUseOverlayLayer="True" HorizontalOffset="0"
+                        IsLightDismissEnabled="False"
                         IsOpen="{Binding IsRepeatHintVisible}" Placement="Top"
                         PlacementTarget="{Binding #RepeatButton}" Topmost="True" VerticalOffset="-8">
                         <Border Classes="mode-hint" Classes.visible="{Binding IsRepeatHintVisible}"
@@ -398,7 +400,8 @@
                             <PathIcon Width="18" Height="18" Classes="heart-icon"
                                 Data="{Binding IsLiked, Converter={StaticResource BoolToGeometryConverter}, ConverterParameter='Heart|HeartOutline'}" />
                         </Button>
-                        <Popup HorizontalOffset="0" IsLightDismissEnabled="False"
+                        <Popup ShouldUseOverlayLayer="True" HorizontalOffset="0"
+                            IsLightDismissEnabled="False"
                             IsOpen="{Binding IsLikeHintVisible}" Placement="Top"
                             PlacementTarget="{Binding #LikeButton}" VerticalOffset="-8">
                             <Border Classes="mode-hint"
