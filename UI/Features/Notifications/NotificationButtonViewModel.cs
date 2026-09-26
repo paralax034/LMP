@@ -1,3 +1,5 @@
+using Avalonia.Threading;
+
 namespace LMP.UI.Features.Notifications;
 
 public sealed partial class NotificationButtonViewModel : ViewModelBase
@@ -39,7 +41,13 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
             {
                 Log.Debug("[NotificationButton] Panel opened");
                 _ = _panelViewModel.OnPanelOpenedAsync();
-                _notificationService.MarkAllAsRead();
+
+                // Откладываем маркировку прочтения на фоновый приоритет UI-потока,
+                // чтобы не блокировать открывающий проход Measure/Arrange для Popup.
+                Dispatcher.UIThread.Post(
+                    static state => ((NotificationService)state!).MarkAllAsRead(),
+                    _notificationService,
+                    DispatcherPriority.Background);
             }
         });
     }

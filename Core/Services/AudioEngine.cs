@@ -121,7 +121,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     #region Dependencies
 
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
     private readonly YoutubeProvider _youtube;
     private readonly LibraryService _library;
     private readonly AudioPlayer _player;
@@ -284,7 +284,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// Инициализирует центральный движок воспроизведения.
     /// </summary>
     public AudioEngine(
-        INetworkManager networkManager,
+        NetworkManager networkManager,
         YoutubeProvider youtube,
         LibraryService library,
         TrackRegistry trackRegistry)

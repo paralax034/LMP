@@ -287,7 +287,6 @@
                             <Panel Classes="shuffle-auto" Width="18" Height="18"
                                 IsVisible="{Binding AutoShuffleEnabled}">
                                 <PathIcon Width="18" Height="18"
-                                    Foreground="{DynamicResource AccentBrush}"
                                     Data="{StaticResource Icon.ShuffleAuto}" />
                             </Panel>
                             <PathIcon Classes="shuffle-flash" Width="18" Height="18" Opacity="0"
@@ -352,6 +351,7 @@
                         <PathIcon Width="20" Height="20" Data="{StaticResource Icon.SkipNext}" />
                     </Button>
                     <Button x:Name="RepeatButton" Width="40" Height="40" Classes="playback-btn"
+                        Classes.active="{Binding !IsRepeatNone}"
                         Command="{Binding ToggleRepeatCommand}" CornerRadius="20"
                         ToolTip.Tip="{Binding RepeatTooltip}" ToolTip.Placement="Top"
                         ToolTip.VerticalOffset="-6">
@@ -359,10 +359,8 @@
                             <PathIcon Width="18" Height="18" Data="{StaticResource Icon.Repeat}"
                                 IsVisible="{Binding IsRepeatNone}" />
                             <PathIcon Width="18" Height="18" Data="{StaticResource Icon.RepeatOnce}"
-                                Foreground="{DynamicResource AccentBrush}"
                                 IsVisible="{Binding IsRepeatOne}" />
                             <PathIcon Width="18" Height="18" Data="{StaticResource Icon.Repeat}"
-                                Foreground="{DynamicResource AccentBrush}"
                                 IsVisible="{Binding IsRepeatAll}" />
                         </Grid>
                     </Button>
@@ -392,23 +390,20 @@
                     <Border Width="1" Height="28" Margin="6,0"
                         Background="{DynamicResource BgHighlightBrush}" />
                     <Panel>
-                        <Button x:Name="LikeButton" Width="36" Height="36" Classes="icon-btn"
-                            Command="{Binding ToggleLikeCommand}" CornerRadius="18"
+                        <Button x:Name="LikeButton" Width="40" Height="40" Classes="playback-btn"
+                            Classes.active="{Binding IsLiked}"
+                            Command="{Binding ToggleLikeCommand}" CornerRadius="20"
                             ToolTip.Tip="{Binding LikeTooltip}" ToolTip.Placement="Top"
                             ToolTip.VerticalOffset="-6">
                             <PathIcon Width="18" Height="18" Classes="heart-icon"
-                                Classes.active="{Binding IsLiked}"
                                 Data="{Binding IsLiked, Converter={StaticResource BoolToGeometryConverter}, ConverterParameter='Heart|HeartOutline'}" />
                         </Button>
-                        <Popup HorizontalOffset="-20" IsLightDismissEnabled="False"
+                        <Popup HorizontalOffset="0" IsLightDismissEnabled="False"
                             IsOpen="{Binding IsLikeHintVisible}" Placement="Top"
                             PlacementTarget="{Binding #LikeButton}" VerticalOffset="-8">
                             <Border Classes="mode-hint"
                                 Classes.visible="{Binding IsLikeHintVisible}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Width="14" Height="14"
-                                        Foreground="{DynamicResource AccentBrush}"
-                                        Data="{StaticResource Icon.Heart}" />
                                     <TextBlock FontSize="12" FontWeight="SemiBold"
                                         Foreground="{DynamicResource TextPrimaryBrush}"
                                         Text="{Binding LikeHintText}" />
@@ -556,14 +551,12 @@
                                                             <!-- Столбец 1: Кодек (Opus/AAC) -->
                                                             <TextBlock Grid.Column="1"
                                                                 Text="{Binding Codec}"
-                                                                FontWeight="{Binding IsActive, Converter={StaticResource BoolToFontWeight}}"
                                                                 VerticalAlignment="Center" />
 
                                                             <!-- Столбец 2: Битрейт с округлением на
                                                             лету -->
                                                             <TextBlock Grid.Column="2"
                                                                 Text="{Binding Bitrate, StringFormat={}{0:F0} kbps}"
-                                                                FontWeight="{Binding IsActive, Converter={StaticResource BoolToFontWeight}}"
                                                                 VerticalAlignment="Center" />
 
                                                             <!-- Столбец 3: Расширение в скобках -->
@@ -588,7 +581,6 @@
                                                             <TextBlock Grid.Column="6"
                                                                 HorizontalAlignment="Right"
                                                                 FontSize="11"
-                                                                FontWeight="SemiBold"
                                                                 VerticalAlignment="Center"
                                                                 Foreground="{DynamicResource TextMutedBrush}"
                                                                 Text="{Binding SizeMbFormatted}" />

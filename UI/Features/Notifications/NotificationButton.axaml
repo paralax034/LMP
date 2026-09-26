@@ -4,27 +4,111 @@
     x:Class="LMP.UI.Features.Notifications.NotificationButton"
     x:DataType="notifications:NotificationButtonViewModel">
 
-    <Button Classes="ctrl-btn"
+    <UserControl.Styles>
+        <Style Selector="Button.notif-btn">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+
+        <Style Selector="Button.notif-btn /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.notif-btn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.notif-btn:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.notif-btn /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style
+            Selector="Button.notif-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.notif-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style Selector="Button.notif-btn:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        </Style>
+        <Style Selector="Button.notif-btn.open">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+        </Style>
+
+        <!-- Колокольчик в состоянии покоя — мягкий вторичный тон без паразитного свечения -->
+        <Style Selector="Button.notif-btn PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.notif-btn:pointerover PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.notif-btn.open PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+
+        <Style Selector="Button.notif-btn TextBlock.notif-title">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.notif-btn:pointerover TextBlock.notif-title">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Button Classes="notif-btn"
+        Classes.open="{Binding IsPanelOpen}"
         Command="{Binding TogglePanelCommand}"
         ToolTip.Tip="{Binding L[Nav_Notifications]}">
-        <Panel>
-            <PathIcon Data="{StaticResource Icon.Bell}"
-                Width="15" Height="15"
-                Foreground="{DynamicResource TextMutedBrush}" />
-            <Border IsVisible="{Binding HasUnread}"
-                Background="{DynamicResource AccentBrush}"
-                CornerRadius="6"
-                MinWidth="13" Height="13"
-                Padding="3,0"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Margin="0,-4,-4,0">
-                <TextBlock Text="{Binding UnreadCountText}"
-                    FontSize="8" FontWeight="Bold"
-                    Foreground="{DynamicResource AccentButtonTextBrush}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center" />
-            </Border>
-        </Panel>
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <!-- Иконка колокольчика со счетчиком непрочитанных -->
+            <Panel VerticalAlignment="Center">
+                <PathIcon Data="{StaticResource Icon.BellOutline}"
+                    Width="15" Height="15" />
+
+                <Border IsVisible="{Binding HasUnread}"
+                    Background="{DynamicResource AccentBrush}"
+                    CornerRadius="5"
+                    MinWidth="10" Height="10"
+                    Padding="2,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,-3,-3,0">
+                    <TextBlock Text="{Binding UnreadCountText}"
+                        FontSize="7" FontWeight="Bold"
+                        Foreground="{DynamicResource AccentButtonTextBrush}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+                </Border>
+            </Panel>
+
+            <!-- Текст «Уведомления», который элегантно раскрывается в шапке при открытии панели -->
+            <TextBlock Classes="notif-title"
+                Text="{Binding L[Nav_Notifications]}"
+                FontSize="12"
+                FontWeight="SemiBold"
+                VerticalAlignment="Center"
+                IsVisible="{Binding IsPanelOpen}" />
+        </StackPanel>
     </Button>
 </UserControl>

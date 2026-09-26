@@ -37,23 +37,23 @@
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                         <!-- Header actions -->
-                        <Button Command="{Binding ShuffleQueueCommand}" Classes="icon-btn"
+                        <Button Command="{Binding ShuffleQueueCommand}" Classes="header-icon-btn"
                             ToolTip.Tip="{Binding L[Queue_Shuffle]}">
-                            <PathIcon Data="{StaticResource Icon.Shuffle}" Width="20" Height="20" />
+                            <PathIcon Data="{StaticResource Icon.Shuffle}" Width="18" Height="18" />
                         </Button>
-                        <Button Command="{Binding DownloadAllCommand}" Classes="icon-btn"
+                        <Button Command="{Binding DownloadAllCommand}" Classes="header-icon-btn"
                             ToolTip.Tip="{Binding L[Queue_DownloadAll]}">
-                            <PathIcon Data="{StaticResource Icon.Download}" Width="20"
-                                Height="20" />
+                            <PathIcon Data="{StaticResource Icon.Download}" Width="18" Height="18" />
                         </Button>
-                        <Button Command="{Binding SaveQueueToPlaylistCommand}" Classes="icon-btn"
+                        <Button Command="{Binding SaveQueueToPlaylistCommand}"
+                            Classes="header-icon-btn"
                             ToolTip.Tip="{Binding L[Queue_SaveToPlaylist]}">
-                            <PathIcon Data="{StaticResource Icon.ContentSave}" Width="20"
-                                Height="20" />
+                            <PathIcon Data="{StaticResource Icon.ContentSave}" Width="18"
+                                Height="18" />
                         </Button>
-                        <Button Command="{Binding ClearQueueCommand}" Classes="icon-btn"
+                        <Button Command="{Binding ClearQueueCommand}" Classes="header-icon-btn"
                             ToolTip.Tip="{Binding L[Queue_Clear]}">
-                            <PathIcon Data="{StaticResource Icon.Broom}" Width="20" Height="20" />
+                            <PathIcon Data="{StaticResource Icon.Broom}" Width="18" Height="18" />
                         </Button>
                     </StackPanel>
                 </Grid>
@@ -76,7 +76,7 @@
                     Foreground="{DynamicResource TextSecondaryBrush}" TextAlignment="Center" />
             </StackPanel>
 
-            <!-- List — ScrollViewer здесь, не внутри TrackListControl -->
+            <!-- List -->
             <ScrollViewer Grid.Row="1" Margin="24,0"
                 IsVisible="{Binding !IsFilterEmpty}">
                 <controls:TrackListControl x:Name="QueueTrackList"

@@ -1,12 +1,12 @@
 <Styles xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- -->
     <!-- CHIP STYLES                                                         -->
     <!-- Чипы и таб-подобные переключатели.                                 -->
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- -->
 
-    <!-- ═══ RADIOBUTTON CHIP ═══ -->
+    <!-- RADIOBUTTON CHIP -->
 
     <Style Selector="RadioButton.chip">
         <Setter Property="Background" Value="Transparent" />
@@ -57,7 +57,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- ═══ BUTTON CHIP ═══ -->
+    <!-- BUTTON CHIP -->
     <!-- Кнопка-чип для кликабельных тегов (история поиска и т.д.) -->
 
     <Style Selector="Button.chip">
@@ -88,7 +88,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- ═══ SOURCE TAB ═══ -->
+    <!-- SOURCE TAB -->
     <!-- Переключатели источника поиска (YouTube Music / YouTube / Local) -->
 
     <Style Selector="RadioButton.source-tab">

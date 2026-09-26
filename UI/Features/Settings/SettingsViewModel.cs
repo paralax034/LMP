@@ -46,7 +46,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
     private const int NavigationDebounceMs = 128;
 
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
     private readonly LibraryService _library;
     private readonly TrackRegistry _registry;
     private readonly SearchCacheService _searchCache;
@@ -808,7 +808,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     /// Создаёт VM настроек и инициализирует команды и sidebar.
     /// </summary>
     public SettingsViewModel(
-        INetworkManager networkManager,
+        NetworkManager networkManager,
         LibraryService library,
         TrackRegistry registry,
         SearchCacheService searchCache,

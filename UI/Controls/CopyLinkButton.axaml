@@ -1,35 +1,66 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctrl="using:LMP.UI.Controls"
     x:Class="LMP.UI.Controls.CopyLinkButton"
+    x:DataType="ctrl:CopyLinkButton"
     x:Name="Root">
 
     <UserControl.Styles>
         <Style Selector="Button.copy-btn">
             <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Opacity" Value="1" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.08" />
-                </Transitions>
-            </Setter>
-        </Style>
-        <Style Selector="Button.copy-btn Border.hover-ring">
-            <Setter Property="Opacity" Value="0" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.10" />
-                </Transitions>
-            </Setter>
-        </Style>
-        <Style Selector="Button.copy-btn:pointerover Border.hover-ring">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Opacity" Value="1" />
         </Style>
-        <Style Selector="Button.copy-btn:pressed Border.hover-ring">
-            <Setter Property="Opacity" Value="1" />
+        <Style Selector="Button.copy-btn:pointerover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
         </Style>
         <Style Selector="Button.copy-btn:pressed">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Opacity" Value="0.82" />
+        </Style>
+        <Style Selector="Button.copy-btn /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.copy-btn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.copy-btn /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style
+            Selector="Button.copy-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style Selector="Button.copy-btn PathIcon">
+            <Setter Property="Data" Value="{StaticResource Icon.LinkVariant}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.1" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.copy-btn:pointerover PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.copy-btn:pressed PathIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+        </Style>
+
+        <Style Selector="Button.copy-btn.success PathIcon">
+            <Setter Property="Data" Value="{StaticResource Icon.Check}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.copy-btn.error PathIcon">
+            <Setter Property="Data" Value="{StaticResource Icon.Close}" />
+            <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
         </Style>
     </UserControl.Styles>
 
@@ -46,30 +77,11 @@
             ToolTip.Placement="Top"
             ToolTip.VerticalOffset="-6">
 
-            <Grid Width="{Binding ButtonSize, ElementName=Root}"
-                Height="{Binding ButtonSize, ElementName=Root}">
-
-                <Border Classes="hover-ring"
-                    Margin="2"
-                    CornerRadius="999"
-                    BorderThickness="1"
-                    IsVisible="{Binding ShowHoverRing, ElementName=Root}"
-                    BorderBrush="{DynamicResource AccentBrush}" />
-
-                <PathIcon x:Name="LinkIcon"
-                    Width="{Binding IconSize, ElementName=Root}"
-                    Height="{Binding IconSize, ElementName=Root}"
-                    Data="{StaticResource Icon.LinkVariant}"
-                    Foreground="{DynamicResource TextSecondaryBrush}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center">
-                    <PathIcon.Transitions>
-                        <Transitions>
-                            <DoubleTransition Property="Opacity" Duration="0:0:0.1" />
-                        </Transitions>
-                    </PathIcon.Transitions>
-                </PathIcon>
-            </Grid>
+            <PathIcon x:Name="LinkIcon"
+                Width="{Binding IconSize, ElementName=Root}"
+                Height="{Binding IconSize, ElementName=Root}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center" />
         </Button>
 
         <Popup x:Name="HintPopup"

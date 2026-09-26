@@ -10,16 +10,6 @@ namespace LMP.UI.Features.Shell;
 
 /// <summary>
 /// Кастомное всплывающее окно контекстного меню трея.
-/// 
-/// <para><b>Поведение:</b></para>
-/// <list type="bullet">
-///   <item>Автоматически закрывается при потере фокуса (light-dismiss) и по Escape</item>
-///   <item>Позиционируется рядом с курсором, не выходя за границы экрана</item>
-///   <item>Секция громкости поддерживает скролл колесиком (PointerWheelChanged)</item>
-///   <item>Текст и иконка кнопки Show/Hide меняются в зависимости от видимости главного окна</item>
-///   <item>Все тексты локализованы и обновляются при каждом показе</item>
-///   <item>Поддерживает подписки на события состояния плеера в момент отображения</item>
-/// </list>
 /// </summary>
 public partial class TrayPopupWindow : Window
 {
@@ -44,7 +34,7 @@ public partial class TrayPopupWindow : Window
     /// </summary>
     private bool _isSubscribed;
 
-    // ═══ UI контролы ═══
+    // UI контролы
     private Border? _trackInfoSection;
     private TextBlock? _trackTitleText;
     private TextBlock? _trackAuthorText;
@@ -74,11 +64,11 @@ public partial class TrayPopupWindow : Window
     /// <summary>Шаг изменения громкости при скролле в popup.</summary>
     private const int VolumeStep = 2;
 
-    /// <summary>Примерная ширина popup для расчёта позиции (DIP).</summary>
-    private const int EstimatedWidth = 260;
+    /// <summary>Точная фиксированная ширина popup для расчёта позиции (DIP).</summary>
+    private const int PopupWidth = 260;
 
     /// <summary>Примерная высота popup для расчёта позиции (DIP).</summary>
-    private const int EstimatedHeight = 400;
+    private const int EstimatedHeight = 390;
 
     #endregion
 
@@ -121,7 +111,7 @@ public partial class TrayPopupWindow : Window
         ResolveControls();
         BindClickHandlers();
 
-        // ═══ Скролл громкости на volume section ═══
+        // Скролл громкости на volume section
         _volumeSection?.PointerWheelChanged += OnVolumeScroll;
 
         // Light-dismiss: закрыть popup при потере фокуса
@@ -208,35 +198,35 @@ public partial class TrayPopupWindow : Window
         var track = _playerControl.CurrentTrack;
         bool hasTrack = track != null;
 
-        // ═══ Track info ═══
+        // Track info
         UpdateTrackInfo(track, hasTrack);
 
-        // ═══ Show / Hide — текст и иконка зависят от состояния окна ═══
+        // Show / Hide — текст и иконка зависят от состояния окна
         UpdateShowHideButton(isWindowVisible, L);
 
-        // ═══ Play/Pause ═══
+        // Play/Pause
         UpdatePlayPauseButton(_playerControl.IsPlaying, L);
 
-        // ═══ Next / Previous ═══
+        // Next / Previous
         SetText(_nextText, L["Tray_Next"] ?? "Next");
         SetText(_prevText, L["Tray_Previous"] ?? "Previous");
 
-        // ═══ Repeat ═══
+        // Repeat
         UpdateRepeatButton(_playerControl.RepeatMode, L);
 
-        // ═══ Volume ═══
+        // Volume
         UpdateVolumeDisplay();
 
         if (_volumeSection != null)
             ToolTip.SetTip(_volumeSection, L["Tray_VolumeScrollHint"] ?? "Scroll ↕");
 
-        // ═══ Enabled states (playback controls) ═══
+        // Enabled states (playback controls)
         SetEnabled(_playPauseButton, hasTrack);
         SetEnabled(_nextButton, hasTrack);
         SetEnabled(_prevButton, hasTrack);
         SetEnabled(_repeatButton, hasTrack);
 
-        // ═══ Bottom items ═══
+        // Bottom items
         SetText(_queueText, L["Tray_Queue"] ?? "Queue");
         SetText(_cleanMemText, L["Tray_ClearMemory"] ?? "Clear Memory");
         SetText(_exitText, L["Tray_Exit"] ?? "Exit");
@@ -422,15 +412,15 @@ public partial class TrayPopupWindow : Window
             double workLeft = workArea.X / scaling;
             double workTop = workArea.Y / scaling;
 
-            // Корректируем позицию чтобы popup не выходил за границы экрана
-            if (dipX + EstimatedWidth > workRight)
-                dipX = workRight - EstimatedWidth;
+            // Корректируем позицию чтобы окно фиксированной ширины не вылетало за границы монитора
+            if (dipX + PopupWidth > workRight)
+                dipX = workRight - PopupWidth;
+
             if (dipY + EstimatedHeight > workBottom)
                 dipY -= EstimatedHeight;
-            if (dipX < workLeft)
-                dipX = workLeft;
-            if (dipY < workTop)
-                dipY = workTop;
+
+            dipX = Math.Clamp(dipX, workLeft, Math.Max(workLeft, workRight - PopupWidth));
+            dipY = Math.Clamp(dipY, workTop, Math.Max(workTop, workBottom - EstimatedHeight));
 
             Position = new PixelPoint((int)(dipX * scaling), (int)(dipY * scaling));
         }

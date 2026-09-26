@@ -8,7 +8,7 @@ namespace LMP.Core.Services;
 /// <summary>
 /// Централизованный сервис управления жизненным циклом сетевых клиентов и состоянием адаптеров.
 /// </summary>
-public sealed class NetworkManager : INetworkManager
+public sealed class NetworkManager
 {
     private const int RebuildCooldownMs = 15_000;
     private const int ClientDrainTimeoutSeconds = 30;
@@ -175,7 +175,7 @@ public sealed class NetworkManager : INetworkManager
             Proxy = effectiveProxy,
             UseProxy = true,
             PooledConnectionLifetime = TimeSpan.FromSeconds(90),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(45),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
             MaxConnectionsPerServer = 6,
             AutomaticDecompression = DecompressionMethods.All,
             UseCookies = false,

@@ -19,12 +19,13 @@ public partial class VolumeControl : UserControl
         public const double ThumbRadius = 5.0;
         public const int DefaultMaxVolume = 100;
 
-        public const double ActiveBorderThickness = 2.0;
-        public const double InactiveBorderThickness = 1.0;
-        public const double PopupCornerRadius = 10.0;
+        public const double ActiveBorderThickness = 1.0;
+        public const double InactiveBorderThickness = 0.0;
+        public const double PopupCornerRadius = 8.0;
         public const double ButtonCornerRadius = 19.0;
 
         public const int PopupCloseDelayMs = 200;
+        public const byte Transparency70PercentAlpha = 76;
     }
 
     #region Styled Properties 
@@ -159,13 +160,23 @@ public partial class VolumeControl : UserControl
         var accentBrush = (IBrush)(Application.Current?.Resources["AccentBrush"] ?? Brushes.Purple);
         var textMutedBrush = (IBrush)(Application.Current?.Resources["TextMutedBrush"] ?? Brushes.Gray);
         var textSecondaryBrush = (IBrush)(Application.Current?.Resources["TextSecondaryBrush"] ?? Brushes.LightGray);
-        var transparentBrush = (IBrush)(Application.Current?.Resources["AccentTransparentBrush"] ?? Brushes.Transparent);
+        var bgPrimaryBrush = (IBrush)(Application.Current?.Resources["BgPrimaryBrush"] ?? Brushes.Black);
+
+        var baseColor = bgPrimaryBrush is ISolidColorBrush scb ? scb.Color : Color.FromRgb(18, 18, 18);
+        var transparent70PercentBg = new SolidColorBrush(Color.FromArgb(
+            VolumeConstants.Transparency70PercentAlpha,
+            baseColor.R,
+            baseColor.G,
+            baseColor.B));
+
+        PopupBorder.Background = transparent70PercentBg;
 
         bool isPopupOpen = VolumePopup != null && VolumePopup.IsOpen;
 
         // ПРЯМОЕ УПРАВЛЕНИЕ СВОЙСТВАМИ КНОПКИ (100% надежность отрисовки без участия биндингов)
         if (isPopupOpen)
         {
+            VolumeButton.Background = transparent70PercentBg;
             VolumeButton.BorderBrush = accentBrush;
             VolumeButton.Foreground = accentBrush;
             VolumeButton.BorderThickness = new Thickness(
@@ -178,13 +189,16 @@ public partial class VolumeControl : UserControl
                 0,
                 VolumeConstants.PopupCornerRadius,
                 VolumeConstants.PopupCornerRadius);
+            VolumeButton.Classes.Set("active", true);
         }
         else
         {
-            VolumeButton.BorderBrush = transparentBrush;
+            VolumeButton.Background = Brushes.Transparent;
+            VolumeButton.BorderBrush = Brushes.Transparent;
             VolumeButton.Foreground = isMuted ? textMutedBrush : textSecondaryBrush;
             VolumeButton.BorderThickness = new Thickness(VolumeConstants.InactiveBorderThickness);
             VolumeButton.CornerRadius = new CornerRadius(VolumeConstants.ButtonCornerRadius);
+            VolumeButton.Classes.Set("active", false);
         }
     }
 

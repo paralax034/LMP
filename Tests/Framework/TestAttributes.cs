@@ -77,4 +77,5 @@ public static class TestGroups
     public const string Pipeline = "Pipeline";
     public const string Cache = "Cache";
     public const string Audio = "Audio";
+    public const string Notifications = "Notifications";
 }

@@ -40,7 +40,7 @@
         </Setter>
     </Style>
 
-    <!-- ═══ COMPACT VARIANT ═══ -->
+    <!-- COMPACT VARIANT -->
     <Style Selector="ToolTip.compact">
         <Setter Property="Template">
             <ControlTemplate TargetType="ToolTip">
@@ -67,7 +67,7 @@
         </Setter>
     </Style>
 
-    <!-- ═══ ACCENT VARIANT ═══ -->
+    <!-- ACCENT VARIANT -->
     <Style Selector="ToolTip.accent">
         <Setter Property="Template">
             <ControlTemplate TargetType="ToolTip">
@@ -93,7 +93,7 @@
         </Setter>
     </Style>
 
-    <!-- ═══ INFO VARIANT (с акцентной нижней полосой) ═══ -->
+    <!-- INFO VARIANT (с акцентной нижней полосой) -->
     <Style Selector="ToolTip.info">
         <Setter Property="Template">
             <ControlTemplate TargetType="ToolTip">

@@ -40,10 +40,10 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
         Playlist playlist,
         bool isAuthenticated,
         IReadOnlyList<TrackInfo>? playlistTracks = null,
-        INetworkManager? networkManager = null,
+        NetworkManager? networkManager = null,
         DominantColorService? dominantColorService = null)
     {
-        networkManager ??= AppEntry.Services.GetService<INetworkManager>();
+        networkManager ??= AppEntry.Services.GetService<NetworkManager>();
         dominantColorService ??= AppEntry.Services.GetService<DominantColorService>();
 
         Editor = PlaylistEditorViewModel.ForEdit(

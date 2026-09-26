@@ -2,185 +2,230 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:notifications="using:LMP.UI.Features.Notifications"
     xmlns:models="using:LMP.Core.Models"
-    xmlns:controls="using:LMP.UI.Controls"
+    xmlns:ctrl="using:LMP.UI.Controls"
     x:Class="LMP.UI.Features.Notifications.NotificationPanel"
-    x:DataType="notifications:NotificationPanelViewModel">
+    x:DataType="notifications:NotificationPanelViewModel"
+    x:Name="RootPanel">
 
     <UserControl.Styles>
-        <Style Selector="Border.notification-card">
-            <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BgElevatedBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="12,10" />
-            <Setter Property="Margin" Value="6,2" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                </Transitions>
-            </Setter>
+        <!-- Строка уведомления: плоская хроника без аллокаций анимаций при рециклинге скролла -->
+        <Style Selector="Border.notification-row">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="16,12" />
         </Style>
-        <Style Selector="Border.notification-card:pointerover">
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Style Selector="Border.notification-row:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         </Style>
 
-        <Style Selector="Border.skeleton-card">
+        <!-- Мягкий бейдж серьезности с достаточным размером и контрастом -->
+        <Style Selector="Border.severity-badge">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="0,1,12,0" />
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="12,10" />
-            <Setter Property="Margin" Value="6,2" />
         </Style>
 
-        <!-- Плашка-заглушка внутри скелетона -->
-        <Style Selector="Border.skeleton-line">
-            <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
-            <Setter Property="CornerRadius" Value="4" />
-            <Setter Property="Height" Value="10" />
-        </Style>
-
-        <!-- Круглая заглушка иконки -->
-        <Style Selector="Border.skeleton-icon">
-            <Setter Property="Width" Value="32" />
-            <Setter Property="Height" Value="32" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Margin" Value="0,0,10,0" />
-        </Style>
-
-        <Style Selector="Border.severity-strip">
-            <Setter Property="Width" Value="3" />
-            <Setter Property="CornerRadius" Value="2" />
-            <Setter Property="VerticalAlignment" Value="Stretch" />
-            <Setter Property="Margin" Value="0,2,12,2" />
-        </Style>
-
-        <Style Selector="Border.recommendation-block">
+        <!-- Блок рекомендации: аккуратный акцентный штрих слева без тяжелых рамок -->
+        <Style Selector="Border.recommendation-quote">
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
             <Setter Property="BorderThickness" Value="2,0,0,0" />
-            <Setter Property="Padding" Value="10,6" />
-            <Setter Property="Margin" Value="0,8,0,0" />
-        </Style>
-
-        <Style Selector="Border.track-info-block">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-            <Setter Property="BorderThickness" Value="0,1,0,0" />
-            <Setter Property="Padding" Value="0,6,0,0" />
+            <Setter Property="Padding" Value="10,2" />
             <Setter Property="Margin" Value="0,6,0,0" />
         </Style>
 
-        <Style Selector="Border.attempt-row">
-            <Setter Property="Background" Value="Transparent" />
+        <!-- Метаданные трека -->
+        <Style Selector="Grid.track-info-strip">
+            <Setter Property="Margin" Value="0,4,0,0" />
+        </Style>
+
+        <!-- Контейнер технического стектрейса -->
+        <Style Selector="Border.code-log-box">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="8,6" />
-            <Setter Property="Margin" Value="0,2" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                </Transitions>
-            </Setter>
+            <Setter Property="Margin" Value="0,6,0,0" />
         </Style>
 
-        <Style Selector="Expander.details-expander">
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Margin" Value="0,6,0,0" />
+        <!-- Стилизация нативного Expander для чистого инлайн-отображения -->
+        <Style Selector="Expander.clean-expander">
             <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+
+        <!-- Заголовок Expander: убираем системные рамки и паддинги -->
+        <Style Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+
+        <!-- Переопределяем фон внутреннего Border#ToggleButtonBackground во всех состояниях,
+        исключая темный прямоугольник -->
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader:pressed /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader:checked /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader:checked:pointerover /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader:checked:pressed /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <!-- Скрываем второй дублирующий правый серый шеврон Fluent-шаблона -->
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader /template/ Border#ExpandCollapseChevronBorder">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style
+            Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader /template/ Path#ExpandCollapseChevron">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+
+        <!-- Поворот единственного левого акцентного шеврона при раскрытии -->
+        <Style Selector="Expander.clean-expander:expanded PathIcon.expand-chevron">
+            <Setter Property="RenderTransform">
+                <RotateTransform Angle="180" />
+            </Setter>
         </Style>
     </UserControl.Styles>
 
-    <Border Background="{DynamicResource BgElevatedBrush}"
+    <!-- Стыковочный контейнер: СВЕРХУ ОСТРЫЙ (0,0), СНИЗУ СКРУГЛЕННЫЙ (8,8), БЕЗ ВЕРХНЕЙ ЛИНИИ
+    (1,0,1,1) -->
+    <Border Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
-        BorderThickness="1"
-        CornerRadius="14"
-        Width="400"
-        MaxHeight="560"
-        BoxShadow="0 8 32 0 #50000000"
+        BorderThickness="1,0,1,1"
+        CornerRadius="0,0,8,8"
+        Width="380"
+        MaxHeight="500"
+        BoxShadow="{StaticResource CardShadow}"
         ClipToBounds="True">
 
         <Grid RowDefinitions="Auto, *">
 
-            <!-- ═══ ШАПКА — рендерится мгновенно ═══ -->
-            <Border Grid.Row="0"
-                Padding="16,14,12,12"
-                BorderThickness="0,0,0,1"
-                BorderBrush="{DynamicResource BgHighlightBrush}">
-                <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel Grid.Column="0"
-                        Orientation="Horizontal"
-                        Spacing="8"
-                        VerticalAlignment="Center">
-                        <PathIcon Data="{StaticResource Icon.BellOutline}"
-                            Width="16" Height="16"
-                            Foreground="{DynamicResource TextPrimaryBrush}" />
-                        <TextBlock Text="{Binding L[Nav_Notifications]}"
-                            FontSize="14" FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
+            <!-- Компактная служебная строка: счетчик и минималистичная кнопка очистки -->
+            <Grid Grid.Row="0"
+                ColumnDefinitions="*, Auto"
+                Margin="16,8,10,8"
+                IsVisible="{Binding HasNotifications}">
+                <TextBlock Grid.Column="0"
+                    Text="{Binding Notifications.Count, StringFormat='{}{0}'}"
+                    FontSize="12"
+                    FontWeight="SemiBold"
+                    Foreground="{DynamicResource TextSecondaryBrush}"
+                    VerticalAlignment="Center" />
 
-                    <Button Grid.Column="1"
-                        Classes="ghost-btn"
-                        Command="{Binding ClearAllCommand}"
-                        IsVisible="{Binding HasNotifications}"
-                        ToolTip.Tip="{Binding L[Notification_Clear]}">
-                        <PathIcon Data="{StaticResource Icon.NotificationClearAll}"
-                            Width="15" Height="15"
-                            Foreground="{DynamicResource TextMutedBrush}" />
-                    </Button>
-                </Grid>
-            </Border>
+                <Button Grid.Column="1"
+                    Classes="header-icon-btn"
+                    Command="{Binding ClearAllCommand}"
+                    ToolTip.Tip="{Binding L[Notification_Clear]}"
+                    Width="26" Height="26"
+                    Padding="3"
+                    VerticalAlignment="Center">
+                    <PathIcon Data="{StaticResource Icon.NotificationClearAll}"
+                        Width="13" Height="13" />
+                </Button>
+            </Grid>
 
-            <!-- ═══ ТЕЛО ═══ -->
+            <!-- Тонкий разделитель под служебной шапкой -->
+            <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom"
+                Background="{DynamicResource BgHighlightTransparentBrush}"
+                IsVisible="{Binding HasNotifications}" />
+
+            <!-- ═══ ВЫСОКОПРОИЗВОДИТЕЛЬНЫЙ СПИСОК УВЕДОМЛЕНИЙ ═══ -->
             <Grid Grid.Row="1">
 
-                <!--  Пустое состояние  -->
+                <!-- Пустое состояние -->
                 <StackPanel IsVisible="{Binding !HasNotifications}"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
-                    Spacing="12"
-                    Margin="0,40">
-                    <Border Width="60" Height="60"
-                        CornerRadius="30"
+                    Spacing="10"
+                    Margin="0,48">
+                    <PathIcon Data="{StaticResource Icon.BellSleep}"
+                        Width="28" Height="28"
+                        Foreground="{DynamicResource TextMutedBrush}"
                         HorizontalAlignment="Center"
-                        BorderBrush="{DynamicResource BgHighlightBrush}"
-                        BorderThickness="1">
-                        <PathIcon Data="{StaticResource Icon.BellSleep}"
-                            Width="26" Height="26"
-                            Foreground="{DynamicResource TextMutedBrush}"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Opacity="0.5" />
-                    </Border>
+                        Opacity="0.4" />
                     <TextBlock Text="{Binding L[Notification_NoNotifications]}"
-                        FontSize="13"
+                        FontSize="12"
                         Foreground="{DynamicResource TextMutedBrush}"
                         HorizontalAlignment="Center"
                         Opacity="0.7" />
                 </StackPanel>
 
+                <!-- 
+                    ListBox с аппаратной пиксельной виртуализацией:
+                    ScrollViewer.IsScrollInertiaEnabled="True" гарантирует плавный 60/120 FPS скролл.
+                    Focusable="False" отключает холостые проходы поиска фокуса.
+                    MaxHeight="450" гарантирует ограничение области прокрутки внутри Popup.
+                -->
                 <ListBox IsVisible="{Binding HasNotifications}"
                     ItemsSource="{Binding Notifications}"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="0,4,0,6"
+                    Padding="0"
+                    Focusable="False"
+                    MaxHeight="450"
                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                    ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    ScrollViewer.VerticalScrollBarVisibility="Auto"
+                    ScrollViewer.IsScrollInertiaEnabled="True">
                     <ListBox.Styles>
                         <Style Selector="ListBoxItem">
                             <Setter Property="Padding" Value="0" />
-                            <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+                            <Setter Property="Focusable" Value="False" />
+                            <Setter Property="Background" Value="Transparent" />
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         </Style>
                         <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-                            <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+                            <Setter Property="Background" Value="Transparent" />
                         </Style>
                         <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
-                            <Setter Property="Background" Value="{DynamicResource BgElevatedBrush}" />
+                            <Setter Property="Background" Value="Transparent" />
                         </Style>
                     </ListBox.Styles>
                     <ListBox.ItemsPanel>
@@ -188,148 +233,165 @@
                             <VirtualizingStackPanel />
                         </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
+
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="{x:Type models:Notification}">
-                            <Border Classes="notification-card">
-                                <Grid ColumnDefinitions="Auto, Auto, *, Auto">
+                            <Border Classes="notification-row">
+                                <Grid ColumnDefinitions="Auto, *">
 
-                                    <Border Grid.Column="0" Classes="severity-strip">
-                                        <Border.Background>
-                                            <SolidColorBrush
-                                                Color="{Binding Severity, Converter={StaticResource SeverityToColor}}" />
-                                        </Border.Background>
-                                    </Border>
-
-                                    <Border Grid.Column="1"
-                                        Width="32" Height="32"
-                                        CornerRadius="8"
-                                        Margin="0,0,10,0"
-                                        VerticalAlignment="Top"
-                                        BorderThickness="1">
-                                        <Border.BorderBrush>
-                                            <SolidColorBrush
-                                                Color="{Binding Severity, Converter={StaticResource SeverityToColor}}"
-                                                Opacity="0.3" />
-                                        </Border.BorderBrush>
+                                    <!-- Лаконичный круглый индикатор серьезности с цветовой
+                                    подсветкой значка -->
+                                    <Border Grid.Column="0" Classes="severity-badge">
                                         <TextBlock Text="{Binding Icon}"
-                                            FontSize="14"
+                                            Foreground="{Binding SeverityColorHex}"
+                                            FontSize="13"
+                                            FontWeight="Bold"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
                                     </Border>
 
-                                    <StackPanel Grid.Column="2" Spacing="2" MinWidth="0">
+                                    <!-- Информационное содержимое -->
+                                    <StackPanel Grid.Column="1" Spacing="2">
 
-                                        <TextBlock Text="{Binding Title}"
-                                            FontSize="13"
-                                            FontWeight="SemiBold"
-                                            Foreground="{DynamicResource TextPrimaryBrush}"
-                                            TextWrapping="Wrap" />
+                                        <!-- Заголовок и относительное время на одной строке -->
+                                        <Grid ColumnDefinitions="*, Auto">
+                                            <TextBlock Grid.Column="0"
+                                                Text="{Binding Title}"
+                                                FontSize="13"
+                                                FontWeight="SemiBold"
+                                                Foreground="{DynamicResource TextPrimaryBrush}"
+                                                TextTrimming="CharacterEllipsis"
+                                                VerticalAlignment="Center" />
 
+                                            <TextBlock Grid.Column="1"
+                                                Text="{Binding TimeAgo}"
+                                                FontSize="11"
+                                                Foreground="{DynamicResource TextMutedBrush}"
+                                                Margin="8,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Opacity="0.75" />
+                                        </Grid>
+
+                                        <!-- Текст сообщения -->
                                         <TextBlock Text="{Binding Message}"
                                             FontSize="12"
                                             Foreground="{DynamicResource TextSecondaryBrush}"
                                             TextWrapping="Wrap"
-                                            Margin="0,2,0,0"
-                                            LineHeight="17" />
+                                            LineHeight="16"
+                                            Margin="0,1,0,0" />
 
-                                        <Border Classes="track-info-block"
+                                        <!-- Контекст трека с оригинальной кнопкой CopyLinkButton -->
+                                        <Grid Classes="track-info-strip"
+                                            ColumnDefinitions="Auto, *, Auto"
                                             IsVisible="{Binding TrackTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                                            <Grid ColumnDefinitions="Auto, *, Auto">
-                                                <PathIcon Grid.Column="0"
-                                                    Data="{StaticResource Icon.MusicNote}"
-                                                    Width="12" Height="12"
-                                                    Foreground="{DynamicResource TextMutedBrush}"
-                                                    Margin="0,1,6,0"
-                                                    VerticalAlignment="Top" />
-                                                <TextBlock Grid.Column="1"
-                                                    Text="{Binding TrackTitle}"
-                                                    FontSize="11"
-                                                    Foreground="{DynamicResource TextMutedBrush}"
-                                                    TextWrapping="Wrap"
-                                                    LineHeight="15" />
-                                                <controls:CopyLinkButton Grid.Column="2"
-                                                    CopyUrl="{Binding TrackUrl}"
-                                                    SuccessText="{Binding $parent[ListBox].DataContext.L[Track_Copied]}"
-                                                    ToolTipText="{Binding $parent[ListBox].DataContext.L[Notification_CopyTrackUrl]}"
-                                                    ButtonSize="28" IconSize="13"
-                                                    ShowHoverRing="False"
-                                                    VerticalAlignment="Top"
-                                                    Margin="6,0,0,0"
-                                                    IsVisible="{Binding TrackUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                            </Grid>
-                                        </Border>
+                                            <PathIcon Grid.Column="0"
+                                                Data="{StaticResource Icon.MusicNote}"
+                                                Width="12" Height="12"
+                                                Foreground="{DynamicResource TextMutedBrush}"
+                                                Margin="0,0,6,0"
+                                                VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1"
+                                                Text="{Binding TrackTitle}"
+                                                FontSize="11"
+                                                Foreground="{DynamicResource TextMutedBrush}"
+                                                TextTrimming="CharacterEllipsis"
+                                                VerticalAlignment="Center" />
+                                            <ctrl:CopyLinkButton Grid.Column="2"
+                                                CopyUrl="{Binding TrackUrl}"
+                                                ButtonSize="22"
+                                                IconSize="12"
+                                                ToolTipText="{Binding L[Notification_CopyTrackUrl]}"
+                                                SuccessText="{Binding L[Common_Copied]}"
+                                                VerticalAlignment="Center"
+                                                Margin="4,0,0,0"
+                                                IsVisible="{Binding TrackUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                        </Grid>
 
-                                        <Border Classes="recommendation-block"
+                                        <!-- Рекомендация: минималистичная цитата со штрихом -->
+                                        <Border Classes="recommendation-quote"
                                             IsVisible="{Binding HasRecommendation}">
                                             <Grid ColumnDefinitions="Auto, *">
                                                 <PathIcon Grid.Column="0"
                                                     Data="{StaticResource Icon.Lightbulb}"
-                                                    Width="13" Height="13"
+                                                    Width="14" Height="14"
                                                     Foreground="{DynamicResource AccentBrush}"
-                                                    Margin="0,1,8,0"
-                                                    VerticalAlignment="Top" />
+                                                    Margin="0,0,8,0"
+                                                    VerticalAlignment="Center" />
                                                 <TextBlock Grid.Column="1"
                                                     Text="{Binding Recommendation}"
                                                     FontSize="11"
-                                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                                    Foreground="{DynamicResource TextPrimaryBrush}"
                                                     TextWrapping="Wrap"
-                                                    LineHeight="16" />
+                                                    LineHeight="15"
+                                                    VerticalAlignment="Center" />
                                             </Grid>
                                         </Border>
 
-                                        <Expander Classes="details-expander"
+                                        <!-- Инлайн-спойлер технических подробностей -->
+                                        <Expander Classes="clean-expander"
                                             IsVisible="{Binding HasDetails}">
                                             <Expander.Header>
-                                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                                    <PathIcon
+                                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                                    VerticalAlignment="Center">
+                                                    <PathIcon Classes="expand-chevron"
                                                         Data="{StaticResource Icon.ChevronDown}"
-                                                        Width="13" Height="13"
-                                                        Foreground="{DynamicResource AccentBrush}" />
-                                                    <TextBlock
-                                                        Text="{Binding $parent[ListBox].DataContext.L[Notification_ViewDetails]}"
-                                                        FontSize="11"
+                                                        Width="10" Height="10"
                                                         Foreground="{DynamicResource AccentBrush}"
+                                                        VerticalAlignment="Center">
+                                                        <PathIcon.Transitions>
+                                                            <Transitions>
+                                                                <TransformOperationsTransition
+                                                                    Property="RenderTransform"
+                                                                    Duration="0:0:0.15" />
+                                                            </Transitions>
+                                                        </PathIcon.Transitions>
+                                                    </PathIcon>
+                                                    <TextBlock
+                                                        Text="{Binding L[Notification_ViewDetails]}"
+                                                        FontSize="11"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="{DynamicResource AccentBrush}"
+                                                        VerticalAlignment="Center"
                                                         Cursor="Hand" />
                                                 </StackPanel>
                                             </Expander.Header>
 
-                                            <StackPanel Spacing="3" Margin="0,6,0,0">
+                                            <StackPanel Spacing="4" Margin="0,4,0,0">
 
+                                                <!-- Список попыток клиентов -->
                                                 <ItemsControl ItemsSource="{Binding Attempts}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate
                                                             DataType="{x:Type models:AttemptRecord}">
-                                                            <Border Classes="attempt-row">
-                                                                <Grid
-                                                                    ColumnDefinitions="Auto, Auto, *"
-                                                                    Margin="0,1">
-                                                                    <TextBlock Grid.Column="0"
-                                                                        Text="{Binding StatusIcon}"
-                                                                        FontSize="11"
-                                                                        Margin="0,0,8,0"
-                                                                        VerticalAlignment="Top" />
-                                                                    <TextBlock Grid.Column="1"
-                                                                        Text="{Binding ClientName}"
-                                                                        FontSize="11"
-                                                                        FontWeight="Medium"
-                                                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                                                        Margin="0,0,10,0"
-                                                                        VerticalAlignment="Top" />
-                                                                    <TextBlock Grid.Column="2"
-                                                                        Text="{Binding DisplayMessage}"
-                                                                        FontSize="11"
-                                                                        Foreground="{DynamicResource TextMutedBrush}"
-                                                                        TextWrapping="Wrap"
-                                                                        LineHeight="15" />
-                                                                </Grid>
-                                                            </Border>
+                                                            <Grid ColumnDefinitions="Auto, Auto, *"
+                                                                Margin="0,1">
+                                                                <TextBlock Grid.Column="0"
+                                                                    Text="{Binding StatusIcon}"
+                                                                    FontSize="11"
+                                                                    Margin="0,0,6,0"
+                                                                    VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="1"
+                                                                    Text="{Binding ClientName}"
+                                                                    FontSize="11"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                                                    Margin="0,0,8,0"
+                                                                    VerticalAlignment="Center" />
+                                                                <TextBlock Grid.Column="2"
+                                                                    Text="{Binding DisplayMessage}"
+                                                                    FontSize="11"
+                                                                    Foreground="{DynamicResource TextMutedBrush}"
+                                                                    TextTrimming="CharacterEllipsis"
+                                                                    VerticalAlignment="Center" />
+                                                            </Grid>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
 
-                                                <Border Classes="attempt-row"
+                                                <!-- Трассировка исключения -->
+                                                <Border Classes="code-log-box"
                                                     IsVisible="{Binding HasExceptionDetails}">
-                                                    <ScrollViewer MaxHeight="140"
+                                                    <ScrollViewer MaxHeight="100"
                                                         HorizontalScrollBarVisibility="Disabled"
                                                         VerticalScrollBarVisibility="Auto">
                                                         <TextBlock Text="{Binding ExceptionDetails}"
@@ -341,21 +403,27 @@
                                                     </ScrollViewer>
                                                 </Border>
 
+                                                <!-- Скопировать ошибку с визуальным откликом -->
                                                 <Button Classes="ghost-btn"
+                                                    Height="24"
+                                                    Padding="6,2"
                                                     IsVisible="{Binding HasExceptionDetails}"
-                                                    Command="{Binding $parent[ListBox].DataContext.CopyErrorCommand}"
-                                                    CommandParameter="{Binding ExceptionDetails}"
+                                                    Tag="{Binding ExceptionDetails}"
+                                                    Click="OnCopyErrorClick"
+                                                    ToolTip.Tip="{Binding L[Notification_CopyError]}"
                                                     HorizontalAlignment="Left"
-                                                    Margin="0,2,0,0">
-                                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    Margin="0,3,0,0">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6"
+                                                        VerticalAlignment="Center">
                                                         <PathIcon
                                                             Data="{StaticResource Icon.ContentCopy}"
                                                             Width="12" Height="12"
-                                                            Foreground="{DynamicResource TextMutedBrush}" />
+                                                            Foreground="{DynamicResource TextSecondaryBrush}" />
                                                         <TextBlock
-                                                            Text="{Binding $parent[ListBox].DataContext.L[Notification_CopyError]}"
+                                                            Text="{Binding L[Notification_CopyError]}"
                                                             FontSize="11"
-                                                            Foreground="{DynamicResource TextMutedBrush}" />
+                                                            Foreground="{DynamicResource TextSecondaryBrush}"
+                                                            VerticalAlignment="Center" />
                                                     </StackPanel>
                                                 </Button>
 
@@ -363,16 +431,6 @@
                                         </Expander>
 
                                     </StackPanel>
-
-                                    <TextBlock Grid.Column="3"
-                                        Text="{Binding TimeAgo}"
-                                        FontSize="10"
-                                        Foreground="{DynamicResource TextMutedBrush}"
-                                        Margin="10,2,0,0"
-                                        VerticalAlignment="Top"
-                                        TextAlignment="Right"
-                                        Opacity="0.6" />
-
                                 </Grid>
                             </Border>
                         </DataTemplate>

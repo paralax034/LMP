@@ -452,7 +452,7 @@ public sealed class AppEntry
         services.AddSingleton<INotificationRepository, NotificationRepository>();
 
         // 1. Централизованный сетевой менеджер (Singleton)
-        services.AddSingleton<INetworkManager, NetworkManager>();
+        services.AddSingleton<NetworkManager>();
 
         services.AddSingleton(sp =>
         {
@@ -496,7 +496,7 @@ public sealed class AppEntry
         // 2. PlayerContextManager с динамическим разрешением HttpClient через NetworkManager
         services.AddSingleton(sp =>
         {
-            var net = sp.GetRequiredService<INetworkManager>();
+            var net = sp.GetRequiredService<NetworkManager>();
             return new PlayerContextManager(() => net.AudioClient);
         });
 

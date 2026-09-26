@@ -9,29 +9,24 @@
     <Panel Name="VolumePanel">
         <!-- Кнопка вызова/сворачивания (Управление свойствами перенесено в Code-Behind) -->
         <Button x:Name="VolumeButton" Width="38" Height="38"
-            Classes="icon-btn"
+            Classes="playback-btn"
             Transitions="{x:Null}"
             Click="OnVolumeButtonClick"
             PointerWheelChanged="OnVolumeScroll">
             <Grid>
                 <PathIcon Width="24" Height="24"
-                    Foreground="{Binding $parent[Button].Foreground}"
                     Data="{StaticResource Icon.VolumeMute}"
                     IsVisible="{Binding IsMuted, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
-                    Foreground="{Binding $parent[Button].Foreground}"
                     Data="{StaticResource Icon.VolumeLow}"
                     IsVisible="{Binding IsVolumeLow, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
-                    Foreground="{Binding $parent[Button].Foreground}"
                     Data="{StaticResource Icon.VolumeMedium}"
                     IsVisible="{Binding IsVolumeMedium, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
-                    Foreground="{Binding $parent[Button].Foreground}"
                     Data="{StaticResource Icon.VolumeHigh}"
                     IsVisible="{Binding IsVolumeHigh, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
                 <PathIcon Width="24" Height="24"
-                    Foreground="{Binding $parent[Button].Foreground}"
                     Data="{StaticResource Icon.VolumeVibrate}"
                     IsVisible="{Binding IsVolumeBoosted, RelativeSource={RelativeSource AncestorType=controls:VolumeControl}}" />
             </Grid>
@@ -50,10 +45,11 @@
                 x:DataType="controls:VolumeControl"
                 Width="38"
                 Padding="6,8"
-                Background="{DynamicResource BgSecondaryBrush}"
+                Background="{DynamicResource BgPrimaryBrush}"
                 BorderBrush="{DynamicResource AccentBrush}"
-                BorderThickness="2,2,2,0"
-                CornerRadius="10,10,0,0"
+                BorderThickness="1,1,1,0"
+                CornerRadius="8,8,0,0"
+                BoxShadow="0 4 16 0 #40000000"
                 ClipToBounds="False"
                 PointerEntered="OnVolumePopupContentEntered"
                 PointerExited="OnVolumePopupContentExited">

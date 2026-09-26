@@ -10,7 +10,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
 {
     private const int MaxSelection = 4;
 
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
     private readonly List<TrackCoverItemViewModel> _selectionOrder = [];
     private readonly Dictionary<string, Bitmap> _bitmapCache = [];
     private readonly SemaphoreSlim _loadSemaphore = new(3, 3);
@@ -43,7 +43,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     /// </summary>
     /// <param name="tracks">Список доступных треков.</param>
     /// <param name="networkManager">Сетевой менеджер загрузки миниатюр.</param>
-    public PlaylistCoverPickerViewModel(IReadOnlyList<TrackInfo> tracks, INetworkManager networkManager)
+    public PlaylistCoverPickerViewModel(IReadOnlyList<TrackInfo> tracks, NetworkManager networkManager)
     {
         _networkManager = networkManager;
 

@@ -23,7 +23,7 @@ public sealed class PlaylistSyncService
     private readonly CookieAuthService _auth;
     private readonly YoutubeUserDataService _ytUser;
     private readonly NotificationService _notifications;
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
 
     private string CurrentOwnerId => _auth.State.DisplayId;
 
@@ -38,7 +38,7 @@ public sealed class PlaylistSyncService
         CookieAuthService auth,
         YoutubeUserDataService ytUser,
         NotificationService notifications,
-        INetworkManager networkManager)
+        NetworkManager networkManager)
     {
         _playlists = playlists;
         _tracks = tracks;

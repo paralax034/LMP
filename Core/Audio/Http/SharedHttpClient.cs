@@ -11,13 +11,13 @@ namespace LMP.Core.Audio.Http;
 /// </summary>
 public static class SharedHttpClient
 {
-    private static INetworkManager? _networkManager;
+    private static NetworkManager? _networkManager;
     private static long _connectionSequence;
 
     /// <summary>
     /// Инициализирует статический фасад ссылкой на централизованный NetworkManager.
     /// </summary>
-    public static void Initialize(INetworkManager networkManager)
+    public static void Initialize(NetworkManager networkManager)
     {
         _networkManager = networkManager;
     }

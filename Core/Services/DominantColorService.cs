@@ -11,7 +11,7 @@ namespace LMP.Core.Services;
 /// </summary>
 public sealed class DominantColorService
 {
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
     private readonly ImageCacheService _imageCache;
     private readonly ConcurrentDictionary<string, Color> _cache = new();
 
@@ -20,7 +20,7 @@ public sealed class DominantColorService
     private const float MinSaturation = 0.15f;
     private const int SampleSize = 50;
 
-    public DominantColorService(INetworkManager networkManager, ImageCacheService imageCache)
+    public DominantColorService(NetworkManager networkManager, ImageCacheService imageCache)
     {
         _networkManager = networkManager;
         _imageCache = imageCache;

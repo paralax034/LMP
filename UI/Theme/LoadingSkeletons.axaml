@@ -31,43 +31,6 @@
         </Style.Animations>
     </Style>
 
-    <Style Selector="PathIcon.scanner-smooth">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="RenderTransformOrigin" Value="50%,50%" />
-        <Setter Property="RenderTransform">
-            <Setter.Value>
-                <TransformGroup>
-                    <ScaleTransform />
-                    <TranslateTransform />
-                    <RotateTransform />
-                </TransformGroup>
-            </Setter.Value>
-        </Setter>
-        <Style.Animations>
-            <Animation Duration="0:0:4" IterationCount="Infinite" PlaybackDirection="Alternate"
-                Easing="SineEaseInOut">
-                <KeyFrame Cue="0%">
-                    <Setter Property="TranslateTransform.X" Value="0" />
-                    <Setter Property="RotateTransform.Angle" Value="-15" />
-                </KeyFrame>
-                <KeyFrame Cue="100%">
-                </KeyFrame>
-            </Animation>
-            <Animation Duration="0:0:2.5" IterationCount="Infinite" PlaybackDirection="Alternate"
-                Easing="SineEaseInOut">
-                <KeyFrame Cue="0%">
-                    <Setter Property="TranslateTransform.Y" Value="20" />
-                    <Setter Property="ScaleTransform.ScaleX" Value="1.0" />
-                    <Setter Property="ScaleTransform.ScaleY" Value="1.0" />
-                </KeyFrame>
-                <KeyFrame Cue="100%">
-                    <Setter Property="TranslateTransform.Y" Value="120" />
-                    <Setter Property="ScaleTransform.ScaleY" Value="1.1" />
-                </KeyFrame>
-            </Animation>
-        </Style.Animations>
-    </Style>
-
     <Style Selector="ContentControl.track-skeleton-row">
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="Template">
@@ -99,26 +62,11 @@
         </Setter>
     </Style>
 
-    <Style Selector="ContentControl.loading-skeletons">
-        <Setter Property="ContentTemplate">
-            <Setter.Value>
-                <DataTemplate>
-                    <!-- ОПТИМИЗАЦИЯ: УБРАН BlurEffect. Заменён на жесткое значение Opacity -->
-                    <StackPanel HorizontalAlignment="Stretch" Margin="0,4,0,24" Opacity="0.3">
-                        <ContentControl Classes="track-skeleton-row" />
-                        <ContentControl Classes="track-skeleton-row" />
-                    </StackPanel>
-                </DataTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
     <Style Selector="StackPanel.skeleton-list-container">
         <Setter Property="Spacing" Value="4" />
         <Setter Property="Margin" Value="0,10" />
         <Setter Property="HorizontalAlignment" Value="Stretch" />
 
-        <!-- ОПТИМИЗАЦИЯ: УБРАН BlurEffect -->
 
         <Setter Property="OpacityMask">
             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
@@ -126,22 +74,6 @@
                 <GradientStop Offset="0.6" Color="#FF000000" />
                 <GradientStop Offset="1.0" Color="#00000000" />
             </LinearGradientBrush>
-        </Setter>
-    </Style>
-
-    <Style Selector="ContentControl.loading-initial">
-        <Setter Property="ContentTemplate">
-            <Setter.Value>
-                <DataTemplate>
-                    <StackPanel Classes="breathing skeleton-list-container">
-                        <ContentControl Classes="track-skeleton-row" />
-                        <ContentControl Classes="track-skeleton-row" />
-                        <ContentControl Classes="track-skeleton-row" />
-                        <ContentControl Classes="track-skeleton-row" />
-                        <ContentControl Classes="track-skeleton-row" />
-                    </StackPanel>
-                </DataTemplate>
-            </Setter.Value>
         </Setter>
     </Style>
 

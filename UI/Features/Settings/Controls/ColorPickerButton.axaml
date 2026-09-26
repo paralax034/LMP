@@ -1,34 +1,33 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:controls="using:LMP.UI.Features.Settings.Controls"
-             x:Class="LMP.UI.Features.Settings.Controls.ColorPickerButton"
-             x:Name="Root">
-    
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:LMP.UI.Features.Settings.Controls"
+    x:Class="LMP.UI.Features.Settings.Controls.ColorPickerButton"
+    x:Name="Root">
+
     <UserControl.Styles>
         <Style Selector="Button.color-btn">
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
         </Style>
         <Style Selector="Button.color-btn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Border.color-swatch">
-            <Setter Property="Width" Value="40"/>
-            <Setter Property="Height" Value="40"/>
-            <Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="BorderThickness" Value="2"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}"/>
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1"/>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
         </Style>
         <Style Selector="Button.color-btn:pointerover Border.color-swatch">
-            <Setter Property="RenderTransform" Value="scale(1.05)"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
     </UserControl.Styles>
 
@@ -37,20 +36,20 @@
         <Button x:Name="ColorButton" Classes="color-btn" Click="OnButtonClick">
             <Border Classes="color-swatch">
                 <Border.Background>
-                    <SolidColorBrush Color="{Binding Color, ElementName=Root}"/>
+                    <SolidColorBrush Color="{Binding Color, ElementName=Root}" />
                 </Border.Background>
             </Border>
         </Button>
-        
+
         <!-- Встроенный Popup -->
         <Popup x:Name="PickerPopup"
-               PlacementTarget="{Binding #ColorButton}"
-               Placement="BottomEdgeAlignedRight"
-               IsLightDismissEnabled="True"
-               WindowManagerAddShadowHint="False">
+            PlacementTarget="{Binding #ColorButton}"
+            Placement="BottomEdgeAlignedRight"
+            IsLightDismissEnabled="True"
+            WindowManagerAddShadowHint="False">
             <controls:ColorPickerPopup x:Name="PickerContent"
-                                       ColorConfirmed="OnColorConfirmed"
-                                       ColorCancelled="OnColorCancelled"/>
+                ColorConfirmed="OnColorConfirmed"
+                ColorCancelled="OnColorCancelled" />
         </Popup>
     </Panel>
 </UserControl>

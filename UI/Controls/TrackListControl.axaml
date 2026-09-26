@@ -197,7 +197,7 @@
 
                             <!-- COL 3: ЛАЙК -->
                             <Button Grid.Column="3"
-                                Classes="icon-btn like-btn"
+                                Classes="like-btn"
                                 Classes.is-liked="{Binding IsLiked}"
                                 Width="28" Height="28"
                                 VerticalAlignment="Center"
@@ -221,7 +221,8 @@
                                 IsHitTestVisible="False" />
 
                             <Button Grid.Column="4"
-                                Classes="icon-btn more-btn"
+                                Classes="more-btn"
+                                Classes.active="{Binding IsMenuOpen}"
                                 Width="32" Height="32"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
@@ -229,7 +230,6 @@
                                 Click="OnMoreButtonClicked"
                                 ToolTip.Tip="{Binding L[Track_MoreOptions]}">
                                 <PathIcon Width="20" Height="20"
-                                    Foreground="{DynamicResource TextPrimaryBrush}"
                                     Data="{StaticResource Icon.DotsHorizontal}" />
                             </Button>
 

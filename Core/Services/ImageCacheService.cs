@@ -28,7 +28,7 @@ public enum ImageQuality
 /// </summary>
 public sealed class ImageCacheService : IDisposable
 {
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
     private readonly LibraryService _library;
     private readonly SemaphoreSlim _downloadSemaphore = new(6);
 
@@ -75,7 +75,7 @@ public sealed class ImageCacheService : IDisposable
     // High (400px): 400×400×4 = 640KB × 25 items ≈ 16MB — нужно учитывать
     private long MaxMemoryBytes => MaxMemoryItems * 400L * 400 * 4; // запас для High качества
 
-    public ImageCacheService(INetworkManager networkManager, LibraryService library)
+    public ImageCacheService(NetworkManager networkManager, LibraryService library)
     {
         _networkManager = networkManager;
         _library = library;
@@ -257,7 +257,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Скачивание файла на диск через изолированный ImageClient из <see cref="INetworkManager"/>.
+    /// Скачивание файла на диск через изолированный ImageClient из <see cref="NetworkManager"/>.
     /// </summary>
     private async Task DownloadDirectToDiskAsync(string url, string finalPath, CancellationToken ct)
     {

@@ -162,6 +162,7 @@ public static class TestDiscovery
             "StreamPipeline" => TestGroups.Pipeline,
             "NToken" => TestGroups.NToken,
             "Cache" => TestGroups.Cache,
+            "Notification" => TestGroups.Notifications,
             _ => result, // для неизвестных — как есть
         };
     }

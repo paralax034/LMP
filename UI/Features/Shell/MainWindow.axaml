@@ -351,8 +351,8 @@
             Placement="BottomEdgeAlignedRight"
             IsOpen="{Binding NotificationButton.IsPanelOpen, Mode=TwoWay}"
             IsLightDismissEnabled="True"
-            HorizontalOffset="-8"
-            VerticalOffset="8">
+            HorizontalOffset="0"
+            VerticalOffset="6">
             <notifications:NotificationPanel DataContext="{Binding NotificationPanel}" />
         </Popup>
 

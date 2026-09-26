@@ -92,7 +92,7 @@ public partial class App : Application
             _splash?.SetProgress(10);
 
             // Привязываем статический SharedHttpClient к синглтону NetworkManager
-            var networkManager = AppEntry.Services.GetRequiredService<INetworkManager>();
+            var networkManager = AppEntry.Services.GetRequiredService<NetworkManager>();
             SharedHttpClient.Initialize(networkManager);
 
             // Audio Cache

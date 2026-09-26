@@ -65,7 +65,6 @@
         <Style Selector="Button.playlist-main-btn:pressed">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="RenderTransform" Value="scale(0.88)" />
         </Style>
 
         <!-- OUTLINE STATUS CHIPS -->
@@ -535,13 +534,11 @@
                     </Button>
 
                     <Button Classes="playback-btn"
+                        Classes.active="{Binding IsShuffleActive}"
                         Command="{Binding ShufflePlayCommand}"
                         Width="38" Height="38" CornerRadius="19"
                         ToolTip.Tip="{Binding L[Playlist_ShufflePlay]}">
-                        <PathIcon Data="{StaticResource Icon.Shuffle}" Width="18" Height="18"
-                            Foreground="{Binding IsShuffleActive,
-                                  Converter={StaticResource BoolToSelector},
-                                  ConverterParameter='AccentBrush|TextSecondaryBrush'}" />
+                        <PathIcon Data="{StaticResource Icon.Shuffle}" Width="18" Height="18" />
                     </Button>
 
                     <Button Classes="playback-btn"
@@ -552,16 +549,15 @@
                     </Button>
 
                     <Button Classes="playback-btn"
+                        Classes.active="{Binding IsDownloadingActive}"
                         Command="{Binding DownloadAllCommand}"
                         Width="38" Height="38" CornerRadius="19"
                         ToolTip.Tip="{Binding L[Playlist_DownloadAll]}">
-                        <PathIcon Data="{StaticResource Icon.Download}" Width="18" Height="18"
-                            Foreground="{Binding IsDownloadingActive,
-                                  Converter={StaticResource BoolToSelector},
-                                  ConverterParameter='AccentBrush|TextSecondaryBrush'}" />
+                        <PathIcon Data="{StaticResource Icon.Download}" Width="18" Height="18" />
                     </Button>
 
                     <Button Classes="playback-btn"
+                        Classes.active="{Binding IsSyncing}"
                         Command="{Binding RefreshPlaylistCommand}"
                         IsVisible="{Binding CanRefreshFromCloud}"
                         Width="38" Height="38" CornerRadius="19"

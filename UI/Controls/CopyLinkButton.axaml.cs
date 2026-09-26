@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using LMP.Core.Services;
 
 namespace LMP.UI.Controls;
 
@@ -17,15 +18,13 @@ namespace LMP.UI.Controls;
 public partial class CopyLinkButton : UserControl
 {
     private CancellationTokenSource? _stateCts;
-    private PathIcon? _icon;
+    private Button? _copyButton;
     private Popup? _hintPopup;
     private PathIcon? _hintIcon;
     private TextBlock? _hintText;
 
-    private const int FadeDurationMs = 150;
     private const int StateDurationMs = 1200;
 
-    private const string IdleIconKey = "Icon.LinkVariant";
     private const string SuccessIconKey = "Icon.Check";
     private const string ErrorIconKey = "Icon.Close";
 
@@ -102,7 +101,7 @@ public partial class CopyLinkButton : UserControl
     {
         base.OnAttachedToVisualTree(e);
 
-        _icon = this.FindControl<PathIcon>("LinkIcon");
+        _copyButton = this.FindControl<Button>("CopyButton");
         _hintPopup = this.FindControl<Popup>("HintPopup");
         _hintIcon = this.FindControl<PathIcon>("HintIcon");
         _hintText = this.FindControl<TextBlock>("HintText");
@@ -143,30 +142,21 @@ public partial class CopyLinkButton : UserControl
         {
             ShowHint(success);
 
-            _icon?.Opacity = 0;
-            await Task.Delay(FadeDurationMs, cts.Token);
-
-            SetIconState(
-                            success ? SuccessIconKey : ErrorIconKey,
-                            success ? "AccentBrush" : "SystemErrorBrush");
-
-            _icon?.Opacity = 1;
+            if (_copyButton != null)
+            {
+                _copyButton.Classes.Set("error", !success);
+                _copyButton.Classes.Set("success", success);
+            }
 
             await Task.Delay(StateDurationMs, cts.Token);
 
             HideHint();
-
-            _icon?.Opacity = 0;
-            await Task.Delay(FadeDurationMs, cts.Token);
-
             ApplyIdleState();
-            _icon?.Opacity = 1;
         }
         catch (OperationCanceledException)
         {
             HideHint();
             ApplyIdleState();
-            _icon?.Opacity = 1;
         }
     }
 
@@ -190,15 +180,39 @@ public partial class CopyLinkButton : UserControl
         }
 
         _hintText.Text = success
-            ? (SuccessText ?? "Copied!")
-            : "Copy failed";
+            ? ResolveSuccessText()
+            : ResolveErrorText();
 
         _hintPopup.IsOpen = true;
     }
 
+    private string ResolveSuccessText()
+    {
+        if (!string.IsNullOrEmpty(SuccessText) && !SuccessText.StartsWith('['))
+            return SuccessText;
+
+        var L = LocalizationService.Instance;
+        var localized = L.Get("Common_Copied");
+        if (!string.IsNullOrEmpty(localized) && !localized.StartsWith('['))
+            return localized;
+
+        return L.CurrentLanguageCode == "ru" ? "Скопировано!" : "Copied!";
+    }
+
+    private static string ResolveErrorText()
+    {
+        var L = LocalizationService.Instance;
+        var localized = L.Get("Common_CopyFailed");
+        if (!string.IsNullOrEmpty(localized) && !localized.StartsWith('['))
+            return localized;
+
+        return L.CurrentLanguageCode == "ru" ? "Ошибка копирования" : "Copy failed";
+    }
+
     private void HideHint()
     {
-        _hintPopup?.IsOpen = false;
+        if (_hintPopup != null)
+            _hintPopup.IsOpen = false;
     }
 
     /// <summary>
@@ -209,46 +223,10 @@ public partial class CopyLinkButton : UserControl
     /// </summary>
     private void ApplyIdleState()
     {
-        if (_icon is null) return;
+        if (_copyButton is null) return;
 
-        var app = Application.Current;
-        var theme = app?.ActualThemeVariant;
-
-        if (app is null || theme is null)
-        {
-            // Ресурсы недоступны — сбрасываем на AXAML-значение через ClearValue.
-            // DynamicResource из разметки вернётся автоматически.
-            _icon.ClearValue(PathIcon.DataProperty);
-            _icon.ClearValue(ForegroundProperty);
-            return;
-        }
-
-        if (app.Resources.TryGetResource(IdleIconKey, theme, out var geo) && geo is StreamGeometry sg)
-            _icon.Data = sg;
-
-        if (app.Resources.TryGetResource("TextSecondaryBrush", theme, out var br) && br is IBrush brush)
-            _icon.Foreground = brush;
-        else
-            // Fallback: не ставим null — сбрасываем на inherited/DynamicResource.
-            _icon.ClearValue(ForegroundProperty);
-    }
-
-    private void SetIconState(string geometryKey, string brushKey)
-    {
-        if (_icon is null) return;
-
-        var app = Application.Current;
-        var theme = app?.ActualThemeVariant;
-        if (app is null || theme is null) return;
-
-        if (app.Resources.TryGetResource(geometryKey, theme, out var geo) && geo is StreamGeometry geometry)
-            _icon.Data = geometry;
-
-        if (app.Resources.TryGetResource(brushKey, theme, out var res) && res is IBrush brush)
-            _icon.Foreground = brush;
-        else if (app.Resources.TryGetResource("TextMutedBrush", theme, out var fb) && fb is IBrush fallback)
-            _icon.Foreground = fallback;
-        // Намеренно НЕ ставим null — видимость важнее точного цвета.
+        _copyButton.Classes.Set("success", false);
+        _copyButton.Classes.Set("error", false);
     }
 
     protected override void OnUnloaded(RoutedEventArgs e)
@@ -256,7 +234,7 @@ public partial class CopyLinkButton : UserControl
         _stateCts?.Cancel();
         _stateCts?.Dispose();
         _stateCts = null;
-        _icon = null;
+        _copyButton = null;
         _hintPopup = null;
         _hintIcon = null;
         _hintText = null;

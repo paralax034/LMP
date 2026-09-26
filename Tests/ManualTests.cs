@@ -167,4 +167,12 @@ public static class ManualTests
         await Unit.MemoryPackTests.TestSessionCacheBinaryRoundtripAsync();
         await Unit.MemoryPackTests.TestSettingsRepositoryBinaryBlobAndLegacyMigrationAsync(AppEntry.Services);
     }
+
+    /// <summary>Быстрая генерация тестовых уведомлений для проверки производительности UI.</summary>
+    public static Task GenerateTestNotificationsAsync(int count = 100) =>
+        Integration.NotificationTests.TestGenerateNotificationsAsync(AppEntry.Services, count);
+
+    /// <summary>Очистка всех уведомлений.</summary>
+    public static Task ClearNotificationsAsync() =>
+        Integration.NotificationTests.TestClearAllNotificationsAsync(AppEntry.Services);
 }

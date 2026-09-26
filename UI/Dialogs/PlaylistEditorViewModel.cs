@@ -28,7 +28,7 @@ public enum CoverMode
 /// </summary>
 public sealed partial class PlaylistEditorViewModel : ViewModelBase
 {
-    private readonly INetworkManager? _networkManager;
+    private readonly NetworkManager? _networkManager;
     private readonly DominantColorService? _dominantColorService;
     private readonly string? _originalDescription;
 
@@ -268,10 +268,10 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         IReadOnlyList<TrackInfo>? playlistTracks = null,
         bool isForEdit = false,
         bool isSystemPlaylist = false,
-        INetworkManager? networkManager = null,
+        NetworkManager? networkManager = null,
         DominantColorService? dominantColorService = null)
     {
-        _networkManager = networkManager ?? AppEntry.Services.GetService<INetworkManager>();
+        _networkManager = networkManager ?? AppEntry.Services.GetService<NetworkManager>();
         _dominantColorService = dominantColorService ?? AppEntry.Services.GetService<DominantColorService>();
         _originalDescription = description;
         IsForEdit = isForEdit;
@@ -618,7 +618,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     /// </summary>
     public static PlaylistEditorViewModel ForCreate(
         bool isAuthenticated = false,
-        INetworkManager? networkManager = null,
+        NetworkManager? networkManager = null,
         DominantColorService? dominantColorService = null) =>
         new(name: "", thumbnailUrl: null, customColor: null, description: null,
             computedColor: null,
@@ -639,7 +639,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         Playlist playlist,
         bool isAuthenticated,
         IReadOnlyList<TrackInfo>? playlistTracks = null,
-        INetworkManager? networkManager = null,
+        NetworkManager? networkManager = null,
         DominantColorService? dominantColorService = null)
     {
         var isSystem = LibraryService.IsSystemPlaylist(playlist.Id);

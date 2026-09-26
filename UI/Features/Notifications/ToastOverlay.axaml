@@ -9,88 +9,73 @@
         <Border IsVisible="{Binding IsVisible}"
             HorizontalAlignment="Right"
             VerticalAlignment="Top"
-            Margin="0,20,20,0"
-            Background="{DynamicResource BgElevatedBrush}"
+            Margin="0,16,16,0"
+            Background="{DynamicResource BgPrimaryBrush}"
             BorderBrush="{DynamicResource BgHighlightBrush}"
             BorderThickness="1"
-            CornerRadius="14"
-            Padding="0"
-            MinWidth="300"
-            MaxWidth="420"
-            BoxShadow="0 8 28 0 #50000000, 0 2 8 0 #20000000"
+            CornerRadius="8"
+            Padding="14,10"
+            MinWidth="280"
+            MaxWidth="390"
+            BoxShadow="{StaticResource CardShadow}"
             ClipToBounds="True">
 
             <Border.Transitions>
                 <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.25" />
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.25" />
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut" />
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.2"
+                        Easing="CubicEaseOut" />
                 </Transitions>
             </Border.Transitions>
 
-            <Grid RowDefinitions="Auto, Auto">
+            <Grid ColumnDefinitions="Auto, *, Auto">
 
-                <!-- Цветная полоска сверху -->
-                <Border Grid.Row="0"
-                    Height="3"
-                    CornerRadius="14,14,0,0">
-                    <Border.Background>
-                        <SolidColorBrush
-                            Color="{Binding ToastSeverity, Converter={StaticResource SeverityToColor}}" />
-                    </Border.Background>
+                <!-- Лаконичный круглый индикатор серьезности в едином стиле с NotificationPanel -->
+                <Border Grid.Column="0"
+                    Width="28" Height="28"
+                    CornerRadius="14"
+                    Margin="0,1,12,0"
+                    VerticalAlignment="Top"
+                    Background="{DynamicResource BgElevatedTransparentBrush}"
+                    BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="1">
+                    <TextBlock Text="{Binding ToastIcon}"
+                        Foreground="{Binding ToastSeverityColorHex}"
+                        FontSize="13"
+                        FontWeight="Bold"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
                 </Border>
 
-                <!-- Контент -->
-                <Grid Grid.Row="1"
-                    ColumnDefinitions="Auto, *, Auto"
-                    Margin="16,12,12,14">
+                <!-- Информационное содержимое -->
+                <StackPanel Grid.Column="1"
+                    Spacing="2"
+                    VerticalAlignment="Center"
+                    MinWidth="0">
+                    <TextBlock Text="{Binding ToastTitle}"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Foreground="{DynamicResource TextPrimaryBrush}"
+                        TextWrapping="Wrap"
+                        LineHeight="17" />
+                    <TextBlock Text="{Binding ToastMessage}"
+                        FontSize="12"
+                        Foreground="{DynamicResource TextSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        LineHeight="16" />
+                </StackPanel>
 
-                    <!-- Severity Icon -->
-                    <Border Grid.Column="0"
-                        Width="36" Height="36"
-                        CornerRadius="10"
-                        Margin="0,0,12,0"
-                        VerticalAlignment="Top">
-                        <Border.Background>
-                            <SolidColorBrush
-                                Color="{Binding ToastSeverity, Converter={StaticResource SeverityToColor}}"
-                                Opacity="0.1" />
-                        </Border.Background>
-                        <TextBlock Text="{Binding ToastIcon}"
-                            FontSize="16"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center" />
-                    </Border>
-
-                    <!-- Текст -->
-                    <StackPanel Grid.Column="1"
-                        Spacing="4"
-                        VerticalAlignment="Center"
-                        MinWidth="0">
-                        <TextBlock Text="{Binding ToastTitle}"
-                            FontSize="14"
-                            FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            TextWrapping="Wrap"
-                            LineHeight="18" />
-                        <TextBlock Text="{Binding ToastMessage}"
-                            FontSize="13"
-                            Foreground="{DynamicResource TextSecondaryBrush}"
-                            TextWrapping="Wrap"
-                            LineHeight="18" />
-                    </StackPanel>
-
-                    <!-- Кнопка закрытия тоста -->
-                    <Button Grid.Column="2"
-                        Classes="ghost-btn"
-                        Command="{Binding DismissCommand}"
-                        VerticalAlignment="Top"
-                        Margin="8,0,0,0">
-                        <PathIcon Data="{StaticResource Icon.Close}"
-                            Width="14" Height="14"
-                            Foreground="{DynamicResource TextMutedBrush}" />
-                    </Button>
-                </Grid>
-
+                <!-- Кнопка закрытия тоста -->
+                <Button Grid.Column="2"
+                    Classes="header-icon-btn"
+                    Width="24" Height="24"
+                    Padding="4"
+                    Command="{Binding DismissCommand}"
+                    VerticalAlignment="Top"
+                    Margin="6,0,0,0">
+                    <PathIcon Data="{StaticResource Icon.Close}"
+                        Width="11" Height="11" />
+                </Button>
             </Grid>
         </Border>
     </Panel>

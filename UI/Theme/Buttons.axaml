@@ -15,13 +15,14 @@
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
         <Setter Property="Template">
             <ControlTemplate TargetType="Button">
                 <Border
                     Name="PART_Border"
-                    Background="Transparent"
+                    Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
                     CornerRadius="{TemplateBinding CornerRadius}"
@@ -41,20 +42,17 @@
     </Style>
 
     <Style Selector="Button:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="Button:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Button:disabled">
         <Setter Property="Opacity" Value="0.4" />
         <Setter Property="Cursor" Value="Arrow" />
-    </Style>
-
-    <Style Selector="RepeatButton">
-        <Setter Property="Transitions" Value="{x:Null}" />
     </Style>
 
     <Style Selector="Button /template/ ContentPresenter#PART_ContentPresenter">
@@ -75,86 +73,7 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- ═══ WINDOW CONTROL BUTTONS ═══ -->
-    <Style Selector="Button.window-btn">
-        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Width" Value="46" />
-        <Setter Property="Height" Value="38" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="CornerRadius" Value="0" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.window-btn:pointerover">
-        <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.window-btn:pressed">
-        <Setter Property="Background" Value="{DynamicResource BgHoverBrush}" />
-    </Style>
-
-    <Style Selector="Button.window-btn > Panel > Border">
-        <Setter Property="BorderBrush" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.window-btn:pointerover > Panel > Border">
-        <Setter Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Button.window-btn > Panel > Grid > Border">
-        <Setter Property="BorderBrush" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="Background" Value="{DynamicResource BgSecondaryBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.window-btn:pointerover > Panel > Grid > Border">
-        <Setter Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Button.window-btn > Grid > Line">
-        <Setter Property="Stroke" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Stroke" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.window-btn:pointerover > Grid > Line">
-        <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-
-    <Style Selector="Button.window-btn-close">
-        <Setter Property="Background" Value="{DynamicResource SystemErrorTransparentBrush}" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.window-btn-close:pointerover">
-        <Setter Property="Background" Value="{DynamicResource SystemErrorBrush}" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.window-btn-close:pointerover > Grid > Line">
-        <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Button.window-btn-close:pressed">
-        <Setter Property="Background" Value="{DynamicResource SystemErrorBgBrush}" />
-    </Style>
-
-    <!-- ═══ ACCENT BUTTONS ═══ -->
+    <!-- ACCENT BUTTONS -->
     <Style Selector="Button.accent-base /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
@@ -194,6 +113,7 @@
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
@@ -201,25 +121,24 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="Button.accent:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.accent:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- ═══ PRIMARY ACCENT BUTTON ═══ -->
+    <!-- PRIMARY ACCENT BUTTON -->
     <Style Selector="Button.primary-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
@@ -232,11 +151,12 @@
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="Button.primary-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
@@ -245,15 +165,16 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.primary-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.primary-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- ═══ INLINE LINK BUTTON ═══ -->
+    <!-- INLINE LINK BUTTON -->
     <Style Selector="Button.inline-link">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
@@ -278,7 +199,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- ═══ SIDEBAR BUTTON ═══ -->
+    <!-- SIDEBAR BUTTON -->
     <Style Selector="Button.sidebar-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -291,24 +212,26 @@
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="Button.sidebar-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.sidebar-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Button.sidebar-btn.active">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="Button.sidebar-btn.active:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.sidebar-btn TextBlock">
@@ -318,7 +241,7 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- ═══ ICON BUTTON ═══ -->
+    <!-- ICON BUTTON -->
     <Style Selector="Button.icon-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -332,17 +255,19 @@
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="Button.icon-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="Button.icon-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Button.icon-btn:disabled">
         <Setter Property="Opacity" Value="0.4" />
@@ -366,48 +291,138 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- HEADER ICON BUTTON (Без рамок, чистая анимация цвета иконки на AccentBrush) -->
+    <Style Selector="Button.header-icon-btn">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="6" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.header-icon-btn:pointerover">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.header-icon-btn:pressed">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.header-icon-btn /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.header-icon-btn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.header-icon-btn:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.header-icon-btn /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style
+        Selector="Button.header-icon-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style
+        Selector="Button.header-icon-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Button.header-icon-btn PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button.header-icon-btn:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.header-icon-btn.active PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.header-icon-btn:disabled">
+        <Setter Property="Opacity" Value="0.4" />
+        <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="Button.header-icon-btn:disabled PathIcon">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- -->
     <!-- PLAYBACK BUTTONS                                                    -->
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- Без рамок, чистая анимация цвета иконки на AccentBrush             -->
+    <!-- -->
 
     <Style Selector="Button.playback-btn">
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Width" Value="40" />
         <Setter Property="Height" Value="40" />
         <Setter Property="CornerRadius" Value="20" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.playback-btn.active">
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.playback-btn:pointerover">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="Button.playback-btn.active:pointerover">
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
     <Style Selector="Button.playback-btn:pressed">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style
+        Selector="Button.playback-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- Используем :disabled псевдокласс -->
+    <Style Selector="Button.playback-btn PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button.playback-btn:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.playback-btn:pressed PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="Button.playback-btn.active PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.playback-btn.active:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+
     <Style Selector="Button.playback-btn:disabled">
         <Setter Property="Opacity" Value="0.4" />
         <Setter Property="Cursor" Value="Arrow" />
@@ -417,39 +432,63 @@
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     </Style>
 
-    <!-- PLAYBACK MAIN BUTTON -->
+    <!-- PLAYBACK MAIN BUTTON (Play / Pause) — в покое TextSecondaryBrush, ховер AccentBrush -->
     <Style Selector="Button.playback-btn-main">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Width" Value="48" />
-        <Setter Property="Height" Value="48" />
-        <Setter Property="CornerRadius" Value="24" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Width" Value="52" />
+        <Setter Property="Height" Value="52" />
+        <Setter Property="CornerRadius" Value="26" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.playback-btn-main:pointerover">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
     <Style Selector="Button.playback-btn-main:pressed">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
-    <Style Selector="Button.playback-btn-main:pressed PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
+    <Style Selector="Button.playback-btn-main /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn-main:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn-main:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.playback-btn-main /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style
+        Selector="Button.playback-btn-main:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style
+        Selector="Button.playback-btn-main:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- Добавлен :disabled стиль для главной кнопки -->
+    <Style Selector="Button.playback-btn-main PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button.playback-btn-main:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.playback-btn-main:pressed PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
     <Style Selector="Button.playback-btn-main:disabled">
         <Setter Property="Opacity" Value="0.4" />
         <Setter Property="Cursor" Value="Arrow" />
@@ -459,94 +498,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     </Style>
 
-    <Style Selector="Button.playback-btn-main PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Button.playback-btn-main /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-
-    <Style Selector="Button.play-circle">
-        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Width" Value="56" />
-        <Setter Property="Height" Value="56" />
-        <Setter Property="CornerRadius" Value="28" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.play-circle:pointerover">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
-    </Style>
-    <Style Selector="Button.play-circle:pressed">
-        <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
-    </Style>
-
-    <Style Selector="Button.delete-btn">
-        <Setter Property="Background" Value="{DynamicResource SystemErrorTransparentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorTransparentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Opacity" Value="0" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Border:pointerover Button.delete-btn">
-        <Setter Property="Opacity" Value="1" />
-    </Style>
-    <Style Selector="Button.delete-btn:pointerover">
-        <Setter Property="Background" Value="{DynamicResource SystemErrorTransparentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorBrush}" />
-    </Style>
-
-    <Style Selector="Button.filter-type-btn">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Width" Value="28" />
-        <Setter Property="Height" Value="28" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="4" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.filter-type-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="Button.filter-type-btn.active">
-        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-
-    <!-- ═══ GHOST BUTTONS ═══ -->
+    <!-- GHOST BUTTONS -->
     <Style Selector="Button.ghost-btn, Button.transparent-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -563,12 +515,12 @@
         </Setter>
     </Style>
     <Style Selector="Button.ghost-btn:pointerover, Button.transparent-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.ghost-btn:pressed, Button.transparent-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
     </Style>
     <Style Selector="Button.ghost-btn PathIcon, Button.transparent-btn PathIcon">
         <Setter Property="Transitions">
@@ -598,95 +550,6 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <Style Selector="Border.search-chip">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Border.search-chip:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-
-    <Style Selector="Button.search-chip-text">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="Padding" Value="10,4,4,4" />
-        <Setter Property="FontSize" Value="12" />
-        <Setter Property="CornerRadius" Value="6,0,0,6" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.search-chip-text:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Button.search-chip-text /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="Button.search-chip-text:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-
-    <Style Selector="Button.search-chip-close">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="Padding" Value="2,4,8,4" />
-        <Setter Property="Width" Value="24" />
-        <Setter Property="Height" Value="24" />
-        <Setter Property="CornerRadius" Value="0,6,6,0" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Opacity" Value="0.6" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.search-chip-close:pointerover">
-        <Setter Property="Opacity" Value="1" />
-        <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.search-chip-close /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="Button.search-chip-close:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.search-chip-close PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.search-chip-close:pointerover PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
-    </Style>
-
     <Style Selector="Button.nav-tab">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
@@ -702,11 +565,12 @@
             <Transitions>
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="Button.nav-tab:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
     </Style>
@@ -720,8 +584,21 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Cursor" Value="Arrow" />
-        <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
+
+    <!-- Сохраняем акцентную рамку и цвет текста активной вкладки при наведении мыши (устраняет
+    мигание в серый) -->
+    <Style Selector="Button.nav-tab.active:pointerover">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style
+        Selector="Button.nav-tab.active:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+
     <Style Selector="Button.nav-tab TextBlock">
         <Setter Property="FontSize" Value="11" />
         <Setter Property="FontWeight" Value="Medium" />
@@ -746,6 +623,10 @@
     <Style Selector="Button.nav-tab.active PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
+    <Style Selector="Button.nav-tab.active:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
     <Style Selector="Button.nav-tab /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
     </Style>
@@ -761,88 +642,6 @@
         <Setter Property="Cursor" Value="Arrow" />
     </Style>
 
-    <Style Selector="ToggleButton.sync-toggle">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-        <Setter Property="Template">
-            <ControlTemplate TargetType="ToggleButton">
-                <Border
-                    Name="PART_Border"
-                    Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="{TemplateBinding CornerRadius}"
-                    Padding="{TemplateBinding Padding}">
-                    <ContentPresenter
-                        Name="PART_ContentPresenter"
-                        Background="Transparent"
-                        Foreground="{TemplateBinding Foreground}"
-                        HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                        Content="{TemplateBinding Content}"
-                        ContentTemplate="{TemplateBinding ContentTemplate}" />
-                </Border>
-            </ControlTemplate>
-        </Setter>
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:checked">
-        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:checked:pointerover">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:checked PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:checked:pointerover PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:checked TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle:checked:pointerover TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource AccentButtonTextBrush}" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="ToggleButton.sync-toggle:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="ToggleButton.sync-toggle:checked /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="ToggleButton.sync-toggle:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="ToggleButton.sync-toggle TextBlock">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-
     <Style Selector="Button.ctrl-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
@@ -854,17 +653,33 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Transitions">
             <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
     <Style Selector="Button.ctrl-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="Button.ctrl-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.ctrl-btn.active">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.ctrl-btn.active:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="Button.ctrl-btn.active PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.ctrl-btn.active:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.ctrl-btn /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
@@ -896,9 +711,15 @@
         <Setter Property="Background" Value="{DynamicResource SystemErrorTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorBrush}" />
     </Style>
+    <Style Selector="Button.ctrl-btn-close:pointerover > Grid > Line">
+        <Setter Property="Stroke" Value="{DynamicResource SystemErrorBrush}" />
+    </Style>
     <Style Selector="Button.ctrl-btn-close:pressed">
         <Setter Property="Background" Value="{DynamicResource SystemErrorBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorBrush}" />
+    </Style>
+    <Style Selector="Button.ctrl-btn-close:pressed > Grid > Line">
+        <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.ctrl-btn-close /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
@@ -932,7 +753,7 @@
             </Transitions>
         </Setter>
         <Setter Property="Template">
-            <ControlTemplate>
+            <ControlTemplate TargetType="ListBoxItem">
                 <Border
                     Name="PART_Border"
                     Background="Transparent"

@@ -20,6 +20,11 @@ public sealed partial class ToastOverlayViewModel : ViewModelBase
     /// </summary>
     public NotificationSeverity ToastSeverity => CurrentToast?.Severity ?? NotificationSeverity.Info;
 
+    /// <summary>
+    /// Семантический цвет для акцентного значка серьезности тоста.
+    /// </summary>
+    public string ToastSeverityColorHex => CurrentToast?.SeverityColorHex ?? "#8BE9FD";
+
     #endregion
 
     public IRelayCommand DismissCommand { get; }
@@ -54,5 +59,6 @@ public sealed partial class ToastOverlayViewModel : ViewModelBase
         OnPropertyChanged(nameof(ToastMessage));
         OnPropertyChanged(nameof(ToastIcon));
         OnPropertyChanged(nameof(ToastSeverity));
+        OnPropertyChanged(nameof(ToastSeverityColorHex));
     }
 }

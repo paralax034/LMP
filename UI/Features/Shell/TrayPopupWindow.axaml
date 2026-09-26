@@ -2,7 +2,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     x:Class="LMP.UI.Features.Shell.TrayPopupWindow"
     Title=""
-    SizeToContent="WidthAndHeight"
+    Width="260"
+    SizeToContent="Height"
     CanResize="False"
     ShowInTaskbar="False"
     WindowDecorations="None"
@@ -14,7 +15,7 @@
     <Window.Styles>
         <Style Selector="Button.tray-menu-item">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="11,7" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -24,17 +25,19 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.1" />
+                    <BrushTransition Property="Foreground" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
         </Style>
         <Style Selector="Button.tray-menu-item:pointerover">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
         <Style Selector="Button.tray-menu-item:pressed">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="BorderThickness" Value="1.5" />
         </Style>
         <Style Selector="Button.tray-menu-item:disabled">
             <Setter Property="Opacity" Value="0.4" />
@@ -89,37 +92,34 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
         </Style>
         <Style Selector="Border.volume-section:pointerover">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
     </Window.Styles>
 
     <!-- Корневая карточка -->
     <Border CornerRadius="8"
-        Background="{DynamicResource BgElevatedBrush}"
+        Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
         BorderThickness="1"
         Padding="4"
-        MinWidth="220"
-        MaxWidth="280"
+        BoxShadow="0 8 32 0 #50000000"
         ClipToBounds="True">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="16" Opacity="0.4" OffsetX="0" OffsetY="4" Color="#000000" />
-        </Border.Effect>
 
         <StackPanel Spacing="2">
 
-            <!-- ═══ TRACK INFO ═══ -->
+            <!-- TRACK INFO -->
             <Border x:Name="TrackInfoSection"
                 IsVisible="False"
-                Background="{DynamicResource BgSecondaryBrush}"
-                CornerRadius="6"
-                Padding="12,10"
+                Background="Transparent"
+                BorderBrush="{DynamicResource BgHighlightBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8"
                 Margin="0,0,0,2">
                 <StackPanel Spacing="2">
                     <TextBlock x:Name="TrackTitleText"
@@ -135,7 +135,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- ═══ SHOW / HIDE WINDOW ═══ -->
+            <!-- SHOW / HIDE WINDOW -->
             <Button Classes="tray-menu-item" x:Name="ShowButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <!--
@@ -152,7 +152,7 @@
 
             <Border Height="1" Background="{DynamicResource BgHighlightBrush}" Margin="8,2" />
 
-            <!-- ═══ PLAY / PAUSE ═══ -->
+            <!-- PLAY / PAUSE -->
             <Button Classes="tray-menu-item" x:Name="PlayPauseButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <!-- PlayPauseIcon: Data переключается кодом между Icon.Play и Icon.Pause -->
@@ -164,7 +164,7 @@
                 </StackPanel>
             </Button>
 
-            <!-- ═══ NEXT ═══ -->
+            <!-- NEXT -->
             <Button Classes="tray-menu-item" x:Name="NextButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <PathIcon Width="16" Height="16"
@@ -174,7 +174,7 @@
                 </StackPanel>
             </Button>
 
-            <!-- ═══ PREVIOUS ═══ -->
+            <!-- PREVIOUS -->
             <Button Classes="tray-menu-item" x:Name="PrevButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <PathIcon Width="16" Height="16"
@@ -184,7 +184,7 @@
                 </StackPanel>
             </Button>
 
-            <!-- ═══ REPEAT ═══ -->
+            <!-- REPEAT -->
             <Button Classes="tray-menu-item" x:Name="RepeatButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <!-- RepeatIcon: Data переключается кодом (Icon.Repeat / Icon.RepeatOnce) -->
@@ -198,7 +198,7 @@
 
             <Border Height="1" Background="{DynamicResource BgHighlightBrush}" Margin="8,2" />
 
-            <!-- ═══ VOLUME (scrollable) ═══ -->
+            <!-- VOLUME (scrollable) -->
             <Border Classes="volume-section" x:Name="VolumeSection" Padding="11,5">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <!-- VolumeIcon: Data переключается кодом по уровню громкости -->
@@ -216,7 +216,7 @@
 
             <Border Height="1" Background="{DynamicResource BgHighlightBrush}" Margin="8,2" />
 
-            <!-- ═══ QUEUE ═══ -->
+            <!-- QUEUE -->
             <Button Classes="tray-menu-item" x:Name="QueueButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <PathIcon Width="16" Height="16"
@@ -226,7 +226,7 @@
                 </StackPanel>
             </Button>
 
-            <!-- ═══ CLEAR MEMORY ═══ -->
+            <!-- CLEAR MEMORY -->
             <Button Classes="tray-menu-item" x:Name="CleanMemButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <PathIcon Width="16" Height="16"
@@ -238,7 +238,7 @@
 
             <Border Height="1" Background="{DynamicResource BgHighlightBrush}" Margin="8,2" />
 
-            <!-- ═══ EXIT ═══ -->
+            <!-- EXIT -->
             <Button Classes="tray-menu-item" x:Name="ExitButton">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <PathIcon Width="16" Height="16"

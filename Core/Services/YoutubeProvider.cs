@@ -29,7 +29,7 @@ public partial class YoutubeProvider : IDisposable
 {
     #region Fields & Dependencies
 
-    private readonly INetworkManager _networkManager;
+    private readonly NetworkManager _networkManager;
     private readonly NTokenDecryptor _nTokenDecryptor;
     private readonly SigCipherDecryptor _sigCipherDecryptor;
     private readonly TrackRegistry _trackRegistry;
@@ -80,7 +80,7 @@ public partial class YoutubeProvider : IDisposable
     /// Создаёт экземпляр провайдера YouTube.
     /// </summary>
     public YoutubeProvider(
-        INetworkManager networkManager,
+        NetworkManager networkManager,
         TrackRegistry trackRegistry,
         LibraryService? libraryService,
         CookieAuthService cookieAuth,
@@ -112,7 +112,7 @@ public partial class YoutubeProvider : IDisposable
     #region Client Initialization
 
     /// <summary>
-    /// Пересоздаёт внутренний <see cref="YoutubeClient"/> на базе актуального ApiClient из <see cref="INetworkManager"/>.
+    /// Пересоздаёт внутренний <see cref="YoutubeClient"/> на базе актуального ApiClient из <see cref="NetworkManager"/>.
     /// Вызывается при смене аккаунта, смене сетевого интерфейса (VPN) и изменении прокси.
     /// </summary>
     public void ReloadClient()

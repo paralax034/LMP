@@ -56,7 +56,10 @@ public sealed class Notification
 
     #region Computed Localized Properties
 
-    private static LocalizationService L => LocalizationService.Instance;
+    /// <summary>
+    /// Экземпляр сервиса локализации для прямой компилируемой привязки в шаблонах.
+    /// </summary>
+    public LocalizationService L => LocalizationService.Instance;
 
     /// <summary>
     /// Локализованный заголовок (автоматически переводится при смене языка).
@@ -128,11 +131,22 @@ public sealed class Notification
 
     public string Icon => Severity switch
     {
-        NotificationSeverity.Info => "🛈",    // Unicode: \uF005 или \u24D8 (Символ информации)
-        NotificationSeverity.Success => "✓", // Unicode: \u2713 (Галочка Checkmark)
-        NotificationSeverity.Warning => "⚠", // Unicode: \u26A0 (Предупреждающий треугольник)
-        NotificationSeverity.Error => "🗙",   // Unicode: \u1F5D9 или "✕" \u2715 (Крестик)
-        _ => "🖈"                             // Unicode: \u1F5C8 (Канцелярская кнопка)
+        NotificationSeverity.Info => "🛈",
+        NotificationSeverity.Success => "✓",
+        NotificationSeverity.Warning => "⚠",
+        NotificationSeverity.Error => "✕",
+        _ => "🖈"
+    };
+
+    /// <summary>
+    /// Семантический HEX-цвет для индикатора серьезности уведомления.
+    /// </summary>
+    public string SeverityColorHex => Severity switch
+    {
+        NotificationSeverity.Success => "#2ECC71",
+        NotificationSeverity.Warning => "#FFB86C",
+        NotificationSeverity.Error => "#FF5555",
+        _ => "#8BE9FD"
     };
 
     #endregion

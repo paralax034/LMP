@@ -41,9 +41,9 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     private bool _isInitialized;
 
     /// <summary>
-    /// Максимум уведомлений в памяти. Берётся из <see cref="AppSettings"/>.
+    /// Максимум уведомлений в памяти. Ограничен 100 для сохранения максимальной отзывчивости интерфейса.
     /// </summary>
-    private int MaxNotifications => _libraryService.Settings.Notifications.MaxInPanelCount;
+    private int MaxNotifications => Math.Clamp(_libraryService.Settings.Notifications.MaxInPanelCount, 10, 100);
 
     public NotificationService(LibraryService libraryService, INotificationRepository repository)
     {
@@ -447,6 +447,113 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(UnreadCount));
         OnPropertyChanged(nameof(HasUnread));
+    }
+
+    /// <summary>
+    /// Генерирует набор тестовых уведомлений для проверки производительности UI-панели.
+    /// </summary>
+    /// <param name="count">Количество создаваемых уведомлений.</param>
+    /// <param name="clearExisting">Флаг предварительной очистки существующей истории.</param>
+    public async Task SeedDebugNotificationsAsync(int count = 100, bool clearExisting = true)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            PopulateDebugNotifications(count, clearExisting);
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() => PopulateDebugNotifications(count, clearExisting));
+    }
+
+    private void PopulateDebugNotifications(int count, bool clearExisting)
+    {
+        if (clearExisting)
+        {
+            Notifications.Clear();
+            _unreadCount = 0;
+        }
+
+        bool isRu = LocalizationService.Instance.CurrentLanguageCode == "ru";
+
+        var severities = new[]
+        {
+            NotificationSeverity.Info,
+            NotificationSeverity.Success,
+            NotificationSeverity.Warning,
+            NotificationSeverity.Error
+        };
+
+        for (int i = 0; i < count; i++)
+        {
+            var severity = severities[i % severities.Length];
+            bool isError = severity == NotificationSeverity.Error;
+            bool isWarning = severity == NotificationSeverity.Warning;
+
+            string severityName = severity switch
+            {
+                NotificationSeverity.Info => isRu ? "Инфо" : "Info",
+                NotificationSeverity.Success => isRu ? "Успешно" : "Success",
+                NotificationSeverity.Warning => isRu ? "Предупреждение" : "Warning",
+                NotificationSeverity.Error => isRu ? "Ошибка" : "Error",
+                _ => isRu ? "Заметка" : "Notice"
+            };
+
+            string title = isRu
+                ? $"Тестовое уведомление #{i + 1} ({severityName})"
+                : $"Test Notification #{i + 1} ({severityName})";
+
+            string message = severity switch
+            {
+                NotificationSeverity.Error => isRu
+                    ? $"Сбой потока воспроизведения при расшифровке подписи для потока #{i + 1}."
+                    : $"Sample playback stream failure occurred while resolving cipher for stream #{i + 1}.",
+                NotificationSeverity.Warning => isRu
+                    ? $"Обнаружена повышенная задержка при загрузке аудио-сегмента #{i + 1}."
+                    : $"High latency detected while downloading audio segment #{i + 1}.",
+                NotificationSeverity.Success => isRu
+                    ? $"Синхронизация треков успешно завершена для пакета #{i + 1}."
+                    : $"Track synchronization completed successfully for batch #{i + 1}.",
+                _ => isRu
+                    ? $"Диагностическое событие телеметрии получено для пакета #{i + 1}."
+                    : $"Diagnostic test event dispatched for telemetry chunk #{i + 1}."
+            };
+
+            string? recommendation = isWarning
+                ? (isRu ? "Проверьте настройки прокси или сетевое подключение." : "Check your proxy or network connection.")
+                : null;
+
+            var notification = new Notification
+            {
+                TitleRaw = title,
+                MessageRaw = message,
+                Severity = severity,
+                IsRead = i >= 5,
+                Timestamp = DateTime.UtcNow.AddMinutes(-i * 3),
+                TrackId = (isError || isWarning) ? "dQw4w9WgXcQ" : null,
+                TrackTitle = (isError || isWarning) ? $"Rick Astley - Never Gonna Give You Up (Track #{i + 1})" : null,
+                RecommendationRaw = recommendation,
+                ExceptionDetails = isError
+                    ? $"LMP.Core.Exceptions.StreamUnavailableException: Stream not found for itag 251\n" +
+                      $"   at LMP.Core.Youtube.Streams.StreamClient.GetAsync(VideoId id) in StreamClient.cs:line 142\n" +
+                      $"   at LMP.Core.Audio.AudioEngine.ResolveAsync(TrackInfo track) in AudioEngine.cs:line 320"
+                    : null,
+                Attempts = isError
+                    ? new ObservableCollection<AttemptRecord>
+                    {
+                        new("ANDROID", false, "HTTP 403 Forbidden", DateTime.UtcNow.AddSeconds(-30)),
+                        new("WEB_REMIX", false, isRu ? "Сбой расшифровки N-Token" : "N-Token decryption failed", DateTime.UtcNow.AddSeconds(-20)),
+                        new("TVHTML5", true, null, DateTime.UtcNow.AddSeconds(-10))
+                    }
+                    : null
+            };
+
+            Notifications.Add(notification);
+            if (!notification.IsRead)
+                _unreadCount++;
+        }
+
+        RaiseUnreadProperties();
+        Log.Info($"[NotificationService] Seeded {count} debug notifications (Unread: {_unreadCount})");
     }
 
     #endregion
