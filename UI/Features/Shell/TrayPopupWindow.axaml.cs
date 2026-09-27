@@ -173,16 +173,6 @@ public partial class TrayPopupWindow : Window
 
     /// <summary>
     /// Обновляет состояние всех элементов popup перед показом.
-    /// 
-    /// <para><b>Вызывается при каждом открытии popup</b> для актуализации:
-    /// трек-инфо, play/pause, repeat, громкость, локализация, Show/Hide.</para>
-    /// 
-    /// <para><b>Show/Hide кнопка:</b> текст и иконка меняются в зависимости
-    /// от <paramref name="isWindowVisible"/>:</para>
-    /// <list type="bullet">
-    ///   <item><c>true</c> → "Hide" + WindowMinimize icon</item>
-    ///   <item><c>false</c> → "Show" + WindowRestore icon</item>
-    /// </list>
     /// </summary>
     /// <param name="isWindowVisible">
     /// <c>true</c> — главное окно видимо (кнопка показывает "Hide / Свернуть").
@@ -388,16 +378,13 @@ public partial class TrayPopupWindow : Window
 
     /// <summary>
     /// Показывает popup рядом с курсором, корректируя позицию для рабочей области экрана.
-    /// Использует сохранённое состояние <see cref="_lastKnownWindowVisible"/>.
-    /// 
-    /// <para><b>Позиционирование:</b> Если popup не помещается справа/снизу от курсора,
-    /// он сдвигается влево/вверх. Гарантируется нахождение в пределах WorkingArea.</para>
     /// </summary>
     /// <param name="x">X-координата курсора в пикселях экрана</param>
     /// <param name="y">Y-координата курсора в пикселях экрана</param>
-    public void ShowAt(int x, int y)
+    /// <param name="isWindowVisible">Текущее состояние видимости главного окна. Если null, используется последнее кэшированное значение.</param>
+    public void ShowAt(int x, int y, bool? isWindowVisible = null)
     {
-        UpdateState(_lastKnownWindowVisible);
+        UpdateState(isWindowVisible ?? _lastKnownWindowVisible);
 
         var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
         if (screen != null)

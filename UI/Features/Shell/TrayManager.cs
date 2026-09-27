@@ -675,13 +675,6 @@ internal sealed partial class TrayManager : IDisposable
 
     /// <summary>
     /// Entry point выделенного hook thread.
-    /// 
-    /// <para><b>Порядок инициализации:</b>
-    /// <list type="number">
-    ///   <item>PeekMessage — форсирует создание Win32 message queue (до Set!)</item>
-    ///   <item>_hookThreadReady.Set() — PostThreadMessage от UI-потока безопасен</item>
-    ///   <item>GetMessage loop — крутится до WM_APP_SHUTDOWN или ошибки</item>
-    /// </list></para>
     /// </summary>
     private void HookThreadProc()
     {
@@ -848,10 +841,6 @@ internal sealed partial class TrayManager : IDisposable
 
     /// <summary>
     /// Callback low-level mouse hook.
-    /// 
-    /// <para><b>Поток:</b> Runs на выделенном hook thread (НЕ Avalonia UI thread).</para>
-    /// <para><b>Фильтрация:</b> Обрабатывает ТОЛЬКО WM_MOUSEWHEEL.</para>
-    /// <para><b>Zero-alloc:</b> Читает поля через Marshal.ReadInt32.</para>
     /// </summary>
     private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
@@ -891,10 +880,6 @@ internal sealed partial class TrayManager : IDisposable
 
     /// <summary>
     /// Обработчик оконных сообщений от Shell_NotifyIcon V4.
-    /// 
-    /// <para><b>Toggle debounce:</b> NIN_SELECT и WM_LBUTTONDBLCLK оба вызывают
-    /// <see cref="TryInvokeToggle"/> с cooldown <see cref="MainWindow.ToggleCooldownMs"/>.
-    /// Это предотвращает двойное срабатывание при быстром клике.</para>
     /// </summary>
     private IntPtr WndProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam)
     {
@@ -946,15 +931,6 @@ internal sealed partial class TrayManager : IDisposable
 
     /// <summary>
     /// Вызывает toggle окна с debounce-защитой.
-    /// 
-    /// <para><b>Почему нужен debounce:</b>
-    /// Shell_NotifyIcon V4 при быстром клике посылает NIN_SELECT + WM_LBUTTONDBLCLK.
-    /// Без debounce окно мгновенно скрывается и показывается — шторм lifecycle-событий
-    /// (17 VM делают dispose/recreate subscriptions). Cooldown <see cref="MainWindow.ToggleCooldownMs"/>
-    /// гарантирует максимум 1 toggle в 800мс.</para>
-    /// 
-    /// <para>При throttle просто игнорируем событие — tooltip при клике скрывается shell'ом,
-    /// поэтому визуальный feedback через tooltip невозможен.</para>
     /// </summary>
     private void TryInvokeToggle()
     {
@@ -1004,10 +980,8 @@ internal sealed partial class TrayManager : IDisposable
                 }
 
                 bool isVisible = _isWindowVisible?.Invoke() ?? false;
-                _popupWindow.UpdateState(isVisible);
-
                 GetCursorPos(out POINT pt);
-                _popupWindow.ShowAt(pt.X, pt.Y);
+                _popupWindow.ShowAt(pt.X, pt.Y, isVisible);
             }
             catch (Exception ex)
             {

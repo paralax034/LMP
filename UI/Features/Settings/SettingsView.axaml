@@ -5,20 +5,8 @@
     x:Class="LMP.UI.Features.Settings.SettingsView"
     x:DataType="vm:SettingsViewModel">
 
-    <!--
-        UserControl.Styles полностью убраны.
-        Все стили сайдбара живут in UI/Theme/Buttons.axaml → ListBox.nav-sidebar.
-        Это обеспечивает единый визуальный язык с nav-tab из MainWindow
-        и устраняет дублирование ~70 строк стилей.
-    -->
-
     <Grid ColumnDefinitions="46, *" Name="LayoutGrid">
 
-        <!--
-            Модульная встроенная стойка (Left-Embedded Modular Rail)
-            Ширина строго 46px, прижата к левому краю.
-            Межиконочные и концевые разделители не анимируются и не меняют цвет.
-        -->
         <Border Grid.Column="0"
             Width="46"
             HorizontalAlignment="Left"

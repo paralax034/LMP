@@ -6,6 +6,7 @@ using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Normalization;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Utils;
+using LMP.UI.Controls;
 using LMP.UI.Dialogs;
 using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
@@ -363,7 +364,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
     #endregion
 
-    #region Theme
+    #region Theme & Animation
 
     /// <summary>Встроенные и пользовательские пресеты тем для ComboBox.</summary>
     public ObservableCollection<ThemeSettings> ThemePresets { get; } = [];
@@ -377,6 +378,15 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial Color BgElevatedColor { get; set; }
     [ObservableProperty] public partial Color TextPrimaryColor { get; set; }
     [ObservableProperty] public partial Color TextSecondaryColor { get; set; }
+
+    /// <summary>Варианты скорости анимации играющего трека для ComboBox.</summary>
+    public ObservableCollection<LocalizedItem<TrackAnimationSpeed>> TrackAnimationSpeedOptions { get; } = [];
+
+    /// <summary>Выбранная скорость анимации играющего трека.</summary>
+    [ObservableProperty] public partial LocalizedItem<TrackAnimationSpeed>? SelectedTrackAnimationSpeed { get; set; }
+
+    /// <summary>Флаг использования гидродинамического волновода вместо классической пульсации.</summary>
+    [ObservableProperty] public partial bool UseWaveAnimation { get; set; }
 
     /// <summary>
     /// Признак несохранённых изменений темы.
@@ -396,6 +406,20 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     partial void OnBgElevatedColorChanged(Color value) => OnColorPickerChanged();
     partial void OnTextPrimaryColorChanged(Color value) => OnColorPickerChanged();
     partial void OnTextSecondaryColorChanged(Color value) => OnColorPickerChanged();
+
+    partial void OnUseWaveAnimationChanged(bool value)
+    {
+        if (_isLoadingSettings) return;
+        _library.UpdateSettings(s => s.UseWaveAnimation = value);
+        AudioWaveBorder.ConfigureGlobal(value, SelectedTrackAnimationSpeed?.Value ?? TrackAnimationSpeed.Medium);
+    }
+
+    partial void OnSelectedTrackAnimationSpeedChanged(LocalizedItem<TrackAnimationSpeed>? value)
+    {
+        if (_isLoadingSettings || value is null) return;
+        _library.UpdateSettings(s => s.TrackAnimationSpeed = value.Value);
+        AudioWaveBorder.ConfigureGlobal(UseWaveAnimation, value.Value);
+    }
 
     private void OnColorPickerChanged()
     {
@@ -873,6 +897,9 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         }
 
         LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
+
+        // Применяем сохранённые глобальные параметры анимации волны
+        AudioWaveBorder.ConfigureGlobal(_library.Settings.UseWaveAnimation, _library.Settings.TrackAnimationSpeed);
     }
 
     private void OnAudioFormatCached(string trackId, AudioFormat format, int bitrate, bool isDownloaded)
@@ -1078,6 +1105,16 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         SelectedVolumeCurve = VolumeCurveOptions.FirstOrDefault(x => x.Value == currentCurve)
                            ?? VolumeCurveOptions[1];
 
+        var currentSpeed = SelectedTrackAnimationSpeed?.Value ?? _library.Settings.TrackAnimationSpeed;
+        TrackAnimationSpeedOptions.Clear();
+        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.VerySlow, ResolveSpeedLabel(TrackAnimationSpeed.VerySlow)));
+        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Slow, ResolveSpeedLabel(TrackAnimationSpeed.Slow)));
+        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Medium, ResolveSpeedLabel(TrackAnimationSpeed.Medium)));
+        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Fast, ResolveSpeedLabel(TrackAnimationSpeed.Fast)));
+        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Epileptic, ResolveSpeedLabel(TrackAnimationSpeed.Epileptic)));
+        SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FirstOrDefault(x => x.Value == currentSpeed)
+                                  ?? TrackAnimationSpeedOptions[2];
+
         var currentErrorBehavior = SelectedErrorBehavior?.Value ?? _library.Settings.Audio.CriticalErrorBehavior;
         ErrorBehaviorOptions.Clear();
         ErrorBehaviorOptions.Add(new(PlaybackErrorBehavior.Dialog, SL["Settings_ErrorBehavior_Dialog"]));
@@ -1132,6 +1169,29 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         OnPropertyChanged(nameof(QualityOptions));
     }
 
+    private string ResolveSpeedLabel(TrackAnimationSpeed speed)
+    {
+        string key = $"AnimationSpeed_{speed}";
+        string raw = SL[key];
+
+        // Защитный fallback исключает отображение скобок вида [AnimationSpeed_...], если ключ не найден в словаре
+        if (string.IsNullOrEmpty(raw) || raw.StartsWith('['))
+        {
+            bool isRu = string.Equals(LocalizationService.Instance.CurrentLanguage, "ru", StringComparison.OrdinalIgnoreCase);
+            return speed switch
+            {
+                TrackAnimationSpeed.VerySlow => isRu ? "Очень медленно" : "Very Slow",
+                TrackAnimationSpeed.Slow => isRu ? "Медленно" : "Slow",
+                TrackAnimationSpeed.Medium => isRu ? "Средне" : "Medium",
+                TrackAnimationSpeed.Fast => isRu ? "Быстро" : "Fast",
+                TrackAnimationSpeed.Epileptic => isRu ? "Эпилепсия" : "Epilepsy",
+                _ => speed.ToString()
+            };
+        }
+
+        return raw;
+    }
+
     private void LoadAllSettings()
     {
         _isLoadingSettings = true;
@@ -1146,6 +1206,12 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             MaxVolumeLimit = s.MaxVolumeLimit;
             TargetGainDb = s.TargetGainDb;
             RememberTrackFormat = s.RememberTrackFormat;
+
+            UseWaveAnimation = s.UseWaveAnimation;
+            SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FirstOrDefault(x => x.Value == s.TrackAnimationSpeed)
+                                      ?? TrackAnimationSpeedOptions[2];
+
+            AudioWaveBorder.ConfigureGlobal(s.UseWaveAnimation, s.TrackAnimationSpeed);
 
             EnableSearchCache = s.EnableSearchCache;
             SearchCacheTtlMinutes = s.SearchCacheTtlMinutes;
@@ -1659,15 +1725,6 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
     /// <summary>
     /// Проверяет наличие активного VPN-интерфейса среди сетевых адаптеров Windows.
-    ///
-    /// Изменения vs старой версии:
-    /// - Тип Tunnel больше НЕ является достаточным признаком: Microsoft Teredo Tunneling
-    ///   Adapter имеет тип Tunnel но VPN не является — давал false positive на чистом Wi-Fi.
-    ///   Теперь Tunnel + фильтр по имени/описанию.
-    /// - "tun" по substring заменён на точные паттерны с границами слова / позицией,
-    ///   чтобы не ловить "fortune", "Saturn", "intuned" и т.п.
-    /// - Исключаем Teredo, 6to4, Bluetooth PAN, Loopback, VMware/VirtualBox/Hyper-V
-    ///   которые всегда присутствуют на Windows и к VPN не относятся.
     /// </summary>
     private static bool DetectVpnInterface()
     {

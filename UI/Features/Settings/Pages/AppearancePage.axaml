@@ -34,6 +34,30 @@
 
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
+                <!--  Live wave animation toggle  -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Settings_UseWaveAnimation]}" />
+                        <TextBlock Classes="desc" Text="{Binding L[Settings_UseWaveAnimationDesc]}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding UseWaveAnimation}" />
+                </Grid>
+
+                <!--  Track playing animation speed  -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Settings_TrackAnimationSpeed]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_TrackAnimationSpeedDesc]}" />
+                    </StackPanel>
+                    <ComboBox Grid.Column="1"
+                        ItemsSource="{Binding TrackAnimationSpeedOptions}"
+                        SelectedItem="{Binding SelectedTrackAnimationSpeed}"
+                        MinWidth="200" />
+                </Grid>
+
+                <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
+
                 <!--  Accent color  -->
                 <Grid Classes="color-row" ColumnDefinitions="*, Auto">
                     <StackPanel VerticalAlignment="Center">

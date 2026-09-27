@@ -619,6 +619,83 @@ public sealed class PlaylistRepository : IPlaylistRepository
     }
 
     /// <inheritdoc />
+    public async Task<int> RemoveTracksAsync(string playlistId, IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default)
+    {
+        var trackIdList = trackIds as IList<string> ?? [.. trackIds];
+        if (trackIdList.Count == 0) return 0;
+
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            int totalDeleted = 0;
+            const int chunkSize = 500;
+
+            for (int i = 0; i < trackIdList.Count; i += chunkSize)
+            {
+                int count = Math.Min(chunkSize, trackIdList.Count - i);
+
+                await using var cmdDel = connection.CreateCommand();
+                cmdDel.Transaction = transaction;
+
+                var paramNames = new string[count];
+                for (int j = 0; j < count; j++)
+                {
+                    var paramName = $"@t{j}";
+                    paramNames[j] = paramName;
+                    AddParameter(cmdDel, paramName, trackIdList[i + j]);
+                }
+
+                cmdDel.CommandText = $"""
+                    DELETE FROM PlaylistTracks
+                    WHERE PlaylistId = @pId AND TrackId IN ({string.Join(',', paramNames)});
+                    """;
+
+                AddParameter(cmdDel, "@pId", playlistId);
+                totalDeleted += await cmdDel.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            if (totalDeleted > 0)
+            {
+                await using (var cmdReindex = connection.CreateCommand())
+                {
+                    cmdReindex.Transaction = transaction;
+                    cmdReindex.CommandText = """
+                        WITH Ranked AS (
+                            SELECT rowid, ROW_NUMBER() OVER (ORDER BY Position) - 1 AS NewPos
+                            FROM PlaylistTracks
+                            WHERE PlaylistId = @pId
+                        )
+                        UPDATE PlaylistTracks
+                        SET Position = (SELECT NewPos FROM Ranked WHERE Ranked.rowid = PlaylistTracks.rowid)
+                        WHERE PlaylistId = @pId;
+                        """;
+                    AddParameter(cmdReindex, "@pId", playlistId);
+                    await cmdReindex.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+
+                await using (var cmdUpdatePl = connection.CreateCommand())
+                {
+                    cmdUpdatePl.Transaction = transaction;
+                    cmdUpdatePl.CommandText = "UPDATE Playlists SET UpdatedAt = @updatedAt WHERE Id = @pId;";
+                    AddParameter(cmdUpdatePl, "@updatedAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+                    AddParameter(cmdUpdatePl, "@pId", playlistId);
+                    await cmdUpdatePl.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            return totalDeleted;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task MoveTrackAsync(string playlistId, int oldIndex, int newIndex, CancellationToken ct = default)
     {
         if (oldIndex == newIndex) return;

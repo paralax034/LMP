@@ -1,7 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
-using LMP.Core.Services;
 
 namespace LMP.UI.Features.Notifications;
 

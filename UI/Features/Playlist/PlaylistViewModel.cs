@@ -338,25 +338,36 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         vm.SourceContextId = _currentPlaylistId;
         vm.IsPlaylistContext = CanEdit;
 
-        vm.RemoveFromPlaylistAction = async t =>
+        vm.RemoveFromPlaylistAction = async targets =>
         {
-            if (!CanEdit) return;
+            if (!CanEdit || targets.Count == 0) return;
 
             _lastLocalMutationTime = DateTime.Now;
-            RemoveItemLocally(t.Id);
 
-            TrackCount = Math.Max(0, TrackCount - 1);
+            TimeSpan durationRemoved = TimeSpan.Zero;
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var t = targets[i];
+                RemoveItemLocally(t.Id);
+                if (t.Duration > TimeSpan.Zero)
+                    durationRemoved += t.Duration;
+            }
+
+            TrackCount = Math.Max(0, TrackCount - targets.Count);
             OnPropertyChanged(nameof(FormattedTrackCount));
 
-            if (t.Duration > TimeSpan.Zero)
+            if (durationRemoved > TimeSpan.Zero)
             {
-                TotalDuration = TotalDuration > t.Duration
-                    ? TotalDuration - t.Duration
+                TotalDuration = TotalDuration > durationRemoved
+                    ? TotalDuration - durationRemoved
                     : TimeSpan.Zero;
                 FormatDuration();
             }
 
-            await _playlistService.RemoveTrackFromPlaylistAsync(_currentPlaylistId, t.Id);
+            for (int i = 0; i < targets.Count; i++)
+            {
+                await _playlistService.RemoveTrackFromPlaylistAsync(_currentPlaylistId, targets[i].Id);
+            }
         };
 
         vm.StartRadioAction = t => Log.Info($"[Playlist] Start radio requested for {t.Title}");

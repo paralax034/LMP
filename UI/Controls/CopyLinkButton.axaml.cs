@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using LMP.Core.Services;
 
 namespace LMP.UI.Controls;
 
@@ -211,8 +210,7 @@ public partial class CopyLinkButton : UserControl
 
     private void HideHint()
     {
-        if (_hintPopup != null)
-            _hintPopup.IsOpen = false;
+        _hintPopup?.IsOpen = false;
     }
 
     /// <summary>

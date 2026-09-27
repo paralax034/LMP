@@ -1,5 +1,4 @@
 using LMP.Core.Audio.Normalization;
-using MemoryPack;
 
 namespace LMP.Core.Models;
 
@@ -44,6 +43,28 @@ public enum VolumeCurveType
     /// </summary>
     SpeedOfLight
 }
+
+/// <summary>
+/// Скорость анимации активного играющего трека в списке треков.
+/// </summary>
+public enum TrackAnimationSpeed
+{
+    /// <summary>Очень медленная плавная анимация.</summary>
+    VerySlow,
+
+    /// <summary>Медленная плавная анимация.</summary>
+    Slow,
+
+    /// <summary>Сбалансированная стандартная скорость (по умолчанию).</summary>
+    Medium,
+
+    /// <summary>Быстрая динамичная анимация.</summary>
+    Fast,
+
+    /// <summary>Экстремально быстрая анимация высокой частоты.</summary>
+    Epileptic
+}
+
 /// <summary>
 /// Стратегия обработки критических ошибок воспроизведения.
 /// </summary>
@@ -132,8 +153,7 @@ public enum AudioQualityPreference
     Standard
 }
 
-[MemoryPackable]
-public sealed partial class ProxySettings
+public sealed class ProxySettings
 {
     public bool Enabled { get; set; } = false;
     public string Host { get; set; } = "";
@@ -146,8 +166,7 @@ public sealed partial class ProxySettings
 /// <summary>
 /// Настройки хранения данных.
 /// </summary>
-[MemoryPackable]
-public sealed partial class StorageSettings
+public sealed class StorageSettings
 {
     /// <summary>
     /// Лимит кэша изображений в МБ.
@@ -177,8 +196,7 @@ public sealed partial class StorageSettings
 /// <summary>
 /// Настройки аудио системы.
 /// </summary>
-[MemoryPackable]
-public sealed partial class AudioSettings
+public sealed class AudioSettings
 {
     /// <summary>
     /// Включить boost громкости выше 100%.
@@ -234,7 +252,7 @@ public sealed partial class AudioSettings
     /// <summary>
     /// Режим отображения уведомлений при сложной расшифровке n-токена.
     /// </summary>
-    public NTokenNotificationMode NTokenNotificationMode { get; set; } = NTokenNotificationMode.Toast;
+    public NTokenNotificationMode NTokenNotificationMode { get; set; } = NTokenNotificationMode.PanelOnly;
 
     /// <summary>
     /// Действие автоматического восстановления после критической ошибки воспроизведения.
@@ -263,8 +281,7 @@ public sealed partial class AudioSettings
 /// что устраняет жёсткие константы в коде сервиса.
 /// </para>
 /// </summary>
-[MemoryPackable]
-public sealed partial class NotificationSettings
+public sealed class NotificationSettings
 {
     /// <summary>
     /// Ширина панели уведомлений в пикселях.
@@ -297,8 +314,7 @@ public sealed partial class NotificationSettings
 /// <summary>
 /// Настройки автоматической очистки памяти.
 /// </summary>
-[MemoryPackable]
-public sealed partial class MemorySettings
+public sealed class MemorySettings
 {
     /// <summary>
     /// Включить автоматическую очистку памяти по таймеру.
@@ -320,10 +336,9 @@ public sealed partial class MemorySettings
 /// <summary>
 /// Application settings. Stored as JSON in Settings table.
 /// </summary>
-[MemoryPackable]
-public sealed partial class AppSettings
+public sealed class AppSettings
 {
-    // === Audio ===
+    // === Audio (1-7) ===
 
     /// <summary>
     /// Текущий уровень громкости плеера в процентах (0–100).
@@ -338,16 +353,16 @@ public sealed partial class AppSettings
     public bool RememberTrackFormat { get; set; } = true;
 
     /// <summary>
-    /// Расширенные настройки аудио.
+    /// Расширенные настройки аудио (8).
     /// </summary>
     public AudioSettings Audio { get; set; } = new();
 
-    // === Network ===
+    // === Network (9-11) ===
     public InternetProfile InternetProfile { get; set; } = InternetProfile.Medium;
     public ProxySettings Proxy { get; set; } = new();
     public StorageSettings Storage { get; set; } = new();
 
-    // === UI ===
+    // === UI (12-24) ===
     public double PlaylistHeaderHeight { get; set; } = 300;
     public string LanguageCode { get; set; } = "en";
     public string DownloadPath { get; set; } = string.Empty;
@@ -390,17 +405,28 @@ public sealed partial class AppSettings
     public bool MinimizeToTray { get; set; } = false;
 
     /// <summary>
-    /// Настройки панели уведомлений и авто-очистки.
+    /// Настройки панели уведомлений и авто-очистки (25).
     /// </summary>
     public NotificationSettings Notifications { get; set; } = new();
 
     /// <summary>
-    /// Режим синхронизации лайков с YouTube.
+    /// Режим синхронизации лайков с YouTube (26).
     /// </summary>
     public LikeSyncMode LikeSyncMode { get; set; } = LikeSyncMode.MusicOnly;
 
     /// <summary>
-    /// Настройки управления памятью.
+    /// Настройки управления памятью (27).
     /// </summary>
     public MemorySettings Memory { get; set; } = new();
+
+    /// <summary>
+    /// Использовать живую волновую анимацию для активного играющего трека.
+    /// false = классическая пульсирующая подсветка.
+    /// </summary>
+    public bool UseWaveAnimation { get; set; } = true;
+
+    /// <summary>
+    /// Скорость анимации играющего трека в списке.
+    /// </summary>
+    public TrackAnimationSpeed TrackAnimationSpeed { get; set; } = TrackAnimationSpeed.Medium;
 }

@@ -49,6 +49,7 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(InternetProfile))]
 [JsonSerializable(typeof(YoutubeClientProfile))]
 [JsonSerializable(typeof(VolumeCurveType))]
+[JsonSerializable(typeof(TrackAnimationSpeed))]
 [JsonSerializable(typeof(PlaybackErrorBehavior))]
 [JsonSerializable(typeof(LikeSyncMode))]
 [JsonSerializable(typeof(NTokenNotificationMode))]
@@ -66,6 +67,14 @@ public sealed partial class AppJsonContext : JsonSerializerContext
     public static AppJsonContext DefaultCompact { get; } = new(new JsonSerializerOptions
     {
         WriteIndented = false,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+    });
+
+    public static AppJsonContext DefaultPretty { get; } = new(new JsonSerializerOptions
+    {
+        WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals

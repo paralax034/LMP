@@ -1,4 +1,3 @@
-using LMP.Core.Services;
 using LMP.Tests.Framework;
 using Microsoft.Extensions.DependencyInjection;
 

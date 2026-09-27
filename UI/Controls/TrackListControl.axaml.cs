@@ -1,9 +1,8 @@
 ﻿using System.Collections;
+using System.Collections.Specialized;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -19,7 +18,7 @@ public partial class TrackListControl : UserControl
     private const string DragFormatTrackIndex = "application/x-lmp-track-index";
 
     private static readonly DataFormat<string> TrackIndexDataFormat =
-        DataFormat.CreateStringPlatformFormat(DragFormatTrackIndex);
+        DataFormat.CreateInProcessFormat<string>(DragFormatTrackIndex);
 
     /// <summary>
     /// Фиксированная высота строки трека — O(1) hit-test при drag-and-drop.
@@ -29,12 +28,7 @@ public partial class TrackListControl : UserControl
     /// <summary>
     /// Минимальное смещение в пикселях для начала drag.
     /// </summary>
-    private const double DragThreshold = 8.0;
-
-    /// <summary>
-    /// Минимальное время удержания кнопки мыши перед началом drag (мс).
-    /// </summary>
-    private const int DragMinHoldMs = 180;
+    private const double DragThreshold = 6.0;
 
     private const int AutoScrollMargin = 50;
     private const double AutoScrollAmount = 12.0;
@@ -46,19 +40,21 @@ public partial class TrackListControl : UserControl
 
     private readonly EventHandler<string> _languageChangedHandler;
 
+    // Selection Engine
+    private readonly HashSet<TrackItemViewModel> _selectedSet = [];
+    private readonly HashSet<TrackItemViewModel> _preDragSelectionSnapshot = [];
+    private int _selectionAnchorIndex = -1;
+    private int _leadIndex = -1;
+    private TrackItemViewModel? _deferredSingleSelectVm;
+    private int _deferredSingleSelectIndex = -1;
+
     // Drag & Drop
     private Point _dragStartPoint;
     private int _dragSourceIndex = -1;
     private bool _isDragging;
     private Control? _lastHighlightedItem;
-    private long _dragPressTimestamp;
-
-    /// <summary>
-    /// Saved PointerPressedEventArgs from OnItemPointerPressed.
-    /// Avalonia 12 requires PointerPressedEventArgs (not PointerEventArgs)
-    /// for DoDragDropAsync — PR #20988.
-    /// </summary>
     private PointerPressedEventArgs? _dragPressedArgs;
+    private static IReadOnlyList<int>? _activeInProcessDragIndices;
 
     // Scroll & Layout
     private ScrollViewer? _scrollViewer;
@@ -254,6 +250,12 @@ public partial class TrackListControl : UserControl
         private set => SetAndRaise(IsFooterVisibleProperty, ref field, value);
     }
 
+    public static readonly DirectProperty<TrackListControl, int> SelectedCountProperty =
+        AvaloniaProperty.RegisterDirect<TrackListControl, int>(
+            nameof(SelectedCount), static o => o.SelectedCount);
+
+    public int SelectedCount => _selectedSet.Count;
+
     #endregion
 
     #region Constructor
@@ -271,6 +273,10 @@ public partial class TrackListControl : UserControl
         };
 
         UpdateLocalizedTexts();
+
+        AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        AddHandler(DragDrop.DropEvent, OnDrop);
+        AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
     }
 
     #endregion
@@ -285,10 +291,12 @@ public partial class TrackListControl : UserControl
 
         _repeater = this.FindControl<ItemsRepeater>("MainRepeater");
 
+        SubscribeToCollectionChanged(Items);
+        ResyncSelectionFromItems();
+
         Dispatcher.UIThread.Post(() =>
         {
             _scrollViewer = this.FindAncestorOfType<ScrollViewer>();
-            Log.Debug($"[TrackList] Attached. ScrollViewer found: {_scrollViewer != null}");
 
             if (_scrollViewer != null && EnableSnapScroll)
             {
@@ -298,13 +306,16 @@ public partial class TrackListControl : UserControl
         }, DispatcherPriority.Loaded);
 
         _autoScrollTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(16), DispatcherPriority.Render, OnAutoScrollTick);
+            TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, OnAutoScrollTick);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
         base.OnDetachedFromVisualTree(e);
+
+        UnsubscribeFromCollectionChanged(Items);
+        DetachSelectionState();
 
         _autoScrollTimer?.Stop();
         _autoScrollTimer = null;
@@ -313,7 +324,167 @@ public partial class TrackListControl : UserControl
         _repeater = null;
         _scrollViewer = null;
         _lastHighlightedItem = null;
-        Log.Debug("[TrackList] Detached from visual tree.");
+    }
+
+    #endregion
+
+    #region Keyboard Navigation
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        bool isCtrlOrMeta = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+        bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+
+        if (e.Key == Key.A && isCtrlOrMeta)
+        {
+            SelectAll();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            if (_isDragging)
+            {
+                CleanupDragStyles();
+                _isDragging = false;
+                _activeInProcessDragIndices = null;
+            }
+            else
+            {
+                ClearSelection();
+            }
+            e.Handled = true;
+        }
+        else if (e.Key is Key.Delete or Key.Back)
+        {
+            if (IsPlaylistContext || IsQueueContext)
+            {
+                ExecuteDeleteSelection();
+                e.Handled = true;
+            }
+        }
+        else if (e.Key == Key.Down)
+        {
+            HandleArrowNavigation(isDown: true, isShift: isShift, isCtrl: isCtrlOrMeta);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Up)
+        {
+            HandleArrowNavigation(isDown: false, isShift: isShift, isCtrl: isCtrlOrMeta);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Home)
+        {
+            HandleHomeEndNavigation(isHome: true, isShift: isShift);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.End)
+        {
+            HandleHomeEndNavigation(isHome: false, isShift: isShift);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Space)
+        {
+            if (Items is IList list && _leadIndex >= 0 && _leadIndex < list.Count)
+            {
+                if (list[_leadIndex] is TrackItemViewModel vm)
+                {
+                    if (isCtrlOrMeta)
+                    {
+                        ToggleItemSelection(vm);
+                        _selectionAnchorIndex = _leadIndex;
+                    }
+                    else
+                    {
+                        vm.PlayCommand.Execute(null);
+                    }
+                    e.Handled = true;
+                }
+            }
+        }
+    }
+
+    private void HandleArrowNavigation(bool isDown, bool isShift, bool isCtrl)
+    {
+        if (Items is not IList list || list.Count == 0) return;
+
+        int current = _leadIndex >= 0 ? _leadIndex : (isDown ? -1 : list.Count);
+        int target = isDown ? Math.Min(current + 1, list.Count - 1) : Math.Max(current - 1, 0);
+
+        _leadIndex = target;
+
+        if (isCtrl)
+        {
+            ScrollToTrackIndex(target, smooth: false);
+            return;
+        }
+
+        if (isShift)
+        {
+            int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : current;
+            if (_selectionAnchorIndex < 0) _selectionAnchorIndex = anchor;
+            SelectRange(anchor, target, addToExisting: true);
+        }
+        else
+        {
+            int oldCount = _selectedSet.Count;
+            ClearSelectionInternal();
+            if (list[target] is TrackItemViewModel vm)
+            {
+                vm.IsSelected = true;
+                _selectedSet.Add(vm);
+                _selectionAnchorIndex = target;
+                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+            }
+        }
+
+        ScrollToTrackIndex(target, smooth: false);
+    }
+
+    private void HandleHomeEndNavigation(bool isHome, bool isShift)
+    {
+        if (Items is not IList list || list.Count == 0) return;
+
+        int target = isHome ? 0 : list.Count - 1;
+        _leadIndex = target;
+
+        if (isShift)
+        {
+            int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : 0;
+            SelectRange(anchor, target, addToExisting: true);
+        }
+        else
+        {
+            int oldCount = _selectedSet.Count;
+            ClearSelectionInternal();
+            if (list[target] is TrackItemViewModel vm)
+            {
+                vm.IsSelected = true;
+                _selectedSet.Add(vm);
+                _selectionAnchorIndex = target;
+                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+            }
+        }
+
+        ScrollToTrackIndex(target, smooth: false);
+    }
+
+    private void ExecuteDeleteSelection()
+    {
+        if (_selectedSet.Count == 0) return;
+
+        var rep = _selectedSet.FirstOrDefault();
+        if (rep == null) return;
+
+        if (IsPlaylistContext)
+        {
+            rep.RemoveFromPlaylistCommand.Execute(null);
+        }
+        else if (IsQueueContext)
+        {
+            rep.RemoveFromQueueCommand.Execute(null);
+        }
     }
 
     #endregion
@@ -326,10 +497,15 @@ public partial class TrackListControl : UserControl
 
         if (change.Property == FilterTextProperty)
         {
+            ClearSelection();
             ResetScrollPosition();
         }
         else if (change.Property == ItemsProperty)
         {
+            UnsubscribeFromCollectionChanged(change.GetOldValue<IEnumerable?>());
+            SubscribeToCollectionChanged(change.GetNewValue<IEnumerable?>());
+
+            ResyncSelectionFromItems();
             UpdateItemsContext();
         }
         else if (change.Property == IsPlaylistContextProperty ||
@@ -361,6 +537,63 @@ public partial class TrackListControl : UserControl
         }
     }
 
+    private void SubscribeToCollectionChanged(IEnumerable? items)
+    {
+        if (items is INotifyCollectionChanged incc)
+            incc.CollectionChanged += OnItemsCollectionChanged;
+    }
+
+    private void UnsubscribeFromCollectionChanged(IEnumerable? items)
+    {
+        if (items is INotifyCollectionChanged incc)
+            incc.CollectionChanged -= OnItemsCollectionChanged;
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Remove && e.OldItems != null)
+        {
+            int oldCount = _selectedSet.Count;
+            bool selectionChanged = false;
+            for (int i = 0; i < e.OldItems.Count; i++)
+            {
+                if (e.OldItems[i] is TrackItemViewModel vm && _selectedSet.Remove(vm))
+                {
+                    vm.IsSelected = false;
+                    selectionChanged = true;
+                }
+            }
+
+            if (selectionChanged)
+            {
+                RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
+            }
+
+            if (Items is IList list)
+            {
+                _selectionAnchorIndex = Math.Clamp(_selectionAnchorIndex, -1, list.Count - 1);
+                _leadIndex = Math.Clamp(_leadIndex, -1, list.Count - 1);
+            }
+            else
+            {
+                _selectionAnchorIndex = -1;
+                _leadIndex = -1;
+            }
+        }
+        else if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
+        {
+            for (int i = 0; i < e.NewItems.Count; i++)
+            {
+                if (e.NewItems[i] is TrackItemViewModel vm)
+                    vm.SelectionProvider = GetSelectedTrackInfos;
+            }
+        }
+        else if (e.Action is NotifyCollectionChangedAction.Reset)
+        {
+            ResyncSelectionFromItems();
+        }
+    }
+
     private void UpdateFooterVisibility(Vector offset)
     {
         if (_scrollViewer == null) { IsFooterVisible = false; return; }
@@ -374,130 +607,370 @@ public partial class TrackListControl : UserControl
 
     #endregion
 
-    #region Drag & Drop Helpers
+    #region Selection Engine
 
-    /// <summary>
-    /// Безопасно вычисляет положение курсора мыши относительно начала <see cref="ItemsRepeater"/>,
-    /// используя систему координат стабильного <see cref="ScrollViewer"/>. Выводит подробный лог.
-    /// </summary>
-    private Point GetSafePositionInRepeater(DragEventArgs e, string context)
+    public void ClearSelection()
     {
-        if (_repeater == null)
+        if (_selectedSet.Count == 0) return;
+
+        int oldCount = _selectedSet.Count;
+        ClearSelectionInternal();
+        RaisePropertyChanged(SelectedCountProperty, oldCount, 0);
+    }
+
+    private void ClearSelectionInternal()
+    {
+        foreach (var item in _selectedSet)
         {
-            Log.Trace($"[{context}] GetSafePositionInRepeater: _repeater is null!");
-            return default;
+            item.IsSelected = false;
         }
 
-        var rawPos = e.GetPosition(_repeater);
-        var scrollViewer = _scrollViewer ?? this.FindAncestorOfType<ScrollViewer>();
+        _selectedSet.Clear();
+        _selectionAnchorIndex = -1;
+        _leadIndex = -1;
+        _deferredSingleSelectVm = null;
+        _deferredSingleSelectIndex = -1;
+    }
 
-        Log.Trace($"[{context}] === Safe Position Calc Started ===");
-        Log.Trace($"[{context}] Raw e.GetPosition(_repeater): X={rawPos.X:F1}, Y={rawPos.Y:F1}");
+    private void DetachSelectionState()
+    {
+        _selectedSet.Clear();
+        _preDragSelectionSnapshot.Clear();
+        _selectionAnchorIndex = -1;
+        _leadIndex = -1;
+        _deferredSingleSelectVm = null;
+        _deferredSingleSelectIndex = -1;
+    }
 
-        if (scrollViewer != null)
+    private void ResyncSelectionFromItems()
+    {
+        int oldCount = _selectedSet.Count;
+        _selectedSet.Clear();
+        _preDragSelectionSnapshot.Clear();
+        _selectionAnchorIndex = -1;
+        _leadIndex = -1;
+        _deferredSingleSelectVm = null;
+        _deferredSingleSelectIndex = -1;
+
+        if (Items == null)
         {
-            var posInScrollViewer = e.GetPosition(scrollViewer);
-            var repeaterOrigin = _repeater.TranslatePoint(new Point(0, 0), scrollViewer);
-            var offset = scrollViewer.Offset;
+            if (oldCount != 0)
+                RaisePropertyChanged(SelectedCountProperty, oldCount, 0);
+            return;
+        }
 
-            Log.Trace($"[{context}] ScrollViewer.Offset.Y: {offset.Y:F1}");
-            Log.Trace($"[{context}] Pointer pos in ScrollViewer: X={posInScrollViewer.X:F1}, Y={posInScrollViewer.Y:F1}");
+        int firstIndex = -1;
+        int currentIndex = 0;
 
-            if (repeaterOrigin.HasValue)
+        if (Items is IList list)
+        {
+            int count = list.Count;
+            for (int i = 0; i < count; i++)
             {
-                Log.Trace($"[{context}] _repeater origin inside ScrollViewer: X={repeaterOrigin.Value.X:F1}, Y={repeaterOrigin.Value.Y:F1}");
-                var calculated = new Point(
-                    posInScrollViewer.X - repeaterOrigin.Value.X,
-                    posInScrollViewer.Y - repeaterOrigin.Value.Y);
-                Log.Debug($"[{context}] Calculated Safe Position: X={calculated.X:F1}, Y={calculated.Y:F1} (Diff with raw Y: {calculated.Y - rawPos.Y:F1})");
-                return calculated;
-            }
-            else
-            {
-                Log.Warn($"[{context}] _repeater.TranslatePoint returned NULL. Origin cannot be translated.");
+                if (list[i] is TrackItemViewModel vm)
+                {
+                    vm.SelectionProvider = GetSelectedTrackInfos;
+                    if (vm.IsSelected)
+                    {
+                        _selectedSet.Add(vm);
+                        if (firstIndex < 0) firstIndex = i;
+                    }
+                }
             }
         }
         else
         {
-            Log.Warn($"[{context}] ScrollViewer not found. Using fallback raw position.");
+            foreach (var item in Items)
+            {
+                if (item is TrackItemViewModel vm)
+                {
+                    vm.SelectionProvider = GetSelectedTrackInfos;
+                    if (vm.IsSelected)
+                    {
+                        _selectedSet.Add(vm);
+                        if (firstIndex < 0) firstIndex = currentIndex;
+                    }
+                }
+                currentIndex++;
+            }
         }
 
-        return rawPos;
+        _selectionAnchorIndex = firstIndex;
+        _leadIndex = firstIndex;
+
+        if (oldCount != _selectedSet.Count)
+            RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
     }
 
-    /// <summary>
-    /// Безопасно вычисляет Y-координату мыши относительно конкретного элемента списка с подробным логированием.
-    /// </summary>
-    private double GetSafeElementRelativeY(DragEventArgs e, Control element, Point safePosInRepeater, int idx, string context)
+    public void SelectAll()
     {
-        var scrollViewer = _scrollViewer ?? this.FindAncestorOfType<ScrollViewer>();
-        Log.Trace($"[{context}] GetSafeElementRelativeY for item index={idx}");
+        if (Items == null) return;
 
-        if (scrollViewer != null)
+        int oldCount = _selectedSet.Count;
+
+        if (Items is IList list)
         {
-            var posInScrollViewer = e.GetPosition(scrollViewer);
-            var elementOrigin = element.TranslatePoint(new Point(0, 0), scrollViewer);
-            if (elementOrigin.HasValue)
+            int count = list.Count;
+            for (int i = 0; i < count; i++)
             {
-                double calculatedRelY = posInScrollViewer.Y - elementOrigin.Value.Y;
-                Log.Trace($"[{context}] posInScrollViewer.Y={posInScrollViewer.Y:F1}, elementOrigin.Y={elementOrigin.Value.Y:F1} -> calculatedRelY={calculatedRelY:F1}");
-                return calculatedRelY;
+                if (list[i] is TrackItemViewModel vm && _selectedSet.Add(vm))
+                {
+                    vm.IsSelected = true;
+                }
             }
-            else
+            _leadIndex = list.Count - 1;
+            if (_selectionAnchorIndex < 0 && list.Count > 0)
+                _selectionAnchorIndex = 0;
+        }
+        else
+        {
+            int idx = 0;
+            foreach (var item in Items)
             {
-                Log.Warn($"[{context}] element.TranslatePoint returned NULL for item index={idx}");
+                if (item is TrackItemViewModel vm && _selectedSet.Add(vm))
+                {
+                    vm.IsSelected = true;
+                }
+                idx++;
+            }
+            _leadIndex = idx - 1;
+            if (_selectionAnchorIndex < 0 && idx > 0)
+                _selectionAnchorIndex = 0;
+        }
+
+        if (_selectedSet.Count != oldCount)
+        {
+            RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
+        }
+    }
+
+    private void SelectRange(int fromIndex, int toIndex, bool addToExisting)
+    {
+        if (Items is not IList list || list.Count == 0) return;
+
+        int start = Math.Clamp(Math.Min(fromIndex, toIndex), 0, list.Count - 1);
+        int end = Math.Clamp(Math.Max(fromIndex, toIndex), 0, list.Count - 1);
+
+        int oldCount = _selectedSet.Count;
+
+        if (!addToExisting)
+        {
+            foreach (var item in _selectedSet)
+            {
+                item.IsSelected = false;
+            }
+            _selectedSet.Clear();
+        }
+
+        for (int i = start; i <= end; i++)
+        {
+            if (list[i] is TrackItemViewModel vm && _selectedSet.Add(vm))
+            {
+                vm.IsSelected = true;
             }
         }
 
-        double fallbackRelY = safePosInRepeater.Y - (idx * ItemHeight);
-        Log.Trace($"[{context}] Fallback calculation used: safePosInRepeater.Y={safePosInRepeater.Y:F1} - (idx*{ItemHeight}) -> fallbackRelY={fallbackRelY:F1}");
-        return fallbackRelY;
+        if (oldCount != _selectedSet.Count)
+            RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
+    }
+
+    private void ToggleItemSelection(TrackItemViewModel vm)
+    {
+        int oldCount = _selectedSet.Count;
+
+        if (vm.IsSelected)
+        {
+            vm.IsSelected = false;
+            _selectedSet.Remove(vm);
+        }
+        else
+        {
+            vm.IsSelected = true;
+            _selectedSet.Add(vm);
+        }
+
+        RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
+    }
+
+    private IReadOnlyList<TrackInfo> GetSelectedTrackInfos()
+    {
+        if (_selectedSet.Count == 0) return [];
+
+        var result = new List<TrackInfo>(_selectedSet.Count);
+
+        if (Items is IList list)
+        {
+            int count = list.Count;
+            for (int i = 0; i < count; i++)
+            {
+                if (list[i] is TrackItemViewModel vm && _selectedSet.Contains(vm))
+                {
+                    result.Add(vm.Track);
+                }
+            }
+        }
+        else if (Items != null)
+        {
+            foreach (var item in Items)
+            {
+                if (item is TrackItemViewModel vm && _selectedSet.Contains(vm))
+                {
+                    result.Add(vm.Track);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private List<TrackItemViewModel> GetSelectedViewModelsOrdered()
+    {
+        var result = new List<TrackItemViewModel>(_selectedSet.Count);
+        if (Items is IList list)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] is TrackItemViewModel vm && _selectedSet.Contains(vm))
+                    result.Add(vm);
+            }
+        }
+        else if (Items != null)
+        {
+            foreach (var item in Items)
+            {
+                if (item is TrackItemViewModel vm && _selectedSet.Contains(vm))
+                    result.Add(vm);
+            }
+        }
+        return result;
     }
 
     #endregion
 
     #region Drag & Drop
 
-    /// <summary>
-    /// O(1) индекс элемента по позиции Y.
-    /// </summary>
-    private int GetItemIndexFromPosition(Point positionInRepeater)
+    private void OnRootPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (_repeater?.ItemsSource is not ICollection collection) return -1;
-        int index = (int)(positionInRepeater.Y / ItemHeight);
-        return index >= 0 && index < collection.Count ? index : -1;
-    }
-
-    private void OnItemPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (!EnableReordering) return;
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-
-        // Игнорируем запуск перетаскивания, если клик произошел по интерактивным элементам (кнопкам Play, Like, More)
         if (e.Source is Visual visual)
         {
             var parent = visual;
             while (parent != null && parent != this)
             {
-                if (parent is Button)
-                {
-                    Log.Debug("[PointerPressed] Clicked on button inside track row, skipping drag initialization.");
+                if (parent is Border border && border.Classes.Contains("track-row"))
                     return;
-                }
+
                 parent = parent.GetVisualParent();
             }
         }
 
-        _dragStartPoint = e.GetPosition(null);
-        _dragPressTimestamp = Environment.TickCount64;
-        _isDragging = false;
-        _dragPressedArgs = e;
-
-        if (_repeater != null)
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
-            var repeaterPos = e.GetPosition(_repeater);
-            _dragSourceIndex = GetItemIndexFromPosition(repeaterPos);
-            Log.Debug($"[PointerPressed] Pressed at repeater: X={repeaterPos.X:F1}, Y={repeaterPos.Y:F1}. Calculated Source Index: {_dragSourceIndex}");
+            bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+
+            this.Focus();
+
+            if (!isShift && !isCtrl)
+            {
+                ClearSelection();
+            }
+        }
+    }
+
+    private void OnItemDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (e.Source is Visual visual && IsInteractiveChild(visual))
+            return;
+
+        if (sender is Control { DataContext: TrackItemViewModel vm })
+        {
+            vm.PlayCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void OnItemPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is Visual visual && IsInteractiveChild(visual))
+            return;
+
+        if (sender is not Control sourceControl || sourceControl.DataContext is not TrackItemViewModel vm)
+            return;
+
+        this.Focus();
+
+        int itemIndex = Items is IList list ? list.IndexOf(vm) : -1;
+        if (itemIndex < 0) return;
+
+        var point = e.GetCurrentPoint(this);
+
+        if (point.Properties.IsLeftButtonPressed)
+        {
+            bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+
+            if (isShift)
+            {
+                int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : itemIndex;
+                if (_selectionAnchorIndex < 0) _selectionAnchorIndex = itemIndex;
+
+                SelectRange(anchor, itemIndex, addToExisting: true);
+                _leadIndex = itemIndex;
+                _deferredSingleSelectVm = null;
+                _deferredSingleSelectIndex = -1;
+            }
+            else if (isCtrl)
+            {
+                ToggleItemSelection(vm);
+                _selectionAnchorIndex = itemIndex;
+                _leadIndex = itemIndex;
+                _deferredSingleSelectVm = null;
+                _deferredSingleSelectIndex = -1;
+            }
+            else
+            {
+                if (vm.IsSelected)
+                {
+                    _deferredSingleSelectVm = vm;
+                    _deferredSingleSelectIndex = itemIndex;
+                }
+                else
+                {
+                    int oldCount = _selectedSet.Count;
+                    ClearSelectionInternal();
+                    vm.IsSelected = true;
+                    _selectedSet.Add(vm);
+                    _selectionAnchorIndex = itemIndex;
+                    _leadIndex = itemIndex;
+                    _deferredSingleSelectVm = null;
+                    _deferredSingleSelectIndex = -1;
+                    RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+                }
+            }
+
+            if (!EnableReordering) return;
+
+            _dragStartPoint = e.GetPosition(this);
+            _isDragging = false;
+            _dragPressedArgs = e;
+            _dragSourceIndex = itemIndex;
+        }
+        else if (point.Properties.IsRightButtonPressed)
+        {
+            if (!vm.IsSelected)
+            {
+                int oldCount = _selectedSet.Count;
+                ClearSelectionInternal();
+                vm.IsSelected = true;
+                _selectedSet.Add(vm);
+                _selectionAnchorIndex = itemIndex;
+                _leadIndex = itemIndex;
+                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+            }
+
+            vm.SelectionProvider = GetSelectedTrackInfos;
+            ShowSharedFlyout(sourceControl, true);
+            e.Handled = true;
         }
     }
 
@@ -506,34 +979,57 @@ public partial class TrackListControl : UserControl
         if (!EnableReordering || _isDragging || _dragSourceIndex < 0 || _dragPressedArgs is null) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
-        var pos = e.GetPosition(null);
+        var pos = e.GetPosition(this);
         double deltaX = Math.Abs(pos.X - _dragStartPoint.X);
         double deltaY = Math.Abs(pos.Y - _dragStartPoint.Y);
 
         if (deltaX < DragThreshold && deltaY < DragThreshold) return;
 
-        long heldMs = Environment.TickCount64 - _dragPressTimestamp;
-        if (heldMs < DragMinHoldMs)
-        {
-            Log.Debug($"[PointerMoved] Drag threshold met but hold time too short ({heldMs}ms < {DragMinHoldMs}ms). Drag aborted.");
-            return;
-        }
+        _deferredSingleSelectVm = null;
+        _deferredSingleSelectIndex = -1;
 
         if (sender is not Control source) return;
 
         _isDragging = true;
-        Log.Info($"[PointerMoved] Starting drag-and-drop process from source index: {_dragSourceIndex}");
-        using var dragData = new DragDataTransfer(_dragSourceIndex);
+
+        IReadOnlyList<int> dragIndices;
+        if (source.DataContext is TrackItemViewModel vm && vm.IsSelected && _selectedSet.Count > 1)
+        {
+            var orderedVms = GetSelectedViewModelsOrdered();
+            var indices = new List<int>(orderedVms.Count);
+            if (Items is IList list)
+            {
+                for (int i = 0; i < orderedVms.Count; i++)
+                {
+                    int idx = list.IndexOf(orderedVms[i]);
+                    if (idx >= 0) indices.Add(idx);
+                }
+            }
+            dragIndices = indices.Count > 0 ? indices : [_dragSourceIndex];
+        }
+        else
+        {
+            dragIndices = [_dragSourceIndex];
+        }
+
+        _activeInProcessDragIndices = dragIndices;
+
+        var dragData = new DataTransfer();
+        var item = new DataTransferItem();
+        string payload = string.Join(',', dragIndices);
+        item.Set(TrackIndexDataFormat, payload);
+        item.Set(DataFormat.Text, payload);
+        dragData.Add(item);
+
         source.Classes.Add("dragging");
 
         try
         {
-            var result = await DragDrop.DoDragDropAsync(_dragPressedArgs, dragData, DragDropEffects.Move);
-            Log.Info($"[PointerMoved] DoDragDropAsync completed. Result: {result}");
+            await DragDrop.DoDragDropAsync(_dragPressedArgs, dragData, DragDropEffects.Move);
         }
         catch (Exception ex)
         {
-            Log.Error($"[PointerMoved] Error during DoDragDropAsync: {ex.Message}");
+            Log.Error($"[TrackList] DoDragDropAsync failed: {ex.Message}");
         }
         finally
         {
@@ -542,197 +1038,275 @@ public partial class TrackListControl : UserControl
             _isDragging = false;
             _dragSourceIndex = -1;
             _dragPressedArgs = null;
+            _activeInProcessDragIndices = null;
         }
     }
 
     private void OnItemPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (e.InitialPressMouseButton == MouseButton.Right &&
-            sender is Control ctl && ctl.DataContext is TrackItemViewModel vm)
+        if (e.InitialPressMouseButton == MouseButton.Left)
         {
-            Log.Debug($"[PointerReleased] Right-click detected on item: {vm.Title}");
-            ShowSharedFlyout(ctl, true);
-            e.Handled = true;
-            return;
-        }
+            bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
 
-        Log.Debug("[PointerReleased] Mouse button released. Resetting drag parameters.");
-        _isDragging = false;
-        _dragSourceIndex = -1;
-        _dragPressedArgs = null;
-        CleanupDragStyles();
+            var deferredVm = _deferredSingleSelectVm;
+            int deferredIdx = _deferredSingleSelectIndex;
+
+            _deferredSingleSelectVm = null;
+            _deferredSingleSelectIndex = -1;
+
+            if (!_isDragging && deferredVm != null && !isShift && !isCtrl)
+            {
+                int oldCount = _selectedSet.Count;
+                ClearSelectionInternal();
+                deferredVm.IsSelected = true;
+                _selectedSet.Add(deferredVm);
+                _selectionAnchorIndex = deferredIdx;
+                _leadIndex = deferredIdx;
+                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+            }
+
+            _isDragging = false;
+            _dragSourceIndex = -1;
+            _dragPressedArgs = null;
+            CleanupDragStyles();
+        }
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)
     {
-        if (!EnableReordering || !HasTrackIndexData(e))
+        if (!EnableReordering || !HasTrackIndexData(e) || _repeater == null)
         {
             e.DragEffects = DragDropEffects.None;
             return;
         }
 
         e.DragEffects = DragDropEffects.Move;
-        if (_repeater == null) return;
 
-        Log.Debug("[DragOver] OnDragOver triggered.");
-
-        // Получаем безопасные координаты с подробным логом вычислений
-        var pos = GetSafePositionInRepeater(e, "DragOver");
-        int idx = GetItemIndexFromPosition(pos);
-        var overItem = idx >= 0 ? _repeater.TryGetElement(idx) : null;
-
-        Log.Debug($"[DragOver] Hovered visual element index calculated: {idx}. Element found: {overItem != null}");
+        var (_, overItem) = ResolveDropTarget(e);
 
         if (_lastHighlightedItem != null && _lastHighlightedItem != overItem)
         {
-            Log.Debug($"[DragOver] Removing drag highlights from previous item: {_lastHighlightedItem.DataContext}");
-            _lastHighlightedItem.Classes.Remove("insert-top");
-            _lastHighlightedItem.Classes.Remove("insert-bottom");
+            _lastHighlightedItem.Classes.Remove("drop-target");
         }
 
         if (overItem == null)
         {
-            Log.Debug("[DragOver] overItem is null (no row under calculated coordinate), exiting OnDragOver.");
+            _lastHighlightedItem = null;
             return;
         }
+
         _lastHighlightedItem = overItem;
-
-        // Вычисляем координату внутри самой строки (0..60px)
-        double relY = GetSafeElementRelativeY(e, overItem, pos, idx, "DragOver");
-        Log.Debug($"[DragOver] Element relative position relY: {relY:F1}px (Row Height: {ItemHeight}px)");
-
-        if (relY < ItemHeight / 2)
-        {
-            Log.Debug($"[DragOver] relY < ItemHeight/2 ({ItemHeight / 2}). Visual line: TOP.");
-            overItem.Classes.Add("insert-top");
-            overItem.Classes.Remove("insert-bottom");
-        }
-        else
-        {
-            Log.Debug($"[DragOver] relY >= ItemHeight/2 ({ItemHeight / 2}). Visual line: BOTTOM.");
-            overItem.Classes.Remove("insert-top");
-            overItem.Classes.Add("insert-bottom");
-        }
+        overItem.Classes.Add("drop-target");
 
         HandleAutoScroll(e);
     }
 
     private void OnDragLeave(object? sender, RoutedEventArgs e)
     {
-        Log.Debug("[DragLeave] OnDragLeave triggered. Stopping timers & cleaning styles.");
+        if (e.Source is Visual visual && this.Bounds.Contains(visual.TranslatePoint(new Point(0, 0), this) ?? new Point(-1, -1)))
+        {
+            return;
+        }
+
         CleanupDragStyles();
         _autoScrollTimer?.Stop();
     }
 
-    private void OnDrop(object? sender, DragEventArgs e)
+    private async void OnDrop(object? sender, DragEventArgs e)
     {
-        Log.Info("[Drop] OnDrop event received.");
         CleanupDragStyles();
         _autoScrollTimer?.Stop();
 
         if (!EnableReordering || !HasTrackIndexData(e) || _repeater == null)
-        {
-            Log.Warn($"[Drop] Drop aborted. EnableReordering={EnableReordering}, HasTrackData={HasTrackIndexData(e)}, RepeaterExists={_repeater != null}");
             return;
-        }
 
-        int oldIndex = GetTrackIndex(e);
-        Log.Info($"[Drop] Extracted oldIndex from drag payload: {oldIndex}");
-        if (oldIndex < 0) return;
+        var oldIndices = GetTrackIndices(e);
+        if (oldIndices.Count == 0) return;
 
-        int newIndex = CalculateDropIndex(e, oldIndex);
-        Log.Info($"[Drop] Final calculated target index (newIndex): {newIndex}");
+        var (targetIndex, _) = ResolveDropTarget(e);
+        if (targetIndex < 0) return;
 
-        if (_repeater.ItemsSource is ICollection col)
+        if (oldIndices.Count == 1)
         {
-            Log.Debug($"[Drop] Source collection count: {col.Count}");
-            if (newIndex >= 0 && oldIndex != newIndex && newIndex < col.Count)
+            int oldIndex = oldIndices[0];
+            if (oldIndex != targetIndex)
             {
-                Log.Info($"[Drop] Executing MoveItemCommand: moving track from {oldIndex} to {newIndex}");
-                MoveItemCommand?.Execute((oldIndex, newIndex));
-            }
-            else
-            {
-                Log.Warn($"[Drop] Move rejected. Verification failed (newIndex out of bounds or oldIndex == newIndex).");
+                if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
+                    await asyncCmd.ExecuteAsync((oldIndex, targetIndex));
+                else
+                    MoveItemCommand?.Execute((oldIndex, targetIndex));
+
+                ResyncSelectionFromItems();
+                _selectionAnchorIndex = targetIndex;
+                _leadIndex = targetIndex;
             }
         }
         else
         {
-            Log.Error("[Drop] ItemsSource is not ICollection!");
+            await ExecuteBatchMoveAsync(oldIndices, targetIndex);
         }
     }
 
-    private int CalculateDropIndex(DragEventArgs e, int oldIndex)
+    private async Task ExecuteBatchMoveAsync(IReadOnlyList<int> sourceIndices, int targetIndex)
     {
-        if (_repeater == null)
+        if (Items is not IList list || list.Count == 0) return;
+
+        var sortedSources = sourceIndices.Distinct().OrderBy(x => x).ToList();
+        var movingVms = new List<TrackItemViewModel>(sortedSources.Count);
+        for (int i = 0; i < sortedSources.Count; i++)
         {
-            Log.Warn("[DropIndex] _repeater is null in CalculateDropIndex!");
-            return -1;
+            int idx = sortedSources[i];
+            if (idx >= 0 && idx < list.Count && list[idx] is TrackItemViewModel vm)
+                movingVms.Add(vm);
         }
 
-        Log.Debug($"[DropIndex] Calculating target index for oldIndex: {oldIndex}");
+        if (movingVms.Count == 0) return;
 
-        // Точное и безопасное вычисление координат с логом
-        var pos = GetSafePositionInRepeater(e, "DropIndex");
-        int idx = GetItemIndexFromPosition(pos);
+        int clampedTarget = Math.Clamp(targetIndex, 0, list.Count - 1);
+        var targetVm = list[clampedTarget] as TrackItemViewModel;
+        if (targetVm == null) return;
 
-        Log.Debug($"[DropIndex] Calculated raw index from safe coordinates: {idx}");
+        if (movingVms.Contains(targetVm)) return;
 
-        if (idx < 0)
+        for (int i = 0; i < movingVms.Count; i++)
         {
-            int fallback = _repeater.ItemsSource is ICollection c ? c.Count - 1 : -1;
-            Log.Debug($"[DropIndex] Calculated index is out of bounds (<0). Falling back to bottom of list: {fallback}");
-            return fallback;
+            var vm = movingVms[i];
+            int currentFrom = list.IndexOf(vm);
+            int currentTarget = list.IndexOf(targetVm);
+
+            if (currentFrom < 0 || currentTarget < 0 || currentFrom == currentTarget)
+                continue;
+
+            if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
+                await asyncCmd.ExecuteAsync((currentFrom, currentTarget));
+            else
+                MoveItemCommand?.Execute((currentFrom, currentTarget));
         }
 
-        var targetElement = _repeater.TryGetElement(idx);
-        double relY = targetElement != null
-            ? GetSafeElementRelativeY(e, targetElement, pos, idx, "DropIndex")
-            : pos.Y - (idx * ItemHeight);
-
-        Log.Debug($"[DropIndex] Target row element resolved: {targetElement != null}. relY: {relY:F1}px");
-
-        int target = relY > ItemHeight / 2 ? idx + 1 : idx;
-        Log.Debug($"[DropIndex] Temp target before drag source index adjustment: {target}");
-
-        if (oldIndex < target)
+        ClearSelectionInternal();
+        for (int i = 0; i < movingVms.Count; i++)
         {
-            target--;
-            Log.Debug($"[DropIndex] oldIndex < target ({oldIndex} < {target + 1}). Adjusted target to: {target}");
+            movingVms[i].IsSelected = true;
+            _selectedSet.Add(movingVms[i]);
+        }
+        RaisePropertyChanged(SelectedCountProperty, -1, _selectedSet.Count);
+
+        int newAnchor = list.IndexOf(targetVm);
+        _selectionAnchorIndex = newAnchor >= 0 ? newAnchor : clampedTarget;
+        _leadIndex = _selectionAnchorIndex;
+    }
+
+    private (int index, Control? rowControl) ResolveDropTarget(DragEventArgs e)
+    {
+        if (_repeater == null || Items is not IList list || list.Count == 0)
+            return (-1, null);
+
+        Visual? visual = e.Source as Visual;
+        while (visual != null && visual != _repeater && visual != this)
+        {
+            if (visual is Border border && border.Classes.Contains("track-row") && border.DataContext is TrackItemViewModel vm)
+            {
+                int index = list.IndexOf(vm);
+                if (index >= 0)
+                    return (index, border);
+            }
+            visual = visual.GetVisualParent();
         }
 
-        int finalClamp = _repeater.ItemsSource is ICollection col
-            ? Math.Clamp(target, 0, col.Count - 1)
-            : target;
+        var repeaterPos = e.GetPosition(_repeater);
+        if (_repeater.InputHitTest(repeaterPos) is Visual hitVisual)
+        {
+            visual = hitVisual;
+            while (visual != null && visual != _repeater && visual != this)
+            {
+                if (visual is Border border && border.Classes.Contains("track-row") && border.DataContext is TrackItemViewModel vm)
+                {
+                    int index = list.IndexOf(vm);
+                    if (index >= 0)
+                        return (index, border);
+                }
+                visual = visual.GetVisualParent();
+            }
+        }
 
-        Log.Debug($"[DropIndex] Target index after clamping: {finalClamp}");
-        return finalClamp;
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (_repeater.TryGetElement(i) is Control child)
+            {
+                var bounds = child.Bounds;
+                if (repeaterPos.Y >= bounds.Top && repeaterPos.Y <= bounds.Bottom)
+                {
+                    return (i, child);
+                }
+            }
+        }
+
+        if (repeaterPos.Y < 0)
+            return (0, _repeater.TryGetElement(0));
+
+        int lastIdx = list.Count - 1;
+        return (lastIdx, _repeater.TryGetElement(lastIdx));
     }
 
     private static bool HasTrackIndexData(DragEventArgs e)
-        => e.DataTransfer is DragDataTransfer ||
-           e.DataTransfer.Formats.Any(f => f.Identifier == DragFormatTrackIndex);
-
-    private static int GetTrackIndex(DragEventArgs e)
     {
-        if (e.DataTransfer is DragDataTransfer a) return a.TrackIndex;
-        foreach (var item in e.DataTransfer.Items)
+        if (_activeInProcessDragIndices != null && _activeInProcessDragIndices.Count > 0)
+            return true;
+
+        var formats = e.DataTransfer.Formats;
+        for (int i = 0; i < formats.Count; i++)
         {
-            if (item is DragDataTransferItem d) return d.TrackIndex;
-            var raw = item.TryGetRaw(TrackIndexDataFormat);
-            if (raw is string s && int.TryParse(s, out int i)) return i;
-            if (raw is int v) return v;
+            if (formats[i].Identifier == DragFormatTrackIndex || formats[i] == DataFormat.Text)
+                return true;
         }
-        return -1;
+
+        return false;
+    }
+
+    private static IReadOnlyList<int> GetTrackIndices(DragEventArgs e)
+    {
+        if (_activeInProcessDragIndices != null && _activeInProcessDragIndices.Count > 0)
+            return _activeInProcessDragIndices;
+
+        var items = e.DataTransfer.Items;
+        for (int i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            string? raw = item.TryGetValue(TrackIndexDataFormat) ?? item.TryGetValue(DataFormat.Text);
+            if (!string.IsNullOrEmpty(raw))
+            {
+                var parts = raw.Split(',');
+                var list = new List<int>(parts.Length);
+                for (int j = 0; j < parts.Length; j++)
+                {
+                    if (int.TryParse(parts[j], out int idx))
+                        list.Add(idx);
+                }
+                if (list.Count > 0) return list;
+            }
+        }
+
+        return [];
     }
 
     private void CleanupDragStyles()
     {
         if (_lastHighlightedItem == null) return;
-        Log.Debug($"[Cleanup] Resetting visual highlight from item: {_lastHighlightedItem.DataContext}");
-        _lastHighlightedItem.Classes.Remove("insert-top");
-        _lastHighlightedItem.Classes.Remove("insert-bottom");
+        _lastHighlightedItem.Classes.Remove("drop-target");
         _lastHighlightedItem = null;
+    }
+
+    private static bool IsInteractiveChild(Visual visual)
+    {
+        var parent = visual;
+        while (parent != null)
+        {
+            if (parent is Button) return true;
+            if (parent is Border border && border.Classes.Contains("track-row")) return false;
+            parent = parent.GetVisualParent();
+        }
+        return false;
     }
 
     #endregion
@@ -815,32 +1389,27 @@ public partial class TrackListControl : UserControl
 
     #endregion
 
-    #region Drag Data Types
-
-    private sealed class DragDataTransferItem(int trackIndex) : IDataTransferItem
-    {
-        public int TrackIndex { get; } = trackIndex;
-        public IReadOnlyList<DataFormat> Formats { get; } = [TrackIndexDataFormat];
-        public object? TryGetRaw(DataFormat format)
-            => format.Identifier == DragFormatTrackIndex ? TrackIndex.ToString() : null;
-    }
-
-    private sealed class DragDataTransfer(int trackIndex) : IDataTransfer
-    {
-        private bool _disposed;
-        public int TrackIndex { get; } = trackIndex;
-        public IReadOnlyList<DataFormat> Formats { get; } = [TrackIndexDataFormat];
-        public IReadOnlyList<IDataTransferItem> Items { get; } = [new DragDataTransferItem(trackIndex)];
-        public void Dispose() { if (_disposed) return; _disposed = true; }
-    }
-
-    #endregion
-
     #region Context Menu
 
     private void OnMoreButtonClicked(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Control c || c.DataContext is not TrackItemViewModel) return;
+        if (sender is not Control c || c.DataContext is not TrackItemViewModel vm) return;
+
+        this.Focus();
+        int itemIndex = Items is IList list ? list.IndexOf(vm) : -1;
+
+        if (!vm.IsSelected)
+        {
+            int oldCount = _selectedSet.Count;
+            ClearSelectionInternal();
+            vm.IsSelected = true;
+            _selectedSet.Add(vm);
+            _selectionAnchorIndex = itemIndex;
+            _leadIndex = itemIndex;
+            RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+        }
+
+        vm.SelectionProvider = GetSelectedTrackInfos;
         ShowSharedFlyout(c, false);
     }
 
@@ -858,13 +1427,19 @@ public partial class TrackListControl : UserControl
     private void OnMenuFlyoutOpened(object? sender, EventArgs e)
     {
         if (sender is MenuFlyout { Target: Control t } && t.DataContext is TrackItemViewModel vm)
+        {
             vm.IsMenuOpen = true;
+            _ = vm.PreparePlaylistSubmenuAsync();
+        }
     }
 
     private void OnMenuFlyoutClosed(object? sender, EventArgs e)
     {
         if (sender is MenuFlyout { Target: Control t } && t.DataContext is TrackItemViewModel vm)
+        {
             vm.IsMenuOpen = false;
+            vm.ClearPlaylistSubmenu();
+        }
     }
 
     #endregion
@@ -900,6 +1475,7 @@ public partial class TrackListControl : UserControl
                 var vm = list[i];
                 if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
                 if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
+                vm.SelectionProvider = GetSelectedTrackInfos;
             }
             return;
         }
@@ -909,289 +1485,7 @@ public partial class TrackListControl : UserControl
             if (item is not TrackItemViewModel vm) continue;
             if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
             if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
-        }
-    }
-
-    #endregion
-
-    #region Smooth Snap Scroll Helper
-
-    /// <summary>
-    /// Обеспечивает ультра-плавную интерполяцию прокрутки ScrollViewer.
-    /// Поддерживает как прокрутку колесиком (с накоплением), так и плавное «догоняние» 
-    /// при кликах по треку скроллбара и нажатиях клавиш (PageUp/PageDown, стрелки).
-    /// Автоматически отключается при ручном перетаскивании ползунка мыши, исключая лаги.
-    /// </summary>
-    private sealed class SnapScrollHelper : IDisposable
-    {
-        #region Constants
-
-        private const double ScrollStep = 130.0;    // Дистанция прокрутки за один щелчок мыши (в пикселях)
-        private const double Smoothness = 16.0;    // Коэффициент жесткости анимации LERP (скорость доводки)
-        private const double Epsilon = 0.5;         // Минимальный порог остановки кадровой анимации (в пикселях)
-
-        #endregion
-
-        #region Fields
-
-        private readonly ScrollViewer _sv;
-        private ScrollBar? _verticalScrollBar;
-
-        private double _targetY;
-        private double _currentY;
-        private bool _isAnimating;
-        private bool _isUpdatingOffset;
-        private bool _isDraggingScrollbar;
-        private bool _disposed;
-        private DateTime _lastTickTime;
-
-        #endregion
-
-        /// <summary>
-        /// Инициализирует новый экземпляр помощника плавной прокрутки.
-        /// </summary>
-        /// <param name="sv">Целевой ScrollViewer.</param>
-        /// <param name="itemHeight">Параметр высоты элемента (сохранено для совместимости сигнатуры конструктора).</param>
-        public SnapScrollHelper(ScrollViewer sv)
-        {
-            _sv = sv;
-            _currentY = sv.Offset.Y;
-            _targetY = _currentY;
-
-            // Перехватываем колесико мыши на стадии туннелирования (до системного скачка)
-            sv.AddHandler(
-                PointerWheelChangedEvent,
-                OnWheel,
-                RoutingStrategies.Tunnel,
-                handledEventsToo: false);
-
-            // Слушаем нативные изменения скролла
-            sv.ScrollChanged += OnScrollChanged;
-
-            // Пытаемся найти нативный вертикальный скроллбар ScrollViewer-а
-            Dispatcher.UIThread.Post(InitializeScrollBar, DispatcherPriority.Loaded);
-        }
-
-        /// <summary>
-        /// Запускает плавную анимацию до заданной координаты Y.
-        /// </summary>
-        public void AnimateTo(double targetY)
-        {
-            double maxScroll = GetMaxScrollY();
-            _targetY = Math.Clamp(targetY, 0, maxScroll);
-            StartAnimation();
-        }
-
-        /// <summary>
-        /// Мгновенно останавливает интерполяцию скролла.
-        /// </summary>
-        public void CancelAnimation()
-        {
-            StopAnimation();
-            _targetY = _sv.Offset.Y;
-            _currentY = _sv.Offset.Y;
-        }
-
-        /// <summary>
-        /// Выполняет мгновенный переход к заданной координате без запуска сглаживания и без отката позиции.
-        /// </summary>
-        /// <param name="targetY">Целевая Y-координата скролла.</param>
-        public void JumpTo(double targetY)
-        {
-            StopAnimation();
-            double maxScroll = GetMaxScrollY();
-            double clamped = Math.Clamp(targetY, 0, maxScroll);
-
-            _currentY = clamped;
-            _targetY = clamped;
-
-            ApplyOffset(clamped);
-        }
-
-        private void InitializeScrollBar()
-        {
-            if (_disposed) return;
-
-            // Стандартное имя скроллбара в шаблоне ScrollViewer
-            _verticalScrollBar = _sv.GetTemplateDescendants().OfType<ScrollBar>().FirstOrDefault(x => x.Name == "PART_VerticalScrollBar");
-
-            // Запасной вариант: поиск по визуальному дереву
-            _verticalScrollBar ??= _sv.FindDescendantOfType<ScrollBar>();
-
-            if (_verticalScrollBar != null)
-            {
-                // Подписываемся на события скроллбара
-                _verticalScrollBar.Scroll += OnScrollBarScroll;
-
-                // Дополнительный страховочный обработчик отпускания мыши
-                _verticalScrollBar.AddHandler(
-                    PointerReleasedEvent,
-                    OnScrollBarPointerReleased,
-                    RoutingStrategies.Bubble,
-                    handledEventsToo: true);
-            }
-        }
-
-        /// <summary>
-        /// Событие нативной прокрутки скроллбара. Позволяет вычленить перетаскивание мывой.
-        /// </summary>
-        private void OnScrollBarScroll(object? sender, ScrollEventArgs e)
-        {
-            if (e.ScrollEventType == ScrollEventType.ThumbTrack)
-            {
-                // Пользователь физически тащит ползунок скроллбара.
-                // Мгновенно отключаем сглаживание и синхронизируем координаты, убирая лаги.
-                _isDraggingScrollbar = true;
-                _currentY = e.NewValue;
-                _targetY = e.NewValue;
-            }
-            else
-            {
-                // Любые другие клики (по стрелкам скроллбара или по пустому треку) должны быть плавными.
-                _isDraggingScrollbar = false;
-            }
-        }
-
-        /// <summary>
-        /// Страховочный сброс состояния перетаскивания при отпускании левой кнопки мыши.
-        /// </summary>
-        private void OnScrollBarPointerReleased(object? sender, PointerReleasedEventArgs e)
-        {
-            _isDraggingScrollbar = false;
-        }
-
-        /// <summary>
-        /// Обработчик колесика мыши.
-        /// </summary>
-        private void OnWheel(object? sender, PointerWheelEventArgs e)
-        {
-            if (e.Delta.Y == 0 || _isDraggingScrollbar) return;
-
-            e.Handled = true; // Блокируем нативный мгновенный скачок колеса
-
-            double maxScroll = GetMaxScrollY();
-            if (maxScroll <= 0) return;
-
-            double direction = -Math.Sign(e.Delta.Y);
-            _targetY = Math.Clamp(_targetY + direction * ScrollStep, 0, maxScroll);
-
-            StartAnimation();
-        }
-
-        /// <summary>
-        /// Обработчик любых внешних изменений смещения (клавиши, клики по треку скроллбара).
-        /// </summary>
-        private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
-        {
-            if (_isUpdatingOffset || _disposed) return;
-
-            double nativeY = _sv.Offset.Y;
-
-            // Если ползунок тащат вручную — сглаживание выключено, просто следим за позицией
-            if (_isDraggingScrollbar)
-            {
-                _currentY = nativeY;
-                _targetY = nativeY;
-                return;
-            }
-
-            // Если произошло внешнее дискретное изменение (PageUp/Down, клик по треку, стрелки клавиатуры)
-            if (Math.Abs(nativeY - _currentY) > Epsilon)
-            {
-                double maxScroll = GetMaxScrollY();
-
-                _currentY = Math.Min(_currentY, maxScroll);
-                _targetY = Math.Clamp(nativeY, 0, maxScroll);
-
-                // Мгновенно откатываем скролл назад на плавную позицию до отрисовки кадра
-                ApplyOffset(_currentY);
-
-                // Запускаем анимацию скольжения к новой цели
-                StartAnimation();
-            }
-        }
-
-        /// <summary>
-        /// Кадровый тик анимации. Синхронизируется с частотой развертки монитора (60/120/144+ Гц).
-        /// </summary>
-        private void OnAnimationFrame(TimeSpan elapsed)
-        {
-            if (!_isAnimating || _disposed || _isDraggingScrollbar) return;
-
-            // Вычисляем реальный дельта-тайм кадра
-            var now = DateTime.UtcNow;
-            double dt = (now - _lastTickTime).TotalSeconds;
-            _lastTickTime = now;
-
-            // Защита от зависаний системы
-            if (dt > 0.1) dt = 0.1;
-
-            double maxScroll = GetMaxScrollY();
-            _targetY = Math.Clamp(_targetY, 0, maxScroll);
-
-            // Если цель достигнута — останавливаемся
-            if (Math.Abs(_targetY - _currentY) < Epsilon)
-            {
-                _currentY = _targetY;
-                ApplyOffset(_currentY);
-                StopAnimation();
-                return;
-            }
-
-            // Frame-rate independent LERP формула
-            double factor = 1.0 - Math.Exp(-Smoothness * dt);
-            _currentY += (_targetY - _currentY) * factor;
-
-            ApplyOffset(_currentY);
-
-            // Запрашиваем следующий кадр у Avalonia
-            TopLevel.GetTopLevel(_sv)?.RequestAnimationFrame(OnAnimationFrame);
-        }
-
-        private void StartAnimation()
-        {
-            if (_isAnimating || _isDraggingScrollbar) return;
-
-            _isAnimating = true;
-            _lastTickTime = DateTime.UtcNow;
-
-            TopLevel.GetTopLevel(_sv)?.RequestAnimationFrame(OnAnimationFrame);
-        }
-
-        private void StopAnimation()
-        {
-            _isAnimating = false;
-        }
-
-        private double GetMaxScrollY()
-        {
-            return Math.Max(0, _sv.Extent.Height - _sv.Viewport.Height);
-        }
-
-        private void ApplyOffset(double y)
-        {
-            _isUpdatingOffset = true;
-            _sv.Offset = new Vector(_sv.Offset.X, y);
-            _isUpdatingOffset = false;
-        }
-
-        /// <summary>
-        /// Освобождает занятые ресурсы и отписывается от событий.
-        /// </summary>
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _disposed = true;
-
-            _isAnimating = false;
-            _sv.RemoveHandler(PointerWheelChangedEvent, OnWheel);
-            _sv.ScrollChanged -= OnScrollChanged;
-
-            if (_verticalScrollBar != null)
-            {
-                _verticalScrollBar.Scroll -= OnScrollBarScroll;
-                _verticalScrollBar.RemoveHandler(PointerReleasedEvent, OnScrollBarPointerReleased);
-            }
+            vm.SelectionProvider = GetSelectedTrackInfos;
         }
     }
 

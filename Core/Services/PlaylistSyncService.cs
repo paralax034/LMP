@@ -541,18 +541,27 @@ public sealed class PlaylistSyncService
     /// <param name="playlist">Модель плейлиста.</param>
     /// <param name="setVideoId">Идентификатор связи видео в облачном плейлисте.</param>
     /// <returns>Задача, представляющая асинхронную операцию удаления трека.</returns>
-    public async Task RemoveTrackFromCloudAsync(Playlist playlist, string setVideoId)
+    public Task RemoveTrackFromCloudAsync(Playlist playlist, string setVideoId) =>
+        RemoveTracksFromCloudAsync(playlist, [setVideoId]);
+
+    /// <summary>
+    /// Пакетно удаляет группу треков из облачного плейлиста по их идентификаторам связи.
+    /// </summary>
+    /// <param name="playlist">Модель плейлиста.</param>
+    /// <param name="setVideoIds">Коллекция идентификаторов связи видео в облачном плейлисте.</param>
+    /// <returns>Задача, представляющая асинхронную операцию удаления треков.</returns>
+    public async Task RemoveTracksFromCloudAsync(Playlist playlist, IReadOnlyList<string> setVideoIds)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
+        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated || setVideoIds.Count == 0)
             return;
 
         try
         {
-            await _youtube.RemoveFromPlaylistAsync(playlist.YoutubeId, setVideoId).ConfigureAwait(false);
+            await _youtube.RemoveTracksFromPlaylistAsync(playlist.YoutubeId, setVideoIds).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            Log.Error($"[PlaylistSync] Failed to remove track from cloud: {ex.Message}");
+            Log.Error($"[PlaylistSync] Failed to remove tracks from cloud: {ex.Message}");
         }
     }
 

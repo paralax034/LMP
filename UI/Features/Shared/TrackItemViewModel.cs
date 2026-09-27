@@ -1,6 +1,9 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Shared;
 
@@ -70,7 +73,6 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     private ICommand? _saveToDownloadsCommand;
     private ICommand? _removeFromPlaylistCommand;
     private ICommand? _removeFromQueueCommand;
-    private ICommand? _addToPlaylistCommand;
     private ICommand? _copyLinkCommand;
 
     public TrackInfo Track { get; }
@@ -98,6 +100,9 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     [ObservableProperty] public partial bool IsPlaylistContext { get; set; }
     [ObservableProperty] public partial bool IsQueueContext { get; set; }
 
+    [ObservableProperty] public partial string AddToPlaylistHeader { get; private set; } = string.Empty;
+    public ObservableCollection<PlaylistMenuItemViewModel> PlaylistMenuItems { get; } = [];
+
     public bool ShowAddToQueue => !IsQueueContext;
     public bool HasCacheIcon => !IsDownloading && (Track.IsDownloaded || Track.IsCached);
 
@@ -107,7 +112,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     public string? CacheIconTooltip => Track.IsDownloaded
         ? L["Track_Downloaded"]
-        : (Track.IsCached ? L["Track_Cached"] : null);
+        : (Track.IsCached ? L["Track_SaveToFolder"] : null);
 
     public string DownloadStatusText
     {
@@ -120,7 +125,8 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     }
 
     public Action<TrackInfo>? StartRadioAction { get; set; }
-    public Action<TrackInfo>? RemoveFromPlaylistAction { get; set; }
+    public Action<IReadOnlyList<TrackInfo>>? RemoveFromPlaylistAction { get; set; }
+    public Func<IReadOnlyList<TrackInfo>>? SelectionProvider { get; set; }
     public string? SourceContextId { get; set; }
 
     public ICommand PlayCommand { get; }
@@ -134,9 +140,6 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     public ICommand SaveToDownloadsCommand =>
         _saveToDownloadsCommand ??= new TrackAsyncCommand(SaveToDownloadsAsync);
-
-    public ICommand AddToPlaylistCommand =>
-        _addToPlaylistCommand ??= new TrackAsyncCommand(AddToPlaylistAsync);
 
     public ICommand CopyLinkCommand =>
         _copyLinkCommand ??= new TrackAsyncCommand(CopyLinkAsync);
@@ -170,6 +173,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         ToggleLikeCommand = new TrackAsyncCommand(ToggleLikeAsync);
 
         _trackSubscription = new WeakPropertyChangedSubscription(this, track);
+        UpdateAddToPlaylistHeader();
     }
 
     private void OnTrackPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -202,22 +206,209 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         }
     }
 
-    private Task ToggleLikeAsync() => _playerControl.ToggleLikeAsync(Track);
+    public IReadOnlyList<TrackInfo> GetActionTargets()
+    {
+        if (IsSelected && SelectionProvider != null)
+        {
+            var selected = SelectionProvider();
+            if (selected.Count > 1)
+                return selected;
+        }
 
-    private void OnAddToQueue() => _audio.Enqueue(Track);
+        return [Track];
+    }
+
+    private void UpdateAddToPlaylistHeader()
+    {
+        var targets = GetActionTargets();
+        AddToPlaylistHeader = targets.Count > 1
+            ? string.Format(L["AddToPlaylist_BatchHeader"] ?? "To playlist ({0})", targets.Count)
+            : (L["AddToPlaylist_Title"] ?? "Add to playlist");
+    }
+
+    public async Task PreparePlaylistSubmenuAsync(CancellationToken ct = default)
+    {
+        var targets = GetActionTargets();
+        UpdateAddToPlaylistHeader();
+
+        await _playlistService.EnsureIndexInitializedAsync(ct).ConfigureAwait(false);
+        var playlists = await _playlistService.GetEditablePlaylistsAsync(ct).ConfigureAwait(false);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            PlaylistMenuItems.Clear();
+
+            var createItem = new PlaylistMenuItemViewModel(
+                playlistId: string.Empty,
+                name: L["Playlist_CreateNew"] ?? "New playlist...",
+                state: PlaylistMembershipState.None,
+                countText: string.Empty,
+                onToggle: _ => CreateNewPlaylistWithTargetsAsync(targets),
+                isCreateAction: true);
+            PlaylistMenuItems.Add(createItem);
+
+            PlaylistMenuItems.Add(PlaylistMenuItemViewModel.CreateSeparator());
+
+            for (int i = 0; i < playlists.Count; i++)
+            {
+                var p = playlists[i];
+                var (state, includedCount, totalCount) = _playlistService.GetMembershipStatus(p.Id, targets);
+
+                string? countText = (targets.Count > 1 && state == PlaylistMembershipState.Indeterminate)
+                                    ? $"{includedCount}/{totalCount}"
+                                    : null;
+
+                var item = new PlaylistMenuItemViewModel(
+                    playlistId: p.Id,
+                    name: p.Name,
+                    state: state,
+                    countText: countText,
+                    onToggle: vm => TogglePlaylistMembershipAsync(vm, targets));
+
+                PlaylistMenuItems.Add(item);
+            }
+        });
+    }
+
+    public void ClearPlaylistSubmenu()
+    {
+        PlaylistMenuItems.Clear();
+    }
+
+    private async Task TogglePlaylistMembershipAsync(PlaylistMenuItemViewModel item, IReadOnlyList<TrackInfo> targets)
+    {
+        var previousState = item.State;
+        var previousCountText = item.CountText;
+
+        if (previousState == PlaylistMembershipState.All)
+        {
+            item.State = PlaylistMembershipState.None;
+            item.CountText = string.Empty;
+        }
+        else
+        {
+            item.State = PlaylistMembershipState.All;
+            item.CountText = string.Empty;
+        }
+
+        try
+        {
+            var newState = await _playlistService.ToggleTracksMembershipAsync(item.PlaylistId, targets).ConfigureAwait(false);
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                item.State = newState;
+                item.CountText = string.Empty;
+            });
+
+            var notif = AppEntry.Services.GetService<NotificationService>();
+            if (notif != null)
+            {
+                string msgKey = newState == PlaylistMembershipState.All
+                    ? "Playlist_TracksAdded_Toast"
+                    : "Playlist_TracksRemoved_Toast";
+
+                await notif.ShowToastAsync(
+                    titleKey: "Dialog_Success",
+                    messageKey: msgKey,
+                    severity: NotificationSeverity.Success,
+                    durationMs: 3000,
+                    messageArgs: [targets.Count, item.Name]).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[TrackItemVM] Failed to toggle playlist membership: {ex.Message}");
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                item.State = previousState;
+                item.CountText = previousCountText;
+            });
+        }
+    }
+
+    private async Task CreateNewPlaylistWithTargetsAsync(IReadOnlyList<TrackInfo> targets)
+    {
+        var result = await _dialog.ShowCreatePlaylistDialogAsync();
+        if (result == null || string.IsNullOrWhiteSpace(result.Name)) return;
+
+        try
+        {
+            var playlist = await _playlistService.CreatePlaylistAsync(
+                result.Name,
+                result.Description,
+                result.ThumbnailUrl,
+                result.CustomColor,
+                result.ComputedColor).ConfigureAwait(false);
+
+            await _playlistService.AddTracksToPlaylistAsync(playlist.Id, targets).ConfigureAwait(false);
+
+            var notif = AppEntry.Services.GetService<NotificationService>();
+            if (notif != null)
+            {
+                await notif.ShowToastAsync(
+                    titleKey: "Dialog_Success",
+                    messageKey: "Playlist_TracksAdded_Toast",
+                    severity: NotificationSeverity.Success,
+                    durationMs: 3000,
+                    messageArgs: [targets.Count, playlist.Name]).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[TrackItemVM] Failed to create playlist with tracks: {ex.Message}");
+        }
+    }
+
+    private async Task ToggleLikeAsync()
+    {
+        var targets = GetActionTargets();
+        if (targets.Count > 1)
+        {
+            bool anyUnliked = false;
+            for (int i = 0; i < targets.Count; i++)
+            {
+                if (!targets[i].IsLiked)
+                {
+                    anyUnliked = true;
+                    break;
+                }
+            }
+
+            bool targetState = anyUnliked;
+            for (int i = 0; i < targets.Count; i++)
+            {
+                if (targets[i].IsLiked != targetState)
+                    await _playerControl.ToggleLikeAsync(targets[i]).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            await _playerControl.ToggleLikeAsync(Track).ConfigureAwait(false);
+        }
+    }
+
+    private void OnAddToQueue()
+    {
+        var targets = GetActionTargets();
+        _audio.EnqueueRangeUnique(targets);
+    }
 
     private void OnStartRadio() => StartRadioAction?.Invoke(Track);
 
     private void OnRemoveFromPlaylist()
     {
-        if (IsPlaylistContext)
-            RemoveFromPlaylistAction?.Invoke(Track);
+        if (!IsPlaylistContext) return;
+        RemoveFromPlaylistAction?.Invoke(GetActionTargets());
     }
 
     private void OnRemoveFromQueue()
     {
-        if (IsQueueContext)
-            _audio.RemoveFromQueue(Track);
+        if (!IsQueueContext) return;
+
+        var targets = GetActionTargets();
+        for (int i = 0; i < targets.Count; i++)
+            _audio.RemoveFromQueue(targets[i]);
     }
 
     private async Task PlayAsync()
@@ -230,23 +421,28 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     private async Task SaveToDownloadsAsync()
     {
-        if (Track.IsDownloaded) return;
-
-        if (Track.IsCached)
+        var targets = GetActionTargets();
+        for (int i = 0; i < targets.Count; i++)
         {
-            var cache = AudioSourceFactory.GlobalCache;
-            if (cache == null) return;
+            var targetTrack = targets[i];
+            if (targetTrack.IsDownloaded) continue;
 
-            bool success = await cache.ExportTrackToDownloadsAsync(
-                Track.Id,
-                async id => await _library.GetTrackAsync(id).ConfigureAwait(false),
-                async t => await _library.AddOrUpdateTrackAsync(t).ConfigureAwait(false)).ConfigureAwait(false);
+            if (targetTrack.IsCached)
+            {
+                var cache = AudioSourceFactory.GlobalCache;
+                if (cache == null) continue;
 
-            if (success) Track.IsDownloaded = true;
-        }
-        else
-        {
-            _downloads.StartDownload(Track);
+                bool success = await cache.ExportTrackToDownloadsAsync(
+                    targetTrack.Id,
+                    async id => await _library.GetTrackAsync(id).ConfigureAwait(false),
+                    async t => await _library.AddOrUpdateTrackAsync(t).ConfigureAwait(false)).ConfigureAwait(false);
+
+                if (success) targetTrack.IsDownloaded = true;
+            }
+            else
+            {
+                _downloads.StartDownload(targetTrack);
+            }
         }
     }
 
@@ -276,18 +472,44 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     public void UpdatePlayAction(Action<TrackInfo>? onPlay) => _onPlay = onPlay;
 
-    private async Task AddToPlaylistAsync()
-    {
-        var selectedIds = await _dialog.ShowAddToPlaylistDialogAsync(Track);
-        if (selectedIds.Count == 0) return;
-
-        for (int i = 0; i < selectedIds.Count; i++)
-            await _playlistService.AddTrackToPlaylistAsync(selectedIds[i], Track);
-    }
-
     private async Task CopyLinkAsync()
     {
         if (IsDisposed) return;
+
+        var targets = GetActionTargets();
+        if (targets.Count > 1)
+        {
+            var builder = new System.Text.StringBuilder(targets.Count * 45);
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var target = targets[i];
+                var targetUrl = target.Url;
+                if (string.IsNullOrEmpty(targetUrl))
+                    targetUrl = $"https://www.youtube.com/watch?v={target.GetRawId()}";
+
+                if (!string.IsNullOrEmpty(targetUrl))
+                {
+                    if (builder.Length > 0) builder.AppendLine();
+                    builder.Append(targetUrl);
+                }
+            }
+
+            if (builder.Length == 0)
+            {
+                CopyHintService.Instance.Show(
+                    L["Track_CopyLink_NoUrl"] ?? "No link available",
+                    CopyHintKind.Warning,
+                    null);
+                return;
+            }
+
+            await Clipboard.SetTextAsync(builder.ToString()).ConfigureAwait(false);
+            CopyHintService.Instance.Show(
+                L["Track_Copied"] ?? "Copied!",
+                CopyHintKind.Success,
+                null);
+            return;
+        }
 
         var url = Track.Url;
         if (string.IsNullOrEmpty(url))
@@ -319,6 +541,8 @@ public sealed partial class TrackItemViewModel : ViewModelBase
             _onPlay = null;
             StartRadioAction = null;
             RemoveFromPlaylistAction = null;
+            SelectionProvider = null;
+            PlaylistMenuItems.Clear();
         }
         base.Dispose(disposing);
         IsDisposed = true;

@@ -37,7 +37,7 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- ═══ TRACK ROW — Border-only hover/active (no background change) ═══ -->
+    <!-- TRACK ROW BASE -->
     <Style Selector="Border.track-row">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
@@ -50,6 +50,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
@@ -59,44 +60,20 @@
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
     </Style>
 
-    <Style Selector="Border.track-row.is-active">
-        <Setter Property="Background" Value="Transparent" />
+    <!-- NON-ACTIVE SELECTED TRACK (Standard 1px accent border) -->
+    <Style Selector="Border.track-row.is-selected">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Opacity" Value="1" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,6" />
     </Style>
 
-    <!-- Сохраняем акцентную рамку активного трека при наведении мыши (устраняет мигание) -->
-    <Style Selector="Border.track-row.is-active:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-
-    <Style Selector="Border.track-row.is-active.is-playing">
-        <Style.Animations>
-            <Animation Duration="0:0:1.8"
-                IterationCount="Infinite"
-                PlaybackDirection="Alternate"
-                Easing="SineEaseInOut"
-                FillMode="None">
-                <KeyFrame Cue="0%">
-                    <Setter Property="Opacity" Value="1" />
-                </KeyFrame>
-                <KeyFrame Cue="100%">
-                    <Setter Property="Opacity" Value="0.733" />
-                </KeyFrame>
-            </Animation>
-        </Style.Animations>
+    <Style Selector="Border.track-row.is-selected:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
     <Style Selector="Border.track-row.menu-open">
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-
-    <Style Selector="Border.track-row.is-active.menu-open">
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-
-    <Style Selector="Border.track-row.is-active.menu-open:pointerover">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
@@ -104,6 +81,38 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
+    <!-- ACTIVE (PLAYING) TRACK: Outer border is ALWAYS transparent.
+         Border rendering is exclusively owned by AudioWaveBorder to prevent double borders. -->
+    <Style
+        Selector="Border.track-row.is-active,
+                   Border.track-row.is-active:pointerover,
+                   Border.track-row.is-active.is-playing,
+                   Border.track-row.is-active.is-playing:pointerover,
+                   Border.track-row.is-active.menu-open,
+                   Border.track-row.is-active.menu-open:pointerover">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <!-- ACTIVE AND SELECTED TRACK: Only applies background tint.
+         Outer BorderBrush remains Transparent, so AudioWaveBorder draws the single prominent bold border. -->
+    <Style
+        Selector="Border.track-row.is-active.is-selected,
+                   Border.track-row.is-active.is-selected:pointerover,
+                   Border.track-row.is-active.is-selected.is-playing,
+                   Border.track-row.is-active.is-selected.is-playing:pointerover,
+                   Border.track-row.is-active.is-selected.menu-open,
+                   Border.track-row.is-active.is-selected.menu-open:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,6" />
+    </Style>
+
+    <!-- TITLE FONT STYLING -->
     <Style Selector="Border.track-row TextBlock.track-title">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="FontWeight" Value="Normal" />
@@ -113,12 +122,18 @@
             </Transitions>
         </Setter>
     </Style>
+
     <Style Selector="Border.track-row.is-active TextBlock.track-title">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
-    <!-- КНОПКА ОБЛОЖКИ (Скругление и обрезка без лишних Border-оберток) -->
+    <Style Selector="Border.track-row.is-active.is-selected TextBlock.track-title">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+
+    <!-- КНОПКА ОБЛОЖКИ -->
     <Style Selector="Button.cover-btn">
         <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="Transparent" />
@@ -172,7 +187,7 @@
         </Setter>
     </Style>
 
-    <!-- КНОПКА ЛАЙКА — Чистая анимация цвета иконки без рамок -->
+    <!-- КНОПКА ЛАЙКА -->
     <Style Selector="Button.like-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
@@ -237,7 +252,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- КНОПКА ТРЕХ ТОЧЕК — Чистая анимация цвета иконки без рамок и без протечки стилей во Flyout -->
+    <!-- КНОПКА ТРЕХ ТОЧЕК -->
     <Style Selector="Button.more-btn, Button.remove-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
@@ -283,8 +298,6 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- Использование селектора прямого потомка '>' исключает окрашивание иконок внутри
-    всплывающего MenuFlyout -->
     <Style Selector="Button.more-btn > PathIcon, Button.remove-btn > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Transitions">
@@ -298,7 +311,6 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <!-- Активное состояние кнопки при открытом меню: только иконка самой кнопки светится акцентом -->
     <Style Selector="Border.track-row.menu-open Button.more-btn, Button.more-btn.active">
         <Setter Property="Opacity" Value="1" />
         <Setter Property="IsHitTestVisible" Value="True" />
@@ -330,17 +342,13 @@
         <Setter Property="Opacity" Value="0" />
     </Style>
 
-    <!-- ═══ DRAG & DROP INDICATORS для ItemsRepeater ═══ -->
+    <!-- DRAG & DROP INDICATORS -->
     <Style Selector="Border.track-row.dragging">
         <Setter Property="Opacity" Value="0.4" />
     </Style>
-    <Style Selector="Border.track-row.insert-top">
-        <Setter Property="BorderThickness" Value="0,2,0,0" />
+    <Style Selector="Border.track-row.drop-target">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="Border.track-row.insert-bottom">
-        <Setter Property="BorderThickness" Value="0,0,0,2" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
     </Style>
 
     <!-- LOADING DOTS -->
@@ -445,10 +453,7 @@
         </Style.Animations>
     </Style>
 
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <!-- PLAYLIST CARD — Staggered Animation + Context Menu                  -->
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
-
+    <!-- PLAYLIST CARD -->
     <Style Selector="Border.playlist-card-inner">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="CornerRadius" Value="8" />

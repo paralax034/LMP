@@ -42,6 +42,7 @@ public sealed class AudioPipeline : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts;
     private readonly EbuR128Analyzer _analyzer;
     private readonly TruePeakLimiter? _truePeakLimiter;
+    private readonly Audio3BandAnalyzer _analyzer3Band;
     private GainCrossfader _gainCrossfader;
 
     private CancellationTokenSource? _decoderCts;
@@ -137,6 +138,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 
         _analyzer = new EbuR128Analyzer();
         _truePeakLimiter = new TruePeakLimiter(decoder.SampleRate);
+        _analyzer3Band = new Audio3BandAnalyzer(decoder.SampleRate, decoder.Channels);
         _gainCrossfader = new GainCrossfader(1.0f);
     }
 
@@ -691,6 +693,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         if (_disposed) return;
         _source.SetPlaybackActive(false);
         _backend.Stop();
+        _analyzer3Band.Reset();
     }
 
     public void Flush()
@@ -703,6 +706,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         var tcs = Interlocked.Exchange(ref _warmupTcs, null);
         tcs?.TrySetResult();
 
+        _analyzer3Band.Reset();
         Log.Debug("[AudioPipeline] Flushed");
     }
 
@@ -724,6 +728,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 
         _analyzer.PrepareForSeek();
         _truePeakLimiter?.Reset();
+        _analyzer3Band.Reset();
 
         float normGain = _analyzer.IsEnabled ? _analyzer.GetLockedGain() : 1.0f;
         _gainCrossfader.Reset(normGain);
@@ -845,7 +850,12 @@ public sealed class AudioPipeline : IAsyncDisposable
 
     private int AudioCallback(Span<float> buffer)
     {
-        if (_disposed) { buffer.Clear(); return 0; }
+        if (_disposed)
+        {
+            buffer.Clear();
+            _analyzer3Band.Reset();
+            return 0;
+        }
 
         int read = _pcmBuffer.Read(buffer);
         if (read < buffer.Length) buffer[read..].Clear();
@@ -873,6 +883,13 @@ public sealed class AudioPipeline : IAsyncDisposable
             {
                 _truePeakLimiter!.Process(samples, ref _gainCrossfader);
             }
+
+            // 3-полосный sidechain-анализ: Low, Mid, High, Kick Transient
+            _analyzer3Band.ProcessBlock(samples, _decoder.Channels);
+        }
+        else
+        {
+            _analyzer3Band.Reset();
         }
 
         return read / _decoder.Channels;
@@ -934,6 +951,8 @@ public sealed class AudioPipeline : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        _analyzer3Band.Reset();
 
         try { _lifetimeCts.Cancel(); } catch (ObjectDisposedException) { }
         try { _decoderCts?.Cancel(); } catch (ObjectDisposedException) { }

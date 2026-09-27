@@ -14,6 +14,10 @@ public sealed class PlaylistService
     private readonly CookieAuthService _auth;
     private readonly PlaylistSyncService _syncService;
 
+    private readonly Dictionary<string, HashSet<string>> _playlistTrackIndex = new(StringComparer.Ordinal);
+    private readonly Lock _indexLock = new();
+    private volatile bool _isIndexInitialized;
+
     public event Action<Playlist>? OnPlaylistChanged;
     public event Action<string>? OnPlaylistRemoved;
 
@@ -37,6 +41,8 @@ public sealed class PlaylistService
         _registry = registry;
         _auth = auth;
         _syncService = syncService;
+
+        _auth.OnAuthStateChanged += InvalidateIndex;
     }
 
     #region Read API
@@ -183,6 +189,129 @@ public sealed class PlaylistService
         return TimeSpan.FromTicks(ticks);
     }
 
+    public async Task<List<Playlist>> GetEditablePlaylistsAsync(CancellationToken ct = default)
+    {
+        var all = await GetAllPlaylistsAsync(ct).ConfigureAwait(false);
+        var editable = new List<Playlist>(all.Count);
+        for (int i = 0; i < all.Count; i++)
+        {
+            var p = all[i];
+            if (p.Id != LibraryService.LikedPlaylistId && p.CanEditTracks)
+                editable.Add(p);
+        }
+        return editable;
+    }
+
+    #endregion
+
+    #region In-Memory Reverse Index & Membership Status
+
+    public async Task EnsureIndexInitializedAsync(CancellationToken ct = default)
+    {
+        if (_isIndexInitialized) return;
+
+        var playlists = await _playlists.GetAllAsync(CurrentOwnerId, ct).ConfigureAwait(false);
+        var newIndex = new Dictionary<string, HashSet<string>>(playlists.Count, StringComparer.Ordinal);
+
+        for (int i = 0; i < playlists.Count; i++)
+        {
+            var p = playlists[i];
+            if (!p.IsEditable) continue;
+            var trackIds = await _playlists.GetTrackIdsAsync(p.Id, CurrentOwnerId, ct).ConfigureAwait(false);
+            newIndex[p.Id] = new HashSet<string>(trackIds, StringComparer.Ordinal);
+        }
+
+        lock (_indexLock)
+        {
+            _playlistTrackIndex.Clear();
+            foreach (var (k, v) in newIndex)
+                _playlistTrackIndex[k] = v;
+            _isIndexInitialized = true;
+        }
+    }
+
+    public void InvalidateIndex()
+    {
+        lock (_indexLock)
+        {
+            _playlistTrackIndex.Clear();
+            _isIndexInitialized = false;
+        }
+    }
+
+    public (PlaylistMembershipState State, int IncludedCount, int TotalCount) GetMembershipStatus(
+        string playlistId,
+        IReadOnlyList<TrackInfo> targets)
+    {
+        if (targets.Count == 0)
+            return (PlaylistMembershipState.None, 0, 0);
+
+        HashSet<string>? trackIds;
+        lock (_indexLock)
+        {
+            _playlistTrackIndex.TryGetValue(playlistId, out trackIds);
+        }
+
+        if (trackIds == null || trackIds.Count == 0)
+            return (PlaylistMembershipState.None, 0, targets.Count);
+
+        int matchCount = 0;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            if (trackIds.Contains(targets[i].Id))
+                matchCount++;
+        }
+
+        if (matchCount == 0)
+            return (PlaylistMembershipState.None, 0, targets.Count);
+
+        if (matchCount == targets.Count)
+            return (PlaylistMembershipState.All, matchCount, targets.Count);
+
+        return (PlaylistMembershipState.Indeterminate, matchCount, targets.Count);
+    }
+
+    public async Task<PlaylistMembershipState> ToggleTracksMembershipAsync(
+        string playlistId,
+        IReadOnlyList<TrackInfo> targets,
+        CancellationToken ct = default)
+    {
+        if (targets.Count == 0)
+            return PlaylistMembershipState.None;
+
+        await EnsureIndexInitializedAsync(ct).ConfigureAwait(false);
+
+        var (state, _, _) = GetMembershipStatus(playlistId, targets);
+
+        if (state == PlaylistMembershipState.All)
+        {
+            await RemoveTracksFromPlaylistAsync(playlistId, targets, ct).ConfigureAwait(false);
+            return PlaylistMembershipState.None;
+        }
+        else
+        {
+            HashSet<string>? currentIds;
+            lock (_indexLock)
+            {
+                _playlistTrackIndex.TryGetValue(playlistId, out currentIds);
+            }
+
+            var toAdd = new List<TrackInfo>(targets.Count);
+            for (int i = 0; i < targets.Count; i++)
+            {
+                if (currentIds == null || !currentIds.Contains(targets[i].Id))
+                    toAdd.Add(targets[i]);
+            }
+
+            if (toAdd.Count > 0)
+            {
+                await AddTracksToPlaylistAsync(playlistId, toAdd, ct).ConfigureAwait(false);
+            }
+
+            return PlaylistMembershipState.All;
+        }
+    }
+
     #endregion
 
     #region Mutation CRUD API
@@ -213,6 +342,12 @@ public sealed class PlaylistService
         };
 
         await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+
+        lock (_indexLock)
+        {
+            _playlistTrackIndex[playlist.Id] = new HashSet<string>(StringComparer.Ordinal);
+        }
+
         OnPlaylistChanged?.Invoke(playlist);
         return playlist;
     }
@@ -298,6 +433,19 @@ public sealed class PlaylistService
             {
                 await _playlists.AddTracksAsync(playlist.Id, newTrackIds, CurrentOwnerId, ct).ConfigureAwait(false);
             }
+
+            lock (_indexLock)
+            {
+                _playlistTrackIndex[playlist.Id] = existingSet;
+            }
+        }
+        else
+        {
+            lock (_indexLock)
+            {
+                if (!_playlistTrackIndex.ContainsKey(playlist.Id))
+                    _playlistTrackIndex[playlist.Id] = new HashSet<string>(StringComparer.Ordinal);
+            }
         }
 
         OnPlaylistChanged?.Invoke(playlist);
@@ -330,6 +478,11 @@ public sealed class PlaylistService
         foreach (var track in _registry.GetPinnedTracks())
             track.InPlaylists.Remove(playlistId);
 
+        lock (_indexLock)
+        {
+            _playlistTrackIndex.Remove(playlistId);
+        }
+
         await _playlists.DeleteAsync(playlistId, ct).ConfigureAwait(false);
 
         if (deleteFromCloud && !string.IsNullOrEmpty(playlist.YoutubeId) && playlist.SyncMode == PlaylistSyncMode.TwoWaySync)
@@ -343,44 +496,8 @@ public sealed class PlaylistService
     /// <summary>
     /// Добавляет трек в локальный плейлист с немедленной синхронизацией мутации в облако.
     /// </summary>
-    public async Task AddTrackToPlaylistAsync(string playlistId, TrackInfo track, CancellationToken ct = default)
-    {
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
-            canonical.SetLikedState(true);
-            canonical.InPlaylists.Add(LibraryService.LikedPlaylistId);
-
-            await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
-            await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, true, ct: ct).ConfigureAwait(false);
-
-            _registry.UpdatePinStatus(canonical);
-
-            var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
-            if (likedPlaylist != null)
-                OnPlaylistChanged?.Invoke(likedPlaylist);
-
-            return;
-        }
-
-        var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
-        if (playlist == null || !playlist.CanEditTracks) return;
-
-        var canonicalTrack = _registry.RegisterOrUpdate(track);
-        await _tracks.UpsertAsync(canonicalTrack, ct).ConfigureAwait(false);
-
-        bool alreadyIn = await _playlists.ContainsTrackAsync(playlistId, canonicalTrack.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-        if (!alreadyIn)
-        {
-            await _playlists.AddTrackAsync(playlistId, canonicalTrack.Id, CurrentOwnerId, null, ct).ConfigureAwait(false);
-            canonicalTrack.InPlaylists.Add(playlistId);
-            _registry.UpdatePinStatus(canonicalTrack);
-
-            await _syncService.AddTrackToCloudAsync(playlist, canonicalTrack.Id, ct).ConfigureAwait(false);
-        }
-
-        OnPlaylistChanged?.Invoke(playlist);
-    }
+    public Task AddTrackToPlaylistAsync(string playlistId, TrackInfo track, CancellationToken ct = default) =>
+        AddTracksToPlaylistAsync(playlistId, [track], ct);
 
     /// <summary>
     /// Пакетно добавляет набор треков в локальный плейлист с последующей синхронизацией мутации в облако.
@@ -400,6 +517,10 @@ public sealed class PlaylistService
                 canonical.InPlaylists.Add(LibraryService.LikedPlaylistId);
                 _registry.UpdatePinStatus(canonical);
             }
+
+            var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
+            if (likedPlaylist != null)
+                OnPlaylistChanged?.Invoke(likedPlaylist);
             return;
         }
 
@@ -416,6 +537,17 @@ public sealed class PlaylistService
             _registry.UpdatePinStatus(canonical);
         }
 
+        lock (_indexLock)
+        {
+            if (!_playlistTrackIndex.TryGetValue(playlistId, out var set))
+            {
+                set = new HashSet<string>(StringComparer.Ordinal);
+                _playlistTrackIndex[playlistId] = set;
+            }
+            for (int i = 0; i < trackIds.Count; i++)
+                set.Add(trackIds[i]);
+        }
+
         await _playlists.AddTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
 
         await _syncService.AddTracksToCloudAsync(playlist, trackIds, ct).ConfigureAwait(false);
@@ -430,14 +562,26 @@ public sealed class PlaylistService
     /// <param name="trackId">Идентификатор удаляемого трека.</param>
     /// <param name="ct">Токен отмены операции.</param>
     /// <returns>Задача, представляющая асинхронную операцию удаления.</returns>
-    public async Task RemoveTrackFromPlaylistAsync(string playlistId, string trackId, CancellationToken ct = default)
+    public Task RemoveTrackFromPlaylistAsync(string playlistId, string trackId, CancellationToken ct = default)
     {
+        var track = _registry.TryGet(trackId) ?? new TrackInfo { Id = trackId };
+        return RemoveTracksFromPlaylistAsync(playlistId, [track], ct);
+    }
+
+    /// <summary>
+    /// Пакетно удаляет коллекцию треков из локального плейлиста и синхронизирует удаление в облако.
+    /// </summary>
+    public async Task RemoveTracksFromPlaylistAsync(string playlistId, IReadOnlyList<TrackInfo> tracks, CancellationToken ct = default)
+    {
+        if (tracks.Count == 0) return;
+
         if (playlistId == LibraryService.LikedPlaylistId)
         {
-            await _tracks.SetLikedAsync(trackId, CurrentOwnerId, false, ct: ct).ConfigureAwait(false);
-            var trackInfo = _registry.TryGet(trackId);
-            if (trackInfo != null)
+            for (int i = 0; i < tracks.Count; i++)
             {
+                var t = tracks[i];
+                await _tracks.SetLikedAsync(t.Id, CurrentOwnerId, false, ct: ct).ConfigureAwait(false);
+                var trackInfo = _registry.TryGet(t.Id) ?? t;
                 trackInfo.SetLikedState(false);
                 trackInfo.InPlaylists.Remove(LibraryService.LikedPlaylistId);
                 _registry.UpdatePinStatus(trackInfo);
@@ -453,20 +597,42 @@ public sealed class PlaylistService
         var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
         if (playlist == null || !playlist.CanEditTracks) return;
 
-        string? setVideoId = await _syncService.GetOrFetchSetVideoIdAsync(playlist, trackId, ct).ConfigureAwait(false);
-
-        await _playlists.RemoveTrackAsync(playlistId, trackId, CurrentOwnerId, ct).ConfigureAwait(false);
-
-        var track = _registry.TryGet(trackId);
-        if (track != null)
+        var trackIds = new List<string>(tracks.Count);
+        for (int i = 0; i < tracks.Count; i++)
         {
+            var id = tracks[i].Id;
+            trackIds.Add(id);
+
+            var track = _registry.TryGet(id) ?? tracks[i];
             track.InPlaylists.Remove(playlistId);
             _registry.UpdatePinStatus(track);
         }
 
-        if (!string.IsNullOrEmpty(setVideoId))
+        lock (_indexLock)
         {
-            await _syncService.RemoveTrackFromCloudAsync(playlist, setVideoId).ConfigureAwait(false);
+            if (_playlistTrackIndex.TryGetValue(playlistId, out var set))
+            {
+                for (int i = 0; i < trackIds.Count; i++)
+                    set.Remove(trackIds[i]);
+            }
+        }
+
+        await _playlists.RemoveTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
+
+        if (playlist.SyncMode == PlaylistSyncMode.TwoWaySync && !string.IsNullOrEmpty(playlist.YoutubeId))
+        {
+            var setVideoIds = new List<string>(trackIds.Count);
+            for (int i = 0; i < trackIds.Count; i++)
+            {
+                var svId = await _syncService.GetOrFetchSetVideoIdAsync(playlist, trackIds[i], ct).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(svId))
+                    setVideoIds.Add(svId);
+            }
+
+            if (setVideoIds.Count > 0)
+            {
+                await _syncService.RemoveTracksFromCloudAsync(playlist, setVideoIds).ConfigureAwait(false);
+            }
         }
 
         OnPlaylistChanged?.Invoke(playlist);

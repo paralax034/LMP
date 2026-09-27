@@ -571,7 +571,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     /// Принудительная синхронизация всех состояний при восстановлении из трея.
     ///
     /// <para><b>ВАЖНО:</b> НЕ переиздаёт CurrentTrack если трек тот же самый (по Id).
-    /// Это предотвращает ложный BeginTrackReset → замораживание UI.</para>
+    /// Это предотвращает ложный TrackReset при восстановлении из трея.</para>
     ///
     /// <para>Вместо этого вызывает ForceSync, на который PlayerBarViewModel
     /// подписывается для мягкого обновления (позиция, буфер, стрим-инфо).</para>

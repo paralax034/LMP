@@ -483,7 +483,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <!-- CONTEXT MENU / MENUITEM — ПЛОСКОЕ МЕНЮ (БЕЗ SUBMENU/ШЕВРОНА)       -->
+    <!-- CONTEXT MENU / MENUITEM — КАСКАДНЫЙ И ПЛОСКИЙ СТИЛЬ С ПОДДЕРЖКОЙ SUBMENU -->
 
     <Style Selector="ContextMenu">
         <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
@@ -510,46 +510,103 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <ControlTemplate TargetType="MenuItem">
-                <Border Name="PART_LayoutRoot"
-                    Background="Transparent"
-                    BorderBrush="{DynamicResource AccentTransparentBrush}"
-                    BorderThickness="1"
-                    CornerRadius="6"
-                    Padding="{TemplateBinding Padding}">
-                    <Border.Transitions>
-                        <Transitions>
-                            <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                        </Transitions>
-                    </Border.Transitions>
+                <Panel>
+                    <Border Name="PART_LayoutRoot"
+                        Background="Transparent"
+                        BorderBrush="{DynamicResource AccentTransparentBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="{TemplateBinding Padding}">
+                        <Border.Transitions>
+                            <Transitions>
+                                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                                <BrushTransition Property="Background" Duration="0:0:0.15" />
+                            </Transitions>
+                        </Border.Transitions>
 
-                    <Grid ColumnDefinitions="24, *, Auto">
-                        <ContentPresenter Name="PART_IconPresenter"
-                            Content="{TemplateBinding Icon}"
-                            Width="16" Height="16"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center" />
+                        <Grid ColumnDefinitions="24, *, Auto, Auto">
+                            <ContentPresenter Name="PART_IconPresenter"
+                                Content="{TemplateBinding Icon}"
+                                Width="16" Height="16"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center" />
 
-                        <ContentPresenter Name="PART_HeaderPresenter"
-                            Grid.Column="1"
-                            Content="{TemplateBinding Header}"
-                            VerticalAlignment="Center"
-                            HorizontalAlignment="Left"
-                            RecognizesAccessKey="True" />
+                            <ContentPresenter Name="PART_HeaderPresenter"
+                                Grid.Column="1"
+                                Content="{TemplateBinding Header}"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Left"
+                                RecognizesAccessKey="True" />
 
-                        <TextBlock Name="PART_InputGestureText"
-                            Grid.Column="2"
-                            Text="{TemplateBinding InputGesture}"
-                            Margin="16,0,0,0"
-                            VerticalAlignment="Center"
-                            Foreground="{DynamicResource TextMutedBrush}"
-                            FontSize="12" />
-                    </Grid>
-                </Border>
+                            <TextBlock Name="PART_InputGestureText"
+                                Grid.Column="2"
+                                Text="{TemplateBinding InputGesture}"
+                                Margin="16,0,0,0"
+                                VerticalAlignment="Center"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                FontSize="12"
+                                IsVisible="{TemplateBinding InputGesture, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                            <TextBlock Name="PART_BadgeText"
+                                Grid.Column="2"
+                                Text="{TemplateBinding Tag}"
+                                Margin="16,0,0,0"
+                                VerticalAlignment="Center"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                FontSize="12"
+                                IsVisible="{TemplateBinding Tag, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                            <PathIcon Name="PART_ChevronPath"
+                                Grid.Column="3"
+                                Data="{StaticResource Icon.ChevronRight}"
+                                Width="12" Height="12"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                IsVisible="False">
+                                <PathIcon.Transitions>
+                                    <Transitions>
+                                        <BrushTransition Property="Foreground" Duration="0:0:0.15" />
+                                    </Transitions>
+                                </PathIcon.Transitions>
+                            </PathIcon>
+                        </Grid>
+                    </Border>
+
+                    <Popup Name="PART_Popup"
+                        WindowManagerAddShadowHint="True"
+                        Placement="RightEdgeAlignedTop"
+                        HorizontalOffset="-4"
+                        VerticalOffset="-4"
+                        IsOpen="{TemplateBinding IsSubMenuOpen, Mode=TwoWay}">
+                        <Border Background="{DynamicResource BgPrimaryBrush}"
+                            BorderBrush="{DynamicResource BgHighlightBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="4"
+                            MinWidth="180"
+                            BoxShadow="{StaticResource CardShadow}">
+                            <ScrollViewer MaxHeight="400" HorizontalScrollBarVisibility="Disabled">
+                                <ItemsPresenter Name="PART_ItemsPresenter"
+                                    ItemsPanel="{TemplateBinding ItemsPanel}"
+                                    Grid.IsSharedSizeScope="True" />
+                            </ScrollViewer>
+                        </Border>
+                    </Popup>
+                </Panel>
             </ControlTemplate>
         </Setter>
     </Style>
 
+    <Style Selector="MenuItem:not(:empty) /template/ PathIcon#PART_ChevronPath">
+        <Setter Property="IsVisible" Value="True" />
+    </Style>
+
     <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="MenuItem:open /template/ Border#PART_LayoutRoot">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
@@ -558,12 +615,19 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
+    <Style Selector="MenuItem:pointerover PathIcon#PART_ChevronPath">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="MenuItem:open PathIcon#PART_ChevronPath">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
     <Style Selector="MenuItem:disabled">
         <Setter Property="Opacity" Value="0.5" />
     </Style>
 
-    <!-- Иконки пунктов контекстного меню в покое — всегда нейтральный вторичный цвет -->
-    <Style Selector="MenuItem PathIcon">
+    <!-- Иконки пунктов контекстного меню в покое — нейтральный вторичный цвет -->
+    <Style Selector="MenuItem PathIcon:not(#PART_ChevronPath)">
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         <Setter Property="Width" Value="16" />
         <Setter Property="Height" Value="16" />
@@ -575,7 +639,7 @@
     </Style>
 
     <!-- Иконка пункта контекстного меню при наведении — плавное акцентное свечение -->
-    <Style Selector="MenuItem:pointerover:not(.danger) PathIcon">
+    <Style Selector="MenuItem:pointerover:not(.danger) PathIcon:not(#PART_ChevronPath)">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 

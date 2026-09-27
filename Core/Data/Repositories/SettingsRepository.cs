@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using LMP.Core.Models;
 using MemoryPack;
 
 namespace LMP.Core.Data.Repositories;
@@ -19,9 +20,9 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        try
+        object? rawValue;
+        await using (var cmd = connection.CreateCommand())
         {
-            await using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT Value FROM Settings WHERE Key = @key LIMIT 1;";
 
             var param = cmd.CreateParameter();
@@ -29,47 +30,69 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
             param.Value = key;
             cmd.Parameters.Add(param);
 
-            var rawValue = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (rawValue is null or DBNull)
-                return null;
+            rawValue = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        }
 
-            if (rawValue is byte[] binaryData)
-            {
-                return MemoryPackSerializer.Deserialize<T>(binaryData);
-            }
-
-            if (rawValue is string jsonValue)
-            {
-                return await MigrateLegacyJsonSettingAsync<T>(key, jsonValue, ct).ConfigureAwait(false);
-            }
-
+        if (rawValue is null or DBNull)
             return null;
-        }
-        finally
+
+        // 1. Основной путь: персистентный JSON (согласно схеме Value TEXT)
+        if (rawValue is string jsonValue)
         {
-            // Соединение возвращается в пул при Dispose
+            return DeserializeJson<T>(jsonValue);
         }
-    }
 
-    /// <summary>
-    /// Изолированная миграция устаревшего JSON-значения SQLite в бинарный MemoryPack BLOB.
-    /// </summary>
-    private async Task<T?> MigrateLegacyJsonSettingAsync<T>(string key, string jsonValue, CancellationToken ct) where T : class
-    {
-        Log.Info($"[SettingsRepository] Migrating legacy JSON setting '{key}' to MemoryPack BLOB...");
-        T? migratedValue = null;
-
-        if (AppJsonContext.Default.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
+        // 2. Двусторонний мост миграции: бинарный BLOB (legacy MemoryPack или UTF-8 JSON)
+        if (rawValue is byte[] binaryData)
         {
-            migratedValue = JsonSerializer.Deserialize(jsonValue, jsonTypeInfo);
+            T? result = null;
+            bool shouldMigrateToJson = false;
+
+            // Проверяем, не является ли BLOB сохранённым UTF-8 JSON
+            if (binaryData.Length > 0 && (binaryData[0] == (byte)'{' || binaryData[0] == (byte)'['))
+            {
+                result = DeserializeJsonBytes<T>(binaryData);
+            }
+
+            // Если не JSON — десериализуем через MemoryPack (точная схема для миграции в JSON)
+            if (result == null)
+            {
+                try
+                {
+                    result = MemoryPackSerializer.Deserialize<T>(binaryData);
+                    if (result != null)
+                    {
+                        shouldMigrateToJson = true;
+                    }
+                }
+                catch (MemoryPackSerializationException ex)
+                {
+                    Log.Warn($"[SettingsRepository] Legacy binary layout mismatch for '{key}': {ex.Message}. Falling back to default.");
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[SettingsRepository] Unexpected error reading binary '{key}': {ex.Message}");
+                }
+            }
+
+            // Автоматически фиксируем данные в надёжном JSON, освобождая SQLite от бинарной привязки
+            if (shouldMigrateToJson && result != null)
+            {
+                Log.Info($"[SettingsRepository] Auto-migrating setting '{key}' from binary BLOB to resilient JSON format...");
+                try
+                {
+                    await SetAsync(key, result, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"[SettingsRepository] Failed to persist migrated JSON for '{key}': {ex.Message}");
+                }
+            }
+
+            return result;
         }
 
-        if (migratedValue != null)
-        {
-            await SetAsync(key, migratedValue, ct).ConfigureAwait(false);
-        }
-
-        return migratedValue;
+        return null;
     }
 
     /// <inheritdoc />
@@ -87,9 +110,9 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
          T value,
          CancellationToken ct = default)
     {
-        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        string jsonPayload = SerializeJson(value);
 
-        byte[] payload = MemoryPackSerializer.Serialize(value);
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
@@ -101,13 +124,11 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
 
         var pValue = cmd.CreateParameter();
         pValue.ParameterName = "@value";
-        pValue.Value = payload;
+        pValue.Value = jsonPayload;
         cmd.Parameters.Add(pValue);
 
-        // Прямой SQL Upsert в обход ChangeTracker EF Core (гарантирует реальное обновление строки в SQLite)
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-        // Сбрасываем страницы WAL в основной файл на диске
         try
         {
             await using var walCmd = connection.CreateCommand();
@@ -116,7 +137,7 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
         }
         catch { }
 
-        Log.Info($"[SettingsRepository] Successfully committed '{key}' to database ({payload.Length} bytes)");
+        Log.Info($"[SettingsRepository] Successfully committed '{key}' to database (JSON)");
     }
 
     /// <inheritdoc />
@@ -124,10 +145,10 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
         string key,
         T value)
     {
+        string jsonPayload = SerializeJson(value);
+
         using var connection = _factory.CreateConnection();
         connection.Open();
-
-        byte[] payload = MemoryPackSerializer.Serialize(value);
 
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
@@ -139,7 +160,7 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
 
         var pValue = cmd.CreateParameter();
         pValue.ParameterName = "@value";
-        pValue.Value = payload;
+        pValue.Value = jsonPayload;
         cmd.Parameters.Add(pValue);
 
         cmd.ExecuteNonQuery();
@@ -152,6 +173,55 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
         }
         catch { }
 
-        Log.Info($"[SettingsRepository] Successfully committed '{key}' (sync) to database ({payload.Length} bytes)");
+        Log.Info($"[SettingsRepository] Successfully committed '{key}' (sync) to database (JSON)");
     }
+
+    #region Serialization Helpers
+
+    private static string SerializeJson<T>(T value)
+    {
+        if (AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
+        {
+            return JsonSerializer.Serialize(value, jsonTypeInfo);
+        }
+
+        return JsonSerializer.Serialize(value);
+    }
+
+    private static T? DeserializeJson<T>(string json) where T : class
+    {
+        try
+        {
+            if (AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
+            {
+                return JsonSerializer.Deserialize(json, jsonTypeInfo);
+            }
+
+            return JsonSerializer.Deserialize<T>(json);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[SettingsRepository] JSON deserialization failed for {typeof(T).Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static T? DeserializeJsonBytes<T>(byte[] bytes) where T : class
+    {
+        try
+        {
+            if (AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
+            {
+                return JsonSerializer.Deserialize(bytes, jsonTypeInfo);
+            }
+
+            return JsonSerializer.Deserialize<T>(bytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    #endregion
 }

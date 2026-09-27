@@ -93,6 +93,16 @@ public interface IPlaylistRepository
     Task RemoveTrackAsync(string playlistId, string trackId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Пакетно удаляет коллекцию треков из плейлиста в рамках единой транзакции базы данных.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор плейлиста.</param>
+    /// <param name="trackIds">Коллекция идентификаторов удаляемых треков.</param>
+    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Количество успешно удаленных записей.</returns>
+    Task<int> RemoveTracksAsync(string playlistId, IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default);
+
+    /// <summary>
     /// Изменяет порядок воспроизведения треков внутри плейлиста.
     /// </summary>
     /// <param name="playlistId">Идентификатор плейлиста.</param>
