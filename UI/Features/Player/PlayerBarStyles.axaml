@@ -10,10 +10,6 @@
         <Setter Property="Padding" Value="4" />
     </Style>
 
-    <!-- Применяется к корневым нативным окнам всплывающих элементов -->
-    <Style Selector="PopupRoot">
-    </Style>
-
     <Style Selector="Button.icon-btn.popup-open">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -95,12 +91,6 @@
     </Style>
     <Style Selector="Border.seek-preview-cursor.active">
         <Setter Property="Opacity" Value="0.7" />
-    </Style>
-
-    <!-- ИСПРАВЛЕНИЕ XAMLX CRASH -->
-    <Style Selector="Border.progress-bar">
-    </Style>
-    <Style Selector="Grid.dragging Border.progress-bar">
     </Style>
 
     <!-- Section: Volume Thumb Styles -->
@@ -185,15 +175,8 @@
             </Transitions>
         </Setter>
     </Style>
-    <Style Selector="Button.format-item-btn /template/ ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.format-item-btn:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.format-item-btn:pressed /template/ ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
+
+    <!-- Таргетирование только именованного контейнера PART_ContentPresenter -->
     <Style Selector="Button.format-item-btn /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
     </Style>
@@ -214,10 +197,6 @@
     <Style Selector="Button.format-item-btn:pressed">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="FontWeight" Value="Bold" />
-    </Style>
-    <Style Selector="Button.format-item-btn:pressed TextBlock">
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
 

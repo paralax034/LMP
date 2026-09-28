@@ -49,6 +49,24 @@
         </DataTemplate>
     </Window.DataTemplates>
 
+    <Window.Styles>
+        <Style
+            Selector="Button.titlebar-brand-btn /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style
+            Selector="Button.titlebar-brand-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style Selector="Button.titlebar-version-btn:pointerover StackPanel">
+            <Setter Property="Opacity" Value="0.8" />
+        </Style>
+        <Style Selector="Button.titlebar-version-btn:pointerover TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+    </Window.Styles>
+
     <Grid x:Name="RootGrid"
         RowDefinitions="Auto, *, Auto"
         Margin="{Binding $parent[Window].OffScreenMargin}">
@@ -64,13 +82,9 @@
                 <Button Background="Transparent" BorderThickness="0"
                     Padding="12,0,8,0" Margin="0" VerticalAlignment="Stretch"
                     Cursor="Hand" Name="AppLogoButton"
+                    Classes="titlebar-brand-btn"
                     Command="{Binding ToggleVersionInfoCommand}"
                     ToolTip.Tip="{Binding L[Common_AppName]}">
-                    <Button.Styles>
-                        <Style Selector="Button:pointerover /template/ ContentPresenter">
-                            <Setter Property="Background" Value="Transparent" />
-                        </Style>
-                    </Button.Styles>
 
                     <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                         <Grid Width="24" Height="24">
@@ -106,21 +120,11 @@
                     BorderThickness="0"
                     Padding="0" Margin="0"
                     VerticalAlignment="Center"
+                    Classes="titlebar-brand-btn titlebar-version-btn"
                     IsVisible="{Binding IsVersionInfoVisible}"
                     Cursor="Hand"
                     Command="{Binding OpenGitHubCommand}"
                     ToolTip.Tip="{Binding L[Common_OpenGitHub]}">
-                    <Button.Styles>
-                        <Style Selector="Button:pointerover /template/ ContentPresenter">
-                            <Setter Property="Background" Value="Transparent" />
-                        </Style>
-                        <Style Selector="Button:pointerover StackPanel">
-                            <Setter Property="Opacity" Value="0.8" />
-                        </Style>
-                        <Style Selector="Button:pointerover TextBlock">
-                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-                        </Style>
-                    </Button.Styles>
 
                     <StackPanel Orientation="Horizontal" Spacing="6" Opacity="0.5">
                         <Border Width="1" Height="12"

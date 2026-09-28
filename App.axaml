@@ -22,9 +22,6 @@
         <StyleInclude Source="avares://LMP/UI/Theme/ToolTipTheme.axaml" />
         <!-- 2. Theme.axaml: Typography, Buttons, Controls, AppComponents, PlayerBarStyles -->
         <StyleInclude Source="avares://LMP/UI/Theme/Theme.axaml" />
-        <!-- 3. Дополнительные компоненты -->
-        <StyleInclude Source="avares://LMP/UI/Theme/LoadingSkeletons.axaml" />
-        <StyleInclude Source="avares://LMP/UI/Theme/ChipStyles.axaml" />
     </Application.Styles>
 
 </Application>

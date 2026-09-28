@@ -94,7 +94,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     public event Action<bool>? ShuffleEnabledChanged;
     public event Action<int>? QueueCountChanged;
     public event Action<int>? VolumeChanged;
-    public event Action<string?>? ActivePlaylistIdChanged;
 
     /// <summary>
     /// Событие изменения чистоты очереди активного плейлиста.
@@ -304,8 +303,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
             _activePlaylistTrackIds.Add(effectiveTracks[i].Id);
         }
 
-        ActivePlaylistIdChanged?.Invoke(playlistId);
-
         var targetStartTrack = startTrack ?? (isShuffled ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)] : effectiveTracks[0]);
         await _audio.StartQueueAsync(effectiveTracks, targetStartTrack).ConfigureAwait(false);
 
@@ -437,7 +434,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
             ActivePlaylistId = null;
             _activePlaylistTrackIds.Clear();
             _expectedPlaylistTrackCount = 0;
-            ActivePlaylistIdChanged?.Invoke(null);
             UpdatePurityState();
             Log.Debug("[PlayerControl] ActivePlaylistId cleared (track → null)");
         }

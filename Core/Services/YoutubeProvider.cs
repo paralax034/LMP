@@ -1290,8 +1290,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Получает поисковые подсказки от Google/YouTube Suggest API с fallback-доменами и локальным кэшированием.
-    /// Предотвращает зависания UI-потока при блокировках сетевых узлов ТСПУ/DPI.
+    /// Получает поисковые подсказки от Google/YouTube Suggest API с независимыми таймаутами для каждого узла и защитой от зависаний.
     /// </summary>
     /// <param name="query">Поисковый запрос.</param>
     /// <param name="ct">Токен отмены вызывающей стороны.</param>
@@ -1309,17 +1308,17 @@ public partial class YoutubeProvider : IDisposable
             return cached.Items;
         }
 
-        // Ограничиваем таймаут подсказок 2.5 секундами — автодополнение не должно подвешивать ввод
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(2500));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-        var token = linkedCts.Token;
-
         var client = _networkManager.ProbeClient;
         var encoded = Uri.EscapeDataString(normalizedQuery);
 
-        // Zero-alloc fallback: генерируем строку по требованию без аллокации промежуточного массива и без ReadOnlySpan через await
         for (int i = 0; i < 2; i++)
         {
+            if (ct.IsCancellationRequested) return [];
+
+            using var attemptTimeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1800));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, attemptTimeoutCts.Token);
+            var token = linkedCts.Token;
+
             var endpoint = i == 0
                 ? $"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={encoded}&hl=ru"
                 : $"https://suggestqueries-clients6.youtube.com/complete/search?client=firefox&ds=yt&q={encoded}&hl=ru";
@@ -1370,9 +1369,13 @@ public partial class YoutubeProvider : IDisposable
             {
                 return [];
             }
-            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (attemptTimeoutCts.IsCancellationRequested)
             {
                 Log.Debug($"[YouTube] Suggestion timeout for '{normalizedQuery}' on endpoint #{i}");
+            }
+            catch (Exception ex) when (ex is IOException or HttpRequestException && (ct.IsCancellationRequested || attemptTimeoutCts.IsCancellationRequested))
+            {
+                // Подавление ожидаемых прерываний сокета при сработавшем токене отмены
             }
             catch (Exception ex)
             {
@@ -1410,13 +1413,17 @@ public partial class YoutubeProvider : IDisposable
             if (playlistId == null) return null;
 
             var playlist = await _youtube.Playlists.GetAsync(playlistId.Value);
-            var tracks = await _youtube.Playlists.GetVideosAsync(playlistId.Value).CollectAsync();
+            var rawTracks = await _youtube.Playlists.GetVideosAsync(playlistId.Value).CollectAsync();
 
-            for (int i = 0; i < tracks.Count; i++)
-                _trackRegistry.RegisterOrUpdate(tracks[i]);
+            var tracks = new List<TrackInfo>(rawTracks.Count);
+            for (int i = 0; i < rawTracks.Count; i++)
+            {
+                var canonical = _trackRegistry.RegisterOrUpdate(rawTracks[i]);
+                tracks.Add(canonical);
+            }
 
             Log.Info($"[YouTube] Playlist '{playlist.Name}': {tracks.Count} tracks");
-            return (playlist.Name, tracks.ToList());
+            return (playlist.Name, tracks);
         }
         catch (BotDetectionException)
         {
@@ -1813,15 +1820,15 @@ public partial class YoutubeProvider : IDisposable
 
     [GeneratedRegex(
         @"(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex _YoutubeVideoRegex();
 
     [GeneratedRegex(
         @"(?:youtube\.com\/.*[?&]list=)([a-zA-Z0-9_-]+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex _YoutubePlaylistRegex();
 
-    [GeneratedRegex(@"^[a-zA-Z0-9_-]{11}$", RegexOptions.Compiled)]
+    [GeneratedRegex(@"^[a-zA-Z0-9_-]{11}$", RegexOptions.CultureInvariant)]
     private static partial Regex _ValidYoutubeId();
 
     #endregion

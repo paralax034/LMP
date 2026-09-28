@@ -213,19 +213,14 @@ public partial class MainWindow
 
     private static async Task<bool> DelayNoThrowAsync(TimeSpan delay, CancellationToken token)
     {
-        if (token.IsCancellationRequested)
-            return false;
-
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        using (token.Register(static state =>
-               {
-                   ((TaskCompletionSource<bool>)state!).TrySetResult(false);
-               }, tcs))
+        try
         {
-            var delayTask = Task.Delay(delay, CancellationToken.None);
-            var completedTask = await Task.WhenAny(delayTask, tcs.Task).ConfigureAwait(false);
-            return completedTask == delayTask;
+            await Task.Delay(delay, token).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 }

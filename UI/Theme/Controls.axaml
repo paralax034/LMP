@@ -130,12 +130,12 @@
 
     <!-- RADIOBUTTON           -->
 
-    <Style Selector="RadioButton:not(.chip):not(.source-tab)">
+    <Style Selector="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Cursor" Value="Hand" />
     </Style>
-    <Style Selector="RadioButton:not(.chip):not(.source-tab) /template/ Ellipse#OuterEllipse">
+    <Style Selector="RadioButton /template/ Ellipse#OuterEllipse">
         <Setter Property="Stroke" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="StrokeThickness" Value="1" />
         <Setter Property="Fill" Value="Transparent" />
@@ -147,11 +147,11 @@
         </Setter>
     </Style>
     <Style
-        Selector="RadioButton:not(.chip):not(.source-tab):pointerover /template/ Ellipse#OuterEllipse">
+        Selector="RadioButton:pointerover /template/ Ellipse#OuterEllipse">
         <Setter Property="Stroke" Value="{DynamicResource AccentBrush}" />
         <Setter Property="Fill" Value="{DynamicResource BgElevatedTransparentBrush}" />
     </Style>
-    <Style Selector="RadioButton:not(.chip):not(.source-tab) /template/ Ellipse#CheckGlyph">
+    <Style Selector="RadioButton /template/ Ellipse#CheckGlyph">
         <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
         <Setter Property="Transitions">
             <Transitions>
@@ -352,7 +352,7 @@
 
     <!-- TEXTBOX — ГЛОБАЛЬНЫЙ СТИЛЬ И ЦЕНТРАЛИЗОВАННЫЙ CONTEXT MENU         -->
 
-    <Style Selector="TextBox:not(.search-box):not(.flat-search-box)">
+    <Style Selector="TextBox:not(.flat-search-box)">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
@@ -364,7 +364,7 @@
     </Style>
 
     <Style
-        Selector="TextBox:not(.search-box):not(.flat-search-box) /template/ Border#PART_BorderElement">
+        Selector="TextBox:not(.flat-search-box) /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
@@ -378,79 +378,55 @@
     </Style>
 
     <Style
-        Selector="TextBox:not(.search-box):not(.flat-search-box):pointerover /template/ Border#PART_BorderElement">
+        Selector="TextBox:not(.flat-search-box):pointerover /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style
-        Selector="TextBox:not(.search-box):not(.flat-search-box):focus /template/ Border#PART_BorderElement">
+        Selector="TextBox:not(.flat-search-box):focus /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style
-        Selector="TextBox:not(.search-box):not(.flat-search-box):focus:pointerover /template/ Border#PART_BorderElement">
+        Selector="TextBox:not(.flat-search-box):focus:pointerover /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
-    <Style Selector="TextBox:not(.search-box):not(.flat-search-box):disabled">
+    <Style Selector="TextBox:not(.flat-search-box):disabled">
         <Setter Property="Opacity" Value="0.5" />
     </Style>
     <Style
-        Selector="TextBox:not(.search-box):not(.flat-search-box):disabled /template/ Border#PART_BorderElement">
+        Selector="TextBox:not(.flat-search-box):disabled /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
     </Style>
 
-    <!-- SEARCH BOX -->
-
-    <Style Selector="TextBox.search-box">
+    <!-- FLAT SEARCH BOX -->
+    <Style Selector="TextBox.flat-search-box">
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Normal" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="40,10,16,10" />
-        <Setter Property="FontSize" Value="14" />
         <Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}" />
         <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Cursor" Value="IBeam" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
-
-    <Style Selector="TextBox.search-box /template/ Border#PART_BorderElement">
+    <Style Selector="TextBox.flat-search-box /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
-    <Style Selector="TextBox.search-box:pointerover /template/ Border#PART_BorderElement">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-    </Style>
-    <Style Selector="TextBox.search-box:focus /template/ Border#PART_BorderElement">
+    <Style Selector="TextBox.flat-search-box:pointerover /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
-    <Style Selector="TextBox.search-box:focus:pointerover /template/ Border#PART_BorderElement">
+    <Style Selector="TextBox.flat-search-box:focus /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-    </Style>
-    <Style Selector="TextBox.search-box:disabled">
-        <Setter Property="Opacity" Value="0.5" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
 
     <!-- SCROLLBAR / PROGRESS  -->

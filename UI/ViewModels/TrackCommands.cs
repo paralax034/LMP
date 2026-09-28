@@ -1,28 +1,18 @@
 using System.Windows.Input;
+using Avalonia.Threading;
 
 namespace LMP.UI.ViewModels;
 
 /// <summary>
-/// Сверхлёгкая async команда для TrackItemViewModel.
+/// Сверхлёгкая async команда для TrackItemViewModel с поддержкой нотификации CanExecuteChanged.
 /// Не создаёт Subject, Observable, Scheduler — только один int для флага выполнения.
-/// Сравнение: ReactiveCommand ≈ 6-8 объектов, TrackAsyncCommand ≈ 1 объект.
 /// </summary>
 internal sealed class TrackAsyncCommand : ICommand
 {
     private readonly Func<Task> _execute;
     private int _isExecuting;
 
-    /// <summary>
-    /// Avalonia подписывается на CanExecuteChanged через WeakEvent (CommandCanExecuteChanged).
-    /// Пустые аксессоры: CanExecute меняется только во время Execute (краткосрочно),
-    /// Avalonia сама перепроверяет после завершения команды через CommandManager.
-    /// Backing field не нужен — экономим аллокацию delegate-списка.
-    /// </summary>
-    public event EventHandler? CanExecuteChanged
-    {
-        add { }
-        remove { }
-    }
+    public event EventHandler? CanExecuteChanged;
 
     public TrackAsyncCommand(Func<Task> execute) => _execute = execute;
 
@@ -32,6 +22,8 @@ internal sealed class TrackAsyncCommand : ICommand
     public async void Execute(object? parameter)
     {
         if (Interlocked.CompareExchange(ref _isExecuting, 1, 0) != 0) return;
+
+        NotifyCanExecuteChanged();
 
         try
         {
@@ -44,6 +36,19 @@ internal sealed class TrackAsyncCommand : ICommand
         finally
         {
             Volatile.Write(ref _isExecuting, 0);
+            NotifyCanExecuteChanged();
+        }
+    }
+
+    private void NotifyCanExecuteChanged()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => CanExecuteChanged?.Invoke(this, EventArgs.Empty));
         }
     }
 }

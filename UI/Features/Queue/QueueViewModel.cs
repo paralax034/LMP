@@ -19,6 +19,7 @@ public sealed partial class QueueViewModel : ViewModelBase
     private readonly TrackViewModelFactory _vmFactory;
     private readonly DownloadService _downloads;
 
+    private readonly List<TrackItemViewModel> _allQueueItems = [];
     private TrackItemViewModel? _currentActiveVm;
 
     public ObservableCollection<TrackItemViewModel> QueueItems { get; } = [];
@@ -92,7 +93,7 @@ public sealed partial class QueueViewModel : ViewModelBase
 
     partial void OnFilterQueryChanged(string value)
     {
-        UpdateFilterState();
+        ApplyFilter();
         OnPropertyChanged(nameof(CanReorderItems));
     }
 
@@ -104,9 +105,12 @@ public sealed partial class QueueViewModel : ViewModelBase
             return;
         }
 
-        if (from >= 0 && from < QueueItems.Count && to >= 0 && to < QueueItems.Count && from != to)
+        if (from >= 0 && from < _allQueueItems.Count && to >= 0 && to < _allQueueItems.Count && from != to)
         {
-            QueueItems.Move(from, to);
+            var item = _allQueueItems[from];
+            _allQueueItems.RemoveAt(from);
+            _allQueueItems.Insert(to, item);
+            ApplyFilter();
         }
     }
 
@@ -118,10 +122,12 @@ public sealed partial class QueueViewModel : ViewModelBase
             return;
         }
 
-        if (index >= 0 && index <= QueueItems.Count)
+        if (index >= 0 && index <= _allQueueItems.Count)
         {
             var vm = _vmFactory.CreateForQueue(track, t => _ = _audio.PlayTrackAsync(t));
-            QueueItems.Insert(index, vm);
+            _allQueueItems.Insert(index, vm);
+            TotalCount = _allQueueItems.Count;
+            ApplyFilter();
         }
     }
 
@@ -133,11 +139,15 @@ public sealed partial class QueueViewModel : ViewModelBase
             return;
         }
 
-        if (index >= 0 && index < QueueItems.Count)
+        if (index >= 0 && index < _allQueueItems.Count)
         {
-            var vm = QueueItems[index];
-            QueueItems.RemoveAt(index);
+            var vm = _allQueueItems[index];
+            _allQueueItems.RemoveAt(index);
+            if (ReferenceEquals(_currentActiveVm, vm))
+                _currentActiveVm = null;
             vm.Dispose();
+            TotalCount = _allQueueItems.Count;
+            ApplyFilter();
         }
     }
 
@@ -157,9 +167,11 @@ public sealed partial class QueueViewModel : ViewModelBase
             {
                 var track = rawQueue[targetIndex];
                 var vm = _vmFactory.CreateForQueue(track, t => _ = _audio.PlayTrackAsync(t));
-                QueueItems.Insert(targetIndex, vm);
+                _allQueueItems.Insert(targetIndex, vm);
             }
         }
+        TotalCount = _allQueueItems.Count;
+        ApplyFilter();
     }
 
     private void OnAudioQueueChanged()
@@ -211,11 +223,11 @@ public sealed partial class QueueViewModel : ViewModelBase
 
         if (_currentActiveVm == null)
         {
-            for (int i = 0; i < QueueItems.Count; i++)
+            for (int i = 0; i < _allQueueItems.Count; i++)
             {
-                if (string.Equals(QueueItems[i].Id, currentTrack.Id, StringComparison.Ordinal))
+                if (string.Equals(_allQueueItems[i].Id, currentTrack.Id, StringComparison.Ordinal))
                 {
-                    _currentActiveVm = QueueItems[i];
+                    _currentActiveVm = _allQueueItems[i];
                     break;
                 }
             }
@@ -237,12 +249,12 @@ public sealed partial class QueueViewModel : ViewModelBase
             ? duration.ToString(@"h\:mm\:ss")
             : duration.ToString(@"m\:ss");
 
-        if (QueueItems.Count == rawQueue.Count)
+        if (_allQueueItems.Count == rawQueue.Count)
         {
             bool match = true;
             for (int i = 0; i < rawQueue.Count; i++)
             {
-                if (!string.Equals(QueueItems[i].Id, rawQueue[i].Id, StringComparison.Ordinal))
+                if (!string.Equals(_allQueueItems[i].Id, rawQueue[i].Id, StringComparison.Ordinal))
                 {
                     match = false;
                     break;
@@ -251,7 +263,7 @@ public sealed partial class QueueViewModel : ViewModelBase
 
             if (match)
             {
-                UpdateFilterState();
+                ApplyFilter();
                 OnPropertyChanged(nameof(IsEmpty));
                 OnPropertyChanged(nameof(CanReorderItems));
                 NotifyCommandStates();
@@ -259,9 +271,10 @@ public sealed partial class QueueViewModel : ViewModelBase
             }
         }
 
-        for (int i = 0; i < QueueItems.Count; i++)
-            QueueItems[i].Dispose();
+        for (int i = 0; i < _allQueueItems.Count; i++)
+            _allQueueItems[i].Dispose();
 
+        _allQueueItems.Clear();
         QueueItems.Clear();
         _currentActiveVm = null;
 
@@ -277,10 +290,10 @@ public sealed partial class QueueViewModel : ViewModelBase
                 vm.SetActive(true, isPlaying);
                 _currentActiveVm = vm;
             }
-            QueueItems.Add(vm);
+            _allQueueItems.Add(vm);
         }
 
-        UpdateFilterState();
+        ApplyFilter();
 
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(CanReorderItems));
@@ -295,29 +308,51 @@ public sealed partial class QueueViewModel : ViewModelBase
         SaveQueueToPlaylistCommand.NotifyCanExecuteChanged();
     }
 
-    private void UpdateFilterState()
+    private void ApplyFilter()
     {
         if (string.IsNullOrWhiteSpace(FilterQuery))
         {
             IsFilterEmpty = false;
+
+            if (QueueItems.Count == _allQueueItems.Count)
+            {
+                bool identical = true;
+                for (int i = 0; i < _allQueueItems.Count; i++)
+                {
+                    if (!ReferenceEquals(QueueItems[i], _allQueueItems[i]))
+                    {
+                        identical = false;
+                        break;
+                    }
+                }
+                if (identical) return;
+            }
+
+            QueueItems.Clear();
+            for (int i = 0; i < _allQueueItems.Count; i++)
+                QueueItems.Add(_allQueueItems[i]);
+
             return;
         }
 
         var query = FilterQuery.Trim();
-        bool hasMatch = false;
+        var matched = new List<TrackItemViewModel>(_allQueueItems.Count);
 
-        for (int i = 0; i < QueueItems.Count; i++)
+        for (int i = 0; i < _allQueueItems.Count; i++)
         {
-            var item = QueueItems[i];
+            var item = _allQueueItems[i];
             if (item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 item.Author.Contains(query, StringComparison.OrdinalIgnoreCase))
             {
-                hasMatch = true;
-                break;
+                matched.Add(item);
             }
         }
 
-        IsFilterEmpty = !hasMatch;
+        IsFilterEmpty = matched.Count == 0 && _allQueueItems.Count > 0;
+
+        QueueItems.Clear();
+        for (int i = 0; i < matched.Count; i++)
+            QueueItems.Add(matched[i]);
     }
 
     private Task DownloadAllAsync()
@@ -369,9 +404,10 @@ public sealed partial class QueueViewModel : ViewModelBase
             _playerControl.IsPlayingChanged -= OnPlayerControlIsPlayingChanged;
             _playerControl.ForceSyncTriggered -= OnPlayerControlForceSyncTriggered;
 
-            for (int i = 0; i < QueueItems.Count; i++)
-                QueueItems[i].Dispose();
+            for (int i = 0; i < _allQueueItems.Count; i++)
+                _allQueueItems[i].Dispose();
 
+            _allQueueItems.Clear();
             QueueItems.Clear();
             _currentActiveVm = null;
         }

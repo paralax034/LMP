@@ -241,14 +241,15 @@ public sealed class NetworkManager : IDisposable
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         };
 
-        // 4. Probe Client (HTTP/1.1, быстрые таймауты)
+        // 4. Probe Client (HTTP/1.1, быстрые таймауты и своевременная очистка пула)
         var probeHandler = new SocketsHttpHandler
         {
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
             Proxy = effectiveProxy,
             UseProxy = true,
-            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
-            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(1),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15),
+            ResponseDrainTimeout = TimeSpan.FromMilliseconds(250),
             MaxConnectionsPerServer = 4,
             ConnectTimeout = TimeSpan.FromSeconds(4),
             AllowAutoRedirect = false

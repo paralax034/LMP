@@ -7,14 +7,6 @@
     <!-- Источник: SettingsView локальные стили → вынесены для переиспользования -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
-    <!-- Заголовок страницы -->
-    <Style Selector="TextBlock.h1">
-        <Setter Property="FontSize" Value="22" />
-        <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-        <Setter Property="Margin" Value="0,0,0,20" />
-    </Style>
-
     <!-- Заголовок секции -->
     <Style Selector="TextBlock.h2">
         <Setter Property="FontSize" Value="16" />
@@ -114,17 +106,6 @@
     </Style>
     <Style Selector="Border.feature-badge.experimental TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource SystemWarnOrangeBrush}" />
-    </Style>
-
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <!-- SECTION SEPARATOR                                                   -->
-    <!-- Стандартный разделитель внутри card.                                -->
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
-
-    <Style Selector="Separator.card-separator">
-        <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="Height" Value="1" />
-        <Setter Property="Margin" Value="0,0" />
     </Style>
 
 </Styles>

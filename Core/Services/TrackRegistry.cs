@@ -19,6 +19,8 @@ public sealed class TrackRegistry
     private readonly ConcurrentDictionary<string, TrackInfo> _pinned =
         new(StringComparer.Ordinal);
 
+    private readonly Lock _registryLock = new();
+
     private readonly ITrackRepository? _repository;
     private readonly IPlaylistRepository? _playlists;
     private readonly CookieAuthService? _auth;
@@ -71,7 +73,6 @@ public sealed class TrackRegistry
     /// Выполняет синхронизацию закрепления трека в сильной памяти: если трек теряет статус лайкнутого, скачанного или добавленного в плейлист,
     /// он автоматически исключается из словаря сильных ссылок и переходит в weak-кэш для своевременной сборки мусора.
     /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TrackInfo RegisterOrUpdate(TrackInfo incoming, bool hasUserContext)
     {
         if (string.IsNullOrEmpty(incoming.Id)) return incoming;
@@ -83,26 +84,29 @@ public sealed class TrackRegistry
 
         var audioCache = GetAudioCache();
 
-        if (_pinned.TryGetValue(incoming.Id, out var pinned))
+        lock (_registryLock)
         {
-            pinned.UpdateMetadata(incoming, hasUserContext);
-            HydrateTrackFromAudioCache(pinned, audioCache);
-            UpdatePinStatusInternal(pinned);
-            return pinned;
-        }
+            if (_pinned.TryGetValue(incoming.Id, out var pinned))
+            {
+                pinned.UpdateMetadata(incoming, hasUserContext);
+                HydrateTrackFromAudioCache(pinned, audioCache);
+                UpdatePinStatusInternal(pinned);
+                return pinned;
+            }
 
-        if (_cache.TryGetValue(incoming.Id, out var weakRef) && weakRef.TryGetTarget(out var cached))
-        {
-            cached.UpdateMetadata(incoming, hasUserContext);
-            HydrateTrackFromAudioCache(cached, audioCache);
-            UpdatePinStatusInternal(cached);
-            return cached;
-        }
+            if (_cache.TryGetValue(incoming.Id, out var weakRef) && weakRef.TryGetTarget(out var cached))
+            {
+                cached.UpdateMetadata(incoming, hasUserContext);
+                HydrateTrackFromAudioCache(cached, audioCache);
+                UpdatePinStatusInternal(cached);
+                return cached;
+            }
 
-        _cache[incoming.Id] = new WeakReference<TrackInfo>(incoming);
-        HydrateTrackFromAudioCache(incoming, audioCache);
-        UpdatePinStatusInternal(incoming);
-        return incoming;
+            _cache[incoming.Id] = new WeakReference<TrackInfo>(incoming);
+            HydrateTrackFromAudioCache(incoming, audioCache);
+            UpdatePinStatusInternal(incoming);
+            return incoming;
+        }
     }
 
     /// <summary>
@@ -239,7 +243,6 @@ public sealed class TrackRegistry
             }
         }
 
-        // Восстанавливаем порядок входного списка
         var result = new List<TrackInfo>(ids.Count);
         for (int i = 0; i < ids.Count; i++)
         {
@@ -391,6 +394,7 @@ public sealed class TrackRegistry
     public int CleanupDeadReferences()
     {
         var maxDeadCount = _cache.Count;
+        if (maxDeadCount == 0) return 0;
 
         var deadKeysArray = ArrayPool<string>.Shared.Rent(maxDeadCount);
         int deadCount = 0;
@@ -427,8 +431,11 @@ public sealed class TrackRegistry
     /// </summary>
     public void Clear()
     {
-        _cache.Clear();
-        _pinned.Clear();
+        lock (_registryLock)
+        {
+            _cache.Clear();
+            _pinned.Clear();
+        }
         Log.Debug("[TrackRegistry] Memory caches successfully cleared on profile transition.");
     }
 

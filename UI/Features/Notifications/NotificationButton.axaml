@@ -20,15 +20,6 @@
             </Setter>
         </Style>
 
-        <Style Selector="Button.notif-btn /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Button.notif-btn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Button.notif-btn:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
         <Style Selector="Button.notif-btn /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>

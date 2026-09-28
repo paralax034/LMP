@@ -18,6 +18,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     {
         private readonly WeakReference<TrackItemViewModel> _weak;
         private readonly INotifyPropertyChanged _source;
+        private int _isUnsubscribed;
 
         internal WeakPropertyChangedSubscription(TrackItemViewModel vm, INotifyPropertyChanged source)
         {
@@ -29,12 +30,22 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         private void Handle(object? sender, PropertyChangedEventArgs e)
         {
             if (_weak.TryGetTarget(out var vm))
+            {
                 vm.OnTrackPropertyChanged(sender, e);
+            }
             else
-                _source.PropertyChanged -= Handle;
+            {
+                Unsubscribe();
+            }
         }
 
-        internal void Unsubscribe() => _source.PropertyChanged -= Handle;
+        internal void Unsubscribe()
+        {
+            if (Interlocked.Exchange(ref _isUnsubscribed, 1) == 0)
+            {
+                _source.PropertyChanged -= Handle;
+            }
+        }
     }
 
     private readonly WeakPropertyChangedSubscription _trackSubscription;
@@ -65,6 +76,9 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     private readonly DownloadService _downloads;
     private readonly DialogService _dialog;
     private readonly LibraryService _library;
+
+    private readonly TrackInfo[] _singleTarget;
+    private CancellationTokenSource? _submenuCts;
 
     private Action<TrackInfo>? _onPlay;
 
@@ -169,6 +183,8 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         _library = library;
         _onPlay = onPlay;
 
+        _singleTarget = [track];
+
         PlayCommand = new TrackAsyncCommand(PlayAsync);
         ToggleLikeCommand = new TrackAsyncCommand(ToggleLikeAsync);
 
@@ -215,7 +231,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
                 return selected;
         }
 
-        return [Track];
+        return _singleTarget;
     }
 
     private void UpdateAddToPlaylistHeader()
@@ -228,50 +244,72 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     public async Task PreparePlaylistSubmenuAsync(CancellationToken ct = default)
     {
+        _submenuCts?.Cancel();
+        _submenuCts?.Dispose();
+        _submenuCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _submenuCts.Token;
+
         var targets = GetActionTargets();
         UpdateAddToPlaylistHeader();
 
-        await _playlistService.EnsureIndexInitializedAsync(ct).ConfigureAwait(false);
-        var playlists = await _playlistService.GetEditablePlaylistsAsync(ct).ConfigureAwait(false);
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        try
         {
-            PlaylistMenuItems.Clear();
+            await _playlistService.EnsureIndexInitializedAsync(token).ConfigureAwait(false);
+            var playlists = await _playlistService.GetEditablePlaylistsAsync(token).ConfigureAwait(false);
 
-            var createItem = new PlaylistMenuItemViewModel(
-                playlistId: string.Empty,
-                name: L["Playlist_CreateNew"] ?? "New playlist...",
-                state: PlaylistMembershipState.None,
-                countText: string.Empty,
-                onToggle: _ => CreateNewPlaylistWithTargetsAsync(targets),
-                isCreateAction: true);
-            PlaylistMenuItems.Add(createItem);
+            if (token.IsCancellationRequested || !IsMenuOpen)
+                return;
 
-            PlaylistMenuItems.Add(PlaylistMenuItemViewModel.CreateSeparator());
-
-            for (int i = 0; i < playlists.Count; i++)
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                var p = playlists[i];
-                var (state, includedCount, totalCount) = _playlistService.GetMembershipStatus(p.Id, targets);
+                if (token.IsCancellationRequested || !IsMenuOpen)
+                    return;
 
-                string? countText = (targets.Count > 1 && state == PlaylistMembershipState.Indeterminate)
-                                    ? $"{includedCount}/{totalCount}"
-                                    : null;
+                PlaylistMenuItems.Clear();
 
-                var item = new PlaylistMenuItemViewModel(
-                    playlistId: p.Id,
-                    name: p.Name,
-                    state: state,
-                    countText: countText,
-                    onToggle: vm => TogglePlaylistMembershipAsync(vm, targets));
+                var createItem = new PlaylistMenuItemViewModel(
+                    playlistId: string.Empty,
+                    name: L["Playlist_CreateNew"] ?? "New playlist...",
+                    state: PlaylistMembershipState.None,
+                    countText: string.Empty,
+                    onToggle: _ => CreateNewPlaylistWithTargetsAsync(targets),
+                    isCreateAction: true);
+                PlaylistMenuItems.Add(createItem);
 
-                PlaylistMenuItems.Add(item);
-            }
-        });
+                PlaylistMenuItems.Add(PlaylistMenuItemViewModel.CreateSeparator());
+
+                for (int i = 0; i < playlists.Count; i++)
+                {
+                    var p = playlists[i];
+                    var (state, includedCount, totalCount) = _playlistService.GetMembershipStatus(p.Id, targets);
+
+                    string? countText = (targets.Count > 1 && state == PlaylistMembershipState.Indeterminate)
+                                        ? $"{includedCount}/{totalCount}"
+                                        : null;
+
+                    var item = new PlaylistMenuItemViewModel(
+                        playlistId: p.Id,
+                        name: p.Name,
+                        state: state,
+                        countText: countText,
+                        onToggle: vm => TogglePlaylistMembershipAsync(vm, targets));
+
+                    PlaylistMenuItems.Add(item);
+                }
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Log.Error($"[TrackItemVM] PreparePlaylistSubmenuAsync failed: {ex.Message}");
+        }
     }
 
     public void ClearPlaylistSubmenu()
     {
+        _submenuCts?.Cancel();
+        _submenuCts?.Dispose();
+        _submenuCts = null;
         PlaylistMenuItems.Clear();
     }
 
@@ -537,6 +575,10 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         if (IsDisposed) return;
         if (disposing)
         {
+            _submenuCts?.Cancel();
+            _submenuCts?.Dispose();
+            _submenuCts = null;
+
             _trackSubscription.Unsubscribe();
             _onPlay = null;
             StartRadioAction = null;

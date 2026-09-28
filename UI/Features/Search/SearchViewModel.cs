@@ -64,16 +64,27 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
     /// <summary>
     /// Текущий текст поискового запроса с автоматической очисткой от переносов строк.
+    /// Исключает деструктивное усечение пробелов при посимвольном вводе для предотвращения скачков курсора.
     /// </summary>
     public string SearchQuery
     {
         get => _searchQuery;
         set
         {
-            var sanitized = value.SanitizeSingleLine();
-            if (SetProperty(ref _searchQuery, sanitized))
+            var raw = value ?? string.Empty;
+            string clean;
+            if (raw.Contains('\r') || raw.Contains('\n'))
             {
-                OnSearchQueryChanged(sanitized);
+                clean = raw.Replace("\r", string.Empty).Replace("\n", " ");
+            }
+            else
+            {
+                clean = raw;
+            }
+
+            if (SetProperty(ref _searchQuery, clean))
+            {
+                OnSearchQueryChanged(clean);
             }
         }
     }

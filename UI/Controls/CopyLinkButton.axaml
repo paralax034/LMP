@@ -12,7 +12,6 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="Button.copy-btn:pointerover">
             <Setter Property="Background" Value="Transparent" />
@@ -22,12 +21,6 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Opacity" Value="0.82" />
-        </Style>
-        <Style Selector="Button.copy-btn /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Button.copy-btn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Button.copy-btn /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
@@ -43,7 +36,6 @@
             <Setter Property="Transitions">
                 <Transitions>
                     <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.1" />
                 </Transitions>
             </Setter>
         </Style>

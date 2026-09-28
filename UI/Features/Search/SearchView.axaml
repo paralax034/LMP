@@ -8,73 +8,10 @@
     x:DataType="vm:SearchViewModel">
 
     <UserControl.Styles>
-        <!-- Полоса шапки во всю ширину окна -->
-        <Style Selector="Border.header-strip">
-            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
-            <Setter Property="Padding" Value="0" />
-        </Style>
-
-        <!-- Кнопки действий и источников: без рамок, чистая анимация цвета иконки -->
-        <Style Selector="Button.header-icon-btn">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="6" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="34" />
-        </Style>
-        <Style Selector="Button.header-icon-btn /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Button.header-icon-btn:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Button.header-icon-btn:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-
-        <Style Selector="Button.header-icon-btn PathIcon">
-            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-            <Setter Property="Width" Value="18" />
-            <Setter Property="Height" Value="18" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-                </Transitions>
-            </Setter>
-        </Style>
-        <Style Selector="Button.header-icon-btn:pointerover PathIcon">
-            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        </Style>
-        <Style Selector="Button.header-icon-btn.active PathIcon">
-            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        </Style>
-
-        <!-- Крупное поле ввода на всю высоту шапки (18px) -->
+        <!-- Крупное поле ввода на всю высоту шапки (18px) поверх базового flat-search-box -->
         <Style Selector="TextBox.flat-search-box">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="2,0" />
             <Setter Property="FontSize" Value="18" />
-            <Setter Property="FontWeight" Value="Normal" />
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-            <Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-        </Style>
-        <Style Selector="TextBox.flat-search-box /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="TextBox.flat-search-box:pointerover /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="TextBox.flat-search-box:focus /template/ Border#PART_BorderElement">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="2,0" />
         </Style>
 
         <!-- Минималистичные интерактивные чипы с ограничением максимальной ширины -->
