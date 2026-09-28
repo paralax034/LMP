@@ -1,16 +1,21 @@
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 
 namespace LMP.Core.Helpers;
 
 /// <summary>
 /// Обеспечивает запуск строго одного экземпляра приложения в рамках пользовательской сессии.
-/// Инкапсулирует системный мьютекс, автоматически устраняет зависшие зомби-процессы,
-/// предоставляет интерактивный запрос на перезапуск существующего экземпляра и восстанавливает окно.
+/// Инкапсулирует системный мьютекс, кроссплатформенный IPC-канал передачи фокуса,
+/// автоматически устраняет зависшие зомби-процессы и восстанавливает главное окно.
 /// </summary>
 public sealed partial class SingleInstanceGuard : IDisposable
 {
     private const string MutexName = @"Local\LMP_SingleInstance_Mutex_paralax034";
+    private const string PipeName = "LMP_SingleInstance_IPC_paralax034";
+    private const byte CommandWakeUp = 0x01;
+    private const int IpcConnectTimeoutMs = 200;
+
     private const int SwRestore = 9;
     private const int SwShow = 5;
 
@@ -21,9 +26,24 @@ public sealed partial class SingleInstanceGuard : IDisposable
     private const int IDYES = 6;
 
     private readonly Mutex _mutex;
+    private readonly CancellationTokenSource _serverCts;
+    private static Action? _activationCallback;
     private bool _disposed;
 
-    private SingleInstanceGuard(Mutex mutex) => _mutex = mutex;
+    private SingleInstanceGuard(Mutex mutex)
+    {
+        _mutex = mutex;
+        _serverCts = new CancellationTokenSource();
+        StartIpcServerLoop(_serverCts.Token);
+    }
+
+    /// <summary>
+    /// Регистрирует делегат активации главного окна при получении межпроцессного сигнала от второго экземпляра.
+    /// </summary>
+    public static void RegisterActivationCallback(Action? callback)
+    {
+        _activationCallback = callback;
+    }
 
     /// <summary>
     /// Пытается захватить владение системным мьютексом единственного экземпляра.
@@ -65,6 +85,12 @@ public sealed partial class SingleInstanceGuard : IDisposable
         mutex?.Dispose();
         mutex = null;
 
+        // Второй процесс: пытаемся разбудить первый через быстрый кроссплатформенный IPC
+        if (TryNotifyActiveInstance())
+        {
+            return null;
+        }
+
         // Проверяем существующие процессы: устранение зависаний либо подтверждение перезапуска пользователем
         if (HandleExistingProcesses())
         {
@@ -103,6 +129,58 @@ public sealed partial class SingleInstanceGuard : IDisposable
         }
 
         return null;
+    }
+
+    private static bool TryNotifyActiveInstance()
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            client.Connect(IpcConnectTimeoutMs);
+            client.WriteByte(CommandWakeUp);
+            client.Flush();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void StartIpcServerLoop(CancellationToken ct)
+    {
+        _ = Task.Run(async () =>
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    using var server = new NamedPipeServerStream(
+                        PipeName,
+                        PipeDirection.In,
+                        1,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
+
+                    await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
+
+                    int cmd = server.ReadByte();
+                    if (cmd == CommandWakeUp)
+                    {
+                        _activationCallback?.Invoke();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch
+                {
+                    try { await Task.Delay(250, ct).ConfigureAwait(false); }
+                    catch { break; }
+                }
+            }
+        }, ct);
     }
 
     /// <summary>
@@ -350,6 +428,13 @@ public sealed partial class SingleInstanceGuard : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        try
+        {
+            _serverCts.Cancel();
+            _serverCts.Dispose();
+        }
+        catch { }
 
         try { _mutex.ReleaseMutex(); }
         catch { }

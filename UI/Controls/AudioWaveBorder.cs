@@ -115,6 +115,8 @@ public sealed class AudioWaveBorder : Decorator
     private readonly Action<TimeSpan> _frameCallback;
     private readonly EventHandler<AvaloniaPropertyChangedEventArgs> _windowPropertyChangedHandler;
     private readonly Action _globalConfigChangedHandler;
+    private readonly Action<SuspendLevel> _suspendLevelChangedHandler;
+    private readonly EventHandler _windowActivatedHandler;
 
     private readonly WavePacket[] _packets = new WavePacket[MaxActivePackets];
     private ulong _rngState;
@@ -251,6 +253,8 @@ public sealed class AudioWaveBorder : Decorator
         _frameCallback = OnAnimationFrame;
         _windowPropertyChangedHandler = OnWindowPropertyChanged;
         _globalConfigChangedHandler = OnGlobalConfigChanged;
+        _suspendLevelChangedHandler = OnSuspendLevelChanged;
+        _windowActivatedHandler = OnWindowActivated;
 
         _rngState = (ulong)Stopwatch.GetTimestamp() ^ 0x9E3779B97F4A7C15UL;
     }
@@ -294,6 +298,19 @@ public sealed class AudioWaveBorder : Decorator
         InvalidateVisual();
     }
 
+    private void OnSuspendLevelChanged(SuspendLevel level)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            EvaluateAnimationState();
+        else
+            Dispatcher.UIThread.Post(EvaluateAnimationState);
+    }
+
+    private void OnWindowActivated(object? sender, EventArgs e)
+    {
+        EvaluateAnimationState();
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -301,12 +318,14 @@ public sealed class AudioWaveBorder : Decorator
         EnsureGlobalConfigLoaded();
 
         GlobalConfigChanged += _globalConfigChangedHandler;
+        ViewModelBase.SuspendLevelChanged += _suspendLevelChangedHandler;
         _attachedTopLevel = TopLevel.GetTopLevel(this);
 
         if (_attachedTopLevel is Window w)
         {
             _subscribedWindow = w;
             w.PropertyChanged += _windowPropertyChangedHandler;
+            w.Activated += _windowActivatedHandler;
         }
 
         EvaluateAnimationState();
@@ -315,9 +334,11 @@ public sealed class AudioWaveBorder : Decorator
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         GlobalConfigChanged -= _globalConfigChangedHandler;
+        ViewModelBase.SuspendLevelChanged -= _suspendLevelChangedHandler;
         if (_subscribedWindow != null)
         {
             _subscribedWindow.PropertyChanged -= _windowPropertyChangedHandler;
+            _subscribedWindow.Activated -= _windowActivatedHandler;
             _subscribedWindow = null;
         }
 
@@ -446,15 +467,34 @@ public sealed class AudioWaveBorder : Decorator
                 _lastFrameTimestamp = Stopwatch.GetTimestamp();
                 _attachedTopLevel.RequestAnimationFrame(_frameCallback);
             }
-        }
-        else if (!_isFrameLoopActive && HasActivePackets())
-        {
-            _isFrameLoopActive = true;
-            _lastFrameTimestamp = Stopwatch.GetTimestamp();
-            _attachedTopLevel.RequestAnimationFrame(_frameCallback);
+            InvalidateVisual();
         }
         else
         {
+            bool isHiddenOrSuspended = _attachedTopLevel == null ||
+                (_subscribedWindow != null && (!_subscribedWindow.IsVisible || _subscribedWindow.WindowState == WindowState.Minimized)) ||
+                ViewModelBase.CurrentSuspendLevel == SuspendLevel.Hard;
+
+            if (isHiddenOrSuspended)
+            {
+                _isFrameLoopActive = false;
+                ClearAllPackets();
+            }
+            else if (HasActivePackets())
+            {
+                if (!_isFrameLoopActive)
+                {
+                    _isFrameLoopActive = true;
+                    _lastFrameTimestamp = Stopwatch.GetTimestamp();
+                    _attachedTopLevel!.RequestAnimationFrame(_frameCallback);
+                }
+                return;
+            }
+            else
+            {
+                _isFrameLoopActive = false;
+            }
+
             InvalidateVisual();
         }
     }

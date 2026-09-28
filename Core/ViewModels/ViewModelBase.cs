@@ -21,6 +21,11 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     public static SuspendLevel CurrentSuspendLevel { get; private set; } = SuspendLevel.None;
 
     /// <summary>
+    /// Событие изменения глобального уровня приостановки активности приложения.
+    /// </summary>
+    public static event Action<SuspendLevel>? SuspendLevelChanged;
+
+    /// <summary>
     /// Указывает, находится ли текущий компонент в состоянии приостановки (фоновом режиме).
     /// </summary>
     [ObservableProperty] public partial bool IsSuspended { get; private set; }
@@ -158,6 +163,8 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
         if (previousLevel == level && !forceOptimize) return;
 
         CurrentSuspendLevel = level;
+
+        SuspendLevelChanged?.Invoke(level);
 
         if (LifecycleRegistry.Instance != null)
         {
