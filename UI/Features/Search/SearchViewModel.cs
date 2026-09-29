@@ -3,7 +3,6 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using Avalonia.Threading;
-using LMP.Core.Helpers.Extensions;
 using LMP.Core.Youtube.Search;
 
 namespace LMP.UI.Features.Search;

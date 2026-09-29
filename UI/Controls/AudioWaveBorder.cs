@@ -6,10 +6,6 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
-using LMP.Core.Audio;
-using LMP.Core.Models;
-using LMP.Core.Services;
-using LMP.Core.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Controls;

@@ -1,6 +1,5 @@
 using System.Windows.Input;
 using Avalonia.Media;
-using LMP.UI.ViewModels;
 
 namespace LMP.UI.Features.Shared;
 
