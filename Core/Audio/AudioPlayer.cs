@@ -1116,8 +1116,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         string message = ex switch
         {
             AudioDeviceException => GetDeviceErrorMessage(),
-            CacheInvalidatedException => LocalizationService.Instance.Get(
-                "Error_CacheInvalidated", "Track cache was deleted. Playback stopped."),
+            CacheInvalidatedException => LocalizationService.Instance["Error_CacheInvalidated"],
             _ => ex.Message
         };
 
@@ -1125,9 +1124,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     private static string GetDeviceErrorMessage() =>
-        LocalizationService.Instance.Get(
-            "Error_NoAudioDevice",
-            "Audio output device is not available. Please connect headphones or speakers.");
+        LocalizationService.Instance["Error_NoAudioDevice"];
 
     /// <summary>
     /// Выполняет переход state machine.

@@ -64,10 +64,10 @@ public sealed class PlaylistEditService
         if (!playlist.IsEditable)
         {
             var message = !string.IsNullOrEmpty(playlist.Author)
-                ? string.Format(SL["Playlist_ReadOnly_ByAuthor"] ?? "Playlist by {0} is read-only", playlist.Author)
-                : SL["Playlist_ReadOnly"] ?? "This playlist is read-only";
+                ? string.Format(SL["Playlist_ReadOnly_ByAuthor"], playlist.Author)
+                : SL["Playlist_ReadOnly"];
 
-            await _dialog.ShowInfoAsync(SL["Dialog_Warning_Title"] ?? "Warning", message);
+            await _dialog.ShowInfoAsync(SL["Dialog_Warning_Title"], message);
             return null;
         }
 
@@ -201,7 +201,7 @@ public sealed class PlaylistEditService
         Action<string> lockNavigation,
         Action unlockNavigation)
     {
-        RunOnUi(lockNavigation, SL["Playlist_CreatingCopy"] ?? "Creating copy...");
+        RunOnUi(lockNavigation, SL["Playlist_CreatingCopy"]);
         try
         {
             var copyName = string.IsNullOrWhiteSpace(editorResult.Name)
@@ -209,7 +209,7 @@ public sealed class PlaylistEditService
                 : editorResult.Name.Trim();
 
             if (string.Equals(copyName, original.Name, StringComparison.Ordinal))
-                copyName = $"{copyName} ({SL["Playlist_CopySuffix"] ?? "copy"})";
+                copyName = $"{copyName} ({SL["Playlist_CopySuffix"]})";
 
             var copy = await _playlistService.CreateCopyAsync(
                 original.Id,
@@ -252,7 +252,7 @@ public sealed class PlaylistEditService
         Action<string> lockNavigation,
         Action unlockNavigation)
     {
-        RunOnUi(lockNavigation, SL["Playlist_LinkingToCloud"] ?? "Linking to YouTube Music...");
+        RunOnUi(lockNavigation, SL["Playlist_LinkingToCloud"]);
         try
         {
             bool success = await _playlistService.LinkToCloudAsync(localPlaylistId).ConfigureAwait(false);
@@ -299,13 +299,12 @@ public sealed class PlaylistEditService
     private async Task<bool> TryUnlinkFromCloudAsync(Playlist playlist)
     {
         var confirm = await _dialog.ConfirmAsync(
-            SL["Dialog_Confirm_Title"] ?? "Confirm",
-            SL["Playlist_UnlinkConfirm"]
-                ?? "Unlink this playlist from YouTube Music?\n\n" +
+            SL["Dialog_Confirm_Title"],
+            SL["Playlist_UnlinkConfirm"] +
                    "The playlist will remain in your YouTube account, " +
                    "but local changes will no longer sync.",
-            SL["Playlist_Unlink"] ?? "Unlink",
-            SL["Button_Cancel"] ?? "Cancel");
+            SL["Playlist_Unlink"],
+            SL["Button_Cancel"]);
 
         if (!confirm) return false;
 

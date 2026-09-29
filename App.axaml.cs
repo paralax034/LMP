@@ -341,7 +341,7 @@ public partial class App : Application
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                _splash?.UpdateStatus(L["Splash_Error_Title"] ?? "Ошибка инициализации!");
+                _splash?.UpdateStatus(L["Splash_Error_Title"]);
             });
 
             OsNotificationHelper.ShowFatalError(

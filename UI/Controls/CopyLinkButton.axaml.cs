@@ -187,25 +187,15 @@ public partial class CopyLinkButton : UserControl
 
     private string ResolveSuccessText()
     {
-        if (!string.IsNullOrEmpty(SuccessText) && !SuccessText.StartsWith('['))
+        if (!string.IsNullOrEmpty(SuccessText))
             return SuccessText;
 
-        var L = LocalizationService.Instance;
-        var localized = L.Get("Common_Copied");
-        if (!string.IsNullOrEmpty(localized) && !localized.StartsWith('['))
-            return localized;
-
-        return L.CurrentLanguageCode == "ru" ? "Скопировано!" : "Copied!";
+        return LocalizationService.Instance["Common_Copied"];
     }
 
     private static string ResolveErrorText()
     {
-        var L = LocalizationService.Instance;
-        var localized = L.Get("Common_CopyFailed");
-        if (!string.IsNullOrEmpty(localized) && !localized.StartsWith('['))
-            return localized;
-
-        return L.CurrentLanguageCode == "ru" ? "Ошибка копирования" : "Copy failed";
+        return LocalizationService.Instance["Common_CopyFailed"];
     }
 
     private void HideHint()

@@ -93,8 +93,8 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         try
         {
             var L = LocalizationService.Instance;
-            string title = L.Get("Notification_DeviceLost_Title", "Audio device disconnected");
-            string message = L.Get("Notification_DeviceLost_Message", "Playback paused. Connect an audio device and press Play to resume.");
+            string title = L["Notification_DeviceLost_Title"];
+            string message = L["Notification_DeviceLost_Message"];
 
             await _notificationService.ShowToastAsync(
                 titleKey: "Notification_DeviceLost_Title",

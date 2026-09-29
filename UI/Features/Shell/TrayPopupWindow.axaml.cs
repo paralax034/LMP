@@ -198,8 +198,8 @@ public partial class TrayPopupWindow : Window
         UpdatePlayPauseButton(_playerControl.IsPlaying, L);
 
         // Next / Previous
-        SetText(_nextText, L["Tray_Next"] ?? "Next");
-        SetText(_prevText, L["Tray_Previous"] ?? "Previous");
+        SetText(_nextText, L["Tray_Next"]);
+        SetText(_prevText, L["Tray_Previous"]);
 
         // Repeat
         UpdateRepeatButton(_playerControl.RepeatMode, L);
@@ -208,7 +208,7 @@ public partial class TrayPopupWindow : Window
         UpdateVolumeDisplay();
 
         if (_volumeSection != null)
-            ToolTip.SetTip(_volumeSection, L["Tray_VolumeScrollHint"] ?? "Scroll ↕");
+            ToolTip.SetTip(_volumeSection, L["Tray_VolumeScrollHint"]);
 
         // Enabled states (playback controls)
         SetEnabled(_playPauseButton, hasTrack);
@@ -217,9 +217,9 @@ public partial class TrayPopupWindow : Window
         SetEnabled(_repeatButton, hasTrack);
 
         // Bottom items
-        SetText(_queueText, L["Tray_Queue"] ?? "Queue");
-        SetText(_cleanMemText, L["Tray_ClearMemory"] ?? "Clear Memory");
-        SetText(_exitText, L["Tray_Exit"] ?? "Exit");
+        SetText(_queueText, L["Tray_Queue"]);
+        SetText(_cleanMemText, L["Tray_ClearMemory"]);
+        SetText(_exitText, L["Tray_Exit"]);
     }
 
     /// <summary>
@@ -243,12 +243,12 @@ public partial class TrayPopupWindow : Window
     {
         if (isWindowVisible)
         {
-            SetText(_showText, L["Tray_Hide"] ?? "Hide");
+            SetText(_showText, L["Tray_Hide"]);
             SetIcon(_showIcon, "Icon.ChevronDown");
         }
         else
         {
-            SetText(_showText, L["Tray_Show"] ?? "Show");
+            SetText(_showText, L["Tray_Show"]);
             SetIcon(_showIcon, "Icon.Home");
         }
     }
@@ -260,12 +260,12 @@ public partial class TrayPopupWindow : Window
     {
         if (isPlaying)
         {
-            SetText(_playPauseText, L["Tray_Pause"] ?? "Pause");
+            SetText(_playPauseText, L["Tray_Pause"]);
             SetIcon(_playPauseIcon, "Icon.Pause");
         }
         else
         {
-            SetText(_playPauseText, L["Tray_Play"] ?? "Play");
+            SetText(_playPauseText, L["Tray_Play"]);
             SetIcon(_playPauseIcon, "Icon.Play");
         }
     }
@@ -279,9 +279,9 @@ public partial class TrayPopupWindow : Window
 
         var (text, iconKey) = repeatMode switch
         {
-            RepeatMode.All => (L["Tray_RepeatAll"] ?? "Repeat All", "Icon.Repeat"),
-            RepeatMode.One => (L["Tray_RepeatOne"] ?? "Repeat One", "Icon.RepeatOnce"),
-            _ => (L["Tray_Repeat"] ?? "Repeat", "Icon.Repeat")
+            RepeatMode.All => (L["Tray_RepeatAll"], "Icon.Repeat"),
+            RepeatMode.One => (L["Tray_RepeatOne"], "Icon.RepeatOnce"),
+            _ => (L["Tray_Repeat"], "Icon.Repeat")
         };
 
         _repeatText.Text = text;

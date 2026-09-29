@@ -66,13 +66,13 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
             var parts = new List<string>(3);
             if (Preview.CommonTrackCount > 0)
                 parts.Add(string.Format(
-                    SL["Playlist_SyncCommon"] ?? "common: {0}", Preview.CommonTrackCount));
+                    SL["Playlist_SyncCommon"], Preview.CommonTrackCount));
             if (Preview.LocalOnlyTrackCount > 0)
                 parts.Add(string.Format(
-                    SL["Playlist_SyncLocalOnly"] ?? "local only: {0}", Preview.LocalOnlyTrackCount));
+                    SL["Playlist_SyncLocalOnly"], Preview.LocalOnlyTrackCount));
             if (Preview.CloudOnlyTrackCount > 0)
                 parts.Add(string.Format(
-                    SL["Playlist_SyncCloudOnly"] ?? "cloud only: {0}", Preview.CloudOnlyTrackCount));
+                    SL["Playlist_SyncCloudOnly"], Preview.CloudOnlyTrackCount));
             return string.Join("  •  ", parts);
         }
     }
@@ -88,13 +88,11 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
     public string StrategyDescription => SelectedStrategy switch
     {
         PlaylistSyncStrategy.Merge =>
-            SL["Playlist_SyncStrategy_MergeDesc"] ?? "Add missing tracks to both sides. No deletions.",
+            SL["Playlist_SyncStrategy_MergeDesc"],
         PlaylistSyncStrategy.ReplaceLocal =>
-            SL["Playlist_SyncStrategy_ReplaceLocalDesc"]
-                ?? "Replace local tracks with YouTube. Local-only tracks will be removed.",
+            SL["Playlist_SyncStrategy_ReplaceLocalDesc"],
         PlaylistSyncStrategy.ReplaceCloud =>
-            SL["Playlist_SyncStrategy_ReplaceCloudDesc"]
-                ?? "Replace YouTube tracks with local. Cloud-only tracks will be removed.",
+            SL["Playlist_SyncStrategy_ReplaceCloudDesc"],
         _ => ""
     };
 

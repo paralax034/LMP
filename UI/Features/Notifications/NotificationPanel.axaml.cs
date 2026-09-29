@@ -42,7 +42,7 @@ public partial class NotificationPanel : UserControl
                 Log.Info("[Notification] Error details copied to clipboard");
 
                 var L = LocalizationService.Instance;
-                string copiedText = L.Get("Common_Copied", "Copied");
+                string copiedText = L["Common_Copied"];
 
                 ToolTip.SetTip(btn, copiedText);
                 ToolTip.SetIsOpen(btn, true);

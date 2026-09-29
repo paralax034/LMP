@@ -219,7 +219,7 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
 
         if (selectedCount == 0)
         {
-            SelectedSummary = SL["Sync_NoneSelected"] ?? "0 выбрано";
+            SelectedSummary = SL["Sync_NoneSelected"];
             return;
         }
 

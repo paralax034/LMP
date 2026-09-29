@@ -46,7 +46,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Display
 
     /// <summary>
-    /// Название плейлиста. Обновляется при переименовании.
+    /// Название плейлиста. Обновляется при переименовании и смене языка.
     /// </summary>
     [ObservableProperty] public partial string Name { get; private set; }
 
@@ -214,8 +214,8 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     /// Текст для пункта контекстного меню «Воспроизвести / Пауза».
     /// </summary>
     public string PlayMenuHeader => IsPlayingPure
-        ? (LocalizationService.Instance["Player_Pause"] ?? "Pause")
-        : (LocalizationService.Instance["Player_Play"] ?? "Play");
+        ? LocalizationService.Instance["Player_Pause"]
+        : LocalizationService.Instance["Player_Play"];
 
     /// <summary>
     /// Геометрия иконки Play/Pause для контекстного меню.
@@ -322,7 +322,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
                 if (_isDisposed || string.IsNullOrEmpty(YoutubeUrl)) return;
                 await Clipboard.SetTextAsync(YoutubeUrl);
                 CopyHintService.Instance.Show(
-                    LocalizationService.Instance["Playlist_LinkCopied"] ?? "Copied!",
+                    LocalizationService.Instance["Playlist_LinkCopied"],
                     CopyHintKind.Success);
             },
             () => !string.IsNullOrEmpty(YoutubeUrl));
@@ -332,6 +332,11 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
 
         _languageChangedHandler = (_, _) =>
         {
+            if (IsLikedPlaylist)
+            {
+                Name = Playlist.Name;
+            }
+
             OnPropertyChanged(nameof(FormattedTrackCount));
             OnPropertyChanged(nameof(PlayMenuHeader));
             RefreshAuthorTexts();
@@ -458,15 +463,11 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         bool hasAuthor = !string.IsNullOrEmpty(author);
 
         AuthorDisplayText = hasAuthor
-            ? string.Format(
-                LocalizationService.Instance["Playlist_ByAuthor"] ?? "от {0}",
-                author)
+            ? string.Format(LocalizationService.Instance["Playlist_ByAuthor"], author)
             : null;
 
         AuthorTooltip = hasAuthor
-            ? string.Format(
-                LocalizationService.Instance["Playlist_Foreign_Tooltip"] ?? "Плейлист от {0}",
-                author)
+            ? string.Format(LocalizationService.Instance["Playlist_Foreign_Tooltip"], author)
             : null;
     }
 

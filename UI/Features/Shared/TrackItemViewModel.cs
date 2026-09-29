@@ -132,9 +132,9 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     {
         get
         {
-            if (Track.IsDownloaded) return L["Track_Downloaded"] ?? "Downloaded";
-            if (Track.IsCached) return L["Track_SaveToFolder"] ?? "Save to folder";
-            return L["Track_Download"] ?? "Download";
+            if (Track.IsDownloaded) return L["Track_Downloaded"];
+            if (Track.IsCached) return L["Track_SaveToFolder"];
+            return L["Track_Download"];
         }
     }
 
@@ -238,8 +238,8 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     {
         var targets = GetActionTargets();
         AddToPlaylistHeader = targets.Count > 1
-            ? string.Format(L["AddToPlaylist_BatchHeader"] ?? "To playlist ({0})", targets.Count)
-            : (L["AddToPlaylist_Title"] ?? "Add to playlist");
+            ? string.Format(L["AddToPlaylist_BatchHeader"], targets.Count)
+            : (L["AddToPlaylist_Title"]);
     }
 
     public async Task PreparePlaylistSubmenuAsync(CancellationToken ct = default)
@@ -269,7 +269,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
                 var createItem = new PlaylistMenuItemViewModel(
                     playlistId: string.Empty,
-                    name: L["Playlist_CreateNew"] ?? "New playlist...",
+                    name: L["Playlist_CreateNew"],
                     state: PlaylistMembershipState.None,
                     countText: string.Empty,
                     onToggle: _ => CreateNewPlaylistWithTargetsAsync(targets),
@@ -535,7 +535,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
             if (builder.Length == 0)
             {
                 CopyHintService.Instance.Show(
-                    L["Track_CopyLink_NoUrl"] ?? "No link available",
+                    L["Track_CopyLink_NoUrl"],
                     CopyHintKind.Warning,
                     null);
                 return;
@@ -543,7 +543,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
             await Clipboard.SetTextAsync(builder.ToString()).ConfigureAwait(false);
             CopyHintService.Instance.Show(
-                L["Track_Copied"] ?? "Copied!",
+                L["Track_Copied"],
                 CopyHintKind.Success,
                 null);
             return;
@@ -556,7 +556,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         if (string.IsNullOrEmpty(url))
         {
             CopyHintService.Instance.Show(
-                L["Track_CopyLink_NoUrl"] ?? "No link available",
+                L["Track_CopyLink_NoUrl"],
                 CopyHintKind.Warning,
                 null);
             return;
@@ -565,7 +565,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         await Clipboard.SetTextAsync(url).ConfigureAwait(false);
 
         CopyHintService.Instance.Show(
-            L["Track_Copied"] ?? "Copied!",
+            L["Track_Copied"],
             CopyHintKind.Success,
             null);
     }

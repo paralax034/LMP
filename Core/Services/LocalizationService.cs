@@ -1,27 +1,55 @@
-﻿using Avalonia.Platform;
+﻿using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Avalonia.Platform;
 
 namespace LMP.Core.Services;
 
+/// <summary>
+/// Сервис локализации и многоязыковой поддержки приложения.
+/// <para>
+/// Оптимизирован для AOT и zero-allocation в горячих путях за счет использования <see cref="FrozenDictionary{TKey, TValue}"/>
+/// и пула кэширования отсутствующих ключей.
+/// </para>
+/// </summary>
 public sealed class LocalizationService : INotifyPropertyChanged
 {
     public static readonly LocalizationService Instance = new();
 
-    private Dictionary<string, string> _resources = [];
+    /// <summary>
+    /// Неизменяемый FrozenDictionary для O(1) поиска ключей без накладных расходов синхронизации и проверок коллизий.
+    /// </summary>
+    private FrozenDictionary<string, string> _resources = FrozenDictionary<string, string>.Empty;
+
+    /// <summary>
+    /// Пул отсутствующих маркеров ключей вида [key] для предотвращения GC-аллокаций при повторных запросах.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, string> _missingMarkerCache = new(StringComparer.Ordinal);
+
     private bool _isInitialized;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler<string>? LanguageChanged;
 
+    /// <summary>
+    /// Возвращает список поддерживаемых языков интерфейса.
+    /// </summary>
     public List<LanguageItem> AvailableLanguages { get; } =
     [
         new() { Code = "en", Name = "English" },
         new() { Code = "ru", Name = "Русский" }
     ];
 
+    /// <summary>
+    /// Возвращает код текущего языка интерфейса.
+    /// </summary>
     public string CurrentLanguageCode { get; private set; } = "en";
 
+    /// <summary>
+    /// Получает или задает текущий язык приложения. При изменении триггерит перезагрузку ресурсов и событие смены языка.
+    /// </summary>
     public string CurrentLanguage
     {
         get => CurrentLanguageCode;
@@ -48,6 +76,10 @@ public sealed class LocalizationService : INotifyPropertyChanged
         Log.Info("LocalizationService created (deferred)");
     }
 
+    /// <summary>
+    /// Инициализирует службу локализации выбранным кодом языка.
+    /// </summary>
+    /// <param name="langCode">Код языка (например, "en" или "ru").</param>
     public void Initialize(string? langCode)
     {
         // Не блокируем повторную инициализацию, если предыдущая попытка (например, на раннем старте) завершилась с пустым словарем
@@ -75,6 +107,9 @@ public sealed class LocalizationService : INotifyPropertyChanged
         Log.Info($"LocalizationService initialized: {langToUse} (Keys: {_resources.Count})");
     }
 
+    /// <summary>
+    /// Загружает файл локализации для указанного языка в память.
+    /// </summary>
     private void LoadLanguage(string langCode)
     {
         try
@@ -90,15 +125,17 @@ public sealed class LocalizationService : INotifyPropertyChanged
             using var reader = new StreamReader(stream);
             var json = reader.ReadToEnd();
 
-            var resources = JsonSerializer.Deserialize(json, AppJsonContext.Default.DictionaryStringString)
+            var rawDictionary = JsonSerializer.Deserialize(json, AppJsonContext.Default.DictionaryStringString)
                 ?? throw new InvalidOperationException("Deserialization returned null");
 
-            _resources = resources;
+            // Замена изменяемого Dictionary на легковесный, оптимизированный FrozenDictionary
+            _resources = rawDictionary.ToFrozenDictionary(StringComparer.Ordinal);
+            _missingMarkerCache.Clear();
 
             // Синхронизация глобальных строковых ресурсов для DynamicResource в стилях и контекстных меню (AOT)
             UpdateApplicationResources();
 
-            Log.Info($"✓ Loaded {langCode}.json ({_resources.Count} keys)");
+            Log.Info($"✓ Loaded {langCode}.json ({_resources.Count} keys into FrozenDictionary)");
         }
         catch (Exception ex)
         {
@@ -106,7 +143,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
 
             if (langCode == "en")
             {
-                _resources = [];
+                _resources = FrozenDictionary<string, string>.Empty;
                 Log.Warn("Using empty dictionary");
             }
             else
@@ -126,10 +163,10 @@ public sealed class LocalizationService : INotifyPropertyChanged
 
         void Apply()
         {
-            app.Resources["L10n.ContextMenu_Cut"] = Get("ContextMenu_Cut", "Cut");
-            app.Resources["L10n.ContextMenu_Copy"] = Get("ContextMenu_Copy", "Copy");
-            app.Resources["L10n.ContextMenu_Paste"] = Get("ContextMenu_Paste", "Paste");
-            app.Resources["L10n.ContextMenu_SelectAll"] = Get("ContextMenu_SelectAll", "Select All");
+            app.Resources["L10n.ContextMenu_Cut"] = Instance["ContextMenu_Cut"];
+            app.Resources["L10n.ContextMenu_Copy"] = Instance["ContextMenu_Copy"];
+            app.Resources["L10n.ContextMenu_Paste"] = Instance["ContextMenu_Paste"];
+            app.Resources["L10n.ContextMenu_SelectAll"] = Instance["ContextMenu_SelectAll"];
         }
 
         if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
@@ -178,25 +215,52 @@ public sealed class LocalizationService : INotifyPropertyChanged
         return null;
     }
 
+    /// <summary>
+    /// Получает локализованную строку по ключу. Гарантирует O(1) доступ и zero-allocation на кэшированных промахах.
+    /// </summary>
     public string this[string key]
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            if (!_isInitialized)
-                return $"[{key}]";
+            if (_resources.TryGetValue(key, out var value))
+                return value;
 
-            return _resources.TryGetValue(key, out var value) ? value : $"[{key}]";
+            return ResolveMissingKey(key);
         }
     }
 
-    public string Get(string key, string? fallback = null)
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private string ResolveMissingKey(string key)
     {
-        if (!_isInitialized)
-            return fallback ?? $"[{key}]";
-
-        return _resources.TryGetValue(key, out var value) ? value : fallback ?? $"[{key}]";
+#if DEBUG
+        if (_isInitialized)
+        {
+            Log.Warn($"[Localization] Missing key '{key}' for language '{CurrentLanguageCode}'");
+        }
+#endif
+        return _missingMarkerCache.GetOrAdd(key, static k => string.Concat("[", k, "]"));
     }
 
+    /// <summary>
+    /// Метод Get() полностью упразднён. Используйте прямой индексатор сервиса: L[key] или SL[key].
+    /// </summary>
+    [Obsolete("Метод Get() упразднён. Используйте индексатор L[key] или SL[key]. Fallbacks запрещены.", error: true)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public string Get(string key) => this[key];
+
+    /// <summary>
+    /// Использование fallback-значений строго запрещено для исключения скрытого отображения неверного языка.
+    /// Добавляйте недостающие ключи напрямую в файлы локализации en.json и ru.json.
+    /// </summary>
+    [Obsolete("Fallback values are strictly forbidden to ensure missing localization keys are immediately visible.", error: true)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public string Get(string key, string? fallback) =>
+        throw new NotSupportedException("Fallbacks are disabled. Add the key to JSON dictionaries.");
+
+    /// <summary>
+    /// Возвращает плюрализованную строку. Поддерживает CLDR категории (_one, _few, _many) и числовые суффиксы (_1, _2, _5).
+    /// </summary>
     public string GetPlural(string key, int count)
     {
         if (!_isInitialized) return $"{count}";
@@ -205,23 +269,71 @@ public sealed class LocalizationService : INotifyPropertyChanged
         var lastTwo = absCount % 100;
         var lastOne = absCount % 10;
 
-        string suffix;
-        if (count == 0) suffix = "_0";
-        else if (lastTwo >= 11 && lastTwo <= 19) suffix = "_5";
-        else if (lastOne == 1) suffix = "_1";
-        else if (lastOne >= 2 && lastOne <= 4) suffix = "_2";
-        else suffix = "_5";
+        string numSuffix;
+        string nameSuffix;
 
-        if (_resources.TryGetValue(key + suffix, out var specific))
-            return string.Format(specific, count);
+        if (count == 0)
+        {
+            numSuffix = "_0";
+            nameSuffix = "_zero";
+        }
+        else if (lastTwo >= 11 && lastTwo <= 19)
+        {
+            numSuffix = "_5";
+            nameSuffix = "_many";
+        }
+        else if (lastOne == 1)
+        {
+            numSuffix = "_1";
+            nameSuffix = "_one";
+        }
+        else if (lastOne >= 2 && lastOne <= 4)
+        {
+            numSuffix = "_2";
+            nameSuffix = "_few";
+        }
+        else
+        {
+            numSuffix = "_5";
+            nameSuffix = "_many";
+        }
 
-        if (_resources.TryGetValue(key + "_other", out var other))
-            return string.Format(other, count);
+        string? pattern = null;
 
-        return $"{count}";
+        if (!_resources.TryGetValue(string.Concat(key, numSuffix), out pattern) &&
+            !_resources.TryGetValue(string.Concat(key, nameSuffix), out pattern))
+        {
+            if (count == 0 && _resources.TryGetValue(string.Concat(key, "_many"), out var zeroMany))
+            {
+                pattern = zeroMany;
+            }
+            else if (!_resources.TryGetValue(string.Concat(key, "_other"), out pattern))
+            {
+                _resources.TryGetValue(key, out pattern);
+            }
+        }
+
+        if (pattern != null)
+        {
+            if (pattern.Contains("{0}"))
+                return string.Format(pattern, count);
+
+            if (count == 0 && (numSuffix == "_0" || nameSuffix == "_zero"))
+                return pattern;
+
+            return $"{count} {pattern}";
+        }
+
+#if DEBUG
+        Log.Warn($"[Localization] Missing plural keys for base '{key}' in language '{CurrentLanguageCode}'");
+#endif
+        return ResolveMissingKey(key);
     }
 }
 
+/// <summary>
+/// Представляет элемент поддерживаемого языка в выпадающем списке.
+/// </summary>
 public sealed class LanguageItem
 {
     public required string Code { get; set; }

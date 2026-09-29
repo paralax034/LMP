@@ -112,7 +112,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
         ToggleGuideCommand = new RelayCommand(() => IsGuideExpanded = !IsGuideExpanded);
         CloseCommand = new RelayCommand(() => OnResult?.Invoke(false));
 
-        StatusText = SL["Dialog_Login_WaitingStatus"] ?? "Ожидаем запрос от расширения или введите куки вручную...";
+        StatusText = SL["Dialog_Login_WaitingStatus"];
 
         _ = StartListeningAsync(_cts.Token);
         _ = CheckExtensionVersionAsync(_cts.Token);
@@ -288,7 +288,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
         SetStatus($"{SL["Splash_ConnectingYouTube"]} ({AttemptCount})", isError: false);
 
         var mainWindow = GetMainWindowViewModel();
-        mainWindow?.LockNavigation(SL["Splash_ConnectingYouTube"] ?? "Подключение к YouTube...");
+        mainWindow?.LockNavigation(SL["Splash_ConnectingYouTube"]);
 
         try
         {
@@ -339,7 +339,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
 
                 _auth.SetAuthUser(selectedAccount.AuthUser);
                 IsAuthenticating = true;
-                mainWindow?.LockNavigation(SL["Splash_ConnectingYouTube"] ?? "Подключение к YouTube...");
+                mainWindow?.LockNavigation(SL["Splash_ConnectingYouTube"]);
 
                 // БЕРЕМ ДАННЫЕ ИЗ ВЫБРАННОГО АККАУНТА, а не запрашиваем заново
                 finalName = selectedAccount.Name;

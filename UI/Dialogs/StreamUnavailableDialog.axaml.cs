@@ -113,9 +113,9 @@ public partial class StreamUnavailableDialog : Window
     /// </summary>
     public void ConfigureForException(StreamUnavailableException exception)
     {
-        // Получаем локализованное сообщение по ключу
+        // Получаем локализованное сообщение по ключу строго через индексатор без fallback
         var locKey = exception.GetLocalizationKey();
-        Message = L.Get(locKey, GetFallbackMessage(exception));
+        Message = L[locKey];
 
         // Техническая информация
         var techInfo = new System.Text.StringBuilder();
@@ -160,36 +160,6 @@ public partial class StreamUnavailableDialog : Window
             """;
 
         ShowCopyButton = true;
-    }
-
-    private static string GetFallbackMessage(StreamUnavailableException ex)
-    {
-        // Fallback на английском если ключ не найден
-        return ex.Reason switch
-        {
-            StreamUnavailableReason.Forbidden403
-                => "Track access forbidden (403). Please contact the developer.",
-
-            StreamUnavailableReason.AllClientsFailed
-                => "Could not access track. Please contact the developer.",
-
-            StreamUnavailableReason.RegionBlocked
-                => "Track not available in your region.",
-
-            StreamUnavailableReason.AgeRestricted
-                => "Track is age-restricted. Please sign in.",
-
-            StreamUnavailableReason.LiveStream
-                => "Live streams are not supported.",
-
-            StreamUnavailableReason.Private
-                => "This is a private video.",
-
-            StreamUnavailableReason.Removed
-                => "Video has been removed.",
-
-            _ => "Track unavailable. Please contact the developer."
-        };
     }
 
     private static string BuildFullErrorDetails(StreamUnavailableException ex)

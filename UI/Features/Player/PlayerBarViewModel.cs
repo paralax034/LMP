@@ -804,20 +804,20 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (speedBytesPerSec > 1024 * 1024)
         {
             double speedMb = speedBytesPerSec / (1024.0 * 1024.0);
-            NetworkSpeedText = string.Format(LocalizationService.Instance.Get("Stream_Speed_Mb", "{0:F1} MB/s"), speedMb);
+            NetworkSpeedText = string.Format(LocalizationService.Instance["Stream_Speed_Mb"], speedMb);
         }
         else if (speedBytesPerSec > 0)
         {
             double speedKb = speedBytesPerSec / 1024.0;
-            NetworkSpeedText = string.Format(LocalizationService.Instance.Get("Stream_Speed_Kb", "{0:F0} KB/s"), speedKb);
+            NetworkSpeedText = string.Format(LocalizationService.Instance["Stream_Speed_Kb"], speedKb);
         }
         else
         {
-            NetworkSpeedText = string.Format(LocalizationService.Instance.Get("Stream_Speed_Kb", "0 KB/s"), 0);
+            NetworkSpeedText = string.Format(LocalizationService.Instance["Stream_Speed_Kb"], 0);
         }
 
         // Локализованный пинг
-        PingText = string.Format(LocalizationService.Instance.Get("Stream_Ping_Ms", "{0:F0} ms"), pingMs);
+        PingText = string.Format(LocalizationService.Instance["Stream_Ping_Ms"], pingMs);
 
         // Динамическая адаптивная стилизация задержки сети
         var app = Application.Current;

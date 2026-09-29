@@ -1792,10 +1792,10 @@ public sealed partial class StreamOption : ObservableObject
     public string Container => Format.ToContainerName();
     public string Codec => CodecType.ToDisplayName();
 
-    public string DisplayName => $"{Codec} {string.Format(LocalizationService.Instance.Get("Stream_Bitrate"), Bitrate)} ({Container})";
+    public string DisplayName => $"{Codec} {string.Format(LocalizationService.Instance["Stream_Bitrate"], Bitrate)} ({Container})";
 
     public string SizeMbFormatted => string.Format(
-        LocalizationService.Instance.Get("Stream_Format_Mb", "{0:F1} MB"),
+        LocalizationService.Instance["Stream_Format_Mb"],
         SizeMb);
 
     [ObservableProperty] public partial bool IsDownloaded { get; set; }

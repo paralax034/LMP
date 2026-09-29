@@ -277,15 +277,8 @@ public sealed partial class SingleInstanceGuard : IDisposable
             var locQuestion = LocalizationService.Instance["Notification_AlreadyRunning_Question"];
 
             // Проверяем, что локализация вернула реальные значения, а не сырые ключи вида [Key]
-            if (!string.IsNullOrEmpty(locTitle) && !locTitle.StartsWith('['))
-                title = locTitle;
-            else if (lang.StartsWith("ru", StringComparison.OrdinalIgnoreCase))
-                title = "Уже запущено";
-
-            if (!string.IsNullOrEmpty(locQuestion) && !locQuestion.StartsWith('['))
-                question = locQuestion;
-            else if (lang.StartsWith("ru", StringComparison.OrdinalIgnoreCase))
-                question = "Lite Music Player уже запущен.\n\nЗавершить предыдущий процесс и запустить новый?";
+            title = locTitle;
+            question = locQuestion;
         }
         catch
         {

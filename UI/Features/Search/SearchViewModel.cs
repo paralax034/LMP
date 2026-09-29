@@ -206,10 +206,10 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     /// Всплывающая подсказка для счетчика треков/подсказок.
     /// </summary>
     public string BadgeTooltip => DisplayTrackCount > 0
-        ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Tracks"] ?? "Найдено треков: {0}", DisplayTrackCount)
+        ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Tracks"], DisplayTrackCount)
         : Suggestions.Count > 0
-            ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Suggestions"] ?? "Подсказок: {0}", Suggestions.Count)
-            : (LocalizationService.Instance["Search_BadgeTooltip_Empty"] ?? "Нет элементов");
+            ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Suggestions"], Suggestions.Count)
+            : (LocalizationService.Instance["Search_BadgeTooltip_Empty"]);
 
     /// <summary>
     /// Текст-заглушка ленты подсказок, когда подсказки отсутствуют.
@@ -220,11 +220,11 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         {
             var trimmed = SearchQuery.Trim();
             if (!string.IsNullOrEmpty(trimmed) && YoutubeProvider.DetectQueryType(trimmed) != QueryType.Search)
-                return LocalizationService.Instance["Search_DirectUrlHint"] ?? "Прямая ссылка на трек или плейлист";
+                return LocalizationService.Instance["Search_DirectUrlHint"];
 
             return string.IsNullOrWhiteSpace(trimmed)
-                ? (LocalizationService.Instance["Search_NoHistoryPlaceholder"] ?? "История поиска и популярные запросы")
-                : (LocalizationService.Instance["Search_NoSuggestionsPlaceholder"] ?? "Нет подсказок для данного запроса");
+                ? (LocalizationService.Instance["Search_NoHistoryPlaceholder"])
+                : (LocalizationService.Instance["Search_NoSuggestionsPlaceholder"]);
         }
     }
 

@@ -649,7 +649,7 @@ public partial class PlayerBarView : UserControl
         EnsureRafRunning();
 
         ShowSeekHint(
-            vm.L.Get("Seek_CancelHint", "ESC or Right Click to cancel"));
+            vm.L["Seek_CancelHint"]);
     }
 
     private void OnSeekAreaReleased(object? sender, PointerReleasedEventArgs e)

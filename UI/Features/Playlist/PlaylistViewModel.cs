@@ -122,8 +122,8 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         get
         {
             if (IsQueuePure)
-                return IsPlayingPure ? (SL["Player_Pause"] ?? "Pause") : (SL["Player_Play"] ?? "Play");
-            return SL["Playlist_PlayAll"] ?? "Play (replace queue)";
+                return IsPlayingPure ? (SL["Player_Pause"]) : (SL["Player_Play"]);
+            return SL["Playlist_PlayAll"];
         }
     }
 
@@ -681,7 +681,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             return;
 
         IsSyncing = true;
-        _mainWindow.LockNavigation(SL["Playlist_SyncInProgress"] ?? "Syncing...");
+        _mainWindow.LockNavigation(SL["Playlist_SyncInProgress"]);
 
         try
         {
@@ -711,13 +711,13 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                         return;
                     }
 
-                    await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"] ?? "Error", SL["Playlist_SyncFetchFailed"] ?? "Failed to fetch cloud preview");
+                    await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], SL["Playlist_SyncFetchFailed"]);
                     return;
                 }
 
                 if (!preview.HasAnyDifference)
                 {
-                    await _dialog.ShowInfoAsync(SL["Playlist_SyncWithCloud"] ?? "Sync", SL["Playlist_SyncNoChanges"] ?? "Playlist is already in sync");
+                    await _dialog.ShowInfoAsync(SL["Playlist_SyncWithCloud"], SL["Playlist_SyncNoChanges"]);
                     return;
                 }
 
@@ -749,15 +749,15 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 else
                 {
                     await _dialog.ShowInfoAsync(
-                        SL["Dialog_Error_Title"] ?? "Error",
-                        result.ErrorMessage ?? SL["Playlist_SyncFailed"] ?? "Sync failed");
+                        SL["Dialog_Error_Title"],
+                        result.ErrorMessage ?? SL["Playlist_SyncFailed"]);
                 }
             }
         }
         catch (Exception ex)
         {
             Log.Error($"[Playlist] Sync error: {ex.Message}");
-            await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"] ?? "Error", ex.Message);
+            await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], ex.Message);
         }
         finally
         {
@@ -783,13 +783,13 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         if (_currentPlaylist?.YoutubeId is not { Length: > 0 } ytId)
         {
             CopyHintService.Instance.Show(
-                SL["Playlist_CopyLink_NotLinked"] ?? "Not linked to YouTube",
+                SL["Playlist_CopyLink_NotLinked"],
                 CopyHintKind.Warning);
             return;
         }
 
         await Clipboard.SetTextAsync($"https://www.youtube.com/playlist?list={ytId}");
-        CopyHintService.Instance.Show(SL["Playlist_LinkCopied"] ?? "Copied!", CopyHintKind.Success);
+        CopyHintService.Instance.Show(SL["Playlist_LinkCopied"], CopyHintKind.Success);
     }
 
     private async Task MergePlaylistAsync()
@@ -835,7 +835,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             _ => string.Create(CultureInfo.CurrentCulture, $"{v / 1_000.0:0.#}K")
         };
 
-        var pattern = SL.Get("Playlist_Views_other", "{0} views");
+        var pattern = SL["Playlist_Views_other"];
         return string.Format(CultureInfo.CurrentCulture, pattern, number);
     }
 
@@ -846,10 +846,10 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         int daysDiff = today.DayNumber - date.Value.DayNumber;
 
-        if (daysDiff == 0) return SL["Playlist_Updated_JustNow"] ?? "обновлено сегодня";
-        if (daysDiff == 1) return SL["Playlist_Updated_Yesterday"] ?? "обновлено вчера";
+        if (daysDiff == 0) return SL["Playlist_Updated_JustNow"];
+        if (daysDiff == 1) return SL["Playlist_Updated_Yesterday"];
         if (daysDiff is > 1 and < 7)
-            return string.Format(SL["Playlist_Updated_DaysAgo"] ?? "обновлено {0} дн. назад", daysDiff);
+            return string.Format(SL["Playlist_Updated_DaysAgo"], daysDiff);
 
         return date.Value.ToString("d MMM yyyy", CultureInfo.CurrentCulture);
     }

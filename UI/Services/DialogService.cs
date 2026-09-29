@@ -293,24 +293,24 @@ public sealed class DialogService
     public async Task<ChoiceResult<CloseAction>?> ShowCloseActionDialogAsync()
     {
         return await ShowChoiceAsync(
-            title: L["Dialog_CloseAction_Title"] ?? "Close application?",
-            message: L["Dialog_CloseAction_Message"] ?? "What would you like to do?",
+            title: L["Dialog_CloseAction_Title"],
+            message: L["Dialog_CloseAction_Message"],
             options:
             [
                 new ChoiceOption<CloseAction>
                 {
-                    Text = L["Dialog_CloseAction_Tray"] ?? "Minimize to tray",
+                    Text = L["Dialog_CloseAction_Tray"],
                     Value = CloseAction.MinimizeToTray,
                     IsPrimary = true
                 },
                 new ChoiceOption<CloseAction>
                 {
-                    Text = L["Dialog_CloseAction_Exit"] ?? "Exit",
+                    Text = L["Dialog_CloseAction_Exit"],
                     Value = CloseAction.Exit
                 }
             ],
-            cancelText: L["Common_Cancel"] ?? "Cancel",
-            checkBoxText: L["Dialog_CloseAction_Remember"] ?? "Remember my choice");
+            cancelText: L["Common_Cancel"],
+            checkBoxText: L["Dialog_CloseAction_Remember"]);
     }
 
     #endregion
@@ -539,8 +539,8 @@ public sealed class DialogService
         var tcs = new TaskCompletionSource<object?>();
 
         var vm = new MigrationWarningDialogViewModel(
-            title: L["Dialog_Warning_Title"] ?? "Warning",
-            message: L["Library_LegacyPlaylists_Message"] ?? "Please re-sync your playlists.",
+            title: L["Dialog_Warning_Title"],
+            message: L["Library_LegacyPlaylists_Message"],
             countdownSeconds: countdownSeconds,
             onClose: () =>
             {

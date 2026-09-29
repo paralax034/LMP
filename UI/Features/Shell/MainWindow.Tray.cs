@@ -152,35 +152,35 @@ public partial class MainWindow
 
         menu.Add(new NativeMenuItemSeparator());
 
-        _playPauseItem = new NativeMenuItem($"►  {L["Tray_Play"] ?? "Play"}") { IsEnabled = false };
+        _playPauseItem = new NativeMenuItem($"►  {L["Tray_Play"]}") { IsEnabled = false };
         _playPauseItem.Click += (_, _) => _ = _playerControl?.PlayPauseAsync();
         menu.Add(_playPauseItem);
 
-        _nextItem = new NativeMenuItem($"»  {L["Tray_Next"] ?? "Next"}") { IsEnabled = false };
+        _nextItem = new NativeMenuItem($"»  {L["Tray_Next"]}") { IsEnabled = false };
         _nextItem.Click += (_, _) => _ = _playerControl?.NextAsync();
         menu.Add(_nextItem);
 
-        _prevItem = new NativeMenuItem($"«  {L["Tray_Previous"] ?? "Previous"}") { IsEnabled = false };
+        _prevItem = new NativeMenuItem($"«  {L["Tray_Previous"]}") { IsEnabled = false };
         _prevItem.Click += (_, _) => _ = _playerControl?.PreviousAsync();
         menu.Add(_prevItem);
 
-        _repeatItem = new NativeMenuItem($"↻  {L["Tray_Repeat"] ?? "Repeat"}") { IsEnabled = false };
+        _repeatItem = new NativeMenuItem($"↻  {L["Tray_Repeat"]}") { IsEnabled = false };
         _repeatItem.Click += (_, _) => _playerControl?.ToggleRepeat();
         menu.Add(_repeatItem);
 
         menu.Add(new NativeMenuItemSeparator());
 
-        _queueItem = new NativeMenuItem($"≡  {L["Tray_Queue"] ?? "Queue"}");
+        _queueItem = new NativeMenuItem($"≡  {L["Tray_Queue"]}");
         _queueItem.Click += (_, _) => OnTrayGoToQueue();
         menu.Add(_queueItem);
 
-        _cleanMemItem = new NativeMenuItem($"⟳  {L["Tray_ClearMemory"] ?? "Clear Memory"}");
+        _cleanMemItem = new NativeMenuItem($"⟳  {L["Tray_ClearMemory"]}");
         _cleanMemItem.Click += (_, _) => OnTrayClearMemory();
         menu.Add(_cleanMemItem);
 
         menu.Add(new NativeMenuItemSeparator());
 
-        _exitItem = new NativeMenuItem($"×  {L["Tray_Exit"] ?? "Exit"}");
+        _exitItem = new NativeMenuItem($"×  {L["Tray_Exit"]}");
         _exitItem.Click += (_, _) => { _forceClose = true; Close(); };
         menu.Add(_exitItem);
 
@@ -468,8 +468,8 @@ public partial class MainWindow
         bool isVisible = IsVisible && !_isInTray && WindowState != WindowState.Minimized;
 
         return isVisible
-            ? $"●  {L["Tray_Hide"] ?? "Hide"}"
-            : $"●  {L["Tray_Show"] ?? "Show"}";
+            ? $"●  {L["Tray_Hide"]}"
+            : $"●  {L["Tray_Show"]}";
     }
 
     private void UpdateShowHideItemText()
@@ -498,8 +498,8 @@ public partial class MainWindow
         var L = LocalizationService.Instance;
 
         _playPauseItem.Header = isPlaying
-            ? $"‖  {L["Tray_Pause"] ?? "Pause"}"
-            : $"►  {L["Tray_Play"] ?? "Play"}";
+            ? $"‖  {L["Tray_Pause"]}"
+            : $"►  {L["Tray_Play"]}";
     }
 
     private void UpdateRepeatMenuText()
@@ -509,9 +509,9 @@ public partial class MainWindow
 
         _repeatItem.Header = _playerControl.RepeatMode switch
         {
-            RepeatMode.All => $"↻• {L["Tray_RepeatAll"] ?? "All"}",
-            RepeatMode.One => $"↺• {L["Tray_RepeatOne"] ?? "One"}",
-            _ => $"↻  {L["Tray_Repeat"] ?? "Repeat"}"
+            RepeatMode.All => $"↻• {L["Tray_RepeatAll"]}",
+            RepeatMode.One => $"↺• {L["Tray_RepeatOne"]}",
+            _ => $"↻  {L["Tray_Repeat"]}"
         };
     }
 
@@ -520,11 +520,11 @@ public partial class MainWindow
         var L = LocalizationService.Instance;
 
         UpdateShowHideItemText();
-        _nextItem?.Header = $"»  {L["Tray_Next"] ?? "Next"}";
-        _prevItem?.Header = $"«  {L["Tray_Previous"] ?? "Previous"}";
-        _queueItem?.Header = $"≡  {L["Tray_Queue"] ?? "Queue"}";
-        _cleanMemItem?.Header = $"⟳  {L["Tray_ClearMemory"] ?? "Clear Memory"}";
-        _exitItem?.Header = $"×  {L["Tray_Exit"] ?? "Exit"}";
+        _nextItem?.Header = $"»  {L["Tray_Next"]}";
+        _prevItem?.Header = $"«  {L["Tray_Previous"]}";
+        _queueItem?.Header = $"≡  {L["Tray_Queue"]}";
+        _cleanMemItem?.Header = $"⟳  {L["Tray_ClearMemory"]}";
+        _exitItem?.Header = $"×  {L["Tray_Exit"]}";
 
         if (_playerControl != null)
         {

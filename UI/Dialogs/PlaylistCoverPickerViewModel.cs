@@ -108,7 +108,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     private void UpdateSelectionStatus()
     {
         SelectionStatus = string.Format(
-            SL["CoverPicker_Status"] ?? "{0}/{1}",
+            SL["CoverPicker_Status"],
             _selectionOrder.Count, MaxSelection);
     }
 

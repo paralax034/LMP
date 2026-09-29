@@ -128,6 +128,14 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         SubscribeToEvents();
         Playlists.CollectionChanged += OnPlaylistsCollectionChanged;
         HasPlaylists = Playlists.Count > 0;
+
+        LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
+    }
+
+    private void OnLanguageChanged(object? sender, string lang)
+    {
+        if (_isDisposed) return;
+        UpdateStatsInBackground();
     }
 
     /// <inheritdoc />
@@ -351,7 +359,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         if (result.SyncToCloud && _auth.IsAuthenticated)
         {
-            _mainWindow.LockNavigation(SL["Playlist_CreatingCloud"] ?? "Creating on cloud...");
+            _mainWindow.LockNavigation(SL["Playlist_CreatingCloud"]);
             try
             {
                 bool success = await _playlistService.LinkToCloudAsync(playlist.Id);
@@ -466,10 +474,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             if (playlistsToImport.Count == 0)
             {
                 var confirmSyncLikes = await _dialog.ConfirmAsync(
-                    SL["Sync_ConfirmLikedOnly"] ?? "No playlists found",
-                    SL["Sync_NoPlaylistsFound_AskLiked"] ?? "Sync liked songs?",
-                    SL["Common_Yes"] ?? "Yes",
-                    SL["Common_No"] ?? "No");
+                    SL["Sync_ConfirmLikedOnly"],
+                    SL["Sync_NoPlaylistsFound_AskLiked"],
+                    SL["Common_Yes"],
+                    SL["Common_No"]);
 
                 if (confirmSyncLikes)
                 {
@@ -477,7 +485,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                     await _playlistService.SyncLikedTracksAsync(ct);
                     await _dialog.ShowInfoAsync(
                         SL["Dialog_Done_Title"],
-                        SL["Sync_Success_Msg_LikedOnly"] ?? "Liked songs synchronized.");
+                        SL["Sync_Success_Msg_LikedOnly"]);
                 }
 
                 return;
@@ -985,6 +993,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (disposing)
         {
             _isDisposed = true;
+
+            LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
 
             Playlists.CollectionChanged -= OnPlaylistsCollectionChanged;
             _playlistService.OnPlaylistChanged -= OnPlaylistChangedIncremental;

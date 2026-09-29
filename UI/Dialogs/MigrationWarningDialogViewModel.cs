@@ -70,12 +70,12 @@ public sealed partial class MigrationWarningDialogViewModel : ViewModelBase
         var L = LocalizationService.Instance;
         if (_secondsRemaining > 0)
         {
-            ButtonText = string.Format(L["Dialog_LegacyPlaylists_CountdownButton"] ?? "Read ({0}s)", _secondsRemaining);
+            ButtonText = string.Format(L["Dialog_LegacyPlaylists_CountdownButton"], _secondsRemaining);
             CanClose = false;
         }
         else
         {
-            ButtonText = L["Common_OK"] ?? "OK";
+            ButtonText = L["Common_OK"];
             CanClose = true;
         }
     }

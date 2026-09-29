@@ -747,9 +747,7 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     }
 
     private static string GetDeviceErrorMessage() =>
-        LocalizationService.Instance.Get(
-            "Error_NoAudioDevice",
-            "Audio output device is not available. Please connect headphones or speakers.");
+        LocalizationService.Instance["Error_NoAudioDevice"];
 
     /// <inheritdoc/>
     public void SetVolumeGain(float gain) => _gainProcessor?.SetVolumeGain(gain);

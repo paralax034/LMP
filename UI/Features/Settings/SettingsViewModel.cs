@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Net;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -14,6 +13,36 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Features.Settings;
 
 /// <summary>
+/// Статическая фабрика для создания локализованных коллекций перечислений без избыточных generic-параметров.
+/// </summary>
+public static class LocalizedItem
+{
+    /// <summary>
+    /// Автоматически строит неизменяемый список локализованных элементов для указанного перечисления.
+    /// Гарантирует правильный вывод типов компилятором C#.
+    /// </summary>
+    public static IReadOnlyList<LocalizedItem<TEnum>> CreateList<TEnum>(
+        string keyPrefix,
+        Func<TEnum, string>? customKeyResolver = null) where TEnum : struct, Enum
+    {
+        var values = Enum.GetValues<TEnum>();
+        var items = new LocalizedItem<TEnum>[values.Length];
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            var val = values[i];
+            string key = customKeyResolver != null
+                ? customKeyResolver(val)
+                : string.Concat(keyPrefix, val.ToString());
+
+            items[i] = new LocalizedItem<TEnum>(val, LocalizationService.Instance[key]);
+        }
+
+        return items;
+    }
+}
+
+/// <summary>
 /// Обёртка над произвольным значением с именем для отображения в ComboBox.
 /// <para>
 /// ToString() возвращает Name — ComboBox вызывает его напрямую,
@@ -27,6 +56,28 @@ public sealed class LocalizedItem<T>(T value, string name)
     public string Name { get; } = name;
 
     public override string ToString() => Name;
+}
+
+public static class LocalizedItemExtensions
+{
+    /// <summary>
+    /// Находит элемент по значению без создания замыканий LINQ.
+    /// </summary>
+    public static LocalizedItem<T> FindByValue<T>(
+        this IReadOnlyList<LocalizedItem<T>> list,
+        T value,
+        int fallbackIndex = 0)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (EqualityComparer<T>.Default.Equals(list[i].Value, value))
+                return list[i];
+        }
+
+        return list.Count > 0
+            ? list[Math.Clamp(fallbackIndex, 0, list.Count - 1)]
+            : default!;
+    }
 }
 
 /// <summary>Пресеты количества bitmap-объектов в RAM-кэше изображений.</summary>
@@ -100,7 +151,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     /// В каждый момент в visual tree — одна страница (~10–15 контролов).
     /// </para>
     /// </summary>
-    public ObservableCollection<SettingsSidebarItemBase> SidebarItems { get; } = [];
+    public System.Collections.ObjectModel.ObservableCollection<SettingsSidebarItemBase> SidebarItems { get; } = [];
 
     /// <summary>Текущий выбранный элемент sidebar — определяет какая страница отображается.</summary>
     [ObservableProperty] public partial SettingsSidebarItemBase? SelectedSidebarItem { get; set; }
@@ -200,7 +251,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial bool IsNetworkTesting { get; private set; }
 
     /// <summary>Доступные профили скорости интернета для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<InternetProfile>> InternetProfileOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<InternetProfile>> InternetProfileOptions { get; private set; } = [];
 
     /// <summary>Выбранный профиль скорости; синхронизируется с настройками через подписку.</summary>
     [ObservableProperty] public partial LocalizedItem<InternetProfile>? SelectedInternetProfile { get; set; }
@@ -256,7 +307,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial string DownloadPath { get; set; } = string.Empty;
 
     /// <summary>Пресеты количества bitmap-объектов в RAM для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<ImageCachePreset>> ImageCachePresets { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<ImageCachePreset>> ImageCachePresets { get; private set; } = [];
 
     /// <summary>Выбранный пресет; <c>null</c> означает Custom (произвольное значение слайдера).</summary>
     [ObservableProperty] public partial LocalizedItem<ImageCachePreset>? SelectedImageCachePreset { get; set; }
@@ -354,9 +405,9 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         _isUpdatingPreset = true;
         SelectedImageCachePreset = value switch
         {
-            20 => ImageCachePresets.FirstOrDefault(x => x.Value == ImageCachePreset.Low),
-            50 => ImageCachePresets.FirstOrDefault(x => x.Value == ImageCachePreset.Medium),
-            100 => ImageCachePresets.FirstOrDefault(x => x.Value == ImageCachePreset.High),
+            20 => ImageCachePresets.FindByValue(ImageCachePreset.Low),
+            50 => ImageCachePresets.FindByValue(ImageCachePreset.Medium),
+            100 => ImageCachePresets.FindByValue(ImageCachePreset.High),
             _ => null
         };
         _isUpdatingPreset = false;
@@ -367,7 +418,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     #region Theme & Animation
 
     /// <summary>Встроенные и пользовательские пресеты тем для ComboBox.</summary>
-    public ObservableCollection<ThemeSettings> ThemePresets { get; } = [];
+    public System.Collections.ObjectModel.ObservableCollection<ThemeSettings> ThemePresets { get; } = [];
 
     /// <summary>Выбранный пресет темы; при смене — цвета применяются к color picker'ам.</summary>
     [ObservableProperty] public partial ThemeSettings? SelectedPreset { get; set; }
@@ -380,7 +431,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial Color TextSecondaryColor { get; set; }
 
     /// <summary>Варианты скорости анимации играющего трека для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<TrackAnimationSpeed>> TrackAnimationSpeedOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<TrackAnimationSpeed>> TrackAnimationSpeedOptions { get; private set; } = [];
 
     /// <summary>Выбранная скорость анимации играющего трека.</summary>
     [ObservableProperty] public partial LocalizedItem<TrackAnimationSpeed>? SelectedTrackAnimationSpeed { get; set; }
@@ -435,7 +486,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     /// Обёрнутые значения AudioQualityPreference — ComboBox использует ToString()
     /// от LocalizedItem, DataTemplate и конвертер AudioQualityToString не нужны.
     /// </summary>
-    public List<LocalizedItem<AudioQualityPreference>> QualityOptions { get; private set; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<AudioQualityPreference>> QualityOptions { get; private set; } = [];
 
     /// <summary>Выбранный элемент качества; синхронизируется с настройками через подписку.</summary>
     [ObservableProperty] public partial LocalizedItem<AudioQualityPreference>? SelectedQualityItem { get; set; }
@@ -449,13 +500,13 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial float NormalizationMaxGain { get; set; }
 
     /// <summary>Варианты кривой громкости для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<VolumeCurveType>> VolumeCurveOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<VolumeCurveType>> VolumeCurveOptions { get; private set; } = [];
 
     /// <summary>Выбранная кривая громкости; синхронизируется с настройками через подписку.</summary>
     [ObservableProperty] public partial LocalizedItem<VolumeCurveType>? SelectedVolumeCurve { get; set; }
 
     /// <summary>Варианты поведения при ошибке воспроизведения для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<PlaybackErrorBehavior>> ErrorBehaviorOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<PlaybackErrorBehavior>> ErrorBehaviorOptions { get; private set; } = [];
 
     /// <summary>Выбранное поведение при ошибке; синхронизируется с настройками через подписку.</summary>
     [ObservableProperty] public partial LocalizedItem<PlaybackErrorBehavior>? SelectedErrorBehavior { get; set; }
@@ -464,7 +515,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial bool SkipNTokenTracks { get; set; }
 
     /// <summary>Варианты режима нормализации для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<NormalizationMode>> NormalizationModeOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<NormalizationMode>> NormalizationModeOptions { get; private set; } = [];
 
     /// <summary>Выбранный режим нормализации; синхронизируется с настройками через подписку.</summary>
     [ObservableProperty] public partial LocalizedItem<NormalizationMode>? SelectedNormalizationMode { get; set; }
@@ -610,13 +661,13 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     #region Playback & Failure Settings
 
     /// <summary>Варианты уведомлений n-токена для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<NTokenNotificationMode>> NTokenNotificationOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<NTokenNotificationMode>> NTokenNotificationOptions { get; private set; } = [];
 
     /// <summary>Выбранный режим предупреждений расшифровки n-токена.</summary>
     [ObservableProperty] public partial LocalizedItem<NTokenNotificationMode>? SelectedNTokenNotification { get; set; }
 
     /// <summary>Варианты поведения при сбое воспроизведения для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<PlaybackFailureBehavior>> PlaybackFailureOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<PlaybackFailureBehavior>> PlaybackFailureOptions { get; private set; } = [];
 
     /// <summary>Выбранный режим поведения при фатальном сбое трека.</summary>
     [ObservableProperty] public partial LocalizedItem<PlaybackFailureBehavior>? SelectedPlaybackFailure { get; set; }
@@ -652,7 +703,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     [ObservableProperty] public partial LanguageItem? SelectedLanguage { get; set; }
 
     /// <summary>Варианты действия при закрытии окна для ComboBox.</summary>
-    public ObservableCollection<LocalizedItem<CloseAction>> CloseActionOptions { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<CloseAction>> CloseActionOptions { get; private set; } = [];
 
     /// <summary>Выбранное действие при закрытии; синхронизируется с настройками через подписку.</summary>
     [ObservableProperty] public partial LocalizedItem<CloseAction>? SelectedCloseAction { get; set; }
@@ -743,7 +794,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     }
 
     /// <summary>Пресеты размера GPU-кэша текстур для ComboBox.</summary>
-    public ObservableCollection<GpuCachePresetItem> GpuCachePresets { get; } = [];
+    [ObservableProperty] public partial IReadOnlyList<GpuCachePresetItem> GpuCachePresets { get; private set; } = [];
 
     /// <summary>Выбранный пресет GPU-кэша; при смене требует перезапуска.</summary>
     [ObservableProperty] public partial GpuCachePresetItem? SelectedGpuCachePreset { get; set; }
@@ -974,18 +1025,20 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
     {
         RefreshThemePresets();
         RefreshLocalizedLists();
-        InitGpuCachePresets();
     }
 
     private void InitGpuCachePresets()
     {
-        GpuCachePresets.Clear();
-        GpuCachePresets.Add(new GpuCachePresetItem(32, $"32 MB  ({SL["Cache_Low"]})"));
-        GpuCachePresets.Add(new GpuCachePresetItem(64, $"64 MB  ({SL["Cache_Medium"]}) ✓"));
-        GpuCachePresets.Add(new GpuCachePresetItem(128, $"128 MB ({SL["Cache_High"]})"));
-        GpuCachePresets.Add(new GpuCachePresetItem(256, $"256 MB ({SL["Cache_Ultra"]})"));
+        var currentMb = SelectedGpuCachePreset?.Mb ?? BootstrapSettings.Current.GpuTextureCacheMb;
 
-        var currentMb = BootstrapSettings.Current.GpuTextureCacheMb;
+        GpuCachePresets =
+        [
+            new GpuCachePresetItem(32, $"32 MB  ({SL["Cache_Low"]})"),
+            new GpuCachePresetItem(64, $"64 MB  ({SL["Cache_Medium"]})"),
+            new GpuCachePresetItem(128, $"128 MB ({SL["Cache_High"]})"),
+            new GpuCachePresetItem(256, $"256 MB ({SL["Cache_Ultra"]})"),
+        ];
+
         SelectedGpuCachePreset = GpuCachePresets.FirstOrDefault(x => x.Mb == currentMb)
                               ?? GpuCachePresets[1];
     }
@@ -1078,118 +1131,68 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             : LightenColor(accent, 0.15);
     }
 
+    /// <summary>
+    /// Атомарно обновляет все списки настроек в один такт UI без вызова побочных сетевых эффектов.
+    /// </summary>
     private void RefreshLocalizedLists()
     {
-        var currentProfile = SelectedInternetProfile?.Value ?? _library.Settings.InternetProfile;
-        InternetProfileOptions.Clear();
-        foreach (var p in Enum.GetValues<InternetProfile>())
-            InternetProfileOptions.Add(new LocalizedItem<InternetProfile>(p, SL[$"NetProfile_{p}"]));
-        SelectedInternetProfile = InternetProfileOptions.FirstOrDefault(x => x.Value == currentProfile)
-                               ?? InternetProfileOptions[1];
-
-        var currentImgPreset = SelectedImageCachePreset?.Value ?? ImageCachePreset.Custom;
-        ImageCachePresets.Clear();
-        ImageCachePresets.Add(new LocalizedItem<ImageCachePreset>(ImageCachePreset.Low, $"{SL["Cache_Low"]} (20)"));
-        ImageCachePresets.Add(new LocalizedItem<ImageCachePreset>(ImageCachePreset.Medium, $"{SL["Cache_Medium"]} (50)"));
-        ImageCachePresets.Add(new LocalizedItem<ImageCachePreset>(ImageCachePreset.High, $"{SL["Cache_High"]} (100)"));
-        if (currentImgPreset != ImageCachePreset.Custom)
-            SelectedImageCachePreset = ImageCachePresets.FirstOrDefault(x => x.Value == currentImgPreset);
-
-        var currentCurve = SelectedVolumeCurve?.Value ?? _library.Settings.Audio.VolumeCurve;
-        VolumeCurveOptions.Clear();
-        VolumeCurveOptions.Add(new(VolumeCurveType.Linear, SL["VolumeCurve_Linear"]));
-        VolumeCurveOptions.Add(new(VolumeCurveType.Quadratic, SL["VolumeCurve_Quadratic"]));
-        VolumeCurveOptions.Add(new(VolumeCurveType.Logarithmic, SL["VolumeCurve_Logarithmic"]));
-        VolumeCurveOptions.Add(new(VolumeCurveType.Cubic, SL["VolumeCurve_Cubic"]));
-        VolumeCurveOptions.Add(new(VolumeCurveType.SpeedOfLight, SL["VolumeCurve_SpeedOfLight"]));
-        SelectedVolumeCurve = VolumeCurveOptions.FirstOrDefault(x => x.Value == currentCurve)
-                           ?? VolumeCurveOptions[1];
-
-        var currentSpeed = SelectedTrackAnimationSpeed?.Value ?? _library.Settings.TrackAnimationSpeed;
-        TrackAnimationSpeedOptions.Clear();
-        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.VerySlow, ResolveSpeedLabel(TrackAnimationSpeed.VerySlow)));
-        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Slow, ResolveSpeedLabel(TrackAnimationSpeed.Slow)));
-        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Medium, ResolveSpeedLabel(TrackAnimationSpeed.Medium)));
-        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Fast, ResolveSpeedLabel(TrackAnimationSpeed.Fast)));
-        TrackAnimationSpeedOptions.Add(new(TrackAnimationSpeed.Epileptic, ResolveSpeedLabel(TrackAnimationSpeed.Epileptic)));
-        SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FirstOrDefault(x => x.Value == currentSpeed)
-                                  ?? TrackAnimationSpeedOptions[2];
-
-        var currentErrorBehavior = SelectedErrorBehavior?.Value ?? _library.Settings.Audio.CriticalErrorBehavior;
-        ErrorBehaviorOptions.Clear();
-        ErrorBehaviorOptions.Add(new(PlaybackErrorBehavior.Dialog, SL["Settings_ErrorBehavior_Dialog"]));
-        ErrorBehaviorOptions.Add(new(PlaybackErrorBehavior.ToastAndSkip, SL["Settings_ErrorBehavior_ToastAndSkip"]));
-        ErrorBehaviorOptions.Add(new(PlaybackErrorBehavior.Ignore, SL["Settings_ErrorBehavior_Ignore"]));
-        SelectedErrorBehavior = ErrorBehaviorOptions.FirstOrDefault(x => x.Value == currentErrorBehavior)
-                             ?? ErrorBehaviorOptions.FirstOrDefault(x => x.Value == PlaybackErrorBehavior.ToastAndSkip)
-                             ?? ErrorBehaviorOptions[0];
-
-        var currentNTokenMode = SelectedNTokenNotification?.Value ?? _library.Settings.Audio.NTokenNotificationMode;
-        NTokenNotificationOptions.Clear();
-        NTokenNotificationOptions.Add(new(NTokenNotificationMode.Disabled, SL["Settings_NTokenMode_Disabled"]));
-        NTokenNotificationOptions.Add(new(NTokenNotificationMode.PanelOnly, SL["Settings_NTokenMode_PanelOnly"]));
-        NTokenNotificationOptions.Add(new(NTokenNotificationMode.Toast, SL["Settings_NTokenMode_Toast"]));
-        SelectedNTokenNotification = NTokenNotificationOptions.FirstOrDefault(x => x.Value == currentNTokenMode)
-                                  ?? NTokenNotificationOptions.FirstOrDefault(x => x.Value == NTokenNotificationMode.Toast)
-                                  ?? NTokenNotificationOptions[^1];
-
-        var currentFailureMode = SelectedPlaybackFailure?.Value ?? _library.Settings.Audio.PlaybackFailureBehavior;
-        PlaybackFailureOptions.Clear();
-        PlaybackFailureOptions.Add(new(PlaybackFailureBehavior.SkipAndPlay, SL["Settings_PlaybackFailure_SkipAndPlay"]));
-        PlaybackFailureOptions.Add(new(PlaybackFailureBehavior.SkipAndPause, SL["Settings_PlaybackFailure_SkipAndPause"]));
-        PlaybackFailureOptions.Add(new(PlaybackFailureBehavior.Stop, SL["Settings_PlaybackFailure_Stop"]));
-        SelectedPlaybackFailure = PlaybackFailureOptions.FirstOrDefault(x => x.Value == currentFailureMode)
-                               ?? PlaybackFailureOptions.FirstOrDefault(x => x.Value == PlaybackFailureBehavior.SkipAndPause)
-                               ?? PlaybackFailureOptions[0];
-
-        UpdatePlaybackFailureActionAvailability();
-
-        var currentCloseAction = SelectedCloseAction?.Value ?? _library.Settings.CloseAction;
-        CloseActionOptions.Clear();
-        CloseActionOptions.Add(new(CloseAction.Exit, SL["CloseAction_Exit"]));
-        CloseActionOptions.Add(new(CloseAction.MinimizeToTray, SL["CloseAction_MinimizeToTray"]));
-        CloseActionOptions.Add(new(CloseAction.Ask, SL["CloseAction_Ask"]));
-        SelectedCloseAction = CloseActionOptions.FirstOrDefault(x => x.Value == currentCloseAction)
-                           ?? CloseActionOptions[2];
-
-        var currentNormMode = SelectedNormalizationMode?.Value ?? _library.Settings.Audio.NormalizationMode;
-        NormalizationModeOptions.Clear();
-        NormalizationModeOptions.Add(new(NormalizationMode.Bidirectional, SL["NormMode_Bidirectional"]));
-        NormalizationModeOptions.Add(new(NormalizationMode.DownwardOnly, SL["NormMode_DownwardOnly"]));
-        SelectedNormalizationMode = NormalizationModeOptions.FirstOrDefault(x => x.Value == currentNormMode)
-                                 ?? NormalizationModeOptions[0];
-
-        var currentQuality = SelectedQualityItem?.Value ?? _library.Settings.QualityPreference;
-        QualityOptions = Enum.GetValues<AudioQualityPreference>()
-            .Select(q => new LocalizedItem<AudioQualityPreference>(
-                q, SL[$"AudioQuality_{q}"] ?? q.ToString()))
-            .ToList();
-        SelectedQualityItem = QualityOptions.FirstOrDefault(x => x.Value == currentQuality)
-                           ?? QualityOptions[0];
-        OnPropertyChanged(nameof(QualityOptions));
-    }
-
-    private string ResolveSpeedLabel(TrackAnimationSpeed speed)
-    {
-        string key = $"AnimationSpeed_{speed}";
-        string raw = SL[key];
-
-        // Защитный fallback исключает отображение скобок вида [AnimationSpeed_...], если ключ не найден в словаре
-        if (string.IsNullOrEmpty(raw) || raw.StartsWith('['))
+        _isLoadingSettings = true;
+        try
         {
-            bool isRu = string.Equals(LocalizationService.Instance.CurrentLanguage, "ru", StringComparison.OrdinalIgnoreCase);
-            return speed switch
-            {
-                TrackAnimationSpeed.VerySlow => isRu ? "Очень медленно" : "Very Slow",
-                TrackAnimationSpeed.Slow => isRu ? "Медленно" : "Slow",
-                TrackAnimationSpeed.Medium => isRu ? "Средне" : "Medium",
-                TrackAnimationSpeed.Fast => isRu ? "Быстро" : "Fast",
-                TrackAnimationSpeed.Epileptic => isRu ? "Эпилепсия" : "Epilepsy",
-                _ => speed.ToString()
-            };
-        }
+            InitGpuCachePresets();
 
-        return raw;
+            var currentProfile = SelectedInternetProfile?.Value ?? _library.Settings.InternetProfile;
+            InternetProfileOptions = LocalizedItem.CreateList<InternetProfile>("NetProfile_");
+            SelectedInternetProfile = InternetProfileOptions.FindByValue(currentProfile, 1);
+
+            var currentImgPreset = SelectedImageCachePreset?.Value ?? ImageCachePreset.Custom;
+            ImageCachePresets =
+            [
+                new(ImageCachePreset.Low, $"{SL["Cache_Low"]} (20)"),
+                new(ImageCachePreset.Medium, $"{SL["Cache_Medium"]} (50)"),
+                new(ImageCachePreset.High, $"{SL["Cache_High"]} (100)"),
+            ];
+            if (currentImgPreset != ImageCachePreset.Custom)
+                SelectedImageCachePreset = ImageCachePresets.FindByValue(currentImgPreset);
+
+            var currentCurve = SelectedVolumeCurve?.Value ?? _library.Settings.Audio.VolumeCurve;
+            VolumeCurveOptions = LocalizedItem.CreateList<VolumeCurveType>("VolumeCurve_");
+            SelectedVolumeCurve = VolumeCurveOptions.FindByValue(currentCurve, 1);
+
+            var currentSpeed = SelectedTrackAnimationSpeed?.Value ?? _library.Settings.TrackAnimationSpeed;
+            TrackAnimationSpeedOptions = LocalizedItem.CreateList<TrackAnimationSpeed>("AnimationSpeed_");
+            SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FindByValue(currentSpeed, 2);
+
+            var currentErrorBehavior = SelectedErrorBehavior?.Value ?? _library.Settings.Audio.CriticalErrorBehavior;
+            ErrorBehaviorOptions = LocalizedItem.CreateList<PlaybackErrorBehavior>("Settings_ErrorBehavior_");
+            SelectedErrorBehavior = ErrorBehaviorOptions.FindByValue(currentErrorBehavior, 1);
+
+            var currentNTokenMode = SelectedNTokenNotification?.Value ?? _library.Settings.Audio.NTokenNotificationMode;
+            NTokenNotificationOptions = LocalizedItem.CreateList<NTokenNotificationMode>("Settings_NTokenMode_");
+            SelectedNTokenNotification = NTokenNotificationOptions.FindByValue(currentNTokenMode, 2);
+
+            var currentFailureMode = SelectedPlaybackFailure?.Value ?? _library.Settings.Audio.PlaybackFailureBehavior;
+            PlaybackFailureOptions = LocalizedItem.CreateList<PlaybackFailureBehavior>("Settings_PlaybackFailure_");
+            SelectedPlaybackFailure = PlaybackFailureOptions.FindByValue(currentFailureMode, 1);
+
+            var currentCloseAction = SelectedCloseAction?.Value ?? _library.Settings.CloseAction;
+            CloseActionOptions = LocalizedItem.CreateList<CloseAction>("CloseAction_");
+            SelectedCloseAction = CloseActionOptions.FindByValue(currentCloseAction, 2);
+
+            var currentNormMode = SelectedNormalizationMode?.Value ?? _library.Settings.Audio.NormalizationMode;
+            NormalizationModeOptions = LocalizedItem.CreateList<NormalizationMode>("NormMode_");
+            SelectedNormalizationMode = NormalizationModeOptions.FindByValue(currentNormMode, 0);
+
+            var currentQuality = SelectedQualityItem?.Value ?? _library.Settings.QualityPreference;
+            QualityOptions = LocalizedItem.CreateList<AudioQualityPreference>("AudioQuality_");
+            SelectedQualityItem = QualityOptions.FindByValue(currentQuality, 0);
+
+            UpdatePlaybackFailureActionAvailability();
+        }
+        finally
+        {
+            _isLoadingSettings = false;
+        }
     }
 
     private void LoadAllSettings()
@@ -1208,8 +1211,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             RememberTrackFormat = s.RememberTrackFormat;
 
             UseWaveAnimation = s.UseWaveAnimation;
-            SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FirstOrDefault(x => x.Value == s.TrackAnimationSpeed)
-                                      ?? TrackAnimationSpeedOptions[2];
+            SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FindByValue(s.TrackAnimationSpeed, 2);
 
             AudioWaveBorder.ConfigureGlobal(s.UseWaveAnimation, s.TrackAnimationSpeed);
 
@@ -1227,30 +1229,20 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             AudioNormalizationEnabled = s.Audio.NormalizationEnabled;
             NormalizationTargetLufs = s.Audio.NormalizationTargetLufs;
             NormalizationMaxGain = s.Audio.NormalizationMaxGain;
-            SelectedNormalizationMode = NormalizationModeOptions.FirstOrDefault(x => x.Value == s.Audio.NormalizationMode)
-                                     ?? NormalizationModeOptions[0];
-            SelectedVolumeCurve = VolumeCurveOptions.FirstOrDefault(x => x.Value == s.Audio.VolumeCurve)
-                                     ?? VolumeCurveOptions[1];
-            PlayErrorSound = s.Audio.PlayErrorSound;
-            SelectedErrorBehavior = ErrorBehaviorOptions.FirstOrDefault(x => x.Value == s.Audio.CriticalErrorBehavior)
-                                 ?? ErrorBehaviorOptions.FirstOrDefault(x => x.Value == PlaybackErrorBehavior.ToastAndSkip)
-                                 ?? ErrorBehaviorOptions[0];
-            SkipNTokenTracks = s.Audio.SkipNTokenTracks;
-            SelectedNTokenNotification = NTokenNotificationOptions.FirstOrDefault(x => x.Value == s.Audio.NTokenNotificationMode)
-                                      ?? NTokenNotificationOptions.FirstOrDefault(x => x.Value == NTokenNotificationMode.Toast)
-                                      ?? NTokenNotificationOptions[^1];
-            SelectedPlaybackFailure = PlaybackFailureOptions.FirstOrDefault(x => x.Value == s.Audio.PlaybackFailureBehavior)
-                                   ?? PlaybackFailureOptions.FirstOrDefault(x => x.Value == PlaybackFailureBehavior.SkipAndPause)
-                                   ?? PlaybackFailureOptions[0];
 
-            SelectedQualityItem = QualityOptions.FirstOrDefault(x => x.Value == s.QualityPreference)
-                               ?? QualityOptions[0];
+            SelectedNormalizationMode = NormalizationModeOptions.FindByValue(s.Audio.NormalizationMode, 0);
+            SelectedVolumeCurve = VolumeCurveOptions.FindByValue(s.Audio.VolumeCurve, 1);
+            PlayErrorSound = s.Audio.PlayErrorSound;
+            SelectedErrorBehavior = ErrorBehaviorOptions.FindByValue(s.Audio.CriticalErrorBehavior, 1);
+            SkipNTokenTracks = s.Audio.SkipNTokenTracks;
+            SelectedNTokenNotification = NTokenNotificationOptions.FindByValue(s.Audio.NTokenNotificationMode, 2);
+            SelectedPlaybackFailure = PlaybackFailureOptions.FindByValue(s.Audio.PlaybackFailureBehavior, 1);
+            SelectedQualityItem = QualityOptions.FindByValue(s.QualityPreference, 0);
 
             IsAuthenticated = _auth.IsAuthenticated;
             RaiseAccountProperties();
 
-            SelectedInternetProfile = InternetProfileOptions.FirstOrDefault(x => x.Value == s.InternetProfile)
-                                   ?? InternetProfileOptions[1];
+            SelectedInternetProfile = InternetProfileOptions.FindByValue(s.InternetProfile, 1);
 
             ProxyEnabled = s.Proxy.Enabled;
             ProxyHost = s.Proxy.Host;
@@ -1268,15 +1260,14 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             _isUpdatingPreset = true;
             SelectedImageCachePreset = MaxBitmapCacheItems switch
             {
-                20 => ImageCachePresets.FirstOrDefault(x => x.Value == ImageCachePreset.Low),
-                50 => ImageCachePresets.FirstOrDefault(x => x.Value == ImageCachePreset.Medium),
-                100 => ImageCachePresets.FirstOrDefault(x => x.Value == ImageCachePreset.High),
+                20 => ImageCachePresets.FindByValue(ImageCachePreset.Low),
+                50 => ImageCachePresets.FindByValue(ImageCachePreset.Medium),
+                100 => ImageCachePresets.FindByValue(ImageCachePreset.High),
                 _ => null
             };
             _isUpdatingPreset = false;
 
-            SelectedCloseAction = CloseActionOptions.FirstOrDefault(x => x.Value == s.CloseAction)
-                               ?? CloseActionOptions.LastOrDefault();
+            SelectedCloseAction = CloseActionOptions.FindByValue(s.CloseAction, 2);
             MinimizeToTray = s.MinimizeToTray;
 
             UpdatePlaybackFailureActionAvailability();
@@ -1435,8 +1426,9 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
                 RaiseAccountProperties();
 
                 await _notifications.ShowToastAsync(
-                    titleKey: SL["Dialog_Success"] ?? "Success",
-                    messageKey: string.Format(SL["Auth_LoggedInAs"] ?? "Signed in: {0}", _auth.State.UserName),
+                    titleKey: "Dialog_Success",
+                    messageKey: "Auth_LoggedInAs",
+                    messageArgs: [_auth.State.UserName],
                     severity: NotificationSeverity.Success);
             }
         }
@@ -1463,13 +1455,13 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
 
             if (accounts.Count == 0)
             {
-                await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"] ?? "Error", SL["Auth_ProfileLoadError_Message"] ?? "Failed to load profile data.");
+                await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], SL["Auth_ProfileLoadError_Message"]);
                 return;
             }
 
             if (accounts.Count <= 1)
             {
-                await _dialog.ShowInfoAsync(SL["Dialog_Info_Title"] ?? "Info", SL["Auth_NoMultipleAccounts"] ?? "There are no other channels available for this profile.");
+                await _dialog.ShowInfoAsync(SL["Dialog_Info_Title"], SL["Auth_NoMultipleAccounts"]);
                 return;
             }
 
@@ -1483,18 +1475,19 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
             RaiseAccountProperties();
 
             await _notifications.ShowToastAsync(
-                titleKey: SL["Dialog_Success"] ?? "Success",
-                messageKey: string.Format(SL["Auth_LoggedInAs"] ?? "Signed in: {0}", selectedAccount.Name),
+                titleKey: "Dialog_Success",
+                messageKey: "Auth_LoggedInAs",
+                messageArgs: [selectedAccount.Name],
                 severity: NotificationSeverity.Success);
         }
         catch (LoginRequiredException ex) when (ex.Reason == LoginRequiredReason.SessionExpired)
         {
             Log.Warn("[Settings] Switch account failed due to expired session. Prompting user to update cookies.");
 
-            var title = SL["Auth_SessionExpired_SwitchAccount_Title"] ?? "Session Update Required";
-            var msg = SL["Auth_SessionExpired_SwitchAccount_Message"] ?? "To switch accounts, you need to update your authorization because the current session has expired.\n\nDo you want to sign in again right now?";
-            var loginText = SL["Auth_Login"] ?? "Sign In";
-            var cancelText = SL["Common_Cancel"] ?? "Cancel";
+            var title = SL["Auth_SessionExpired_SwitchAccount_Title"];
+            var msg = SL["Auth_SessionExpired_SwitchAccount_Message"];
+            var loginText = SL["Auth_Login"];
+            var cancelText = SL["Common_Cancel"];
 
             bool wantsToLogin = await _dialog.ConfirmAsync(title, msg, loginText, cancelText);
             if (wantsToLogin)
@@ -1504,7 +1497,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         }
         catch (Exception ex)
         {
-            await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"] ?? "Error", ex.Message);
+            await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], ex.Message);
         }
         finally
         {
@@ -1723,9 +1716,6 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
         }
     }
 
-    /// <summary>
-    /// Проверяет наличие активного VPN-интерфейса среди сетевых адаптеров Windows.
-    /// </summary>
     private static bool DetectVpnInterface()
     {
         try
@@ -1749,13 +1739,6 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
                     descLow.Contains("logmein") ||
                     nameLow.Contains("radmin"))
                 {
-#if DEBUG
-                    if (!nameLow.Contains("--") && !nameLow.Contains("-wfp") &&
-                        !nameLow.Contains("-qos") && !nameLow.Contains("-npcap"))
-                    {
-                        Log.Debug($"[Settings] Skipping LAN-only virtual adapter: {name}");
-                    }
-#endif
                     continue;
                 }
 

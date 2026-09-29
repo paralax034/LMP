@@ -24,7 +24,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Classes="label" Text="{Binding L[General_Discord]}" />
                             <Border Classes="feature-badge coming-soon">
-                                <TextBlock Text="СКОРО" />
+                                <TextBlock Text="{Binding L[Common_ComingSoon]}" />
                             </Border>
                         </StackPanel>
                         <TextBlock Classes="desc" Text="{Binding L[General_DiscordDesc]}" />

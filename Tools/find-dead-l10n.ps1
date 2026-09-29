@@ -103,7 +103,7 @@ Write-Host "  Исходных файлов: $(@($sourceFiles).Count)  (.cs + .a
 # --- Регулярные выражения для поиска ключей ---
 
 $patterns = @(
-    '(?:SL|L|LocalizationService\.Instance)\s*\[\s*"([A-Za-z][A-Za-z0-9_]+)"\s*\]',
+    '(?:SL|L|LocalizationService\.Instance|this|Instance)\s*\[\s*"([A-Za-z][A-Za-z0-9_]+)"\s*\]',
     '\.(?:Get|RawGet|GetPlural)\(\s*"([A-Za-z][A-Za-z0-9_]+)"',
     '(?:SL|L)\[([A-Za-z][A-Za-z0-9_]+)\]',
     '\{l:Loc\s+(?:Key=)?([A-Za-z][A-Za-z0-9_]+)',

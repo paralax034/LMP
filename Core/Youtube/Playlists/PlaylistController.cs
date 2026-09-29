@@ -56,7 +56,7 @@ internal class PlaylistController(HttpClient http)
         var playlistResponse = await PlaylistBrowseResponse.ParseAsync(stream, cancellationToken).ConfigureAwait(false);
 
         if (!playlistResponse.IsAvailable && browseId != "VLLL")
-            throw new PlaylistUnavailableException($"Плейлист '{playlistId}' недоступен.");
+            throw new PlaylistUnavailableException($"Playlist '{playlistId}' isnt avaliable.");
 
         return playlistResponse;
     }
@@ -164,7 +164,7 @@ internal class PlaylistController(HttpClient http)
 
             if (!playlistResponse.IsAvailable)
             {
-                throw new PlaylistUnavailableException($"Плейлист '{playlistId}' недоступен.");
+                throw new PlaylistUnavailableException($"Playlist '{playlistId}' isnt avaliable.");
             }
 
             return playlistResponse;

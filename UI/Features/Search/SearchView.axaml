@@ -100,7 +100,7 @@
                     <Button Classes="header-icon-btn"
                         Command="{Binding ClearQueryCommand}"
                         IsVisible="{Binding SearchQuery, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        ToolTip.Tip="{Binding L[Search_ClearQuery], FallbackValue='Очистить запрос'}"
+                        ToolTip.Tip="{Binding L[Search_ClearQuery]}"
                         Margin="0,0,2,0"
                         VerticalAlignment="Center">
                         <PathIcon Data="{StaticResource Icon.Close}" Width="14" Height="14" />
@@ -110,7 +110,7 @@
                     <Button Classes="header-icon-btn"
                         Command="{Binding ClearHistoryCommand}"
                         IsVisible="{Binding HasRecentSearches}"
-                        ToolTip.Tip="{Binding L[Search_ClearHistory], FallbackValue='Очистить историю поиска'}"
+                        ToolTip.Tip="{Binding L[Search_ClearHistory]}"
                         Margin="0,0,2,0"
                         VerticalAlignment="Center">
                         <PathIcon Data="{StaticResource Icon.Broom}" Width="16" Height="16" />
@@ -120,7 +120,7 @@
                     <Button Classes="header-icon-btn"
                         Command="{Binding ForceSearchCommand}"
                         IsVisible="{Binding IsFromCache}"
-                        ToolTip.Tip="{Binding L[Search_FromCache_Tooltip], FallbackValue='Данные из кэша. Нажмите для обновления из сети'}"
+                        ToolTip.Tip="{Binding L[Search_FromCache_Tooltip]}"
                         Margin="0,0,4,0"
                         VerticalAlignment="Center">
                         <PathIcon Data="{StaticResource Icon.Refresh}"
@@ -140,7 +140,7 @@
                             Classes.active="{Binding IsSourceYtm}"
                             Command="{Binding SetSourceCommand}"
                             CommandParameter="YouTubeMusic"
-                            ToolTip.Tip="YouTube Music">
+                            ToolTip.Tip="{Binding L[Search_Source_YouTubeMusic]}">
                             <PathIcon Data="{StaticResource Icon.MusicCircle}" />
                         </Button>
 
@@ -148,7 +148,7 @@
                             Classes.active="{Binding IsSourceYt}"
                             Command="{Binding SetSourceCommand}"
                             CommandParameter="YouTube"
-                            ToolTip.Tip="YouTube Video">
+                            ToolTip.Tip="{Binding L[Search_Source_YouTube]}">
                             <PathIcon Data="{StaticResource Icon.Youtube}" />
                         </Button>
 
@@ -156,7 +156,7 @@
                             Classes.active="{Binding IsSourceLocal}"
                             Command="{Binding SetSourceCommand}"
                             CommandParameter="Local"
-                            ToolTip.Tip="Локальная библиотека">
+                            ToolTip.Tip="{Binding L[Search_Source_Local]}">
                             <PathIcon Data="{StaticResource Icon.DatabaseSearch}" />
                         </Button>
                     </StackPanel>
@@ -269,7 +269,7 @@
                     Width="48" Height="48"
                     Foreground="{DynamicResource TextMutedBrush}"
                     Opacity="0.6" />
-                <TextBlock Text="{Binding ErrorMessage, FallbackValue='Ничего не найдено'}"
+                <TextBlock Text="{Binding ErrorMessage}"
                     FontSize="15"
                     FontWeight="Medium"
                     Foreground="{DynamicResource TextMutedBrush}"

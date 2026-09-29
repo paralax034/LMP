@@ -386,11 +386,11 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
 
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = SL["CoverPicker_SelectFile"] ?? "Select image",
+            Title = SL["CoverPicker_SelectFile"],
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType(SL["CoverPicker_ImageFiles"] ?? "Images")
+                new FilePickerFileType(SL["CoverPicker_ImageFiles"])
                 {
                     Patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"],
                     MimeTypes = ["image/png", "image/jpeg", "image/webp", "image/bmp"]
@@ -557,13 +557,13 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(Name))
         {
-            SetError(SL["Error_EmptyName"] ?? "Name cannot be empty");
+            SetError(SL["Error_EmptyName"]);
             return;
         }
 
         if (!string.IsNullOrWhiteSpace(ThumbnailUrl) && !IsValidUri(ThumbnailUrl))
         {
-            SetError(SL["Error_InvalidUrl"] ?? "Invalid cover URL format");
+            SetError(SL["Error_InvalidUrl"]);
             return;
         }
 

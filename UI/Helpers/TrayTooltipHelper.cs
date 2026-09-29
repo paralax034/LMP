@@ -23,7 +23,7 @@ public static class TrayTooltipHelper
     /// <returns>Отформатированная строка tooltip</returns>
     public static string Format(TrackInfo? track, int volume)
     {
-        var appName = LocalizationService.Instance["Common_AppName"] ?? "Lite Music Player";
+        var appName = LocalizationService.Instance["Common_AppName"];
 
         if (track == null)
             return Truncate(appName);
@@ -43,7 +43,7 @@ public static class TrayTooltipHelper
     /// <returns>Отформатированная строка tooltip с выделенной громкостью</returns>
     public static string FormatWithVolumeAccent(TrackInfo? track, int volume)
     {
-        var appName = LocalizationService.Instance["Common_AppName"] ?? "Lite Music Player";
+        var appName = LocalizationService.Instance["Common_AppName"];
         var emoji = GetVolumeEmoji(volume);
 
         var trackPart = track != null

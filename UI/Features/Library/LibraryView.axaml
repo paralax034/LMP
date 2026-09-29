@@ -227,7 +227,7 @@
                     </StackPanel.Transitions>
 
                     <Border Classes="stat-block"
-                        ToolTip.Tip="{Binding L[Library_Tip_PlaylistCount], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_Tip_PlaylistCount]}">
                         <!-- Hit-testing отключен на внутреннем контенте для оптимизации
                         производительности -->
                         <StackPanel Orientation="Horizontal"
@@ -244,7 +244,7 @@
                     </Border>
 
                     <Border Classes="stat-block"
-                        ToolTip.Tip="{Binding L[Library_Tip_TrackCount], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_Tip_TrackCount]}">
                         <StackPanel Orientation="Horizontal"
                             Spacing="8"
                             VerticalAlignment="Center"
@@ -259,7 +259,7 @@
                     </Border>
 
                     <Border Classes="stat-block"
-                        ToolTip.Tip="{Binding L[Library_Tip_TotalDuration], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_Tip_TotalDuration]}">
                         <StackPanel Orientation="Horizontal"
                             Spacing="8"
                             VerticalAlignment="Center"
@@ -275,7 +275,7 @@
                     <Border Classes="stat-block"
                         IsVisible="{Binding AvgTrackDurationText,
                                                 Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        ToolTip.Tip="{Binding L[Library_Tip_AvgTrack], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_Tip_AvgTrack]}">
                         <TextBlock Text="{Binding AvgTrackDurationText}"
                             FontSize="12"
                             VerticalAlignment="Center"
@@ -285,7 +285,7 @@
                     <Border Classes="stat-block"
                         IsVisible="{Binding AvgPlaylistDurationText,
                                                 Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        ToolTip.Tip="{Binding L[Library_Tip_AvgPlaylist], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_Tip_AvgPlaylist]}">
                         <TextBlock Text="{Binding AvgPlaylistDurationText}"
                             FontSize="12"
                             VerticalAlignment="Center"
@@ -323,7 +323,7 @@
 
                     <Button Command="{Binding SyncAccountPlaylistsCommand}"
                         Classes="header-action-btn"
-                        ToolTip.Tip="{Binding L[Library_SyncYoutube], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_SyncYoutube]}">
                         <Panel Width="20" Height="20" IsHitTestVisible="False">
                             <PathIcon Data="{StaticResource Icon.CloudSync}"
                                 IsVisible="{Binding !IsSyncing}" />
@@ -336,7 +336,7 @@
                     <Button Command="{Binding OpenCreateCommand}"
                         Classes="header-action-btn"
                         IsEnabled="{Binding !IsSyncing}"
-                        ToolTip.Tip="{Binding L[Library_CreatePlaylist], FallbackValue=''}">
+                        ToolTip.Tip="{Binding L[Library_CreatePlaylist]}">
                         <PathIcon Data="{StaticResource Icon.Plus}" IsHitTestVisible="False" />
                     </Button>
                 </StackPanel>
@@ -552,7 +552,7 @@
                                             </MenuItem>
 
                                             <MenuItem
-                                                Header="{Binding L[Playlist_Open], FallbackValue='Open'}"
+                                                Header="{Binding L[Playlist_Open]}"
                                                 Command="{Binding OpenCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon
@@ -563,7 +563,7 @@
                                             </MenuItem>
 
                                             <MenuItem
-                                                Header="{Binding L[EditPlaylist_Title], FallbackValue='Edit'}"
+                                                Header="{Binding L[EditPlaylist_Title]}"
                                                 Command="{Binding EditCommand}"
                                                 IsVisible="{Binding CanEdit}">
                                                 <MenuItem.Icon>
@@ -574,7 +574,7 @@
                                             </MenuItem>
 
                                             <MenuItem
-                                                Header="{Binding L[Queue_AddAll], FallbackValue='Add to queue'}"
+                                                Header="{Binding L[Queue_AddAll]}"
                                                 Command="{Binding AddToQueueCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon
@@ -585,7 +585,7 @@
                                             </MenuItem>
 
                                             <MenuItem
-                                                Header="{Binding L[Track_CopyLink], FallbackValue='Copy link'}"
+                                                Header="{Binding L[Track_CopyLink]}"
                                                 Command="{Binding CopyLinkCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon
@@ -598,7 +598,7 @@
                                             <Separator Classes="menu-separator" />
 
                                             <MenuItem
-                                                Header="{Binding L[Button_Delete], FallbackValue='Delete'}"
+                                                Header="{Binding L[Button_Delete]}"
                                                 Command="{Binding DeleteCommand}"
                                                 IsVisible="{Binding CanDelete}"
                                                 Classes="danger">
@@ -700,18 +700,14 @@
                                                         Height="12"
                                                         Foreground="{DynamicResource TextMutedBrush}"
                                                         IsVisible="{Binding IsPrivate}"
-                                                        ToolTip.Tip="{Binding L[Playlist_Private_Tooltip],
-                                                                                    FallbackValue='',
-                                                                                    TargetNullValue=''}" />
+                                                        ToolTip.Tip="{Binding L[Playlist_Private_Tooltip],TargetNullValue=''}" />
 
                                                     <PathIcon Data="{StaticResource Icon.Link}"
                                                         Width="12"
                                                         Height="12"
                                                         Foreground="{DynamicResource TextMutedBrush}"
                                                         IsVisible="{Binding IsUnlisted}"
-                                                        ToolTip.Tip="{Binding L[Playlist_Unlisted_Tooltip],
-                                                                                    FallbackValue='',
-                                                                                    TargetNullValue=''}" />
+                                                        ToolTip.Tip="{Binding L[Playlist_Unlisted_Tooltip],TargetNullValue=''}" />
 
                                                     <PathIcon
                                                         Data="{StaticResource Icon.CloudCheck}"
@@ -719,9 +715,7 @@
                                                         Height="12"
                                                         Foreground="{DynamicResource TextMutedBrush}"
                                                         IsVisible="{Binding HasCloudSource}"
-                                                        ToolTip.Tip="{Binding L[Playlist_Synced_Tooltip],
-                                                                                    FallbackValue='',
-                                                                                    TargetNullValue=''}" />
+                                                        ToolTip.Tip="{Binding L[Playlist_Synced_Tooltip],TargetNullValue=''}" />
                                                 </StackPanel>
                                             </StackPanel>
                                         </Border>
@@ -739,7 +733,7 @@
                             Height="64"
                             Foreground="{DynamicResource TextMutedBrush}"
                             HorizontalAlignment="Center" />
-                        <TextBlock Text="{Binding L[Library_Empty], FallbackValue=''}"
+                        <TextBlock Text="{Binding L[Library_Empty]}"
                             FontSize="16"
                             Foreground="{DynamicResource TextSecondaryBrush}"
                             HorizontalAlignment="Center"

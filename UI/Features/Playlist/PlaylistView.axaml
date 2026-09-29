@@ -364,7 +364,7 @@
                         IsVisible="{Binding ShowAuthor}"
                         VerticalAlignment="Bottom"
                         Margin="12,0,0,4">
-                        <TextBlock Text="от" FontSize="13"
+                        <TextBlock Text="{Binding L[Common_From]}" FontSize="13"
                             Foreground="{DynamicResource TextMutedBrush}"
                             VerticalAlignment="Center" />
                         <Button Classes="author-link"
