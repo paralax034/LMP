@@ -149,6 +149,7 @@ public sealed partial class AudioPlayer
         if (pipeline == null || !pipeline.Source.CanSeek)
         {
             cmd.Completion?.TrySetResult(false);
+            _events.RaiseSeekCompleted(cmd.Position);
             return;
         }
 
@@ -180,6 +181,7 @@ public sealed partial class AudioPlayer
             {
                 cmd.Completion?.TrySetCanceled();
                 StartPositionTimerDelayed();
+                _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(posMs));
                 return;
             }
 
@@ -207,6 +209,7 @@ public sealed partial class AudioPlayer
             cmd.Completion?.TrySetCanceled();
             RestorePlaybackActiveState(pipeline);
             StartPositionTimerDelayed();
+            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(posMs));
         }
         catch (AudioDeviceException ex)
         {
@@ -214,6 +217,7 @@ public sealed partial class AudioPlayer
             RestorePlaybackActiveState(pipeline);
             HandleError(ex);
             StartPositionTimerDelayed();
+            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(posMs));
         }
         catch (Exception ex)
         {
@@ -228,6 +232,7 @@ public sealed partial class AudioPlayer
             }
 
             StartPositionTimerDelayed();
+            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(posMs));
         }
     }
 
@@ -299,6 +304,7 @@ public sealed partial class AudioPlayer
                 if (!ValidateSeekState(iterCt, pipeline, sessionAtStart))
                 {
                     cmd.Completion?.TrySetCanceled();
+                    _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(currentTargetMs));
                     return;
                 }
 
@@ -317,6 +323,7 @@ public sealed partial class AudioPlayer
                 if (!ValidateSeekState(iterCt, pipeline, sessionAtStart))
                 {
                     cmd.Completion?.TrySetCanceled();
+                    _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(currentTargetMs));
                     return;
                 }
 
@@ -365,6 +372,7 @@ public sealed partial class AudioPlayer
                     if (!ValidateSeekState(iterCt, pipeline, sessionAtStart))
                     {
                         cmd.Completion?.TrySetCanceled();
+                        _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(currentTargetMs));
                         return;
                     }
 
@@ -392,18 +400,21 @@ public sealed partial class AudioPlayer
 
             Log.Warn($"[SeekTelemetry] Seek coalescing loop exhausted ({SeekLoopMaxIterations} iterations)");
             cmd.Completion?.TrySetResult(false);
+            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
         }
         catch (OperationCanceledException)
         {
             Log.Debug($"[SeekTelemetry] Seek to {initialPosMs}ms cancelled. " +
                       $"Elapsed: {totalSw.ElapsedMilliseconds}ms");
             cmd.Completion?.TrySetCanceled();
+            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
         }
         catch (Exception ex)
         {
             Log.Error($"[SeekTelemetry] Seek to {initialPosMs}ms failed: {ex.Message}", ex);
             cmd.Completion?.TrySetException(ex);
             SetState(wasPlaying ? PlayerState.Playing : PlayerState.Paused);
+            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
         }
         finally
         {

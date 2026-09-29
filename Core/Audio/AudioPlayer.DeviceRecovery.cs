@@ -141,18 +141,18 @@ public sealed partial class AudioPlayer
         }
         catch (AudioDeviceException ex)
         {
-            SetState(PlayerState.Error);
-            _events.RaiseError(new AudioPlayerError(GetDeviceErrorMessage(), ex));
+            Log.Warn($"[AudioPlayer] Device recovery attempt deferred: endpoint not ready ({ex.Message}). Preserving pipeline in paused state.");
+            SetState(PlayerState.Paused);
         }
         catch (OperationCanceledException)
         {
-            if (_state == PlayerState.Buffering && CurrentPlaybackIntent != PlaybackIntent.Play)
+            if (_state == PlayerState.Buffering)
                 SetState(PlayerState.Paused);
         }
         catch (Exception ex)
         {
-            SetState(PlayerState.Error);
-            _events.RaiseError(new AudioPlayerError(ex.Message, ex));
+            Log.Error($"[AudioPlayer] Device recovery unexpected error: {ex.Message}");
+            SetState(PlayerState.Paused);
         }
     }
 }

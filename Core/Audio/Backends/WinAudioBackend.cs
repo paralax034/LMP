@@ -214,7 +214,7 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
                     DisposeWaveOutSafe();
                     StartDeviceWatcher();
                     Log.Error($"[WinAudioBackend] Failed to open audio device after {attempt + 1} attempts: {ex.Message}");
-                    throw new AudioDeviceException(GetDeviceErrorMessage(), ex);
+                    throw new AudioDeviceException("Error_NoAudioDevice", ex);
                 }
             }
         }
@@ -293,9 +293,9 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
         {
             wFormatTag = 0x0003, // WAVE_FORMAT_IEEE_FLOAT
             nChannels = (ushort)channels,
-            nSamplesPerSec = (uint)sampleRate,
-            nAvgBytesPerSec = (uint)(sampleRate * channels * sizeof(float)),
-            nBlockAlign = (ushort)(channels * sizeof(float)),
+            nSamplesPerSec = (uint)(sampleRate > 0 ? sampleRate : 48000),
+            nAvgBytesPerSec = (uint)((sampleRate > 0 ? sampleRate : 48000) * (channels > 0 ? channels : 2) * sizeof(float)),
+            nBlockAlign = (ushort)((channels > 0 ? channels : 2) * sizeof(float)),
             wBitsPerSample = 32,
             cbSize = 0
         };
@@ -357,17 +357,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
     /// <summary>
     /// Основной цикл воспроизведения.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Читает PCM float-данные напрямую из <see cref="_callback"/> без промежуточных managed-буферов.
-    /// Применяет fade envelope и volume gain in-place перед единственным <see cref="Marshal.Copy"/>
-    /// в нативный <c>WAVEHDR.lpData</c>.
-    /// </para>
-    /// <para>
-    /// При ошибке <see cref="waveOutWrite"/> (например, MMSYSERR_INVALHANDLE = 6 при смене устройства)
-    /// немедленно переводит бэкенд в состояние DeviceLost, закрывает gate и оповещает плеер.
-    /// </para>
-    /// </remarks>
     private unsafe void NativePlaybackLoop()
     {
         float[] floatBuffer = new float[_bufferFloatCount];
@@ -487,6 +476,7 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
 
         _playbackRunning = false;
     }
+
     private unsafe void DisposeWaveOutSafe()
     {
         _playbackRunning = false;
@@ -561,7 +551,7 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
         if (_hWaveOut == 0) return;
 
         if (_deviceLost)
-            throw new AudioDeviceException(GetDeviceErrorMessage());
+            throw new AudioDeviceException("Error_NoAudioDevice");
 
         lock (_stateLock)
         {
@@ -725,7 +715,7 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
                 if (queryRes == MMSYSERR_NOERROR)
                 {
                     StopDeviceWatcher();
-                    Log.Info($"[WinAudioBackend] Audio endpoint verified available via query — triggering auto-recovery");
+                    Log.Info("[WinAudioBackend] Audio endpoint verified available via query — triggering auto-recovery");
 
                     var cb = _onDeviceAvailable;
                     if (cb != null) Task.Run(cb);
@@ -745,9 +735,6 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
 
         _playbackThread = null;
     }
-
-    private static string GetDeviceErrorMessage() =>
-        LocalizationService.Instance["Error_NoAudioDevice"];
 
     /// <inheritdoc/>
     public void SetVolumeGain(float gain) => _gainProcessor?.SetVolumeGain(gain);

@@ -43,7 +43,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         _audioEngine.OnDeviceLost += HandleDeviceLost;
         _audioEngine.OnDeviceRestored += HandleDeviceRestored;
 
-        // Subscribe to low-level early-warning network events
         Core.Audio.Sources.CachingStreamSource.OnSourceWarning += HandleSourceWarning;
 
         Log.Info("[PlaybackErrorOrchestrator] Initialized and ready");
@@ -55,7 +54,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     {
         if (_disposed) return;
 
-        // Deduplicate early-warnings to avoid UI clutter
         string warningKey = $"warning_{trackId}_{exception.GetType().Name}";
         if (!TryRegisterError(warningKey)) return;
 
@@ -68,7 +66,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     {
         try
         {
-            // Apologize for the delay without premature assumptions about DPI blocking
             await _notificationService.ShowToastAsync(
                 titleKey: "Notification_PlaybackDelay_Title",
                 messageKey: "Notification_PlaybackDelay_Message",
@@ -173,6 +170,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
 
             await (actualException switch
             {
+                AudioDeviceException devEx => HandleAudioDeviceUnavailableAsync(devEx),
                 BotDetectionException botEx => HandleBotDetectionAsync(botEx),
                 CdnUnavailableException cdnEx
                     => HandleCdnUnavailableAsync(cdnEx, isDuplicate),
@@ -193,10 +191,29 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     }
 
     /// <summary>
-    /// CDN заблокирован ТСПУ для media-трафика.
-    /// Failover уже запущен в <see cref="AudioEngine"/> — здесь только уведомление
-    /// если все попытки исчерпаны.
+    /// Обрабатывает неготовность аудиоустройства вывода без убийства и запечатывания активного трека.
     /// </summary>
+    private async Task HandleAudioDeviceUnavailableAsync(AudioDeviceException exception)
+    {
+        Log.Warn($"[Orchestrator] Audio device endpoint is currently unavailable: {exception.Message}. Playback preserved in paused state.");
+
+        if (!TryRegisterError("audio_device_unavailable"))
+            return;
+
+        _notificationService.TryPlayErrorSound();
+
+        await _notificationService.ShowToastAsync(
+            titleKey: "Notification_DeviceLost_Title",
+            messageKey: "Notification_DeviceLost_Message",
+            severity: NotificationSeverity.Warning,
+            durationMs: SkipToastDurationMs);
+
+        await NotificationService.ShowOsNotificationAsync(
+            LocalizationService.Instance["Notification_DeviceLost_Title"],
+            LocalizationService.Instance["Notification_DeviceLost_Message"],
+            NotificationSeverity.Warning);
+    }
+
     private async Task HandleCdnUnavailableAsync(
         LMP.Core.Exceptions.CdnUnavailableException exception,
         bool isDuplicate)
@@ -212,11 +229,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
             recommendationKeyOverride: "Recommendation_DpiBlocked");
     }
 
-    /// <summary>
-    /// Обрабатывает сетевые ошибки подключения к YouTube (таймаут, SSL, DNS).
-    /// Показывает пользователю понятное сообщение с рекомендацией вместо
-    /// технического "видео недоступно через все клиенты".
-    /// </summary>
     private async Task HandleNetworkErrorAsync(YoutubeNetworkException exception, bool isDuplicate)
     {
         Log.Warn($"[Orchestrator] Network error: {exception.ErrorType} — {exception.Message}");
@@ -239,7 +251,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
             return;
         }
 
-        var settings = _libraryService.Settings.Audio;
         _notificationService.TryPlayErrorSound();
 
         var messageKey = GetLoginRequiredMessageKey(exception);
@@ -264,10 +275,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         await DispatchPlaybackErrorAsync(exception, messageKey, attempts, isDuplicate);
     }
 
-    /// <summary>
-    /// Обрабатывает ситуацию, когда видео недоступно ни через один клиент YouTube.
-    /// Пробрасывает управление в единый диспетчер с ключом локализации.
-    /// </summary>
     private async Task HandleVideoUnplayableAsync(VideoUnplayableException exception, bool isDuplicate)
     {
         Log.Error($"[Orchestrator] Video unplayable: {exception.VideoId} — {exception.Message}");
@@ -336,11 +343,8 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
 
     #endregion
 
-    #region Behavior Strategies (Deduplicated)
+    #region Behavior Strategies
 
-    /// <summary>
-    /// Универсальный диспетчер, обрабатывающий поведение на основе настроек воспроизведения.
-    /// </summary>
     private async Task DispatchPlaybackErrorAsync(
         Exception exception,
         string messageOrKey,
@@ -505,7 +509,8 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
                 ChunkDownloadFatalException or
                 VideoUnplayableException or
                 YoutubeNetworkException or
-                CdnUnavailableException)
+                CdnUnavailableException or
+                AudioDeviceException)
             {
                 return inner;
             }
@@ -522,6 +527,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
 
         return exception switch
         {
+            AudioDeviceException => "audio_device_unavailable",
             BotDetectionException => "bot_detection",
             YoutubeNetworkException net => $"network_{net.ErrorType}",
             LoginRequiredException login => $"login_{login.VideoId}",
@@ -651,7 +657,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         _audioEngine.OnDeviceLost -= HandleDeviceLost;
         _audioEngine.OnDeviceRestored -= HandleDeviceRestored;
 
-        // Unsubscribe safely to prevent GC leaks
         Core.Audio.Sources.CachingStreamSource.OnSourceWarning -= HandleSourceWarning;
 
         lock (_recentlyShownErrors) _recentlyShownErrors.Clear();

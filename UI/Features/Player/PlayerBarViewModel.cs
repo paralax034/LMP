@@ -494,17 +494,17 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         });
 
         ToggleLikeCommand = new AsyncRelayCommand(async () =>
-                {
-                    if (CurrentTrack != null)
-                    {
-                        await _playerControl.ToggleLikeAsync(CurrentTrack);
-                        IsLiked = CurrentTrack.IsLiked;
-                        OnPropertyChanged(nameof(LikeTooltip));
-                        ShowHint(
-                            v => IsLikeHintVisible = v,
-                            () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);
-                    }
-                }, () => HasTrack);
+        {
+            if (CurrentTrack != null)
+            {
+                await _playerControl.ToggleLikeAsync(CurrentTrack);
+                IsLiked = CurrentTrack.IsLiked;
+                OnPropertyChanged(nameof(LikeTooltip));
+                ShowHint(
+                    v => IsLikeHintVisible = v,
+                    () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);
+            }
+        }, () => HasTrack);
 
         LoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: false));
         ForceLoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: true));
@@ -573,6 +573,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private void OnPlayerControlIsPlayingChanged(bool isPlaying)
     {
         IsPlaying = isPlaying;
+        if (isPlaying)
+        {
+            IsSeekBusy = false;
+        }
         OnPropertyChanged(nameof(PlayPauseTooltip));
         if (isPlaying && IsTrackResetting)
         {
@@ -583,6 +587,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private void OnPlayerControlIsPausedChanged(bool isPaused)
     {
         IsPaused = isPaused;
+        if (isPaused)
+        {
+            IsSeekBusy = false;
+        }
     }
 
     private void OnPlayerControlRepeatModeChanged(RepeatMode mode)
@@ -921,6 +929,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         CurrentTrack = track;
         HasTrack = track != null;
 
+        // Сбрасываем флаг занятости перемотки при смене трека
+        IsSeekBusy = false;
+
         RaiseTrackInfoChanged();
 
         if (track != null)
@@ -1005,6 +1016,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         ShowNetworkStats = false;
         IsLiked = false;
         IsTrackResetting = false;
+        IsSeekBusy = false;
         Position = TimeSpan.Zero;
         PositionSeconds = 0;
         ResetBufferState();
@@ -1023,10 +1035,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             IsTrackResetting = false;
         }
 
-        if (IsSeekBusy)
-        {
-            IsSeekBusy = false;
-        }
+        IsSeekBusy = false;
 
         SyncPositionFromEngine();
 
@@ -1118,36 +1127,43 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void FallbackPositionUpdate()
     {
-        if (!HasTrack || IsTrackResetting)
+        if (!HasTrack)
+            return;
+
+        if (IsTrackResetting)
         {
-            if (IsTrackResetting && HasTrack)
+            var elapsed = DateTime.UtcNow - _trackResetStartTime;
+            bool audioIsPlaying = IsPlaying || _audio.CurrentPosition.TotalSeconds > AudioIsPlayingThresholdSec;
+
+            // Защита от зависания состояния сброса: если звук играет дольше таймаута — принудительно сбрасываем флаг
+            if (audioIsPlaying && elapsed > TimeSpan.FromSeconds(StaleResetTimeoutSec))
             {
-                var elapsed = DateTime.UtcNow - _trackResetStartTime;
-                bool audioIsPlaying = IsPlaying || _audio.CurrentPosition.TotalSeconds > AudioIsPlayingThresholdSec;
+                Log.Warn($"[PlayerBar] TrackReset stuck for {elapsed.TotalSeconds:F1}s while audio is playing — force clearing");
+                IsTrackResetting = false;
+                SyncPositionFromEngine();
+                SyncBufferState();
 
-                if (audioIsPlaying && elapsed > TimeSpan.FromSeconds(StaleResetTimeoutSec))
+                if (!string.IsNullOrEmpty(_lastValidStreamInfo))
                 {
-                    Log.Warn($"[PlayerBar] TrackReset stuck for {elapsed.TotalSeconds:F1}s while audio is playing — force clearing");
-                    IsTrackResetting = false;
-                    SyncPositionFromEngine();
-                    SyncBufferState();
-
-                    if (!string.IsNullOrEmpty(_lastValidStreamInfo))
-                    {
-                        StreamInfo = _lastValidStreamInfo;
-                        ShowStreamInfo = true;
-                    }
+                    StreamInfo = _lastValidStreamInfo;
+                    ShowStreamInfo = true;
                 }
+            }
+            else if (!IsLoading && elapsed > TimeSpan.FromSeconds(StaleResetTimeoutSec * 2))
+            {
+                // Если устройство на паузе или в процессе восстановления, но загрузка не активна — снимаем зависший визуальный флаг
+                Log.Debug($"[PlayerBar] TrackReset cleared in paused/idle state ({elapsed.TotalSeconds:F1}s)");
+                IsTrackResetting = false;
+                SyncPositionFromEngine();
+                SyncBufferState();
             }
             return;
         }
 
-        if (IsSeekBusy)
+        if (IsSeekBusy || _isSeeking)
         {
             return;
         }
-
-        if (_isSeeking) return;
 
         if (IsPlaying)
         {
