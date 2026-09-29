@@ -425,33 +425,6 @@ public sealed class PlaylistSyncService
     }
 
     /// <summary>
-    /// Добавляет трек в облачный плейлист.
-    /// </summary>
-    public async Task AddTrackToCloudAsync(Playlist playlist, string trackId, CancellationToken ct = default)
-    {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
-            return;
-
-        try
-        {
-            var rawId = YoutubeIdHelper.ExtractRawId(trackId);
-            var setVideoId = await _youtube.AddToPlaylistAsync(playlist.YoutubeId, rawId).ConfigureAwait(false);
-            if (!string.IsNullOrEmpty(setVideoId))
-            {
-                await _playlists.UpdateSetVideoIdAsync(playlist.Id, trackId, setVideoId, ct).ConfigureAwait(false);
-            }
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[PlaylistSync] Add track to cloud failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
     /// Пакетно добавляет треки в облачный плейлист.
     /// </summary>
     public async Task AddTracksToCloudAsync(Playlist playlist, IReadOnlyList<string> trackIds, CancellationToken ct = default)
@@ -534,15 +507,6 @@ public sealed class PlaylistSyncService
 
         return setVideoId;
     }
-
-    /// <summary>
-    /// Удаляет трек из облачного плейлиста по его идентификатору связи.
-    /// </summary>
-    /// <param name="playlist">Модель плейлиста.</param>
-    /// <param name="setVideoId">Идентификатор связи видео в облачном плейлисте.</param>
-    /// <returns>Задача, представляющая асинхронную операцию удаления трека.</returns>
-    public Task RemoveTrackFromCloudAsync(Playlist playlist, string setVideoId) =>
-        RemoveTracksFromCloudAsync(playlist, [setVideoId]);
 
     /// <summary>
     /// Пакетно удаляет группу треков из облачного плейлиста по их идентификаторам связи.

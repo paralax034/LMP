@@ -61,15 +61,6 @@ public static class ThumbnailUtils
     }
 
     /// <summary>
-    /// Находит обложку с максимальным разрешением с fallback на YouTube video thumbnail.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static string GetBestUrlOrDefault(IReadOnlyList<Thumbnail> thumbnails, string videoId)
-    {
-        return GetBestUrl(thumbnails, videoId);
-    }
-
-    /// <summary>
     /// Высокопроизводительно извлекает массив Thumbnail напрямую из JSON без создания промежуточных объектов ThumbnailData.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -56,39 +56,6 @@ internal static class StringExtensions
         }
 
         /// <summary>
-        /// Удаляет все нецифровые символы из строки.
-        /// </summary>
-        public string StripNonDigit()
-        {
-            var allDigits = true;
-            foreach (var c in str)
-            {
-                if (!char.IsDigit(c))
-                {
-                    allDigits = false;
-                    break;
-                }
-            }
-
-            return allDigits ? str : str.StripNonDigitOptimized();
-        }
-
-        /// <summary>
-        /// Удаляет нецифровые символы с выделением буфера под длину строки.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string StripNonDigitOptimized()
-        {
-            var builder = new StringBuilder(str.Length);
-            foreach (var c in str)
-            {
-                if (char.IsDigit(c))
-                    builder.Append(c);
-            }
-            return builder.ToString();
-        }
-
-        /// <summary>
         /// Разворачивает строку без аллокации массивов.
         /// </summary>
         public string Reverse()

@@ -94,17 +94,6 @@ public sealed class NetworkManager : IDisposable
     }
 
     /// <inheritdoc/>
-    public void UpdateProfile(InternetProfile profile)
-    {
-        lock (_stateLock)
-        {
-            _currentProfile = profile;
-        }
-        AudioSourceFactory.ApplyInternetProfile(profile);
-        Log.Info($"[NetworkManager] Internet profile updated: {profile}");
-    }
-
-    /// <inheritdoc/>
     public void RebuildAll(string reason, bool force = false)
     {
         long now = Environment.TickCount64;

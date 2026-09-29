@@ -665,33 +665,6 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
     }
 
-    public async Task CleanupAsync(CancellationToken ct = default)
-    {
-        var stats = GetStats();
-        if (stats.TotalSizeBytes <= _maxCacheSize) return;
-
-        Log.Info($"[AudioCache] Cleanup needed: {stats.TotalSizeBytes / 1024 / 1024}MB > {_maxCacheSize / 1024 / 1024}MB");
-
-        long totalSize = stats.TotalSizeBytes;
-
-        var entries = _entries.Values
-            .OrderBy(e => e.LastAccessedAt)
-            .ToList();
-
-        foreach (var entry in entries)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (totalSize <= _maxCacheSize * CacheCleanupThreshold)
-                break;
-
-            totalSize -= entry.ActualFileSize;
-            RemoveCache(entry.CacheKey);
-        }
-
-        Log.Info($"[AudioCache] Cleanup complete, new size: {totalSize / 1024 / 1024}MB");
-    }
-
     #endregion
 
     #region Lease API

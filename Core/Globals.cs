@@ -184,7 +184,6 @@ public static class G
         public static readonly string AuthData = Path.Combine(Folder.Data, "auth.json");
 
         public static readonly string NTokenCache = Path.Combine(Folder.NTokenCache, "tokens.bin");
-        public static readonly string NTokenScript = Path.Combine(Folder.NTokenCache, "ntoken_override.js");
         public static readonly string SigCipherCache = Path.Combine(Folder.SigCipherCache, "sigcache.bin");
 
         /// <summary>

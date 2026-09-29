@@ -97,9 +97,11 @@ $runArgs = @(
 )
 
 & dotnet @runArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Ошибка при выполнении анализатора AotScanner. Код выхода: $LASTEXITCODE"
-    exit $LASTEXITCODE
+$scannerExitCode = $LASTEXITCODE
+
+if ($scannerExitCode -lt 0) {
+    Write-Error "Ошибка при выполнении анализатора AotScanner. Код выхода: $scannerExitCode"
+    exit $scannerExitCode
 }
 
 Write-Host ""
@@ -107,3 +109,5 @@ Write-Host "══════════════════════�
 Write-Host " Анализ успешно завершен! Отчет: $fullOutputPath" -ForegroundColor Green
 Write-Host "══════════════════════════════════════════════════════════════" -ForegroundColor DarkGray
 Write-Host ""
+
+exit $scannerExitCode

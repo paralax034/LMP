@@ -23,9 +23,6 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     /// <summary>Версия клиента YouTube Web.</summary>
     public const string WebClientVersion = "2.20260126.01.00";
 
-    /// <summary>Идентификатор клиента YouTube Web.</summary>
-    public const string WebClientName = "1";
-
     /// <summary>Origin заголовок для YouTube Music.</summary>
     public const string MusicOrigin = "https://music.youtube.com";
 

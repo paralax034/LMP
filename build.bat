@@ -96,11 +96,11 @@ dotnet build LMP.sln -c Debug ^
 goto :CHECK
 
 :RELEASE
-echo Checking for dead events...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Tools\find-dead-events.ps1"
+echo Auditing dead code and events (Native AOT + Source Tree)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Tools\find-dead-code.ps1"
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [WARNING] Dead events detected. Consider fixing before release.
+    echo [WARNING] Dead code or events detected. Check DeadCode.txt before releasing.
     echo.
 )
 

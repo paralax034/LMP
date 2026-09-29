@@ -154,5 +154,4 @@ public sealed class PlaylistSyncResult
         : $"Failed: {ErrorMessage}";
 
     public static PlaylistSyncResult Fail(string error) => new() { Success = false, ErrorMessage = error };
-    public static PlaylistSyncResult NoChanges() => new() { Success = true };
 }

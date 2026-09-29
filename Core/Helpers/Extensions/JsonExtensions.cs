@@ -8,21 +8,6 @@ namespace LMP.Core.Helpers.Extensions;
 /// </summary>
 internal static class JsonExtensions
 {
-    private static class Utf8PropertyNames
-    {
-        public static readonly byte[] Thumbnails = "thumbnails"u8.ToArray();
-        public static readonly byte[] Runs = "runs"u8.ToArray();
-        public static readonly byte[] Text = "text"u8.ToArray();
-        public static readonly byte[] VideoId = "videoId"u8.ToArray();
-        public static readonly byte[] Title = "title"u8.ToArray();
-        public static readonly byte[] NavigationEndpoint = "navigationEndpoint"u8.ToArray();
-        public static readonly byte[] BrowseEndpoint = "browseEndpoint"u8.ToArray();
-        public static readonly byte[] BrowseId = "browseId"u8.ToArray();
-        public static readonly byte[] PlaylistId = "playlistId"u8.ToArray();
-        public static readonly byte[] ContinuationCommand = "continuationCommand"u8.ToArray();
-        public static readonly byte[] Token = "token"u8.ToArray();
-    }
-
     extension(JsonElement element)
     {
         /// <summary>
@@ -214,81 +199,6 @@ internal static class JsonExtensions
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Лениво собирает все свойства с именем <paramref name="propertyName"/> в дереве.
-        /// </summary>
-        public IEnumerable<JsonElement> EnumerateDescendantProperties(string propertyName)
-        {
-            var results = new List<JsonElement>(4);
-            element.EnumerateDescendantProperties(propertyName, results);
-            return results;
-        }
-
-        /// <summary>
-        /// Извлекает строку из <c>runs[0].text</c>.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string? GetTextFromRuns()
-        {
-            var runs = element.GetPropertyOrNull(Utf8PropertyNames.Runs);
-            if (runs is null) return null;
-
-            var firstRun = runs.Value.GetFirstArrayElementOrNull();
-            if (firstRun is null) return null;
-
-            var text = firstRun.Value.GetPropertyOrNull(Utf8PropertyNames.Text);
-            return text?.GetStringOrNull();
-        }
-
-        /// <summary>
-        /// Извлекает идентификатор видео из <c>navigationEndpoint</c>.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string? GetVideoIdFromNavigation()
-        {
-            var nav = element.GetPropertyOrNull(Utf8PropertyNames.NavigationEndpoint);
-            if (nav is null) return null;
-
-            var watchEndpoint = nav.Value.GetPropertyOrNull("watchEndpoint"u8);
-            if (watchEndpoint is not null)
-            {
-                var videoId = watchEndpoint.Value.GetPropertyOrNull(Utf8PropertyNames.VideoId);
-                if (videoId is not null) return videoId.Value.GetStringOrNull();
-            }
-
-            var browseEndpoint = nav.Value.GetPropertyOrNull(Utf8PropertyNames.BrowseEndpoint);
-            if (browseEndpoint is not null)
-            {
-                var browseId = browseEndpoint.Value.GetPropertyOrNull(Utf8PropertyNames.BrowseId);
-                if (browseId is not null) return browseId.Value.GetStringOrNull();
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Извлекает <c>playlistId</c>.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string? GetPlaylistIdSafe()
-        {
-            var plId = element.GetPropertyOrNull(Utf8PropertyNames.PlaylistId);
-            return plId?.GetStringOrNull();
-        }
-
-        /// <summary>
-        /// Извлекает токен продолжения страницы (<c>continuationCommand.token</c>).
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string? GetContinuationToken()
-        {
-            var cmd = element.GetPropertyOrNull(Utf8PropertyNames.ContinuationCommand);
-            if (cmd is null) return null;
-
-            var token = cmd.Value.GetPropertyOrNull(Utf8PropertyNames.Token);
-            return token?.GetStringOrNull();
         }
     }
 }

@@ -35,24 +35,9 @@ public static class AudioConstants
     /// <summary>Размер чанка для кэширования (64KB = оптимум для HTTP Range + минимум аллокаций).</summary>
     public const int ChunkSize = 64 * 1024;
 
-    /// <summary>Максимум чанков в RAM (32 × 64KB = 2MB RAM на трек).</summary>
-    public const int MaxRamChunks = 96;
-
-    /// <summary>Расстояние от текущей позиции для вытеснения (eviction) чанков из RAM.</summary>
-    public const int RamEvictionDistance = 14;
-
     // ═══════════════════════════════════════════════════════
     // PRELOAD SETTINGS — Стратегия упреждающей загрузки
     // ═══════════════════════════════════════════════════════
-
-    /// <summary>Чанков загружать перед стартом воспроизведения (300ms @ 128kbps).</summary>
-    public const int InitialChunksToLoad = 4;
-
-    /// <summary>Чанков держать впереди от текущей позиции (adaptive buffering).</summary>
-    public const int PreloadAheadChunks = 6;
-
-    /// <summary>Чанков загружать при seek (instant seek UX).</summary>
-    public const int SeekPreloadChunks = 6;
 
     /// <summary>Интервал проверки preload loop (мс).</summary>
     public const int PreloadIntervalMs = 500;
@@ -63,9 +48,6 @@ public static class AudioConstants
     // ═══════════════════════════════════════════════════════
     // DOWNLOAD TIMEOUTS — HTTP операции
     // ═══════════════════════════════════════════════════════
-
-    /// <summary>Таймаут загрузки одного чанка (15s = mobile-friendly).</summary>
-    public const int DownloadTimeoutMs = 15_000;
 
     /// <summary>Таймаут ожидания слота загрузки (мс).</summary>
     public const int DownloadSlotTimeoutMs = 300;
@@ -79,12 +61,6 @@ public static class AudioConstants
 
     /// <summary>Пауза между фоновыми загрузками (5s = gentle network usage).</summary>
     public const int BackgroundFillIntervalMs = 5_000;
-
-    /// <summary>Максимум чанков для фоновой докачки за сессию (0 = unlimited).</summary>
-    public const int MaxBackgroundChunksPerSession = 50;
-
-    /// <summary>Минимум буфера впереди для начала фоновой докачки.</summary>
-    public const int MinBufferAheadForBackgroundFill = 6;
 
     // ═══════════════════════════════════════════════════════
     // DECODER SETTINGS — Параметры декодирования
@@ -127,12 +103,6 @@ public static class AudioConstants
     /// <summary>Размер PCM буфера в секундах (2s = smooth playback).</summary>
     public const int BufferSizeSeconds = 2;
 
-    /// <summary>Минимальный буфер для старта воспроизведения (мс).</summary>
-    public const int MinBufferMs = 80;
-
-    /// <summary>Минимальный буфер для возобновления после seek (мс).</summary>
-    public const int MinSeekResumeBufferMs = 50;
-
     // ═══════════════════════════════════════════════════════
     // POSITION REPORTING — UI обновления
     // ═══════════════════════════════════════════════════════
@@ -174,9 +144,6 @@ public static class AudioConstants
 
     /// <summary>Количество байт в одном килобайте.</summary>
     public const int BytesPerKilobyte = 1024;
-
-    /// <summary>Порог очистки кэша (80% от максимума).</summary>
-    public const double CacheCleanupThreshold = 0.8;
 
     // ═══════════════════════════════════════════════════════
     // BITRATE NORMALIZATION THRESHOLDS

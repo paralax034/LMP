@@ -120,13 +120,14 @@ $usedKeys = @{}
 
 # Белый список динамических ключей
 $dynamicKeys = @(
-    "Home_Greeting_Morning", "Home_Greeting_Afternoon", "Home_Greeting_Evening",
+    "Home_Greeting_Morning", "Home_Greeting_Afternoon", "Home_Greeting_Evening", "Home_Greeting_Night",
     "NetProfile_Low", "NetProfile_Medium", "NetProfile_High", "NetProfile_Ultra",
     "AudioQuality_BestAvailable", "AudioQuality_Standard",
     "Client_AndroidVR", "Client_TV", "Client_Web",
-    "Cache_Low", "Cache_Medium", "Cache_High",
+    "Cache_Low", "Cache_Medium", "Cache_High", "Cache_Ultra",
     "VolumeCurve_Linear", "VolumeCurve_Quadratic", "VolumeCurve_Logarithmic", "VolumeCurve_Cubic", "VolumeCurve_SpeedOfLight",
-    "CloseAction_Exit", "CloseAction_MinimizeToTray", "CloseAction_Ask"
+    "CloseAction_Exit", "CloseAction_MinimizeToTray", "CloseAction_Ask",
+    "AnimationSpeed_VerySlow", "AnimationSpeed_Slow", "AnimationSpeed_Medium", "AnimationSpeed_Fast", "AnimationSpeed_Epileptic"
 )
 
 foreach ($key in $dynamicKeys) {
@@ -335,11 +336,11 @@ Write-Host ""
 Write-Host ("-" * 53) -ForegroundColor DarkGray
 Write-Host "  Итоговая статистика"                                                                    -ForegroundColor White
 Write-Host "    Ключей в мастере ($Master) : $($masterDict.Count)"                                     -ForegroundColor Gray
-Write-Host "    Использовано в коде        : $($usedKeys.Count)"                                            -ForegroundColor Gray
+Write-Host "    Использовано в коде        : $($usedKeys.Count)"                                       -ForegroundColor Gray
 Write-Host "    Мёртвых ключей             : $($deadKeys.Count)"    -ForegroundColor $(if ($deadKeys.Count    -eq 0) { "Green" } else { "DarkYellow" })
 Write-Host "    Пропущенных ключей         : $($missingKeys.Count)" -ForegroundColor $(if ($missingKeys.Count -eq 0) { "Green" } else { "Red" })
 Write-Host "    Пропущено Plural FP        : $pluralFP"             -ForegroundColor Gray
-ZWrite-Host "    Ошибок синхронизации       : $syncIssues"           -ForegroundColor $(if ($syncIssues         -eq 0) { "Green" } else { "Red" })
+Write-Host "    Ошибок синхронизации       : $syncIssues"           -ForegroundColor $(if ($syncIssues         -eq 0) { "Green" } else { "Red" })
 Write-Host ""
 
 exit ($deadKeys.Count + $missingKeys.Count + $syncIssues)

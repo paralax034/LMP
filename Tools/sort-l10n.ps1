@@ -1,78 +1,98 @@
 <#
 .SYNOPSIS
-    Скрипт для сортировки и группировки ключей в JSON-файлах локализации.
+    Localization JSON dictionary sorter and formatter for LMP.
 
 .PARAMETER LocalizationDir
-    Путь к директории с файлами локализации.
+    Relative or absolute path to the localization directory.
 
 .EXAMPLE
     .\Tools\sort-l10n.ps1
 #>
 
 param (
-    [string]$LocalizationDir = "$PSScriptRoot\..\Assets\Localization"
+    [string]$LocalizationDir = ""
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path $LocalizationDir)) {
-    Write-Error "Директория локализации не найдена: $LocalizationDir"
+# Resolve repository root path
+$root = Split-Path $PSScriptRoot -Parent
+
+$targetDir = if ([string]::IsNullOrWhiteSpace($LocalizationDir)) {
+    Join-Path $root "Assets\Localization"
+} else {
+    if ([System.IO.Path]::IsPathRooted($LocalizationDir)) {
+        $LocalizationDir
+    } else {
+        Join-Path $root $LocalizationDir
+    }
+}
+
+if (-not (Test-Path $targetDir)) {
+    Write-Error "Localization directory not found: $targetDir"
     exit 1
 }
 
-$jsonFiles = Get-ChildItem -Path $LocalizationDir -Filter "*.json"
+$jsonFiles = @(Get-ChildItem -Path $targetDir -Filter "*.json" | Sort-Object Name)
+if ($jsonFiles.Count -eq 0) {
+    Write-Error "No JSON files found in directory: $targetDir"
+    exit 1
+}
+
+Write-Host ""
+Write-Host "==============================================================" -ForegroundColor DarkGray
+Write-Host " LMP Localization Sorter & Formatter" -ForegroundColor Cyan
+Write-Host "==============================================================" -ForegroundColor DarkGray
+Write-Host "  Directory : $targetDir" -ForegroundColor Gray
+Write-Host ""
 
 foreach ($file in $jsonFiles) {
-    Write-Host "Обработка файла: $($file.Name)..." -ForegroundColor Cyan
+    Write-Host "  Sorting $($file.Name)..." -ForegroundColor Yellow
 
-    $rawContent = Get-Content -Path $file.FullName -Raw -Encoding UTF8
-    $jsonObject = $rawContent | ConvertFrom-Json
+    $lines = [System.IO.File]::ReadAllLines($file.FullName, [System.Text.Encoding]::UTF8)
+    $dict = [System.Collections.Generic.SortedDictionary[string, string]]::new([System.StringComparer]::Ordinal)
 
-    # Универсальное извлечение свойств для совместимости с Windows PowerShell 5.1
-    $sortedProperties = $jsonObject.psobject.properties | Sort-Object Name
+    foreach ($line in $lines) {
+        if ($line -match '^\s*"([^"]+)"\s*:\s*"((?:[^"\\]|\\.)*)"') {
+            $dict[$Matches[1]] = $Matches[2]
+        }
+    }
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine("{")
 
     $previousPrefix = ""
-    $count = $sortedProperties.Count
+    $keys = @($dict.Keys)
+    $count = $keys.Count
     $index = 0
 
-    foreach ($prop in $sortedProperties) {
+    foreach ($key in $keys) {
         $index++
-        $key = $prop.Name
-        $value = $prop.Value
+        $value = $dict[$key]
 
-        # Извлечение префикса до символа '_' для логической группировки блоков
+        # Logical prefix grouping by underscore
         $prefix = if ($key.Contains("_")) { $key.Split("_")[0] } else { "Other" }
 
-        # Вставка пустой строки при смене префикса
         if ($previousPrefix -ne "" -and $prefix -ne $previousPrefix) {
             [void]$sb.AppendLine()
         }
         $previousPrefix = $prefix
 
-        # Форматирование значений
-        if ($null -eq $value) {
-            $formattedValue = "null"
-        } elseif ($value -is [bool]) {
-            $formattedValue = $value.ToString().ToLower()
-        } elseif ($value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]) {
-            $formattedValue = $value.ToString()
-        } else {
-            $escapedValue = $value.ToString().Replace("\", "\\").Replace('"', '\"').Replace("`n", "\n").Replace("`r", "\r").Replace("`t", "\t")
-            $formattedValue = """$escapedValue"""
-        }
-
         $comma = if ($index -lt $count) { "," } else { "" }
-        [void]$sb.AppendLine("  ""$key"": $formattedValue$comma")
+        [void]$sb.AppendLine("  ""$key"": ""$value""$comma")
     }
 
     [void]$sb.AppendLine("}")
 
-    # Сохранение отформатированного JSON в UTF-8 без BOM
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     [System.IO.File]::WriteAllText($file.FullName, $sb.ToString(), $utf8NoBom)
 
-    Write-Host "Успешно отсортировано и сгруппировано: $($file.Name)" -ForegroundColor Green
+    Write-Host "  [OK] Successfully sorted: $($file.Name) ($count keys)" -ForegroundColor Green
 }
+
+Write-Host ""
+Write-Host "==============================================================" -ForegroundColor DarkGray
+Write-Host " All localization files sorted and formatted successfully!" -ForegroundColor Green
+Write-Host "==============================================================" -ForegroundColor DarkGray
+Write-Host ""

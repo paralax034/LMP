@@ -26,14 +26,6 @@ public sealed class DownloadService
         }
     }
 
-    public float GetProgress(string trackId)
-    {
-        lock (_lock)
-        {
-            return _activeTasks.TryGetValue(trackId, out var task) ? task.Progress : 0f;
-        }
-    }
-
     public int ActiveDownloadsCount
     {
         get
@@ -240,28 +232,6 @@ public sealed class DownloadService
                 _activeTasks.Remove(track.Id);
             }
             _downloadSemaphore.Release();
-        }
-    }
-
-    public void CancelDownload(string trackId)
-    {
-        lock (_lock)
-        {
-            if (_activeTasks.TryGetValue(trackId, out var task))
-            {
-                task.CancellationSource.Cancel();
-            }
-        }
-    }
-
-    public void CancelAllDownloads()
-    {
-        lock (_lock)
-        {
-            foreach (var task in _activeTasks.Values)
-            {
-                task.CancellationSource.Cancel();
-            }
         }
     }
 

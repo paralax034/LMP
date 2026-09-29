@@ -55,7 +55,6 @@ public partial class YoutubeProvider : IDisposable
 
     private static readonly Regex YoutubeVideoRegex = _YoutubeVideoRegex();
     private static readonly Regex YoutubePlaylistRegex = _YoutubePlaylistRegex();
-    private static readonly Regex ValidYoutubeId = _ValidYoutubeId();
 
     #endregion
 
@@ -240,36 +239,6 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Добавляет один трек в существующий облачный плейлист с пробросом исключений отсутствия ресурса (404).
-    /// </summary>
-    /// <param name="playlistId">Идентификатор целевого плейлиста.</param>
-    /// <param name="trackId">Идентификатор добавляемого трека.</param>
-    /// <returns>Идентификатор созданной связи (setVideoId) или <c>null</c> при отсутствии авторизации.</returns>
-    public async Task<string?> AddToPlaylistAsync(string playlistId, string trackId)
-    {
-        if (AuthService?.IsAuthenticated != true) return null;
-        try
-        {
-            var rawId = YoutubeIdHelper.ExtractRawId(trackId);
-            var setVideoIds = await _youtube.Mutations.AddTracksAsync(playlistId, [rawId]);
-            var result = setVideoIds.Count > 0 ? setVideoIds[0] : null;
-            if (!string.IsNullOrEmpty(result))
-                Log.Debug($"[Music] Added {rawId} to {playlistId}, setVideoId={result}");
-            return result;
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            Log.Warn($"[Music] Playlist {playlistId} not found on YouTube (404).");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Music] Failed to add to playlist: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Выполняет пакетное добавление треков в облачный плейлист.
     /// </summary>
     public async Task<List<string?>> AddTracksToPlaylistAsync(
@@ -294,28 +263,6 @@ public partial class YoutubeProvider : IDisposable
         {
             Log.Error($"[Music] Failed to batch add to playlist: {ex.Message}");
             return [];
-        }
-    }
-
-    /// <summary>
-    /// Удаляет один элемент из облачного плейлиста по его внутреннему setVideoId.
-    /// </summary>
-    public async Task RemoveFromPlaylistAsync(string playlistId, string setVideoId)
-    {
-        if (AuthService?.IsAuthenticated != true) return;
-
-        VideoController.ThrowIfInCooldown();
-
-        try
-        {
-            await _youtube.Mutations.RemoveTracksAsync(playlistId, [setVideoId]);
-            Log.Info($"[Music] Removed item {setVideoId} from playlist {playlistId}");
-        }
-        catch (BotDetectionException) { throw; }
-        catch (Exception ex)
-        {
-            Log.Error($"[Music] Failed to remove from playlist: {ex.Message}");
-            throw;
         }
     }
 
@@ -1827,9 +1774,6 @@ public partial class YoutubeProvider : IDisposable
         @"(?:youtube\.com\/.*[?&]list=)([a-zA-Z0-9_-]+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex _YoutubePlaylistRegex();
-
-    [GeneratedRegex(@"^[a-zA-Z0-9_-]{11}$", RegexOptions.CultureInvariant)]
-    private static partial Regex _ValidYoutubeId();
 
     #endregion
 }

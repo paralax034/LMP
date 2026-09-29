@@ -105,23 +105,6 @@ public struct GainCrossfader
     }
 
     /// <summary>
-    /// Принудительно начинает длинный fade (для событий lock/reset).
-    /// Используется когда gain меняется резко и нужен гарантированный 300ms переход
-    /// независимо от величины изменения.
-    /// </summary>
-    /// <param name="newTarget">Новый целевой gain.</param>
-    /// <param name="sampleRate">Sample rate.</param>
-    /// <param name="channels">Количество каналов.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void BeginSuddenTransition(float newTarget, int sampleRate, int channels)
-    {
-        _startGain = _currentGain;
-        _targetGain = newTarget;
-        _totalFadeSamples = (int)(sampleRate * channels * SuddenFadeMs / 1000f);
-        _remainingSamples = _totalFadeSamples;
-    }
-
-    /// <summary>
     /// Возвращает gain для текущего сэмпла и продвигает интерполяцию на 1 сэмпл.
     /// </summary>
     /// <returns>Текущий interpolated gain.</returns>

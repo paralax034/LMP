@@ -69,20 +69,6 @@ internal static class MediaPathProbe
     }
 
     /// <summary>
-    /// Быстрая проверка: может ли хост отдать медиа-данные (<c>Range: bytes=0-1</c>).
-    /// Используется для проактивного probe перед <c>InitializeAsync</c>.
-    /// </summary>
-    internal static async Task<bool> IsMediaAvailableAsync(
-        string mediaUrl,
-        int timeoutMs = DefaultTimeoutMs,
-        CancellationToken ct = default)
-    {
-        var (Ok, _, _, Bytes, _) = await ProbeMediaRangeAsync(mediaUrl, timeoutMs, ct)
-            .ConfigureAwait(false);
-        return Ok && Bytes > 0;
-    }
-
-    /// <summary>
     /// <c>Range GET</c> к media URL с корректными параметрами сессии YouTube.
     /// Использует общий рабочий SharedHttpClient.Instance.
     /// </summary>

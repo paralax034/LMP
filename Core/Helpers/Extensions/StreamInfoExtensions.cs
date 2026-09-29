@@ -7,24 +7,6 @@ namespace LMP.Core.Helpers.Extensions;
 /// </summary>
 public static class StreamInfoExtensions
 {
-    extension<T>(T streamInfo) where T : IStreamInfo
-    {
-        /// <summary>
-        /// Проверяет, ограничен ли поток по скорости (throttling).
-        /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="streamInfo"/> равен null.</exception>
-        public bool IsThrottled()
-        {
-            ArgumentNullException.ThrowIfNull(streamInfo);
-
-            return !string.Equals(
-                UrlEx.TryGetQueryParameterValue(streamInfo.Url, "ratebypass"),
-                "yes",
-                StringComparison.OrdinalIgnoreCase
-            );
-        }
-    }
-
     extension<T>(IEnumerable<T> streamInfos) where T : IStreamInfo
     {
         /// <summary>
