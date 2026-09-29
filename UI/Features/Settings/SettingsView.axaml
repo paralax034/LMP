@@ -1,12 +1,13 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:LMP.UI.Features.Settings"
-    xmlns:pages="using:LMP.UI.Features.Settings.Pages"
     x:Class="LMP.UI.Features.Settings.SettingsView"
-    x:DataType="vm:SettingsViewModel">
+    x:DataType="vm:SettingsViewModel"
+    x:CompileBindings="True">
 
     <Grid ColumnDefinitions="46, *" Name="LayoutGrid">
 
+        <!-- Боковое меню навигации -->
         <Border Grid.Column="0"
             Width="46"
             HorizontalAlignment="Left"
@@ -16,7 +17,6 @@
             ClipToBounds="True">
 
             <StackPanel Margin="0">
-                <!-- Верхняя концевая планка стойки -->
                 <Border Height="1" Background="{DynamicResource BgHighlightBrush}" Margin="0" />
 
                 <ListBox ItemsSource="{Binding SidebarItems}"
@@ -26,14 +26,11 @@
                     Margin="0">
 
                     <ListBox.DataTemplates>
-
                         <DataTemplate DataType="vm:AccountLanguageSidebarItem"
                             x:DataType="vm:AccountLanguageSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Account_Language]}">
-                                <PathIcon Data="{StaticResource Icon.Account}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Account}" Width="18"
+                                    Height="18" HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
@@ -42,12 +39,9 @@
 
                         <DataTemplate DataType="vm:NetworkSidebarItem"
                             x:DataType="vm:NetworkSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Network]}">
-                                <PathIcon Data="{StaticResource Icon.Web}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center" />
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Web}" Width="18" Height="18"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
                             </Grid>
@@ -55,11 +49,9 @@
 
                         <DataTemplate DataType="vm:StorageCacheSidebarItem"
                             x:DataType="vm:StorageCacheSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Storage_Data]}">
-                                <PathIcon Data="{StaticResource Icon.Database}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Database}" Width="18"
+                                    Height="18" HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
@@ -68,12 +60,9 @@
 
                         <DataTemplate DataType="vm:MemorySidebarItem"
                             x:DataType="vm:MemorySidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Memory]}">
-                                <PathIcon Data="{StaticResource Icon.Memory}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center" />
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Memory}" Width="18" Height="18"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
                             </Grid>
@@ -81,11 +70,9 @@
 
                         <DataTemplate DataType="vm:AppearanceSidebarItem"
                             x:DataType="vm:AppearanceSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Appearance]}">
-                                <PathIcon Data="{StaticResource Icon.Palette}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Palette}" Width="18"
+                                    Height="18" HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
@@ -94,11 +81,9 @@
 
                         <DataTemplate DataType="vm:AudioSidebarItem"
                             x:DataType="vm:AudioSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Audio]}">
-                                <PathIcon Data="{StaticResource Icon.VolumeHigh}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.VolumeHigh}" Width="18"
+                                    Height="18" HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
@@ -107,12 +92,9 @@
 
                         <DataTemplate DataType="vm:PlaybackSidebarItem"
                             x:DataType="vm:PlaybackSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_Playback]}">
-                                <PathIcon Data="{StaticResource Icon.Play}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center" />
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Play}" Width="18" Height="18"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
                             </Grid>
@@ -120,11 +102,9 @@
 
                         <DataTemplate DataType="vm:WindowBehaviorSidebarItem"
                             x:DataType="vm:WindowBehaviorSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_WindowBehavior]}">
-                                <PathIcon Data="{StaticResource Icon.WindowRestore}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.WindowRestore}" Width="18"
+                                    Height="18" HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
@@ -133,63 +113,29 @@
 
                         <DataTemplate DataType="vm:GeneralSidebarItem"
                             x:DataType="vm:GeneralSidebarItem">
-                            <Grid RowDefinitions="*, 1" Height="42"
-                                ToolTip.Tip="{Binding Owner.L[Settings_General]}">
-                                <PathIcon Data="{StaticResource Icon.Settings}"
-                                    Width="18" Height="18"
-                                    HorizontalAlignment="Center"
+                            <Grid RowDefinitions="*, 1" Height="42" ToolTip.Tip="{Binding Title}">
+                                <PathIcon Data="{StaticResource Icon.Settings}" Width="18"
+                                    Height="18" HorizontalAlignment="Center"
                                     VerticalAlignment="Center" />
                                 <Border Grid.Row="1" Height="1"
                                     Background="{DynamicResource BgHighlightBrush}" />
                             </Grid>
                         </DataTemplate>
-
                     </ListBox.DataTemplates>
                 </ListBox>
             </StackPanel>
         </Border>
 
-        <!--
-            Content
-            ScrollViewer сбрасывается в 0 при смене страницы (code-behind).
+        <!-- 
+            DataContext="{x:Null}" на контейнере блокирует нисходящее наследование SettingsViewModel,
+            гарантируя отсутствие коллизий типов и исключений при монтировании страниц.
         -->
         <ScrollViewer Grid.Column="1"
             Name="ContentScrollViewer"
             HorizontalScrollBarVisibility="Disabled">
-            <ContentControl Content="{Binding SelectedSidebarItem}"
-                Margin="0,0,0,80">
-                <ContentControl.DataTemplates>
-
-                    <DataTemplate DataType="vm:AccountLanguageSidebarItem">
-                        <pages:AccountLanguagePage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:NetworkSidebarItem">
-                        <pages:NetworkPage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:StorageCacheSidebarItem">
-                        <pages:StorageCachePage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:MemorySidebarItem">
-                        <pages:MemoryPage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:AppearanceSidebarItem">
-                        <pages:AppearancePage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:AudioSidebarItem">
-                        <pages:AudioPage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:PlaybackSidebarItem">
-                        <pages:PlaybackPage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:WindowBehaviorSidebarItem">
-                        <pages:WindowBehaviorPage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:GeneralSidebarItem">
-                        <pages:GeneralPage DataContext="{Binding Owner}" />
-                    </DataTemplate>
-
-                </ContentControl.DataTemplates>
-            </ContentControl>
+            <Panel Name="PageHostContainer"
+                DataContext="{x:Null}"
+                Margin="0,0,0,80" />
         </ScrollViewer>
 
     </Grid>

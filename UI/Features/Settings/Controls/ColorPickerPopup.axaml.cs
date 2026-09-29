@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 
 namespace LMP.UI.Features.Settings.Controls;
 
@@ -98,17 +99,17 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
         }
     }
 
-    public List<ColorPreset> PresetColors { get; } = GeneratePresets();
+    public IReadOnlyList<ColorPreset> PresetColors => CachedPresets;
 
     #endregion
 
+    private static readonly IReadOnlyList<ColorPreset> CachedPresets = GeneratePresets();
     private bool _isUpdating;
 
     public ColorPickerPopup()
     {
         InitializeComponent();
 
-        // Синхронизация: SelectedColor -> RGB & HEX
         SelectedColorProperty.Changed.AddClassHandler<ColorPickerPopup>(static (sender, _) =>
         {
             sender.SyncFromSelectedColor();
@@ -258,10 +259,20 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
 }
 
 /// <summary>
-/// Пресет цвета для быстрого выбора
+/// Пресет цвета для быстрого выбора с неизменяемой кэшированной кистью.
 /// </summary>
-public record ColorPreset(string Name, string Hex)
+public sealed class ColorPreset
 {
-    public Color Color => Color.Parse(Hex);
-    public SolidColorBrush Brush => new(Color);
+    public string Name { get; }
+    public string Hex { get; }
+    public Color Color { get; }
+    public IBrush Brush { get; }
+
+    public ColorPreset(string name, string hex)
+    {
+        Name = name;
+        Hex = hex;
+        Color = Color.Parse(hex);
+        Brush = new ImmutableSolidColorBrush(Color);
+    }
 }

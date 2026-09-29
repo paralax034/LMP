@@ -17,6 +17,7 @@ using LMP.UI.Features.Playlist;
 using LMP.UI.Features.Queue;
 using LMP.UI.Features.Search;
 using LMP.UI.Features.Settings;
+using LMP.UI.Features.Settings.ViewModels;
 using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -542,6 +543,15 @@ public sealed class AppEntry
         services.AddTransient<SearchViewModel>();
         services.AddTransient<LibraryViewModel>();
         services.AddTransient<QueueViewModel>();
+        services.AddTransient<AccountLanguageSettingsViewModel>();
+        services.AddTransient<NetworkSettingsViewModel>();
+        services.AddTransient<StorageCacheSettingsViewModel>();
+        services.AddTransient<MemorySettingsViewModel>();
+        services.AddTransient<AppearanceSettingsViewModel>();
+        services.AddTransient<AudioSettingsViewModel>();
+        services.AddTransient<PlaybackSettingsViewModel>();
+        services.AddTransient<WindowBehaviorSettingsViewModel>();
+        services.AddTransient<GeneralSettingsViewModel>();
         services.AddTransient<SettingsViewModel>();
         services.AddTransient<PlaylistViewModel>();
         services.AddTransient<SyncSelectionViewModel>();

@@ -7,20 +7,6 @@ namespace LMP.UI.Features.Shell;
 
 /// <summary>
 /// Главное окно приложения.
-///
-/// <para><b>Lifecycle:</b> управляет видимостью окна (Normal / Minimized / Tray),
-/// уровнем приостановки (<see cref="SuspendLevel"/>) и системными ресурсами.</para>
-///
-/// <para><b>Suspend архитектура (три уровня):</b></para>
-/// <list type="bullet">
-///   <item><b>None</b> — окно активно, все подписки работают</item>
-///   <item><b>Soft</b> — окно свёрнуто в taskbar или потеряло фокус (500мс debounce)</item>
-///   <item><b>Hard</b> — окно свёрнуто в tray, максимальная экономия ресурсов</item>
-/// </list>
-///
-/// <para><b>Tray:</b> иконка ВСЕГДА видна в системном трее.
-/// На Windows — нативный <see cref="TrayManager"/> с перехватом WM_MOUSEWHEEL.
-/// На других платформах — стандартный Avalonia <see cref="TrayIcon"/>.</para>
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -105,10 +91,6 @@ public partial class MainWindow : Window
 
     #region Window Activation & Restore
 
-    /// <summary>
-    /// Выводит окно приложения на передний план, восстанавливая его из системного трея или панели задач.
-    /// Вызывается при клике по иконке трея либо при получении сигнала от второго запущенного экземпляра.
-    /// </summary>
     public void BringToFront()
     {
         if (_isInTray)

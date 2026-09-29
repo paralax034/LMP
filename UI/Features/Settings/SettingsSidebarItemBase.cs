@@ -1,25 +1,36 @@
+using LMP.UI.Features.Settings.ViewModels;
+
 namespace LMP.UI.Features.Settings;
 
 /// <summary>
-/// Базовый маркер элемента sidebar.
-/// <para>
-/// Каждый наследник — отдельный тип → Avalonia выбирает DataTemplate по DataType.
-/// ContentControl в зоне контента показывает страницу, соответствующую типу.
-/// В каждый момент в visual tree — ОДИН sidebar item template + ОДНА страница контента.
-/// </para>
+/// Ленивый маркер элемента sidebar с фабричным разрешением секции и независимым заголовком.
 /// </summary>
-public abstract class SettingsSidebarItemBase(SettingsViewModel owner)
+public abstract class SettingsSidebarItemBase
 {
-    /// <summary>Ссылка на VM — страницы биндятся через Owner.*</summary>
-    public SettingsViewModel Owner { get; } = owner;
+    private readonly Func<ViewModelBase> _sectionFactory;
+    private ViewModelBase? _resolvedSection;
+
+    protected SettingsSidebarItemBase(string titleKey, Func<ViewModelBase> sectionFactory)
+    {
+        TitleKey = titleKey;
+        _sectionFactory = sectionFactory;
+    }
+
+    public string TitleKey { get; }
+
+    public string Title => LocalizationService.Instance[TitleKey];
+
+    public ViewModelBase Section => GetSection();
+
+    public ViewModelBase GetSection() => _resolvedSection ??= _sectionFactory();
 }
 
-public sealed class AccountLanguageSidebarItem(SettingsViewModel owner) : SettingsSidebarItemBase(owner);
-public sealed class NetworkSidebarItem(SettingsViewModel owner)         : SettingsSidebarItemBase(owner);
-public sealed class StorageCacheSidebarItem(SettingsViewModel owner)    : SettingsSidebarItemBase(owner);
-public sealed class MemorySidebarItem(SettingsViewModel owner)          : SettingsSidebarItemBase(owner);
-public sealed class AppearanceSidebarItem(SettingsViewModel owner)      : SettingsSidebarItemBase(owner);
-public sealed class AudioSidebarItem(SettingsViewModel owner)           : SettingsSidebarItemBase(owner);
-public sealed class PlaybackSidebarItem(SettingsViewModel owner)        : SettingsSidebarItemBase(owner);
-public sealed class WindowBehaviorSidebarItem(SettingsViewModel owner)  : SettingsSidebarItemBase(owner);
-public sealed class GeneralSidebarItem(SettingsViewModel owner)         : SettingsSidebarItemBase(owner);
+public sealed class AccountLanguageSidebarItem(string titleKey, Func<AccountLanguageSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class NetworkSidebarItem(string titleKey, Func<NetworkSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class StorageCacheSidebarItem(string titleKey, Func<StorageCacheSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class MemorySidebarItem(string titleKey, Func<MemorySettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class AppearanceSidebarItem(string titleKey, Func<AppearanceSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class AudioSidebarItem(string titleKey, Func<AudioSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class PlaybackSidebarItem(string titleKey, Func<PlaybackSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class WindowBehaviorSidebarItem(string titleKey, Func<WindowBehaviorSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);
+public sealed class GeneralSidebarItem(string titleKey, Func<GeneralSettingsViewModel> factory) : SettingsSidebarItemBase(titleKey, factory);

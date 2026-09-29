@@ -1,9 +1,9 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:vm="using:LMP.UI.Features.Settings"
+    xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
     xmlns:ui="using:LMP.UI.Controls"
     x:Class="LMP.UI.Features.Settings.Pages.AccountLanguagePage"
-    x:DataType="vm:SettingsViewModel"
+    x:DataType="vm:AccountLanguageSettingsViewModel"
     x:CompileBindings="True">
 
     <!--

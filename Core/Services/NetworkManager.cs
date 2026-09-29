@@ -22,7 +22,7 @@ public sealed class NetworkManager : IDisposable
     private volatile HttpClient _probeClient;
 
     private ProxySettings? _currentProxy;
-    private InternetProfile _currentProfile = InternetProfile.Medium;
+    private readonly InternetProfile _currentProfile = InternetProfile.Medium;
     private string? _lastOutboundIp;
     private bool _isVpnActive;
     private long _lastRebuildTick;
@@ -62,6 +62,53 @@ public sealed class NetworkManager : IDisposable
     /// <inheritdoc/>
     public bool IsVpnActive => Volatile.Read(ref _isVpnActive);
 
+    /// <summary>
+    /// Выполняет динамическую проверку активного исходящего сетевого маршрута на принадлежность к VPN/TUN-туннелю.
+    /// </summary>
+    public bool CheckIsVpnActive()
+    {
+        var ip = GetOutboundIpAddress();
+        return ip != null && DetectVpnRoute(ip);
+    }
+
+    /// <summary>
+    /// Проверяет наличие и параметры активного прокси-сервера (явно заданного в приложении или системного прокси ОС).
+    /// </summary>
+    public (bool IsActive, string Host, int Port, bool IsSystemProxy) GetActiveProxyInfo()
+    {
+        lock (_stateLock)
+        {
+            if (_currentProxy is { Enabled: true } custom && !string.IsNullOrWhiteSpace(custom.Host))
+            {
+                int customPort = custom.Port > 0 ? custom.Port : 8080;
+                return (true, custom.Host.Trim(), customPort, false);
+            }
+        }
+
+        try
+        {
+            var defaultProxy = HttpClient.DefaultProxy;
+            if (defaultProxy != null)
+            {
+                var targetUri = new Uri("https://music.youtube.com");
+                if (!defaultProxy.IsBypassed(targetUri))
+                {
+                    var proxyUri = defaultProxy.GetProxy(targetUri);
+                    if (proxyUri != null && !proxyUri.Equals(targetUri))
+                    {
+                        return (true, proxyUri.Host, proxyUri.Port, true);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"[NetworkManager] Error querying system proxy: {ex.Message}");
+        }
+
+        return (false, string.Empty, 0, false);
+    }
+
     /// <inheritdoc/>
     public event Action? NetworkRebuilt;
 
@@ -72,8 +119,10 @@ public sealed class NetworkManager : IDisposable
     {
         _currentProxy = initialProxy;
         _currentProfile = initialProfile;
-        _lastOutboundIp = GetOutboundIp();
-        _isVpnActive = _lastOutboundIp != null && IsVpnTunAddress(_lastOutboundIp);
+
+        var (outboundIp, isVpn) = EvaluateOutboundRoute();
+        _lastOutboundIp = outboundIp;
+        _isVpnActive = isVpn;
 
         (_audioClient, _apiClient, _imageClient, _probeClient) = CreateClientCluster(_currentProxy);
 
@@ -303,7 +352,7 @@ public sealed class NetworkManager : IDisposable
             // Увеличенный дебаунс: даём TUN/VPN адаптеру стабилизировать таблицу маршрутизации
             await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
 
-            var currentIp = GetOutboundIp();
+            var (currentIp, isVpn) = EvaluateOutboundRoute();
             if (currentIp == null)
             {
                 Log.Debug("[NetworkManager] Address change ignored — no outbound route");
@@ -311,17 +360,18 @@ public sealed class NetworkManager : IDisposable
             }
 
             var previousIp = Volatile.Read(ref _lastOutboundIp);
-            if (string.Equals(currentIp, previousIp, StringComparison.Ordinal))
+            bool previousVpn = Volatile.Read(ref _isVpnActive);
+
+            Volatile.Write(ref _isVpnActive, isVpn);
+            Volatile.Write(ref _lastOutboundIp, currentIp);
+
+            if (string.Equals(currentIp, previousIp, StringComparison.Ordinal) && previousVpn == isVpn)
             {
-                Log.Debug($"[NetworkManager] Address change ignored — outbound IP unchanged ({currentIp})");
+                Log.Debug($"[NetworkManager] Address change ignored — outbound IP and VPN state unchanged ({currentIp})");
                 return;
             }
 
-            bool isTun = IsVpnTunAddress(currentIp);
-            Volatile.Write(ref _isVpnActive, isTun);
-            Volatile.Write(ref _lastOutboundIp, currentIp);
-
-            RebuildAll($"Adapter route changed ({previousIp ?? "(none)"} → {currentIp}, VPN: {isTun})", force: false);
+            RebuildAll($"Adapter route changed ({previousIp ?? "(none)"} → {currentIp}, VPN: {previousVpn} → {isVpn})", force: false);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -340,12 +390,13 @@ public sealed class NetworkManager : IDisposable
             {
                 await Task.Delay(TimeSpan.FromMinutes(2), _cts.Token).ConfigureAwait(false);
 
-                var currentIp = GetOutboundIp();
+                var (currentIp, isVpn) = EvaluateOutboundRoute();
                 var previousIp = Volatile.Read(ref _lastOutboundIp);
+                bool previousVpn = Volatile.Read(ref _isVpnActive);
 
-                if (currentIp != null && previousIp != null && !string.Equals(currentIp, previousIp, StringComparison.Ordinal))
+                if (currentIp != null && (previousIp == null || !string.Equals(currentIp, previousIp, StringComparison.Ordinal) || previousVpn != isVpn))
                 {
-                    Log.Info($"[NetworkManager] Watchdog detected unhandled IP change: {previousIp} → {currentIp}");
+                    Log.Info($"[NetworkManager] Watchdog detected unhandled route change: {previousIp} (VPN: {previousVpn}) → {currentIp} (VPN: {isVpn})");
                     OnNetworkAddressChanged(this, EventArgs.Empty);
                 }
             }
@@ -357,46 +408,164 @@ public sealed class NetworkManager : IDisposable
         }
     }
 
-    private static string? GetOutboundIp()
+    private static (string? OutboundIp, bool IsVpn) EvaluateOutboundRoute()
+    {
+        var ip = GetOutboundIpAddress();
+        if (ip == null)
+            return (null, false);
+
+        return (ip.ToString(), DetectVpnRoute(ip));
+    }
+
+    private static IPAddress? GetOutboundIpAddress()
     {
         try
         {
             using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             socket.Connect("8.8.8.8", 65530);
-            return (socket.LocalEndPoint as IPEndPoint)?.Address.ToString();
+            return (socket.LocalEndPoint as IPEndPoint)?.Address;
         }
         catch
         {
-            return null;
+            try
+            {
+                using var socket6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp);
+                socket6.Connect("2001:4860:4860::8888", 65530);
+                return (socket6.LocalEndPoint as IPEndPoint)?.Address;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
-    private static bool IsVpnTunAddress(string ip)
+    private static bool DetectVpnRoute(IPAddress outboundIp)
     {
-        if (!IPAddress.TryParse(ip, out var addr))
-            return false;
+        if (IsSpecialTunIpRange(outboundIp))
+            return true;
 
-        var bytes = addr.GetAddressBytes();
+        var activeInterface = FindInterfaceByIp(outboundIp);
+        return activeInterface != null && IsVpnInterface(activeInterface);
+    }
+
+    private static bool IsSpecialTunIpRange(IPAddress ip)
+    {
+        var bytes = ip.GetAddressBytes();
         if (bytes.Length != 4) return false;
 
-        // RFC 1918 — стандартные приватные диапазоны (LAN, Radmin VPN, OpenVPN client-side)
-        if (bytes[0] == 10) return true;
-        if (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) return true;
-        if (bytes[0] == 192 && bytes[1] == 168) return true;
+        // RFC 2544 — Benchmark / Fake-IP (используется Clash, sing-box, Mihomo, v2ray в TUN-режиме)
+        if (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19)) return true;
 
-        // Loopback
-        if (bytes[0] == 127) return true;
-
-        // RFC 6598 — CGNAT / shared address space (Tailscale, WireGuard, МГТС CGNAT)
-        if (bytes[0] == 100 && bytes[1] is >= 64 and <= 127) return true;
-
-        // RFC 2544 — benchmark testing (часто назначается TUN-адаптерами)
-        if (bytes[0] == 198 && bytes[1] is 18 or 19) return true;
-
-        // RFC 5737 — documentation ranges (используются sing-box tun mode)
+        // RFC 5737 — Documentation ranges (используются некоторыми виртуальными TUN-адаптерами)
         if (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100) return true;
         if (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113) return true;
 
+        return false;
+    }
+
+    private static NetworkInterface? FindInterfaceByIp(IPAddress targetIp)
+    {
+        try
+        {
+            var interfaces = NetworkInterface.GetAllNetworkInterfaces();
+            for (int i = 0; i < interfaces.Length; i++)
+            {
+                var iface = interfaces[i];
+                if (iface.OperationalStatus != OperationalStatus.Up)
+                    continue;
+
+                var unicastAddresses = iface.GetIPProperties().UnicastAddresses;
+                for (int j = 0; j < unicastAddresses.Count; j++)
+                {
+                    if (unicastAddresses[j].Address.Equals(targetIp))
+                        return iface;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"[NetworkManager] Failed to query network interfaces: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private static bool IsVpnInterface(NetworkInterface iface)
+    {
+        if (iface.NetworkInterfaceType is NetworkInterfaceType.Tunnel or NetworkInterfaceType.Ppp)
+        {
+            Log.Debug($"[NetworkManager] Active interface detected as VPN by type: {iface.NetworkInterfaceType} ({iface.Name} / {iface.Description})");
+            return true;
+        }
+
+        var name = iface.Name;
+        var desc = iface.Description;
+
+        if (ContainsVpnKeyword(name) || ContainsVpnKeyword(desc))
+        {
+            Log.Debug($"[NetworkManager] Active interface detected as VPN by keyword: {name} / {desc}");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsVpnKeyword(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        ReadOnlySpan<char> span = text.AsSpan();
+
+        if (span.Contains("vpn".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (span.Contains("wireguard".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("wintun".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("openvpn".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("sing-box".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("xray".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("v2ray".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("clash".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("mihomo".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("tailscale".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("zerotier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("nordlynx".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("warp".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("cisco".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("anyconnect".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("shadowsocks".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("fortinet".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("forticlient".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (span.Contains("tap".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            span.Contains("tun".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsTunOrTapIdentifier(span))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsTunOrTapIdentifier(ReadOnlySpan<char> span)
+    {
+        for (int i = 0; i <= span.Length - 3; i++)
+        {
+            var slice = span.Slice(i, 3);
+            if (slice.Equals("tap".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                slice.Equals("tun".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            {
+                bool beforeOk = i == 0 || !char.IsLetter(span[i - 1]) || (i == 1 && (span[0] == 'u' || span[0] == 'U'));
+                bool afterOk = i + 3 >= span.Length || !char.IsLetter(span[i + 3]);
+                if (beforeOk && afterOk)
+                    return true;
+            }
+        }
         return false;
     }
 

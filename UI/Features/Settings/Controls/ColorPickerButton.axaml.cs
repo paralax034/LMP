@@ -34,7 +34,6 @@ public partial class ColorPickerButton : UserControl
     public ColorPickerButton()
     {
         InitializeComponent();
-        // НЕ устанавливаем DataContext = this!
     }
 
     private void OnButtonClick(object? sender, RoutedEventArgs e)
@@ -44,7 +43,6 @@ public partial class ColorPickerButton : UserControl
 
     private void ShowPopup()
     {
-        // Создаем popup при первом открытии
         if (_popup == null)
         {
             _pickerContent = new ColorPickerPopup
@@ -57,10 +55,10 @@ public partial class ColorPickerButton : UserControl
                 PlacementTarget = this,
                 Placement = PlacementMode.BottomEdgeAlignedRight,
                 IsLightDismissEnabled = true,
+                WindowManagerAddShadowHint = false,
                 Child = _pickerContent
             };
 
-            // Подписываемся на выбор цвета
             _pickerContent.ColorConfirmed += OnColorConfirmed;
             _pickerContent.ColorCancelled += OnColorCancelled;
         }

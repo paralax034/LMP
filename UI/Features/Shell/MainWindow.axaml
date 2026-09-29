@@ -21,13 +21,6 @@
     ExtendClientAreaTitleBarHeightHint="-1"
     WindowDecorations="BorderOnly">
 
-    <!--
-        DataTemplates на уровне Window — резолвятся через resource lookup.
-        TransitioningContentControl (наследник ContentControl) находит их
-        автоматически по типу VM без промежуточного ContentControl-обёртки.
-        Это устраняет лишний слой ValueStore/StyleInstance/DynamicResourceExpression
-        который не отсоединялся корректно при CrossFade анимации.
-    -->
     <Window.DataTemplates>
         <DataTemplate DataType="{x:Type homeV:HomeViewModel}">
             <homeV:HomeView />
@@ -58,7 +51,6 @@
             Selector="Button.titlebar-brand-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-
         <Style Selector="Button.titlebar-version-btn:pointerover StackPanel">
             <Setter Property="Opacity" Value="0.8" />
         </Style>
@@ -75,10 +67,8 @@
         <Grid Grid.Row="0" Height="46" Background="{DynamicResource BgSecondaryBrush}"
             ColumnDefinitions="Auto, Auto, *, Auto, Auto" Name="TitleBar">
 
-            <!-- Col 0: App Logo (toggle version) + Version info (clickable → GitHub) -->
+            <!-- Col 0: App Logo + Version info -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-
-                <!-- Logo Button (toggle version visibility) -->
                 <Button Background="Transparent" BorderThickness="0"
                     Padding="12,0,8,0" Margin="0" VerticalAlignment="Stretch"
                     Cursor="Hand" Name="AppLogoButton"
@@ -115,11 +105,8 @@
                     </StackPanel>
                 </Button>
 
-                <!-- Version Info (clickable → GitHub, toggleable) -->
-                <Button Background="Transparent"
-                    BorderThickness="0"
-                    Padding="0" Margin="0"
-                    VerticalAlignment="Center"
+                <Button Background="Transparent" BorderThickness="0"
+                    Padding="0" Margin="0" VerticalAlignment="Center"
                     Classes="titlebar-brand-btn titlebar-version-btn"
                     IsVisible="{Binding IsVersionInfoVisible}"
                     Cursor="Hand"
@@ -128,20 +115,17 @@
 
                     <StackPanel Orientation="Horizontal" Spacing="6" Opacity="0.5">
                         <Border Width="1" Height="12"
-                            Background="{DynamicResource BgHighlightBrush}"
-                            Margin="4,0" />
-                        <TextBlock Text="{Binding VersionDisplay}"
-                            FontSize="10" FontFamily="Consolas, monospace"
-                            Foreground="{DynamicResource TextMutedBrush}"
-                            VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding GitHashDisplay}"
-                            FontSize="10" FontFamily="Consolas, monospace"
-                            Foreground="{DynamicResource TextMutedBrush}"
-                            VerticalAlignment="Center" Opacity="0.7" />
-                        <TextBlock Text="{Binding CommitsDisplay}"
-                            FontSize="10"
-                            Foreground="{DynamicResource TextMutedBrush}"
-                            VerticalAlignment="Center" Opacity="0.5" />
+                            Background="{DynamicResource BgHighlightBrush}" Margin="4,0" />
+                        <TextBlock Text="{Binding VersionDisplay}" FontSize="10"
+                            FontFamily="Consolas, monospace"
+                            Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding GitHashDisplay}" FontSize="10"
+                            FontFamily="Consolas, monospace"
+                            Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"
+                            Opacity="0.7" />
+                        <TextBlock Text="{Binding CommitsDisplay}" FontSize="10"
+                            Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"
+                            Opacity="0.5" />
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -149,15 +133,11 @@
             <!-- Col 1: Navigation Tabs -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="0"
                 VerticalAlignment="Stretch" Margin="8,0,0,0">
-
-                <Border Width="1" Height="20"
-                    Background="{DynamicResource BgHighlightBrush}"
+                <Border Width="1" Height="20" Background="{DynamicResource BgHighlightBrush}"
                     Margin="0,0,4,0" VerticalAlignment="Center" />
 
                 <Button Classes="nav-tab"
-                    Classes.active="{Binding CurrentPageName,
-                Converter={StaticResource StringStartsWithConverter},
-                ConverterParameter='Home'}"
+                    Classes.active="{Binding CurrentPageName, Converter={StaticResource StringStartsWithConverter}, ConverterParameter='Home'}"
                     Command="{Binding NavigateCommand}" CommandParameter="Home"
                     IsEnabled="{Binding !IsNavigationLocked}"
                     ToolTip.Tip="{Binding L[Nav_Home_Tip]}">
@@ -168,9 +148,7 @@
                 </Button>
 
                 <Button Classes="nav-tab"
-                    Classes.active="{Binding CurrentPageName,
-                Converter={StaticResource StringStartsWithConverter},
-                ConverterParameter='Search'}"
+                    Classes.active="{Binding CurrentPageName, Converter={StaticResource StringStartsWithConverter}, ConverterParameter='Search'}"
                     Command="{Binding NavigateCommand}" CommandParameter="Search"
                     IsEnabled="{Binding !IsNavigationLocked}"
                     ToolTip.Tip="{Binding L[Nav_Search_Tip]}">
@@ -181,9 +159,7 @@
                 </Button>
 
                 <Button Classes="nav-tab"
-                    Classes.active="{Binding CurrentPageName,
-                Converter={StaticResource StringStartsWithConverter},
-                ConverterParameter='Library'}"
+                    Classes.active="{Binding CurrentPageName, Converter={StaticResource StringStartsWithConverter}, ConverterParameter='Library'}"
                     Command="{Binding NavigateCommand}" CommandParameter="Library"
                     IsEnabled="{Binding !IsNavigationLocked}"
                     ToolTip.Tip="{Binding L[Nav_Library_Tip]}">
@@ -194,9 +170,7 @@
                 </Button>
 
                 <Button Classes="nav-tab"
-                    Classes.active="{Binding CurrentPageName,
-                Converter={StaticResource StringStartsWithConverter},
-                ConverterParameter='Queue'}"
+                    Classes.active="{Binding CurrentPageName, Converter={StaticResource StringStartsWithConverter}, ConverterParameter='Queue'}"
                     Command="{Binding NavigateCommand}" CommandParameter="Queue"
                     IsEnabled="{Binding !IsNavigationLocked}"
                     ToolTip.Tip="{Binding L[Nav_Queue_Tip]}">
@@ -207,9 +181,7 @@
                 </Button>
 
                 <Button Classes="nav-tab"
-                    Classes.active="{Binding CurrentPageName,
-                Converter={StaticResource StringStartsWithConverter},
-                ConverterParameter='Settings'}"
+                    Classes.active="{Binding CurrentPageName, Converter={StaticResource StringStartsWithConverter}, ConverterParameter='Settings'}"
                     Command="{Binding NavigateCommand}" CommandParameter="Settings"
                     IsEnabled="{Binding !IsNavigationLocked}"
                     ToolTip.Tip="{Binding L[Nav_Settings_Tip]}">
@@ -219,11 +191,8 @@
                     </StackPanel>
                 </Button>
 
-                <!-- Breadcrumb — виден только на странице плейлиста -->
                 <Button Classes="nav-tab active"
-                    IsVisible="{Binding CurrentPageName,
-                Converter={StaticResource StringStartsWithConverter},
-                ConverterParameter='Playlist'}">
+                    IsVisible="{Binding CurrentPageName, Converter={StaticResource StringStartsWithConverter}, ConverterParameter='Playlist'}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <PathIcon Data="{StaticResource Icon.PlaylistMusic}" Width="16" Height="16" />
                         <TextBlock Text="{Binding L[Nav_Playlist]}" VerticalAlignment="Center" />
@@ -231,47 +200,36 @@
                 </Button>
             </StackPanel>
 
-            <!-- Col 2: Drag Area -->
+            <!-- Col 2: Drag Area (Прямой приемник кликов перетаскивания) -->
             <Border Grid.Column="2" Background="Transparent" Name="DragArea" />
 
-            <!-- Col 3: Notification Button -->
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"
-                Margin="0,0,4,0">
-                <notifications:NotificationButton DataContext="{Binding NotificationButton}"
-                    x:Name="NotificationButtonControl" />
-            </StackPanel>
+            <!-- Col 3: Notification Button (Изолированный DataContext контейнера) -->
+            <Border Grid.Column="3" DataContext="{Binding NotificationButton}"
+                VerticalAlignment="Center" Margin="0,0,4,0">
+                <notifications:NotificationButton x:Name="NotificationButtonControl" />
+            </Border>
 
             <!-- Col 4: Window Controls -->
             <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="2" Margin="0,0,6,0">
-                <Border Width="1" Height="16"
-                    Background="{DynamicResource BgHighlightBrush}"
+                <Border Width="1" Height="16" Background="{DynamicResource BgHighlightBrush}"
                     Margin="4,0,6,0" VerticalAlignment="Center" />
 
-                <Button Name="MinimizeButton"
-                    Classes="ctrl-btn"
+                <Button Name="MinimizeButton" Classes="ctrl-btn"
                     ToolTip.Tip="{Binding L[Window_Minimize]}">
-                    <Border Width="10" Height="1"
-                        Background="{DynamicResource TextMutedBrush}"
-                        VerticalAlignment="Center"
-                        CornerRadius="0.5" />
+                    <Border Width="10" Height="1" Background="{DynamicResource TextMutedBrush}"
+                        VerticalAlignment="Center" CornerRadius="0.5" />
                 </Button>
 
-                <Button Name="MaximizeButton"
-                    Classes="ctrl-btn"
+                <Button Name="MaximizeButton" Classes="ctrl-btn"
                     ToolTip.Tip="{Binding L[Window_Maximize]}">
                     <Panel>
-                        <Border Name="MaximizeIcon"
-                            Width="10" Height="10"
-                            BorderThickness="1.2"
-                            CornerRadius="1"
-                            BorderBrush="{DynamicResource TextMutedBrush}" />
+                        <Border Name="MaximizeIcon" Width="10" Height="10" BorderThickness="1.2"
+                            CornerRadius="1" BorderBrush="{DynamicResource TextMutedBrush}" />
                         <Grid Name="RestoreIcon" IsVisible="False" Width="12" Height="12">
-                            <Border Width="8" Height="8"
-                                BorderThickness="1.2" CornerRadius="1"
+                            <Border Width="8" Height="8" BorderThickness="1.2" CornerRadius="1"
                                 BorderBrush="{DynamicResource TextMutedBrush}"
                                 HorizontalAlignment="Left" VerticalAlignment="Bottom" />
-                            <Border Width="8" Height="8"
-                                BorderThickness="1.2" CornerRadius="1"
+                            <Border Width="8" Height="8" BorderThickness="1.2" CornerRadius="1"
                                 BorderBrush="{DynamicResource TextMutedBrush}"
                                 Background="{DynamicResource BgSecondaryBrush}"
                                 HorizontalAlignment="Right" VerticalAlignment="Top" />
@@ -279,16 +237,15 @@
                     </Panel>
                 </Button>
 
-                <Button Name="CloseButton"
-                    Classes="ctrl-btn-close"
+                <Button Name="CloseButton" Classes="ctrl-btn-close"
                     ToolTip.Tip="{Binding L[Window_Close]}">
                     <Grid Width="10" Height="10">
                         <Line StartPoint="0,0" EndPoint="10,10"
-                            Stroke="{DynamicResource TextMutedBrush}"
-                            StrokeThickness="1.2" StrokeLineCap="Round" />
+                            Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="1.2"
+                            StrokeLineCap="Round" />
                         <Line StartPoint="10,0" EndPoint="0,10"
-                            Stroke="{DynamicResource TextMutedBrush}"
-                            StrokeThickness="1.2" StrokeLineCap="Round" />
+                            Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="1.2"
+                            StrokeLineCap="Round" />
                     </Grid>
                 </Button>
             </StackPanel>
@@ -297,11 +254,6 @@
         <!-- MAIN CONTENT -->
         <Border Grid.Row="1" Background="{DynamicResource BgPrimaryBrush}" ClipToBounds="True">
             <Panel>
-                <!--
-                    Композитный переход (GPU Accelerated).
-                    Анимация Fade и Slide выполняется параллельно на Render-потоке.
-                    Разгружает UI-поток и убирает микро-статтеры при переключении.
-                -->
                 <TransitioningContentControl Content="{Binding CurrentPage}"
                     IsTransitionReversed="False">
                     <TransitioningContentControl.PageTransition>
@@ -311,43 +263,44 @@
                     </TransitioningContentControl.PageTransition>
                 </TransitioningContentControl>
 
-                <!-- Nav Lock Overlay — CloudSync PathIcon -->
+                <!-- Nav Lock Overlay -->
                 <Border IsVisible="{Binding IsNavigationLocked}" Background="#60000000"
                     IsHitTestVisible="True">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
                         <Panel Width="80" Height="80" HorizontalAlignment="Center">
                             <Border Width="80" Height="80" CornerRadius="40"
                                 Background="{DynamicResource AccentBrush}" />
-                            <PathIcon Data="{StaticResource Icon.CloudSync}"
-                                Width="40" Height="40"
+                            <PathIcon Data="{StaticResource Icon.CloudSync}" Width="40" Height="40"
                                 Foreground="{DynamicResource TextDarkBrush}"
                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Panel>
                         <StackPanel Spacing="6" HorizontalAlignment="Center">
                             <TextBlock Text="{Binding NavigationLockReason}" FontSize="16"
-                                FontWeight="Bold"
-                                Foreground="{DynamicResource TextPrimaryBrush}"
+                                FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"
                                 TextAlignment="Center" />
                             <TextBlock Text="{Binding L[Nav_PleaseWait]}" FontSize="13"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                TextAlignment="Center" />
+                                Foreground="{DynamicResource TextMutedBrush}" TextAlignment="Center" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <!-- Dialog Host (ZIndex: 900) — над контентом, под TopBar -->
-                <shell:DialogHost DataContext="{Binding DialogHost}"
-                    ZIndex="900"
-                    IsVisible="{Binding HasActiveDialog}" />
+                <!-- Dialog Host (ZIndex: 900, Изолированный DataContext контейнера) -->
+                <Panel DataContext="{Binding DialogHost}" ZIndex="900"
+                    IsVisible="{Binding HasActiveDialog}">
+                    <shell:DialogHost />
+                </Panel>
 
-                <!-- Toast Overlay (ZIndex: 1000) -->
-                <notifications:ToastOverlay DataContext="{Binding ToastOverlay}" ZIndex="1000" />
+                <!-- Toast Overlay (ZIndex: 1000, Изолированный DataContext контейнера) -->
+                <Panel DataContext="{Binding ToastOverlay}" ZIndex="1000">
+                    <notifications:ToastOverlay />
+                </Panel>
             </Panel>
         </Border>
 
-        <!-- PLAYER BAR -->
-        <playerBarV:PlayerBarView Grid.Row="2" DataContext="{Binding PlayerBar}"
-            IsVisible="{Binding HasTrack}" />
+        <!-- PLAYER BAR (Изолированный DataContext контейнера) -->
+        <Border Grid.Row="2" DataContext="{Binding PlayerBar}">
+            <playerBarV:PlayerBarView IsVisible="{Binding HasTrack}" />
+        </Border>
 
         <!-- NOTIFICATION PANEL POPUP -->
         <Popup Grid.Row="0" Grid.RowSpan="3"
@@ -358,15 +311,14 @@
             IsLightDismissEnabled="True"
             HorizontalOffset="0"
             VerticalOffset="6">
-            <notifications:NotificationPanel DataContext="{Binding NotificationPanel}" />
+            <Border DataContext="{Binding NotificationPanel}">
+                <notifications:NotificationPanel />
+            </Border>
         </Popup>
 
         <!-- TOAST CANVAS (ZIndex: 2000) -->
-        <Canvas x:Name="CopyHintCanvas"
-            Grid.Row="0" Grid.RowSpan="3"
-            ZIndex="2000"
+        <Canvas x:Name="CopyHintCanvas" Grid.Row="0" Grid.RowSpan="3" ZIndex="2000"
             IsHitTestVisible="False">
-
             <Border x:Name="CopyHintOverlay"
                 Padding="10,6"
                 Background="{DynamicResource BgPrimaryBrush}"
@@ -383,13 +335,10 @@
                     </Transitions>
                 </Border.Transitions>
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                    <PathIcon x:Name="CopyHintIcon"
-                        Width="13" Height="13"
+                    <PathIcon x:Name="CopyHintIcon" Width="13" Height="13"
                         VerticalAlignment="Center" />
-                    <TextBlock x:Name="CopyHintText"
-                        FontSize="11" FontWeight="Medium"
-                        VerticalAlignment="Center"
-                        Foreground="{DynamicResource TextPrimaryBrush}"
+                    <TextBlock x:Name="CopyHintText" FontSize="11" FontWeight="Medium"
+                        VerticalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}"
                         TextWrapping="Wrap" MaxWidth="380" />
                 </StackPanel>
             </Border>

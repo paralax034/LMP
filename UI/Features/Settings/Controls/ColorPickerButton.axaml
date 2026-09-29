@@ -1,6 +1,5 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:LMP.UI.Features.Settings.Controls"
     x:Class="LMP.UI.Features.Settings.Controls.ColorPickerButton"
     x:Name="Root">
 
@@ -31,26 +30,11 @@
         </Style>
     </UserControl.Styles>
 
-    <Panel>
-        <!-- Color Button -->
-        <Button x:Name="ColorButton" Classes="color-btn" Click="OnButtonClick">
-            <Border Classes="color-swatch">
-                <Border.Background>
-                    <SolidColorBrush Color="{Binding Color, ElementName=Root}" />
-                </Border.Background>
-            </Border>
-        </Button>
-
-        <!-- Встроенный Popup -->
-        <Popup x:Name="PickerPopup"
-            ShouldUseOverlayLayer="True"
-            PlacementTarget="{Binding #ColorButton}"
-            Placement="BottomEdgeAlignedRight"
-            IsLightDismissEnabled="True"
-            WindowManagerAddShadowHint="False">
-            <controls:ColorPickerPopup x:Name="PickerContent"
-                ColorConfirmed="OnColorConfirmed"
-                ColorCancelled="OnColorCancelled" />
-        </Popup>
-    </Panel>
+    <Button x:Name="ColorButton" Classes="color-btn" Click="OnButtonClick">
+        <Border Classes="color-swatch">
+            <Border.Background>
+                <SolidColorBrush Color="{Binding Color, ElementName=Root}" />
+            </Border.Background>
+        </Border>
+    </Button>
 </UserControl>

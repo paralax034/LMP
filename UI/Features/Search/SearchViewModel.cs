@@ -939,13 +939,28 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (_isDisposed) return;
+
+                if (RecentSearches.Count == history.Count)
+                {
+                    bool same = true;
+                    for (int i = 0; i < history.Count; i++)
+                    {
+                        if (!string.Equals(RecentSearches[i], history[i], StringComparison.Ordinal))
+                        {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same) return;
+                }
+
                 RecentSearches.Clear();
                 for (int i = 0; i < history.Count; i++)
                     RecentSearches.Add(history[i]);
 
                 OnPropertyChanged(nameof(HasRecentSearches));
                 UpdateLocalSuggestionsAndGhostText(SearchQuery);
-            });
+            }, DispatcherPriority.Background);
         }
         catch (Exception ex)
         {

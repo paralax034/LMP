@@ -1,9 +1,9 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:vm="using:LMP.UI.Features.Settings"
+    xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
     xmlns:controls="using:LMP.UI.Features.Settings.Controls"
     x:Class="LMP.UI.Features.Settings.Pages.AppearancePage"
-    x:DataType="vm:SettingsViewModel"
+    x:DataType="vm:AppearanceSettingsViewModel"
     x:CompileBindings="True">
 
     <StackPanel Margin="32,24">

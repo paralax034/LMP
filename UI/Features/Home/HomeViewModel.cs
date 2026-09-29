@@ -1,12 +1,13 @@
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
+using LMP.UI.Features.Shell;
 
 namespace LMP.UI.Features.Home;
 
 /// <summary>
 /// ViewModel главного экрана. Категории + поиск через YouTube с кэшированием.
 /// </summary>
-public sealed partial class HomeViewModel : TrackListReorderableViewModel
+public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoothTransitionViewModel
 {
     #region Constants
 
@@ -86,6 +87,19 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
 
     #endregion
 
+    #region ISmoothTransitionViewModel
+
+    public override void PrepareForTransition()
+    {
+        base.PrepareForTransition();
+        if (!_isDataLoaded)
+        {
+            IsLoading = true;
+        }
+    }
+
+    #endregion
+
     #region Navigation
 
     public override async Task OnNavigatedToAsync()
@@ -98,6 +112,10 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel
         {
             await LoadTracksAsync();
             _isDataLoaded = true;
+        }
+        else
+        {
+            IsLoading = false;
         }
     }
 
