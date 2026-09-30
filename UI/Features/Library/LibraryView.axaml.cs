@@ -1,7 +1,5 @@
 ﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.LogicalTree;
-
 
 namespace LMP.UI.Features.Library;
 
@@ -14,13 +12,12 @@ public partial class LibraryView : UserControl
 
     /// <summary>
     /// Сохраняет акцентную обводку карточки плейлиста при открытии контекстного меню.
-    /// Вызывается после полного открытия меню, когда логические связи дерева уже выстроены.
     /// </summary>
     private void OnPlaylistContextMenuOpened(object? sender, RoutedEventArgs e)
     {
-        if (sender is ContextMenu { PlacementTarget: Control target })
+        if (sender is ContextMenu { DataContext: PlaylistCardViewModel vm })
         {
-            target.Classes.Add("menu-open");
+            vm.IsMenuOpen = true;
         }
     }
 
@@ -29,9 +26,9 @@ public partial class LibraryView : UserControl
     /// </summary>
     private void OnPlaylistContextMenuClosed(object? sender, RoutedEventArgs e)
     {
-        if (sender is ContextMenu { PlacementTarget: Control target })
+        if (sender is ContextMenu { DataContext: PlaylistCardViewModel vm })
         {
-            target.Classes.Remove("menu-open");
+            vm.IsMenuOpen = false;
         }
     }
 }

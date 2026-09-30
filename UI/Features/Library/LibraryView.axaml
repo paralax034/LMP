@@ -410,6 +410,7 @@
                                     Classes.visible="{Binding IsVisible}"
                                     Classes.is-active="{Binding IsActive}"
                                     Classes.is-liked="{Binding IsLikedPlaylist}"
+                                    Classes.menu-open="{Binding IsMenuOpen}"
                                     Command="{Binding OpenCommand}">
 
                                     <!-- Строго типизированный ContextMenu со 100% корректным

@@ -92,6 +92,11 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     public bool ShowPlaceholder => string.IsNullOrEmpty(ThumbnailUrl) && !IsLikedPlaylist;
 
     /// <summary>
+    /// Флаг открытого контекстного меню карточки (управляет псевдоклассом menu-open).
+    /// </summary>
+    [ObservableProperty] public partial bool IsMenuOpen { get; set; }
+
+    /// <summary>
     /// YouTube URL плейлиста для CopyLinkButton.
     /// Null если плейлист не привязан к YouTube.
     /// </summary>
