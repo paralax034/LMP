@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using LMP.UI.Features.Shared;
+using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Queue;
@@ -9,7 +10,7 @@ namespace LMP.UI.Features.Queue;
 /// ViewModel экрана текущей очереди воспроизведения.
 /// Синхронизирует состав очереди с <see cref="AudioEngine"/> и активное состояние треков с <see cref="PlayerControlService"/>.
 /// </summary>
-public sealed partial class QueueViewModel : ViewModelBase
+public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionViewModel
 {
     private readonly AudioEngine _audio;
     private readonly PlayerControlService _playerControl;
@@ -22,14 +23,25 @@ public sealed partial class QueueViewModel : ViewModelBase
     private readonly List<TrackItemViewModel> _allQueueItems = [];
     private TrackItemViewModel? _currentActiveVm;
 
+    private bool _isTransitioning;
+
     public ObservableCollection<TrackItemViewModel> QueueItems { get; } = [];
     public ObservableCollection<TrackItemViewModel> QueueTracks => QueueItems;
 
     [ObservableProperty] public partial int TotalCount { get; private set; }
     [ObservableProperty] public partial string FormattedTotalDuration { get; private set; } = "";
-    [ObservableProperty] public partial bool IsLoading { get; set; }
     [ObservableProperty] public partial string FilterQuery { get; set; } = string.Empty;
     [ObservableProperty] public partial bool IsFilterEmpty { get; private set; }
+    public bool IsLoading
+    {
+        get => _isTransitioning;
+        private set
+        {
+            if (_isTransitioning == value) return;
+            _isTransitioning = value;
+            OnPropertyChanged(nameof(IsLoading));
+        }
+    }
 
     public bool IsEmpty => TotalCount == 0;
     public bool CanReorderItems => string.IsNullOrWhiteSpace(FilterQuery) && TotalCount > 1;
@@ -89,6 +101,19 @@ public sealed partial class QueueViewModel : ViewModelBase
         _playerControl.ForceSyncTriggered += OnPlayerControlForceSyncTriggered;
 
         SyncWithAudioQueue();
+    }
+
+    /// <inheritdoc />
+    public void PrepareForTransition()
+    {
+        IsLoading = true;
+    }
+
+    /// <inheritdoc />
+    public override Task OnNavigatedToAsync()
+    {
+        IsLoading = false;
+        return Task.CompletedTask;
     }
 
     partial void OnFilterQueryChanged(string value)

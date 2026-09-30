@@ -506,7 +506,6 @@ public partial class TrackListControl : UserControl
             SubscribeToCollectionChanged(change.GetNewValue<IEnumerable?>());
 
             ResyncSelectionFromItems();
-            UpdateItemsContext();
         }
         else if (change.Property == IsPlaylistContextProperty ||
                  change.Property == IsQueueContextProperty)
@@ -660,16 +659,37 @@ public partial class TrackListControl : UserControl
         }
 
         int firstIndex = -1;
-        int currentIndex = 0;
+        var isPlaylist = IsPlaylistContext;
+        var isQueue = IsQueueContext;
 
-        if (Items is IList list)
+        if (Items is IList<TrackItemViewModel> list)
         {
             int count = list.Count;
             for (int i = 0; i < count; i++)
             {
-                if (list[i] is TrackItemViewModel vm)
+                var vm = list[i];
+                vm.SelectionProvider = GetSelectedTrackInfos;
+                if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
+                if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
+
+                if (vm.IsSelected)
+                {
+                    _selectedSet.Add(vm);
+                    if (firstIndex < 0) firstIndex = i;
+                }
+            }
+        }
+        else if (Items is IList objList)
+        {
+            int count = objList.Count;
+            for (int i = 0; i < count; i++)
+            {
+                if (objList[i] is TrackItemViewModel vm)
                 {
                     vm.SelectionProvider = GetSelectedTrackInfos;
+                    if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
+                    if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
+
                     if (vm.IsSelected)
                     {
                         _selectedSet.Add(vm);
@@ -680,11 +700,15 @@ public partial class TrackListControl : UserControl
         }
         else
         {
+            int currentIndex = 0;
             foreach (var item in Items)
             {
                 if (item is TrackItemViewModel vm)
                 {
                     vm.SelectionProvider = GetSelectedTrackInfos;
+                    if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
+                    if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
+
                     if (vm.IsSelected)
                     {
                         _selectedSet.Add(vm);
@@ -1352,8 +1376,6 @@ public partial class TrackListControl : UserControl
             else
                 sv.Offset = new Vector(sv.Offset.X, targetY);
         }
-
-        _repeater?.InvalidateMeasure();
     }
 
     /// <summary>

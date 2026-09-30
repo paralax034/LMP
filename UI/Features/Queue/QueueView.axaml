@@ -3,7 +3,8 @@
     xmlns:vm="using:LMP.UI.Features.Queue"
     xmlns:controls="using:LMP.UI.Controls"
     x:Class="LMP.UI.Features.Queue.QueueView"
-    x:DataType="vm:QueueViewModel">
+    x:DataType="vm:QueueViewModel"
+    x:CompileBindings="True">
 
     <Grid>
         <!-- Empty State -->

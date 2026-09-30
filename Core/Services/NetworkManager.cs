@@ -15,6 +15,9 @@ public sealed class NetworkManager : IDisposable
 
     private readonly Lock _rebuildLock = new();
     private readonly Lock _stateLock = new();
+    private static IPAddress? _cachedOutboundIp;
+    private static bool _cachedVpnStatus;
+    private static readonly Lock _routeCacheLock = new();
 
     private volatile HttpClient _audioClient;
     private volatile HttpClient _apiClient;
@@ -335,6 +338,11 @@ public sealed class NetworkManager : IDisposable
     {
         Log.Debug("[NetworkManager] System NetworkAddressChanged event received");
 
+        lock (_routeCacheLock)
+        {
+            _cachedOutboundIp = null;
+        }
+
         lock (_stateLock)
         {
             _addressChangeDebounceCts?.Cancel();
@@ -388,7 +396,7 @@ public sealed class NetworkManager : IDisposable
 
             while (!_cts.Token.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromMinutes(2), _cts.Token).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromMinutes(5), _cts.Token).ConfigureAwait(false);
 
                 var (currentIp, isVpn) = EvaluateOutboundRoute();
                 var previousIp = Volatile.Read(ref _lastOutboundIp);
@@ -414,7 +422,18 @@ public sealed class NetworkManager : IDisposable
         if (ip == null)
             return (null, false);
 
-        return (ip.ToString(), DetectVpnRoute(ip));
+        lock (_routeCacheLock)
+        {
+            if (ip.Equals(_cachedOutboundIp))
+            {
+                return (ip.ToString(), _cachedVpnStatus);
+            }
+
+            bool isVpn = DetectVpnRoute(ip);
+            _cachedOutboundIp = ip;
+            _cachedVpnStatus = isVpn;
+            return (ip.ToString(), isVpn);
+        }
     }
 
     private static IPAddress? GetOutboundIpAddress()

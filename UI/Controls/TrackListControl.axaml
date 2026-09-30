@@ -4,6 +4,7 @@
     xmlns:ctrl="using:LMP.UI.Controls"
     xmlns:ir="using:Avalonia.Controls"
     x:Class="LMP.UI.Controls.TrackListControl"
+    x:CompileBindings="True"
     x:Name="Root"
     Focusable="True">
 
@@ -106,14 +107,45 @@
         </MenuFlyout>
     </UserControl.Resources>
 
-    <StackPanel IsVisible="{Binding !IsLoading, ElementName=Root}"
+    <DockPanel IsVisible="{Binding !IsLoading, ElementName=Root}"
         Background="Transparent"
         PointerPressed="OnRootPointerPressed"
         DragDrop.AllowDrop="{Binding EnableReordering, ElementName=Root}">
 
+        <!-- FOOTER -->
+        <StackPanel DockPanel.Dock="Bottom"
+            Margin="0,8,0,80"
+            DataContext="{Binding #Root}"
+            IsHitTestVisible="False"
+            IsVisible="{Binding IsLoaderOrFooterVisible}">
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                Margin="0,16,0,24" Opacity="0.6"
+                IsVisible="{Binding IsFetchingFromNetwork}">
+                <TextBlock Text="{Binding LoadingMoreText}" FontSize="13"
+                    Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
+                    Classes="loading-dot1" Margin="2,0,0,0" />
+                <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
+                    Classes="loading-dot2" />
+                <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
+                    Classes="loading-dot3" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="8"
+                IsVisible="{Binding IsFooterVisible}"
+                Margin="0,16,0,32" HorizontalAlignment="Center" Opacity="0.5">
+                <PathIcon Data="{StaticResource Icon.CheckCircle}" Width="16" Height="16"
+                    Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock Text="{Binding EndOfListText}"
+                    Foreground="{DynamicResource TextMutedBrush}" FontSize="13" />
+            </StackPanel>
+        </StackPanel>
+
         <!-- ITEMS REPEATER -->
         <ir:ItemsRepeater x:Name="MainRepeater"
             ItemsSource="{Binding Items, ElementName=Root}"
+            VerticalCacheLength="1.0"
             TextOptions.BaselinePixelAlignment="Unaligned"
             TextOptions.TextHintingMode="None">
 
@@ -151,9 +183,9 @@
                                     <Panel>
                                         <Image Stretch="UniformToFill"
                                             RenderOptions.BitmapInterpolationMode="LowQuality"
-                                            ctrl:SmartImage.Source="{Binding ThumbnailUrl}"
                                             ctrl:SmartImage.Quality="Low"
-                                            ctrl:SmartImage.Debounce="80" />
+                                            ctrl:SmartImage.Debounce="80"
+                                            ctrl:SmartImage.Source="{Binding ThumbnailUrl}" />
 
                                         <Border Classes="cover-overlay"
                                             Background="{DynamicResource BgOverlayBrush}"
@@ -278,34 +310,5 @@
                 </DataTemplate>
             </ir:ItemsRepeater.ItemTemplate>
         </ir:ItemsRepeater>
-
-        <!-- FOOTER -->
-        <StackPanel Margin="0,8,0,80"
-            DataContext="{Binding #Root}"
-            IsHitTestVisible="False"
-            IsVisible="{Binding IsLoaderOrFooterVisible}">
-
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                Margin="0,16,0,24" Opacity="0.6"
-                IsVisible="{Binding IsFetchingFromNetwork}">
-                <TextBlock Text="{Binding LoadingMoreText}" FontSize="13"
-                    Foreground="{DynamicResource TextMutedBrush}" />
-                <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
-                    Classes="loading-dot1" Margin="2,0,0,0" />
-                <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
-                    Classes="loading-dot2" />
-                <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
-                    Classes="loading-dot3" />
-            </StackPanel>
-
-            <StackPanel Orientation="Horizontal" Spacing="8"
-                IsVisible="{Binding IsFooterVisible}"
-                Margin="0,16,0,32" HorizontalAlignment="Center" Opacity="0.5">
-                <PathIcon Data="{StaticResource Icon.CheckCircle}" Width="16" Height="16"
-                    Foreground="{DynamicResource TextMutedBrush}" />
-                <TextBlock Text="{Binding EndOfListText}"
-                    Foreground="{DynamicResource TextMutedBrush}" FontSize="13" />
-            </StackPanel>
-        </StackPanel>
-    </StackPanel>
+    </DockPanel>
 </UserControl>

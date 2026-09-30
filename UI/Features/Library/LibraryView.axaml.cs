@@ -18,13 +18,9 @@ public partial class LibraryView : UserControl
     /// </summary>
     private void OnPlaylistContextMenuOpened(object? sender, RoutedEventArgs e)
     {
-        if (sender is ContextMenu menu)
+        if (sender is ContextMenu { PlacementTarget: Control target })
         {
-            var target = menu.GetLogicalAncestors()
-                .OfType<Control>()
-                .FirstOrDefault(c => c.Classes.Contains("playlist-card-inner"));
-
-            target?.Classes.Add("menu-open");
+            target.Classes.Add("menu-open");
         }
     }
 
@@ -33,13 +29,9 @@ public partial class LibraryView : UserControl
     /// </summary>
     private void OnPlaylistContextMenuClosed(object? sender, RoutedEventArgs e)
     {
-        if (sender is ContextMenu menu)
+        if (sender is ContextMenu { PlacementTarget: Control target })
         {
-            var target = menu.GetLogicalAncestors()
-                .OfType<Control>()
-                .FirstOrDefault(c => c.Classes.Contains("playlist-card-inner"));
-
-            target?.Classes.Remove("menu-open");
+            target.Classes.Remove("menu-open");
         }
     }
 }
