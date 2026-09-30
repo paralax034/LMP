@@ -740,8 +740,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
-                PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
-                TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
+                PlaylistCountText = targetPlaylists.ToString();
+                TotalTracksText = targetTracks.ToString();
                 TotalDurationText = FormatDurationLocalized(duration);
                 AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(avgTrk)}";
                 AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(avgPl)}";
@@ -770,8 +770,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 {
                     if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
-                    PlaylistCountText = SL.GetPlural("Library_PlaylistWord", currentPlaylists);
-                    TotalTracksText = SL.GetPlural("Library_TrackWord", currentTracks);
+                    PlaylistCountText = currentPlaylists.ToString();
+                    TotalTracksText = currentTracks.ToString();
 
                     if (!IsStatsVisible)
                         IsStatsVisible = true;
@@ -794,8 +794,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             {
                 if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
-                PlaylistCountText = SL.GetPlural("Library_PlaylistWord", targetPlaylists);
-                TotalTracksText = SL.GetPlural("Library_TrackWord", targetTracks);
+                PlaylistCountText = targetPlaylists.ToString();
+                TotalTracksText = targetTracks.ToString();
                 TotalDurationText = FormatDurationLocalized(finalDuration);
                 AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(finalAvgTrack)}";
                 AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(finalAvgPlaylist)}";

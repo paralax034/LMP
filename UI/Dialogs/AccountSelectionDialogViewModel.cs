@@ -21,15 +21,37 @@ public sealed partial class AccountSelectionDialogViewModel : ViewModelBase
         IEnumerable<YoutubeAccountItem> accounts,
         string? activeAuthUser = "")
     {
-        Accounts = new ObservableCollection<YoutubeAccountItem>(accounts);
-        SelectedAccount = Accounts.FirstOrDefault(a => a.AuthUser == activeAuthUser && !string.IsNullOrEmpty(activeAuthUser))
-                        ?? Accounts.FirstOrDefault(a => a.IsSelected)
-                        ?? Accounts.FirstOrDefault();
+        Accounts = new(accounts);
 
         ConfirmCommand = new RelayCommand(
             () => OnResult?.Invoke(SelectedAccount),
             () => SelectedAccount != null);
 
         CancelCommand = new RelayCommand(() => OnResult?.Invoke(null));
+
+        YoutubeAccountItem? matched = null;
+        YoutubeAccountItem? selected = null;
+        YoutubeAccountItem? first = null;
+
+        bool hasActiveUser = !string.IsNullOrEmpty(activeAuthUser);
+
+        for (int i = 0; i < Accounts.Count; i++)
+        {
+            var acc = Accounts[i];
+            first ??= acc;
+
+            if (hasActiveUser && matched is null && acc.AuthUser == activeAuthUser)
+            {
+                matched = acc;
+                break;
+            }
+
+            if (selected is null && acc.IsSelected)
+            {
+                selected = acc;
+            }
+        }
+
+        SelectedAccount = matched ?? selected ?? first;
     }
 }
