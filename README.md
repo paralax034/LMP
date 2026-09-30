@@ -20,7 +20,7 @@ Engineered with **.NET 11**, **Avalonia UI 12**, and **Native AOT**.
 <br/>
 
 <!-- HERO DEMO MP4 -->
-<video src="docs/assets/demo-hero.mp4" width="100%" autoplay loop muted playsinline style="border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+<video src="https://github.com/user-attachments/assets/ccc83af4-40fe-4048-b60f-e7c344d0ec91" width="100%" autoplay loop muted playsinline style="border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
 </video>
 
 </div>
@@ -58,7 +58,7 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - Customizable animation speeds and full control over accent colors.
 
 <div align="center">
-  <video src="docs/assets/feature-theming.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/35e184d4-5294-43c3-9e48-1d4f1a67d0ae" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -72,7 +72,7 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - Custom non-linear volume curves (Quadratic / Linear / Cubic).
 
 <div align="center">
-  <video src="docs/assets/feature-audio.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/575f3dbe-b438-4c15-9985-b0b49e9e34dd" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -86,7 +86,7 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - Multi-account management with instant session switching.
 
 <div align="center">
-  <video src="docs/assets/feature-sync.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/212907b7-d1fc-4ab7-a7f5-563449918f7a" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -100,7 +100,7 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - **Automated YouTube Cipher Bypass:** Background decryption of `sig`, `n-token`, and `poToken` parameters with automatic client profile rotation.
 
 <div align="center">
-  <video src="docs/assets/feature-storage.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/cb0b3669-cfb9-42f7-8f70-b988ac60fae8" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -182,7 +182,7 @@ build.bat publish
 - Настройка скорости пульсации и полное управление акцентными цветами интерфейса.
 
 <div align="center">
-  <video src="docs/assets/feature-theming.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/35e184d4-5294-43c3-9e48-1d4f1a67d0ae" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -196,7 +196,7 @@ build.bat publish
 - Настройка кривых затухания громкости (Квадратичная / Линейная / Кубическая).
 
 <div align="center">
-  <video src="docs/assets/feature-audio.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/575f3dbe-b438-4c15-9985-b0b49e9e34dd" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -210,7 +210,7 @@ build.bat publish
 - Поддержка нескольких аккаунтов с быстрым переключением сессий.
 
 <div align="center">
-  <video src="docs/assets/feature-sync.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/212907b7-d1fc-4ab7-a7f5-563449918f7a" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
@@ -224,7 +224,7 @@ build.bat publish
 - **Обход блокировок YouTube:** Фоновая дешифровка токенов `sig`, `n-token`, `poToken` и динамическая ротация клиентских профилей для защиты от троттлинга скорости.
 
 <div align="center">
-  <video src="docs/assets/feature-storage.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/cb0b3669-cfb9-42f7-8f70-b988ac60fae8" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
