@@ -11,16 +11,17 @@ Engineered with **.NET 11**, **Avalonia UI 12**, and **Native AOT**.
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_x64-0078D6?style=flat-square&logo=windows)](https://microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-MIT-333333?style=flat-square)](LICENSE)
 
-[**Download Release (.7z)**](https://github.com/paralax034/LMP/releases/latest) | [**Report Issue**](https://github.com/paralax034/LMP/issues) | [**Changelog**](https://github.com/paralax034/LMP/releases)
+[**Download**](https://github.com/paralax034/LMP/releases/dev) | [**Report Issue**](https://github.com/paralax034/LMP/issues) | [**Changelog**](https://github.com/paralax034/LMP/releases)
 
 <br/>
 
-**Navigation:** [English](#english) | [Русский](#русский)
+[English](#english) | [Русский](#русский)
 
 <br/>
 
-<!-- HERO DEMO -->
-<img src="docs/assets/demo-hero.gif" alt="LMP Showcase" width="100%" style="border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);" />
+<!-- HERO DEMO MP4 -->
+<video src="docs/assets/demo-hero.mp4" width="100%" autoplay loop muted playsinline style="border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+</video>
 
 </div>
 
@@ -57,7 +58,8 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - Customizable animation speeds and full control over accent colors.
 
 <div align="center">
-  <img src="docs/assets/feature-theming.gif" alt="Theme Customization" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-theming.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 <br/>
@@ -70,7 +72,8 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - Custom non-linear volume curves (Quadratic / Linear / Cubic).
 
 <div align="center">
-  <img src="docs/assets/feature-audio.gif" alt="Audio Normalization" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-audio.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 <br/>
@@ -83,7 +86,8 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - Multi-account management with instant session switching.
 
 <div align="center">
-  <img src="docs/assets/feature-sync.gif" alt="Playlist & Cloud Sync" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-sync.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 <br/>
@@ -96,7 +100,8 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - **Automated YouTube Cipher Bypass:** Background decryption of `sig`, `n-token`, and `poToken` parameters with automatic client profile rotation.
 
 <div align="center">
-  <img src="docs/assets/feature-storage.gif" alt="Storage and Cache Controls" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-storage.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 ---
@@ -177,7 +182,8 @@ build.bat publish
 - Настройка скорости пульсации и полное управление акцентными цветами интерфейса.
 
 <div align="center">
-  <img src="docs/assets/feature-theming.gif" alt="Настройки внешнего вида" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-theming.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 <br/>
@@ -190,7 +196,8 @@ build.bat publish
 - Настройка кривых затухания громкости (Квадратичная / Линейная / Кубическая).
 
 <div align="center">
-  <img src="docs/assets/feature-audio.gif" alt="Нормализация звука" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-audio.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 <br/>
@@ -203,7 +210,8 @@ build.bat publish
 - Поддержка нескольких аккаунтов с быстрым переключением сессий.
 
 <div align="center">
-  <img src="docs/assets/feature-sync.gif" alt="Синхронизация плейлистов" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-sync.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 <br/>
@@ -216,7 +224,8 @@ build.bat publish
 - **Обход блокировок YouTube:** Фоновая дешифровка токенов `sig`, `n-token`, `poToken` и динамическая ротация клиентских профилей для защиты от троттлинга скорости.
 
 <div align="center">
-  <img src="docs/assets/feature-storage.gif" alt="Управление кэшем и памятью" width="90%" style="border-radius: 6px;" />
+  <video src="docs/assets/feature-storage.mp4" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  </video>
 </div>
 
 ---
@@ -266,6 +275,6 @@ build.bat publish
 
 <div align="center">
 
-_Developed by **paralax034**_
+_Developed by **paralax034** with <3_
 
 </div>
