@@ -291,6 +291,16 @@
                         </Panel>
                     </Button>
 
+                    <!-- Кнопка импорта треков из Яндекс Музыки -->
+                    <Button Command="{Binding ImportYandexMusicCommand}"
+                            Classes="header-action-btn"
+                            IsEnabled="{Binding !IsSyncing}"
+                            ToolTip.Tip="Импорт из Яндекс Музыки">
+                        <PathIcon Data="{StaticResource Icon.YandexMusic}"
+                                  Width="16" Height="16"
+                                  IsHitTestVisible="False" />
+                    </Button>
+
                     <Button Command="{Binding OpenCreateCommand}"
                         Classes="header-action-btn"
                         IsEnabled="{Binding !IsSyncing}"
