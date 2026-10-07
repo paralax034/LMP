@@ -254,6 +254,36 @@
   "Home_Greeting_Morning": "Good morning",
   "Home_Greeting_Night": "Good night",
 
+  "Import_Yandex_BrowserOpened": "Opened in browser. Allow access and copy access_token",
+  "Import_Yandex_ChangeAccount": "Change token",
+  "Import_Yandex_Checking": "Verifying token and loading playlists...",
+  "Import_Yandex_ClipboardError": "Clipboard error: {0}",
+  "Import_Yandex_Connect": "Connect Account",
+  "Import_Yandex_ConnectionError": "Connection error: {0}",
+  "Import_Yandex_Done": "Import completed successfully!",
+  "Import_Yandex_EmptyPlaylist": "Selected playlist is empty.",
+  "Import_Yandex_EnterToken": "Enter or paste OAuth token",
+  "Import_Yandex_Failed_Desc": "The following tracks were not found on YouTube. You can try searching for them again with relaxed filters:",
+  "Import_Yandex_Failed_Title": "Failed to transfer {0} tracks",
+  "Import_Yandex_FetchingPlaylist": "Loading «{0}» from Yandex...",
+  "Import_Yandex_Finish": "Finish",
+  "Import_Yandex_InvalidToken": "Invalid token or session expired.",
+  "Import_Yandex_LikedDesc": "Liked tracks from Yandex Music",
+  "Import_Yandex_LikedTitle": "Liked Tracks",
+  "Import_Yandex_NoPlaylists": "No playlists found in account.",
+  "Import_Yandex_OpenBrowser": "Open Authorization Page",
+  "Import_Yandex_PasteTooltip": "Paste from clipboard",
+  "Import_Yandex_ProgressTitle": "Importing tracks to LMP...",
+  "Import_Yandex_Retry": "Retry",
+  "Import_Yandex_SelectPlaylist": "Select a playlist to import into your library:",
+  "Import_Yandex_StartImport": "Start Import",
+  "Import_Yandex_Success_Message": "Transferred {0} of {1} tracks.\nTraffic used: ~{2} | Saved: ~{3}",
+  "Import_Yandex_Success_Title": "Import Completed",
+  "Import_Yandex_Title": "Yandex Music",
+  "Import_Yandex_TokenHelp": "An OAuth token is required to access your library. You can get it in your browser with one click:",
+  "Import_Yandex_TokenReset": "Token reset. Please sign in again",
+  "Import_Yandex_TokenWatermark": "y0_AgAAAA...",
+
   "Input_Watermark": "Enter text...",
 
   "Library_AvgPlaylist": "playlist",
@@ -726,6 +756,5 @@
   "VolumeCurve_SpeedOfLight": "Speed of Light",
 
   "Window_Close": "Close",
-  "Window_Maximize": "Maximize",
-  "Window_Minimize": "Minimize"
+  "Window_Maximize": "Maximize"
 }

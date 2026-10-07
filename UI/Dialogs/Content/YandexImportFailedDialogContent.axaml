@@ -1,0 +1,80 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:LMP.UI.Dialogs"
+    xmlns:models="using:LMP.Core.Models"
+    x:Class="LMP.UI.Dialogs.Content.YandexImportFailedDialogContent"
+    x:DataType="vm:YandexImportFailedDialogViewModel"
+    Width="500">
+
+    <Border Classes="card" Background="{DynamicResource BgPrimaryBrush}"
+            BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+            CornerRadius="12" Padding="24" BoxShadow="{StaticResource CardShadow}">
+        <Grid RowDefinitions="Auto, Auto, *, Auto">
+
+            <!-- HEADER -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,12">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <PathIcon Data="{StaticResource Icon.AlertCircleOutline}" Width="22" Height="22"
+                              Foreground="{DynamicResource SystemWarnOrangeBrush}" />
+                    <TextBlock Text="{Binding FailedCountText}" FontSize="16" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Button Grid.Column="2" Command="{Binding FinishCommand}" Classes="header-icon-btn"
+                        ToolTip.Tip="{Binding L[Window_Close]}">
+                    <PathIcon Data="{StaticResource Icon.Close}" Width="16" Height="16" />
+                </Button>
+            </Grid>
+
+            <!-- SUBTITLE -->
+            <TextBlock Grid.Row="1" Text="{Binding L[Import_Yandex_Failed_Desc]}"
+                       Classes="desc" FontSize="12" LineHeight="18" Margin="0,0,0,14" />
+
+            <!-- FAILED TRACKS LIST -->
+            <Border Grid.Row="2" BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+                    CornerRadius="8" Padding="4" Background="Transparent" Margin="0,0,0,16">
+                <ScrollViewer MaxHeight="240" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding FailedTracks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:ExternalTrack">
+                                <Border Padding="10,8" Margin="0,2" CornerRadius="6"
+                                        Background="{DynamicResource BgHighlightTransparentBrush}">
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <PathIcon Grid.Column="0" Data="{StaticResource Icon.MusicNote}" Width="16" Height="16"
+                                                  Foreground="{DynamicResource TextMutedBrush}"
+                                                  Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Artist}" FontSize="11"
+                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- FOOTER BUTTONS -->
+            <Grid Grid.Row="3" ColumnDefinitions="*,12,*">
+                <Button Grid.Column="0" Command="{Binding FinishCommand}"
+                        Classes="accent" Height="36" HorizontalAlignment="Stretch">
+                    <TextBlock Text="{Binding L[Import_Yandex_Finish]}" FontSize="12" />
+                </Button>
+
+                <Button Grid.Column="2" Command="{Binding RetryCommand}"
+                        Classes="primary-btn" Height="36" HorizontalAlignment="Stretch">
+                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                        <PathIcon Data="{StaticResource Icon.Refresh}" Width="14" Height="14" />
+                        <TextBlock Text="{Binding L[Import_Yandex_Retry]}" FontSize="12" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

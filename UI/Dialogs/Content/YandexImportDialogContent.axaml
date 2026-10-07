@@ -1,0 +1,228 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:LMP.UI.Dialogs"
+    xmlns:models="using:LMP.Core.Models"
+    xmlns:controls="using:LMP.UI.Controls"
+    x:Class="LMP.UI.Dialogs.Content.YandexImportDialogContent"
+    x:DataType="vm:YandexImportDialogViewModel"
+    Width="500">
+
+    <UserControl.Styles>
+        <!-- Модальная карточка диалога по правилам Theme.axaml (12px, 1px BgHighlight, CardShadow) -->
+        <Style Selector="Border.dialog-modal-card">
+            <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="24" />
+            <Setter Property="BoxShadow" Value="{StaticResource CardShadow}" />
+        </Style>
+
+        <!-- Элемент списка плейлистов с защитой от сдвига компоновки (1px рамка везде) -->
+        <Style Selector="ListBox.playlist-select-list ListBoxItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+
+        <Style Selector="ListBox.playlist-select-list ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        </Style>
+
+        <Style Selector="ListBox.playlist-select-list ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+
+        <Style Selector="ListBox.playlist-select-list ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Classes="dialog-modal-card">
+        <Grid RowDefinitions="Auto,*">
+
+            <!-- ═══ HEADER ═══ -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,20">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <PathIcon Data="{StaticResource Icon.YandexMusic}" Width="22" Height="22"
+                              Foreground="{DynamicResource AccentBrush}" />
+                    <TextBlock Text="{Binding L[Import_Yandex_Title]}" FontSize="16" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Крестик закрытия через проектный стиль header-icon-btn -->
+                <Button Grid.Column="2" Command="{Binding CloseCommand}" Classes="header-icon-btn"
+                        ToolTip.Tip="{Binding L[Window_Close]}">
+                    <PathIcon Data="{StaticResource Icon.Close}" Width="16" Height="16" />
+                </Button>
+            </Grid>
+
+            <!-- ═══ BODY ═══ -->
+            <Grid Grid.Row="1">
+
+                <!-- ШАГ 1: АВТОРИЗАЦИЯ -->
+                <StackPanel Spacing="14" IsVisible="{Binding !IsAuthorized}">
+                    <TextBlock Text="{Binding L[Import_Yandex_TokenHelp]}"
+                               Classes="desc" FontSize="12" LineHeight="18" />
+
+                    <!-- Кнопка перехода в браузер -->
+                    <Button Command="{Binding OpenBrowserCommand}" Classes="accent"
+                            HorizontalAlignment="Stretch" Padding="14,10">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                            <PathIcon Data="{StaticResource Icon.Web}" Width="16" Height="16" />
+                            <TextBlock Text="{Binding L[Import_Yandex_OpenBrowser]}" FontSize="13" />
+                        </StackPanel>
+                    </Button>
+
+                    <!-- Поле ввода токена с кнопкой вставки -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" Text="{Binding TokenText}"
+                                 Watermark="{Binding L[Import_Yandex_TokenWatermark]}"
+                                 Height="36" CornerRadius="6,0,0,6"
+                                 FontSize="12" VerticalContentAlignment="Center" />
+                        <Button Grid.Column="1" Command="{Binding PasteTokenCommand}"
+                                Height="36" Width="38" CornerRadius="0,6,6,0" Padding="0"
+                                Classes="ctrl-btn"
+                                ToolTip.Tip="{Binding L[Import_Yandex_PasteTooltip]}">
+                            <PathIcon Data="{StaticResource Icon.ContentCopy}" Width="14" Height="14" />
+                        </Button>
+                    </Grid>
+
+                    <!-- Статусное сообщение -->
+                    <TextBlock Text="{Binding StatusText}"
+                               Classes="desc" FontSize="11"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               Classes.error-text="{Binding IsError}" />
+
+                    <!-- Кнопка действия -->
+                    <Button Command="{Binding ConnectCommand}" IsEnabled="{Binding !IsLoading}"
+                            Classes="primary-btn" HorizontalAlignment="Stretch" Margin="0,6,0,0" Height="38">
+                        <TextBlock Text="{Binding L[Import_Yandex_Connect]}" FontSize="13" />
+                    </Button>
+                </StackPanel>
+
+                <!-- ШАГ 2: ВЫБОР ПЛЕЙЛИСТА (КВАДРАТНЫЕ ОБЛОЖКИ В СТИЛЕ PLAYLISTVIEW) -->
+                <StackPanel Spacing="14" IsVisible="{Binding IsAuthorized}">
+
+                    <!-- Карточка пользователя (аккуратный контурный стиль) -->
+                    <Border BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+                            CornerRadius="8" Padding="12,10" Background="Transparent">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <PathIcon Grid.Column="0" Data="{StaticResource Icon.Account}" Width="18" Height="18"
+                                      Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,12,0" />
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock Text="{Binding ProfileName}" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding ProfileLogin}" FontSize="11"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+
+                            <Button Grid.Column="2" Command="{Binding ChangeAccountCommand}"
+                                    Classes="ctrl-btn" Width="30" Height="30"
+                                    ToolTip.Tip="{Binding L[Import_Yandex_ChangeAccount]}">
+                                <PathIcon Data="{StaticResource Icon.SwapHorizontal}" Width="14" Height="14" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="{Binding L[Import_Yandex_SelectPlaylist]}"
+                               Classes="label" FontSize="13" />
+
+                    <!-- Вертикальный список со скроллером -->
+                    <Border BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+                            CornerRadius="8" Background="Transparent" Padding="4">
+                        <ScrollViewer MaxHeight="270" HorizontalScrollBarVisibility="Disabled">
+                            <ListBox ItemsSource="{Binding Playlists}"
+                                     SelectedItem="{Binding SelectedPlaylist, Mode=TwoWay}"
+                                     Classes="playlist-select-list"
+                                     Background="Transparent" BorderThickness="0" Padding="0">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="models:ExternalPlaylist">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+
+                                            <!-- ═══ КВАДРАТНАЯ ОБЛОЖКА 48x48 (ИЗ PLAYLISTVIEW) ═══ -->
+                                            <Border Grid.Column="0" Width="48" Height="48"
+                                                    CornerRadius="8" ClipToBounds="True"
+                                                    Background="{DynamicResource BgSkeletonBrush}"
+                                                    BoxShadow="{StaticResource CardShadow}"
+                                                    Margin="0,0,12,0" VerticalAlignment="Center">
+                                                <Panel>
+                                                    <!-- 1. Лайки: проектный градиент liked-gradient + сердце -->
+                                                    <Border Classes="liked-gradient" IsVisible="{Binding IsLikedPlaylist}">
+                                                        <PathIcon Data="{StaticResource Icon.Heart}" Width="22" Height="22"
+                                                                  Foreground="{DynamicResource AccentButtonTextBrush}"
+                                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                  Opacity="0.9" />
+                                                    </Border>
+
+                                                    <!-- 2. Обычный плейлист: SmartImage высокой четкости -->
+                                                    <Image controls:SmartImage.Source="{Binding CoverUrl}"
+                                                           controls:SmartImage.Quality="High"
+                                                           Stretch="UniformToFill"
+                                                           IsVisible="{Binding HasCover}" />
+
+                                                    <!-- 3. Заглушка ноты без обложки (как в PlaylistView) -->
+                                                    <Border Background="{DynamicResource BgSkeletonBrush}"
+                                                            IsVisible="{Binding ShowPlaceholder}">
+                                                        <PathIcon Data="{StaticResource Icon.MusicNote}" Width="22" Height="22"
+                                                                  Foreground="{DynamicResource TextSecondaryBrush}"
+                                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                </Panel>
+                                            </Border>
+
+                                            <!-- ═══ НАЗВАНИЕ И ОПИСАНИЕ ═══ -->
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontSize="13" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip.Tip="{Binding Title}" />
+
+                                                <TextBlock Text="{Binding Description}"
+                                                           FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                                                           TextTrimming="CharacterEllipsis" MaxLines="1"
+                                                           ToolTip.Tip="{Binding Description}"
+                                                           IsVisible="{Binding Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                            </StackPanel>
+
+                                            <!-- ═══ БЕЙДЖ КОЛИЧЕСТВА ТРЕКОВ (STATUS-CHIP) ═══ -->
+                                            <Border Grid.Column="2" Classes="status-chip"
+                                                    VerticalAlignment="Center" Margin="10,0,4,0">
+                                                <TextBlock Text="{Binding FormattedTrackCount}" FontSize="11" />
+                                            </Border>
+
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Кнопка запуска переноса -->
+                    <Button Command="{Binding ConfirmImportCommand}"
+                            Classes="primary-btn" HorizontalAlignment="Stretch" Margin="0,4,0,0" Height="38">
+                        <TextBlock Text="{Binding L[Import_Yandex_StartImport]}" FontSize="13" />
+                    </Button>
+                </StackPanel>
+
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

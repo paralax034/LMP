@@ -13,7 +13,7 @@ namespace LMP.UI.Services;
 
 /// <summary>
 /// Централизованный сервис для показа диалоговых окон.
-/// 
+///
 /// <para><b>Архитектура:</b></para>
 /// <list type="bullet">
 ///   <item><b>Overlay-диалоги</b> — рендерятся через DialogHost поверх контента,
@@ -22,7 +22,7 @@ namespace LMP.UI.Services;
 ///   <item><b>Модальные окна</b> — BotDetection и StreamUnavailable.
 ///     Блокируют ВСЁ приложение. Используются только для критичных ошибок.</item>
 /// </list>
-/// 
+///
 /// <para><b>Паттерн для overlay-диалогов:</b></para>
 /// <code>
 /// 1. Создать Content/ViewModel с callback'ом (OnResult / OnClose)
@@ -262,6 +262,59 @@ public sealed class DialogService
 
             return result.Count > 0 ? result[0].Path.LocalPath : null;
         });
+    }
+    /// <summary>
+    /// Показывает диалог со списком ненайденных треков и возможностью повторного поиска.
+    /// </summary>
+    public async Task<bool> ShowYandexImportFailedDialogAsync(IReadOnlyList<ExternalTrack> failedTracks)
+    {
+        var host = _getDialogHost();
+        var tcs = new TaskCompletionSource<bool>();
+
+        var vm = new YandexImportFailedDialogViewModel(failedTracks)
+        {
+            OnResult = retry =>
+            {
+                host.CloseDialog(retry);
+                tcs.TrySetResult(retry);
+            }
+        };
+
+        var content = new YandexImportFailedDialogContent
+        {
+            DataContext = vm
+        };
+
+        _ = host.ShowAsync<object>(content);
+        return await tcs.Task;
+    }
+    /// <summary>
+    /// Показывает оверлей-диалог авторизации и выбора плейлиста Яндекс Музыки.
+    /// </summary>
+    public async Task<YandexImportDialogResult?> ShowYandexImportDialogAsync(
+        YandexAuthService authService,
+        YandexMusicClient client)
+    {
+        var host = _getDialogHost();
+        var tcs = new TaskCompletionSource<YandexImportDialogResult?>();
+
+        var vm = new YandexImportDialogViewModel(authService, client)
+        {
+            OnResult = result =>
+            {
+                host.CloseDialog(result);
+                tcs.TrySetResult(result);
+            }
+        };
+
+        // Создаём UserControl напрямую и передаём ему DataContext
+        var content = new YandexImportDialogContent
+        {
+            DataContext = vm
+        };
+
+        _ = host.ShowAsync<object>(content);
+        return await tcs.Task;
     }
 
     #endregion

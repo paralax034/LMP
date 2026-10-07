@@ -254,6 +254,36 @@
   "Home_Greeting_Morning": "Доброе утро",
   "Home_Greeting_Night": "Доброй ночи",
 
+  "Import_Yandex_BrowserOpened": "Ссылка открыта в браузере. Разрешите доступ и скопируйте access_token",
+  "Import_Yandex_ChangeAccount": "Сменить токен",
+  "Import_Yandex_Checking": "Проверка токена и загрузка плейлистов...",
+  "Import_Yandex_ClipboardError": "Ошибка буфера обмена: {0}",
+  "Import_Yandex_Connect": "Подключить аккаунт",
+  "Import_Yandex_ConnectionError": "Ошибка подключения: {0}",
+  "Import_Yandex_Done": "Импорт успешно завершён!",
+  "Import_Yandex_EmptyPlaylist": "Выбранный плейлист пуст.",
+  "Import_Yandex_EnterToken": "Введите или вставьте OAuth-токен",
+  "Import_Yandex_Failed_Desc": "Следующие треки не удалось найти на YouTube. Вы можете попробовать запустить расширенный поиск для них:",
+  "Import_Yandex_Failed_Title": "Не удалось перенести треков: {0}",
+  "Import_Yandex_FetchingPlaylist": "Загрузка «{0}» из Яндекса...",
+  "Import_Yandex_Finish": "Завершить",
+  "Import_Yandex_InvalidToken": "Неверный токен или срок его действия истёк.",
+  "Import_Yandex_LikedDesc": "Понравившиеся треки из Яндекс Музыки",
+  "Import_Yandex_LikedTitle": "Мне нравится",
+  "Import_Yandex_NoPlaylists": "В аккаунте не найдено плейлистов.",
+  "Import_Yandex_OpenBrowser": "Открыть страницу авторизации",
+  "Import_Yandex_PasteTooltip": "Вставить из буфера",
+  "Import_Yandex_ProgressTitle": "Перенос треков в LMP...",
+  "Import_Yandex_Retry": "Попробовать заново",
+  "Import_Yandex_SelectPlaylist": "Выберите плейлист для переноса в библиотеку:",
+  "Import_Yandex_StartImport": "Начать перенос",
+  "Import_Yandex_Success_Message": "Перенесено {0} из {1} треков.\nПотрачено: ~{2} | Сэкономлено: ~{3}",
+  "Import_Yandex_Success_Title": "Импорт завершён",
+  "Import_Yandex_Title": "Яндекс Музыка",
+  "Import_Yandex_TokenHelp": "Для доступа к вашей библиотеке требуется OAuth-токен. Вы можете получить его в браузере за 15 секунд:",
+  "Import_Yandex_TokenReset": "Токен сброшен. Войдите заново",
+  "Import_Yandex_TokenWatermark": "y0_AgAAAA...",
+
   "Input_Watermark": "Введите текст...",
 
   "Library_AvgPlaylist": "плейлист",
@@ -726,6 +756,5 @@
   "VolumeCurve_SpeedOfLight": "Скорость света",
 
   "Window_Close": "Закрыть",
-  "Window_Maximize": "Развернуть",
-  "Window_Minimize": "Свернуть"
+  "Window_Maximize": "Развернуть"
 }

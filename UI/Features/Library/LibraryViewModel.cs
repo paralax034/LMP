@@ -57,9 +57,18 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     partial void OnIsSyncingChanged(bool value)
     {
         if (Dispatcher.UIThread.CheckAccess())
+        {
             SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+            ImportYandexMusicCommand.NotifyCanExecuteChanged();
+        }
         else
-            Dispatcher.UIThread.Post(() => SyncAccountPlaylistsCommand.NotifyCanExecuteChanged());
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+                ImportYandexMusicCommand.NotifyCanExecuteChanged();
+            });
+        }
     }
 
     #endregion
@@ -82,6 +91,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     public IAsyncRelayCommand RefreshCommand { get; }
     public IAsyncRelayCommand OpenCreateCommand { get; }
     public IAsyncRelayCommand SyncAccountPlaylistsCommand { get; }
+    public IAsyncRelayCommand ImportYandexMusicCommand { get; }
     public IRelayCommand CancelSyncCommand { get; }
 
     #endregion
@@ -116,6 +126,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         OpenCreateCommand = new AsyncRelayCommand(OpenCreateDialogAsync);
         SyncAccountPlaylistsCommand = new AsyncRelayCommand(SyncAccountPlaylistsAsync, () => !IsSyncing);
+        ImportYandexMusicCommand = new AsyncRelayCommand(ImportYandexMusicAsync, () => !IsSyncing);
 
         CancelSyncCommand = new RelayCommand(() =>
         {
@@ -411,6 +422,151 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
 
         return index;
+    }
+
+/// <summary>
+    /// Авторизованный перенос плейлистов из Яндекс Музыки с бесконечным циклом повтора ненайденных треков.
+    /// </summary>
+    private async Task ImportYandexMusicAsync()
+    {
+        if (_isDisposed) return;
+
+        var authService = new YandexAuthService();
+        var yandexClient = new YandexMusicClient();
+        var matcher = new TrackMatcher(_youtube, _library);
+        var coordinator = new PlaylistImportCoordinator(_playlistService, matcher);
+
+        // 1. Открываем оверлей-диалог авторизации и выбора плейлиста
+        var dialogResult = await _dialog.ShowYandexImportDialogAsync(authService, yandexClient);
+        if (dialogResult == null) return;
+
+        var selectedPlaylist = dialogResult.SelectedPlaylist;
+        var token = dialogResult.Token;
+        var uid = dialogResult.Uid;
+
+        _syncCts?.Cancel();
+        _syncCts = new CancellationTokenSource();
+        var ct = _syncCts.Token;
+
+        IsSyncing = true;
+        IsStatsVisible = false;
+        SyncProgress = 0;
+        SyncStatus = string.Format(SL["Import_Yandex_FetchingPlaylist"], selectedPlaylist.Title);
+        _mainWindow.LockNavigation(SL["Import_Yandex_ProgressTitle"]);
+
+        try
+        {
+            // 2. Выгружаем треки выбранного плейлиста из Яндекс Музыки
+            var (metadata, tracks) = await yandexClient.FetchPlaylistTracksAsync(token, uid, selectedPlaylist, ct);
+
+            if (tracks.Count == 0)
+            {
+                await _dialog.ShowInfoAsync(SL["Import_Yandex_Title"], SL["Import_Yandex_EmptyPlaylist"]);
+                return;
+            }
+
+            var progressReporter = new Progress<ImportProgressReport>(report =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_isDisposed) return;
+                    SyncProgress = (double)report.Processed / report.Total;
+                    SyncStatus = $"[{report.Processed}/{report.Total}] {report.CurrentTrackName}";
+                });
+            });
+
+            // 3. Запускаем первоначальный перенос
+            var summary = await coordinator.ImportAsync(
+                metadata,
+                tracks,
+                yandexClient.GetTrafficUsage(),
+                progressReporter,
+                ct: ct);
+
+            // 4. Цикл повторных попыток: пока есть ненайденные треки и пользователь жмёт «Попробовать заново»
+            while (summary.FailedTracks.Count > 0 && !ct.IsCancellationRequested && !_isDisposed)
+            {
+                // Разблокируем интерфейс для работы с окном
+                Dispatcher.UIThread.Post(() => _mainWindow.UnlockNavigation());
+
+                // Показываем окно со списком оставшихся ненайденных песен
+                bool retry = await _dialog.ShowYandexImportFailedDialogAsync(summary.FailedTracks);
+
+                // Если нажали «Завершить» (пропустить) или закрыли окно — выходим из цикла
+                if (!retry || _isDisposed || ct.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                // Пользователь нажал «Попробовать заново» — блокируем интерфейс и запускаем повтор для остатка
+                _mainWindow.LockNavigation(SL["Import_Yandex_ProgressTitle"]);
+                SyncStatus = string.Format(SL["Import_Yandex_FetchingPlaylist"], selectedPlaylist.Title);
+
+                var retrySummary = await coordinator.ImportAsync(
+                    metadata,
+                    summary.FailedTracks,
+                    yandexClient.GetTrafficUsage(),
+                    progressReporter,
+                    targetPlaylistId: summary.PlaylistId,
+                    isRetry: true,
+                    ct: ct);
+
+                // Обновляем статистику:
+                // - к найденным прибавляем новые
+                // - в FailedTracks записываем только то, что НЕ удалось найти даже со второй попытки
+                summary = summary with
+                {
+                    Matched = summary.Matched + retrySummary.Matched,
+                    FailedTracks = retrySummary.FailedTracks,
+                    TotalTrafficBytes = summary.TotalTrafficBytes + retrySummary.TotalTrafficBytes,
+                    SavedTrafficBytes = summary.SavedTrafficBytes + retrySummary.SavedTrafficBytes
+                };
+            }
+
+            SyncProgress = 1.0;
+            SyncStatus = SL["Import_Yandex_Done"];
+
+            // 5. Финальное всплывающее уведомление
+            await _notifications.ShowToastAsync(
+                titleKey: "Import_Yandex_Success_Title",
+                messageKey: "Import_Yandex_Success_Message",
+                severity: NotificationSeverity.Success,
+                durationMs: 7000,
+                messageArgs: [summary.Matched, summary.Total, summary.FormattedTotalTraffic, summary.FormattedSavedTraffic]);
+        }
+        catch (OperationCanceledException)
+        {
+            SyncStatus = SL["Sync_Cancelled"];
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[Import] Ошибка импорта: {ex.Message}");
+            await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], ex.Message);
+        }
+        finally
+        {
+            await Task.Delay(300);
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                try
+                {
+                    _mainWindow.UnlockNavigation();
+                }
+                catch { }
+
+                if (!_isDisposed)
+                {
+                    IsSyncing = false;
+                    SyncProgress = 0;
+                    SyncStatus = string.Empty;
+                    try
+                    {
+                        await LoadPlaylistsAsync();
+                    }
+                    catch { }
+                }
+            });
+        }
     }
 
     /// <summary>
