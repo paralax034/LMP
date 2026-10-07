@@ -47,10 +47,17 @@ internal class SearchController(HttpClient http)
             : null;
 
         var url = isMusicContext
-            ? "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
-            : "https://www.youtube.com/youtubei/v1/search?prettyPrint=false";
+                    ? "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
+                    : "https://www.youtube.com/youtubei/v1/search?prettyPrint=false";
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
+
+        // Поисковый запрос явно объявляет системный язык пользователя в заголовках,
+        // предотвращая навязывание словарей опечаток сторонних регионов.
+        var userHl = YoutubeHttpHandler.GetHl();
+        var userGl = YoutubeHttpHandler.GetGl();
+        request.Headers.AcceptLanguage.Clear();
+        request.Headers.AcceptLanguage.ParseAdd($"{userHl}-{userGl},{userHl};q=0.9,en;q=0.8");
 
         var bufferWriter = new ArrayBufferWriter<byte>(512);
         using (var writer = new Utf8JsonWriter(bufferWriter))
@@ -85,8 +92,10 @@ internal class SearchController(HttpClient http)
                 writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.WebClientVersion);
             }
 
-            writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.InvariantHl);
-            writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.InvariantGl);
+            // Поисковый запрос должен учитывать локаль и регион пользователя системы,
+            // иначе англоязычный спеллчекер США искажает специфичные имена и никнеймы артистов.
+            writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.GetHl());
+            writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.GetGl());
 
             writer.WriteEndObject(); // client
 

@@ -166,6 +166,11 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         using var request = new HttpRequestMessage(HttpMethod.Post, playerUrl);
         YoutubeClientUtils.ConfigurePlayerRequest(request, clientName);
 
+        // Плееру строго необходим инвариантный английский язык для детерминированного парсинга
+        // дат публикации ("3 days ago") и текстовых причин блокировок (Bot Detection / Age Gate).
+        request.Headers.AcceptLanguage.Clear();
+        request.Headers.AcceptLanguage.ParseAdd(YoutubeHttpHandler.InvariantAcceptLanguage);
+
         bool isMobileClient = clientName is YoutubeClientNames.AndroidVr or
                               YoutubeClientNames.AndroidMusic or
                               YoutubeClientNames.Ios or

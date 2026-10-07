@@ -161,15 +161,13 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
             request.Headers.Add("User-Agent", YoutubeClientUtils.UaWeb);
         }
 
-        if (isYoutubeApi)
+        // Если вызывающий контроллер не установил специфичный Accept-Language,
+        // выставляем заголовок на основе текущей культуры системы пользователя.
+        if (!request.Headers.Contains("Accept-Language"))
         {
-            if (request.Headers.Contains("Accept-Language"))
-                request.Headers.Remove("Accept-Language");
-            request.Headers.Add("Accept-Language", InvariantAcceptLanguage);
-        }
-        else if (!request.Headers.Contains("Accept-Language"))
-        {
-            request.Headers.Add("Accept-Language", "en,ru;q=0.9");
+            var hl = GetHl();
+            var gl = GetGl();
+            request.Headers.Add("Accept-Language", $"{hl}-{gl},{hl};q=0.9,en-US;q=0.8,en;q=0.7");
         }
 
         if (isYoutubeDomain && !isMobileClient && authService is { IsAuthenticated: true })
