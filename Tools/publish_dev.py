@@ -10,13 +10,14 @@ Implements dual-channel release publishing on GitHub:
 
 import sys
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
 import zipfile
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 tools_dir = Path(__file__).resolve().parent
 if str(tools_dir) not in sys.path:
@@ -196,7 +197,7 @@ def main():
         f"| Commit Number | `{commit_count}` |\n"
         f"| Snapshot Tag | [`{history_tag}`](https://github.com/{repo_slug}/releases/tag/{history_tag}) |\n"
         f"| Environment | {source_env} |\n"
-        f"| Updated At | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} |\n\n"
+        f"| Updated At | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} |\n\n"
         f"### 📥 Permanent Download Links:\n"
         f"- **[Download LMP-Release-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Release-latest.7z)** — Native AOT Standalone (Recommended)\n"
         f"- **[Download LMP-Debug-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Debug-latest.7z)** — Debug build with logging console\n"

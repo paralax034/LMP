@@ -2,7 +2,6 @@
   <PropertyGroup>
     <VersionMajor>0</VersionMajor>
     <VersionMinor>0</VersionMinor>
-    <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
     <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
 

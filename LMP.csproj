@@ -28,6 +28,8 @@
       Осознанный выбор: Runtime Async без EnablePreviewFeatures, JIT-улучшения.
     -->
     <TargetFramework>net11.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PublishAot>true</PublishAot>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -154,8 +156,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Concentus.Native" Version="1.5.2" />
-    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3"
-      Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
   </ItemGroup>
 
   <ItemGroup Label="Avalonia Community">
