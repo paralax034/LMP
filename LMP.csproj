@@ -7,7 +7,7 @@
     <!-- MVVM стек CommunityToolkit: современный генератор кода свойств и команд -->
     <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
 
-    <!-- Microsoft Extensions (совпадает с TFM): 10.0.11 -->
+    <!-- Microsoft Extensions (совпадает с TFM): 10.0.12 -->
     <MsExtVersion>10.0.12</MsExtVersion>
 
     <!-- AsyncImageLoader: 3.8.0 — поддержка Avalonia 12 -->
@@ -28,8 +28,6 @@
       Осознанный выбор: Runtime Async без EnablePreviewFeatures, JIT-улучшения.
     -->
     <TargetFramework>net11.0</TargetFramework>
-    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <PublishAot>true</PublishAot>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -49,8 +47,9 @@
     <!-- Нужно для низкоуровневых аудио-операций (PCM-буферы, нативный interop) -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- Lock-файл обязателен для детерминированного восстановления пакетов в CI -->
+    <!-- Раздельные lock-файлы под каждую конфигурацию (устраняет взаимную перезапись) -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath>packages.$(Configuration).lock.json</NuGetLockFilePath>
 
     <!-- Подавляет IL20xx/IL30xx ошибки при AOT-анализе -->
     <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
@@ -106,7 +105,9 @@
 
     <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**</DefaultItemExcludes>
 
-    <!-- Полный тримминг неиспользуемых сборок и IL-кода -->
+    <!-- Native AOT и полный тримминг скомпилированного машинного кода -->
+    <PublishAot>true</PublishAot>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <TrimmerRootDescriptor>trimming.xml</TrimmerRootDescriptor>
@@ -156,7 +157,9 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Concentus.Native" Version="1.5.2" />
-    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
+    <!-- Инструменты диагностики только в Debug: в Release не раздувают размер бинарника -->
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3"
+      Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
 
   <ItemGroup Label="Avalonia Community">

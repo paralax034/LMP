@@ -151,10 +151,11 @@ def main():
     print(f"  {Color.GREEN}✓ Updated: Core/LMP.Core.csproj{Color.RESET}\n")
 
     print(f"{Color.YELLOW}>>> Synchronizing dependency graph and packages.lock.json...{Color.RESET}")
-    res = subprocess.run(["dotnet", "restore", "LMP.sln", "--force-evaluate"], cwd=str(root))
-    if res.returncode != 0:
-        print(f"{Color.RED}[ERROR] 'dotnet restore' failed with exit code: {res.returncode}{Color.RESET}")
-        sys.exit(res.returncode)
+    res_debug = subprocess.run(["dotnet", "restore", "LMP.sln", "-p:Configuration=Debug", "--force-evaluate"], cwd=str(root))
+    res_release = subprocess.run(["dotnet", "restore", "LMP.csproj", "-p:Configuration=Release", "-r", "win-x64", "--force-evaluate"], cwd=str(root))
+    if res_debug.returncode != 0 or res_release.returncode != 0:
+        print(f"{Color.RED}[ERROR] 'dotnet restore' failed.{Color.RESET}")
+        sys.exit(1)
 
     print()
     print(f"{Color.GRAY}=============================================================={Color.RESET}")

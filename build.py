@@ -132,7 +132,8 @@ def main():
             clean_tree(root)
 
         elif mode == "restore":
-            run_step(["dotnet", "restore", "LMP.sln", "--force", "--force-evaluate"], root, "Restoring solution dependencies")
+            run_step(["dotnet", "restore", "LMP.sln", "-p:Configuration=Debug", "--force", "--force-evaluate"], root, "Restoring Debug dependencies")
+            run_step(["dotnet", "restore", "LMP.csproj", "-p:Configuration=Release", "-r", rid, "--force", "--force-evaluate"], root, "Restoring Release AOT dependencies")
 
         elif mode == "debug":
             run_step(["dotnet", "build", "LMP.sln", "-c", "Debug"], root, "Building Debug configuration")
