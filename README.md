@@ -3,10 +3,10 @@
 # Lite Music Player (LMP)
 
 **A high-performance, resource-efficient native YouTube Music desktop client for Windows.**  
-Engineered with **.NET 11**, **Avalonia UI 12**, and **Native AOT**.
+Engineered with **.NET 11**, **Avalonia UI 12.1**, and **Native AOT**.
 
 [![Runtime](https://img.shields.io/badge/.NET-11.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
-[![UI Framework](https://img.shields.io/badge/Avalonia_UI-12.0-8A2BE2?style=flat-square)](https://avaloniaui.net/)
+[![UI Framework](https://img.shields.io/badge/Avalonia_UI-12.1-8A2BE2?style=flat-square)](https://avaloniaui.net/)
 [![Compilation](https://img.shields.io/badge/Compilation-Native_AOT-107C41?style=flat-square)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_x64-0078D6?style=flat-square&logo=windows)](https://microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-MIT-333333?style=flat-square)](LICENSE)
@@ -116,6 +116,7 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 - **MVVM Layer:** Zero-reflection view models driven by compile-time Source Generators (`CommunityToolkit.Mvvm`).
 - **Data Persistence:** Raw ADO.NET SQLite database operations paired with high-speed binary serialization (`MemoryPack`).
 - **Network Stack:** Centralized `NetworkManager` providing connection pooling, DNS-over-HTTPS (DoH), and system/custom proxy support.
+- **Tooling Ecosystem:** Cross-platform build automation engine and zero-allocation static analysis toolset powered by Python 3.
 
 </details>
 
@@ -133,6 +134,7 @@ Download the latest `LMP-Release-latest.7z` from the [**dev**](https://github.co
 
 - Windows 10 / 11 (x64)
 - .NET 11.0 SDK
+- Python 3.10+ (for cross-platform build orchestration and tooling)
 - Visual Studio Build Tools (C++ Desktop Development workload for Native AOT linking)
 
 ```bash
@@ -140,11 +142,16 @@ Download the latest `LMP-Release-latest.7z` from the [**dev**](https://github.co
 git clone https://github.com/paralax034/LMP.git
 cd LMP
 
-# Run in debug mode
-dotnet run --project LMP.csproj -c Debug
+# Run in debug mode (via cross-platform build engine)
+python build.py debug
+# or on Windows:
+build.bat debug
 
 # Build standalone Native AOT release
+python build.py publish
+# or on Windows / Unix:
 build.bat publish
+# ./build.sh publish
 ```
 
 ---
@@ -240,6 +247,7 @@ build.bat publish
 - **Слой MVVM:** Компилируемые привязки и Source Generators библиотеки `CommunityToolkit.Mvvm` без использования динамической рефлексии.
 - **Хранилище данных:** Прямое взаимодействие с SQLite через низкоуровневый ADO.NET и бинарную сериализацию `MemoryPack`.
 - **Сетевой стек:** Централизованный `NetworkManager` с пулом соединений, поддержкой DNS-over-HTTPS (DoH) и системных/кастомных прокси.
+- **Инструментарий:** Кроссплатформенный движок сборки и статические анализаторы без аллокаций памяти на базе Python 3.
 
 </details>
 
@@ -257,6 +265,7 @@ build.bat publish
 
 - Windows 10 / 11 (x64)
 - .NET 11.0 SDK
+- Python 3.10+ (для кроссплатформенного сборочного движка и утилит)
 - Visual Studio Build Tools (компоненты «Разработка классических приложений на C++» для компоновщика Native AOT)
 
 ```bash
@@ -264,11 +273,16 @@ build.bat publish
 git clone https://github.com/paralax034/LMP.git
 cd LMP
 
-# Запуск в режиме отладки
-dotnet run --project LMP.csproj -c Debug
+# Запуск в режиме отладки (через кроссплатформенный сборочный движок)
+python build.py debug
+# или на Windows:
+build.bat debug
 
 # Публикация нативного релиза (Native AOT)
+python build.py publish
+# или на Windows / Unix:
 build.bat publish
+# ./build.sh publish
 ```
 
 ---

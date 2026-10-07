@@ -130,7 +130,6 @@
 
   "Dialog_BotDetection_Message": "YouTube detected unusual activity and temporarily limited playback.\n\nThis is normal after playing many tracks quickly.",
   "Dialog_BotDetection_Title": "Temporary Slowdown",
-  "Dialog_ClearHistoryMessage": "Clear your search history?",
   "Dialog_CloseAction_Exit": "Exit",
   "Dialog_CloseAction_Message": "What would you like to do?",
   "Dialog_CloseAction_Remember": "Remember my choice",
@@ -139,7 +138,6 @@
   "Dialog_Confirm_Title": "Confirm",
   "Dialog_Done_Title": "Done",
   "Dialog_Error_Title": "Error",
-  "Dialog_HistoryCleared": "History cleared.",
   "Dialog_Info_Title": "Information",
   "Dialog_LegacyPlaylists_CountdownButton": "Read ({0}s)",
   "Dialog_LoginMessage_Manual": "Or paste cookies manually (if the extension copied them to clipboard):",

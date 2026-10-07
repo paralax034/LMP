@@ -1,19 +1,23 @@
 ---
-name: Предложение фичи (Feature Request)
-about: Предложить новую идею или улучшение для LMP
-title: "Название фичи"
+name: Feature Request
+about: Propose a new feature, optimization, or architectural enhancement for LMP
+title: "Feature Name"
 labels: ["type: feature"]
 assignees: ""
 ---
 
-### Какую проблему решит эта фича?
+### Problem Statement
 
-> Опишите сценарий использования. Почему плееру нужна эта функция?
+> Describe the user story or bottleneck. Why does Lite Music Player need this feature?
 
-### Описание предлагаемого решения
+### Proposed Solution
 
-> Как, по вашему мнению, это должно работать в интерфейсе или под капотом?
+> How should this feature behave in the UI or under the hood? Detail the technical design or data flow if known.
 
-### Альтернативные варианты (если есть)
+### Alternatives Considered
 
-> Рассматривали ли вы другие способы решения этой задачи?
+> Did you consider alternative approaches or libraries to solve this problem?
+
+### Additional Context
+
+> Add any other context, mockups, or relevant references here.

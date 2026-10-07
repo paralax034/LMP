@@ -1,28 +1,29 @@
 ---
-name: Баг-репорт (Bug Report)
-about: Сообщить об ошибке в плеере по нашей технической структуре
-title: "Краткое описание проблемы"
+name: Bug Report
+about: Report a defect or runtime error following our technical architecture structure
+title: "Brief summary of the issue"
 labels: ["type: bug"]
 assignees: ""
 ---
 
-### Суть проблемы (в чём баг)
+### Problem Description
 
-> Подробно опишите симптомы проблемы. Что именно работает некорректно? Какое поведение ожидалось и какое получилось на самом деле?
+> Provide a detailed description of the defect. What went wrong? What was the expected behavior versus what actually occurred?
 
-### Как воспроизвести (Steps to Reproduce)
+### Steps to Reproduce
 
-1. Открыть плеер...
-2. Переключить громкость / запустить трек...
-3. Сделать действие...
-4. Наблюдать проблему...
+1. Launch Lite Music Player...
+2. Adjust volume / start playback...
+3. Perform action...
+4. Observe the issue...
 
-### Возможное техническое решение (теория и архитектура)
+### Technical Context & Proposed Architecture (Optional)
 
-> Как это должно быть исправлено под капотом в теории? Какие изменения в пайплайн, кэш или UI нужно внести, какие паттерны или структуры данных применить?
+> How should this be resolved internally? What pipeline, caching layer, or UI modifications should be applied? Mention relevant design patterns or data structures if applicable.
 
-### Окружение (Environment)
+### Environment
 
-- **Версия LMP:** (например, #172-dev)
-- **Версия ОС:** (Windows 10 / 11)
-- **Профиль интернета:** (Low / Medium / High)
+- **LMP Version:** (e.g. #172-dev)
+- **OS Version:** (Windows 10 / 11 x64)
+- **Network Profile:** (Low / Medium / High / Ultra)
+- **Audio Output:** (WASAPI / WinMM)

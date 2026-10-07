@@ -8,6 +8,7 @@ appsecrets.*.json
 [Oo]bj/
 # Артефакты публикации
 publis*/
+__pycache__/
 
 ## --- [ Visual Studio ] ---
 .vs/

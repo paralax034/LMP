@@ -2,25 +2,6 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "format: code",
-            "type": "shell",
-            "command": "dotnet",
-            "args": [
-                "format",
-                "LMP.sln"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "build",
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true
-            },
-            "problemMatcher": "$msCompile"
-        },
-        {
             "label": "build: debug",
             "type": "shell",
             "command": "${workspaceFolder}\\build.bat debug nopause",
@@ -28,11 +9,7 @@
                 "cwd": "${workspaceFolder}",
                 "shell": {
                     "executable": "C:\\Windows\\System32\\cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c",
-                        "chcp 65001 >nul &&"
-                    ]
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
                 }
             },
             "group": {
@@ -54,11 +31,7 @@
                 "cwd": "${workspaceFolder}",
                 "shell": {
                     "executable": "C:\\Windows\\System32\\cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c",
-                        "chcp 65001 >nul &&"
-                    ]
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
                 }
             },
             "group": "build",
@@ -77,11 +50,7 @@
                 "cwd": "${workspaceFolder}",
                 "shell": {
                     "executable": "C:\\Windows\\System32\\cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c",
-                        "chcp 65001 >nul &&"
-                    ]
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
                 }
             },
             "group": "build",
@@ -93,18 +62,14 @@
             }
         },
         {
-            "label": "publish: release",
+            "label": "build: clean",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat publish nopause",
+            "command": "${workspaceFolder}\\build.bat clean nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
                     "executable": "C:\\Windows\\System32\\cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c",
-                        "chcp 65001 >nul &&"
-                    ]
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
                 }
             },
             "group": "build",
@@ -116,62 +81,10 @@
             }
         },
         {
-            "label": "analyze: dead-code",
+            "label": "analyze: l10n",
             "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-code.ps1"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "build",
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            }
-        },
-        {
-            "label": "analyze: dead-events",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-events.ps1"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "build",
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true,
-                "focus": true
-            }
-        },
-        {
-            "label": "analyze: dead-l10n",
-            "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-l10n.ps1"
-            ],
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\audit_l10n.py"],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
@@ -187,14 +100,76 @@
         {
             "label": "analyze: dead-styles",
             "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\find-dead-styles.ps1"
-            ],
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\find_dead_styles.py"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "analyze: dead-code (full)",
+            "type": "shell",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\find_dead_code.py"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "analyze: dead-code (fast)",
+            "type": "shell",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\find_dead_code.py", "--skip-build"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "analyze: dependencies",
+            "type": "shell",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\update_dependencies.py", "--dry-run"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "tool: fix-l10n",
+            "type": "shell",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\audit_l10n.py", "--fix"],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
@@ -210,14 +185,8 @@
         {
             "label": "tool: sort-l10n",
             "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\sort-l10n.ps1"
-            ],
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\sort_l10n.py"],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
@@ -231,16 +200,10 @@
             }
         },
         {
-            "label": "tool: migrate-fody-to-sourcegen",
+            "label": "tool: update-dependencies",
             "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\migrate-fody-to-sourcegen.ps1"
-            ],
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\update_dependencies.py"],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
@@ -254,16 +217,45 @@
             }
         },
         {
-            "label": "web-publish: dev",
+            "label": "tool: format-code",
             "type": "shell",
-            "command": "powershell.exe",
-            "args": [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "${workspaceFolder}\\Tools\\publish-dev.ps1"
-            ],
+            "command": "dotnet",
+            "args": ["format", "LMP.sln"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "publish: release",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat publish nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "build",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "publish: dev (full)",
+            "type": "shell",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\publish_dev.py"],
             "options": {
                 "cwd": "${workspaceFolder}"
             },
@@ -277,27 +269,38 @@
             "problemMatcher": []
         },
         {
-            "label": "clean",
+            "label": "publish: dev (release only)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat clean nopause",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\publish_dev.py", "--release-only"],
             "options": {
-                "cwd": "${workspaceFolder}",
-                "shell": {
-                    "executable": "C:\\Windows\\System32\\cmd.exe",
-                    "args": [
-                        "/d",
-                        "/c",
-                        "chcp 65001 >nul &&"
-                    ]
-                }
+                "cwd": "${workspaceFolder}"
             },
             "group": "build",
-            "problemMatcher": "$msCompile",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated",
-                "clear": true
-            }
+                "clear": true,
+                "focus": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "publish: dev (skip build)",
+            "type": "shell",
+            "command": "python",
+            "args": ["${workspaceFolder}\\Tools\\publish_dev.py", "--skip-build"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            },
+            "problemMatcher": []
         }
     ]
 }
