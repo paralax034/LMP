@@ -4,7 +4,6 @@ using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Http;
 using LMP.Core.Data;
 using LMP.Core.Youtube.Bridge.Common;
-using LMP.Core.Youtube.Bridge.PoToken;
 
 namespace LMP.Core.Models;
 

@@ -4,15 +4,19 @@
   "AddToPlaylist_SearchHint": "Search playlists...",
   "AddToPlaylist_Selected": "Selected: {0}",
   "AddToPlaylist_Title": "To Playlist",
+
   "AnimationSpeed_Epileptic": "Epilepsy",
   "AnimationSpeed_Fast": "Fast",
   "AnimationSpeed_Medium": "Medium",
   "AnimationSpeed_Slow": "Slow",
   "AnimationSpeed_VerySlow": "Very Slow",
+
   "Attempt_Failed": "Failed",
   "Attempt_Success": "Success",
+
   "AudioQuality_BestAvailable": "High (Opus)",
   "AudioQuality_Standard": "Standard (AAC)",
+
   "Audio_ErrorSection": "Errors and warnings",
   "Audio_Gain": "Normalization (dB)",
   "Audio_GainDesc": "Adjusts playback volume to be consistent.",
@@ -21,6 +25,7 @@
   "Audio_ProcessingSection": "Processing",
   "Audio_QualitySection": "Quality",
   "Audio_VolumeSection": "Volume",
+
   "Auth_Extension_Version_Format": "Extension: v{0}",
   "Auth_Guest": "Guest Mode",
   "Auth_Incognito_Step1": "Press Ctrl+Shift+N — a new Incognito (Private) window will open.",
@@ -56,14 +61,18 @@
   "Auth_Tooltip_CopyPath": "Copy unpacked extension folder path",
   "Auth_Tooltip_ToProtocol": "Click to go to Login Instructions",
   "Auth_Tooltip_ToggleView": "Switch interface layout",
+
   "Build_CommitsCount": "{0} commits",
+
   "Button_Cancel": "Cancel",
   "Button_Create": "Create",
   "Button_Delete": "Delete",
+
   "Cache_High": "Smooth",
   "Cache_Low": "Economy",
   "Cache_Medium": "Balanced",
   "Cache_Ultra": "Maximum",
+
   "Category_Electronic": "Electronic",
   "Category_HipHop": "Hip-Hop",
   "Category_LoFi": "Lo-Fi Beats",
@@ -71,12 +80,15 @@
   "Category_RecentlyPlayed": "Recently Played",
   "Category_Rock": "Rock Classics",
   "Category_Trending": "Trending",
+
   "Client_AndroidVR": "Android VR (Recommended)",
   "Client_TV": "Smart TV / Console",
   "Client_Web": "Web Browser",
+
   "CloseAction_Ask": "Ask every time",
   "CloseAction_Exit": "Close application",
   "CloseAction_MinimizeToTray": "Minimize to tray",
+
   "Common_AppName": "Lite Player",
   "Common_Apply": "Apply",
   "Common_Cancel": "Cancel",
@@ -94,10 +106,12 @@
   "Common_OpenGitHub": "Open GitHub repository",
   "Common_Reset": "Reset",
   "Common_Yes": "Yes",
+
   "ContextMenu_Copy": "Copy",
   "ContextMenu_Cut": "Cut",
   "ContextMenu_Paste": "Paste",
   "ContextMenu_SelectAll": "Select All",
+
   "CoverPicker_BrowseFile": "Browse file",
   "CoverPicker_FileHint": "Path to image...",
   "CoverPicker_FileTab": "File",
@@ -106,12 +120,14 @@
   "CoverPicker_SelectTracks": "Select 1-4 covers for mosaic",
   "CoverPicker_Status": "Selected: {0}/{1}",
   "CoverPicker_Tab": "From tracks",
+
   "Delete_Description": "How would you like to delete this playlist?",
   "Delete_Everywhere": "Delete Everywhere",
   "Delete_EverywhereHint": "Removes from YouTube account too",
   "Delete_LocalOnly": "Remove from Library",
   "Delete_LocalOnlyHint": "Keeps the playlist on YouTube",
   "Delete_Title": "Delete Playlist",
+
   "Dialog_BotDetection_Message": "YouTube detected unusual activity and temporarily limited playback.\n\nThis is normal after playing many tracks quickly.",
   "Dialog_BotDetection_Title": "Temporary Slowdown",
   "Dialog_ClearHistoryMessage": "Clear your search history?",
@@ -139,9 +155,11 @@
   "Dialog_Success": "Success",
   "Dialog_SyncPlaylist_Title": "Sync Playlist",
   "Dialog_Warning_Title": "Warning",
+
   "Duration_Hours": "h",
   "Duration_Minutes": "m",
   "Duration_Seconds": "s",
+
   "EditPlaylist_Color": "Custom Color",
   "EditPlaylist_CopyCreated": "Playlist copy created",
   "EditPlaylist_CopyFailed": "Failed to create copy: {0}",
@@ -157,6 +175,7 @@
   "EditPlaylist_SyncDesc": "Two-way sync with YouTube",
   "EditPlaylist_Title": "Edit Playlist",
   "EditPlaylist_Unlinked": "Unlinked from YouTube",
+
   "Error_CacheInvalidated": "Track cache was deleted. Playback stopped.",
   "Error_Cdn_Unavailable": "CDN server blocked by provider. Zapret/VPN required.",
   "Error_CopyDetails": "Copy Details",
@@ -190,6 +209,7 @@
   "Error_Stream_UmpFormat": "YouTube returned encrypted format. Please contact the developer.",
   "Error_Stream_Unknown": "Track unavailable. Please contact the developer.",
   "Error_Video_Unavailable": "This video is not available on YouTube. It may have been removed, made private, or restricted.",
+
   "Extension_Guide_Chrome_Header": "Google Chrome",
   "Extension_Guide_Chrome_Step1": "Click the button below — the extensions page address will be copied. Paste it into the Chrome address bar (Ctrl+V) and press Enter.",
   "Extension_Guide_Chrome_Step2": "On the page that opens, find the «Developer mode» toggle in the top-right corner and turn it on.",
@@ -231,15 +251,19 @@
   "Extension_Install_Title": "LMP Auth Extension Setup Guide",
   "Extension_Link_Copied_Toast": "Address copied! Paste it in the browser address bar (Ctrl+V) and press Enter.",
   "Extension_Path_Copied_Toast": "Path copied! Paste it in the file browser (Ctrl+V) and select the folder.",
+
   "General_AutoPaste": "Auto-play from Clipboard",
   "General_AutoPasteDesc": "Automatically play when YouTube URL is pasted",
   "General_Discord": "Discord RPC",
   "General_DiscordDesc": "Show currently playing track in Discord status",
+
   "Home_Greeting_Afternoon": "Good afternoon",
   "Home_Greeting_Evening": "Good evening",
   "Home_Greeting_Morning": "Good morning",
   "Home_Greeting_Night": "Good night",
+
   "Input_Watermark": "Enter text...",
+
   "Library_AvgPlaylist": "playlist",
   "Library_AvgTrack": "track",
   "Library_CloudSyncTooltip": "Synced with YouTube Music",
@@ -261,8 +285,10 @@
   "Library_TrackWord_few": "tracks",
   "Library_TrackWord_many": "tracks",
   "Library_TrackWord_one": "track",
+
   "Merge_Error_Msg": "Failed to merge playlists.",
   "Merge_Success_Msg": "Playlists merged successfully.",
+
   "Nav_Home": "Home",
   "Nav_Home_Tip": "Home — recommendations & recent",
   "Nav_Library": "Library",
@@ -276,10 +302,12 @@
   "Nav_Search_Tip": "Search music on YouTube and local files",
   "Nav_Settings": "Settings",
   "Nav_Settings_Tip": "Application settings",
+
   "NetProfile_High": "High Quality",
   "NetProfile_Low": "Data Saver",
   "NetProfile_Medium": "Balanced",
   "NetProfile_Ultra": "Lossless / LAN",
+
   "Network_StatusCdnBlocked": "YouTube is available, but the audio CDN (googlevideo.com) is blocked. Add *.googlevideo.com to your DPI bypass settings.",
   "Network_StatusChecking": "Checking...",
   "Network_StatusError": "YouTube is unreachable",
@@ -291,8 +319,10 @@
   "Network_StatusVpn": "Connected via VPN",
   "Network_TestButton": "Test Connection",
   "Network_Testing": "Testing...",
+
   "NormMode_Bidirectional": "Bidirectional — Spotify style (recommended)",
   "NormMode_DownwardOnly": "Downward Only — YouTube style",
+
   "Notification_AlreadyRunning_Question": "Lite Music Player is already running.\n\nWould you like to terminate the existing instance and start a new one?",
   "Notification_AlreadyRunning_Title": "Already Running",
   "Notification_Clear": "Clear",
@@ -312,6 +342,7 @@
   "Notification_PlaybackDelay_Message": "Playback is delayed due to a slow or interrupted connection. Please wait...",
   "Notification_PlaybackDelay_Title": "Playback delayed",
   "Notification_ViewDetails": "View details",
+
   "Player_Duration": "Duration: {0} / {1}",
   "Player_Loading_Duration": "Loading duration...",
   "Player_Mute": "Mute",
@@ -329,6 +360,7 @@
   "Player_StreamInfo_Loading": "Loading stream...",
   "Player_TrackNumber": "Track {0} of {1}",
   "Player_Unmute": "Unmute",
+
   "Playlist_AddedToQueue": "Added {0} to queue",
   "Playlist_AddedWithDuplicatesSkipped": "Added {0}, skipped {1} duplicates",
   "Playlist_AllAlreadyInQueue": "All tracks already in queue",
@@ -415,6 +447,7 @@
   "Playlist_Views_2": "{0} views",
   "Playlist_Views_5": "{0} views",
   "Playlist_Views_other": "{0} views",
+
   "Queue_Add": "Add to Queue",
   "Queue_AddAll": "Add to Queue",
   "Queue_Clear": "Clear Queue",
@@ -426,6 +459,7 @@
   "Queue_SaveToPlaylist": "Save Queue to Playlist",
   "Queue_Shuffle": "Shuffle Queue",
   "Queue_Title": "Current Queue",
+
   "Recommendation_AllClientsFailed_Auth": "All clients failed. Try changing the client in Settings → Network, or contact the developer.",
   "Recommendation_BotDetection": "Wait a few minutes or change your IP address (VPN).",
   "Recommendation_ChangeClient": "Try changing the YouTube Client in Settings → Network.",
@@ -441,6 +475,7 @@
   "Recommendation_Removed": "This video has been removed from YouTube.",
   "Recommendation_UseVPN": "This content is region-blocked. Try using a VPN or proxy.",
   "Recommendation_VideoUnavailable": "Check if the video is still available on YouTube, or try a different track.",
+
   "Search_BadgeTooltip_Empty": "No items",
   "Search_BadgeTooltip_Suggestions": "Suggestions: {0}",
   "Search_BadgeTooltip_Tracks": "Found tracks: {0}",
@@ -461,7 +496,9 @@
   "Search_Source_Local": "Local Library",
   "Search_Source_YouTube": "YouTube Video",
   "Search_Source_YouTubeMusic": "YouTube Music",
+
   "Seek_CancelHint": "ESC or Right Click to cancel",
+
   "Settings_Account_Language": "Account & Language",
   "Settings_AdvancedColors": "Advanced Colors",
   "Settings_Appearance": "Appearance",
@@ -554,6 +591,7 @@
   "Settings_VolumeCurve": "Volume Curve",
   "Settings_VolumeCurve_Desc": "How volume slider maps to actual loudness",
   "Settings_WindowBehavior": "Window Behavior",
+
   "Splash_BuildingInterface": "Building interface...",
   "Splash_Commits": "{0} commits",
   "Splash_ConnectingYouTube": "Connecting to YouTube...",
@@ -563,9 +601,11 @@
   "Splash_LoadingLibrary": "Loading library...",
   "Splash_PreparingImages": "Preparing images...",
   "Splash_Ready": "Ready!",
+
   "Storage_Change": "Change",
   "Storage_Path": "Download Folder",
   "Storage_ResetApp": "Reset App",
+
   "Stream_Bitrate": "{0} kbps",
   "Stream_Format_Mb": "{0:F1} MB",
   "Stream_Ping_Ms": "{0:F0} ms",
@@ -573,6 +613,7 @@
   "Stream_SelectQuality": "Select Quality",
   "Stream_Speed_Kb": "{0:F0} KB/s",
   "Stream_Speed_Mb": "{0:F1} MB/s",
+
   "Sync_Action_CreateNew": "Create New",
   "Sync_Action_Import": "Import",
   "Sync_Action_Merge": "Merge",
@@ -605,6 +646,7 @@
   "Sync_Tooltip_Search": "Filter playlists by name or author",
   "Sync_Tooltip_Template_Conflicts": "Apply selected action to all conflicting playlists",
   "Sync_Tooltip_Template_New": "Apply selected action to all new playlists",
+
   "Theme_AccentColor": "Accent Color",
   "Theme_AccentColorDesc": "Buttons, links, and highlights",
   "Theme_BgElevated": "Background Elevated",
@@ -621,9 +663,11 @@
   "Theme_TextPrimaryDesc": "Main text color",
   "Theme_TextSecondary": "Subtitles and descriptions",
   "Theme_TextSecondaryDesc": "Subtitles and descriptions",
+
   "Time_Hours_Short": "h",
   "Time_Minutes_Short": "min",
   "Time_Seconds_Short": "sec",
+
   "Track_Added": "Added to Liked",
   "Track_Copied": "Copied!",
   "Track_CopyLink": "Copy Link",
@@ -638,6 +682,7 @@
   "Track_ToggleLike": "Toggle Like",
   "Track_UnknownAuthor": "Unknown Artist",
   "Track_Unlike": "Remove from Liked",
+
   "Tray_ClearMemory": "Clear Memory",
   "Tray_Exit": "Exit",
   "Tray_Hide": "Hide",
@@ -651,11 +696,13 @@
   "Tray_RepeatOne": "Repeat One",
   "Tray_Show": "Show",
   "Tray_VolumeScrollHint": "Scroll ↕",
+
   "VolumeCurve_Cubic": "Cubic",
   "VolumeCurve_Linear": "Linear",
   "VolumeCurve_Logarithmic": "Logarithmic",
   "VolumeCurve_Quadratic": "Quadratic (Recommended)",
   "VolumeCurve_SpeedOfLight": "Speed of Light",
+
   "Window_Close": "Close",
   "Window_Maximize": "Maximize",
   "Window_Minimize": "Minimize"

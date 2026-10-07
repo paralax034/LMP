@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Net.Http.Headers;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using LMP.Core.Youtube.Utils;
 

@@ -4,15 +4,19 @@
   "AddToPlaylist_SearchHint": "Поиск плейлистов...",
   "AddToPlaylist_Selected": "Выбрано: {0}",
   "AddToPlaylist_Title": "В плейлист",
+
   "AnimationSpeed_Epileptic": "Эпилепсия",
   "AnimationSpeed_Fast": "Быстро",
   "AnimationSpeed_Medium": "Средне",
   "AnimationSpeed_Slow": "Медленно",
   "AnimationSpeed_VerySlow": "Очень медленно",
+
   "Attempt_Failed": "Не удалось",
   "Attempt_Success": "Успешно",
+
   "AudioQuality_BestAvailable": "Высокое (Opus)",
   "AudioQuality_Standard": "Стандартное (AAC)",
+
   "Audio_ErrorSection": "Ошибки и предупреждения",
   "Audio_Gain": "Нормализация (dB)",
   "Audio_GainDesc": "Настраивает громкость воспроизведения для постоянства.",
@@ -21,6 +25,7 @@
   "Audio_ProcessingSection": "Обработка",
   "Audio_QualitySection": "Качество",
   "Audio_VolumeSection": "Громкость",
+
   "Auth_Extension_Version_Format": "Расширение: v{0}",
   "Auth_Guest": "Гостевой режим",
   "Auth_Incognito_Step1": "Нажмите Ctrl+Shift+N — откроется новое окно в режиме Инкогнито (Приватный режим).",
@@ -56,14 +61,18 @@
   "Auth_Tooltip_CopyPath": "Скопировать путь к папке распакованного расширения",
   "Auth_Tooltip_ToProtocol": "Нажмите, чтобы перейти к Инструкции Входа",
   "Auth_Tooltip_ToggleView": "Переключить вид интерфейса",
+
   "Build_CommitsCount": "{0} коммитов",
+
   "Button_Cancel": "Отмена",
   "Button_Create": "Создать",
   "Button_Delete": "Удалить",
+
   "Cache_High": "Плавный",
   "Cache_Low": "Экономия",
   "Cache_Medium": "Сбалансированный",
   "Cache_Ultra": "Максимум",
+
   "Category_Electronic": "Электроника",
   "Category_HipHop": "Хип-хоп",
   "Category_LoFi": "Lo-Fi",
@@ -71,12 +80,15 @@
   "Category_RecentlyPlayed": "Недавнее",
   "Category_Rock": "Рок",
   "Category_Trending": "В тренде",
+
   "Client_AndroidVR": "Android VR (Рекомендуется)",
   "Client_TV": "Smart TV / Консоль",
   "Client_Web": "Веб-браузер",
+
   "CloseAction_Ask": "Спрашивать каждый раз",
   "CloseAction_Exit": "Закрыть приложение",
   "CloseAction_MinimizeToTray": "Свернуть в трей",
+
   "Common_AppName": "Lite Player",
   "Common_Apply": "Применить",
   "Common_Cancel": "Отмена",
@@ -94,10 +106,12 @@
   "Common_OpenGitHub": "Открыть репозиторий на GitHub",
   "Common_Reset": "Сбросить",
   "Common_Yes": "Да",
+
   "ContextMenu_Copy": "Копировать",
   "ContextMenu_Cut": "Вырезать",
   "ContextMenu_Paste": "Вставить",
   "ContextMenu_SelectAll": "Выбрать всё",
+
   "CoverPicker_BrowseFile": "Выбрать файл",
   "CoverPicker_FileHint": "Путь к изображению...",
   "CoverPicker_FileTab": "Файл",
@@ -106,12 +120,14 @@
   "CoverPicker_SelectTracks": "Выберите 1-4 обложки для мозаики",
   "CoverPicker_Status": "Выбрано: {0}/{1}",
   "CoverPicker_Tab": "Из треков",
+
   "Delete_Description": "Как вы хотите удалить этот плейлист?",
   "Delete_Everywhere": "Удалить везде",
   "Delete_EverywhereHint": "Также удаляет из аккаунта YouTube",
   "Delete_LocalOnly": "Удалить из библиотеки",
   "Delete_LocalOnlyHint": "Оставляет плейлист на YouTube",
   "Delete_Title": "Удалить плейлист",
+
   "Dialog_BotDetection_Message": "YouTube обнаружил необычную активность и временно ограничил воспроизведение.\n\nЭто нормально после быстрого воспроизведения множества треков.",
   "Dialog_BotDetection_Title": "Временное замедление",
   "Dialog_ClearHistoryMessage": "Очистить историю поиска?",
@@ -139,9 +155,11 @@
   "Dialog_Success": "Успешно",
   "Dialog_SyncPlaylist_Title": "Синхронизация плейлиста",
   "Dialog_Warning_Title": "Предупреждение",
+
   "Duration_Hours": "ч",
   "Duration_Minutes": "м",
   "Duration_Seconds": "с",
+
   "EditPlaylist_Color": "Пользовательский цвет",
   "EditPlaylist_CopyCreated": "Копия плейлиста создана",
   "EditPlaylist_CopyFailed": "Не удалось создать копию: {0}",
@@ -157,6 +175,7 @@
   "EditPlaylist_SyncDesc": "Двусторонняя синхронизация с YouTube",
   "EditPlaylist_Title": "Редактировать плейлист",
   "EditPlaylist_Unlinked": "Отвязано от YouTube",
+
   "Error_CacheInvalidated": "Кэш трека был удалён. Воспроизведение остановлено.",
   "Error_Cdn_Unavailable": "CDN-сервер заблокирован провайдером. Требуется Zapret или VPN.",
   "Error_CopyDetails": "Скопировать детали",
@@ -190,6 +209,7 @@
   "Error_Stream_UmpFormat": "YouTube вернул зашифрованный формат. Пожалуйста, свяжитесь с разработчиком.",
   "Error_Stream_Unknown": "Трек недоступен. Пожалуйста, свяжитесь с разработчиком.",
   "Error_Video_Unavailable": "Видео недоступно на YouTube. Возможно, оно было удалено, скрыто или ограничено.",
+
   "Extension_Guide_Chrome_Header": "Google Chrome",
   "Extension_Guide_Chrome_Step1": "Нажмите кнопку ниже — адрес страницы расширений скопируется. Вставьте его в адресную строку Chrome (Ctrl+V) и нажмите Enter.",
   "Extension_Guide_Chrome_Step2": "На открывшейся странице в правом верхнем углу найдите переключатель «Режим разработчика» и включите его.",
@@ -231,15 +251,19 @@
   "Extension_Install_Title": "Инструкция установки расширения LMP Auth",
   "Extension_Link_Copied_Toast": "Адрес скопирован! Вставьте его в адресную строку браузера (Ctrl+V) и нажмите Enter.",
   "Extension_Path_Copied_Toast": "Путь скопирован! Вставьте его в проводнике (Ctrl+V) и выберите папку.",
+
   "General_AutoPaste": "Автовоспроизведение из буфера обмена",
   "General_AutoPasteDesc": "Автоматически воспроизводить при вставке ссылки YouTube",
   "General_Discord": "Discord RPC",
   "General_DiscordDesc": "Показывать текущий трек в статусе Discord",
+
   "Home_Greeting_Afternoon": "Добрый день",
   "Home_Greeting_Evening": "Добрый вечер",
   "Home_Greeting_Morning": "Доброе утро",
   "Home_Greeting_Night": "Доброй ночи",
+
   "Input_Watermark": "Введите текст...",
+
   "Library_AvgPlaylist": "плейлист",
   "Library_AvgTrack": "трек",
   "Library_CloudSyncTooltip": "Синхронизировано с YouTube Music",
@@ -261,8 +285,10 @@
   "Library_TrackWord_few": "трека",
   "Library_TrackWord_many": "треков",
   "Library_TrackWord_one": "трек",
+
   "Merge_Error_Msg": "Не удалось объединить плейлисты.",
   "Merge_Success_Msg": "Плейлисты успешно объединены.",
+
   "Nav_Home": "Главная",
   "Nav_Home_Tip": "Главная — рекомендации и недавнее",
   "Nav_Library": "Библиотека",
@@ -276,10 +302,12 @@
   "Nav_Search_Tip": "Поиск музыки на YouTube и локальных файлов",
   "Nav_Settings": "Настройки",
   "Nav_Settings_Tip": "Настройки приложения",
+
   "NetProfile_High": "Высокое качество",
   "NetProfile_Low": "Экономия трафика",
   "NetProfile_Medium": "Сбалансированный",
   "NetProfile_Ultra": "Lossless / LAN",
+
   "Network_StatusCdnBlocked": "YouTube доступен, но аудио CDN (googlevideo.com) заблокирован. Добавьте *.googlevideo.com в настройки DPI-обхода.",
   "Network_StatusChecking": "Проверяем...",
   "Network_StatusError": "YouTube недоступен",
@@ -291,8 +319,10 @@
   "Network_StatusVpn": "Подключено через VPN",
   "Network_TestButton": "Проверить соединение",
   "Network_Testing": "Проверяем...",
+
   "NormMode_Bidirectional": "Двусторонний — как в Spotify (рекомендуется)",
   "NormMode_DownwardOnly": "Только понижение — как на YouTube",
+
   "Notification_AlreadyRunning_Question": "Lite Music Player уже запущен.\n\nЗавершить предыдущий процесс и запустить новый?",
   "Notification_AlreadyRunning_Title": "Уже запущено",
   "Notification_Clear": "Очистить",
@@ -312,6 +342,7 @@
   "Notification_PlaybackDelay_Message": "Воспроизведение задерживается из-за медленного или прерванного соединения. Пожалуйста, подождите...",
   "Notification_PlaybackDelay_Title": "Задержка воспроизведения",
   "Notification_ViewDetails": "Посмотреть детали",
+
   "Player_Duration": "Длительность: {0} / {1}",
   "Player_Loading_Duration": "Загрузка длительности...",
   "Player_Mute": "Отключить звук",
@@ -329,6 +360,7 @@
   "Player_StreamInfo_Loading": "Загрузка потока...",
   "Player_TrackNumber": "Трек {0} из {1}",
   "Player_Unmute": "Включить звук",
+
   "Playlist_AddedToQueue": "Добавлено {0} в очередь",
   "Playlist_AddedWithDuplicatesSkipped": "Добавлено {0}, пропущено {1} дубликатов",
   "Playlist_AllAlreadyInQueue": "Все треки уже в очереди",
@@ -415,6 +447,7 @@
   "Playlist_Views_2": "{0} просмотра",
   "Playlist_Views_5": "{0} просмотров",
   "Playlist_Views_other": "{0} просмотров",
+
   "Queue_Add": "Добавить в очередь",
   "Queue_AddAll": "Добавить в очередь",
   "Queue_Clear": "Очистить очередь",
@@ -426,6 +459,7 @@
   "Queue_SaveToPlaylist": "Сохранить очередь в плейлист",
   "Queue_Shuffle": "Перемешать очередь",
   "Queue_Title": "Текущая очередь",
+
   "Recommendation_AllClientsFailed_Auth": "Все клиенты не смогли получить доступ. Попробуйте изменить клиент в Настройках → Сеть, или свяжитесь с разработчиком.",
   "Recommendation_BotDetection": "Подождите несколько минут или смените IP-адрес (VPN).",
   "Recommendation_ChangeClient": "Попробуйте изменить YouTube клиент в Настройках → Сеть.",
@@ -441,6 +475,7 @@
   "Recommendation_Removed": "Это видео было удалено с YouTube.",
   "Recommendation_UseVPN": "Этот контент заблокирован в вашем регионе. Попробуйте использовать VPN или прокси.",
   "Recommendation_VideoUnavailable": "Убедитесь, что видео доступно на YouTube, или выберите другой трек.",
+
   "Search_BadgeTooltip_Empty": "Нет элементов",
   "Search_BadgeTooltip_Suggestions": "Подсказок: {0}",
   "Search_BadgeTooltip_Tracks": "Найдено треков: {0}",
@@ -461,7 +496,9 @@
   "Search_Source_Local": "Локальная библиотека",
   "Search_Source_YouTube": "YouTube Видео",
   "Search_Source_YouTubeMusic": "YouTube Music",
+
   "Seek_CancelHint": "ESC или правый клик для отмены",
+
   "Settings_Account_Language": "Аккаунт и язык",
   "Settings_AdvancedColors": "Расширенные цвета",
   "Settings_Appearance": "Внешний вид",
@@ -554,6 +591,7 @@
   "Settings_VolumeCurve": "Кривая громкости",
   "Settings_VolumeCurve_Desc": "Как ползунок громкости преобразуется в реальную громкость",
   "Settings_WindowBehavior": "Поведение окна",
+
   "Splash_BuildingInterface": "Построение интерфейса...",
   "Splash_Commits": "{0} коммитов",
   "Splash_ConnectingYouTube": "Подключение к YouTube...",
@@ -563,9 +601,11 @@
   "Splash_LoadingLibrary": "Загрузка библиотеки...",
   "Splash_PreparingImages": "Подготовка изображений...",
   "Splash_Ready": "Готово!",
+
   "Storage_Change": "Изменить",
   "Storage_Path": "Папка загрузок",
   "Storage_ResetApp": "Сбросить приложение",
+
   "Stream_Bitrate": "{0} kbps",
   "Stream_Format_Mb": "{0:F1} МБ",
   "Stream_Ping_Ms": "{0:F0} мс",
@@ -573,6 +613,7 @@
   "Stream_SelectQuality": "Выберите качество",
   "Stream_Speed_Kb": "{0:F0} КБ/с",
   "Stream_Speed_Mb": "{0:F1} МБ/с",
+
   "Sync_Action_CreateNew": "Создать новый",
   "Sync_Action_Import": "Импортировать",
   "Sync_Action_Merge": "Объединить",
@@ -605,6 +646,7 @@
   "Sync_Tooltip_Search": "Фильтровать плейлисты по названию или автору",
   "Sync_Tooltip_Template_Conflicts": "Применить выбранное действие ко всем конфликтующим плейлистам",
   "Sync_Tooltip_Template_New": "Применить выбранное действие ко всем новым плейлистам",
+
   "Theme_AccentColor": "Акцентный цвет",
   "Theme_AccentColorDesc": "Кнопки, ссылки и выделения",
   "Theme_BgElevated": "Возвышенный фон",
@@ -621,9 +663,11 @@
   "Theme_TextPrimaryDesc": "Основной цвет текста",
   "Theme_TextSecondary": "Вторичный текст",
   "Theme_TextSecondaryDesc": "Подзаголовки и описания",
+
   "Time_Hours_Short": "ч",
   "Time_Minutes_Short": "мин",
   "Time_Seconds_Short": "сек",
+
   "Track_Added": "Добавлено в понравившиеся",
   "Track_Copied": "Скопировано!",
   "Track_CopyLink": "Скопировать ссылку",
@@ -638,6 +682,7 @@
   "Track_ToggleLike": "Переключить лайк",
   "Track_UnknownAuthor": "Неизвестный исполнитель",
   "Track_Unlike": "Удалить из понравившихся",
+
   "Tray_ClearMemory": "Очистить память",
   "Tray_Exit": "Выход",
   "Tray_Hide": "Скрыть",
@@ -651,11 +696,13 @@
   "Tray_RepeatOne": "Повторять один",
   "Tray_Show": "Показать",
   "Tray_VolumeScrollHint": "Прокрути ↕",
+
   "VolumeCurve_Cubic": "Кубическая",
   "VolumeCurve_Linear": "Линейная",
   "VolumeCurve_Logarithmic": "Логарифмическая",
   "VolumeCurve_Quadratic": "Квадратичная (Рекомендуется)",
   "VolumeCurve_SpeedOfLight": "Скорость света",
+
   "Window_Close": "Закрыть",
   "Window_Maximize": "Развернуть",
   "Window_Minimize": "Свернуть"

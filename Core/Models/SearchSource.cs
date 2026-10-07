@@ -1,5 +1,3 @@
-using LMP.Core.Youtube.Search;
-
 namespace LMP.Core.Models;
 
 /// <summary>
