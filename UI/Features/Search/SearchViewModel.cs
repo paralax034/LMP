@@ -1205,7 +1205,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     /// <param name="current">Текущая коллекция элементов.</param>
     /// <param name="next">Целевая коллекция элементов.</param>
     /// <returns><c>true</c>, если коллекции идентичны по длине и содержимому.</returns>
-    private static bool AreSuggestionsEqual(IList<SearchSuggestionItem> current, List<SearchSuggestionItem> next)
+    private static bool AreSuggestionsEqual(ObservableCollection<SearchSuggestionItem> current, List<SearchSuggestionItem> next)
     {
         if (current.Count != next.Count)
             return false;

@@ -1,5 +1,4 @@
 ﻿using System.Buffers;
-using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using LMP.Core.Youtube.Utils;
@@ -9,31 +8,6 @@ namespace LMP.Core.Youtube.Bridge;
 
 internal partial class SearchResponse
 {
-    private static readonly FrozenSet<string> ItemRendererNames = new[]
-    {
-        "musicResponsiveListItemRenderer",
-        "videoRenderer",
-        "playlistRenderer",
-        "channelRenderer",
-        "shortsLockupViewModel",
-        "reelItemRenderer",
-        "continuationItemRenderer",
-        "lockupViewModel"
-    }.ToFrozenSet(StringComparer.Ordinal);
-
-    private static readonly FrozenSet<string> ContainerNames = new[]
-    {
-        "contents", "items", "primaryContents", "secondaryContents",
-        "twoColumnSearchResultsRenderer", "sectionListRenderer",
-        "itemSectionRenderer", "musicShelfRenderer", "richGridRenderer",
-        "shelfRenderer", "tabbedSearchResultsRenderer", "tabRenderer",
-        "tabs", "content", "continuations", "onResponseReceivedCommands",
-        "onResponseReceivedActions", "appendContinuationItemsAction",
-        "continuationItems", "continuationContents", "musicShelfContinuation",
-        "musicPlaylistShelfContinuation", "sectionListContinuation",
-        "itemSectionContinuation"
-    }.ToFrozenSet(StringComparer.Ordinal);
-
     public IReadOnlyList<VideoData> Videos { get; }
     public IReadOnlyList<PlaylistData> Playlists { get; }
     public IReadOnlyList<ChannelData> Channels { get; }
@@ -52,6 +26,48 @@ internal partial class SearchResponse
         Playlists = playlists;
         Channels = channels;
         ContinuationToken = foundToken ?? ExtractContinuationTokenFast(content);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsItemRenderer(in JsonProperty prop)
+    {
+        return prop.NameEquals(InnerTubeTokens.MusicResponsiveListItemRenderer) ||
+               prop.NameEquals(InnerTubeTokens.VideoRenderer) ||
+               prop.NameEquals(InnerTubeTokens.PlaylistRenderer) ||
+               prop.NameEquals(InnerTubeTokens.ChannelRenderer) ||
+               prop.NameEquals(InnerTubeTokens.ShortsLockupViewModel) ||
+               prop.NameEquals(InnerTubeTokens.ReelItemRenderer) ||
+               prop.NameEquals(InnerTubeTokens.ContinuationItemRenderer) ||
+               prop.NameEquals(InnerTubeTokens.LockupViewModel);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsContainer(in JsonProperty prop)
+    {
+        return prop.NameEquals(InnerTubeTokens.Contents) ||
+               prop.NameEquals(InnerTubeTokens.Items) ||
+               prop.NameEquals(InnerTubeTokens.PrimaryContents) ||
+               prop.NameEquals(InnerTubeTokens.SecondaryContents) ||
+               prop.NameEquals(InnerTubeTokens.TwoColumnSearchResultsRenderer) ||
+               prop.NameEquals(InnerTubeTokens.SectionListRenderer) ||
+               prop.NameEquals(InnerTubeTokens.ItemSectionRenderer) ||
+               prop.NameEquals(InnerTubeTokens.MusicShelfRenderer) ||
+               prop.NameEquals(InnerTubeTokens.RichGridRenderer) ||
+               prop.NameEquals(InnerTubeTokens.ShelfRenderer) ||
+               prop.NameEquals(InnerTubeTokens.TabbedSearchResultsRenderer) ||
+               prop.NameEquals(InnerTubeTokens.TabRenderer) ||
+               prop.NameEquals(InnerTubeTokens.Tabs) ||
+               prop.NameEquals(InnerTubeTokens.Content) ||
+               prop.NameEquals(InnerTubeTokens.Continuations) ||
+               prop.NameEquals(InnerTubeTokens.OnResponseReceivedCommands) ||
+               prop.NameEquals(InnerTubeTokens.OnResponseReceivedActions) ||
+               prop.NameEquals(InnerTubeTokens.AppendContinuationItemsAction) ||
+               prop.NameEquals(InnerTubeTokens.ContinuationItems) ||
+               prop.NameEquals(InnerTubeTokens.ContinuationContents) ||
+               prop.NameEquals(InnerTubeTokens.MusicShelfContinuation) ||
+               prop.NameEquals(InnerTubeTokens.MusicPlaylistShelfContinuation) ||
+               prop.NameEquals(InnerTubeTokens.SectionListContinuation) ||
+               prop.NameEquals(InnerTubeTokens.ItemSectionContinuation);
     }
 
     /// <summary>
@@ -99,11 +115,11 @@ internal partial class SearchResponse
                 bool isItem = false;
                 foreach (var prop in current.EnumerateObject())
                 {
-                    if (ItemRendererNames.Contains(prop.Name))
+                    if (IsItemRenderer(prop))
                     {
-                        if (prop.NameEquals("lockupViewModel"u8))
+                        if (prop.NameEquals(InnerTubeTokens.LockupViewModel))
                         {
-                            if (prop.Value.TryGetProperty("contentId", out _))
+                            if (prop.Value.TryGetProperty(InnerTubeTokens.ContentId, out _))
                             {
                                 isItem = true;
                                 break;
@@ -125,7 +141,7 @@ internal partial class SearchResponse
 
                 foreach (var prop in current.EnumerateObject())
                 {
-                    if (ContainerNames.Contains(prop.Name))
+                    if (IsContainer(prop))
                     {
                         if (stackTop >= stackBuffer.Length)
                         {
@@ -170,9 +186,9 @@ internal partial class SearchResponse
                 return;
             }
 
-            if (prop.NameEquals("videoRenderer"u8) ||
-                prop.NameEquals("shortsLockupViewModel"u8) ||
-                prop.NameEquals("reelItemRenderer"u8))
+            if (prop.NameEquals(InnerTubeTokens.VideoRenderer) ||
+                prop.NameEquals(InnerTubeTokens.ShortsLockupViewModel) ||
+                prop.NameEquals(InnerTubeTokens.ReelItemRenderer))
             {
                 var videoData = new VideoData(prop.Value, isYtm: false);
                 if (!string.IsNullOrEmpty(videoData.Id))
@@ -180,21 +196,21 @@ internal partial class SearchResponse
                 return;
             }
 
-            if (prop.NameEquals("lockupViewModel"u8))
+            if (prop.NameEquals(InnerTubeTokens.LockupViewModel))
             {
-                var contentId = prop.Value.GetPropertyOrNull("contentId")?.GetStringOrNull();
+                var contentId = prop.Value.GetPropertyOrNull(InnerTubeTokens.ContentId)?.GetStringOrNull();
                 if (!string.IsNullOrEmpty(contentId) && IsPlaylistId(contentId))
                     playlists.Add(new PlaylistData(prop.Value));
                 return;
             }
 
-            if (prop.NameEquals("playlistRenderer"u8))
+            if (prop.NameEquals(InnerTubeTokens.PlaylistRenderer))
             {
                 playlists.Add(new PlaylistData(prop.Value));
                 return;
             }
 
-            if (prop.NameEquals("channelRenderer"u8))
+            if (prop.NameEquals(InnerTubeTokens.ChannelRenderer))
             {
                 channels.Add(new ChannelData(prop.Value));
                 return;
@@ -251,7 +267,7 @@ internal partial class SearchResponse
 
                 if (current.ValueKind == JsonValueKind.Object)
                 {
-                    if (current.TryGetProperty("continuationItemRenderer", out var continuationItem))
+                    if (current.TryGetProperty(InnerTubeTokens.ContinuationItemRenderer, out var continuationItem))
                     {
                         var token = BridgeUtils.ExtractContinuationToken(continuationItem);
                         if (token != null) return token;
@@ -261,12 +277,12 @@ internal partial class SearchResponse
                     {
                         if (prop.NameEquals(InnerTubeTokens.ContinuationCommand))
                         {
-                            var token = prop.Value.GetPropertyOrNull("token")?.GetStringOrNull();
+                            var token = prop.Value.GetPropertyOrNull(InnerTubeTokens.Token)?.GetStringOrNull();
                             if (token != null) return token;
                         }
                         else if (prop.NameEquals(InnerTubeTokens.NextContinuationData))
                         {
-                            var token = prop.Value.GetPropertyOrNull("continuation")?.GetStringOrNull();
+                            var token = prop.Value.GetPropertyOrNull(InnerTubeTokens.Continuation)?.GetStringOrNull();
                             if (token != null) return token;
                         }
                         else if (prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
@@ -343,8 +359,8 @@ internal partial class SearchResponse
             ChannelId = ComputeChannelId(content, isYtm);
             IsOfficialArtist = ComputeIsOfficialArtist(content, isYtm);
             IsShort = !isYtm &&
-                (content.TryGetProperty("shortsLockupViewModel", out _) ||
-                 content.TryGetProperty("reelItemRenderer", out _));
+                (content.TryGetProperty(InnerTubeTokens.ShortsLockupViewModel, out _) ||
+                 content.TryGetProperty(InnerTubeTokens.ReelItemRenderer, out _));
             Duration = ComputeDuration(content, isYtm);
             Thumbnails = ComputeThumbnails(content);
             IsPlaylistContext = ComputeIsPlaylistContext(content, isYtm, Id, Title);
@@ -356,39 +372,39 @@ internal partial class SearchResponse
         {
             if (isYtm)
             {
-                var vid = content.GetPropertyOrNull("playlistItemData")
-                    ?.GetPropertyOrNull("videoId")?.GetStringOrNull();
+                var vid = content.GetPropertyOrNull(InnerTubeTokens.PlaylistItemData)
+                    ?.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
                 if (!string.IsNullOrEmpty(vid)) return vid;
 
-                var nav = content.GetPropertyOrNull("playNavigationEndpoint")
-                    ?? content.GetPropertyOrNull("navigationEndpoint");
-                return nav?.GetPropertyOrNull("watchEndpoint")
-                    ?.GetPropertyOrNull("videoId")?.GetStringOrNull();
+                var nav = content.GetPropertyOrNull(InnerTubeTokens.PlayNavigationEndpoint)
+                    ?? content.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint);
+                return nav?.GetPropertyOrNull(InnerTubeTokens.WatchEndpoint)
+                    ?.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
             }
 
-            var id = content.GetPropertyOrNull("videoId")?.GetStringOrNull();
+            var id = content.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
             if (!string.IsNullOrEmpty(id)) return id;
 
-            return content.GetPropertyOrNull("onTap")
-                ?.GetPropertyOrNull("innertubeCommand")
-                ?.GetPropertyOrNull("reelWatchEndpoint")
-                ?.GetPropertyOrNull("videoId")?.GetStringOrNull();
+            return content.GetPropertyOrNull(InnerTubeTokens.OnTap)
+                ?.GetPropertyOrNull(InnerTubeTokens.InnertubeCommand)
+                ?.GetPropertyOrNull(InnerTubeTokens.ReelWatchEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
         }
 
         private static string? ComputeTitle(JsonElement content, bool isYtm)
         {
             if (isYtm) return GetRunText(content, 0);
 
-            var titleProp = content.GetPropertyOrNull("title");
+            var titleProp = content.GetPropertyOrNull(InnerTubeTokens.Title);
             if (titleProp.HasValue)
             {
-                return titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull()
-                    ?? YoutubeParsingHelpers.ConcatTextRuns(titleProp.Value.GetPropertyOrNull("runs"));
+                return titleProp.Value.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull()
+                    ?? YoutubeParsingHelpers.ConcatTextRuns(titleProp.Value.GetPropertyOrNull(InnerTubeTokens.Runs));
             }
 
-            return content.GetPropertyOrNull("overlayMetadata")
-                ?.GetPropertyOrNull("primaryText")
-                ?.GetPropertyOrNull("content")?.GetStringOrNull();
+            return content.GetPropertyOrNull(InnerTubeTokens.OverlayMetadata)
+                ?.GetPropertyOrNull(InnerTubeTokens.PrimaryText)
+                ?.GetPropertyOrNull(InnerTubeTokens.Content)?.GetStringOrNull();
         }
 
         private static string? ComputeAuthor(JsonElement content, bool isYtm)
@@ -400,25 +416,25 @@ internal partial class SearchResponse
 
                 foreach (var run in runsElement.Value.EnumerateArray())
                 {
-                    var pageType = run.GetPropertyOrNull("navigationEndpoint")
-                        ?.GetPropertyOrNull("browseEndpoint")
-                        ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
-                        ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
-                        ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
+                    var pageType = run.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextSupportedConfigs)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextMusicConfig)
+                        ?.GetPropertyOrNull(InnerTubeTokens.PageType)?.GetStringOrNull();
 
-                    if (pageType is "MUSIC_PAGE_TYPE_ARTIST" or "MUSIC_PAGE_TYPE_USER_CHANNEL")
-                        return run.GetPropertyOrNull("text")?.GetStringOrNull();
+                    if (pageType is InnerTubeConstants.PageTypeArtist or InnerTubeConstants.PageTypeUserChannel)
+                        return run.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
                 }
 
                 var first = runsElement.Value.GetFirstArrayElementOrNull();
-                return first?.GetPropertyOrNull("text")?.GetStringOrNull();
+                return first?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
             }
 
-            var ownerRuns = content.GetPropertyOrNull("ownerText")?.GetPropertyOrNull("runs");
+            var ownerRuns = content.GetPropertyOrNull(InnerTubeTokens.OwnerText)?.GetPropertyOrNull(InnerTubeTokens.Runs);
             if (ownerRuns.HasValue)
                 return YoutubeParsingHelpers.ConcatTextRuns(ownerRuns.Value);
 
-            var bylineRuns = content.GetPropertyOrNull("shortBylineText")?.GetPropertyOrNull("runs");
+            var bylineRuns = content.GetPropertyOrNull(InnerTubeTokens.ShortBylineText)?.GetPropertyOrNull(InnerTubeTokens.Runs);
             if (bylineRuns.HasValue)
                 return YoutubeParsingHelpers.ConcatTextRuns(bylineRuns.Value);
 
@@ -434,9 +450,9 @@ internal partial class SearchResponse
 
                 foreach (var run in runsElement.Value.EnumerateArray())
                 {
-                    var id = run.GetPropertyOrNull("navigationEndpoint")
-                        ?.GetPropertyOrNull("browseEndpoint")
-                        ?.GetPropertyOrNull("browseId")?.GetStringOrNull();
+                    var id = run.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseId)?.GetStringOrNull();
 
                     if (id != null && id.AsSpan().StartsWith("UC"))
                         return id;
@@ -444,38 +460,38 @@ internal partial class SearchResponse
                 return null;
             }
 
-            var ownerRuns = content.GetPropertyOrNull("ownerText")?.GetPropertyOrNull("runs");
+            var ownerRuns = content.GetPropertyOrNull(InnerTubeTokens.OwnerText)?.GetPropertyOrNull(InnerTubeTokens.Runs);
             if (ownerRuns.HasValue)
             {
                 foreach (var run in ownerRuns.Value.EnumerateArrayOrEmpty())
                 {
-                    var id = run.GetPropertyOrNull("navigationEndpoint")
-                        ?.GetPropertyOrNull("browseEndpoint")
-                        ?.GetPropertyOrNull("browseId")?.GetStringOrNull();
+                    var id = run.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseId)?.GetStringOrNull();
                     if (id != null) return id;
                 }
             }
 
-            return content.GetPropertyOrNull("channelThumbnailSupportedRenderers")
-                ?.GetPropertyOrNull("channelThumbnailWithLinkRenderer")
-                ?.GetPropertyOrNull("navigationEndpoint")
-                ?.GetPropertyOrNull("browseEndpoint")
-                ?.GetPropertyOrNull("browseId")?.GetStringOrNull();
+            return content.GetPropertyOrNull(InnerTubeTokens.ChannelThumbnailSupportedRenderers)
+                ?.GetPropertyOrNull(InnerTubeTokens.ChannelThumbnailWithLinkRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseId)?.GetStringOrNull();
         }
 
         private static bool ComputeIsOfficialArtist(JsonElement content, bool isYtm)
         {
             if (isYtm) return true;
 
-            var badges = content.GetPropertyOrNull("ownerBadges");
+            var badges = content.GetPropertyOrNull(InnerTubeTokens.OwnerBadges);
             if (badges == null) return false;
 
             foreach (var badge in badges.Value.EnumerateArrayOrEmpty())
             {
-                var iconType = badge.GetPropertyOrNull("metadataBadgeRenderer")
-                    ?.GetPropertyOrNull("icon")
-                    ?.GetPropertyOrNull("iconType")?.GetStringOrNull();
-                if (iconType == "AUDIO_BADGE") return true;
+                var iconType = badge.GetPropertyOrNull(InnerTubeTokens.MetadataBadgeRenderer)
+                    ?.GetPropertyOrNull(InnerTubeTokens.Icon)
+                    ?.GetPropertyOrNull(InnerTubeTokens.IconType)?.GetStringOrNull();
+                if (iconType == InnerTubeConstants.AudioBadge) return true;
             }
             return false;
         }
@@ -489,7 +505,7 @@ internal partial class SearchResponse
 
                 foreach (var run in runsElement.Value.EnumerateArray())
                 {
-                    var text = run.GetPropertyOrNull("text")?.GetStringOrNull();
+                    var text = run.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
                     if (text != null && text.Contains(':') && !text.Contains('•'))
                     {
                         var ts = YoutubeClientUtils.DurationParser.Parse(text);
@@ -499,25 +515,25 @@ internal partial class SearchResponse
                 return null;
             }
 
-            var textDuration = content.GetPropertyOrNull("lengthText")
-                ?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+            var textDuration = content.GetPropertyOrNull(InnerTubeTokens.LengthText)
+                ?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull();
 
             return textDuration != null ? YoutubeClientUtils.DurationParser.Parse(textDuration) : null;
         }
 
         internal static IReadOnlyList<ThumbnailData> ComputeThumbnails(JsonElement content)
         {
-            var thumbsElement = content.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("musicThumbnailRenderer")
-                ?.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails");
+            var thumbsElement = content.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+                ?.GetPropertyOrNull(InnerTubeTokens.MusicThumbnailRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnails);
 
-            thumbsElement ??= content.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails");
+            thumbsElement ??= content.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnails);
 
-            thumbsElement ??= content.GetPropertyOrNull("thumbnailViewModel")
-                ?.GetPropertyOrNull("image")
-                ?.GetPropertyOrNull("sources");
+            thumbsElement ??= content.GetPropertyOrNull(InnerTubeTokens.ThumbnailViewModel)
+                ?.GetPropertyOrNull(InnerTubeTokens.Image)
+                ?.GetPropertyOrNull(InnerTubeTokens.Sources);
 
             if (thumbsElement == null) return [];
 
@@ -535,26 +551,26 @@ internal partial class SearchResponse
         {
             if (!isYtm) return false;
 
-            var pageType = content.GetPropertyOrNull("navigationEndpoint")
-                ?.GetPropertyOrNull("browseEndpoint")
-                ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
-                ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
-                ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
+            var pageType = content.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextSupportedConfigs)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextMusicConfig)
+                ?.GetPropertyOrNull(InnerTubeTokens.PageType)?.GetStringOrNull();
 
-            return pageType == "MUSIC_PAGE_TYPE_ALBUM" || (id == null && title != null);
+            return pageType == InnerTubeConstants.PageTypeAlbum || (id == null && title != null);
         }
 
         private static bool ComputeIsArtistContext(JsonElement content, bool isYtm)
         {
             if (!isYtm) return false;
 
-            var pageType = content.GetPropertyOrNull("navigationEndpoint")
-                ?.GetPropertyOrNull("browseEndpoint")
-                ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
-                ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
-                ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
+            var pageType = content.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextSupportedConfigs)
+                ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextMusicConfig)
+                ?.GetPropertyOrNull(InnerTubeTokens.PageType)?.GetStringOrNull();
 
-            return pageType == "MUSIC_PAGE_TYPE_ARTIST";
+            return pageType == InnerTubeConstants.PageTypeArtist;
         }
 
         /// <summary>
@@ -562,15 +578,15 @@ internal partial class SearchResponse
         /// </summary>
         private static JsonElement? GetRunsElement(JsonElement item, int columnIndex)
         {
-            var cols = item.GetPropertyOrNull("flexColumns");
+            var cols = item.GetPropertyOrNull(InnerTubeTokens.FlexColumns);
             if (cols == null) return null;
 
             var col = cols.Value.GetArrayElementOrNull(columnIndex);
             if (col == null) return null;
 
-            return col.Value.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
-                ?.GetPropertyOrNull("text")
-                ?.GetPropertyOrNull("runs");
+            return col.Value.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFlexColumnRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.Text)
+                ?.GetPropertyOrNull(InnerTubeTokens.Runs);
         }
 
         /// <summary>
@@ -593,25 +609,25 @@ internal partial class SearchResponse
 
         public PlaylistData(JsonElement content, bool isYtm = false)
         {
-            Id = content.GetPropertyOrNull("playlistId")?.GetStringOrNull() ??
-                 content.GetPropertyOrNull("contentId")?.GetStringOrNull() ??
-                 (isYtm ? content.GetPropertyOrNull("navigationEndpoint")
-                     ?.GetPropertyOrNull("browseEndpoint")
-                     ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
+            Id = content.GetPropertyOrNull(InnerTubeTokens.PlaylistId)?.GetStringOrNull() ??
+                 content.GetPropertyOrNull(InnerTubeTokens.ContentId)?.GetStringOrNull() ??
+                 (isYtm ? content.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                     ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                     ?.GetPropertyOrNull(InnerTubeTokens.BrowseId)?.GetStringOrNull() : null);
 
-            var titleProp = content.GetPropertyOrNull("title");
+            var titleProp = content.GetPropertyOrNull(InnerTubeTokens.Title);
             if (titleProp.HasValue)
             {
-                Title = titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull()
-                    ?? YoutubeParsingHelpers.ConcatTextRuns(titleProp.Value.GetPropertyOrNull("runs"));
+                Title = titleProp.Value.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull()
+                    ?? YoutubeParsingHelpers.ConcatTextRuns(titleProp.Value.GetPropertyOrNull(InnerTubeTokens.Runs));
             }
 
             if (Title is null)
             {
-                var lockupTitle = content.GetPropertyOrNull("metadata")
-                    ?.GetPropertyOrNull("lockupMetadataViewModel")
-                    ?.GetPropertyOrNull("title")
-                    ?.GetPropertyOrNull("content")?.GetStringOrNull();
+                var lockupTitle = content.GetPropertyOrNull(InnerTubeTokens.Metadata)
+                    ?.GetPropertyOrNull(InnerTubeTokens.LockupMetadataViewModel)
+                    ?.GetPropertyOrNull(InnerTubeTokens.Title)
+                    ?.GetPropertyOrNull(InnerTubeTokens.Content)?.GetStringOrNull();
 
                 if (lockupTitle != null)
                     Title = lockupTitle;
@@ -619,7 +635,7 @@ internal partial class SearchResponse
                     Title = VideoData.GetRunText(content, 0);
             }
 
-            var authorRuns = content.GetPropertyOrNull("shortBylineText")?.GetPropertyOrNull("runs");
+            var authorRuns = content.GetPropertyOrNull(InnerTubeTokens.ShortBylineText)?.GetPropertyOrNull(InnerTubeTokens.Runs);
             if (authorRuns.HasValue)
                 Author = YoutubeParsingHelpers.ConcatTextRuns(authorRuns.Value);
             else if (isYtm)
@@ -637,13 +653,13 @@ internal partial class SearchResponse
 
         public ChannelData(JsonElement content, bool isYtm = false)
         {
-            Id = content.GetPropertyOrNull("channelId")?.GetStringOrNull() ??
-                 (isYtm ? content.GetPropertyOrNull("navigationEndpoint")
-                     ?.GetPropertyOrNull("browseEndpoint")
-                     ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
+            Id = content.GetPropertyOrNull(InnerTubeTokens.ChannelId)?.GetStringOrNull() ??
+                 (isYtm ? content.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint)
+                     ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                     ?.GetPropertyOrNull(InnerTubeTokens.BrowseId)?.GetStringOrNull() : null);
 
-            Title = content.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull()
-                ?? YoutubeParsingHelpers.ConcatTextRuns(content.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
+            Title = content.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull()
+                ?? YoutubeParsingHelpers.ConcatTextRuns(content.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.Runs))
                 ?? (isYtm ? VideoData.GetRunText(content, 0) : null);
 
             Thumbnails = VideoData.ComputeThumbnails(content);

@@ -136,21 +136,28 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
             var stsFiles = Directory.GetFiles(dir, "player_*_sts.txt");
             if (stsFiles.Length == 0) return null;
 
-            // Свежайший первым — максимизируем вероятность валидного STS
-            Array.Sort(stsFiles, static (a, b) =>
-                File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
+            // Свежайший первым — однократный сбор времени изменения для исключения O(N log N) дисковых I/O
+            var fileInfos = new (string Path, DateTime LastWriteUtc)[stsFiles.Length];
+            for (int i = 0; i < stsFiles.Length; i++)
+            {
+                fileInfos[i] = (stsFiles[i], File.GetLastWriteTimeUtc(stsFiles[i]));
+            }
+
+            Array.Sort(fileInfos, static (a, b) => b.LastWriteUtc.CompareTo(a.LastWriteUtc));
 
             const string prefix = "player_";
             const string suffix = "_sts.txt";
 
-            for (int i = 0; i < stsFiles.Length; i++)
+            for (int i = 0; i < fileInfos.Length; i++)
             {
-                var fileName = Path.GetFileName(stsFiles[i]);
-                if (!fileName.StartsWith(prefix, StringComparison.Ordinal) ||
-                    !fileName.EndsWith(suffix, StringComparison.Ordinal))
+                var fileName = Path.GetFileName(fileInfos[i].Path);
+                var span = fileName.AsSpan();
+
+                if (!span.StartsWith(prefix.AsSpan(), StringComparison.Ordinal) ||
+                    !span.EndsWith(suffix.AsSpan(), StringComparison.Ordinal))
                     continue;
 
-                var version = fileName[prefix.Length..^suffix.Length];
+                var version = span[prefix.Length..^suffix.Length].ToString();
                 if (string.IsNullOrEmpty(version)) continue;
 
                 var context = PlayerContext.LoadFromCache(version);

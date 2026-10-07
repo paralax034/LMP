@@ -732,11 +732,11 @@ public static partial class YoutubeAstSolver
         if (!matchedId) return null;
 
         Node? targetName = null;
-        IReadOnlyList<Statement>? bodyStatements = null;
+        NodeList<Statement> bodyStatements = default;
 
         if (node is FunctionDeclaration fd)
         {
-            if (fd.Id is Identifier && fd.Body is not null)
+            if (fd.Id is not null && fd.Body is not null)
             {
                 targetName = fd.Id;
                 bodyStatements = fd.Body.Body;
@@ -767,7 +767,7 @@ public static partial class YoutubeAstSolver
             }
         }
 
-        if (targetName is not null && bodyStatements is not null)
+        if (targetName is not null)
         {
             bool hasAsdasd = false;
             for (int i = 0; i < bodyStatements.Count; i++)

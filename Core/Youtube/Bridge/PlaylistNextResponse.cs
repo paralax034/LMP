@@ -48,23 +48,23 @@ internal partial class PlaylistNextResponse : IPlaylistData
     public PlaylistNextResponse(JsonElement content)
     {
         var contentRoot = content
-            .GetPropertyOrNull("contents")
-            ?.GetPropertyOrNull("twoColumnWatchNextResults")
-            ?.GetPropertyOrNull("playlist")
-            ?.GetPropertyOrNull("playlist");
+            .GetPropertyOrNull(InnerTubeTokens.Contents)
+            ?.GetPropertyOrNull(InnerTubeTokens.TwoColumnWatchNextResults)
+            ?.GetPropertyOrNull(InnerTubeTokens.Playlist)
+            ?.GetPropertyOrNull(InnerTubeTokens.Playlist);
 
         IsAvailable = contentRoot is not null;
 
         if (contentRoot is { } root)
         {
-            Title = root.GetPropertyOrNull("title")?.GetStringOrNull();
-            Author = root.GetPropertyOrNull("ownerName")?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+            Title = root.GetPropertyOrNull(InnerTubeTokens.Title)?.GetStringOrNull();
+            Author = root.GetPropertyOrNull(InnerTubeTokens.OwnerName)?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull();
 
-            var totalText = root.GetPropertyOrNull("totalVideosText")?.GetStringOrNull()
-                ?? YoutubeParsingHelpers.ConcatTextRuns(root.GetPropertyOrNull("totalVideosText")?.GetPropertyOrNull("runs"));
+            var totalText = root.GetPropertyOrNull(InnerTubeTokens.TotalVideosText)?.GetStringOrNull()
+                ?? YoutubeParsingHelpers.ConcatTextRuns(root.GetPropertyOrNull(InnerTubeTokens.TotalVideosText)?.GetPropertyOrNull(InnerTubeTokens.Runs));
 
-            var videoCountText = root.GetPropertyOrNull("videoCountText")?.GetStringOrNull()
-                ?? YoutubeParsingHelpers.ConcatTextRuns(root.GetPropertyOrNull("videoCountText")?.GetPropertyOrNull("runs"));
+            var videoCountText = root.GetPropertyOrNull(InnerTubeTokens.VideoCountText)?.GetStringOrNull()
+                ?? YoutubeParsingHelpers.ConcatTextRuns(root.GetPropertyOrNull(InnerTubeTokens.VideoCountText)?.GetPropertyOrNull(InnerTubeTokens.Runs));
 
             var parsedCount = YoutubeParsingHelpers.ParseLongFromText(totalText)
                 ?? YoutubeParsingHelpers.ParseLongFromText(videoCountText);
@@ -74,7 +74,7 @@ internal partial class PlaylistNextResponse : IPlaylistData
                 Count = (int)Math.Min(parsedCount.Value, int.MaxValue);
             }
 
-            var contents = root.GetPropertyOrNull("contents");
+            var contents = root.GetPropertyOrNull(InnerTubeTokens.Contents);
             if (contents is { ValueKind: JsonValueKind.Array } arr)
             {
                 int len = arr.GetArrayLength();
@@ -83,7 +83,7 @@ internal partial class PlaylistNextResponse : IPlaylistData
                     var result = new List<PlaylistVideoData>(len);
                     for (int i = 0; i < len; i++)
                     {
-                        var renderer = arr[i].GetPropertyOrNull("playlistPanelVideoRenderer");
+                        var renderer = arr[i].GetPropertyOrNull(InnerTubeTokens.PlaylistPanelVideoRenderer);
                         if (renderer is not null)
                             result.Add(new PlaylistVideoData(renderer.Value));
                     }

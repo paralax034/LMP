@@ -18,9 +18,9 @@ internal readonly record struct ThumbnailData(string? Url, int? Width, int? Heig
     /// <param name="content">JSON-элемент объекта миниатюры.</param>
     public ThumbnailData(JsonElement content)
         : this(
-            content.GetPropertyOrNull("url")?.GetStringOrNull(),
-            content.GetPropertyOrNull("width")?.GetInt32OrNull(),
-            content.GetPropertyOrNull("height")?.GetInt32OrNull())
+            content.GetPropertyOrNull("url"u8)?.GetStringOrNull(),
+            content.GetPropertyOrNull("width"u8)?.GetInt32OrNull(),
+            content.GetPropertyOrNull("height"u8)?.GetInt32OrNull())
     {
     }
 }

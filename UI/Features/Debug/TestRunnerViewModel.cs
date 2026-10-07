@@ -225,7 +225,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     }
 
     /// <summary>Общая логика запуска batch.</summary>
-    private async Task RunBatchCoreAsync(IReadOnlyList<TestItemViewModel> tests, string label)
+    private async Task RunBatchCoreAsync(List<TestItemViewModel> tests, string label)
     {
         if (tests.Count == 0)
         {

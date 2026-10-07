@@ -31,13 +31,13 @@ internal partial class PlaylistContinuationResponse
     /// <param name="content">Корневой JSON-элемент ответа продолжения.</param>
     public PlaylistContinuationResponse(JsonElement content)
     {
-        var actions = content.GetPropertyOrNull("onResponseReceivedActions");
+        var actions = content.GetPropertyOrNull(InnerTubeTokens.OnResponseReceivedActions);
         if (actions is { ValueKind: JsonValueKind.Array } actionsArr && actionsArr.GetArrayLength() > 0)
         {
             var firstAction = actionsArr[0];
             var continuationItems = firstAction
-                .GetPropertyOrNull("appendContinuationItemsAction")
-                ?.GetPropertyOrNull("continuationItems");
+                .GetPropertyOrNull(InnerTubeTokens.AppendContinuationItemsAction)
+                ?.GetPropertyOrNull(InnerTubeTokens.ContinuationItems);
 
             if (continuationItems is { ValueKind: JsonValueKind.Array } itemsArr)
             {
@@ -47,7 +47,7 @@ internal partial class PlaylistContinuationResponse
                     var result = new List<PlaylistVideoData>(len);
                     for (int i = 0; i < len; i++)
                     {
-                        var renderer = itemsArr[i].GetPropertyOrNull("playlistVideoRenderer");
+                        var renderer = itemsArr[i].GetPropertyOrNull(InnerTubeTokens.PlaylistVideoRenderer);
                         if (renderer is not null)
                             result.Add(new PlaylistVideoData(renderer.Value));
                     }

@@ -409,7 +409,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         _ = AutoRecalculateColorAsync();
     }
 
-    private static TopLevel? GetTopLevel()
+    private static Window? GetTopLevel()
     {
         if (Avalonia.Application.Current?.ApplicationLifetime
             is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)

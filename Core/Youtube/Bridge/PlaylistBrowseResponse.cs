@@ -571,32 +571,23 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         return year.HasValue ? new DateOnly(year.Value, 1, 1) : null;
     }
 
-    private static IReadOnlyList<PlaylistVideoData> ExtractVideos(JsonElement? effectivePlaylistContents)
+    private static List<PlaylistVideoData> ExtractVideos(JsonElement? effectivePlaylistContents)
     {
-        var contents = effectivePlaylistContents?.GetPropertyOrNull("contents");
+        var contents = effectivePlaylistContents?.GetPropertyOrNull(InnerTubeTokens.Contents);
         if (contents is null || contents.Value.ValueKind != JsonValueKind.Array)
             return [];
 
         var array = contents.Value;
         int len = array.GetArrayLength();
+        if (len == 0) return [];
 
-        int validCount = 0;
+        var result = new List<PlaylistVideoData>(len);
         for (int i = 0; i < len; i++)
         {
-            if (array[i].GetPropertyOrNull("playlistVideoRenderer") is not null)
-                validCount++;
-        }
-
-        if (validCount == 0) return [];
-
-        var result = new PlaylistVideoData[validCount];
-        int index = 0;
-        for (int i = 0; i < len; i++)
-        {
-            var videoRenderer = array[i].GetPropertyOrNull("playlistVideoRenderer");
+            var videoRenderer = array[i].GetPropertyOrNull(InnerTubeTokens.PlaylistVideoRenderer);
             if (videoRenderer is not null)
             {
-                result[index++] = new PlaylistVideoData(videoRenderer.Value);
+                result.Add(new PlaylistVideoData(videoRenderer.Value));
             }
         }
 
@@ -656,42 +647,58 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
         if (len == 1)
         {
-            var text = array[0].GetPropertyOrNull("text")?.GetStringOrNull();
+            var text = array[0].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
             return text != null ? StripUpdatePrefix(text) : null;
         }
 
         if (len == 2)
-            return array[1].GetPropertyOrNull("text")?.GetStringOrNull()?.Trim();
+            return array[1].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull()?.Trim();
 
         int dateRunCount = len - 1;
         int totalLen = 0;
-        var strings = new string?[dateRunCount];
 
-        for (int i = 0; i < dateRunCount; i++)
+        string?[]? rentedArray = null;
+        try
         {
-            var t = array[i + 1].GetPropertyOrNull("text")?.GetStringOrNull();
-            if (t != null)
+            rentedArray = System.Buffers.ArrayPool<string?>.Shared.Rent(dateRunCount);
+
+            for (int i = 0; i < dateRunCount; i++)
             {
-                strings[i] = t;
-                totalLen += t.Length;
+                var t = array[i + 1].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
+                if (t != null)
+                {
+                    rentedArray[i] = t;
+                    totalLen += t.Length;
+                }
+                else
+                {
+                    rentedArray[i] = null;
+                }
+            }
+
+            if (totalLen == 0) return null;
+
+            Span<char> span = totalLen <= 128 ? stackalloc char[totalLen] : new char[totalLen];
+            int pos = 0;
+
+            for (int i = 0; i < dateRunCount; i++)
+            {
+                if (rentedArray[i] is { } s)
+                {
+                    s.AsSpan().CopyTo(span[pos..]);
+                    pos += s.Length;
+                }
+            }
+
+            return new string(span[..pos].Trim());
+        }
+        finally
+        {
+            if (rentedArray != null)
+            {
+                System.Buffers.ArrayPool<string?>.Shared.Return(rentedArray, clearArray: true);
             }
         }
-
-        if (totalLen == 0) return null;
-
-        Span<char> span = totalLen <= 128 ? stackalloc char[totalLen] : new char[totalLen];
-        int pos = 0;
-
-        for (int i = 0; i < dateRunCount; i++)
-        {
-            if (strings[i] is { } s)
-            {
-                s.AsSpan().CopyTo(span[pos..]);
-                pos += s.Length;
-            }
-        }
-
-        return new string(span[..pos].Trim());
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -859,7 +859,20 @@ public sealed partial class CachingStreamSource
 
                 if (actualLength < plan.Length)
                 {
-                    bool isNearEof = plan.Start + actualLength >= _contentLength;
+                    bool isCleanServerEof = false;
+
+                    // Если сервер передал ровно столько байт, сколько заявил в Content-Length ответа,
+                    // и дельта до расчетного конца файла находится в пределах погрешности выравнивания — это легитимный EOF
+                    if (response.Content.Headers.ContentLength is { } expectedLen && actualLength == expectedLen)
+                    {
+                        long delta = _contentLength - (plan.Start + actualLength);
+                        if (delta >= 0 && delta <= _requestAlignmentBytes * 4)
+                        {
+                            isCleanServerEof = true;
+                        }
+                    }
+
+                    bool isNearEof = isCleanServerEof || (plan.Start + actualLength >= _contentLength);
                     if (!isNearEof)
                     {
                         memoryOwner.Dispose();

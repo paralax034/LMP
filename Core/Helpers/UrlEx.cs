@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace LMP.Core.Helpers;
@@ -163,18 +164,24 @@ internal static class UrlEx
     }
 
     /// <summary>
-    /// Извлекает время истечения срока действия URL из параметра &amp;expire= (UTC).
+    /// Извлекает время истечения срока действия URL из параметра &amp;expire= (UTC) без строковых аллокаций.
     /// </summary>
     /// <param name="url">URL для проверки.</param>
     /// <param name="expireUtc">Распарсенное время в UTC.</param>
     /// <returns><c>true</c>, если параметр найден и корректно распарсен; иначе <c>false</c>.</returns>
     public static bool TryGetExpireUtc(string url, out DateTime expireUtc)
     {
-        var expireStr = TryGetQueryParameterValue(url, "expire");
-        if (expireStr is not null && long.TryParse(expireStr, out var unixSeconds))
+        var urlSpan = url.AsSpan();
+        var (keyStart, valueStart, valueEnd) = FindParameterBounds(urlSpan, "expire");
+
+        if (keyStart >= 0)
         {
-            expireUtc = DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime;
-            return true;
+            var rawValue = urlSpan[valueStart..valueEnd];
+            if (long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unixSeconds))
+            {
+                expireUtc = DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime;
+                return true;
+            }
         }
 
         expireUtc = DateTime.MaxValue;

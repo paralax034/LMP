@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using LMP.Core.Youtube.Bridge;
 using LMP.Core.Youtube.Bridge.Common;
@@ -8,6 +9,7 @@ using LMP.Core.Helpers.Extensions;
 using LMP.Core.Youtube.Videos.ClosedCaptions;
 using LMP.Core.Youtube.Bridge.PoToken;
 using LMP.Core.Audio.Http;
+using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Videos.Streams;
 
@@ -40,7 +42,6 @@ public sealed class StreamClient
     private readonly SigCipherDecryptor _sigCipherDecryptor;
     private readonly PlayerContextManager _playerContextManager;
     private readonly Func<bool>? _isAuthenticatedCheck;
-    private CipherManifest? _cipherManifest;
     private readonly PoTokenProvider? _poTokenProvider;
 
     /// <summary>
@@ -63,43 +64,9 @@ public sealed class StreamClient
     }
 
     /// <summary>
-    /// Извлекает signatureTimestamp из кэша <see cref="PlayerContextManager"/>.
-    /// Пробрасывает сетевые ошибки и отмены для корректной диагностики.
-    /// </summary>
-    private async ValueTask<CipherManifest> ResolveCipherManifestAsync(CancellationToken cancellationToken)
-    {
-        if (_cipherManifest is not null)
-            return _cipherManifest;
-
-        try
-        {
-            var context = await _playerContextManager.GetOrLoadAsync(cancellationToken).ConfigureAwait(false);
-            var sts = context.Sts;
-
-            if (string.IsNullOrEmpty(sts) && !string.IsNullOrEmpty(context.BaseJs))
-                sts = YoutubeAstSolver.ExtractSts(context.BaseJs);
-
-            _cipherManifest = new CipherManifest(sts ?? "");
-            return _cipherManifest;
-        }
-        catch (YoutubeNetworkException)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Log.Debug($"[StreamClient] CipherManifest resolution failed: {ex.Message}");
-            _cipherManifest = new CipherManifest("");
-            return _cipherManifest;
-        }
-    }
-
-    /// <summary>
     /// Генерирует аудиопотоки из сырых данных ответа YouTube.
+    /// Чистые аудиопотоки имеют абсолютный приоритет. Совмещённые потоки (видео + аудио, например itag 18)
+    /// подключаются исключительно как аварийный резерв, если чистые потоки отсутствуют (SABR-блокировка).
     /// </summary>
     private async IAsyncEnumerable<IStreamInfo> GetAudioStreamInfosAsync(
       VideoId videoId,
@@ -107,10 +74,25 @@ public sealed class StreamClient
       string? clientName,
       [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var rawList = streamDatas as IReadOnlyList<IStreamData> ?? streamDatas.ToList();
+
+        // Проверяем, есть ли хотя бы один чистый аудиопоток с доступным URL или подписью
+        bool hasPureAudioStreams = false;
+        for (int i = 0; i < rawList.Count; i++)
+        {
+            var s = rawList[i];
+            if (s.MimeType?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) == true
+                && (!string.IsNullOrEmpty(s.Url) || !string.IsNullOrEmpty(s.Signature)))
+            {
+                hasPureAudioStreams = true;
+                break;
+            }
+        }
+
         bool? isNTokenDecryptionRequired = null;
 
         string? pot = null;
-        bool skipPoToken = string.Equals(clientName, "ANDROID_VR", StringComparison.OrdinalIgnoreCase);
+        bool skipPoToken = string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal);
 
         if (_poTokenProvider != null && !skipPoToken)
         {
@@ -132,16 +114,27 @@ public sealed class StreamClient
             }
         }
 
-        foreach (var streamData in streamDatas)
+        for (int i = 0; i < rawList.Count; i++)
         {
+            var streamData = rawList[i];
             cancellationToken.ThrowIfCancellationRequested();
 
             var itag = streamData.Itag;
             if (itag is null) continue;
 
             var mimeType = streamData.MimeType;
-            if (string.IsNullOrEmpty(mimeType) ||
-                !mimeType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(mimeType))
+                continue;
+
+            bool isAudioOnly = mimeType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase);
+
+            // Совмещённый поток (video/*) принимается ТОЛЬКО если чистых аудиопотоков нет вообще
+            bool isMuxedFallback = !hasPureAudioStreams
+                                 && mimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+                                 && streamData.AudioChannels > 0
+                                 && !string.IsNullOrWhiteSpace(streamData.AudioCodec);
+
+            if (!isAudioOnly && !isMuxedFallback)
                 continue;
 
             var audioCodec = streamData.AudioCodec;
@@ -183,9 +176,8 @@ public sealed class StreamClient
                 // расшифровка в QuickJS занимает всего 5 мс и выполняется упреждающе.
                 if (isNTokenDecryptionRequired == null)
                 {
-                    bool isKnownEncryptedClient = string.Equals(clientName, "WEB_REMIX", StringComparison.OrdinalIgnoreCase)
-                                               || string.Equals(clientName, "WEB", StringComparison.OrdinalIgnoreCase)
-                                               || string.Equals(clientName, "TVHTML5_SIMPLY_EMBEDDED_PLAYER", StringComparison.OrdinalIgnoreCase);
+                    bool isKnownEncryptedClient = string.Equals(clientName, YoutubeClientNames.WebRemix, StringComparison.Ordinal)
+                                               || string.Equals(clientName, YoutubeClientNames.Web, StringComparison.Ordinal);
 
                     if (isKnownEncryptedClient)
                     {
@@ -232,17 +224,51 @@ public sealed class StreamClient
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            url = UrlEx.RemoveQueryParameter(url, "ump");
-            url = UrlEx.RemoveQueryParameter(url, "alr");
-            url = UrlEx.RemoveQueryParameter(url, "srfvp");
+            var urlSpan = url.AsSpan();
+            if (urlSpan.Contains("ump=".AsSpan(), StringComparison.Ordinal))
+                url = UrlEx.RemoveQueryParameter(url, "ump");
 
-            url = !string.IsNullOrEmpty(pot)
-                ? UrlEx.SetQueryParameter(url, "pot", pot)
-                : UrlEx.RemoveQueryParameter(url, "pot");
+            urlSpan = url.AsSpan();
+            if (urlSpan.Contains("alr=".AsSpan(), StringComparison.Ordinal))
+                url = UrlEx.RemoveQueryParameter(url, "alr");
+
+            urlSpan = url.AsSpan();
+            if (urlSpan.Contains("srfvp=".AsSpan(), StringComparison.Ordinal))
+                url = UrlEx.RemoveQueryParameter(url, "srfvp");
+
+            if (!string.IsNullOrEmpty(pot))
+            {
+                url = UrlEx.SetQueryParameter(url, "pot", pot);
+            }
+            else if (url.AsSpan().Contains("pot=".AsSpan(), StringComparison.Ordinal))
+            {
+                url = UrlEx.RemoveQueryParameter(url, "pot");
+            }
 
             Log.Debug($"[StreamClient] itag={itag} FINAL URL ready.");
 
             var contentLength = streamData.ContentLength ?? 0;
+            if (contentLength == 0)
+            {
+                var clenStr = UrlEx.TryGetQueryParameterValue(url, "clen");
+                if (clenStr != null && long.TryParse(clenStr, out var clenVal))
+                {
+                    contentLength = clenVal;
+                }
+                else if (streamData.Bitrate.HasValue)
+                {
+                    double durationSec = 0;
+                    var durStr = UrlEx.TryGetQueryParameterValue(url, "dur");
+                    if (durStr != null && double.TryParse(durStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var durVal))
+                    {
+                        durationSec = durVal;
+                    }
+
+                    if (durationSec <= 0) durationSec = 180;
+                    contentLength = (long)Math.Ceiling(streamData.Bitrate.Value * durationSec / 8.0);
+                }
+            }
+
             if (contentLength == 0) continue;
 
             var container = streamData.Container is { } c ? new Container(c) : (Container?)null;
@@ -294,38 +320,18 @@ public sealed class StreamClient
         VideoId videoId,
         CancellationToken cancellationToken = default)
     {
-        PlayerResponse playerResponse;
-        string? clientName = null;
         bool isAuth = _isAuthenticatedCheck?.Invoke() ?? false;
-        VideoUnplayableException? fallbackChainException = null;
 
-        try
-        {
-            (playerResponse, clientName) = await _controller.GetPlayerResponseWithFallbackAsync(
-                videoId, cancellationToken, isAuthenticated: isAuth).ConfigureAwait(false);
-        }
-        catch (VideoUnplayableException ex)
-        {
-            fallbackChainException = ex;
-
-            var cipherManifest = await ResolveCipherManifestAsync(cancellationToken).ConfigureAwait(false);
-            playerResponse = await _controller.GetPlayerResponseAsync(
-                videoId,
-                cipherManifest.SignatureTimestamp,
-                cancellationToken
-            ).ConfigureAwait(false);
-        }
+        var (playerResponse, clientName) = await _controller.GetPlayerResponseWithFallbackAsync(
+            videoId, cancellationToken, isAuthenticated: isAuth).ConfigureAwait(false);
 
         if (!playerResponse.IsPlayable)
         {
-            if (fallbackChainException != null)
-                throw fallbackChainException;
-
             throw new VideoUnplayableException(
                 $"Video {videoId} is not playable: {playerResponse.PlayabilityError}");
         }
 
-        var streams = new List<IStreamInfo>();
+        var streams = new List<IStreamInfo>(playerResponse.Streams.Count);
         await foreach (var stream in GetAudioStreamInfosAsync(videoId, playerResponse.Streams, clientName, cancellationToken).ConfigureAwait(false))
         {
             streams.Add(stream);
@@ -338,12 +344,11 @@ public sealed class StreamClient
     }
 
     /// <summary>
-    /// Инвалидирует CipherManifest и signatureTimestamp.
+    /// Инвалидирует signatureTimestamp в кэше менеджера контекста плеера.
     /// </summary>
     public void InvalidateCipherManifest()
     {
-        _cipherManifest = null;
         _controller.InvalidateSignatureTimestamp();
-        Log.Debug("[StreamClient] CipherManifest and STS invalidated");
+        Log.Debug("[StreamClient] SignatureTimestamp invalidated via controller");
     }
 }

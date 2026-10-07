@@ -56,14 +56,14 @@ internal sealed class MusicBrowseResponse
     public MusicBrowseResponse(JsonElement root)
     {
         // 1. Заголовок
-        var header = root.GetPropertyOrNull("header")?.GetPropertyOrNull("musicDetailHeaderRenderer")
-            ?? root.GetPropertyOrNull("header")?.GetPropertyOrNull("musicResponsiveHeaderRenderer");
+        var header = root.GetPropertyOrNull(InnerTubeTokens.Header)?.GetPropertyOrNull(InnerTubeTokens.MusicDetailHeaderRenderer)
+            ?? root.GetPropertyOrNull(InnerTubeTokens.Header)?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveHeaderRenderer);
 
         if (header.HasValue)
         {
-            Title = header.Value.GetPropertyOrNull("title")?.GetPropertyOrNull("runs")
-                        ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull("text")?.GetStringOrNull()
-                    ?? header.Value.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+            Title = header.Value.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.Runs)
+                        ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull()
+                    ?? header.Value.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull();
         }
 
         // 2. Continuation
@@ -71,25 +71,25 @@ internal sealed class MusicBrowseResponse
             return;
 
         // 3. Browse
-        var sectionList = root.GetPropertyOrNull("contents")
-            ?.GetPropertyOrNull("twoColumnBrowseResultsRenderer")
-            ?.GetPropertyOrNull("secondaryContents")
-            ?.GetPropertyOrNull("sectionListRenderer")
-            ?.GetPropertyOrNull("contents");
+        var sectionList = root.GetPropertyOrNull(InnerTubeTokens.Contents)
+            ?.GetPropertyOrNull(InnerTubeTokens.TwoColumnBrowseResultsRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.SecondaryContents)
+            ?.GetPropertyOrNull(InnerTubeTokens.SectionListRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Contents);
 
         if (sectionList == null)
         {
-            var tabs = root.GetPropertyOrNull("contents")
-                ?.GetPropertyOrNull("singleColumnBrowseResultsRenderer")
-                ?.GetPropertyOrNull("tabs");
+            var tabs = root.GetPropertyOrNull(InnerTubeTokens.Contents)
+                ?.GetPropertyOrNull(InnerTubeTokens.SingleColumnBrowseResultsRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.Tabs);
 
             if (tabs != null)
             {
                 var firstTab = tabs.Value.GetFirstArrayElementOrNull();
-                sectionList = firstTab?.GetPropertyOrNull("tabRenderer")
-                    ?.GetPropertyOrNull("content")
-                    ?.GetPropertyOrNull("sectionListRenderer")
-                    ?.GetPropertyOrNull("contents");
+                sectionList = firstTab?.GetPropertyOrNull(InnerTubeTokens.TabRenderer)
+                    ?.GetPropertyOrNull(InnerTubeTokens.Content)
+                    ?.GetPropertyOrNull(InnerTubeTokens.SectionListRenderer)
+                    ?.GetPropertyOrNull(InnerTubeTokens.Contents);
             }
         }
 
@@ -97,20 +97,20 @@ internal sealed class MusicBrowseResponse
         {
             foreach (var section in sectionList.Value.EnumerateArrayOrEmpty())
             {
-                if (section.TryGetProperty("musicPlaylistShelfRenderer", out var playlistShelf))
+                if (section.TryGetProperty(InnerTubeTokens.MusicPlaylistShelfRenderer, out var playlistShelf))
                 {
                     ParseShelfContent(playlistShelf, "Tracks");
 
-                    ContinuationToken ??= playlistShelf.GetPropertyOrNull("continuations")
+                    ContinuationToken ??= playlistShelf.GetPropertyOrNull(InnerTubeTokens.Continuations)
                         ?.GetFirstArrayElementOrNull()
-                        ?.GetPropertyOrNull("nextContinuationData")
-                        ?.GetPropertyOrNull("continuation")?.GetStringOrNull();
+                        ?.GetPropertyOrNull(InnerTubeTokens.NextContinuationData)
+                        ?.GetPropertyOrNull(InnerTubeTokens.Continuation)?.GetStringOrNull();
                 }
-                else if (section.TryGetProperty("gridRenderer", out var grid))
+                else if (section.TryGetProperty(InnerTubeTokens.GridRenderer, out var grid))
                 {
                     ParseGridContent(grid, "Library");
                 }
-                else if (section.TryGetProperty("musicCarouselShelfRenderer", out var carousel))
+                else if (section.TryGetProperty(InnerTubeTokens.MusicCarouselShelfRenderer, out var carousel))
                 {
                     ParseShelfContent(carousel, null);
                 }
@@ -122,13 +122,13 @@ internal sealed class MusicBrowseResponse
     {
         bool foundAny = false;
 
-        var actions = root.GetPropertyOrNull("onResponseReceivedActions");
+        var actions = root.GetPropertyOrNull(InnerTubeTokens.OnResponseReceivedActions);
         if (actions != null)
         {
             foreach (var action in actions.Value.EnumerateArrayOrEmpty())
             {
-                var continuationItems = action.GetPropertyOrNull("appendContinuationItemsAction")
-                    ?.GetPropertyOrNull("continuationItems");
+                var continuationItems = action.GetPropertyOrNull(InnerTubeTokens.AppendContinuationItemsAction)
+                    ?.GetPropertyOrNull(InnerTubeTokens.ContinuationItems);
                 if (continuationItems != null)
                 {
                     ParseMixedContent(continuationItems.Value, "Continuation");
@@ -137,18 +137,18 @@ internal sealed class MusicBrowseResponse
             }
         }
 
-        var contContents = root.GetPropertyOrNull("continuationContents")
-            ?.GetPropertyOrNull("musicPlaylistShelfContinuation");
+        var contContents = root.GetPropertyOrNull(InnerTubeTokens.ContinuationContents)
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicPlaylistShelfContinuation);
         if (contContents != null)
         {
-            var contents = contContents.Value.GetPropertyOrNull("contents");
+            var contents = contContents.Value.GetPropertyOrNull(InnerTubeTokens.Contents);
             if (contents != null)
                 ParseMixedContent(contents.Value, "Continuation");
 
-            ContinuationToken ??= contContents.Value.GetPropertyOrNull("continuations")
+            ContinuationToken ??= contContents.Value.GetPropertyOrNull(InnerTubeTokens.Continuations)
                 ?.GetFirstArrayElementOrNull()
-                ?.GetPropertyOrNull("nextContinuationData")
-                ?.GetPropertyOrNull("continuation")?.GetStringOrNull();
+                ?.GetPropertyOrNull(InnerTubeTokens.NextContinuationData)
+                ?.GetPropertyOrNull(InnerTubeTokens.Continuation)?.GetStringOrNull();
 
             foundAny = true;
         }
@@ -162,25 +162,25 @@ internal sealed class MusicBrowseResponse
 
         foreach (var item in itemsArray.EnumerateArrayOrEmpty())
         {
-            if (item.TryGetProperty("musicResponsiveListItemRenderer", out var trackJson))
+            if (item.TryGetProperty(InnerTubeTokens.MusicResponsiveListItemRenderer, out var trackJson))
             {
                 var musicItem = ParseMusicItem(trackJson);
                 if (musicItem != null) tracks.Add(musicItem);
                 continue;
             }
 
-            if (item.TryGetProperty("musicTwoRowItemRenderer", out var twoRowJson))
+            if (item.TryGetProperty(InnerTubeTokens.MusicTwoRowItemRenderer, out var twoRowJson))
             {
                 var musicItem = ParseTwoRowItem(twoRowJson);
                 if (musicItem != null) tracks.Add(musicItem);
                 continue;
             }
 
-            if (item.TryGetProperty("continuationItemRenderer", out var contItem))
+            if (item.TryGetProperty(InnerTubeTokens.ContinuationItemRenderer, out var contItem))
             {
-                var token = contItem.GetPropertyOrNull("continuationEndpoint")
-                    ?.GetPropertyOrNull("continuationCommand")
-                    ?.GetPropertyOrNull("token")?.GetStringOrNull();
+                var token = contItem.GetPropertyOrNull(InnerTubeTokens.ContinuationEndpoint)
+                    ?.GetPropertyOrNull(InnerTubeTokens.ContinuationCommand)
+                    ?.GetPropertyOrNull(InnerTubeTokens.Token)?.GetStringOrNull();
 
                 if (!string.IsNullOrEmpty(token))
                     ContinuationToken = token;
@@ -194,53 +194,53 @@ internal sealed class MusicBrowseResponse
     private void ParseShelfContent(JsonElement shelf, string? title)
     {
         var displayTitle = title;
-        displayTitle ??= shelf.GetPropertyOrNull("header")
-                ?.GetPropertyOrNull("musicCarouselShelfBasicHeaderRenderer")
-                ?.GetPropertyOrNull("title")
-                ?.GetPropertyOrNull("runs")
+        displayTitle ??= shelf.GetPropertyOrNull(InnerTubeTokens.Header)
+                ?.GetPropertyOrNull(InnerTubeTokens.MusicCarouselShelfBasicHeaderRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.Title)
+                ?.GetPropertyOrNull(InnerTubeTokens.Runs)
                 ?.GetFirstArrayElementOrNull()
-                ?.GetPropertyOrNull("text")?.GetStringOrNull()
+                ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull()
                 ?? "Tracks";
 
-        var contents = shelf.GetPropertyOrNull("contents");
+        var contents = shelf.GetPropertyOrNull(InnerTubeTokens.Contents);
         if (contents != null)
             ParseMixedContent(contents.Value, displayTitle);
     }
 
     private void ParseGridContent(JsonElement grid, string title)
     {
-        var items = grid.GetPropertyOrNull("items");
+        var items = grid.GetPropertyOrNull(InnerTubeTokens.Items);
         if (items != null) ParseMixedContent(items.Value, title);
     }
 
     private static MusicItem? ParseMusicItem(JsonElement json)
     {
-        var playlistItemData = json.GetPropertyOrNull("playlistItemData");
+        var playlistItemData = json.GetPropertyOrNull(InnerTubeTokens.PlaylistItemData);
 
-        var id = playlistItemData?.GetPropertyOrNull("videoId")?.GetStringOrNull();
-        id ??= json.FindFirstDescendantProperty("videoId")?.GetStringOrNull();
+        var id = playlistItemData?.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
+        id ??= json.FindFirstDescendantProperty(InnerTubeTokens.VideoId)?.GetStringOrNull();
 
         if (id == null) return null;
 
-        var setVideoId = playlistItemData?.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
-            ?? playlistItemData?.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
-            ?? json.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
-            ?? json.FindFirstDescendantProperty("playlistSetVideoId")?.GetStringOrNull()
-            ?? json.FindFirstDescendantProperty("setVideoId")?.GetStringOrNull();
+        var setVideoId = playlistItemData?.GetPropertyOrNull(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull()
+            ?? playlistItemData?.GetPropertyOrNull(InnerTubeTokens.SetVideoId)?.GetStringOrNull()
+            ?? json.GetPropertyOrNull(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull()
+            ?? json.FindFirstDescendantProperty(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull()
+            ?? json.FindFirstDescendantProperty(InnerTubeTokens.SetVideoId)?.GetStringOrNull();
 
-        var flexCols = json.GetPropertyOrNull("flexColumns");
+        var flexCols = json.GetPropertyOrNull(InnerTubeTokens.FlexColumns);
 
         var title = flexCols?.GetArrayElementOrNull(0)
-            ?.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
-            ?.GetPropertyOrNull("text")
-            ?.GetPropertyOrNull("runs")
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFlexColumnRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("text")?.GetStringOrNull() ?? "";
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull() ?? "";
 
         var metaRuns = flexCols?.GetArrayElementOrNull(1)
-            ?.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
-            ?.GetPropertyOrNull("text")
-            ?.GetPropertyOrNull("runs");
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFlexColumnRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs);
 
         string? author = null;
         string? album = null;
@@ -249,20 +249,20 @@ internal sealed class MusicBrowseResponse
         {
             foreach (var run in metaRuns.Value.EnumerateArrayOrEmpty())
             {
-                var text = run.GetPropertyOrNull("text")?.GetStringOrNull();
+                var text = run.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
                 if (text == null) continue;
 
-                var nav = run.GetPropertyOrNull("navigationEndpoint");
+                var nav = run.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint);
                 if (nav != null)
                 {
-                    var pageType = nav.Value.GetPropertyOrNull("browseEndpoint")
-                        ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
-                        ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
-                        ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
+                    var pageType = nav.Value.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextSupportedConfigs)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextMusicConfig)
+                        ?.GetPropertyOrNull(InnerTubeTokens.PageType)?.GetStringOrNull();
 
-                    if (pageType is "MUSIC_PAGE_TYPE_ARTIST" or "MUSIC_PAGE_TYPE_USER_CHANNEL")
+                    if (pageType is InnerTubeConstants.PageTypeArtist or InnerTubeConstants.PageTypeUserChannel)
                         author = text;
-                    else if (pageType == "MUSIC_PAGE_TYPE_ALBUM")
+                    else if (pageType == InnerTubeConstants.PageTypeAlbum)
                         album = text;
                 }
                 else if (author == null && !ContainsAnyOf(text, "views", "Song", "Video", ":"))
@@ -272,23 +272,23 @@ internal sealed class MusicBrowseResponse
             }
         }
 
-        var durationText = json.GetPropertyOrNull("fixedColumns")
+        var durationText = json.GetPropertyOrNull(InnerTubeTokens.FixedColumns)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("musicResponsiveListItemFixedColumnRenderer")
-            ?.GetPropertyOrNull("text")
-            ?.GetPropertyOrNull("runs")
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFixedColumnRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("text")?.GetStringOrNull();
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
 
         TimeSpan? duration = durationText != null
             ? YoutubeClientUtils.DurationParser.Parse(durationText)
             : null;
 
         var thumbs = ExtractThumbnails(
-            json.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("musicThumbnailRenderer")
-                ?.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails"));
+            json.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+                ?.GetPropertyOrNull(InnerTubeTokens.MusicThumbnailRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnails));
 
         return new MusicItem
         {
@@ -305,21 +305,21 @@ internal sealed class MusicBrowseResponse
 
     private static MusicItem? ParseTwoRowItem(JsonElement json)
     {
-        var title = json.GetPropertyOrNull("title")
-            ?.GetPropertyOrNull("runs")
+        var title = json.GetPropertyOrNull(InnerTubeTokens.Title)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("text")?.GetStringOrNull() ?? "";
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull() ?? "";
 
-        var subtitle = json.GetPropertyOrNull("subtitle")
-            ?.GetPropertyOrNull("runs")
+        var subtitle = json.GetPropertyOrNull(InnerTubeTokens.Subtitle)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("text")?.GetStringOrNull();
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
 
-        var nav = json.GetPropertyOrNull("navigationEndpoint");
-        var browseId = nav?.GetPropertyOrNull("browseEndpoint")
-            ?.GetPropertyOrNull("browseId")?.GetStringOrNull();
-        var watchId = nav?.GetPropertyOrNull("watchEndpoint")
-            ?.GetPropertyOrNull("videoId")?.GetStringOrNull();
+        var nav = json.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint);
+        var browseId = nav?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+            ?.GetPropertyOrNull(InnerTubeTokens.BrowseId)?.GetStringOrNull();
+        var watchId = nav?.GetPropertyOrNull(InnerTubeTokens.WatchEndpoint)
+            ?.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
 
         string id;
         string type;
@@ -354,10 +354,10 @@ internal sealed class MusicBrowseResponse
         if (string.IsNullOrEmpty(id)) return null;
 
         var thumbs = ExtractThumbnails(
-            json.GetPropertyOrNull("thumbnailRenderer")
-                ?.GetPropertyOrNull("musicThumbnailRenderer")
-                ?.GetPropertyOrNull("thumbnail")
-                ?.GetPropertyOrNull("thumbnails"));
+            json.GetPropertyOrNull(InnerTubeTokens.ThumbnailRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.MusicThumbnailRenderer)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+                ?.GetPropertyOrNull(InnerTubeTokens.Thumbnails));
 
         return new MusicItem
         {

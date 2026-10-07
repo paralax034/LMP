@@ -73,8 +73,8 @@ internal static class PlaylistStreamingParser
 
             // 3. Фиксация входа в полку треков плейлиста
             if (playlistShelfDepth == -1 &&
-                (reader.ValueTextEquals("musicPlaylistShelfRenderer") ||
-                 reader.ValueTextEquals("playlistVideoListRenderer")))
+                (reader.ValueTextEquals(InnerTubeTokens.MusicPlaylistShelfRenderer) ||
+                 reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoListRenderer)))
             {
                 if (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
                 {
@@ -235,58 +235,58 @@ internal static class PlaylistStreamingParser
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryParseMusicItem(
-        JsonElement musicRenderer,
-        int position,
-        out RemoteTrackInfo track)
+            JsonElement musicRenderer,
+            int position,
+            out RemoteTrackInfo track)
     {
         track = default;
 
-        var playlistItemData = musicRenderer.GetPropertyOrNull("playlistItemData");
-        var videoId = playlistItemData?.GetPropertyOrNull("videoId")?.GetStringOrNull()
-            ?? musicRenderer.FindFirstDescendantProperty("videoId")?.GetStringOrNull();
+        var playlistItemData = musicRenderer.GetPropertyOrNull(InnerTubeTokens.PlaylistItemData);
+        var videoId = playlistItemData?.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull()
+            ?? musicRenderer.FindFirstDescendantProperty(InnerTubeTokens.VideoId)?.GetStringOrNull();
 
         if (string.IsNullOrEmpty(videoId))
             return false;
 
-        var setVideoId = playlistItemData?.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
-            ?? playlistItemData?.GetPropertyOrNull("setVideoId")?.GetStringOrNull()
-            ?? musicRenderer.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull();
+        var setVideoId = playlistItemData?.GetPropertyOrNull(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull()
+            ?? playlistItemData?.GetPropertyOrNull(InnerTubeTokens.SetVideoId)?.GetStringOrNull()
+            ?? musicRenderer.GetPropertyOrNull(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull();
 
         if (string.Equals(setVideoId, PlaceholderSetVideoId, StringComparison.OrdinalIgnoreCase))
         {
             setVideoId = null;
         }
 
-        var flexCols = musicRenderer.GetPropertyOrNull("flexColumns");
+        var flexCols = musicRenderer.GetPropertyOrNull(InnerTubeTokens.FlexColumns);
         var title = flexCols?.GetArrayElementOrNull(0)
-            ?.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
-            ?.GetPropertyOrNull("text")
-            ?.GetPropertyOrNull("runs")
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFlexColumnRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("text")?.GetStringOrNull() ?? string.Empty;
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull() ?? string.Empty;
 
         string author = string.Empty;
         var metaRuns = flexCols?.GetArrayElementOrNull(1)
-            ?.GetPropertyOrNull("musicResponsiveListItemFlexColumnRenderer")
-            ?.GetPropertyOrNull("text")
-            ?.GetPropertyOrNull("runs");
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFlexColumnRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs);
 
         if (metaRuns != null)
         {
             foreach (var run in metaRuns.Value.EnumerateArrayOrEmpty())
             {
-                var text = run.GetPropertyOrNull("text")?.GetStringOrNull();
+                var text = run.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
                 if (text == null) continue;
 
-                var nav = run.GetPropertyOrNull("navigationEndpoint");
+                var nav = run.GetPropertyOrNull(InnerTubeTokens.NavigationEndpoint);
                 if (nav != null)
                 {
-                    var pageType = nav.Value.GetPropertyOrNull("browseEndpoint")
-                        ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
-                        ?.GetPropertyOrNull("browseEndpointContextMusicConfig")
-                        ?.GetPropertyOrNull("pageType")?.GetStringOrNull();
+                    var pageType = nav.Value.GetPropertyOrNull(InnerTubeTokens.BrowseEndpoint)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextSupportedConfigs)
+                        ?.GetPropertyOrNull(InnerTubeTokens.BrowseEndpointContextMusicConfig)
+                        ?.GetPropertyOrNull(InnerTubeTokens.PageType)?.GetStringOrNull();
 
-                    if (pageType is "MUSIC_PAGE_TYPE_ARTIST" or "MUSIC_PAGE_TYPE_USER_CHANNEL")
+                    if (pageType is InnerTubeConstants.PageTypeArtist or InnerTubeConstants.PageTypeUserChannel)
                     {
                         author = text;
                         break;
@@ -300,13 +300,13 @@ internal static class PlaylistStreamingParser
         }
 
         int durationSeconds = 0;
-        var durationText = musicRenderer.GetPropertyOrNull("fixedColumns")
+        var durationText = musicRenderer.GetPropertyOrNull(InnerTubeTokens.FixedColumns)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("musicResponsiveListItemFixedColumnRenderer")
-            ?.GetPropertyOrNull("text")
-            ?.GetPropertyOrNull("runs")
+            ?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveListItemFixedColumnRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)
+            ?.GetPropertyOrNull(InnerTubeTokens.Runs)
             ?.GetFirstArrayElementOrNull()
-            ?.GetPropertyOrNull("text")?.GetStringOrNull();
+            ?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
 
         if (durationText != null)
         {
@@ -316,7 +316,7 @@ internal static class PlaylistStreamingParser
         }
 
         var thumbUrl = ExtractLastThumbnailUrl(musicRenderer);
-        var policy = musicRenderer.GetPropertyOrNull("musicItemRendererDisplayPolicy")?.GetStringOrNull();
+        var policy = musicRenderer.GetPropertyOrNull(InnerTubeTokens.MusicItemRendererDisplayPolicy)?.GetStringOrNull();
         bool isPlayable = !string.Equals(policy, GreyOutPolicy, StringComparison.Ordinal);
 
         track = new RemoteTrackInfo(
@@ -334,38 +334,38 @@ internal static class PlaylistStreamingParser
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryParseWebItem(
-        JsonElement renderer,
-        int position,
-        out RemoteTrackInfo track)
+            JsonElement renderer,
+            int position,
+            out RemoteTrackInfo track)
     {
         track = default;
 
-        var videoId = renderer.GetPropertyOrNull("videoId")?.GetStringOrNull();
+        var videoId = renderer.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
         if (string.IsNullOrEmpty(videoId))
             return false;
 
-        var setVideoId = renderer.GetPropertyOrNull("playlistSetVideoId")?.GetStringOrNull()
-            ?? renderer.GetPropertyOrNull("setVideoId")?.GetStringOrNull();
+        var setVideoId = renderer.GetPropertyOrNull(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull()
+            ?? renderer.GetPropertyOrNull(InnerTubeTokens.SetVideoId)?.GetStringOrNull();
 
         if (string.Equals(setVideoId, PlaceholderSetVideoId, StringComparison.OrdinalIgnoreCase))
         {
             setVideoId = null;
         }
 
-        var title = renderer.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull()
-            ?? YoutubeParsingHelpers.ConcatTextRuns(renderer.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
+        var title = renderer.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull()
+            ?? YoutubeParsingHelpers.ConcatTextRuns(renderer.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.Runs))
             ?? string.Empty;
 
-        var author = YoutubeParsingHelpers.ConcatTextRuns(renderer.GetPropertyOrNull("shortBylineText")?.GetPropertyOrNull("runs"))
+        var author = YoutubeParsingHelpers.ConcatTextRuns(renderer.GetPropertyOrNull(InnerTubeTokens.ShortBylineText)?.GetPropertyOrNull(InnerTubeTokens.Runs))
             ?? string.Empty;
 
         int durationSeconds = 0;
-        var lenStr = renderer.GetPropertyOrNull("lengthSeconds")?.GetStringOrNull();
+        var lenStr = renderer.GetPropertyOrNull(InnerTubeTokens.LengthSeconds)?.GetStringOrNull();
         if (!string.IsNullOrEmpty(lenStr))
             int.TryParse(lenStr, CultureInfo.InvariantCulture, out durationSeconds);
 
         var thumbUrl = ExtractLastThumbnailUrl(renderer);
-        var policy = renderer.GetPropertyOrNull("musicItemRendererDisplayPolicy")?.GetStringOrNull();
+        var policy = renderer.GetPropertyOrNull(InnerTubeTokens.MusicItemRendererDisplayPolicy)?.GetStringOrNull();
         bool isPlayable = !string.Equals(policy, GreyOutPolicy, StringComparison.Ordinal);
 
         track = new RemoteTrackInfo(
@@ -384,8 +384,8 @@ internal static class PlaylistStreamingParser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string ExtractLastThumbnailUrl(JsonElement renderer)
     {
-        var thumbs = (renderer.GetPropertyOrNull("thumbnail")
-            ?.GetPropertyOrNull("thumbnails")) ?? renderer.FindFirstDescendantProperty("thumbnails");
+        var thumbs = (renderer.GetPropertyOrNull(InnerTubeTokens.Thumbnail)
+            ?.GetPropertyOrNull(InnerTubeTokens.Thumbnails)) ?? renderer.FindFirstDescendantProperty(InnerTubeTokens.Thumbnails);
 
         if (thumbs is null || thumbs.Value.ValueKind != JsonValueKind.Array)
             return string.Empty;
@@ -395,7 +395,7 @@ internal static class PlaylistStreamingParser
             return string.Empty;
 
         return thumbs.Value[len - 1]
-            .GetPropertyOrNull("url")
+            .GetPropertyOrNull(InnerTubeTokens.Url)
             ?.GetStringOrNull() ?? string.Empty;
     }
 

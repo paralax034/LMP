@@ -109,21 +109,19 @@ public sealed class JsDecryptionService : IDisposable
         await _callLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var sw = Stopwatch.StartNew();
             var result = QuickJsNative.CallFunction(_handle, functionName, argument);
-            sw.Stop();
 
             if (result != null)
             {
                 Log.Debug(
                     $"[JsDecryptionService] {functionName}({Truncate(argument)}) → " +
-                    $"{Truncate(result)} [{sw.Elapsed.TotalMilliseconds:F3}ms]");
+                    $"{Truncate(result)}");
             }
             else
             {
                 var nativeError = QuickJsNative.GetLastError(_handle);
                 Log.Warn(
-                    $"[JsDecryptionService] {functionName}({Truncate(argument)}) → null [{sw.Elapsed.TotalMilliseconds:F3}ms]. " +
+                    $"[JsDecryptionService] {functionName}({Truncate(argument)}) → null. " +
                     $"Native last error: {nativeError ?? "(none)"}");
             }
 

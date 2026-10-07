@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using LMP.Core.Youtube.Utils;
 using LMP.Core.Helpers.Extensions;
-using LMP.Core.Youtube.Exceptions; // Добавлено для ReadOnlyMemoryContent
+using LMP.Core.Youtube.Exceptions;
 
 namespace LMP.Core.Youtube.Music;
 
@@ -11,34 +11,25 @@ internal class MusicController(HttpClient http)
 {
     private const string ApiUrl = "https://music.youtube.com/youtubei/v1";
 
-    private static readonly byte[] Utf8Context = "context"u8.ToArray();
-    private static readonly byte[] Utf8Client = "client"u8.ToArray();
-    private static readonly byte[] Utf8ClientName = "clientName"u8.ToArray();
-    private static readonly byte[] Utf8ClientVersion = "clientVersion"u8.ToArray();
-    private static readonly byte[] Utf8Hl = "hl"u8.ToArray();
-    private static readonly byte[] Utf8Gl = "gl"u8.ToArray();
-    private static readonly byte[] Utf8VisitorData = "visitorData"u8.ToArray();
-    private static readonly byte[] Utf8WebRemix = "WEB_REMIX"u8.ToArray();
-
     private static readonly MediaTypeHeaderValue JsonContentType = new("application/json");
 
     private static void WriteContext(Utf8JsonWriter writer)
     {
-        writer.WritePropertyName(Utf8Context);
+        writer.WritePropertyName(InnerTubeTokens.Context);
         writer.WriteStartObject();
 
-        writer.WritePropertyName(Utf8Client);
+        writer.WritePropertyName(InnerTubeTokens.Client);
         writer.WriteStartObject();
-        writer.WriteString(Utf8ClientName, Utf8WebRemix);
-        writer.WriteString(Utf8ClientVersion, YoutubeHttpHandler.MusicClientVersion);
-        writer.WriteString(Utf8Hl, YoutubeHttpHandler.GetHl());
-        writer.WriteString(Utf8Gl, YoutubeHttpHandler.GetGl());
+        writer.WriteString(InnerTubeTokens.ClientName, InnerTubeTokens.WebRemix);
+        writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.MusicClientVersion);
+        writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.GetHl());
+        writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.GetGl());
 
         var visitorData = YoutubeClientUtils.VisitorData;
         if (!string.IsNullOrEmpty(visitorData))
-            writer.WriteString(Utf8VisitorData, visitorData);
+            writer.WriteString(InnerTubeTokens.VisitorData, visitorData);
         else
-            writer.WriteNull(Utf8VisitorData);
+            writer.WriteNull(InnerTubeTokens.VisitorData);
 
         writer.WriteEndObject(); // client
 
@@ -47,8 +38,8 @@ internal class MusicController(HttpClient http)
 
     private static void UpdateVisitorData(JsonElement root)
     {
-        var newVisitorData = root.GetPropertyOrNull("responseContext")
-            ?.GetPropertyOrNull("visitorData")
+        var newVisitorData = root.GetPropertyOrNull(InnerTubeTokens.ResponseContext)
+            ?.GetPropertyOrNull(InnerTubeTokens.VisitorData)
             ?.GetStringOrNull();
 
         // Обновляем глобальный VisitorData напрямую
@@ -70,7 +61,7 @@ internal class MusicController(HttpClient http)
     /// <summary>
     /// Создаёт HTTP-контент с использованием ReadOnlyMemoryContent для снижения GC pressure.
     /// </summary>
-    private static HttpContent CreateJsonContent(Action<Utf8JsonWriter> writeBody)
+    private static ReadOnlyMemoryContent CreateJsonContent(Action<Utf8JsonWriter> writeBody)
     {
         var bufferWriter = new ArrayBufferWriter<byte>(512);
         using (var writer = new Utf8JsonWriter(bufferWriter))
@@ -81,7 +72,6 @@ internal class MusicController(HttpClient http)
             writer.WriteEndObject();
         }
 
-        // Оптимизировано: предотвращает выделение нового массива в куче и копирование
         var content = new ReadOnlyMemoryContent(bufferWriter.WrittenMemory);
         content.Headers.ContentType = JsonContentType;
         return content;
@@ -138,9 +128,9 @@ internal class MusicController(HttpClient http)
         var jsonDoc = await PostAsync("browse", writer =>
         {
             if (!string.IsNullOrEmpty(continuation))
-                writer.WriteString("continuation", continuation);
+                writer.WriteString(InnerTubeTokens.Continuation, continuation);
             else if (!string.IsNullOrEmpty(browseId))
-                writer.WriteString("browseId", browseId);
+                writer.WriteString(InnerTubeTokens.BrowseId, browseId);
         }, cancellationToken);
 
         return new MusicBrowseResponse(jsonDoc);
@@ -155,9 +145,9 @@ internal class MusicController(HttpClient http)
     {
         await PostFireAndForgetAsync(endpoint, writer =>
         {
-            writer.WritePropertyName("target");
+            writer.WritePropertyName(InnerTubeTokens.Target);
             writer.WriteStartObject();
-            writer.WriteString("videoId", videoId);
+            writer.WriteString(InnerTubeTokens.VideoId, videoId);
             writer.WriteEndObject();
         }, cancellationToken);
     }

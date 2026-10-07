@@ -94,8 +94,8 @@ public partial class YoutubeProvider : IDisposable
         _sigCipherDecryptor = sigCipherDecryptor;
         _poTokenProvider = new PoTokenProvider(() => _networkManager.AudioClient);
 
-        // Связываем централизованный утилитный класс с куками сессии
-        YoutubeClientUtils.Initialize(cookieAuth);
+        // Связываем централизованный утилитный класс с куками сессии и сетевым менеджером
+        YoutubeClientUtils.Initialize(cookieAuth, () => _networkManager.ApiClient);
 
         _nTokenDecryptor.OnComplexDecryptionStarted += HandleNTokenDecryptionStarted;
 
@@ -738,7 +738,7 @@ public partial class YoutubeProvider : IDisposable
     #region Support Helpers
 
     private AudioOnlyStreamInfo? SelectBestStream(
-         List<AudioOnlyStreamInfo> streams,
+         IReadOnlyList<AudioOnlyStreamInfo> streams,
          AudioFormat? preferredFormat,
          int preferredBitrate = 0)
     {
@@ -746,52 +746,75 @@ public partial class YoutubeProvider : IDisposable
 
         var blacklist = AudioSourceFactory.CdnBlacklist;
 
-        // Фильтруем заблокированные ТСПУ CDN-хосты, если есть альтернативы
-        var candidateStreams = streams.Where(s => !blacklist.IsBlockedUrl(s.Url)).ToList();
-        if (candidateStreams.Count == 0)
-            candidateStreams = streams; // Fallback на исходные, если заблокированы вообще все
-
-        if (preferredFormat is { } requestedFormat && requestedFormat != AudioFormat.Unknown)
+        // Быстрая проверка: есть ли заблокированные хосты без выделения нового List через LINQ
+        bool hasBlocked = false;
+        for (int i = 0; i < streams.Count; i++)
         {
-            AudioOnlyStreamInfo? bestMatch = null;
-            double bestDelta = double.MaxValue;
-            AudioOnlyStreamInfo? firstInFormat = null;
-
-            for (int i = 0; i < candidateStreams.Count; i++)
+            if (blacklist.IsBlockedUrl(streams[i].Url))
             {
-                var streamFormat = YoutubeIdHelper.MapContainerToFormat(candidateStreams[i].Container.Name);
-                if (streamFormat != requestedFormat)
-                    continue;
+                hasBlocked = true;
+                break;
+            }
+        }
 
-                firstInFormat ??= candidateStreams[i];
+        AudioOnlyStreamInfo? bestMatch = null;
+        double bestDelta = double.MaxValue;
+        AudioOnlyStreamInfo? firstInFormat = null;
+        AudioOnlyStreamInfo? firstUnblocked = null;
+        AudioOnlyStreamInfo? standardFallback = null;
 
-                if (preferredBitrate > 0)
+        var qualityPref = _libraryService?.Settings.QualityPreference ?? AudioQualityPreference.BestAvailable;
+
+        for (int i = 0; i < streams.Count; i++)
+        {
+            var stream = streams[i];
+            bool isBlocked = hasBlocked && blacklist.IsBlockedUrl(stream.Url);
+
+            // Если есть альтернативы, пропускаем заблокированные
+            if (isBlocked) continue;
+
+            firstUnblocked ??= stream;
+
+            var streamFormat = YoutubeIdHelper.MapContainerToFormat(stream.Container.Name);
+
+            if (qualityPref == AudioQualityPreference.Standard && standardFallback == null && streamFormat == AudioFormat.Mp4)
+            {
+                standardFallback = stream;
+            }
+
+            if (preferredFormat is { } requestedFormat && requestedFormat != AudioFormat.Unknown)
+            {
+                if (streamFormat == requestedFormat)
                 {
-                    var delta = Math.Abs(candidateStreams[i].Bitrate.KiloBitsPerSecond - preferredBitrate);
-                    if (delta < bestDelta)
+                    firstInFormat ??= stream;
+
+                    if (preferredBitrate > 0)
                     {
-                        bestDelta = delta;
-                        bestMatch = candidateStreams[i];
+                        var delta = Math.Abs(stream.Bitrate.KiloBitsPerSecond - preferredBitrate);
+                        if (delta < bestDelta)
+                        {
+                            bestDelta = delta;
+                            bestMatch = stream;
+                        }
                     }
                 }
             }
+        }
 
+        // Если все потоки оказались заблокированы, делаем fallback на первый доступный поток
+        if (firstUnblocked == null && streams.Count > 0)
+            return streams[0];
+
+        if (preferredFormat is not null && preferredFormat != AudioFormat.Unknown)
+        {
             if (preferredBitrate > 0 && bestMatch != null) return bestMatch;
             if (firstInFormat != null) return firstInFormat;
         }
 
-        var qualityPref = _libraryService?.Settings.QualityPreference ?? AudioQualityPreference.BestAvailable;
+        if (qualityPref == AudioQualityPreference.Standard && standardFallback != null)
+            return standardFallback;
 
-        if (qualityPref == AudioQualityPreference.Standard)
-        {
-            for (int i = 0; i < candidateStreams.Count; i++)
-            {
-                if (YoutubeIdHelper.MapContainerToFormat(candidateStreams[i].Container.Name) == AudioFormat.Mp4)
-                    return candidateStreams[i];
-            }
-        }
-
-        return candidateStreams.Count > 0 ? candidateStreams[0] : null;
+        return firstUnblocked ?? streams[0];
     }
 
     private static AudioCodec DetermineCodec(AudioOnlyStreamInfo stream, AudioFormat format)
@@ -1542,10 +1565,7 @@ public partial class YoutubeProvider : IDisposable
         AudioFormat? targetFormat,
         int targetBitrate)
     {
-        var streams = manifest.GetAudioOnlyStreams()
-            .OrderByDescending(s => s.Bitrate)
-            .ToList();
-
+        var streams = manifest.GetAudioOnlyStreams();
         var selected = SelectBestStream(streams, targetFormat, targetBitrate);
         if (selected == null) return null;
 
@@ -1643,10 +1663,7 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     private static List<StreamOption> MapManifestToOptions(StreamManifest manifest)
     {
-        var streams = manifest.GetAudioOnlyStreams()
-            .OrderByDescending(s => s.Bitrate)
-            .ToList();
-
+        var streams = manifest.GetAudioOnlyStreams();
         var seen = new HashSet<(AudioFormat, int)>();
         var result = new List<StreamOption>(streams.Count);
 

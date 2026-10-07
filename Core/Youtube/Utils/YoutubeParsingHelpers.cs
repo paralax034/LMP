@@ -23,8 +23,8 @@ internal static class YoutubeParsingHelpers
     public static readonly CultureInfo EnCulture = CultureInfo.GetCultureInfo("en-US");
 
     /// <summary>
-    /// Склеивает текст из массива runs без LINQ и без промежуточных коллекций.
-    /// Использует stackalloc для строк до 256 символов.
+    /// Склеивает текст из массива runs без LINQ и без промежуточных коллекций в куче.
+    /// Использует string.Create для прямой записи в память строки и пул массивов для ссылок.
     /// </summary>
     /// <param name="runsElement">JSON-элемент массива runs или null.</param>
     /// <returns>Склеенный текст или null.</returns>
@@ -37,33 +37,41 @@ internal static class YoutubeParsingHelpers
         var array = runsElement.Value;
         int len = array.GetArrayLength();
         if (len == 0) return null;
-        if (len == 1) return array[0].GetPropertyOrNull("text")?.GetStringOrNull();
+        if (len == 1) return array[0].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
 
-        var parts = new string?[len];
-        int totalLen = 0;
-
-        for (int i = 0; i < len; i++)
+        var parts = System.Buffers.ArrayPool<string?>.Shared.Rent(len);
+        try
         {
-            var t = array[i].GetPropertyOrNull("text")?.GetStringOrNull();
-            parts[i] = t;
-            if (t is not null) totalLen += t.Length;
-        }
+            int totalLen = 0;
 
-        if (totalLen == 0) return null;
-
-        Span<char> buf = totalLen <= 256 ? stackalloc char[totalLen] : new char[totalLen];
-        int pos = 0;
-
-        for (int i = 0; i < len; i++)
-        {
-            if (parts[i] is { } s)
+            for (int i = 0; i < len; i++)
             {
-                s.AsSpan().CopyTo(buf[pos..]);
-                pos += s.Length;
+                var t = array[i].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
+                parts[i] = t;
+                if (t is not null) totalLen += t.Length;
             }
-        }
 
-        return new string(buf[..pos]);
+            if (totalLen == 0) return null;
+
+            return string.Create(totalLen, (parts, len), static (span, state) =>
+            {
+                var (p, count) = state;
+                int pos = 0;
+
+                for (int i = 0; i < count; i++)
+                {
+                    if (p[i] is { } s)
+                    {
+                        s.AsSpan().CopyTo(span[pos..]);
+                        pos += s.Length;
+                    }
+                }
+            });
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<string?>.Shared.Return(parts, clearArray: true);
+        }
     }
 
     /// <summary>

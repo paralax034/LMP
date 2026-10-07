@@ -5,6 +5,20 @@ using System.Runtime.CompilerServices;
 
 namespace LMP.Core.Youtube.Utils;
 
+/// <summary>
+/// Централизованные строковые идентификаторы клиентов InnerTube API.
+/// </summary>
+public static class YoutubeClientNames
+{
+	public const string AndroidVr = "ANDROID_VR";
+	public const string AndroidMusic = "ANDROID_MUSIC";
+	public const string WebRemix = "WEB_REMIX";
+	public const string Web = "WEB";
+	public const string Tv = "TVHTML5_SIMPLY_EMBEDDED_PLAYER";
+	public const string Ios = "IOS";
+	public const string AndroidTestSuite = "ANDROID_TESTSUITE";
+}
+
 public static class YoutubeClientUtils
 {
 	public static YoutubeClientProfile CurrentProfile { get; set; } = YoutubeClientProfile.AndroidVR;
@@ -13,14 +27,19 @@ public static class YoutubeClientUtils
 	private static string _visitorData = DefaultVisitorData;
 	private static Task<string>? _fetchTask;
 	private static CookieAuthService? _authService;
+	private static Func<HttpClient>? _httpClientProvider;
 	private static readonly Lock _visitorDataLock = new();
 
+	private const string InvariantHlJson = "\"en\"";
+	private const string InvariantGlJson = "\"US\"";
+
 	/// <summary>
-	/// Инициализирует статический провайдер кук авторизации для VisitorData.
+	/// Инициализирует статический провайдер кук авторизации и HTTP-клиента для VisitorData.
 	/// </summary>
-	public static void Initialize(CookieAuthService authService)
+	public static void Initialize(CookieAuthService authService, Func<HttpClient>? httpClientProvider = null)
 	{
 		_authService = authService;
+		_httpClientProvider = httpClientProvider;
 	}
 
 	/// <summary>
@@ -80,7 +99,7 @@ public static class YoutubeClientUtils
 				Version = System.Net.HttpVersion.Version11 // Исключаем медленные UDP-согласования HTTP/3 при старте
 			};
 			request.Headers.UserAgent.ParseAdd(UaWeb);
-			request.Headers.Add("Referer", "https://www.youtube.com/");
+			request.Headers.Add("Referer", YoutubeHttpHandler.YoutubeOrigin + "/");
 
 			if (!string.IsNullOrEmpty(cookiesHeader))
 			{
@@ -90,7 +109,9 @@ public static class YoutubeClientUtils
 			using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 			cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-			using var response = await SharedHttpClient.Instance.SendAsync(
+			var client = _httpClientProvider?.Invoke() ?? SharedHttpClient.Instance;
+
+			using var response = await client.SendAsync(
 					request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
 
 			if (!response.IsSuccessStatusCode)
@@ -144,7 +165,7 @@ public static class YoutubeClientUtils
 	public const string UaWeb = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 	public const string UaWebRemix = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 	public const string UaAndroidMusic = "com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14; en_US; Pixel 8 Pro; Build/AP2A.240805.005)";
-	public const string UaIos = "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)";
+	public const string UaIos = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)";
 
 	public static string UserAgent => CurrentProfile switch
 	{
@@ -160,12 +181,14 @@ public static class YoutubeClientUtils
 	/// <summary>
 	/// Клиенты для получения stream URLs по умолчанию (гостевой режим).
 	/// ANDROID_VR идёт первым для мгновенного старта (fast path без n-token/cipher),
-	/// WEB_REMIX выступает прозрачным fallback при bot challenge / age restriction.
+	/// WEB_REMIX выступает прозрачным fallback при bot challenge / age restriction,
+	/// WEB выступает стабильным веб-резервом с поддержкой совмещённого MP4 AAC без ограничений по длительности.
 	/// </summary>
 	public static readonly string[] StreamFallbackClientsDefault =
 	[
-		"ANDROID_VR",
-		"WEB_REMIX",
+		YoutubeClientNames.AndroidVr,
+		YoutubeClientNames.WebRemix,
+		YoutubeClientNames.Web,
 	];
 
 	/// <summary>
@@ -173,8 +196,9 @@ public static class YoutubeClientUtils
 	/// </summary>
 	public static readonly string[] StreamFallbackClientsAuth =
 	[
-		"ANDROID_VR",
-		"WEB_REMIX",
+		YoutubeClientNames.AndroidVr,
+		YoutubeClientNames.WebRemix,
+		YoutubeClientNames.Web,
 	];
 
 	/// <summary>
@@ -199,14 +223,50 @@ public static class YoutubeClientUtils
 	/// </summary>
 	public static string GetClientApiName(YoutubeClientProfile profile) => profile switch
 	{
-		YoutubeClientProfile.AndroidVR => "ANDROID_VR",
-		YoutubeClientProfile.AndroidMusic => "ANDROID_MUSIC",
-		YoutubeClientProfile.WebRemix => "WEB_REMIX",
-		YoutubeClientProfile.Web => "WEB",
-		YoutubeClientProfile.TV => "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-		YoutubeClientProfile.Ios => "IOS",
-		_ => "WEB_REMIX",
+		YoutubeClientProfile.AndroidVR => YoutubeClientNames.AndroidVr,
+		YoutubeClientProfile.AndroidMusic => YoutubeClientNames.AndroidMusic,
+		YoutubeClientProfile.WebRemix => YoutubeClientNames.WebRemix,
+		YoutubeClientProfile.Web => YoutubeClientNames.Web,
+		YoutubeClientProfile.TV => YoutubeClientNames.Tv,
+		YoutubeClientProfile.Ios => YoutubeClientNames.Ios,
+		_ => YoutubeClientNames.WebRemix,
 	};
+
+	/// <summary>
+	/// Настраивает специфичные заголовки InnerTube API для исходящего запроса плеера.
+	/// </summary>
+	public static void ConfigurePlayerRequest(HttpRequestMessage request, string clientName)
+	{
+		request.Headers.Add("User-Agent", GetUserAgentForClient(clientName));
+
+		(string origin, string name, string version)? webProfile = clientName switch
+		{
+			YoutubeClientNames.Web => (YoutubeHttpHandler.YoutubeOrigin, YoutubeHttpHandler.WebClientName, YoutubeHttpHandler.WebClientVersion),
+			YoutubeClientNames.WebRemix => (YoutubeHttpHandler.MusicOrigin, YoutubeHttpHandler.MusicClientName, YoutubeHttpHandler.MusicClientVersion),
+			_ => null
+		};
+
+		if (webProfile is var (origin, name, version))
+		{
+			request.Headers.Add("Referer", origin + "/");
+			request.Headers.Add("X-YouTube-Client-Name", name);
+			request.Headers.Add("X-YouTube-Client-Version", version);
+			request.Headers.Add("X-Goog-Api-Format-Version", YoutubeHttpHandler.ApiFormatVersion);
+		}
+	}
+
+	/// <summary>
+	/// Возвращает URL конечной точки плеера для указанного клиента.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static string GetPlayerEndpoint(string clientName)
+	{
+		var origin = string.Equals(clientName, YoutubeClientNames.WebRemix, StringComparison.Ordinal)
+			? YoutubeHttpHandler.MusicOrigin
+			: YoutubeHttpHandler.YoutubeOrigin;
+
+		return origin + "/youtubei/v1/player?prettyPrint=false";
+	}
 
 	/// <summary>
 	/// Генерирует контекст плеера для текущего профиля клиента.
@@ -220,17 +280,12 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Генерирует контекст для конкретного клиента.
+	/// Генерирует контекст для конкретного клиента с минимальным числом строковых аллокаций.
 	/// </summary>
 	public static string GeneratePlayerContextForClient(string clientName, string videoId, string? visitorData, string? signatureTimestamp = null)
 	{
-		const string hl = YoutubeHttpHandler.InvariantHl;
-		const string gl = YoutubeHttpHandler.InvariantGl;
-
 		var vidJson = Json.Serialize(videoId);
 		var vdJson = Json.Serialize(visitorData);
-		var hlJson = Json.Serialize(hl);
-		var glJson = Json.Serialize(gl);
 
 		var playbackContextJson = signatureTimestamp != null
 			? $@", ""playbackContext"": {{ ""contentPlaybackContext"": {{ ""signatureTimestamp"": {Json.Serialize(signatureTimestamp)} }} }}"
@@ -238,7 +293,7 @@ public static class YoutubeClientUtils
 
 		return clientName switch
 		{
-			"WEB_REMIX" => $$"""
+			YoutubeClientNames.WebRemix => $$"""
 			{
 				"videoId": {{vidJson}},
 				"contentCheckOk": true,
@@ -248,15 +303,15 @@ public static class YoutubeClientUtils
 						"clientName": "WEB_REMIX",
 						"clientVersion": "{{YoutubeHttpHandler.MusicClientVersion}}",
 						"visitorData": {{vdJson}},
-						"hl": {{hlJson}},
-						"gl": {{glJson}},
+						"hl": {{InvariantHlJson}},
+						"gl": {{InvariantGlJson}},
 						"utcOffsetMinutes": 0
 					}
 				}{{playbackContextJson}}
 			}
 			""",
 
-			"ANDROID_VR" => $$"""
+			YoutubeClientNames.AndroidVr => $$"""
 			{
 				"videoId": {{vidJson}},
 				"contentCheckOk": true,
@@ -280,7 +335,7 @@ public static class YoutubeClientUtils
 			}
 			""",
 
-			"ANDROID_MUSIC" => $$"""
+			YoutubeClientNames.AndroidMusic => $$"""
 			{
 				"videoId": {{vidJson}},
 				"contentCheckOk": true,
@@ -294,15 +349,15 @@ public static class YoutubeClientUtils
 						"osVersion": "14",
 						"platform": "MOBILE",
 						"visitorData": {{vdJson}},
-						"hl": {{hlJson}},
-						"gl": {{glJson}},
+						"hl": {{InvariantHlJson}},
+						"gl": {{InvariantGlJson}},
 						"utcOffsetMinutes": 0
 					}
 				}
 			}
 			""",
 
-			"WEB" => $$"""
+			YoutubeClientNames.Web => $$"""
 			{
 				"videoId": {{vidJson}},
 				"contentCheckOk": true,
@@ -312,15 +367,15 @@ public static class YoutubeClientUtils
 						"clientName": "WEB",
 						"clientVersion": "{{YoutubeHttpHandler.WebClientVersion}}",
 						"visitorData": {{vdJson}},
-						"hl": {{hlJson}},
-						"gl": {{glJson}},
+						"hl": {{InvariantHlJson}},
+						"gl": {{InvariantGlJson}},
 						"utcOffsetMinutes": 0
 					}
-				}
+				}{{playbackContextJson}}
 			}
 			""",
 
-			"IOS" => $$"""
+			YoutubeClientNames.Ios => $$"""
 			{
 				"videoId": {{vidJson}},
 				"contentCheckOk": true,
@@ -328,22 +383,22 @@ public static class YoutubeClientUtils
 				"context": {
 					"client": {
 						"clientName": "IOS",
-						"clientVersion": "19.29.1",
+						"clientVersion": "20.10.4",
 						"deviceMake": "Apple",
 						"deviceModel": "iPhone16,2",
 						"osName": "iOS",
-						"osVersion": "17.5.1",
+						"osVersion": "18.2",
 						"platform": "MOBILE",
 						"visitorData": {{vdJson}},
-						"hl": {{hlJson}},
-						"gl": {{glJson}},
+						"hl": {{InvariantHlJson}},
+						"gl": {{InvariantGlJson}},
 						"utcOffsetMinutes": 0
 					}
 				}
 			}
 			""",
 
-			"TVHTML5_SIMPLY_EMBEDDED_PLAYER" => $$"""
+			YoutubeClientNames.Tv => $$"""
 			{
 				"videoId": {{vidJson}},
 				"context": {
@@ -351,8 +406,8 @@ public static class YoutubeClientUtils
 						"clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
 						"clientVersion": "2.0",
 						"visitorData": {{vdJson}},
-						"hl": {{hlJson}},
-						"gl": {{glJson}},
+						"hl": {{InvariantHlJson}},
+						"gl": {{InvariantGlJson}},
 						"utcOffsetMinutes": 0,
 						"platform": "TV"
 					},
@@ -363,7 +418,7 @@ public static class YoutubeClientUtils
 			}
 			""",
 
-			_ => GeneratePlayerContextForClient("WEB_REMIX", videoId, visitorData)
+			_ => GeneratePlayerContextForClient(YoutubeClientNames.WebRemix, videoId, visitorData, signatureTimestamp)
 		};
 	}
 
@@ -372,12 +427,12 @@ public static class YoutubeClientUtils
 	/// </summary>
 	public static string GetUserAgentForClient(string clientName) => clientName switch
 	{
-		"WEB_REMIX" => UaWebRemix,
-		"ANDROID_VR" => UaVr,
-		"ANDROID_MUSIC" => UaAndroidMusic,
-		"WEB" => UaWeb,
-		"IOS" => UaIos,
-		"TVHTML5_SIMPLY_EMBEDDED_PLAYER" => UaTv,
+		YoutubeClientNames.WebRemix => UaWebRemix,
+		YoutubeClientNames.AndroidVr => UaVr,
+		YoutubeClientNames.AndroidMusic => UaAndroidMusic,
+		YoutubeClientNames.Web => UaWeb,
+		YoutubeClientNames.Ios => UaIos,
+		YoutubeClientNames.Tv => UaTv,
 		_ => UaWebRemix
 	};
 

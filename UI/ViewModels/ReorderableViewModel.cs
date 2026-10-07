@@ -543,7 +543,7 @@ public abstract partial class ReorderableViewModel<TSource, TViewModel> : ViewMo
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool HasSameIdOrder(List<string> currentIds, IReadOnlyList<string> newIds)
+    private static bool HasSameIdOrder(List<string> currentIds, List<string> newIds)
     {
         if (currentIds.Count != newIds.Count) return false;
 

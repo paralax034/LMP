@@ -276,6 +276,11 @@ public sealed partial class CachingStreamSource
             if (gapLength <= 0)
                 continue;
 
+            // Защита от спама на конце файла: если это хвостовой зазор после последнего диапазона
+            // и он меньше размера блока выравнивания — сервер уже отдал весь файл, прекращаем повторные запросы
+            if (i == ranges.Length && gapLength <= _requestAlignmentBytes * 2 && ranges.Length > 0)
+                continue;
+
             int requestLength = (int)Math.Min(gapLength, _config.MaxRequestSizeBytes);
 
             _ = SafeEnsureRangeAsync(gapStart, requestLength, downloadToken, isCritical: false);

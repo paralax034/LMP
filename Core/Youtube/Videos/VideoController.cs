@@ -89,7 +89,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
         return failures switch
         {
-            0 => TimeSpan.FromMilliseconds(50),
+            0 => TimeSpan.Zero,
             1 => TimeSpan.FromMilliseconds(300),
             2 => TimeSpan.FromMilliseconds(600),
             _ => TimeSpan.FromSeconds(1)
@@ -136,10 +136,10 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     }
 
     public async ValueTask<PlayerResponse> GetPlayerResponseWithClientAsync(
-       VideoId videoId,
-       string clientName,
-       CancellationToken cancellationToken,
-       string? signatureTimestamp = null)
+           VideoId videoId,
+           string clientName,
+           CancellationToken cancellationToken,
+           string? signatureTimestamp = null)
     {
         ThrowIfInCooldown();
 
@@ -156,20 +156,21 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
         var visitorData = await YoutubeClientUtils.EnsureVisitorDataAsync(ct: cancellationToken).ConfigureAwait(false);
 
-        if (signatureTimestamp == null && clientName is "WEB" or "WEB_REMIX" or "TVHTML5_SIMPLY_EMBEDDED_PLAYER")
+        if (signatureTimestamp == null && clientName is YoutubeClientNames.Web or YoutubeClientNames.WebRemix or YoutubeClientNames.Tv)
         {
             signatureTimestamp = await ResolveSignatureTimestampAsync(cancellationToken);
         }
 
-        var playerUrl = clientName == "WEB_REMIX"
-            ? "https://music.youtube.com/youtubei/v1/player?prettyPrint=false"
-            : "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
+        var playerUrl = YoutubeClientUtils.GetPlayerEndpoint(clientName);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, playerUrl);
-        request.Headers.Add("User-Agent", YoutubeClientUtils.GetUserAgentForClient(clientName));
+        YoutubeClientUtils.ConfigurePlayerRequest(request, clientName);
 
-        bool isMobileClient = clientName is "ANDROID_VR" or "ANDROID_MUSIC" or "IOS" or
-                      "TVHTML5_SIMPLY_EMBEDDED_PLAYER" or "ANDROID_TESTSUITE";
+        bool isMobileClient = clientName is YoutubeClientNames.AndroidVr or
+                              YoutubeClientNames.AndroidMusic or
+                              YoutubeClientNames.Ios or
+                              YoutubeClientNames.Tv or
+                              YoutubeClientNames.AndroidTestSuite;
 
         if (isMobileClient)
         {
@@ -329,17 +330,18 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     {
         if (string.IsNullOrEmpty(error)) return false;
 
-        return error.Contains("bot", StringComparison.OrdinalIgnoreCase) ||
-               error.Contains("Sign in", StringComparison.OrdinalIgnoreCase) ||
-               error.Contains("LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase) ||
-               error.Contains("confirm", StringComparison.OrdinalIgnoreCase);
+        var span = error.AsSpan();
+        return span.Contains("bot".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+               span.Contains("Sign in".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+               span.Contains("LOGIN_REQUIRED".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+               span.Contains("confirm".AsSpan(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TrackBotDetection(PlayerResponse response, string clientName)
     {
         // ANDROID_VR изолирован собственным 300-секундным кулдауном.
         // Не раздуваем глобальный троттлинг из-за него, иначе WEB_REMIX будет искусственно тормозить на 1-5 сек.
-        if (string.Equals(clientName, "ANDROID_VR", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.OrdinalIgnoreCase))
             return;
 
         if (IsBotDetectionResponse(response))
@@ -401,7 +403,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             // Пропускаем клиент, если он уже давал BotDetection в текущей сессии.
             // Предотвращает ~700 мс задержку перед переходом на WEB_REMIX.
             bool skipAndroidVr = false;
-            if (string.Equals(clientName, "ANDROID_VR", StringComparison.Ordinal)
+            if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal)
                 && _androidVrSessionBotDetections > 0)
             {
                 lock (_stateLock)
@@ -428,10 +430,10 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             {
                 var response = await GetPlayerResponseWithClientAsync(videoId, clientName, cancellationToken);
 
-                if (response.IsPlayable && HasAnyStream(response))
+                if (response.IsPlayable && HasPlayableAudioStream(response))
                 {
                     // Успешный ответ ANDROID_VR — блокировка снята, СБРАСЫВАЕМ счётчик
-                    if (string.Equals(clientName, "ANDROID_VR", StringComparison.Ordinal)
+                    if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal)
                         && _androidVrSessionBotDetections > 0)
                     {
                         _androidVrSessionBotDetections = 0;
@@ -443,7 +445,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
                     return (response, clientName);
                 }
 
-                var error = response.PlayabilityError ?? "Not playable / No streams";
+                var error = response.PlayabilityError ?? (response.IsPlayable ? "No playable audio streams (SABR-only)" : "Not playable");
                 Log.Warn($"[VideoController] [{videoId}] {clientName}: {error}");
                 errors.Add($"{clientName}: {error}");
 
@@ -467,7 +469,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
                 if (ex.Reason == LoginRequiredReason.BotDetection)
                 {
                     // ANDROID_VR BotDetection Tracking
-                    if (string.Equals(clientName, "ANDROID_VR", StringComparison.Ordinal))
+                    if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal))
                     {
                         Interlocked.Increment(ref _androidVrSessionBotDetections);
                         lock (_stateLock)
@@ -559,11 +561,27 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             $"Video {videoId} is not available through any client. Errors: {allErrors}",
             videoId.Value);
     }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool HasAnyStream(PlayerResponse response)
+    private static bool HasPlayableAudioStream(PlayerResponse response)
     {
-        foreach (var _ in response.Streams) return true;
+        foreach (var s in response.Streams)
+        {
+            if (string.IsNullOrEmpty(s.Url) && string.IsNullOrEmpty(s.Signature))
+                continue;
+
+            var mime = s.MimeType;
+            if (string.IsNullOrEmpty(mime))
+                continue;
+
+            // Чистые аудио-потоки
+            if (mime.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Совмещённые потоки (видео + аудио, например itag 18 при SABR)
+            if (mime.StartsWith("video/", StringComparison.OrdinalIgnoreCase) && s.AudioChannels > 0)
+                return true;
+        }
+
         return false;
     }
 

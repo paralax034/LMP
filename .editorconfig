@@ -69,3 +69,9 @@ dotnet_diagnostic.CA1068.severity = none
 
 # StyleCop overrides
 dotnet_analyzer_diagnostic.category-StyleCop.CSharp.MaintainabilityRules.severity = none
+
+# CA1859: Используйте конкретные типы, когда это возможно, для повышения производительности
+dotnet_diagnostic.CA1859.severity = warning
+
+# IDE0150: Предпочитать проверку "null" проверке типа
+dotnet_diagnostic.IDE0150.severity = warning

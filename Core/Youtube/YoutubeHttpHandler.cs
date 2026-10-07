@@ -29,6 +29,12 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     /// <summary>Идентификатор клиента YouTube Music.</summary>
     public const string MusicClientName = "67";
 
+    /// <summary>Идентификатор клиента YouTube Web.</summary>
+    public const string WebClientName = "1";
+
+    /// <summary>Версия формата API для заголовка X-Goog-Api-Format-Version.</summary>
+    public const string ApiFormatVersion = "1";
+
     /// <summary>Версия клиента YouTube Web.</summary>
     public static string WebClientVersion
     {
@@ -81,16 +87,22 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
         if (string.IsNullOrWhiteSpace(sapisid)) return null;
 
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var timestampStr = timestamp.ToString(CultureInfo.InvariantCulture);
 
-        int payloadLen = timestampStr.Length + 1 + sapisid.Length + 1 + origin.Length;
+        // 10 цифр Unix-timestamp в 2026 году
+        Span<char> timestampChars = stackalloc char[20];
+        if (!timestamp.TryFormat(timestampChars, out int tsLen, provider: CultureInfo.InvariantCulture))
+            return null;
+
+        var activeTimestamp = timestampChars[..tsLen];
+
+        int payloadLen = tsLen + 1 + sapisid.Length + 1 + origin.Length;
         Span<char> payloadChars = payloadLen <= 256
             ? stackalloc char[payloadLen]
             : new char[payloadLen];
 
         int pos = 0;
-        timestampStr.AsSpan().CopyTo(payloadChars[pos..]);
-        pos += timestampStr.Length;
+        activeTimestamp.CopyTo(payloadChars[pos..]);
+        pos += tsLen;
         payloadChars[pos++] = ' ';
         sapisid.AsSpan().CopyTo(payloadChars[pos..]);
         pos += sapisid.Length;
@@ -105,9 +117,28 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
         Span<byte> hash = stackalloc byte[20];
         SHA1.HashData(utf8Bytes, hash);
-        var hashHex = Convert.ToHexStringLower(hash);
 
-        return string.Concat("SAPISIDHASH ", timestampStr, "_", hashHex);
+        // "SAPISIDHASH " (12) + tsLen + "_" (1) + sha1_hex (40)
+        int totalHeaderLen = 12 + tsLen + 1 + 40;
+
+        return string.Create(totalHeaderLen, (timestampChars[..tsLen].ToString(), hash.ToArray()), static (span, state) =>
+        {
+            "SAPISIDHASH ".AsSpan().CopyTo(span);
+            int idx = 12;
+
+            state.Item1.AsSpan().CopyTo(span[idx..]);
+            idx += state.Item1.Length;
+
+            span[idx++] = '_';
+
+            var hexDigits = "0123456789abcdef"u8;
+            for (int i = 0; i < state.Item2.Length; i++)
+            {
+                byte b = state.Item2[i];
+                span[idx++] = (char)hexDigits[b >> 4];
+                span[idx++] = (char)hexDigits[b & 0xF];
+            }
+        });
     }
 
     /// <summary>
@@ -117,13 +148,13 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     {
         if (request.RequestUri is null) return request;
 
-        var host = request.RequestUri.Host;
-        bool isMusic = host.Contains("music.youtube.com");
+        var hostSpan = request.RequestUri.Host.AsSpan();
+        bool isMusic = hostSpan.Equals("music.youtube.com".AsSpan(), StringComparison.OrdinalIgnoreCase);
         bool isPlayerRequest = request.Options.TryGetValue(IsPlayerContext, out var p) && p;
         bool isMobileClient = request.Options.TryGetValue(IsMobileClient, out var m) && m;
 
-        bool isYoutubeDomain = host.Contains("youtube.com", StringComparison.OrdinalIgnoreCase);
-        bool isYoutubeApi = isYoutubeDomain && request.RequestUri.AbsolutePath.Contains("/youtubei/v1/");
+        bool isYoutubeDomain = hostSpan.EndsWith("youtube.com".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        bool isYoutubeApi = isYoutubeDomain && request.RequestUri.AbsolutePath.AsSpan().StartsWith("/youtubei/v1/".AsSpan(), StringComparison.Ordinal);
 
         if (!request.Headers.Contains("User-Agent"))
         {

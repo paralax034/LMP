@@ -816,7 +816,7 @@ public partial class TrackListControl : UserControl
         RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
     }
 
-    private IReadOnlyList<TrackInfo> GetSelectedTrackInfos()
+    private List<TrackInfo> GetSelectedTrackInfos()
     {
         if (_selectedSet.Count == 0) return [];
 
