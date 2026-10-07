@@ -47,8 +47,6 @@ internal partial class VideoWatchPage
         }
     }
 
-    public const long DislikeCount = 0;
-
     /// <summary>
     /// Возвращает разобранный ответ плеера с кэшированием в поле экземпляра для исключения повторного парсинга.
     /// </summary>

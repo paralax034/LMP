@@ -20,7 +20,15 @@ jobs:
                   cache: true
                   cache-dependency-path: "**/packages.lock.json"
 
-            - name: Restore dependencies
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Validate Localization Integrity
+              run: python Tools/audit_l10n.py
+
+            - name: Restore Dependencies
               run: dotnet restore --force-evaluate
 
             - name: Build Debug

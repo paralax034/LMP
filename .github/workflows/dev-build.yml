@@ -24,8 +24,16 @@ jobs:
                   cache: true
                   cache-dependency-path: "**/packages.lock.json"
 
-            # === Версия (просто номер коммита + хеш) ===
-            - name: Get Git Version Info
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Validate Localization Integrity
+              run: python Tools/audit_l10n.py
+
+            # Version Computation (Commit count + short hash)
+            - name: Compute Git Version Info
               id: version
               shell: pwsh
               run: |
@@ -40,18 +48,18 @@ jobs:
 
                   Write-Host "Version: v$fullVersion"
 
-            # === 7-Zip ===
+            # 7-Zip Setup
             - name: Setup 7-Zip
               uses: milliewalky/setup-7-zip@v2
 
-            # === Сборка ===
+            # Compilation
             - name: Build Debug
               run: ./build.bat debug nopause
 
             - name: Build Release (Native AOT Publish)
               run: ./build.bat publish nopause
 
-            # === Архивация ===
+            # Archiving
             - name: Archive Debug Build
               shell: pwsh
               run: |
@@ -73,7 +81,7 @@ jobs:
                   7z a -t7z -m0=lzma2 -mx=9 -md=64m -ms=on "LMP-Release-v${{ env.FULL_VERSION }}.7z" "publish/*"
                   Write-Host "Created: LMP-Release-v${{ env.FULL_VERSION }}.7z"
 
-            # === Артефакты для Actions ===
+            # Actions Artifacts
             - name: Upload Debug Artifact
               uses: actions/upload-artifact@v4
               with:
@@ -86,7 +94,7 @@ jobs:
                   name: LMP-Release-v${{ env.FULL_VERSION }}
                   path: LMP-Release-v${{ env.FULL_VERSION }}.7z
 
-            # === Удаляем старые ассеты (чтобы не накапливались) ===
+            # Cleanup Obsolete Dev Assets
             - name: Delete Old Dev Assets
               uses: mknejp/delete-release-assets@v1
               with:
@@ -97,7 +105,7 @@ jobs:
                       LMP-Release-*.7z
                   fail-if-no-release: false
 
-            # === Создание Dev Pre-release по номеру коммита ===
+            # Create/Update Dev Snapshot Release
             - name: Create/Update Dev Pre-release
               uses: softprops/action-gh-release@v2
               with:
@@ -110,20 +118,20 @@ jobs:
                       LMP-Debug-v${{ env.FULL_VERSION }}.7z
                       LMP-Release-v${{ env.FULL_VERSION }}.7z
                   body: |
-                      **Автоматическая dev-сборка**
+                      **Automated Snapshot Dev Build**
 
-                      | Параметр | Значение |
-                      |----------|----------|
-                      | Версия | `v${{ env.FULL_VERSION }}` |
-                      | Архитектура | Native AOT (win-x64) |
-                      | Тег | `dev-${{ env.COMMIT_COUNT }}` |
-                      | Коммит | `${{ env.COMMIT_HASH }}` |
-                      | Всего коммитов | ${{ env.COMMIT_COUNT }} |
-                      | Ветка | `${{ github.ref_name }}` |
-                      | Дата | ${{ github.event.head_commit.timestamp }} |
+                      | Parameter | Value |
+                      |---|---|
+                      | Version | `v${{ env.FULL_VERSION }}` |
+                      | Architecture | Native AOT (win-x64) |
+                      | Release Tag | `dev-${{ env.COMMIT_COUNT }}` |
+                      | Commit SHA | `${{ env.COMMIT_HASH }}` |
+                      | Total Commits | ${{ env.COMMIT_COUNT }} |
+                      | Branch | `${{ github.ref_name }}` |
+                      | Built At | ${{ github.event.head_commit.timestamp }} |
 
-                      ⚠️ **Тестовая сборка — не для продакшена!**
+                      ⚠️ **Testing pre-release build — not intended for production usage.**
 
-                      ### Скачать
-                      - **[LMP-Release-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev/LMP-Release-v${{ env.FULL_VERSION }}.7z)** — Native AOT сборка (рекомендуется)
-                      - [LMP-Debug-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev/LMP-Debug-v${{ env.FULL_VERSION }}.7z) — для отладки
+                      ### Downloads
+                      - **[LMP-Release-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev-${{ env.COMMIT_COUNT }}/LMP-Release-v${{ env.FULL_VERSION }}.7z)** — Native AOT Standalone (Recommended)
+                      - [LMP-Debug-v${{ env.FULL_VERSION }}.7z](https://github.com/${{ github.repository }}/releases/download/dev-${{ env.COMMIT_COUNT }}/LMP-Debug-v${{ env.FULL_VERSION }}.7z) — Debug build with logging console

@@ -130,7 +130,6 @@
 
   "Dialog_BotDetection_Message": "YouTube обнаружил необычную активность и временно ограничил воспроизведение.\n\nЭто нормально после быстрого воспроизведения множества треков.",
   "Dialog_BotDetection_Title": "Временное замедление",
-  "Dialog_ClearHistoryMessage": "Очистить историю поиска?",
   "Dialog_CloseAction_Exit": "Выйти",
   "Dialog_CloseAction_Message": "Что вы хотите сделать?",
   "Dialog_CloseAction_Remember": "Запомнить мой выбор",
@@ -139,7 +138,6 @@
   "Dialog_Confirm_Title": "Подтверждение",
   "Dialog_Done_Title": "Готово",
   "Dialog_Error_Title": "Ошибка",
-  "Dialog_HistoryCleared": "История очищена.",
   "Dialog_Info_Title": "Информация",
   "Dialog_LegacyPlaylists_CountdownButton": "Читать ({0}с)",
   "Dialog_LoginMessage_Manual": "Или вставьте куки вручную (если расширение скопировало их в буфер):",

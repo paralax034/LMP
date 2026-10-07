@@ -1,72 +1,66 @@
 {
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "🎵 Debug (quiet)",
-      "type": "coreclr",
-      "request": "launch",
-      "preLaunchTask": "build: debug",
-      "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-      "args": [
-        "--avalonia-log-level=Warning"
-      ],
-      "cwd": "${workspaceFolder}",
-      "console": "internalConsole",
-      "justMyCode": true,
-      "suppressJITOptimizations": true,
-      "logging": {
-        "moduleLoad": false,
-        "exceptions": true,
-        "programOutput": true
-      },
-      "symbolOptions": {
-        "searchMicrosoftSymbolServer": false,
-        "searchNuGetOrgSymbolServer": false,
-        "searchPaths": [
-          "${workspaceFolder}/bin/Debug/net11.0"
-        ]
-      }
-    },
-    {
-      "name": "🎵 Debug (all logs)",
-      "type": "coreclr",
-      "request": "launch",
-      "preLaunchTask": "build: debug",
-      "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-      "args": [],
-      "cwd": "${workspaceFolder}",
-      "console": "internalConsole",
-      "justMyCode": true,
-      "suppressJITOptimizations": true,
-      "logging": {
-        "moduleLoad": false,
-        "exceptions": true,
-        "programOutput": true
-      },
-      "symbolOptions": {
-        "searchMicrosoftSymbolServer": false,
-        "searchNuGetOrgSymbolServer": false,
-        "searchPaths": [
-          "${workspaceFolder}/bin/Debug/net11.0"
-        ]
-      }
-    },
-    {
-      "name": "🚀 Release (Performance Test)",
-      "type": "coreclr",
-      "request": "launch",
-      "preLaunchTask": "build: release",
-      "program": "${workspaceFolder}/bin/Release/net11.0/LMP.dll",
-      "args": [],
-      "cwd": "${workspaceFolder}",
-      "console": "internalConsole",
-      "justMyCode": false,
-      "suppressJITOptimizations": false,
-      "logging": {
-        "moduleLoad": false,
-        "exceptions": false,
-        "programOutput": true
-      }
-    }
-  ]
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "🎵 Debug (quiet)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: debug",
+            "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
+            "args": ["--avalonia-log-level=Warning"],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": true,
+            "suppressJITOptimizations": true,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": true,
+                "programOutput": true
+            },
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Debug/net11.0"]
+            }
+        },
+        {
+            "name": "🎵 Debug (all logs)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: debug",
+            "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": true,
+            "suppressJITOptimizations": true,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": true,
+                "programOutput": true
+            },
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Debug/net11.0"]
+            }
+        },
+        {
+            "name": "🚀 Release (Performance Test)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: release",
+            "program": "${workspaceFolder}/bin/Release/net11.0/LMP.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": false,
+            "suppressJITOptimizations": false,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": false,
+                "programOutput": true
+            }
+        }
+    ]
 }

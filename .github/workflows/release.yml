@@ -19,12 +19,12 @@ jobs:
                   cache: true
                   cache-dependency-path: "**/packages.lock.json"
 
-            # === 7-Zip ===
+            # 7-Zip Setup
             - name: Setup 7-Zip
               uses: milliewalky/setup-7-zip@v2
 
-            # === Версия (по количеству коммитов) ===
-            - name: Get Git Version Info
+            # Version Computation
+            - name: Compute Git Version Info
               id: version
               shell: pwsh
               run: |
@@ -37,11 +37,11 @@ jobs:
 
                   Write-Host "Version: v$fullVersion"
 
-            # === Сборка Release ===
+            # Native AOT Publish
             - name: Build Release Publish
               run: ./build.bat publish nopause
 
-            # === Архивация ===
+            # Archive Release Package
             - name: Archive Release
               shell: pwsh
               run: |
@@ -55,7 +55,7 @@ jobs:
 
                   Write-Host "Created: $archiveName"
 
-            # === Прикрепляем архив к релизу ===
+            # Attach Release Binary
             - name: Upload Release Asset
               uses: softprops/action-gh-release@v2
               with:
