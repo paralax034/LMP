@@ -208,7 +208,6 @@ public static class YoutubeClientUtils
 		_ => "WEB_REMIX",
 	};
 
-	// Заменить GeneratePlayerContext:
 	/// <summary>
 	/// Генерирует контекст плеера для текущего профиля клиента.
 	/// </summary>
@@ -225,8 +224,8 @@ public static class YoutubeClientUtils
 	/// </summary>
 	public static string GeneratePlayerContextForClient(string clientName, string videoId, string? visitorData, string? signatureTimestamp = null)
 	{
-		var hl = YoutubeHttpHandler.GetHl();
-		var gl = YoutubeHttpHandler.GetGl();
+		const string hl = YoutubeHttpHandler.InvariantHl;
+		const string gl = YoutubeHttpHandler.InvariantGl;
 
 		var vidJson = Json.Serialize(videoId);
 		var vdJson = Json.Serialize(visitorData);

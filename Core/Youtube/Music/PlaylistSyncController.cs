@@ -12,15 +12,6 @@ internal sealed class PlaylistSyncController(HttpClient http)
 
     private static readonly MediaTypeHeaderValue JsonContentType = new("application/json");
 
-    private static readonly byte[] Utf8Context = "context"u8.ToArray();
-    private static readonly byte[] Utf8Client = "client"u8.ToArray();
-    private static readonly byte[] Utf8ClientName = "clientName"u8.ToArray();
-    private static readonly byte[] Utf8ClientVersion = "clientVersion"u8.ToArray();
-    private static readonly byte[] Utf8WebRemix = "WEB_REMIX"u8.ToArray();
-    private static readonly byte[] Utf8Hl = "hl"u8.ToArray();
-    private static readonly byte[] Utf8Gl = "gl"u8.ToArray();
-    private static readonly byte[] Utf8VisitorData = "visitorData"u8.ToArray();
-
     #region Context Writers
 
     /// <summary>
@@ -28,21 +19,21 @@ internal sealed class PlaylistSyncController(HttpClient http)
     /// </summary>
     private static void WriteWebRemixContext(Utf8JsonWriter writer)
     {
-        writer.WritePropertyName(Utf8Context);
+        writer.WritePropertyName(InnerTubeTokens.Context);
         writer.WriteStartObject();
 
-        writer.WritePropertyName(Utf8Client);
+        writer.WritePropertyName(InnerTubeTokens.Client);
         writer.WriteStartObject();
-        writer.WriteString(Utf8ClientName, Utf8WebRemix);
-        writer.WriteString(Utf8ClientVersion, YoutubeHttpHandler.MusicClientVersion);
-        writer.WriteString(Utf8Hl, YoutubeHttpHandler.GetHl());
-        writer.WriteString(Utf8Gl, YoutubeHttpHandler.GetGl());
+        writer.WriteString(InnerTubeTokens.ClientName, InnerTubeTokens.WebRemix);
+        writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.MusicClientVersion);
+        writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.InvariantHl);
+        writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.InvariantGl);
 
         var visitorData = YoutubeClientUtils.VisitorData;
         if (!string.IsNullOrEmpty(visitorData))
-            writer.WriteString(Utf8VisitorData, visitorData);
+            writer.WriteString(InnerTubeTokens.VisitorData, visitorData);
         else
-            writer.WriteNull(Utf8VisitorData);
+            writer.WriteNull(InnerTubeTokens.VisitorData);
 
         writer.WriteEndObject();
 
@@ -63,7 +54,6 @@ internal sealed class PlaylistSyncController(HttpClient http)
             writer.WriteEndObject();
         }
 
-        // Оптимизация: нулевое копирование промежуточного массива
         var content = new ReadOnlyMemoryContent(bufferWriter.WrittenMemory);
         content.Headers.ContentType = JsonContentType;
         return content;
@@ -106,9 +96,7 @@ internal sealed class PlaylistSyncController(HttpClient http)
       string playlistId,
       CancellationToken ct = default)
     {
-        var browseId = playlistId.StartsWith("VL", StringComparison.Ordinal)
-            ? playlistId
-            : "VL" + playlistId;
+        var browseId = YoutubeIdHelper.NormalizePlaylistBrowseId(playlistId);
 
         FullPlaylistSyncData playlistData;
         string? continuationToken;
@@ -117,7 +105,7 @@ internal sealed class PlaylistSyncController(HttpClient http)
         {
             var (response, stream) = await PostMusicStreamAsync("browse", writer =>
             {
-                writer.WriteString("browseId", browseId);
+                writer.WriteString(InnerTubeTokens.BrowseId, browseId);
             }, ct).ConfigureAwait(false);
 
             using (response)
@@ -139,7 +127,7 @@ internal sealed class PlaylistSyncController(HttpClient http)
 
             var (contResponse, contStream) = await PostMusicStreamAsync("browse", writer =>
             {
-                writer.WriteString("continuation", continuationToken);
+                writer.WriteString(InnerTubeTokens.Continuation, continuationToken);
             }, ct).ConfigureAwait(false);
 
             List<RemoteTrackInfo> continuationTracks;

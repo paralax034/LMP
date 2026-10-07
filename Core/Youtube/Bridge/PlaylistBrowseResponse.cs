@@ -12,6 +12,9 @@ namespace LMP.Core.Youtube.Bridge;
 /// </summary>
 internal partial class PlaylistBrowseResponse : IPlaylistData
 {
+    private const string PrefixLastUpdatedOn = "Last updated on ";
+    private const string PrefixUpdated = "Updated ";
+
     /// <inheritdoc />
     public bool IsAvailable { get; init; }
 
@@ -38,7 +41,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
     /// <summary>
     /// Дата создания или последнего обновления плейлиста (в строковом представлении).
-    /// Извлекает чистое значение даты без локализованных префиксов («Обновлен», «Updated»).
+    /// Извлекает чистое значение даты без локализованных префиксов («Updated»).
     /// Поддерживает новый UI заголовка (frameworkUpdates) и парсинг третьего элемента
     /// статистики классического сайдбара.
     /// </summary>
@@ -432,8 +435,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
                             foreach (var part in parts.Value.EnumerateArray())
                             {
                                 var text = part.GetPropertyOrNull("text")?.GetPropertyOrNull("content")?.GetStringOrNull();
-                                if (text != null && (text.Contains("view", StringComparison.OrdinalIgnoreCase) ||
-                                                     text.Contains("просмотр", StringComparison.OrdinalIgnoreCase)))
+                                if (text != null && text.Contains("view", StringComparison.OrdinalIgnoreCase))
                                 {
                                     var views = YoutubeParsingHelpers.ParseLongFromText(text);
                                     if (views.HasValue) return views;
@@ -495,10 +497,10 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
                                     ?.GetPropertyOrNull("content")
                                     ?.GetStringOrNull();
 
-                                if (text != null &&
-                                    (YoutubeParsingHelpers.ParseYearFromText(text).HasValue || YoutubeParsingHelpers.IsRelativeDate(text)))
+                                if (text != null)
                                 {
-                                    return TryParseDate(text);
+                                    var parsed = TryParseDate(text);
+                                    if (parsed.HasValue) return parsed;
                                 }
                             }
                         }
@@ -530,9 +532,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Пытается преобразовать локализованную строку YouTube в <see cref="DateOnly"/>.
-    /// Поддерживает строгие форматы («20 нояб. 2025 г.», «Jan 13, 2026»),
-    /// относительные даты («5 дней назад», «сегодня») и извлечение года.
+    /// Выполняет детерминированное преобразование английской строки даты YouTube в <see cref="DateOnly"/>.
     /// </summary>
     private static DateOnly? TryParseDate(string? text)
     {
@@ -542,56 +542,32 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         var span = clean.AsSpan().Trim();
         if (span.IsEmpty) return null;
 
-        if (DateOnly.TryParseExact(clean, YoutubeParsingHelpers.DateFormats,
-                YoutubeParsingHelpers.RuCulture, DateTimeStyles.AllowWhiteSpaces, out var dateRu))
-            return dateRu;
-        if (DateOnly.TryParseExact(clean, YoutubeParsingHelpers.DateFormats,
+        if (DateOnly.TryParseExact(span, YoutubeParsingHelpers.DateFormats,
                 YoutubeParsingHelpers.EnCulture, DateTimeStyles.AllowWhiteSpaces, out var dateEn))
-            return dateEn;
-
-        if (DateOnly.TryParse(clean, YoutubeParsingHelpers.RuCulture,
-                DateTimeStyles.AllowWhiteSpaces, out var flexRu)) return flexRu;
-        if (DateOnly.TryParse(clean, YoutubeParsingHelpers.EnCulture,
-                DateTimeStyles.AllowWhiteSpaces, out var flexEn)) return flexEn;
-        if (DateOnly.TryParse(clean, CultureInfo.InvariantCulture,
-                DateTimeStyles.AllowWhiteSpaces, out var flexInv)) return flexInv;
-
-        if (YoutubeParsingHelpers.IsRelativeDate(clean))
         {
-            var now = DateTime.UtcNow;
-
-            if (span.Contains("сегодня", StringComparison.OrdinalIgnoreCase) ||
-                span.Contains("today", StringComparison.OrdinalIgnoreCase))
-                return DateOnly.FromDateTime(now);
-
-            if (span.Contains("вчера", StringComparison.OrdinalIgnoreCase) ||
-                span.Contains("yesterday", StringComparison.OrdinalIgnoreCase))
-                return DateOnly.FromDateTime(now.AddDays(-1));
-
-            var val = YoutubeParsingHelpers.ParseLongFromText(clean);
-            if (val.HasValue)
-            {
-                int delta = (int)val.Value;
-
-                if (span.Contains("недел", StringComparison.OrdinalIgnoreCase) ||
-                    span.Contains("week", StringComparison.OrdinalIgnoreCase))
-                    return DateOnly.FromDateTime(now.AddDays(-delta * 7));
-
-                if (span.Contains("месяц", StringComparison.OrdinalIgnoreCase) ||
-                    span.Contains("month", StringComparison.OrdinalIgnoreCase))
-                    return DateOnly.FromDateTime(now.AddMonths(-delta));
-
-                if (span.Contains("час", StringComparison.OrdinalIgnoreCase) ||
-                    span.Contains("hour", StringComparison.OrdinalIgnoreCase) ||
-                    span.Contains("минут", StringComparison.OrdinalIgnoreCase) ||
-                    span.Contains("minute", StringComparison.OrdinalIgnoreCase))
-                    return DateOnly.FromDateTime(now);
-
-                return DateOnly.FromDateTime(now.AddDays(-delta));
-            }
+            return dateEn;
         }
 
-        var year = YoutubeParsingHelpers.ParseYearFromText(clean);
+        if (DateOnly.TryParse(span, YoutubeParsingHelpers.EnCulture,
+                DateTimeStyles.AllowWhiteSpaces, out var flexEn))
+        {
+            return flexEn;
+        }
+
+        if (DateOnly.TryParse(span, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces, out var flexInv))
+        {
+            return flexInv;
+        }
+
+        if (YoutubeParsingHelpers.IsRelativeDate(span))
+        {
+            var relative = YoutubeParsingHelpers.ParseRelativeDate(span, DateTime.UtcNow);
+            if (relative.HasValue)
+                return relative;
+        }
+
+        var year = YoutubeParsingHelpers.ParseYearFromText(span);
         return year.HasValue ? new DateOnly(year.Value, 1, 1) : null;
     }
 
@@ -604,7 +580,6 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         var array = contents.Value;
         int len = array.GetArrayLength();
 
-        // Предварительный проход без аллокаций для подсчета валидных элементов
         int validCount = 0;
         for (int i = 0; i < len; i++)
         {
@@ -669,12 +644,6 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
     #region High-Performance JSON Helpers
 
-    /// <summary>
-    /// Извлекает чистое значение даты из массива <c>runs</c> элемента статистики плейлиста.
-    /// Для массивов с несколькими элементами пропускает первый run (локализованный префикс
-    /// вроде «Обновлен ») и склеивает оставшиеся через <c>stackalloc</c>.
-    /// Для одиночного run удаляет известные префиксы через <see cref="StripUpdatePrefix"/>.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string? GetDateFromStatRuns(JsonElement? runsElement)
     {
@@ -685,18 +654,15 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         int len = array.GetArrayLength();
         if (len == 0) return null;
 
-        // Одиночный run: префикс и дата в одной строке ("Обновлено сегодня")
         if (len == 1)
         {
             var text = array[0].GetPropertyOrNull("text")?.GetStringOrNull();
             return text != null ? StripUpdatePrefix(text) : null;
         }
 
-        // Два run: первый — префикс, второй — чистая дата
         if (len == 2)
             return array[1].GetPropertyOrNull("text")?.GetStringOrNull()?.Trim();
 
-        // 3+ runs: первый — префикс, остальные — составные части даты ("5" + " дней назад")
         int dateRunCount = len - 1;
         int totalLen = 0;
         var strings = new string?[dateRunCount];
@@ -728,28 +694,16 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         return new string(span[..pos].Trim());
     }
 
-    /// <summary>
-    /// Удаляет известные локализованные префиксы обновления из строки даты.
-    /// Поддерживает русские («Обновлено», «Обновлен», «Обновлена»)
-    /// и английские («Updated», «Last updated on») варианты.
-    /// При отсутствии совпадений возвращает исходную ссылку без аллокаций.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string StripUpdatePrefix(string text)
     {
         var span = text.AsSpan();
         int prefixLen = 0;
 
-        if (span.StartsWith("Обновлено ", StringComparison.OrdinalIgnoreCase))
-            prefixLen = 10;
-        else if (span.StartsWith("Обновлена ", StringComparison.OrdinalIgnoreCase))
-            prefixLen = 10;
-        else if (span.StartsWith("Обновлен ", StringComparison.OrdinalIgnoreCase))
-            prefixLen = 9;
-        else if (span.StartsWith("Last updated on ", StringComparison.OrdinalIgnoreCase))
-            prefixLen = 16;
-        else if (span.StartsWith("Updated ", StringComparison.OrdinalIgnoreCase))
-            prefixLen = 8;
+        if (span.StartsWith(PrefixLastUpdatedOn, StringComparison.OrdinalIgnoreCase))
+            prefixLen = PrefixLastUpdatedOn.Length;
+        else if (span.StartsWith(PrefixUpdated, StringComparison.OrdinalIgnoreCase))
+            prefixLen = PrefixUpdated.Length;
 
         if (prefixLen == 0)
             return text;

@@ -1,6 +1,6 @@
-﻿using System.Globalization;
-using System.Text.Json;
+﻿using System.Text.Json;
 using LMP.Core.Helpers.Extensions;
+using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Bridge;
 
@@ -60,28 +60,18 @@ internal partial class PlaylistNextResponse : IPlaylistData
             Title = root.GetPropertyOrNull("title")?.GetStringOrNull();
             Author = root.GetPropertyOrNull("ownerName")?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
 
-            var text = root
-                .GetPropertyOrNull("totalVideosText")
-                ?.GetPropertyOrNull("runs")
-                ?.GetArrayElementOrNull(0)
-                ?.GetPropertyOrNull("text")
-                ?.GetStringOrNull();
+            var totalText = root.GetPropertyOrNull("totalVideosText")?.GetStringOrNull()
+                ?? YoutubeParsingHelpers.ConcatTextRuns(root.GetPropertyOrNull("totalVideosText")?.GetPropertyOrNull("runs"));
 
-            if (text is not null && int.TryParse(text, CultureInfo.InvariantCulture, out var r1))
-            {
-                Count = r1;
-            }
-            else
-            {
-                text = root
-                    .GetPropertyOrNull("videoCountText")
-                    ?.GetPropertyOrNull("runs")
-                    ?.GetArrayElementOrNull(2)
-                    ?.GetPropertyOrNull("text")
-                    ?.GetStringOrNull();
+            var videoCountText = root.GetPropertyOrNull("videoCountText")?.GetStringOrNull()
+                ?? YoutubeParsingHelpers.ConcatTextRuns(root.GetPropertyOrNull("videoCountText")?.GetPropertyOrNull("runs"));
 
-                if (text is not null && int.TryParse(text, CultureInfo.InvariantCulture, out var r2))
-                    Count = r2;
+            var parsedCount = YoutubeParsingHelpers.ParseLongFromText(totalText)
+                ?? YoutubeParsingHelpers.ParseLongFromText(videoCountText);
+
+            if (parsedCount.HasValue)
+            {
+                Count = (int)Math.Min(parsedCount.Value, int.MaxValue);
             }
 
             var contents = root.GetPropertyOrNull("contents");

@@ -2,11 +2,13 @@ namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
 /// Статические UTF-8 литералы ключей и строковых констант InnerTube API.
-/// Используются для zero-alloc сопоставления токенов в <see cref="System.Text.Json.Utf8JsonReader"/>.
+/// Используются для zero-alloc сопоставления токенов в <see cref="System.Text.Json.Utf8JsonReader"/> и <see cref="System.Text.Json.Utf8JsonWriter"/>.
 /// </summary>
 internal static class InnerTubeTokens
 {
     public static ReadOnlySpan<byte> VideoId => "videoId"u8;
+    public static ReadOnlySpan<byte> PlaylistId => "playlistId"u8;
+    public static ReadOnlySpan<byte> PlaylistIndex => "playlistIndex"u8;
     public static ReadOnlySpan<byte> PlaylistSetVideoId => "playlistSetVideoId"u8;
     public static ReadOnlySpan<byte> SetVideoId => "setVideoId"u8;
     public static ReadOnlySpan<byte> Title => "title"u8;
@@ -62,4 +64,59 @@ internal static class InnerTubeTokens
     public static ReadOnlySpan<byte> ClickTrackingParams => "clickTrackingParams"u8;
     public static ReadOnlySpan<byte> ServiceTrackingParams => "serviceTrackingParams"u8;
     public static ReadOnlySpan<byte> CommandMetadata => "commandMetadata"u8;
+
+    public static ReadOnlySpan<byte> Context => "context"u8;
+    public static ReadOnlySpan<byte> Client => "client"u8;
+    public static ReadOnlySpan<byte> ClientName => "clientName"u8;
+    public static ReadOnlySpan<byte> ClientVersion => "clientVersion"u8;
+    public static ReadOnlySpan<byte> Hl => "hl"u8;
+    public static ReadOnlySpan<byte> Gl => "gl"u8;
+    public static ReadOnlySpan<byte> UtcOffsetMinutes => "utcOffsetMinutes"u8;
+    public static ReadOnlySpan<byte> WebRemix => "WEB_REMIX"u8;
+    public static ReadOnlySpan<byte> Web => "WEB"u8;
+    public static ReadOnlySpan<byte> User => "user"u8;
+    public static ReadOnlySpan<byte> Query => "query"u8;
+    public static ReadOnlySpan<byte> Params => "params"u8;
+    public static ReadOnlySpan<byte> BrowseId => "browseId"u8;
+}
+
+/// <summary>
+/// Централизованные строковые константы протокола InnerTube API.
+/// </summary>
+internal static class InnerTubeConstants
+{
+    /// <summary>Идентификатор категории видео YouTube для музыки.</summary>
+    public const string MusicCategoryId = "10";
+
+    /// <summary>Значение метаданных типа страницы для альбома.</summary>
+    public const string PageTypeAlbum = "MUSIC_PAGE_TYPE_ALBUM";
+
+    /// <summary>Значение метаданных типа страницы для артиста.</summary>
+    public const string PageTypeArtist = "MUSIC_PAGE_TYPE_ARTIST";
+
+    /// <summary>Значение метаданных типа страницы для канала пользователя.</summary>
+    public const string PageTypeUserChannel = "MUSIC_PAGE_TYPE_USER_CHANNEL";
+
+    /// <summary>Стиль значка официального верифицированного артиста.</summary>
+    public const string BadgeVerifiedArtist = "BADGE_STYLE_TYPE_VERIFIED_ARTIST";
+
+    /// <summary>Специфичные сериализованные параметры InnerTube protobuf.</summary>
+    public static class Params
+    {
+        /// <summary>Параметр browse-запроса плейлиста для получения полного списка видео.</summary>
+        public static ReadOnlySpan<byte> PlaylistVideoList => "wgYCEAE%3D"u8;
+
+        // Фильтры поиска YouTube Music
+        public const string MusicFilterGeneral = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
+        public const string MusicFilterSong = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
+        public const string MusicFilterVideo = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D";
+        public const string MusicFilterAlbum = "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D";
+        public const string MusicFilterArtist = "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D";
+        public const string MusicFilterPlaylist = "EgeKAQQoAEABagoQAxAEEAoQCRAF";
+
+        // Фильтры поиска стандартного YouTube Web
+        public const string WebFilterVideo = "EgIQAQ%3D%3D";
+        public const string WebFilterPlaylist = "EgIQAw%3D%3D";
+        public const string WebFilterChannel = "EgIQAg%3D%3D";
+    }
 }

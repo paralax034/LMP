@@ -64,6 +64,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
                 var diskFallback = TryLoadFromDiskCache();
                 if (diskFallback != null)
                 {
+                    ApplyClientVersion(diskFallback.ClientVersion);
                     _current = diskFallback;
                     return diskFallback;
                 }
@@ -77,6 +78,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
             var cached = PlayerContext.LoadFromCache(version);
             if (cached is not null)
             {
+                ApplyClientVersion(cached.ClientVersion);
                 _current = cached;
                 Log.Debug($"[PlayerContextManager] Loaded from cache: {version}");
                 return cached;
@@ -90,6 +92,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
                     var baseJs = await http.GetStringAsync(url, ct).ConfigureAwait(false);
                     var newContext = new PlayerContext(version, baseJs);
                     await newContext.SaveCacheAsync().ConfigureAwait(false);
+                    ApplyClientVersion(newContext.ClientVersion);
                     _current = newContext;
                     Log.Info($"[PlayerContextManager] Loaded fresh: {version} ({baseJs.Length / 1024}KB)");
                     return newContext;
@@ -104,6 +107,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
             var lastResort = TryLoadFromDiskCache();
             if (lastResort != null)
             {
+                ApplyClientVersion(lastResort.ClientVersion);
                 _current = lastResort;
                 return lastResort;
             }
@@ -152,6 +156,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
                 var context = PlayerContext.LoadFromCache(version);
                 if (context?.IsValid() == true)
                 {
+                    ApplyClientVersion(context.ClientVersion);
                     Log.Info($"[PlayerContextManager] Disk cache fallback: loaded version {version}");
                     return context;
                 }
@@ -163,6 +168,14 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
         }
 
         return null;
+    }
+
+    private static void ApplyClientVersion(string? clientVersion)
+    {
+        if (!string.IsNullOrWhiteSpace(clientVersion))
+        {
+            YoutubeHttpHandler.WebClientVersion = clientVersion;
+        }
     }
 
     /// <summary>

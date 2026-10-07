@@ -8,6 +8,18 @@ namespace LMP.Core.Youtube.Utils;
 /// </summary>
 public static class YoutubeIdHelper
 {
+    public const string VideoIdPrefix = "yt_";
+    public const string PlaylistIdPrefix = "yt_pl_";
+
+    private const string SystemLikedVideosId = "LL";
+    private const string SystemMusicLikedId = "LM";
+    private const string SystemWatchLaterId = "WL";
+
+    private const string BrowsePrefix = "VL";
+    private const string BrowseLikedVideosId = "VLLL";
+    private const string BrowseMusicLikedId = "VLLM";
+    private const string BrowseWatchLaterId = "VLWL";
+
     /// <summary>
     /// Быстро извлекает чистый YouTube ID без префиксов "yt_" или "yt_pl_" в виде Span без аллокаций.
     /// </summary>
@@ -17,10 +29,10 @@ public static class YoutubeIdHelper
     public static ReadOnlySpan<char> ExtractRawIdSpan(ReadOnlySpan<char> id)
     {
         var trimmed = id.Trim();
-        if (trimmed.StartsWith("yt_pl_"))
-            return trimmed[6..];
-        if (trimmed.StartsWith("yt_"))
-            return trimmed[3..];
+        if (trimmed.StartsWith(PlaylistIdPrefix.AsSpan(), StringComparison.Ordinal))
+            return trimmed[PlaylistIdPrefix.Length..];
+        if (trimmed.StartsWith(VideoIdPrefix.AsSpan(), StringComparison.Ordinal))
+            return trimmed[VideoIdPrefix.Length..];
         return trimmed;
     }
 
@@ -36,13 +48,49 @@ public static class YoutubeIdHelper
         if (string.IsNullOrEmpty(id))
             return string.Empty;
 
-        var span = id.AsSpan().Trim();
-        if (span.StartsWith("yt_pl_"))
-            return new string(span[6..]);
-        if (span.StartsWith("yt_"))
-            return new string(span[3..]);
+        if (id.StartsWith(PlaylistIdPrefix, StringComparison.Ordinal))
+            return id[PlaylistIdPrefix.Length..];
+        if (id.StartsWith(VideoIdPrefix, StringComparison.Ordinal))
+            return id[VideoIdPrefix.Length..];
 
-        return id;
+        var span = id.AsSpan();
+        var trimmed = span.Trim();
+        if (trimmed.Length == span.Length)
+            return id;
+
+        if (trimmed.StartsWith(PlaylistIdPrefix.AsSpan(), StringComparison.Ordinal))
+            return new string(trimmed[PlaylistIdPrefix.Length..]);
+        if (trimmed.StartsWith(VideoIdPrefix.AsSpan(), StringComparison.Ordinal))
+            return new string(trimmed[VideoIdPrefix.Length..]);
+
+        return new string(trimmed);
+    }
+
+    /// <summary>
+    /// Централизованно преобразует идентификатор плейлиста в канонический browseId InnerTube API.
+    /// Корректно нормализует системные разделы (LL -> VLLL, LM -> VLLM, WL -> VLWL) и добавляет префикс VL.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор плейлиста.</param>
+    /// <returns>Канонический идентификатор для browse-запроса.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static string NormalizePlaylistBrowseId(string playlistId)
+    {
+        if (string.IsNullOrEmpty(playlistId))
+            return string.Empty;
+
+        var rawId = ExtractRawId(playlistId);
+
+        if (string.Equals(rawId, SystemLikedVideosId, StringComparison.Ordinal))
+            return BrowseLikedVideosId;
+        if (string.Equals(rawId, SystemMusicLikedId, StringComparison.Ordinal))
+            return BrowseMusicLikedId;
+        if (string.Equals(rawId, SystemWatchLaterId, StringComparison.Ordinal))
+            return BrowseWatchLaterId;
+
+        if (rawId.StartsWith(BrowsePrefix, StringComparison.Ordinal))
+            return rawId;
+
+        return string.Concat(BrowsePrefix, rawId);
     }
 
     /// <summary>
@@ -53,7 +101,7 @@ public static class YoutubeIdHelper
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static AudioFormat MapContainerToFormat(string? container)
     {
-        if (string.IsNullOrWhiteSpace(container)) 
+        if (string.IsNullOrWhiteSpace(container))
             return AudioFormat.Unknown;
 
         var span = container.AsSpan().Trim();

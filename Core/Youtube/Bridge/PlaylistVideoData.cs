@@ -42,6 +42,16 @@ internal sealed class PlaylistVideoData
     public TimeSpan? Duration { get; init; }
 
     /// <summary>
+    /// Флаг схемной принадлежности элемента к музыкальному контенту по строгим маркерам InnerTube API.
+    /// </summary>
+    public bool IsMusic { get; init; }
+
+    /// <summary>
+    /// Идентификатор категории YouTube видеоролика (например, "10" для Music).
+    /// </summary>
+    public string? CategoryId { get; init; }
+
+    /// <summary>
     /// Список доступных миниатюр видеоролика.
     /// </summary>
     public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
@@ -143,5 +153,58 @@ internal sealed class PlaylistVideoData
                 Thumbnails = result;
             }
         }
+
+        CategoryId = content.GetPropertyOrNull("categoryId")?.GetStringOrNull();
+
+        IsMusic = DetermineIsMusic(content, authorDetails, CategoryId);
+    }
+
+    private static bool DetermineIsMusic(JsonElement content, JsonElement? authorDetails, string? categoryId)
+    {
+        if (string.Equals(categoryId, InnerTubeConstants.MusicCategoryId, StringComparison.Ordinal))
+            return true;
+
+        if (content.TryGetProperty("musicResponsiveListItemRenderer", out _))
+            return true;
+
+        var navEndpoint = content.GetPropertyOrNull("navigationEndpoint");
+        if (navEndpoint?.TryGetProperty("watchEndpoint", out var watchEndpoint) == true &&
+            watchEndpoint.TryGetProperty("watchEndpointMusicSupportedConfigs", out _))
+        {
+            return true;
+        }
+
+        var browseConfig = authorDetails
+            ?.GetPropertyOrNull("navigationEndpoint")
+            ?.GetPropertyOrNull("browseEndpoint")
+            ?.GetPropertyOrNull("browseEndpointContextSupportedConfigs")
+            ?.GetPropertyOrNull("browseEndpointContextMusicConfig");
+
+        if (browseConfig is not null)
+        {
+            var pageType = browseConfig.Value.GetPropertyOrNull("pageType")?.GetStringOrNull();
+            if (string.Equals(pageType, InnerTubeConstants.PageTypeAlbum, StringComparison.Ordinal) ||
+                string.Equals(pageType, InnerTubeConstants.PageTypeArtist, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        var badges = content.GetPropertyOrNull("ownerBadges") ?? content.GetPropertyOrNull("badges");
+        if (badges?.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var badge in badges.Value.EnumerateArray())
+            {
+                var style = badge
+                    .GetPropertyOrNull("metadataBadgeRenderer")
+                    ?.GetPropertyOrNull("style")
+                    ?.GetStringOrNull();
+
+                if (string.Equals(style, InnerTubeConstants.BadgeVerifiedArtist, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+
+        return false;
     }
 }

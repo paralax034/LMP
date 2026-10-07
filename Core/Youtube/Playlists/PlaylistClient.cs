@@ -314,33 +314,28 @@ public sealed class PlaylistClient(HttpClient http)
                 Duration = videoData.Duration ?? TimeSpan.Zero,
                 ThumbnailUrl = ThumbnailUtils.GetBestUrl(videoData.Thumbnails, videoId),
                 Url = $"https://www.youtube.com/watch?v={videoId}",
-                IsMusic = DetectIfMusic(title, author, videoData.Duration)
+                IsMusic = DetectIfMusic(videoData, title, author)
             });
         }
     }
 
     /// <summary>
-    /// Heuristic-based music detection since YouTube API doesn't provide this info.
+    /// Выполняет детерминированную классификацию музыки на основе структурных маркеров InnerTube API
+    /// и метаданных канала/заголовка, исключая хрупкие проверки длительности.
     /// </summary>
-    private static bool DetectIfMusic(string title, string author, TimeSpan? duration)
+    private static bool DetectIfMusic(PlaylistVideoData videoData, string title, string author)
     {
+        if (videoData.IsMusic)
+            return true;
+
         if (author.EndsWith(" - Topic", StringComparison.OrdinalIgnoreCase) ||
             author.EndsWith("VEVO", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (duration.HasValue)
-        {
-            var mins = duration.Value.TotalMinutes;
-            if (mins < 1 || mins > 15)
-                return ContainsMusicKeywords(title);
-            if (mins >= 2 && mins <= 6)
-                return true;
-        }
-
-        if (ContainsMusicKeywords(title)) return true;
         if (ContainsNonMusicKeywords(title)) return false;
+        if (ContainsMusicKeywords(title)) return true;
 
-        return true;
+        return false;
     }
 
     private static bool ContainsMusicKeywords(string title)

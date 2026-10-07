@@ -1,80 +1,94 @@
 using System.Text.RegularExpressions;
 using LMP.Core.Helpers.Extensions;
+using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Bridge;
 
-internal partial class VideoWatchPage(string rawContent)
+internal partial class VideoWatchPage
 {
-    public bool IsAvailable => !rawContent.Contains("og:url") || rawContent.Contains("video_id");
+    private readonly string _rawContent;
+    private PlayerResponse? _cachedPlayerResponse;
+    private bool _playerResponseParsed;
+
+    public VideoWatchPage(string rawContent)
+    {
+        _rawContent = rawContent;
+    }
+
+    public bool IsAvailable => !_rawContent.Contains("og:url") || _rawContent.Contains("video_id");
 
     public DateTimeOffset? UploadDate =>
-        MyRegex().Match(rawContent)
+        MyRegex().Match(_rawContent)
             .Groups[1].Value.NullIfWhiteSpace()
             ?.Pipe(s => DateTimeOffset.TryParse(s, out var d) ? d : (DateTimeOffset?)null);
 
-    // Лайки и дизлайки убираем — YouTube API их часто не отдает в HTML без JS, 
-    // а для плеера это лишний мусор в памяти.
-
-    // Парсинг лайков без AngleSharp
-    // YouTube часто меняет формат, ищем "likeCount":"12345" или в тултипе "12,345 likes"
+    /// <summary>
+    /// Парсинг количества лайков с использованием высокопроизводительного Span-парсера без аллокаций.
+    /// </summary>
     public long? LikeCount
     {
         get
         {
-            // Вариант 1: JSON внутри initialData
-            var matchJson = LikeRegex1().Match(rawContent);
-            if (matchJson.Success && long.TryParse(matchJson.Groups[1].Value, out var l1))
-                return l1;
+            var matchJson = LikeRegex1().Match(_rawContent);
+            if (matchJson.Success)
+            {
+                var val = YoutubeParsingHelpers.ParseLongFromText(matchJson.Groups[1].ValueSpan);
+                if (val.HasValue) return val.Value;
+            }
 
-            // Вариант 2: Старый формат текста
-            var matchText = LikeRegex2().Match(rawContent);
+            var matchText = LikeRegex2().Match(_rawContent);
             if (matchText.Success)
             {
-                var clean = matchText.Groups[1].Value.Replace(",", "").Replace(".", "");
-                if (long.TryParse(clean, out var l2)) return l2;
-            }
-
-            return null; // Не нашли (скрыты или новый лейаут)
-        }
-    }
-
-    // То же самое для дизлайков (обычно 0 или скрыты)
-    public static long? DislikeCount => 0;
-
-    public PlayerResponse? PlayerResponse
-    {
-        get
-        {
-            // 1. Пробуем найти ytInitialPlayerResponse
-            var json = InitialYTRegex().Match(rawContent)
-                .Groups[1].Value;
-
-            if (!string.IsNullOrWhiteSpace(json))
-            {
-                return PlayerResponse.Parse(json);
-            }
-
-            // 2. Пробуем найти ytplayer.config (старый формат, иногда встречается)
-            var configJson = PlayerResponseOldRegex().Match(rawContent)
-                .Groups[1].Value;
-
-            if (!string.IsNullOrWhiteSpace(configJson))
-            {
-                var config = Json.TryParse(configJson);
-                var argsResponse = config?.GetPropertyOrNull("args")?.GetPropertyOrNull("player_response")?.GetStringOrNull();
-                if (!string.IsNullOrWhiteSpace(argsResponse))
-                {
-                    return PlayerResponse.Parse(argsResponse);
-                }
+                var val = YoutubeParsingHelpers.ParseLongFromText(matchText.Groups[1].ValueSpan);
+                if (val.HasValue) return val.Value;
             }
 
             return null;
         }
     }
 
+    public const long DislikeCount = 0;
+
+    /// <summary>
+    /// Возвращает разобранный ответ плеера с кэшированием в поле экземпляра для исключения повторного парсинга.
+    /// </summary>
+    public PlayerResponse? PlayerResponse
+    {
+        get
+        {
+            if (_playerResponseParsed)
+                return _cachedPlayerResponse;
+
+            _cachedPlayerResponse = ParsePlayerResponseInternal();
+            _playerResponseParsed = true;
+            return _cachedPlayerResponse;
+        }
+    }
+
+    private PlayerResponse? ParsePlayerResponseInternal()
+    {
+        var json = InitialYTRegex().Match(_rawContent).Groups[1].Value;
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            return PlayerResponse.Parse(json);
+        }
+
+        var configJson = PlayerResponseOldRegex().Match(_rawContent).Groups[1].Value;
+        if (!string.IsNullOrWhiteSpace(configJson))
+        {
+            var config = Json.TryParse(configJson);
+            var argsResponse = config?.GetPropertyOrNull("args")?.GetPropertyOrNull("player_response")?.GetStringOrNull();
+            if (!string.IsNullOrWhiteSpace(argsResponse))
+            {
+                return PlayerResponse.Parse(argsResponse);
+            }
+        }
+
+        return null;
+    }
+
     public static VideoWatchPage? TryParse(string raw)
     {
-        // Простая проверка на наличие признаков страницы видео
         if (!raw.Contains("ytInitialPlayerResponse") && !raw.Contains("ytplayer.config"))
             return null;
 

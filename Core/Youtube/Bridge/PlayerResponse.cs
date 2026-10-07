@@ -89,12 +89,8 @@ internal partial class PlayerResponse
         {
             var reason = PlayabilityError ?? "";
 
-            // 1. Bot detection — ОБЯЗАТЕЛЬНО первым
-            // YouTube ANDROID_VR возвращает "Sign in to confirm you're not a bot"
-            // со статусом LOGIN_REQUIRED. Слово "confirm" ранее ложно
-            // срабатывало на ветку AgeRestricted.
-            if (reason.Contains("bot", StringComparison.OrdinalIgnoreCase) ||
-                reason.Contains("не робот", StringComparison.OrdinalIgnoreCase))
+            // 1. Bot detection (InnerTube возвращает детерминированную английскую ошибку при InvariantHl)
+            if (reason.Contains("bot", StringComparison.OrdinalIgnoreCase))
             {
                 LoginRequiredReason = LoginRequiredReason.BotDetection;
             }
@@ -132,7 +128,10 @@ internal partial class PlayerResponse
 
         var details = content.GetPropertyOrNull("videoDetails");
 
+        var categoryId = details?.GetPropertyOrNull("categoryId")?.GetStringOrNull();
+
         IsMusic = string.Equals(Category, "Music", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(categoryId, InnerTubeConstants.MusicCategoryId, StringComparison.Ordinal) ||
                   details?.GetPropertyOrNull("musicVideoType") != null;
 
         IsAvailable = !string.Equals(PlayabilityStatus, "error", StringComparison.OrdinalIgnoreCase)
@@ -408,7 +407,6 @@ internal partial class PlayerResponse
             Url = content.GetPropertyOrNull("url")?.GetStringOrNull()
                 ?? cipherData?.GetValueOrDefault("url");
 
-            // Остальные свойства без изменений ↓
             ContentLength =
                 content
                     .GetPropertyOrNull("contentLength")
@@ -488,9 +486,18 @@ internal partial class PlayerResponse
                 int eqIdx = pair.IndexOf('=');
                 if (eqIdx >= 0)
                 {
-                    var key = pair[..eqIdx].ToString();
-                    var valEncoded = pair[(eqIdx + 1)..].ToString();
-                    result[key] = Uri.UnescapeDataString(valEncoded);
+                    var keySpan = pair[..eqIdx];
+                    var valSpan = pair[(eqIdx + 1)..];
+
+                    string key = keySpan switch
+                    {
+                        "s" => "s",
+                        "sp" => "sp",
+                        "url" => "url",
+                        _ => keySpan.ToString()
+                    };
+
+                    result[key] = Uri.UnescapeDataString(valSpan.ToString());
                 }
 
                 if (ampIdx < 0) break;

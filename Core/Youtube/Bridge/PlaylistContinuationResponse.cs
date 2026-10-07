@@ -31,43 +31,32 @@ internal partial class PlaylistContinuationResponse
     /// <param name="content">Корневой JSON-элемент ответа продолжения.</param>
     public PlaylistContinuationResponse(JsonElement content)
     {
-        var items = content
-            .GetPropertyOrNull("onResponseReceivedActions")
-            ?.GetArrayElementOrNull(0)
-            ?.GetPropertyOrNull("appendContinuationItemsAction")
-            ?.GetPropertyOrNull("continuationItems");
-
-        if (items is { ValueKind: JsonValueKind.Array } arr)
-        {
-            int len = arr.GetArrayLength();
-            if (len > 0)
-            {
-                var result = new List<PlaylistVideoData>(len);
-                for (int i = 0; i < len; i++)
-                {
-                    var renderer = arr[i].GetPropertyOrNull("playlistVideoRenderer");
-                    if (renderer is not null)
-                        result.Add(new PlaylistVideoData(renderer.Value));
-                }
-
-                if (result.Count > 0)
-                    Videos = result;
-            }
-        }
-
         var actions = content.GetPropertyOrNull("onResponseReceivedActions");
-        if (actions != null)
+        if (actions is { ValueKind: JsonValueKind.Array } actionsArr && actionsArr.GetArrayLength() > 0)
         {
-            var appendAction = actions.Value.EnumerateArrayOrNull()?.FirstOrNull()
-                ?.GetPropertyOrNull("appendContinuationItemsAction");
+            var firstAction = actionsArr[0];
+            var continuationItems = firstAction
+                .GetPropertyOrNull("appendContinuationItemsAction")
+                ?.GetPropertyOrNull("continuationItems");
 
-            if (appendAction != null)
+            if (continuationItems is { ValueKind: JsonValueKind.Array } itemsArr)
             {
-                var continuationItems = appendAction.Value.GetPropertyOrNull("continuationItems");
-                if (continuationItems != null)
+                int len = itemsArr.GetArrayLength();
+                if (len > 0)
                 {
-                    ContinuationToken = BridgeUtils.FindTokenInContents(continuationItems.Value);
+                    var result = new List<PlaylistVideoData>(len);
+                    for (int i = 0; i < len; i++)
+                    {
+                        var renderer = itemsArr[i].GetPropertyOrNull("playlistVideoRenderer");
+                        if (renderer is not null)
+                            result.Add(new PlaylistVideoData(renderer.Value));
+                    }
+
+                    if (result.Count > 0)
+                        Videos = result;
                 }
+
+                ContinuationToken = BridgeUtils.FindTokenInContents(continuationItems.Value);
             }
         }
 

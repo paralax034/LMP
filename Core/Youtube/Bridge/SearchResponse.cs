@@ -1,7 +1,6 @@
 ﻿using System.Buffers;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Text.Json;
 using LMP.Core.Youtube.Utils;
 using LMP.Core.Helpers.Extensions;
@@ -47,7 +46,6 @@ internal partial class SearchResponse
         var channels = new List<ChannelData>(4);
         string? foundToken = null;
 
-        // Используем ArrayPool для стека обхода
         CollectAndClassify(content, videos, playlists, channels, ref foundToken);
 
         Videos = videos;
@@ -67,7 +65,6 @@ internal partial class SearchResponse
         List<ChannelData> channels,
         ref string? token)
     {
-        // Используем массив из пула вместо Stack<JsonElement>
         var stackBuffer = ArrayPool<JsonElement>.Shared.Rent(128);
         int stackTop = 0;
         stackBuffer[stackTop++] = root;
@@ -82,16 +79,14 @@ internal partial class SearchResponse
                 {
                     int len = current.GetArrayLength();
 
-                    // Гарантируем достаточный размер стека
                     if (stackTop + len > stackBuffer.Length)
                     {
-                        var newBuffer = ArrayPool<JsonElement>.Shared.Rent(stackBuffer.Length * 2);
+                        var newBuffer = ArrayPool<JsonElement>.Shared.Rent(Math.Max(stackBuffer.Length * 2, stackTop + len));
                         Array.Copy(stackBuffer, newBuffer, stackTop);
                         ArrayPool<JsonElement>.Shared.Return(stackBuffer);
                         stackBuffer = newBuffer;
                     }
 
-                    // Пушим в обратном порядке для правильной последовательности
                     for (int i = len - 1; i >= 0; i--)
                         stackBuffer[stackTop++] = current[i];
 
@@ -101,13 +96,12 @@ internal partial class SearchResponse
                 if (current.ValueKind != JsonValueKind.Object)
                     continue;
 
-                // Проверяем, является ли это целевым элементом
                 bool isItem = false;
                 foreach (var prop in current.EnumerateObject())
                 {
                     if (ItemRendererNames.Contains(prop.Name))
                     {
-                        if (prop.Name == "lockupViewModel")
+                        if (prop.NameEquals("lockupViewModel"u8))
                         {
                             if (prop.Value.TryGetProperty("contentId", out _))
                             {
@@ -125,17 +119,14 @@ internal partial class SearchResponse
 
                 if (isItem)
                 {
-                    // Классифицируем и извлекаем inline
                     ClassifyAndExtract(current, videos, playlists, channels, ref token);
                     continue;
                 }
 
-                // Добавляем дочерние контейнеры
                 foreach (var prop in current.EnumerateObject())
                 {
                     if (ContainerNames.Contains(prop.Name))
                     {
-                        // Проверяем размер стека
                         if (stackTop >= stackBuffer.Length)
                         {
                             var newBuffer = ArrayPool<JsonElement>.Shared.Rent(stackBuffer.Length * 2);
@@ -167,43 +158,46 @@ internal partial class SearchResponse
     {
         foreach (var prop in item.EnumerateObject())
         {
-            switch (prop.Name)
+            if (prop.NameEquals(InnerTubeTokens.ContinuationItemRenderer))
             {
-                case "continuationItemRenderer":
-                    token ??= prop.Value.GetPropertyOrNull("continuationEndpoint")
-                        ?.GetPropertyOrNull("continuationCommand")
-                        ?.GetPropertyOrNull("token")?.GetStringOrNull();
-                    return;
+                token ??= BridgeUtils.ExtractContinuationToken(prop.Value);
+                return;
+            }
 
-                case "musicResponsiveListItemRenderer":
-                    ProcessMusicItem(prop.Value, videos, playlists, channels);
-                    return;
+            if (prop.NameEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
+            {
+                ProcessMusicItem(prop.Value, videos, playlists, channels);
+                return;
+            }
 
-                case "videoRenderer":
-                case "shortsLockupViewModel":
-                case "reelItemRenderer":
-                    {
-                        var videoData = new VideoData(prop.Value, isYtm: false);
-                        if (!string.IsNullOrEmpty(videoData.Id))
-                            videos.Add(videoData);
-                        return;
-                    }
+            if (prop.NameEquals("videoRenderer"u8) ||
+                prop.NameEquals("shortsLockupViewModel"u8) ||
+                prop.NameEquals("reelItemRenderer"u8))
+            {
+                var videoData = new VideoData(prop.Value, isYtm: false);
+                if (!string.IsNullOrEmpty(videoData.Id))
+                    videos.Add(videoData);
+                return;
+            }
 
-                case "lockupViewModel":
-                    {
-                        var contentId = prop.Value.GetPropertyOrNull("contentId")?.GetStringOrNull();
-                        if (!string.IsNullOrEmpty(contentId) && IsPlaylistId(contentId))
-                            playlists.Add(new PlaylistData(prop.Value));
-                        return;
-                    }
-
-                case "playlistRenderer":
+            if (prop.NameEquals("lockupViewModel"u8))
+            {
+                var contentId = prop.Value.GetPropertyOrNull("contentId")?.GetStringOrNull();
+                if (!string.IsNullOrEmpty(contentId) && IsPlaylistId(contentId))
                     playlists.Add(new PlaylistData(prop.Value));
-                    return;
+                return;
+            }
 
-                case "channelRenderer":
-                    channels.Add(new ChannelData(prop.Value));
-                    return;
+            if (prop.NameEquals("playlistRenderer"u8))
+            {
+                playlists.Add(new PlaylistData(prop.Value));
+                return;
+            }
+
+            if (prop.NameEquals("channelRenderer"u8))
+            {
+                channels.Add(new ChannelData(prop.Value));
+                return;
             }
         }
     }
@@ -211,7 +205,6 @@ internal partial class SearchResponse
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsPlaylistId(string id)
     {
-        // Span-based проверка без аллокации
         var span = id.AsSpan();
         return span.Length >= 2 &&
             (span.StartsWith("PL") || span.StartsWith("OL") || span.StartsWith("RD"));
@@ -258,14 +251,20 @@ internal partial class SearchResponse
 
                 if (current.ValueKind == JsonValueKind.Object)
                 {
+                    if (current.TryGetProperty("continuationItemRenderer", out var continuationItem))
+                    {
+                        var token = BridgeUtils.ExtractContinuationToken(continuationItem);
+                        if (token != null) return token;
+                    }
+
                     foreach (var prop in current.EnumerateObject())
                     {
-                        if (prop.Name == "continuationCommand")
+                        if (prop.NameEquals(InnerTubeTokens.ContinuationCommand))
                         {
                             var token = prop.Value.GetPropertyOrNull("token")?.GetStringOrNull();
                             if (token != null) return token;
                         }
-                        else if (prop.Name == "nextContinuationData")
+                        else if (prop.NameEquals(InnerTubeTokens.NextContinuationData))
                         {
                             var token = prop.Value.GetPropertyOrNull("continuation")?.GetStringOrNull();
                             if (token != null) return token;
@@ -321,7 +320,6 @@ internal partial class SearchResponse
         return new SearchResponse(doc.RootElement);
     }
 
-    // VideoData с кэшированием свойств при первом доступе
     internal sealed class VideoData
     {
         public bool IsMusicItem { get; init; }
@@ -384,13 +382,8 @@ internal partial class SearchResponse
             var titleProp = content.GetPropertyOrNull("title");
             if (titleProp.HasValue)
             {
-                // Без LINQ: берём первый run вручную
-                var firstRun = titleProp.Value.GetPropertyOrNull("runs")
-                    ?.GetFirstArrayElementOrNull();
-                if (firstRun.HasValue)
-                    return firstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
-
-                return titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+                return titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull()
+                    ?? YoutubeParsingHelpers.ConcatTextRuns(titleProp.Value.GetPropertyOrNull("runs"));
             }
 
             return content.GetPropertyOrNull("overlayMetadata")
@@ -405,7 +398,6 @@ internal partial class SearchResponse
                 var runsElement = GetRunsElement(content, 1);
                 if (runsElement == null) return null;
 
-                // Первый проход: ищем артиста
                 foreach (var run in runsElement.Value.EnumerateArray())
                 {
                     var pageType = run.GetPropertyOrNull("navigationEndpoint")
@@ -418,20 +410,17 @@ internal partial class SearchResponse
                         return run.GetPropertyOrNull("text")?.GetStringOrNull();
                 }
 
-                // Второй проход: первый текст
                 var first = runsElement.Value.GetFirstArrayElementOrNull();
                 return first?.GetPropertyOrNull("text")?.GetStringOrNull();
             }
 
-            var ownerFirstRun = content.GetPropertyOrNull("ownerText")
-                ?.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
-            if (ownerFirstRun.HasValue)
-                return ownerFirstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
+            var ownerRuns = content.GetPropertyOrNull("ownerText")?.GetPropertyOrNull("runs");
+            if (ownerRuns.HasValue)
+                return YoutubeParsingHelpers.ConcatTextRuns(ownerRuns.Value);
 
-            var bylineFirstRun = content.GetPropertyOrNull("shortBylineText")
-                ?.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
-            if (bylineFirstRun.HasValue)
-                return bylineFirstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
+            var bylineRuns = content.GetPropertyOrNull("shortBylineText")?.GetPropertyOrNull("runs");
+            if (bylineRuns.HasValue)
+                return YoutubeParsingHelpers.ConcatTextRuns(bylineRuns.Value);
 
             return null;
         }
@@ -455,8 +444,7 @@ internal partial class SearchResponse
                 return null;
             }
 
-            var ownerRuns = content.GetPropertyOrNull("ownerText")
-                ?.GetPropertyOrNull("runs");
+            var ownerRuns = content.GetPropertyOrNull("ownerText")?.GetPropertyOrNull("runs");
             if (ownerRuns.HasValue)
             {
                 foreach (var run in ownerRuns.Value.EnumerateArrayOrEmpty())
@@ -586,43 +574,13 @@ internal partial class SearchResponse
         }
 
         /// <summary>
-        /// Собирает текст всех runs без лишних аллокаций.
+        /// Собирает текст всех runs через централизованный стек-хелпер без лишних аллокаций.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static string? GetRunText(JsonElement item, int columnIndex)
         {
             var runsElement = GetRunsElement(item, columnIndex);
-            if (runsElement == null) return null;
-
-            var runs = runsElement.Value;
-            var len = runs.GetArrayLength();
-            if (len == 0) return null;
-
-            // Быстрый путь: один run
-            if (len == 1)
-                return runs[0].GetPropertyOrNull("text")?.GetStringOrNull();
-
-            // Несколько runs: используем StringBuilder
-            StringBuilder? sb = null;
-            string? first = null;
-
-            for (int i = 0; i < len; i++)
-            {
-                var text = runs[i].GetPropertyOrNull("text")?.GetStringOrNull();
-                if (text == null) continue;
-
-                if (first == null)
-                {
-                    first = text;
-                }
-                else
-                {
-                    sb ??= new StringBuilder(first.Length + text.Length * (len - 1));
-                    if (sb.Length == 0) sb.Append(first);
-                    sb.Append(text);
-                }
-            }
-
-            return sb?.ToString() ?? first;
+            return YoutubeParsingHelpers.ConcatTextRuns(runsElement);
         }
     }
 
@@ -644,17 +602,8 @@ internal partial class SearchResponse
             var titleProp = content.GetPropertyOrNull("title");
             if (titleProp.HasValue)
             {
-                var simple = titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull();
-                if (simple != null)
-                {
-                    Title = simple;
-                }
-                else
-                {
-                    var firstRun = titleProp.Value.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
-                    if (firstRun.HasValue)
-                        Title = firstRun.Value.GetPropertyOrNull("text")?.GetStringOrNull();
-                }
+                Title = titleProp.Value.GetPropertyOrNull("simpleText")?.GetStringOrNull()
+                    ?? YoutubeParsingHelpers.ConcatTextRuns(titleProp.Value.GetPropertyOrNull("runs"));
             }
 
             if (Title is null)
@@ -670,10 +619,9 @@ internal partial class SearchResponse
                     Title = VideoData.GetRunText(content, 0);
             }
 
-            var firstRunAuthor = content.GetPropertyOrNull("shortBylineText")
-                ?.GetPropertyOrNull("runs")?.GetFirstArrayElementOrNull();
-            if (firstRunAuthor.HasValue)
-                Author = firstRunAuthor.Value.GetPropertyOrNull("text")?.GetStringOrNull();
+            var authorRuns = content.GetPropertyOrNull("shortBylineText")?.GetPropertyOrNull("runs");
+            if (authorRuns.HasValue)
+                Author = YoutubeParsingHelpers.ConcatTextRuns(authorRuns.Value);
             else if (isYtm)
                 Author = VideoData.GetRunText(content, 1);
 
@@ -694,8 +642,9 @@ internal partial class SearchResponse
                      ?.GetPropertyOrNull("browseEndpoint")
                      ?.GetPropertyOrNull("browseId")?.GetStringOrNull() : null);
 
-            Title = content.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull() ??
-                    (isYtm ? VideoData.GetRunText(content, 0) : null);
+            Title = content.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull()
+                ?? YoutubeParsingHelpers.ConcatTextRuns(content.GetPropertyOrNull("title")?.GetPropertyOrNull("runs"))
+                ?? (isYtm ? VideoData.GetRunText(content, 0) : null);
 
             Thumbnails = VideoData.ComputeThumbnails(content);
         }

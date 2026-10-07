@@ -3,27 +3,27 @@ using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using LMP.Core.Youtube.Bridge;
+using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Search;
 
 internal class SearchController(HttpClient http)
 {
-    // Используем FrozenDictionary для O(1) маппинг фильтров
     private static readonly FrozenDictionary<SearchFilter, string> MusicFilterParams = new Dictionary<SearchFilter, string>
     {
-        [SearchFilter.Music] = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
-        [SearchFilter.MusicSong] = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
-        [SearchFilter.MusicVideo] = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D",
-        [SearchFilter.MusicAlbum] = "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D",
-        [SearchFilter.MusicArtist] = "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D",
-        [SearchFilter.MusicPlaylist] = "EgeKAQQoAEABagoQAxAEEAoQCRAF",
+        [SearchFilter.Music] = InnerTubeConstants.Params.MusicFilterGeneral,
+        [SearchFilter.MusicSong] = InnerTubeConstants.Params.MusicFilterSong,
+        [SearchFilter.MusicVideo] = InnerTubeConstants.Params.MusicFilterVideo,
+        [SearchFilter.MusicAlbum] = InnerTubeConstants.Params.MusicFilterAlbum,
+        [SearchFilter.MusicArtist] = InnerTubeConstants.Params.MusicFilterArtist,
+        [SearchFilter.MusicPlaylist] = InnerTubeConstants.Params.MusicFilterPlaylist,
     }.ToFrozenDictionary();
 
     private static readonly FrozenDictionary<SearchFilter, string> WebFilterParams = new Dictionary<SearchFilter, string>
     {
-        [SearchFilter.Video] = "EgIQAQ%3D%3D",
-        [SearchFilter.Playlist] = "EgIQAw%3D%3D",
-        [SearchFilter.Channel] = "EgIQAg%3D%3D",
+        [SearchFilter.Video] = InnerTubeConstants.Params.WebFilterVideo,
+        [SearchFilter.Playlist] = InnerTubeConstants.Params.WebFilterPlaylist,
+        [SearchFilter.Channel] = InnerTubeConstants.Params.WebFilterChannel,
     }.ToFrozenDictionary();
 
     private static readonly FrozenSet<SearchFilter> MusicFilters = new[]
@@ -33,20 +33,6 @@ internal class SearchController(HttpClient http)
     }.ToFrozenSet();
 
     private static readonly MediaTypeHeaderValue JsonContentType = new("application/json");
-
-    // Кэшированные UTF-8 байты
-    private static readonly byte[] Utf8Context = "context"u8.ToArray();
-    private static readonly byte[] Utf8Client = "client"u8.ToArray();
-    private static readonly byte[] Utf8ClientName = "clientName"u8.ToArray();
-    private static readonly byte[] Utf8ClientVersion = "clientVersion"u8.ToArray();
-    private static readonly byte[] Utf8Hl = "hl"u8.ToArray();
-    private static readonly byte[] Utf8Gl = "gl"u8.ToArray();
-    private static readonly byte[] Utf8User = "user"u8.ToArray();
-    private static readonly byte[] Utf8WebRemix = "WEB_REMIX"u8.ToArray();
-    private static readonly byte[] Utf8Web = "WEB"u8.ToArray();
-    private static readonly byte[] Utf8Query = "query"u8.ToArray();
-    private static readonly byte[] Utf8Continuation = "continuation"u8.ToArray();
-    private static readonly byte[] Utf8Params = "params"u8.ToArray();
 
     public async ValueTask<SearchResponse> GetSearchResponseAsync(
         string searchQuery,
@@ -66,50 +52,47 @@ internal class SearchController(HttpClient http)
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
 
-        // Формируем JSON через Utf8JsonWriter с ArrayBufferWriter
         var bufferWriter = new ArrayBufferWriter<byte>(512);
         using (var writer = new Utf8JsonWriter(bufferWriter))
         {
             writer.WriteStartObject();
 
-            // По спецификации InnerTube: при наличии continuation токена поля query и params запрещены
             if (continuationToken != null)
             {
-                writer.WriteString(Utf8Continuation, continuationToken);
+                writer.WriteString(InnerTubeTokens.Continuation, continuationToken);
             }
             else
             {
-                writer.WriteString(Utf8Query, searchQuery);
+                writer.WriteString(InnerTubeTokens.Query, searchQuery);
                 if (searchParams != null)
-                    writer.WriteString(Utf8Params, searchParams);
+                    writer.WriteString(InnerTubeTokens.Params, searchParams);
             }
 
-            // Inline context — без промежуточного JsonDocument
-            writer.WritePropertyName(Utf8Context);
+            writer.WritePropertyName(InnerTubeTokens.Context);
             writer.WriteStartObject();
 
-            writer.WritePropertyName(Utf8Client);
+            writer.WritePropertyName(InnerTubeTokens.Client);
             writer.WriteStartObject();
 
             if (isMusicContext)
             {
-                writer.WriteString(Utf8ClientName, Utf8WebRemix);
-                writer.WriteString(Utf8ClientVersion, YoutubeHttpHandler.MusicClientVersion);
+                writer.WriteString(InnerTubeTokens.ClientName, InnerTubeTokens.WebRemix);
+                writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.MusicClientVersion);
             }
             else
             {
-                writer.WriteString(Utf8ClientName, Utf8Web);
-                writer.WriteString(Utf8ClientVersion, YoutubeHttpHandler.WebClientVersion);
+                writer.WriteString(InnerTubeTokens.ClientName, InnerTubeTokens.Web);
+                writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.WebClientVersion);
             }
 
-            writer.WriteString(Utf8Hl, YoutubeHttpHandler.GetHl());
-            writer.WriteString(Utf8Gl, YoutubeHttpHandler.GetGl());
+            writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.InvariantHl);
+            writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.InvariantGl);
 
             writer.WriteEndObject(); // client
 
             if (isMusicContext)
             {
-                writer.WritePropertyName(Utf8User);
+                writer.WritePropertyName(InnerTubeTokens.User);
                 writer.WriteStartObject();
                 writer.WriteEndObject(); // user
             }
@@ -122,14 +105,12 @@ internal class SearchController(HttpClient http)
         content.Headers.ContentType = JsonContentType;
         request.Content = content;
 
-        // Читаем response с ResponseHeadersRead для streaming
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        // Парсим из потока без промежуточной строки
         return await SearchResponse.ParseAsync(
-            await response.Content.ReadAsStreamAsync(cancellationToken),
-            cancellationToken);
+            await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static string? GetSearchParams(SearchFilter filter, bool isMusicContext)

@@ -61,10 +61,14 @@ internal static class BridgeUtils
     /// <returns>Токен продолжения, если найден последний элемент-рендерер.</returns>
     public static string? FindTokenInContents(JsonElement contents)
     {
-        if (contents.ValueKind != JsonValueKind.Array || contents.GetArrayLength() == 0)
+        if (contents.ValueKind != JsonValueKind.Array)
             return null;
 
-        var lastItem = contents.EnumerateArray().LastOrDefault();
+        int len = contents.GetArrayLength();
+        if (len == 0)
+            return null;
+
+        var lastItem = contents[len - 1];
 
         if (lastItem.ValueKind == JsonValueKind.Undefined)
             return null;

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using LMP.Core.Youtube.Exceptions;
 
@@ -95,12 +96,11 @@ public static partial class PlayabilityErrorClassifier
         return "YouTube Legal";
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string CleanHolder(string value)
     {
         var span = value.AsSpan().Trim();
-        if (span.EndsWith(".") || span.EndsWith(",") || span.EndsWith(";"))
-            span = span[..^1].Trim();
-
+        span = span.TrimEnd(".,; ");
         return span.ToString();
     }
 

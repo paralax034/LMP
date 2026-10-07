@@ -62,6 +62,11 @@ public sealed partial class PlayerContext
     public string? Sts { get; private set; }
 
     /// <summary>
+    /// Актуальная версия клиента InnerTube Web, динамически извлеченная из кода скрипта плеера.
+    /// </summary>
+    public string? ClientVersion { get; private set; }
+
+    /// <summary>
     /// Временная метка создания объекта в памяти приложения.
     /// Используется для контроля ротации и инвалидации устаревших контекстов плеера в рамках 12-часового цикла YouTube.
     /// </summary>
@@ -74,13 +79,34 @@ public sealed partial class PlayerContext
     /// <param name="baseJs">Оригинальный JS-код плеера плеера.</param>
     /// <param name="preprocessedJs">Необязательный уже оптимизированный JS-код.</param>
     /// <param name="sts">Необязательная метка подписи. Если передана как <c>null</c>, будет извлечена автоматически.</param>
-    public PlayerContext(string version, string baseJs, string? preprocessedJs = null, string? sts = null)
+    /// <param name="clientVersion">Необязательная версия клиента InnerTube. Если <c>null</c>, извлекается из <paramref name="baseJs"/>.</param>
+    public PlayerContext(
+        string version,
+        string baseJs,
+        string? preprocessedJs = null,
+        string? sts = null,
+        string? clientVersion = null)
     {
         Version = version;
         BaseJs = baseJs;
         PreprocessedJs = preprocessedJs;
         Sts = sts ?? (string.IsNullOrEmpty(baseJs) ? null : YoutubeAstSolver.ExtractSts(baseJs));
+        ClientVersion = clientVersion ?? (string.IsNullOrEmpty(baseJs) ? null : ExtractClientVersion(baseJs));
         CachedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Извлекает актуальную версию клиента InnerTube Web из кода плеера.
+    /// </summary>
+    public static string? ExtractClientVersion(string baseJs)
+    {
+        if (string.IsNullOrEmpty(baseJs)) return null;
+
+        var match = ClientVersionRegex().Match(baseJs);
+        if (!match.Success) return null;
+
+        var val = match.Groups[1].Value;
+        return string.IsNullOrWhiteSpace(val) ? null : val;
     }
 
     /// <summary>
@@ -143,11 +169,16 @@ public sealed partial class PlayerContext
 
             var prepPath = GetPreprocessedCachePath(Version);
             var stsPath = GetStsCachePath(Version);
+            var cverPath = GetClientVersionCachePath(Version);
 
             await AtomicFile.WriteTextAsync(prepPath, PreprocessedJs, createBackup: false).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(Sts))
             {
                 await AtomicFile.WriteTextAsync(stsPath, Sts, createBackup: false).ConfigureAwait(false);
+            }
+            if (!string.IsNullOrEmpty(ClientVersion))
+            {
+                await AtomicFile.WriteTextAsync(cverPath, ClientVersion, createBackup: false).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -171,6 +202,12 @@ public sealed partial class PlayerContext
                 await AtomicFile.WriteTextAsync(path, BaseJs, createBackup: false).ConfigureAwait(false);
             }
 
+            if (!string.IsNullOrEmpty(ClientVersion))
+            {
+                var cverPath = GetClientVersionCachePath(Version);
+                await AtomicFile.WriteTextAsync(cverPath, ClientVersion, createBackup: false).ConfigureAwait(false);
+            }
+
             await SavePreprocessedCacheAsync().ConfigureAwait(false);
             CleanupOldVersions();
         }
@@ -189,22 +226,19 @@ public sealed partial class PlayerContext
         {
             var prepPath = GetPreprocessedCachePath(version);
             var stsPath = GetStsCachePath(version);
+            var cverPath = GetClientVersionCachePath(version);
             var baseJsPath = GetCachePath(version);
             var bytecodePath = GetBytecodeCachePath(version);
 
-            // Улучшенная оптимизация:
-            // Если на диске уже есть готовый байткод и файл STS — нам вообще не нужны тяжелые JS-файлы.
-            // Мы считываем только 5 байт STS (необходим для внешних HTTP-запросов к CDN Google)
-            // и мгновенно возвращаем контекст. Экономия 2.5 МБ дискового I/O на каждом старте!
+            string? clientVersion = File.Exists(cverPath) ? File.ReadAllText(cverPath).Trim() : null;
+
             if (File.Exists(bytecodePath) && File.Exists(stsPath))
             {
                 var sts = File.ReadAllText(stsPath).Trim();
                 Log.Debug($"[PlayerContext] Bytecode and STS caches exist for {version}. Skipping base.js/preprocessed.js disk I/O.");
-                return new PlayerContext(version, string.Empty, preprocessedJs: null, sts);
+                return new PlayerContext(version, string.Empty, preprocessedJs: null, sts, clientVersion);
             }
 
-            // Быстрый путь (байткода нет, но есть оптимизированный JS):
-            // Возвращаем объект. preprocessed.js будет считан лениво только при реальном обращении к свойству.
             if (File.Exists(prepPath) && File.Exists(stsPath))
             {
                 var age = DateTimeOffset.UtcNow - File.GetLastWriteTimeUtc(prepPath);
@@ -212,11 +246,10 @@ public sealed partial class PlayerContext
                 {
                     var sts = File.ReadAllText(stsPath).Trim();
                     Log.Debug($"[PlayerContext] Loaded metadata cache for {version} (sts={sts})");
-                    return new PlayerContext(version, string.Empty, preprocessedJs: null, sts);
+                    return new PlayerContext(version, string.Empty, preprocessedJs: null, sts, clientVersion);
                 }
             }
 
-            // Медленный путь (полный фоллбек на оригинальный base.js):
             if (!File.Exists(baseJsPath)) return null;
 
             var baseAge = DateTimeOffset.UtcNow - File.GetLastWriteTimeUtc(baseJsPath);
@@ -227,7 +260,7 @@ public sealed partial class PlayerContext
             }
 
             var baseJs = File.ReadAllText(baseJsPath);
-            return new PlayerContext(version, baseJs);
+            return new PlayerContext(version, baseJs, preprocessedJs: null, sts: null, clientVersion);
         }
         catch (Exception ex)
         {
@@ -248,7 +281,10 @@ public sealed partial class PlayerContext
         {
             var prepPath = GetPreprocessedCachePath(version);
             var stsPath = GetStsCachePath(version);
+            var cverPath = GetClientVersionCachePath(version);
             var baseJsPath = GetCachePath(version);
+
+            string? clientVersion = File.Exists(cverPath) ? File.ReadAllText(cverPath).Trim() : null;
 
             if (File.Exists(prepPath) && File.Exists(stsPath))
             {
@@ -257,7 +293,7 @@ public sealed partial class PlayerContext
 
                 if (!string.IsNullOrWhiteSpace(preprocessedJs))
                 {
-                    return new PlayerContext(version, string.Empty, preprocessedJs, sts);
+                    return new PlayerContext(version, string.Empty, preprocessedJs, sts, clientVersion);
                 }
             }
 
@@ -266,7 +302,7 @@ public sealed partial class PlayerContext
             var baseJs = File.ReadAllText(baseJsPath);
             if (string.IsNullOrWhiteSpace(baseJs)) return null;
 
-            return new PlayerContext(version, baseJs);
+            return new PlayerContext(version, baseJs, preprocessedJs: null, sts: null, clientVersion);
         }
         catch (Exception ex)
         {
@@ -275,33 +311,21 @@ public sealed partial class PlayerContext
         }
     }
 
-    /// <summary>Возвращает физический путь к файлу оригинального <c>base.js</c> на диске.</summary>
     private static string GetCachePath(string version) =>
         Path.Combine(G.Folder.NTokenCache, $"player_{version}_basejs.txt");
 
-    /// <summary>Возвращает физический путь к файлу оптимизированного JS-кода.</summary>
     private static string GetPreprocessedCachePath(string version) =>
         Path.Combine(G.Folder.NTokenCache, $"player_{version}_preprocessed.js");
 
-    /// <summary>Возвращает физический путь к текстовому файлу с временной меткой STS плеера.</summary>
     private static string GetStsCachePath(string version) =>
         Path.Combine(G.Folder.NTokenCache, $"player_{version}_sts.txt");
 
-    /// <summary>Возвращает физический путь к файлу кэша бинарного байткода QuickJS.</summary>
-    /// <remarks>
-    /// Имя файла содержит маркер <c>QuickJsNative.BridgeAbi</c>, что гарантирует 
-    /// инвалидацию старого байткода при любом обновлении нативного моста (защита от аппаратного Access Violation).
-    /// </remarks>
+    private static string GetClientVersionCachePath(string version) =>
+        Path.Combine(G.Folder.NTokenCache, $"player_{version}_cver.txt");
+
     public static string GetBytecodeCachePath(string version) =>
         Path.Combine(G.Folder.NTokenCache, $"player_{version}_abi{QuickJsNative.BridgeAbi}_bytecode.bin");
 
-    /// <summary>
-    /// Автоматически сканирует директорию кэша и удаляет файлы плееров, которые старше <see cref="MaxAgeDays"/> дней,
-    /// если общее количество сохраненных версий превышает <see cref="MaxCachedVersions"/>.
-    /// </summary>
-    /// <remarks>
-    /// Метод осуществляет ротацию всех сопутствующих файлов версии: оригинального JS, препроцессированного JS, STS-файла и бинарного байткода.
-    /// </remarks>
     private static void CleanupOldVersions()
     {
         try
@@ -314,7 +338,6 @@ public sealed partial class PlayerContext
 
             var now = DateTime.UtcNow;
 
-            // Фильтруем кандидатов на удаление: сортируем по дате изменения и берем только устаревшие
             var candidates = files
                 .Select(static f => new FileInfo(f))
                 .OrderByDescending(static f => f.LastWriteTimeUtc)
@@ -333,10 +356,12 @@ public sealed partial class PlayerContext
                         var version = versionMatch.Groups[1].Value;
                         var prepPath = GetPreprocessedCachePath(version);
                         var stsPath = GetStsCachePath(version);
+                        var cverPath = GetClientVersionCachePath(version);
                         var bytecodePath = GetBytecodeCachePath(version);
 
                         if (File.Exists(prepPath)) File.Delete(prepPath);
                         if (File.Exists(stsPath)) File.Delete(stsPath);
+                        if (File.Exists(cverPath)) File.Delete(cverPath);
                         if (File.Exists(bytecodePath)) File.Delete(bytecodePath);
                     }
 
@@ -345,7 +370,6 @@ public sealed partial class PlayerContext
                 }
                 catch
                 {
-                    // Игнорируем заблокированные или используемые другими процессами файлы
                 }
             }
         }
@@ -355,10 +379,6 @@ public sealed partial class PlayerContext
         }
     }
 
-    /// <summary>
-    /// Определяет актуальную версию плеера на основе API-манифеста YouTube (iframe_api) 
-    /// и возвращает её вместе со списком URL-кандидатов для скачивания.
-    /// </summary>
     public static async Task<(string Version, string[] Urls)?> DetectVersionAsync(
         HttpClient http,
         CancellationToken ct = default)
@@ -385,21 +405,19 @@ public sealed partial class PlayerContext
         }
     }
 
-    /// <summary>
-    /// Физически удаляет файлы кэша конкретной версии плеера (включая бинарный байткод) с диска.
-    /// </summary>
-    /// <param name="version">Версия плеера, файлы которой необходимо удалить.</param>
     public static void ClearDiskCache(string version)
     {
         try
         {
             var prepPath = GetPreprocessedCachePath(version);
             var stsPath = GetStsCachePath(version);
+            var cverPath = GetClientVersionCachePath(version);
             var baseJsPath = GetCachePath(version);
             var bytecodePath = GetBytecodeCachePath(version);
 
             if (File.Exists(prepPath)) File.Delete(prepPath);
             if (File.Exists(stsPath)) File.Delete(stsPath);
+            if (File.Exists(cverPath)) File.Delete(cverPath);
             if (File.Exists(baseJsPath)) File.Delete(baseJsPath);
             if (File.Exists(bytecodePath)) File.Delete(bytecodePath);
 
@@ -416,4 +434,7 @@ public sealed partial class PlayerContext
 
     [GeneratedRegex(@"player\\?/([0-9a-fA-F]{8})\\?/")]
     private static partial Regex PlayerVersionIframeRegex();
+
+    [GeneratedRegex(@"(?:INNERTUBE_CONTEXT_CLIENT_VERSION|clientVersion)\s*[:=]\s*[""']([^""']+)[""']", RegexOptions.Compiled)]
+    private static partial Regex ClientVersionRegex();
 }

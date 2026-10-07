@@ -1,7 +1,6 @@
 ﻿using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Utils;
 
@@ -14,20 +13,43 @@ namespace LMP.Core.Youtube;
 public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? authService, bool disposeClient = false)
     : ClientDelegatingHandler(http, disposeClient)
 {
+    public const string FallbackMusicClientVersion = "1.20260126.03.00";
+    public const string FallbackWebClientVersion = "2.20260126.01.00";
+
+    private static volatile string _musicClientVersion = FallbackMusicClientVersion;
+    private static volatile string _webClientVersion = FallbackWebClientVersion;
+
     /// <summary>Версия клиента YouTube Music.</summary>
-    public const string MusicClientVersion = "1.20260126.03.00";
+    public static string MusicClientVersion
+    {
+        get => _musicClientVersion;
+        set => _musicClientVersion = string.IsNullOrWhiteSpace(value) ? FallbackMusicClientVersion : value;
+    }
 
     /// <summary>Идентификатор клиента YouTube Music.</summary>
     public const string MusicClientName = "67";
 
     /// <summary>Версия клиента YouTube Web.</summary>
-    public const string WebClientVersion = "2.20260126.01.00";
+    public static string WebClientVersion
+    {
+        get => _webClientVersion;
+        set => _webClientVersion = string.IsNullOrWhiteSpace(value) ? FallbackWebClientVersion : value;
+    }
 
     /// <summary>Origin заголовок для YouTube Music.</summary>
     public const string MusicOrigin = "https://music.youtube.com";
 
     /// <summary>Origin заголовок для основного YouTube.</summary>
     public const string YoutubeOrigin = "https://www.youtube.com";
+
+    /// <summary>Инвариантная языковая локаль для всех сервисных запросов InnerTube API.</summary>
+    public const string InvariantHl = "en";
+
+    /// <summary>Инвариантный ISO-код региона для всех сервисных запросов InnerTube API.</summary>
+    public const string InvariantGl = "US";
+
+    /// <summary>Инвариантный заголовок языка для предотвращения локализации ответов API.</summary>
+    public const string InvariantAcceptLanguage = "en-US,en;q=0.9";
 
     /// <summary>Максимально время ожидания ответа от сервера</summary>
     private static readonly TimeSpan PerAttemptTimeout = TimeSpan.FromSeconds(10);
@@ -101,14 +123,23 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
         bool isMobileClient = request.Options.TryGetValue(IsMobileClient, out var m) && m;
 
         bool isYoutubeDomain = host.Contains("youtube.com", StringComparison.OrdinalIgnoreCase);
+        bool isYoutubeApi = isYoutubeDomain && request.RequestUri.AbsolutePath.Contains("/youtubei/v1/");
 
         if (!request.Headers.Contains("User-Agent"))
         {
             request.Headers.Add("User-Agent", YoutubeClientUtils.UaWeb);
         }
 
-        if (!request.Headers.Contains("Accept-Language"))
+        if (isYoutubeApi)
+        {
+            if (request.Headers.Contains("Accept-Language"))
+                request.Headers.Remove("Accept-Language");
+            request.Headers.Add("Accept-Language", InvariantAcceptLanguage);
+        }
+        else if (!request.Headers.Contains("Accept-Language"))
+        {
             request.Headers.Add("Accept-Language", "en,ru;q=0.9");
+        }
 
         if (isYoutubeDomain && !isMobileClient && authService is { IsAuthenticated: true })
         {
@@ -154,8 +185,6 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
                 request.Headers.Remove("X-Goog-Visitor-Id");
             request.Headers.Add("X-Goog-Visitor-Id", visitorData);
         }
-
-        bool isYoutubeApi = isYoutubeDomain && request.RequestUri.AbsolutePath.Contains("/youtubei/v1/");
 
         if (request.Method == HttpMethod.Post &&
                isYoutubeApi &&

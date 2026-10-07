@@ -6,21 +6,20 @@ using System.Text.Json;
 using LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Обеспечивает централизованный высокопроизводительный парсинг локализованных данных YouTube.
+/// Обеспечивает централизованный высокопроизводительный парсинг данных YouTube.
 /// </summary>
 internal static class YoutubeParsingHelpers
 {
     public static readonly string[] DateFormats =
     [
-        "d MMM yyyy 'г.'",
-        "d MMMM yyyy 'г.'",
-        "d MMM yyyy",
-        "d MMMM yyyy",
         "MMM d, yyyy",
+        "MMM dd, yyyy",
         "MMMM d, yyyy",
+        "MMMM dd, yyyy",
+        "M/d/yyyy",
+        "yyyy-MM-dd"
     ];
 
-    public static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     public static readonly CultureInfo EnCulture = CultureInfo.GetCultureInfo("en-US");
 
     /// <summary>
@@ -67,33 +66,75 @@ internal static class YoutubeParsingHelpers
         return new string(buf[..pos]);
     }
 
+    /// <summary>
+    /// Проверяет, представляет ли переданная строка относительную дату английского API InnerTube.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsRelativeDate(string text)
+    public static bool IsRelativeDate(ReadOnlySpan<char> span)
     {
-        if (string.IsNullOrEmpty(text)) return false;
-        var span = text.AsSpan();
-        return span.Contains("сегодня".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("today".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("вчера".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("yesterday".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("назад".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("ago".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("час".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("hour".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("минут".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("minute".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("день".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("day".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("недел".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("week".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("месяц".AsSpan(), StringComparison.OrdinalIgnoreCase)
-            || span.Contains("month".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        var trimmed = span.Trim();
+        if (trimmed.IsEmpty) return false;
+
+        return trimmed.Equals("today", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("yesterday", StringComparison.OrdinalIgnoreCase)
+            || trimmed.EndsWith("ago", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Проверяет, представляет ли переданная строка относительную дату английского API InnerTube.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsRelativeDate(string? text) =>
+        !string.IsNullOrEmpty(text) && IsRelativeDate(text.AsSpan());
+
+    /// <summary>
+    /// Выполняет детерминированный разбор английской относительной даты InnerTube без выделения памяти в куче.
+    /// </summary>
+    public static DateOnly? ParseRelativeDate(ReadOnlySpan<char> span, DateTime nowUtc)
+    {
+        var trimmed = span.Trim();
+        if (trimmed.IsEmpty) return null;
+
+        if (trimmed.Equals("today", StringComparison.OrdinalIgnoreCase))
+            return DateOnly.FromDateTime(nowUtc);
+
+        if (trimmed.Equals("yesterday", StringComparison.OrdinalIgnoreCase))
+            return DateOnly.FromDateTime(nowUtc.AddDays(-1));
+
+        if (trimmed.EndsWith("ago", StringComparison.OrdinalIgnoreCase))
+        {
+            var val = ParseLongFromText(trimmed);
+            if (!val.HasValue) return null;
+
+            int delta = (int)Math.Min(val.Value, int.MaxValue);
+
+            if (trimmed.Contains("week", StringComparison.OrdinalIgnoreCase))
+                return DateOnly.FromDateTime(nowUtc.AddDays(-delta * 7));
+
+            if (trimmed.Contains("month", StringComparison.OrdinalIgnoreCase))
+                return DateOnly.FromDateTime(nowUtc.AddMonths(-delta));
+
+            if (trimmed.Contains("year", StringComparison.OrdinalIgnoreCase))
+                return DateOnly.FromDateTime(nowUtc.AddYears(-delta));
+
+            if (trimmed.Contains("day", StringComparison.OrdinalIgnoreCase))
+                return DateOnly.FromDateTime(nowUtc.AddDays(-delta));
+
+            if (trimmed.Contains("hour", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Contains("minute", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Contains("second", StringComparison.OrdinalIgnoreCase))
+            {
+                return DateOnly.FromDateTime(nowUtc);
+            }
+        }
+
+        return null;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int? ParseYearFromText(string? text)
+    public static int? ParseYearFromText(ReadOnlySpan<char> text)
     {
-        if (string.IsNullOrEmpty(text) || text.Length < 4) return null;
+        if (text.Length < 4) return null;
 
         for (int i = 0; i <= text.Length - 4; i++)
         {
@@ -119,9 +160,13 @@ internal static class YoutubeParsingHelpers
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static long? ParseLongFromText(string? text)
+    public static int? ParseYearFromText(string? text) =>
+        string.IsNullOrEmpty(text) ? null : ParseYearFromText(text.AsSpan());
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static long? ParseLongFromText(ReadOnlySpan<char> text)
     {
-        if (string.IsNullOrEmpty(text)) return null;
+        if (text.IsEmpty) return null;
 
         long result = 0;
         bool found = false;
@@ -142,4 +187,8 @@ internal static class YoutubeParsingHelpers
 
         return found ? result : null;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static long? ParseLongFromText(string? text) =>
+        string.IsNullOrEmpty(text) ? null : ParseLongFromText(text.AsSpan());
 }
