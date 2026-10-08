@@ -142,172 +142,187 @@
         </StackPanel>
 
         <!-- ITEMS REPEATER -->
-        <ir:ItemsRepeater x:Name="MainRepeater"
-            ItemsSource="{Binding Items, ElementName=Root}"
-            VerticalCacheLength="1.0"
-            TextOptions.BaselinePixelAlignment="Unaligned"
-            TextOptions.TextHintingMode="None">
+        <Panel>
+            <ir:ItemsRepeater x:Name="MainRepeater"
+                ItemsSource="{Binding Items, ElementName=Root}"
+                VerticalCacheLength="1.0"
+                TextOptions.BaselinePixelAlignment="Unaligned"
+                TextOptions.TextHintingMode="None">
 
-            <ir:ItemsRepeater.Layout>
-                <StackLayout Spacing="0" />
-            </ir:ItemsRepeater.Layout>
+                <ir:ItemsRepeater.Layout>
+                    <StackLayout Spacing="0" />
+                </ir:ItemsRepeater.Layout>
 
-            <ir:ItemsRepeater.ItemTemplate>
-                <DataTemplate x:DataType="svm:TrackItemViewModel">
-                    <Border Classes="track-row"
-                        Classes.is-active="{Binding IsActive}"
-                        Classes.is-playing="{Binding IsPlaying}"
-                        Classes.is-selected="{Binding IsSelected}"
-                        Classes.menu-open="{Binding IsMenuOpen}"
-                        Height="60"
-                        UseLayoutRounding="True"
-                        PointerPressed="OnItemPointerPressed"
-                        PointerMoved="OnItemPointerMoved"
-                        PointerReleased="OnItemPointerReleased"
-                        DoubleTapped="OnItemDoubleTapped">
+                <ir:ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="svm:TrackItemViewModel">
+                        <Border Classes="track-row"
+                            Classes.is-active="{Binding IsActive}"
+                            Classes.is-playing="{Binding IsPlaying}"
+                            Classes.is-selected="{Binding IsSelected}"
+                            Classes.menu-open="{Binding IsMenuOpen}"
+                            Height="60"
+                            UseLayoutRounding="True"
+                            PointerPressed="OnItemPointerPressed"
+                            PointerMoved="OnItemPointerMoved"
+                            PointerReleased="OnItemPointerReleased"
+                            DoubleTapped="OnItemDoubleTapped">
 
-                        <Panel>
-                            <!-- Оптимизированные фиксированные колонки: 52px, *, 44px, 40px, 56px -->
-                            <Grid ColumnDefinitions="52, *, 44, 40, 56">
+                            <Panel>
+                                <!-- Оптимизированные фиксированные колонки: 52px, *, 44px, 40px,
+                                56px -->
+                                <Grid ColumnDefinitions="52, *, 44, 40, 56">
 
-                                <!-- COL 0: ОБЛОЖКА / КНОПКА PLAY -->
-                                <Button Grid.Column="0"
-                                    Classes="cover-btn"
-                                    Width="44" Height="44"
-                                    Margin="8,0,0,0"
-                                    VerticalAlignment="Center"
-                                    Background="{DynamicResource BgSkeletonBrush}"
-                                    Command="{Binding PlayCommand}"
-                                    ToolTip.Tip="{Binding L[Player_Play]}">
-                                    <Panel>
-                                        <Image Stretch="UniformToFill"
-                                            RenderOptions.BitmapInterpolationMode="LowQuality"
-                                            ctrl:SmartImage.Quality="Low"
-                                            ctrl:SmartImage.Debounce="80"
-                                            ctrl:SmartImage.Source="{Binding ThumbnailUrl}" />
-
-                                        <Border Classes="cover-overlay"
-                                            Background="{DynamicResource BgOverlayBrush}"
-                                            IsHitTestVisible="False">
-                                            <PathIcon Width="24" Height="24"
-                                                Classes.playing="{Binding IsPlaying}"
-                                                Foreground="{DynamicResource TextPrimaryBrush}"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center" />
-                                        </Border>
-                                    </Panel>
-                                </Button>
-
-                                <!-- COL 1: НАЗВАНИЕ + АВТОР -->
-                                <StackPanel Grid.Column="1"
-                                    Orientation="Vertical"
-                                    VerticalAlignment="Center"
-                                    Margin="12,0"
-                                    Spacing="2"
-                                    IsHitTestVisible="False">
-                                    <TextBlock
-                                        Text="{Binding Title}"
-                                        Classes="track-title"
-                                        TextWrapping="NoWrap"
-                                        TextTrimming="CharacterEllipsis"
-                                        MaxLines="1"
-                                        FontSize="14" />
-                                    <TextBlock
-                                        Text="{Binding Author}"
-                                        Foreground="{DynamicResource TextMutedBrush}"
-                                        TextWrapping="NoWrap"
-                                        TextTrimming="CharacterEllipsis"
-                                        MaxLines="1"
-                                        FontSize="12" />
-                                </StackPanel>
-
-                                <!-- COL 2: СТАТУС КЭША / ЗАГРУЗКА -->
-                                <Panel Grid.Column="2"
-                                    Width="32" Height="16"
-                                    VerticalAlignment="Center"
-                                    Margin="6,0"
-                                    IsHitTestVisible="False">
-
-                                    <PathIcon
-                                        Width="16" Height="16"
-                                        HorizontalAlignment="Center"
+                                    <!-- COL 0: ОБЛОЖКА / КНОПКА PLAY -->
+                                    <Button Grid.Column="0"
+                                        Classes="cover-btn"
+                                        Width="44" Height="44"
+                                        Margin="8,0,0,0"
                                         VerticalAlignment="Center"
-                                        Foreground="{DynamicResource AccentBrush}"
-                                        Data="{Binding CacheIconGeometry}"
-                                        IsVisible="{Binding HasCacheIcon}"
-                                        ToolTip.Tip="{Binding CacheIconTooltip}" />
+                                        Background="{DynamicResource BgSkeletonBrush}"
+                                        Command="{Binding PlayCommand}"
+                                        ToolTip.Tip="{Binding L[Player_Play]}">
+                                        <Panel>
+                                            <Image Stretch="UniformToFill"
+                                                RenderOptions.BitmapInterpolationMode="LowQuality"
+                                                ctrl:SmartImage.Quality="Low"
+                                                ctrl:SmartImage.Debounce="80"
+                                                ctrl:SmartImage.Source="{Binding ThumbnailUrl}" />
 
-                                    <Border
-                                        Width="32" Height="3"
-                                        HorizontalAlignment="Center"
+                                            <Border Classes="cover-overlay"
+                                                Background="{DynamicResource BgOverlayBrush}"
+                                                IsHitTestVisible="False">
+                                                <PathIcon Width="24" Height="24"
+                                                    Classes.playing="{Binding IsPlaying}"
+                                                    Foreground="{DynamicResource TextPrimaryBrush}"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center" />
+                                            </Border>
+                                        </Panel>
+                                    </Button>
+
+                                    <!-- COL 1: НАЗВАНИЕ + АВТОР -->
+                                    <StackPanel Grid.Column="1"
+                                        Orientation="Vertical"
                                         VerticalAlignment="Center"
-                                        Background="{DynamicResource BgSecondaryBrush}"
-                                        CornerRadius="1.5"
-                                        ClipToBounds="True"
-                                        IsVisible="{Binding IsDownloading}">
+                                        Margin="12,0"
+                                        Spacing="2"
+                                        IsHitTestVisible="False">
+                                        <TextBlock
+                                            Text="{Binding Title}"
+                                            Classes="track-title"
+                                            TextWrapping="NoWrap"
+                                            TextTrimming="CharacterEllipsis"
+                                            MaxLines="1"
+                                            FontSize="14" />
+                                        <TextBlock
+                                            Text="{Binding Author}"
+                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            TextWrapping="NoWrap"
+                                            TextTrimming="CharacterEllipsis"
+                                            MaxLines="1"
+                                            FontSize="12" />
+                                    </StackPanel>
+
+                                    <!-- COL 2: СТАТУС КЭША / ЗАГРУЗКА -->
+                                    <Panel Grid.Column="2"
+                                        Width="32" Height="16"
+                                        VerticalAlignment="Center"
+                                        Margin="6,0"
+                                        IsHitTestVisible="False">
+
+                                        <PathIcon
+                                            Width="16" Height="16"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Foreground="{DynamicResource AccentBrush}"
+                                            Data="{Binding CacheIconGeometry}"
+                                            IsVisible="{Binding HasCacheIcon}"
+                                            ToolTip.Tip="{Binding CacheIconTooltip}" />
+
                                         <Border
                                             Width="32" Height="3"
-                                            HorizontalAlignment="Left"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Background="{DynamicResource BgSecondaryBrush}"
                                             CornerRadius="1.5"
-                                            Background="{DynamicResource AccentBrush}"
-                                            RenderTransformOrigin="0, 0.5">
-                                            <Border.RenderTransform>
-                                                <ScaleTransform ScaleX="{Binding DownloadProgress}" />
-                                            </Border.RenderTransform>
+                                            ClipToBounds="True"
+                                            IsVisible="{Binding IsDownloading}">
+                                            <Border
+                                                Width="32" Height="3"
+                                                HorizontalAlignment="Left"
+                                                CornerRadius="1.5"
+                                                Background="{DynamicResource AccentBrush}"
+                                                RenderTransformOrigin="0, 0.5">
+                                                <Border.RenderTransform>
+                                                    <ScaleTransform
+                                                        ScaleX="{Binding DownloadProgress}" />
+                                                </Border.RenderTransform>
+                                            </Border>
                                         </Border>
-                                    </Border>
-                                </Panel>
+                                    </Panel>
 
-                                <!-- COL 3: ЛАЙК -->
-                                <Button Grid.Column="3"
-                                    Classes="like-btn"
-                                    Classes.is-liked="{Binding IsLiked}"
-                                    Width="28" Height="28"
-                                    VerticalAlignment="Center"
-                                    Margin="6,0"
-                                    Command="{Binding ToggleLikeCommand}"
-                                    ToolTip.Tip="{Binding L[Track_ToggleLike]}">
-                                    <PathIcon Width="16" Height="16" IsHitTestVisible="False" />
-                                </Button>
+                                    <!-- COL 3: ЛАЙК -->
+                                    <Button Grid.Column="3"
+                                        Classes="like-btn"
+                                        Classes.is-liked="{Binding IsLiked}"
+                                        Width="28" Height="28"
+                                        VerticalAlignment="Center"
+                                        Margin="6,0"
+                                        Command="{Binding ToggleLikeCommand}"
+                                        ToolTip.Tip="{Binding L[Track_ToggleLike]}">
+                                        <PathIcon Width="16" Height="16" IsHitTestVisible="False" />
+                                    </Button>
 
-                                <!-- COL 4: ВРЕМЯ И ОПЦИИ -->
-                                <TextBlock Grid.Column="4"
-                                    Classes="duration-text"
-                                    Width="46"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center"
-                                    Margin="0,0,10,0"
-                                    TextAlignment="Center"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    FontSize="12"
-                                    Text="{Binding FormattedDuration}"
+                                    <!-- COL 4: ВРЕМЯ И ОПЦИИ -->
+                                    <TextBlock Grid.Column="4"
+                                        Classes="duration-text"
+                                        Width="46"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,10,0"
+                                        TextAlignment="Center"
+                                        Foreground="{DynamicResource TextMutedBrush}"
+                                        FontSize="12"
+                                        Text="{Binding FormattedDuration}"
+                                        IsHitTestVisible="False" />
+
+                                    <Button Grid.Column="4"
+                                        Classes="more-btn"
+                                        Classes.active="{Binding IsMenuOpen}"
+                                        Width="32" Height="32"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,8,0"
+                                        Click="OnMoreButtonClicked"
+                                        ToolTip.Tip="{Binding L[Track_MoreOptions]}">
+                                        <PathIcon Width="20" Height="20"
+                                            Data="{StaticResource Icon.DotsHorizontal}" />
+                                    </Button>
+
+                                </Grid>
+
+                                <!-- АУДИО-РЕАКТИВНАЯ ВОЛНА ПО НИЖНЕЙ ГРАНИ ТРЕКА -->
+                                <ctrl:AudioWaveBorder Margin="-8,-6"
+                                    IsActive="{Binding IsActive}"
+                                    IsPlaying="{Binding IsPlaying}"
+                                    IsSelected="{Binding IsSelected}"
                                     IsHitTestVisible="False" />
+                            </Panel>
+                        </Border>
+                    </DataTemplate>
+                </ir:ItemsRepeater.ItemTemplate>
+            </ir:ItemsRepeater>
 
-                                <Button Grid.Column="4"
-                                    Classes="more-btn"
-                                    Classes.active="{Binding IsMenuOpen}"
-                                    Width="32" Height="32"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center"
-                                    Margin="0,0,8,0"
-                                    Click="OnMoreButtonClicked"
-                                    ToolTip.Tip="{Binding L[Track_MoreOptions]}">
-                                    <PathIcon Width="20" Height="20"
-                                        Data="{StaticResource Icon.DotsHorizontal}" />
-                                </Button>
-
-                            </Grid>
-
-                            <!-- АУДИО-РЕАКТИВНАЯ ВОЛНА ПО НИЖНЕЙ ГРАНИ ТРЕКА -->
-                            <ctrl:AudioWaveBorder Margin="-8,-6"
-                                IsActive="{Binding IsActive}"
-                                IsPlaying="{Binding IsPlaying}"
-                                IsSelected="{Binding IsSelected}"
-                                IsHitTestVisible="False" />
-                        </Panel>
-                    </Border>
-                </DataTemplate>
-            </ir:ItemsRepeater.ItemTemplate>
-        </ir:ItemsRepeater>
+            <!-- ЕДИНАЯ ЛИНИЯ-ИНДИКАТОР ВСТАВКИ МЕЖДУ ТРЕКАМИ -->
+            <Border x:Name="DropIndicatorLine"
+                Height="2"
+                CornerRadius="1"
+                Background="{DynamicResource AccentBrush}"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Top"
+                IsVisible="False"
+                IsHitTestVisible="False"
+                Margin="8,0" />
+        </Panel>
     </DockPanel>
 </UserControl>

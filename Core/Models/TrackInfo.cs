@@ -298,7 +298,7 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
             if (!string.IsNullOrEmpty(fresh.LocalPath) && fresh.LocalPath != LocalPath)
                 LocalPath = fresh.LocalPath;
 
-            if (fresh.InPlaylists.Count > 0)
+            if (!InPlaylists.SetEquals(fresh.InPlaylists))
             {
                 InPlaylists.Clear();
                 foreach (var playlistId in fresh.InPlaylists)

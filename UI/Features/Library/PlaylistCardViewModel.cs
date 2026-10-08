@@ -286,7 +286,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         // ═══ Initial state from model ═══
         Name = playlist.Name;
         TrackCount = trackCount;
-        ThumbnailUrl = UpscaleThumbnailUrl(playlist.ThumbnailUrl);
+        ThumbnailUrl = playlist.ThumbnailUrl;
         Author = playlist.Author;
 
         ApplyOwnershipState(playlist);
@@ -391,7 +391,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         if (TrackCount != trackCount)
             TrackCount = trackCount;
 
-        var newUrl = UpscaleThumbnailUrl(playlist.ThumbnailUrl);
+        var newUrl = playlist.ThumbnailUrl;
         if (ThumbnailUrl != newUrl)
         {
             Playlist.ThumbnailUrl = playlist.ThumbnailUrl;
@@ -474,22 +474,6 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         AuthorTooltip = hasAuthor
             ? string.Format(LocalizationService.Instance["Playlist_Foreign_Tooltip"], author)
             : null;
-    }
-
-    /// <summary>
-    /// Повышает разрешение YouTube-превью обложки.
-    /// </summary>
-    private static string? UpscaleThumbnailUrl(string? url)
-    {
-        if (string.IsNullOrEmpty(url)) return url;
-
-        if (url.Contains("hqdefault.jpg"))
-            return url.Replace("hqdefault.jpg", "maxresdefault.jpg");
-
-        if (url.Contains("mqdefault.jpg"))
-            return url.Replace("mqdefault.jpg", "maxresdefault.jpg");
-
-        return url;
     }
 
     /// <summary>

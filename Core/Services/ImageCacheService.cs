@@ -55,6 +55,11 @@ public sealed class ImageCacheService : IDisposable
     /// </summary>
     private readonly ConcurrentDictionary<ulong, Lazy<Task<Bitmap?>>> _pendingLoads = [];
 
+    /// <summary>
+    /// Дедупликация параллельных сетевых скачиваний на диск по хешу файла (независимо от decodeWidth).
+    /// </summary>
+    private readonly ConcurrentDictionary<ulong, Task> _pendingDiskDownloads = [];
+
     private long _currentDiskCacheBytes;
     private long _currentMemoryCacheBytes;
     private bool _isDisposed;
@@ -181,15 +186,37 @@ public sealed class ImageCacheService : IDisposable
 
         try
         {
-            await _downloadSemaphore.WaitAsync(ct).ConfigureAwait(false);
+            await EnsureDiskDownloadTaskAsync(url, diskHash, diskPath).WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch { }
+    }
+
+    private Task EnsureDiskDownloadTaskAsync(string url, ulong diskHash, string diskPath)
+    {
+        if (File.Exists(diskPath)) return Task.CompletedTask;
+
+        return _pendingDiskDownloads.GetOrAdd(diskHash, _ => DownloadThrottledAsync(url, diskHash, diskPath));
+    }
+
+    private async Task DownloadThrottledAsync(string url, ulong diskHash, string diskPath)
+    {
+        try
+        {
+            await _downloadSemaphore.WaitAsync(_appCts.Token).ConfigureAwait(false);
             try
             {
                 if (!File.Exists(diskPath))
-                    await DownloadDirectToDiskAsync(url, diskPath, ct);
+                    await DownloadDirectToDiskAsync(url, diskPath, _appCts.Token).ConfigureAwait(false);
             }
-            finally { _downloadSemaphore.Release(); }
+            finally
+            {
+                _downloadSemaphore.Release();
+            }
         }
-        catch { }
+        finally
+        {
+            _pendingDiskDownloads.TryRemove(diskHash, out _);
+        }
     }
 
     /// <summary>
@@ -211,14 +238,10 @@ public sealed class ImageCacheService : IDisposable
         {
             try
             {
-                await _downloadSemaphore.WaitAsync(ct).ConfigureAwait(false);
-
-                if (!File.Exists(diskPath))
-                    await DownloadDirectToDiskAsync(url, diskPath, ct).ConfigureAwait(false);
+                await EnsureDiskDownloadTaskAsync(url, diskHash, diskPath).WaitAsync(ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { return null; }
             catch { return null; }
-            finally { _downloadSemaphore.Release(); }
         }
 
         if (!File.Exists(diskPath)) return null;
@@ -232,7 +255,14 @@ public sealed class ImageCacheService : IDisposable
 
                 try
                 {
-                    using var stream = File.OpenRead(diskPath);
+                    using var stream = new FileStream(
+                        diskPath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.Read | FileShare.Delete,
+                        bufferSize: 4096,
+                        useAsync: false);
+
                     return decodeWidth > 0
                         ? Bitmap.DecodeToWidth(stream, decodeWidth, BitmapInterpolationMode.LowQuality)
                         : new Bitmap(stream);
@@ -282,8 +312,21 @@ public sealed class ImageCacheService : IDisposable
                 await net.CopyToAsync(fs, ct).ConfigureAwait(false);
             }
 
-            File.Move(tmpPath, finalPath, overwrite: true);
-            Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
+            if (File.Exists(finalPath))
+            {
+                try { File.Delete(tmpPath); } catch { }
+                return;
+            }
+
+            try
+            {
+                File.Move(tmpPath, finalPath, overwrite: true);
+                Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException && File.Exists(finalPath))
+            {
+                try { File.Delete(tmpPath); } catch { }
+            }
         }
         catch
         {

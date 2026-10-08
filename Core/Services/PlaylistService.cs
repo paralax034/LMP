@@ -16,12 +16,24 @@ public sealed class PlaylistService
 
     private readonly Dictionary<string, HashSet<string>> _playlistTrackIndex = new(StringComparer.Ordinal);
     private readonly Lock _indexLock = new();
+    private readonly SemaphoreSlim _indexInitLock = new(1, 1);
     private volatile bool _isIndexInitialized;
 
     public event Action<Playlist>? OnPlaylistChanged;
     public event Action<string>? OnPlaylistRemoved;
 
     private string CurrentOwnerId => _auth.State.DisplayId;
+
+    private static Playlist CreateLikedPlaylist(string ownerId, int trackCount) => new()
+    {
+        Id = LibraryService.LikedPlaylistId,
+        StoredName = "Liked",
+        SyncMode = PlaylistSyncMode.LocalOnly,
+        Ownership = PlaylistOwnership.System,
+        TrackCount = trackCount,
+        OwnerChannelId = ownerId,
+        OwnerId = ownerId
+    };
 
     public PlaylistService(
         IPlaylistRepository playlists,
@@ -52,15 +64,7 @@ public sealed class PlaylistService
         if (id == LibraryService.LikedPlaylistId)
         {
             int count = await _tracks.CountLikedAsync(CurrentOwnerId, ct).ConfigureAwait(false);
-            return new Playlist
-            {
-                Id = LibraryService.LikedPlaylistId,
-                StoredName = "Liked",
-                SyncMode = PlaylistSyncMode.LocalOnly,
-                Ownership = PlaylistOwnership.System,
-                TrackCount = count,
-                OwnerId = CurrentOwnerId
-            };
+            return CreateLikedPlaylist(CurrentOwnerId, count);
         }
 
         return await _playlists.GetByIdAsync(id, CurrentOwnerId, ct).ConfigureAwait(false);
@@ -87,16 +91,7 @@ public sealed class PlaylistService
         var localList = await _playlists.GetAllWithCountsAsync(CurrentOwnerId, ct).ConfigureAwait(false);
         int likedCount = await _tracks.CountLikedAsync(CurrentOwnerId, ct).ConfigureAwait(false);
 
-        var likedPlaylist = new Playlist
-        {
-            Id = LibraryService.LikedPlaylistId,
-            StoredName = "Liked",
-            SyncMode = PlaylistSyncMode.LocalOnly,
-            Ownership = PlaylistOwnership.System,
-            TrackCount = likedCount,
-            OwnerChannelId = CurrentOwnerId,
-            OwnerId = CurrentOwnerId
-        };
+        var likedPlaylist = CreateLikedPlaylist(CurrentOwnerId, likedCount);
 
         var result = new List<(Playlist Playlist, int TrackCount)>(localList.Count + 1)
         {
@@ -124,35 +119,14 @@ public sealed class PlaylistService
     {
         if (playlistId == LibraryService.LikedPlaylistId)
         {
-            var likedTracks = await _tracks.GetLikedAsync(CurrentOwnerId, 10000, 0, ct).ConfigureAwait(false);
-            var ids = new List<string>(likedTracks.Count);
-            for (int i = 0; i < likedTracks.Count; i++)
-                ids.Add(likedTracks[i].Id);
-            return ids;
+            return await _tracks.GetLikedTrackIdsAsync(CurrentOwnerId, 10000, 0, ct).ConfigureAwait(false);
         }
 
         return await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
     }
 
-    public async Task<List<TrackInfo>> GetPlaylistTracksAsync(string playlistId, CancellationToken ct = default)
-    {
-        if (playlistId == LibraryService.LikedPlaylistId)
-        {
-            var liked = await _tracks.GetLikedAsync(CurrentOwnerId, 10000, 0, ct).ConfigureAwait(false);
-            for (int i = 0; i < liked.Count; i++)
-            {
-                var canonical = _registry.RegisterOrUpdate(liked[i]);
-                canonical.IsLiked = true;
-                liked[i] = canonical;
-            }
-            return liked;
-        }
-
-        var trackIds = await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
-        if (trackIds.Count == 0) return [];
-
-        return await _registry.PreloadAndReturnAsync(trackIds, ct).ConfigureAwait(false);
-    }
+    public Task<List<TrackInfo>> GetPlaylistTracksAsync(string playlistId, CancellationToken ct = default) =>
+            GetPlaylistTracksAsync(playlistId, limit: 10000, offset: 0, ct);
 
     public async Task<List<TrackInfo>> GetPlaylistTracksAsync(string playlistId, int limit, int offset = 0, CancellationToken ct = default)
     {
@@ -178,15 +152,12 @@ public sealed class PlaylistService
     {
         if (playlistId == LibraryService.LikedPlaylistId)
         {
-            var liked = await _tracks.GetLikedAsync(CurrentOwnerId, 10000, 0, ct).ConfigureAwait(false);
-            long sumTicks = 0;
-            for (int i = 0; i < liked.Count; i++)
-                sumTicks += liked[i].Duration.Ticks;
-            return TimeSpan.FromTicks(sumTicks);
+            var ticks = await _tracks.GetLikedTotalDurationTicksAsync(CurrentOwnerId, ct).ConfigureAwait(false);
+            return TimeSpan.FromTicks(ticks);
         }
 
-        var ticks = await _playlists.GetTotalDurationTicksAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
-        return TimeSpan.FromTicks(ticks);
+        var ticksTotal = await _playlists.GetTotalDurationTicksAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
+        return TimeSpan.FromTicks(ticksTotal);
     }
 
     public async Task<List<Playlist>> GetEditablePlaylistsAsync(CancellationToken ct = default)
@@ -210,23 +181,46 @@ public sealed class PlaylistService
     {
         if (_isIndexInitialized) return;
 
-        var playlists = await _playlists.GetAllAsync(CurrentOwnerId, ct).ConfigureAwait(false);
-        var newIndex = new Dictionary<string, HashSet<string>>(playlists.Count, StringComparer.Ordinal);
-
-        for (int i = 0; i < playlists.Count; i++)
+        await _indexInitLock.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            var p = playlists[i];
-            if (!p.IsEditable) continue;
-            var trackIds = await _playlists.GetTrackIdsAsync(p.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-            newIndex[p.Id] = new HashSet<string>(trackIds, StringComparer.Ordinal);
+            if (_isIndexInitialized) return;
+
+            var ownerId = CurrentOwnerId;
+            var playlists = await _playlists.GetAllAsync(ownerId, ct).ConfigureAwait(false);
+            var batchTrackIdsMap = await _playlists.GetAllPlaylistTrackIdsAsync(ownerId, ct).ConfigureAwait(false);
+
+            lock (_indexLock)
+            {
+                if (!string.Equals(CurrentOwnerId, ownerId, StringComparison.Ordinal))
+                    return;
+
+                for (int i = 0; i < playlists.Count; i++)
+                {
+                    var p = playlists[i];
+                    if (!p.IsEditable) continue;
+
+                    if (!batchTrackIdsMap.TryGetValue(p.Id, out var loadedTrackIds))
+                    {
+                        loadedTrackIds = new HashSet<string>(StringComparer.Ordinal);
+                    }
+
+                    if (_playlistTrackIndex.TryGetValue(p.Id, out var existingSet))
+                    {
+                        existingSet.UnionWith(loadedTrackIds);
+                    }
+                    else
+                    {
+                        _playlistTrackIndex[p.Id] = loadedTrackIds;
+                    }
+                }
+
+                _isIndexInitialized = true;
+            }
         }
-
-        lock (_indexLock)
+        finally
         {
-            _playlistTrackIndex.Clear();
-            foreach (var (k, v) in newIndex)
-                _playlistTrackIndex[k] = v;
-            _isIndexInitialized = true;
+            _indexInitLock.Release();
         }
     }
 

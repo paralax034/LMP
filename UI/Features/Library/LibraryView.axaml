@@ -478,7 +478,8 @@
                                     <Grid RowDefinitions="220,*">
                                         <!-- COVER AREA -->
                                         <Border Grid.Row="0" CornerRadius="7,7,0,0"
-                                            ClipToBounds="True" IsHitTestVisible="False" Margin="0">
+                                            ClipToBounds="True" IsHitTestVisible="False" Margin="0"
+                                            Background="{DynamicResource BgSkeletonBrush}">
                                             <Grid>
                                                 <Image
                                                     controls:SmartImage.Quality="High"

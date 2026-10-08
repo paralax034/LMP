@@ -58,6 +58,24 @@ public interface ITrackRepository
     Task<List<TrackInfo>> GetLikedAsync(string ownerId, int limit = 100, int offset = 0, CancellationToken ct = default);
 
     /// <summary>
+    /// Возвращает упорядоченный список идентификаторов лайкнутых треков без чтения и создания полных моделей.
+    /// </summary>
+    /// <param name="ownerId">Идентификатор владельца (аккаунта).</param>
+    /// <param name="limit">Максимальное количество возвращаемых записей.</param>
+    /// <param name="offset">Смещение выборки от начала.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Список идентификаторов лайкнутых треков.</returns>
+    Task<List<string>> GetLikedTrackIdsAsync(string ownerId, int limit = 10000, int offset = 0, CancellationToken ct = default);
+
+    /// <summary>
+    /// Возвращает суммарную продолжительность всех лайкнутых треков указанного аккаунта в тиках (Ticks) напрямую из базы данных.
+    /// </summary>
+    /// <param name="ownerId">Идентификатор владельца (аккаунта).</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Суммарное время воспроизведения в тиках.</returns>
+    Task<long> GetLikedTotalDurationTicksAsync(string ownerId, CancellationToken ct = default);
+
+    /// <summary>
     /// Возвращает список полностью загруженных на устройство треков.
     /// </summary>
     /// <param name="ownerId">Идентификатор владельца (аккаунта) для вычисления состояния лайков.</param>

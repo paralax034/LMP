@@ -21,7 +21,7 @@ public partial class TrackListControl
     {
         #region Constants
 
-        private const double ScrollStep = 130.0;
+        private const double ScrollStep = ItemHeight * 2; // Ровно 2 трека (124px) за щелчок мыши без накопительного сдвига
         private const double Smoothness = 16.0;
         private const double Epsilon = 0.5;
 
@@ -147,7 +147,11 @@ public partial class TrackListControl
             if (maxScroll <= 0) return;
 
             double direction = -Math.Sign(e.Delta.Y);
-            _targetY = Math.Clamp(_targetY + direction * ScrollStep, 0, maxScroll);
+            double desiredY = _targetY + direction * ScrollStep;
+
+            // Выравниваем целевую координату по сетке слотов треков, исключая субпиксельное накопление ошибки
+            double snappedY = Math.Round(desiredY / ItemHeight) * ItemHeight;
+            _targetY = Math.Clamp(snappedY, 0, maxScroll);
 
             StartAnimation();
         }

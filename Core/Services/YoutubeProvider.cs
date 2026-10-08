@@ -1015,6 +1015,7 @@ public partial class YoutubeProvider : IDisposable
         private int _isFetching;
 
         private readonly Queue<TrackInfo> _buffer = new();
+        private string? _lastContinuationToken;
 
         /// <summary>
         /// Указывает, есть ли ещё результаты для загрузки.
@@ -1102,19 +1103,19 @@ public partial class YoutubeProvider : IDisposable
                     {
                         var client = _provider.GetClient();
                         _enumerator ??= client.Search
-                            .GetResultBatchesAsync(_query, Filter, token)
+                            .GetResultBatchesAsync(_query, Filter, _lastContinuationToken, token)
                             .GetAsyncEnumerator(token);
 
                         moveNextOk = await _enumerator.MoveNextAsync().ConfigureAwait(false);
                     }
                     catch (ObjectDisposedException)
                     {
-                        // Сеть была пересобрана (RebuildAll). Сбрасываем кэшированный энумератор со старым клиентом
-                        Log.Info("[SearchSession] Client was rebuilt during active search session. Recovering enumerator...");
+                        // Сеть была пересобрана (RebuildAll). Восстанавливаем энумератор с сохраненного токена продолжения
+                        Log.Info("[SearchSession] Client was rebuilt during active search session. Recovering enumerator with continuation token...");
                         _enumerator = null;
                         var freshClient = _provider.GetClient();
                         _enumerator = freshClient.Search
-                            .GetResultBatchesAsync(_query, Filter, token)
+                            .GetResultBatchesAsync(_query, Filter, _lastContinuationToken, token)
                             .GetAsyncEnumerator(token);
 
                         moveNextOk = await _enumerator.MoveNextAsync().ConfigureAwait(false);
@@ -1127,6 +1128,7 @@ public partial class YoutubeProvider : IDisposable
                     }
 
                     var batch = _enumerator.Current;
+                    _lastContinuationToken = batch.ContinuationToken;
                     for (int i = 0; i < batch.Items.Count; i++)
                     {
                         if (_seenIds.Count >= _maxResults)

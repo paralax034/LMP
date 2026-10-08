@@ -75,24 +75,6 @@ public sealed class DialogService
         return null;
     }
 
-    /// <summary>
-    /// Безопасный показ модального Window-based диалога.
-    /// Включает Task.Yield() для корректной работы с Avalonia event loop.
-    /// </summary>
-    private static async Task<T?> ShowModalSafeAsync<T>(Window dialog, Window owner)
-    {
-        try
-        {
-            await Task.Yield();
-            return await dialog.ShowDialog<T?>(owner);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Dialog] Modal dialog error: {ex.Message}");
-            return default;
-        }
-    }
-
     #endregion
 
     #region Generic Choice Dialog (Overlay)
@@ -484,41 +466,6 @@ public sealed class DialogService
     #endregion
 
     #region Critical Dialogs (Modal Windows)
-
-    /// <summary>
-    /// Диалог ошибки недоступности стрима.
-    /// <para><b>МОДАЛЬНЫЙ:</b> блокирует ВСЁ окно.</para>
-    /// </summary>
-    public static async Task ShowStreamUnavailableAsync(StreamUnavailableException exception)
-    {
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            var window = GetMainWindow();
-            if (window == null) return;
-
-            var dialog = new StreamUnavailableDialog();
-            dialog.ConfigureForException(exception);
-            await ShowModalSafeAsync<object>(dialog, window);
-        });
-    }
-
-    /// <summary>
-    /// Диалог общей ошибки воспроизведения.
-    /// <para><b>МОДАЛЬНЫЙ:</b> блокирует ВСЁ окно.</para>
-    /// </summary>
-    public static async Task ShowPlaybackErrorAsync(
-        string videoId, string errorMessage, Exception? exception = null)
-    {
-        await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            var window = GetMainWindow();
-            if (window == null) return;
-
-            var dialog = new StreamUnavailableDialog();
-            dialog.ConfigureForError(videoId, errorMessage, exception);
-            await ShowModalSafeAsync<object>(dialog, window);
-        });
-    }
 
     /// <summary>
     /// Диалог требования авторизации.

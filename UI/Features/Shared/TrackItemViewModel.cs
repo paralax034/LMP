@@ -260,41 +260,64 @@ public sealed partial class TrackItemViewModel : ViewModelBase
             if (token.IsCancellationRequested || !IsMenuOpen)
                 return;
 
+            var items = new List<PlaylistMenuItemViewModel>(playlists.Count + 2);
+
+            var createItem = new PlaylistMenuItemViewModel(
+                playlistId: string.Empty,
+                name: L["Playlist_CreateNew"],
+                state: PlaylistMembershipState.None,
+                countText: string.Empty,
+                onToggle: _ => CreateNewPlaylistWithTargetsAsync(targets),
+                isCreateAction: true);
+            items.Add(createItem);
+            items.Add(PlaylistMenuItemViewModel.CreateSeparator());
+
+            bool isSingleTarget = targets.Count == 1;
+            var singleTargetTrack = isSingleTarget ? targets[0] : null;
+
+            for (int i = 0; i < playlists.Count; i++)
+            {
+                var p = playlists[i];
+                PlaylistMembershipState state;
+                string? countText = null;
+
+                if (isSingleTarget && singleTargetTrack != null)
+                {
+                    bool inPlaylist = singleTargetTrack.InPlaylists.Contains(p.Id);
+                    state = inPlaylist ? PlaylistMembershipState.All : PlaylistMembershipState.None;
+                }
+                else
+                {
+                    var status = _playlistService.GetMembershipStatus(p.Id, targets);
+                    state = status.State;
+                    if (targets.Count > 1 && state == PlaylistMembershipState.Indeterminate)
+                    {
+                        countText = $"{status.IncludedCount}/{status.TotalCount}";
+                    }
+                }
+
+                var item = new PlaylistMenuItemViewModel(
+                    playlistId: p.Id,
+                    name: p.Name,
+                    state: state,
+                    countText: countText,
+                    onToggle: vm => TogglePlaylistMembershipAsync(vm, targets));
+
+                items.Add(item);
+            }
+
+            if (token.IsCancellationRequested || !IsMenuOpen)
+                return;
+
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (token.IsCancellationRequested || !IsMenuOpen)
                     return;
 
                 PlaylistMenuItems.Clear();
-
-                var createItem = new PlaylistMenuItemViewModel(
-                    playlistId: string.Empty,
-                    name: L["Playlist_CreateNew"],
-                    state: PlaylistMembershipState.None,
-                    countText: string.Empty,
-                    onToggle: _ => CreateNewPlaylistWithTargetsAsync(targets),
-                    isCreateAction: true);
-                PlaylistMenuItems.Add(createItem);
-
-                PlaylistMenuItems.Add(PlaylistMenuItemViewModel.CreateSeparator());
-
-                for (int i = 0; i < playlists.Count; i++)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    var p = playlists[i];
-                    var (state, includedCount, totalCount) = _playlistService.GetMembershipStatus(p.Id, targets);
-
-                    string? countText = (targets.Count > 1 && state == PlaylistMembershipState.Indeterminate)
-                                        ? $"{includedCount}/{totalCount}"
-                                        : null;
-
-                    var item = new PlaylistMenuItemViewModel(
-                        playlistId: p.Id,
-                        name: p.Name,
-                        state: state,
-                        countText: countText,
-                        onToggle: vm => TogglePlaylistMembershipAsync(vm, targets));
-
-                    PlaylistMenuItems.Add(item);
+                    PlaylistMenuItems.Add(items[i]);
                 }
             });
         }

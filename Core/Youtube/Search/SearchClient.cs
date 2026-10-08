@@ -11,13 +11,23 @@ public sealed class SearchClient(HttpClient http)
     /// <summary>
     /// Возвращает батчи результатов поиска.
     /// </summary>
+    public IAsyncEnumerable<Batch<ISearchResult>> GetResultBatchesAsync(
+        string searchQuery,
+        SearchFilter searchFilter,
+        CancellationToken cancellationToken = default) =>
+        GetResultBatchesAsync(searchQuery, searchFilter, initialContinuationToken: null, cancellationToken);
+
+    /// <summary>
+    /// Возвращает батчи результатов поиска с поддержкой возобновления по токену продолжения.
+    /// </summary>
     public async IAsyncEnumerable<Batch<ISearchResult>> GetResultBatchesAsync(
         string searchQuery,
         SearchFilter searchFilter,
+        string? initialContinuationToken,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var encounteredIds = new HashSet<string>(64, StringComparer.Ordinal);
-        string? continuationToken = null;
+        string? continuationToken = initialContinuationToken;
 
         // Проверка музыкального контекста переведена на существующий метод расширения,
         // исключая дублирование логики маппинга энума.
@@ -45,10 +55,10 @@ public sealed class SearchClient(HttpClient http)
                 ProcessPlaylists(searchResults.Playlists, batchItems, encounteredIds);
             }
 
-            if (batchItems.Count > 0)
-                yield return Batch.Create(batchItems);
-
             continuationToken = searchResults.ContinuationToken;
+
+            if (batchItems.Count > 0)
+                yield return Batch.Create(batchItems, continuationToken);
 
         } while (!string.IsNullOrEmpty(continuationToken));
     }
@@ -134,5 +144,5 @@ public sealed class SearchClient(HttpClient http)
             or SearchFilter.MusicPlaylist;
 
     public IAsyncEnumerable<TrackInfo> GetVideosAsync(string query, CancellationToken ct = default) =>
-        GetResultBatchesAsync(query, SearchFilter.Video, ct).FlattenAsync().OfTypeAsync<TrackInfo>(ct);
+            GetResultBatchesAsync(query, SearchFilter.Video, ct).FlattenAsync().OfTypeAsync<TrackInfo>(ct);
 }

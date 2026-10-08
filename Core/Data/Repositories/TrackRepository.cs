@@ -215,6 +215,60 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <inheritdoc />
+    public async Task<List<string>> GetLikedTrackIdsAsync(string ownerId, int limit = 10000, int offset = 0, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        var result = new List<string>(Math.Min(limit, 256));
+        bool guest = IsGuest(ownerId);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT lt.TrackId
+            FROM LikedTracks lt
+            WHERE (@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest'))
+               OR (@isGuest = 0 AND lt.OwnerId = @ownerId)
+            ORDER BY lt.LikedAt DESC
+            LIMIT @limit OFFSET @offset;
+            """;
+
+        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
+        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        AddParameter(cmd, "@limit", limit);
+        AddParameter(cmd, "@offset", offset);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(reader.GetString(0));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<long> GetLikedTotalDurationTicksAsync(string ownerId, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        bool guest = IsGuest(ownerId);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT COALESCE(SUM(t.DurationTicks), 0)
+            FROM LikedTracks lt
+            INNER JOIN Tracks t ON lt.TrackId = t.Id
+            WHERE (@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest'))
+               OR (@isGuest = 0 AND lt.OwnerId = @ownerId);
+            """;
+
+        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
+        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+
+        var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return Convert.ToInt64(scalar);
+    }
+
+    /// <inheritdoc />
     public async Task<List<TrackInfo>> GetDownloadedAsync(string ownerId, int limit = 100, int offset = 0, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);

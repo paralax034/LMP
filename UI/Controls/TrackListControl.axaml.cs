@@ -52,7 +52,7 @@ public partial class TrackListControl : UserControl
     private Point _dragStartPoint;
     private int _dragSourceIndex = -1;
     private bool _isDragging;
-    private Control? _lastHighlightedItem;
+    private Border? _dropIndicatorLine;
     private PointerPressedEventArgs? _dragPressedArgs;
     private static IReadOnlyList<int>? _activeInProcessDragIndices;
 
@@ -290,6 +290,7 @@ public partial class TrackListControl : UserControl
         UpdateLocalizedTexts();
 
         _repeater = this.FindControl<ItemsRepeater>("MainRepeater");
+        _dropIndicatorLine = this.FindControl<Border>("DropIndicatorLine");
 
         SubscribeToCollectionChanged(Items);
         ResyncSelectionFromItems();
@@ -323,7 +324,6 @@ public partial class TrackListControl : UserControl
         _snapScroll = null;
         _repeater = null;
         _scrollViewer = null;
-        _lastHighlightedItem = null;
     }
 
     #endregion
@@ -1102,26 +1102,33 @@ public partial class TrackListControl : UserControl
         if (!EnableReordering || !HasTrackIndexData(e) || _repeater == null)
         {
             e.DragEffects = DragDropEffects.None;
+            if (_dropIndicatorLine != null) _dropIndicatorLine.IsVisible = false;
             return;
         }
 
         e.DragEffects = DragDropEffects.Move;
 
-        var (_, overItem) = ResolveDropTarget(e);
+        var (targetIndex, overItem, isBelow) = ResolveDropTarget(e);
 
-        if (_lastHighlightedItem != null && _lastHighlightedItem != overItem)
+        if (_dropIndicatorLine != null && _dropIndicatorLine.Parent is Visual indicatorParent)
         {
-            _lastHighlightedItem.Classes.Remove("drop-target");
-        }
+            double fallbackY = (targetIndex * ItemHeight) + (isBelow ? ItemHeight : 0);
+            double targetY = fallbackY;
 
-        if (overItem == null)
-        {
-            _lastHighlightedItem = null;
-            return;
-        }
+            if (overItem != null)
+            {
+                var pt = overItem.TranslatePoint(new Point(0, 0), indicatorParent);
+                if (pt.HasValue)
+                {
+                    targetY = isBelow
+                        ? pt.Value.Y + overItem.Bounds.Height + 1.0
+                        : pt.Value.Y - 1.0;
+                }
+            }
 
-        _lastHighlightedItem = overItem;
-        overItem.Classes.Add("drop-target");
+            _dropIndicatorLine.Margin = new Thickness(8, targetY, 8, 0);
+            _dropIndicatorLine.IsVisible = true;
+        }
 
         HandleAutoScroll(e);
     }
@@ -1148,28 +1155,47 @@ public partial class TrackListControl : UserControl
         var oldIndices = GetTrackIndices(e);
         if (oldIndices.Count == 0) return;
 
-        var (targetIndex, _) = ResolveDropTarget(e);
+        var (targetIndex, _, isBelow) = ResolveDropTarget(e);
         if (targetIndex < 0) return;
+
+        int finalTargetIndex = isBelow ? targetIndex + 1 : targetIndex;
 
         if (oldIndices.Count == 1)
         {
             int oldIndex = oldIndices[0];
-            if (oldIndex != targetIndex)
+            int maxValidIndex = (Items is IList l ? l.Count : 1) - 1;
+            int clampedTarget = Math.Clamp(finalTargetIndex, 0, Math.Max(0, maxValidIndex));
+
+            if (oldIndex != clampedTarget)
             {
                 if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
-                    await asyncCmd.ExecuteAsync((oldIndex, targetIndex));
+                    await asyncCmd.ExecuteAsync((oldIndex, clampedTarget));
                 else
-                    MoveItemCommand?.Execute((oldIndex, targetIndex));
+                    MoveItemCommand?.Execute((oldIndex, clampedTarget));
 
                 ResyncSelectionFromItems();
-                _selectionAnchorIndex = targetIndex;
-                _leadIndex = targetIndex;
+                _selectionAnchorIndex = clampedTarget;
+                _leadIndex = clampedTarget;
             }
         }
         else
         {
-            await ExecuteBatchMoveAsync(oldIndices, targetIndex);
+            await ExecuteBatchMoveAsync(oldIndices, finalTargetIndex);
         }
+
+        // Устранение дефекта ItemsRepeater: порт WinUI не обрабатывает NotifyCollectionChangedAction.Move,
+        // из-за чего элементы отбрасываются в координаты (-10000, -10000) до первого скролла.
+        // Микросдвиг с возвратом принудительно запускает EffectiveViewportChanged и восстанавливает треки.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_scrollViewer != null)
+            {
+                var cur = _scrollViewer.Offset;
+                double delta = cur.Y > 1.0 ? -0.1 : 0.1;
+                _scrollViewer.Offset = new Vector(cur.X, cur.Y + delta);
+                _scrollViewer.Offset = cur;
+            }
+        }, DispatcherPriority.Render);
     }
 
     private async Task ExecuteBatchMoveAsync(IReadOnlyList<int> sourceIndices, int targetIndex)
@@ -1189,13 +1215,19 @@ public partial class TrackListControl : UserControl
 
         int clampedTarget = Math.Clamp(targetIndex, 0, list.Count - 1);
         var targetVm = list[clampedTarget] as TrackItemViewModel;
-        if (targetVm == null) return;
+        if (targetVm == null || movingVms.Contains(targetVm)) return;
 
-        if (movingVms.Contains(targetVm)) return;
+        int initialTargetIdx = list.IndexOf(targetVm);
+        bool isMovingDownwards = sortedSources.First() < initialTargetIdx;
 
-        for (int i = 0; i < movingVms.Count; i++)
+        // При перемещении вниз обходим элементы в обратном порядке (снизу вверх),
+        // чтобы предотвратить инверсию относительного порядка треков внутри переносимой пачки
+        var orderedMovingVms = isMovingDownwards
+            ? movingVms.AsEnumerable().Reverse()
+            : movingVms;
+
+        foreach (var vm in orderedMovingVms)
         {
-            var vm = movingVms[i];
             int currentFrom = list.IndexOf(vm);
             int currentTarget = list.IndexOf(targetVm);
 
@@ -1221,56 +1253,44 @@ public partial class TrackListControl : UserControl
         _leadIndex = _selectionAnchorIndex;
     }
 
-    private (int index, Control? rowControl) ResolveDropTarget(DragEventArgs e)
+    private (int index, Control? rowControl, bool isBelow) ResolveDropTarget(DragEventArgs e)
     {
         if (_repeater == null || Items is not IList list || list.Count == 0)
-            return (-1, null);
+            return (-1, null, false);
 
+        // 1. Быстрый поиск через Visual Tree, если курсор находится над содержимым строки
         Visual? visual = e.Source as Visual;
         while (visual != null && visual != _repeater && visual != this)
         {
             if (visual is Border border && border.Classes.Contains("track-row") && border.DataContext is TrackItemViewModel vm)
             {
-                int index = list.IndexOf(vm);
-                if (index >= 0)
-                    return (index, border);
+                int idx = list.IndexOf(vm);
+                if (idx >= 0)
+                {
+                    var pos = e.GetPosition(border);
+                    bool isBelow = pos.Y >= (border.Bounds.Height / 2.0);
+                    return (idx, border, isBelow);
+                }
             }
             visual = visual.GetVisualParent();
         }
 
+        // 2. O(1) математический расчёт слота без слепых зон.
+        // Исключает падение в хвост списка при попадании курсора ровно в 2px зазор между треками.
         var repeaterPos = e.GetPosition(_repeater);
-        if (_repeater.InputHitTest(repeaterPos) is Visual hitVisual)
-        {
-            visual = hitVisual;
-            while (visual != null && visual != _repeater && visual != this)
-            {
-                if (visual is Border border && border.Classes.Contains("track-row") && border.DataContext is TrackItemViewModel vm)
-                {
-                    int index = list.IndexOf(vm);
-                    if (index >= 0)
-                        return (index, border);
-                }
-                visual = visual.GetVisualParent();
-            }
-        }
-
-        for (int i = 0; i < list.Count; i++)
-        {
-            if (_repeater.TryGetElement(i) is Control child)
-            {
-                var bounds = child.Bounds;
-                if (repeaterPos.Y >= bounds.Top && repeaterPos.Y <= bounds.Bottom)
-                {
-                    return (i, child);
-                }
-            }
-        }
-
         if (repeaterPos.Y < 0)
-            return (0, _repeater.TryGetElement(0));
+            return (0, _repeater.TryGetElement(0), false);
 
-        int lastIdx = list.Count - 1;
-        return (lastIdx, _repeater.TryGetElement(lastIdx));
+        int estimatedIndex = (int)(repeaterPos.Y / ItemHeight);
+        if (estimatedIndex >= list.Count)
+        {
+            int lastIdx = list.Count - 1;
+            return (lastIdx, _repeater.TryGetElement(lastIdx), true);
+        }
+
+        double offsetInSlot = repeaterPos.Y - (estimatedIndex * ItemHeight);
+        bool below = offsetInSlot >= (ItemHeight / 2.0);
+        return (estimatedIndex, _repeater.TryGetElement(estimatedIndex), below);
     }
 
     private static bool HasTrackIndexData(DragEventArgs e)
@@ -1316,9 +1336,7 @@ public partial class TrackListControl : UserControl
 
     private void CleanupDragStyles()
     {
-        if (_lastHighlightedItem == null) return;
-        _lastHighlightedItem.Classes.Remove("drop-target");
-        _lastHighlightedItem = null;
+        _dropIndicatorLine?.IsVisible = false;
     }
 
     private static bool IsInteractiveChild(Visual visual)

@@ -132,11 +132,13 @@ public sealed class PlaylistSyncService
                 return null;
             }
 
-            // Плейлист удален на YouTube (InnerTube вернул ответ без заголовка и треков)
+            // Если метаданные в облаке пустые, помечаем временную недоступность без безвозвратного отвязывания плейлиста.
+            // Деструктивный даунгрейд допустим только при подтвержденных ошибках 404/Unavailable в блоках catch.
             if (string.IsNullOrEmpty(fullData.Title) && fullData.Tracks.Count == 0)
             {
-                Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) has no metadata in cloud. Downgrading to LocalOnly...");
-                await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
+                Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) received empty metadata from cloud. Marking unavailable without downgrade.");
+                playlist.IsCloudUnavailable = true;
+                await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
                 return null;
             }
 

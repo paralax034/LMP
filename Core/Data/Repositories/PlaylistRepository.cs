@@ -144,6 +144,45 @@ public sealed class PlaylistRepository : IPlaylistRepository
     }
 
     /// <inheritdoc />
+    public async Task<Dictionary<string, HashSet<string>>> GetAllPlaylistTrackIdsAsync(string ownerId, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        bool guest = IsGuest(ownerId);
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT pt.PlaylistId, pt.TrackId
+            FROM PlaylistTracks pt
+            INNER JOIN Playlists p ON pt.PlaylistId = p.Id
+            WHERE ((@isGuest = 1 AND (p.OwnerId = '' OR p.OwnerId = 'guest'))
+                OR (@isGuest = 0 AND p.OwnerId = @ownerId))
+            ORDER BY pt.Position;
+            """;
+
+        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
+        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var playlistId = reader.GetString(0);
+            var trackId = reader.GetString(1);
+
+            if (!result.TryGetValue(playlistId, out var set))
+            {
+                set = new HashSet<string>(StringComparer.Ordinal);
+                result[playlistId] = set;
+            }
+
+            set.Add(trackId);
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<List<string>> GetTrackIdsAsync(string playlistId, string ownerId, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);

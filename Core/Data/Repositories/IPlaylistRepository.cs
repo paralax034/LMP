@@ -215,4 +215,13 @@ public interface IPlaylistRepository
     /// <param name="ct">Токен отмены асинхронной операции.</param>
     /// <returns>Страница идентификаторов треков плейлиста.</returns>
     Task<List<string>> GetTrackIdsAsync(string playlistId, string ownerId, int limit, int offset = 0, CancellationToken ct = default);
+
+    /// <summary>
+    /// Пакетно извлекает идентификаторы треков для всех плейлистов пользователя за единый SQL-запрос.
+    /// Исключает проблему N+1 запросов при инициализации обратного индекса связей.
+    /// </summary>
+    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns>Словарь, где ключ — ID плейлиста, а значение — набор ID входящих в него треков.</returns>
+    Task<Dictionary<string, HashSet<string>>> GetAllPlaylistTrackIdsAsync(string ownerId, CancellationToken ct = default);
 }
