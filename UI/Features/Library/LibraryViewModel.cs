@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using Avalonia.Threading;
+using LMP.Core.Exceptions;
 using LMP.Core.Youtube.Search;
 using LMP.UI.Dialogs;
 using LMP.UI.Features.Shell;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Library;
 
@@ -41,6 +43,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     private string _loadedOwnerId = string.Empty;
     private bool _isDirty;
     private bool _isViewActive = true;
+
+    private readonly YandexAuthService _yandexAuth;
+    private readonly YandexMusicClient _yandexClient;
+    private readonly PlaylistImportCoordinator _importCoordinator;
 
     #endregion
 
@@ -108,7 +114,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         AudioEngine audio,
         NotificationService notifications,
         PlaylistEditService editService,
-        PlayerControlService playerControl)
+        PlayerControlService playerControl,
+        YandexAuthService yandexAuth,
+        YandexMusicClient yandexClient,
+        PlaylistImportCoordinator importCoordinator)
     {
         _audio = audio;
         _library = library;
@@ -120,6 +129,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _notifications = notifications;
         _editService = editService;
         _playerControl = playerControl;
+
+        _yandexAuth = yandexAuth;
+        _yandexClient = yandexClient;
+        _importCoordinator = importCoordinator;
 
         IsAuthenticated = _auth.IsAuthenticated;
         _auth.OnAuthStateChanged += OnAuthChanged;
@@ -425,19 +438,14 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     }
 
 /// <summary>
-    /// Авторизованный перенос плейлистов из Яндекс Музыки с бесконечным циклом повтора ненайденных треков.
+    /// Авторизованный перенос плейлистов из Яндекс Музыки через нативные диалоги LMP.
     /// </summary>
     private async Task ImportYandexMusicAsync()
     {
         if (_isDisposed) return;
 
-        var authService = new YandexAuthService();
-        var yandexClient = new YandexMusicClient();
-        var matcher = new TrackMatcher(_youtube, _library);
-        var coordinator = new PlaylistImportCoordinator(_playlistService, matcher);
-
-        // 1. Открываем оверлей-диалог авторизации и выбора плейлиста
-        var dialogResult = await _dialog.ShowYandexImportDialogAsync(authService, yandexClient);
+        // 1. Открываем оверлей-диалог авторизации и выбора плейлиста через DI-зависимости
+        var dialogResult = await _dialog.ShowYandexImportDialogAsync(_yandexAuth, _yandexClient);
         if (dialogResult == null) return;
 
         var selectedPlaylist = dialogResult.SelectedPlaylist;
@@ -456,8 +464,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         try
         {
-            // 2. Выгружаем треки выбранного плейлиста из Яндекс Музыки
-            var (metadata, tracks) = await yandexClient.FetchPlaylistTracksAsync(token, uid, selectedPlaylist, ct);
+            // 2. Выгружаем треки выбранного плейлиста
+            var (metadata, tracks) = await _yandexClient.FetchPlaylistTracksAsync(token, uid, selectedPlaylist, ct);
 
             if (tracks.Count == 0)
             {
@@ -475,45 +483,37 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 });
             });
 
-            // 3. Запускаем первоначальный перенос
-            var summary = await coordinator.ImportAsync(
+            // 3. Запускаем параллельный перенос через внедрённый координатор
+            var summary = await _importCoordinator.ImportAsync(
                 metadata,
                 tracks,
-                yandexClient.GetTrafficUsage(),
+                _yandexClient.GetTrafficUsage(),
                 progressReporter,
                 ct: ct);
 
-            // 4. Цикл повторных попыток: пока есть ненайденные треки и пользователь жмёт «Попробовать заново»
+            // 4. Цикл повторных попыток для ненайденных треков
             while (summary.FailedTracks.Count > 0 && !ct.IsCancellationRequested && !_isDisposed)
             {
-                // Разблокируем интерфейс для работы с окном
                 Dispatcher.UIThread.Post(() => _mainWindow.UnlockNavigation());
 
-                // Показываем окно со списком оставшихся ненайденных песен
                 bool retry = await _dialog.ShowYandexImportFailedDialogAsync(summary.FailedTracks);
-
-                // Если нажали «Завершить» (пропустить) или закрыли окно — выходим из цикла
                 if (!retry || _isDisposed || ct.IsCancellationRequested)
                 {
                     break;
                 }
 
-                // Пользователь нажал «Попробовать заново» — блокируем интерфейс и запускаем повтор для остатка
                 _mainWindow.LockNavigation(SL["Import_Yandex_ProgressTitle"]);
                 SyncStatus = string.Format(SL["Import_Yandex_FetchingPlaylist"], selectedPlaylist.Title);
 
-                var retrySummary = await coordinator.ImportAsync(
+                var retrySummary = await _importCoordinator.ImportAsync(
                     metadata,
                     summary.FailedTracks,
-                    yandexClient.GetTrafficUsage(),
+                    _yandexClient.GetTrafficUsage(),
                     progressReporter,
                     targetPlaylistId: summary.PlaylistId,
                     isRetry: true,
                     ct: ct);
 
-                // Обновляем статистику:
-                // - к найденным прибавляем новые
-                // - в FailedTracks записываем только то, что НЕ удалось найти даже со второй попытки
                 summary = summary with
                 {
                     Matched = summary.Matched + retrySummary.Matched,
@@ -526,7 +526,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             SyncProgress = 1.0;
             SyncStatus = SL["Import_Yandex_Done"];
 
-            // 5. Финальное всплывающее уведомление
             await _notifications.ShowToastAsync(
                 titleKey: "Import_Yandex_Success_Title",
                 messageKey: "Import_Yandex_Success_Message",
@@ -540,7 +539,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
         catch (Exception ex)
         {
-            Log.Error($"[Import] Ошибка импорта: {ex.Message}");
+            Log.Error($"[Import] Import failure: {ex.Message}");
             await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], ex.Message);
         }
         finally

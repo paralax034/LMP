@@ -597,6 +597,12 @@ public sealed class AppEntry
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<PlayerBarViewModel>();
 
+        // --- External Music Import Services ---
+        services.AddSingleton<YandexAuthService>();
+        services.AddSingleton<YandexMusicClient>();
+        services.AddSingleton<TrackMatcher>();
+        services.AddSingleton<PlaylistImportCoordinator>();
+
         Log.Info("Services registered.");
     }
 }

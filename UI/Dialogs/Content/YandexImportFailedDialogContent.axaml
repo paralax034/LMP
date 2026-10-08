@@ -4,12 +4,12 @@
     xmlns:models="using:LMP.Core.Models"
     x:Class="LMP.UI.Dialogs.Content.YandexImportFailedDialogContent"
     x:DataType="vm:YandexImportFailedDialogViewModel"
-    Width="500">
+    Width="520">
 
     <Border Classes="card" Background="{DynamicResource BgPrimaryBrush}"
             BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
             CornerRadius="12" Padding="24" BoxShadow="{StaticResource CardShadow}">
-        <Grid RowDefinitions="Auto, Auto, *, Auto">
+        <Grid RowDefinitions="Auto, Auto, Auto, *, Auto">
 
             <!-- HEADER -->
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,12">
@@ -28,10 +28,24 @@
 
             <!-- SUBTITLE -->
             <TextBlock Grid.Row="1" Text="{Binding L[Import_Yandex_Failed_Desc]}"
-                       Classes="desc" FontSize="12" LineHeight="18" Margin="0,0,0,14" />
+                       Classes="desc" FontSize="12" LineHeight="18" Margin="0,0,0,10" />
+
+            <!-- TOOLBAR С КНОПКОЙ КОПИРОВАНИЯ -->
+            <Grid Grid.Row="2" Margin="0,0,0,8">
+                <Button HorizontalAlignment="Right" Command="{Binding CopyListCommand}"
+                        Classes="ghost-btn" Padding="8,4"
+                        ToolTip.Tip="{Binding L[Import_Yandex_CopyList_Tooltip]}">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <PathIcon Data="{StaticResource Icon.ContentCopy}" Width="13" Height="13"
+                                  Foreground="{DynamicResource AccentBrush}" />
+                        <TextBlock Text="{Binding L[Import_Yandex_CopyList]}" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentBrush}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
 
             <!-- FAILED TRACKS LIST -->
-            <Border Grid.Row="2" BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+            <Border Grid.Row="3" BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
                     CornerRadius="8" Padding="4" Background="Transparent" Margin="0,0,0,16">
                 <ScrollViewer MaxHeight="240" HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding FailedTracks}">
@@ -61,7 +75,7 @@
             </Border>
 
             <!-- FOOTER BUTTONS -->
-            <Grid Grid.Row="3" ColumnDefinitions="*,12,*">
+            <Grid Grid.Row="4" ColumnDefinitions="*,12,*">
                 <Button Grid.Column="0" Command="{Binding FinishCommand}"
                         Classes="accent" Height="36" HorizontalAlignment="Stretch">
                     <TextBlock Text="{Binding L[Import_Yandex_Finish]}" FontSize="12" />

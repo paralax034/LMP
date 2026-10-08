@@ -20,7 +20,9 @@ public sealed record ExternalPlaylist(
     string? Description,
     string? CoverUrl,
     string? HexColor,
-    int TrackCount)
+    int TrackCount,
+    long? OwnerUid = null,
+    string? AuthorName = null)
 {
     public bool IsLikedPlaylist => Id == "likes";
     public bool HasCover => !string.IsNullOrEmpty(CoverUrl) && !IsLikedPlaylist;

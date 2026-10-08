@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using LMP.Core.Helpers;
 using LMP.Core.Models;
@@ -117,6 +118,9 @@ public sealed partial class YandexImportDialogViewModel : ViewModelBase
         await Task.CompletedTask;
     }
 
+    [GeneratedRegex(@"access_token=([^&]+)")]
+    private static partial Regex AccessTokenRegex();
+
     private async Task PasteTokenFromClipboardAsync()
     {
         try
@@ -126,7 +130,7 @@ public sealed partial class YandexImportDialogViewModel : ViewModelBase
             {
                 if (text.Contains("access_token="))
                 {
-                    var match = System.Text.RegularExpressions.Regex.Match(text, @"access_token=([^&]+)");
+                    var match = AccessTokenRegex().Match(text);
                     if (match.Success)
                     {
                         text = match.Groups[1].Value;

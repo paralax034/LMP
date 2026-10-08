@@ -8,6 +8,8 @@ namespace LMP.Core.Services;
 /// </summary>
 public sealed class PlaylistImportCoordinator
 {
+    private const int FlushBatchSize = 25;
+
     private readonly PlaylistService _playlistService;
     private readonly TrackMatcher _matcher;
 
@@ -31,13 +33,15 @@ public sealed class PlaylistImportCoordinator
             return new ImportSummary(0, 0, 0, 0, sourceTraffic.BytesReceived, sourceTraffic.BytesSent, 0, 0, [], targetPlaylistId ?? string.Empty);
         }
 
-        // 1. Создаём новый или берем переданный плейлист для дозаписи
+        // 1. Создаём плейлист с локализованным описанием по умолчанию
         string playlistId = targetPlaylistId ?? string.Empty;
         if (string.IsNullOrEmpty(playlistId))
         {
+            string defaultDesc = LocalizationService.Instance["Import_Yandex_DefaultDescription"];
+
             var lmpPlaylist = await _playlistService.CreatePlaylistAsync(
                 name: playlistMetadata.Title,
-                description: playlistMetadata.Description ?? "Импортировано из Яндекс Музыки",
+                description: playlistMetadata.Description ?? defaultDesc,
                 thumbnailUrl: playlistMetadata.CoverUrl,
                 customColor: playlistMetadata.HexColor,
                 computedColor: playlistMetadata.HexColor,
@@ -51,6 +55,7 @@ public sealed class PlaylistImportCoordinator
         int matchedCount = 0;
         int localHits = 0;
         int networkSearches = 0;
+        int uncommittedCount = 0; // O(1) счетчик вместо медленного ConcurrentQueue.Count
 
         var saveQueue = new ConcurrentQueue<TrackInfo>();
         var failedTracks = new ConcurrentBag<ExternalTrack>();
@@ -73,15 +78,17 @@ public sealed class PlaylistImportCoordinator
             {
                 Interlocked.Increment(ref matchedCount);
                 saveQueue.Enqueue(matched);
+
+                // O(1) инкремент и сброс пакета без обхода очереди
+                if (Interlocked.Increment(ref uncommittedCount) >= FlushBatchSize)
+                {
+                    Interlocked.Exchange(ref uncommittedCount, 0);
+                    await FlushQueueAsync(playlistId, saveQueue, flushLock, token).ConfigureAwait(false);
+                }
             }
             else
             {
                 failedTracks.Add(track);
-            }
-
-            if (saveQueue.Count >= 25)
-            {
-                await FlushQueueAsync(playlistId, saveQueue, flushLock, token).ConfigureAwait(false);
             }
 
             progress?.Report(new ImportProgressReport(currentProcessed, total, $"{track.Artist} — {track.Title}"));
@@ -120,7 +127,7 @@ public sealed class PlaylistImportCoordinator
         await flushLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var batch = new List<TrackInfo>(32);
+            var batch = new List<TrackInfo>(FlushBatchSize + 8);
             while (queue.TryDequeue(out var t))
             {
                 batch.Add(t);
@@ -139,13 +146,13 @@ public sealed class PlaylistImportCoordinator
 
     private static void LogSummary(ImportSummary s)
     {
-        Log.Info("[ImportCoordinator] ═════════ СТАТИСТИКА ИМПОРТА ═════════");
-        Log.Info($"[ImportCoordinator] • Найдено треков:      {s.Matched} из {s.Total}");
-        Log.Info($"[ImportCoordinator] • Не найдено треков:   {s.FailedTracks.Count}");
-        Log.Info($"[ImportCoordinator] • Трафик источника:     {s.FormattedSourceTraffic}");
-        Log.Info($"[ImportCoordinator] • Local-First (L1):     {s.LocalHits} треков (0 байт сети)");
-        Log.Info($"[ImportCoordinator] • Суммарный трафик:     ~{s.FormattedTotalTraffic}");
-        Log.Info($"[ImportCoordinator] • Сэкономлено:          ~{s.FormattedSavedTraffic}");
-        Log.Info("[ImportCoordinator] ══════════════════════════════════════");
+        Log.Info("[ImportCoordinator] ═════════ IMPORT TRAFFIC METRICS ═════════");
+        Log.Info($"[ImportCoordinator] • Matched tracks:     {s.Matched} of {s.Total}");
+        Log.Info($"[ImportCoordinator] • Unresolved tracks:  {s.FailedTracks.Count}");
+        Log.Info($"[ImportCoordinator] • Source traffic:     {s.FormattedSourceTraffic}");
+        Log.Info($"[ImportCoordinator] • Local-First (L1):   {s.LocalHits} tracks (0 wire bytes)");
+        Log.Info($"[ImportCoordinator] • Total wire traffic: ~{s.FormattedTotalTraffic}");
+        Log.Info($"[ImportCoordinator] • Bandwidth saved:    ~{s.FormattedSavedTraffic}");
+        Log.Info("[ImportCoordinator] ═════════════════════════════════════════");
     }
 }

@@ -1,28 +1,27 @@
 ﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using LMP.Core.Exceptions;
 using LMP.Core.Models;
 
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Чистый клиент API Яндекс Музыки без привязки к плееру.
+/// Клиент API Яндекс Музыки. Потоковое чтение, поддержка HTTP/2 и строгая декомпозиция.
 /// </summary>
 public sealed class YandexMusicClient : IExternalMusicSource
 {
     public string ProviderName => "Yandex Music";
 
+    private readonly HttpClient _http;
     private long _bytesReceived;
     private long _bytesSent;
 
-    private static readonly HttpClient Http = new(new SocketsHttpHandler
+    public YandexMusicClient(NetworkManager networkManager)
     {
-        AutomaticDecompression = DecompressionMethods.All,
-        ConnectTimeout = TimeSpan.FromSeconds(15)
-    })
-    {
-        Timeout = TimeSpan.FromSeconds(30)
-    };
+        ArgumentNullException.ThrowIfNull(networkManager);
+        _http = networkManager.ApiClient;
+    }
 
     public (long BytesReceived, long BytesSent) GetTrafficUsage() => (_bytesReceived, _bytesSent);
 
@@ -33,16 +32,21 @@ public sealed class YandexMusicClient : IExternalMusicSource
 
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
-            throw new UnauthorizedAccessException("Токен недействителен или срок его действия истёк.");
+            throw new YandexAuthException();
         }
 
         resp.EnsureSuccessStatusCode();
 
-        var bytes = await ReadMeasuredBytesAsync(resp, ct).ConfigureAwait(false);
-        using var doc = JsonDocument.Parse(bytes);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
 
-        var account = doc.RootElement.GetProperty("result").GetProperty("account");
-        long uid = account.GetProperty("uid").GetInt64();
+        if (!doc.RootElement.TryGetProperty("result", out var res) ||
+            !res.TryGetProperty("account", out var account))
+        {
+            throw new YandexMusicException("Invalid account status response format.");
+        }
+
+        long uid = account.TryGetProperty("uid", out var uidProp) ? uidProp.GetInt64() : 0;
         string login = account.TryGetProperty("login", out var lp) ? lp.GetString() ?? "User" : "User";
         string fullName = account.TryGetProperty("fullName", out var fp) ? fp.GetString() ?? login : login;
 
@@ -52,68 +56,34 @@ public sealed class YandexMusicClient : IExternalMusicSource
     public async Task<IReadOnlyList<ExternalPlaylist>> GetPlaylistsAsync(string token, long uid, CancellationToken ct = default)
     {
         var result = new List<ExternalPlaylist>();
+        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
 
-        // 1. «Мне нравится» (системный плейлист)
-        try
+        // 1. Системный плейлист «Мне нравится»
+        var likedPlaylist = await FetchLikedPlaylistHeaderAsync(token, uid, ct).ConfigureAwait(false);
+        if (likedPlaylist != null)
         {
-            using var likesReq = CreateRequest($"https://api.music.yandex.net/users/{uid}/likes/tracks", token, HttpMethod.Get);
-            using var likesResp = await SendMeasuredAsync(likesReq, ct).ConfigureAwait(false);
+            result.Add(likedPlaylist);
+            seenKeys.Add("likes");
+        }
 
-            if (likesResp.IsSuccessStatusCode)
+        // 2. Созданные пользователем плейлисты
+        var userPlaylists = await FetchUserPlaylistsHeadersAsync(token, uid, ct).ConfigureAwait(false);
+        foreach (var p in userPlaylists)
+        {
+            if (seenKeys.Add($"{p.OwnerUid ?? uid}:{p.Id}"))
             {
-                var bytes = await ReadMeasuredBytesAsync(likesResp, ct).ConfigureAwait(false);
-                using var doc = JsonDocument.Parse(bytes);
-
-                if (doc.RootElement.TryGetProperty("result", out var res) &&
-                    res.TryGetProperty("library", out var lib) &&
-                    lib.TryGetProperty("tracks", out var arr))
-                {
-                    result.Add(new ExternalPlaylist(
-                        Id: "likes",
-                        Title: "Мне нравится",
-                        Description: "Понравившиеся треки из Яндекс Музыки",
-                        CoverUrl: null,
-                        HexColor: "#E02E2E",
-                        TrackCount: arr.GetArrayLength()));
-                }
+                result.Add(p);
             }
         }
-        catch (Exception ex)
-        {
-            Log.Warn($"[YandexClient] Не удалось прочитать лайки: {ex.Message}");
-        }
 
-        // 2. Пользовательские плейлисты
-        try
+        // 3. Любимые (сохранённые) плейлисты других авторов и кураторов
+        var favoritePlaylists = await FetchFavoritePlaylistsHeadersAsync(token, uid, ct).ConfigureAwait(false);
+        foreach (var p in favoritePlaylists)
         {
-            using var req = CreateRequest($"https://api.music.yandex.net/users/{uid}/playlists/list", token, HttpMethod.Get);
-            using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
-
-            if (resp.IsSuccessStatusCode)
+            if (seenKeys.Add($"{p.OwnerUid ?? uid}:{p.Id}"))
             {
-                var bytes = await ReadMeasuredBytesAsync(resp, ct).ConfigureAwait(false);
-                using var doc = JsonDocument.Parse(bytes);
-
-                if (doc.RootElement.TryGetProperty("result", out var arr) && arr.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var p in arr.EnumerateArray())
-                    {
-                        var kind = p.GetProperty("kind").GetInt64().ToString();
-                        var title = p.TryGetProperty("title", out var tp) ? tp.GetString() ?? "Плейлист" : "Плейлист";
-                        var count = p.TryGetProperty("trackCount", out var cp) ? cp.GetInt32() : 0;
-                        var desc = p.TryGetProperty("description", out var dp) ? dp.GetString() : null;
-
-                        string? cover = ExtractCoverUrl(p);
-                        string? hexColor = ExtractDerivedColor(p);
-
-                        result.Add(new ExternalPlaylist(kind, title, desc, cover, hexColor, count));
-                    }
-                }
+                result.Add(p);
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[YandexClient] Не удалось получить плейлисты: {ex.Message}");
         }
 
         return result;
@@ -127,38 +97,210 @@ public sealed class YandexMusicClient : IExternalMusicSource
     {
         if (targetPlaylist.Id == "likes")
         {
-            using var likesReq = CreateRequest($"https://api.music.yandex.net/users/{uid}/likes/tracks", token, HttpMethod.Get);
-            using var likesResp = await SendMeasuredAsync(likesReq, ct).ConfigureAwait(false);
-            likesResp.EnsureSuccessStatusCode();
-
-            var bytes = await ReadMeasuredBytesAsync(likesResp, ct).ConfigureAwait(false);
-            using var d = JsonDocument.Parse(bytes);
-
-            var trackIds = new List<string>(2500);
-            var tracksArr = d.RootElement.GetProperty("result").GetProperty("library").GetProperty("tracks");
-
-            foreach (var t in tracksArr.EnumerateArray())
-            {
-                string? id = t.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                if (!string.IsNullOrEmpty(id))
-                {
-                    string? albumId = t.TryGetProperty("albumId", out var aProp) ? aProp.GetString() : null;
-                    trackIds.Add(albumId != null ? $"{id}:{albumId}" : id);
-                }
-            }
-
-            var tracks = await FetchTracksByIdsChunkedAsync(token, trackIds, ct).ConfigureAwait(false);
+            var likedIds = await FetchLikedTrackIdsAsync(token, uid, ct).ConfigureAwait(false);
+            var tracks = await FetchTracksChunkedAsync(token, likedIds, ct).ConfigureAwait(false);
             return (targetPlaylist, tracks);
         }
 
-        using var req = CreateRequest($"https://api.music.yandex.net/users/{uid}/playlists/{targetPlaylist.Id}", token, HttpMethod.Get);
+        return await FetchCustomPlaylistWithTracksAsync(token, uid, targetPlaylist, ct).ConfigureAwait(false);
+    }
+
+    #region Decomposition Helpers
+
+    private async Task<ExternalPlaylist?> FetchLikedPlaylistHeaderAsync(string token, long uid, CancellationToken ct)
+    {
+        try
+        {
+            using var req = CreateRequest($"https://api.music.yandex.net/users/{uid}/likes/tracks", token, HttpMethod.Get);
+            using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+
+            if (doc.RootElement.TryGetProperty("result", out var res) &&
+                res.TryGetProperty("library", out var lib) &&
+                lib.TryGetProperty("tracks", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                return new ExternalPlaylist(
+                    Id: "likes",
+                    Title: LocalizationService.Instance["Import_Yandex_LikedTitle"],
+                    Description: LocalizationService.Instance["Import_Yandex_LikedDesc"],
+                    CoverUrl: null,
+                    HexColor: "#E02E2E",
+                    TrackCount: arr.GetArrayLength(),
+                    OwnerUid: uid);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[YandexClient] Failed to fetch liked tracks header: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private async Task<List<ExternalPlaylist>> FetchUserPlaylistsHeadersAsync(string token, long uid, CancellationToken ct)
+    {
+        var list = new List<ExternalPlaylist>();
+        try
+        {
+            using var req = CreateRequest($"https://api.music.yandex.net/users/{uid}/playlists/list", token, HttpMethod.Get);
+            using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return list;
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+
+            if (doc.RootElement.TryGetProperty("result", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                string defaultTitle = LocalizationService.Instance["Import_Yandex_DefaultPlaylistTitle"];
+
+                foreach (var p in arr.EnumerateArray())
+                {
+                    if (!p.TryGetProperty("kind", out var kindProp)) continue;
+                    var kind = kindProp.GetInt64().ToString();
+                    var title = p.TryGetProperty("title", out var tp) ? tp.GetString() ?? defaultTitle : defaultTitle;
+                    var count = p.TryGetProperty("trackCount", out var cp) ? cp.GetInt32() : 0;
+                    var desc = p.TryGetProperty("description", out var dp) ? dp.GetString() : null;
+
+                    string? cover = ExtractCoverUrl(p);
+                    string? hexColor = ExtractDerivedColor(p);
+
+                    list.Add(new ExternalPlaylist(kind, title, desc, cover, hexColor, count, OwnerUid: uid));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[YandexClient] Failed to fetch user playlists: {ex.Message}");
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Выгружает заголовки любимых (сохранённых) плейлистов из /users/{uid}/likes/playlists.
+    /// </summary>
+    private async Task<List<ExternalPlaylist>> FetchFavoritePlaylistsHeadersAsync(string token, long uid, CancellationToken ct)
+    {
+        var list = new List<ExternalPlaylist>();
+        try
+        {
+            using var req = CreateRequest($"https://api.music.yandex.net/users/{uid}/likes/playlists", token, HttpMethod.Get);
+            using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return list;
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+
+            if (doc.RootElement.TryGetProperty("result", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                string defaultTitle = LocalizationService.Instance["Import_Yandex_DefaultPlaylistTitle"];
+
+                foreach (var item in arr.EnumerateArray())
+                {
+                    // В likes/playlists объект плейлиста вложен в свойство "playlist"
+                    var p = item.TryGetProperty("playlist", out var plObj) && plObj.ValueKind == JsonValueKind.Object
+                        ? plObj
+                        : item;
+
+                    if (!p.TryGetProperty("kind", out var kindProp)) continue;
+                    var kind = kindProp.GetInt64().ToString();
+                    var title = p.TryGetProperty("title", out var tp) ? tp.GetString() ?? defaultTitle : defaultTitle;
+                    var count = p.TryGetProperty("trackCount", out var cp) ? cp.GetInt32() : 0;
+                    var desc = p.TryGetProperty("description", out var dp) ? dp.GetString() : null;
+
+                    long? playlistOwnerUid = null;
+                    string? ownerName = null;
+
+                    if (p.TryGetProperty("owner", out var ownerEl) && ownerEl.ValueKind == JsonValueKind.Object)
+                    {
+                        if (ownerEl.TryGetProperty("uid", out var ownerUidProp))
+                            playlistOwnerUid = ownerUidProp.GetInt64();
+
+                        if (ownerEl.TryGetProperty("name", out var nameProp))
+                            ownerName = nameProp.GetString();
+                        else if (ownerEl.TryGetProperty("login", out var loginProp))
+                            ownerName = loginProp.GetString();
+                    }
+
+                    // Если у плейлиста нет своего описания, но есть автор — формируем «от ИмяАвтора»
+                    if (string.IsNullOrWhiteSpace(desc) && !string.IsNullOrWhiteSpace(ownerName))
+                    {
+                        desc = string.Format(LocalizationService.Instance["Playlist_ByAuthor"], ownerName);
+                    }
+
+                    string? cover = ExtractCoverUrl(p);
+                    string? hexColor = ExtractDerivedColor(p);
+
+                    list.Add(new ExternalPlaylist(
+                        Id: kind,
+                        Title: title,
+                        Description: desc,
+                        CoverUrl: cover,
+                        HexColor: hexColor,
+                        TrackCount: count,
+                        OwnerUid: playlistOwnerUid ?? uid,
+                        AuthorName: ownerName));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[YandexClient] Failed to fetch favorite/liked playlists: {ex.Message}");
+        }
+
+        return list;
+    }
+
+    private async Task<List<string>> FetchLikedTrackIdsAsync(string token, long uid, CancellationToken ct)
+    {
+        using var req = CreateRequest($"https://api.music.yandex.net/users/{uid}/likes/tracks", token, HttpMethod.Get);
         using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
-        var plBytes = await ReadMeasuredBytesAsync(resp, ct).ConfigureAwait(false);
-        using var plDoc = JsonDocument.Parse(plBytes);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
 
-        var resultEl = plDoc.RootElement.GetProperty("result");
+        var trackIds = new List<string>(2500);
+        if (doc.RootElement.TryGetProperty("result", out var res) &&
+            res.TryGetProperty("library", out var lib) &&
+            lib.TryGetProperty("tracks", out var arr) &&
+            arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var t in arr.EnumerateArray())
+            {
+                if (t.TryGetProperty("id", out var idProp))
+                {
+                    string id = idProp.GetString() ?? idProp.GetInt64().ToString();
+                    string? albumId = t.TryGetProperty("albumId", out var aProp) ? aProp.GetString() ?? aProp.GetInt64().ToString() : null;
+                    trackIds.Add(albumId != null ? $"{id}:{albumId}" : id);
+                }
+            }
+        }
+
+        return trackIds;
+    }
+
+    private async Task<(ExternalPlaylist Metadata, IReadOnlyList<ExternalTrack> Tracks)> FetchCustomPlaylistWithTracksAsync(
+        string token, long uid, ExternalPlaylist targetPlaylist, CancellationToken ct)
+    {
+        // Подставляем реальный ownerUid плейлиста (критично для любимых плейлистов других авторов)
+        long effectiveOwnerUid = targetPlaylist.OwnerUid ?? uid;
+
+        using var req = CreateRequest($"https://api.music.yandex.net/users/{effectiveOwnerUid}/playlists/{targetPlaylist.Id}", token, HttpMethod.Get);
+        using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
+
+        if (!doc.RootElement.TryGetProperty("result", out var resultEl))
+        {
+            throw new YandexMusicException("Invalid playlist response payload.");
+        }
 
         string title = resultEl.TryGetProperty("title", out var titleProp) ? titleProp.GetString() ?? targetPlaylist.Title : targetPlaylist.Title;
         string? desc = resultEl.TryGetProperty("description", out var descProp) ? descProp.GetString() : targetPlaylist.Description;
@@ -179,7 +321,7 @@ public sealed class YandexMusicClient : IExternalMusicSource
                 }
                 else if (item.TryGetProperty("id", out var idProp))
                 {
-                    var id = idProp.GetString();
+                    var id = idProp.GetString() ?? idProp.GetInt64().ToString();
                     if (!string.IsNullOrEmpty(id)) unexpandedIds.Add(id);
                 }
             }
@@ -187,7 +329,7 @@ public sealed class YandexMusicClient : IExternalMusicSource
 
         if (unexpandedIds.Count > 0)
         {
-            var extra = await FetchTracksByIdsChunkedAsync(token, unexpandedIds, ct).ConfigureAwait(false);
+            var extra = await FetchTracksChunkedAsync(token, unexpandedIds, ct).ConfigureAwait(false);
             tracksList.AddRange(extra);
         }
 
@@ -203,15 +345,12 @@ public sealed class YandexMusicClient : IExternalMusicSource
         return (fullMetadata, tracksList);
     }
 
-    private async Task<List<ExternalTrack>> FetchTracksByIdsChunkedAsync(
-        string token,
-        IEnumerable<string> trackIds,
-        CancellationToken ct)
+    private async Task<List<ExternalTrack>> FetchTracksChunkedAsync(
+        string token, IEnumerable<string> trackIds, CancellationToken ct)
     {
         const int batchSize = 400;
         var result = new List<ExternalTrack>();
 
-        // Нарезка через BCL .Chunk() за один проход без GC Pressure
         foreach (var chunk in trackIds.Chunk(batchSize))
         {
             ct.ThrowIfCancellationRequested();
@@ -226,10 +365,10 @@ public sealed class YandexMusicClient : IExternalMusicSource
             using var resp = await SendMeasuredAsync(req, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) continue;
 
-            var bytes = await ReadMeasuredBytesAsync(resp, ct).ConfigureAwait(false);
-            using var d = JsonDocument.Parse(bytes);
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);
 
-            if (d.RootElement.TryGetProperty("result", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            if (doc.RootElement.TryGetProperty("result", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
                 foreach (var t in arr.EnumerateArray())
                 {
@@ -265,15 +404,9 @@ public sealed class YandexMusicClient : IExternalMusicSource
         }
 
         string artist = artistsList.Count > 0 ? string.Join(", ", artistsList) : "Unknown Artist";
-
-        int durationMs = 0;
-        if (el.TryGetProperty("durationMs", out var dp) && dp.TryGetInt32(out var ms))
-        {
-            durationMs = ms;
-        }
-
+        int durationMs = el.TryGetProperty("durationMs", out var dp) ? dp.GetInt32() : 0;
         string? cover = ExtractCoverUrl(el);
-        string? id = el.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+        string? id = el.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? idProp.GetInt64().ToString() : null;
 
         return new ExternalTrack(title, artist, TimeSpan.FromMilliseconds(durationMs), id, null, cover);
     }
@@ -287,7 +420,7 @@ public sealed class YandexMusicClient : IExternalMusicSource
         if (string.IsNullOrEmpty(uri)) return null;
 
         uri = uri.Replace("%%", "m1000x1000");
-        return uri.StartsWith("http") ? uri : $"https://{uri}";
+        return uri.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? uri : $"https://{uri}";
     }
 
     private static string? ExtractDerivedColor(JsonElement el)
@@ -307,7 +440,12 @@ public sealed class YandexMusicClient : IExternalMusicSource
 
     private static HttpRequestMessage CreateRequest(string url, string token, HttpMethod method)
     {
-        var req = new HttpRequestMessage(method, url);
+        var req = new HttpRequestMessage(method, url)
+        {
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+        };
+
         req.Headers.Authorization = new AuthenticationHeaderValue("OAuth", token);
         req.Headers.UserAgent.ParseAdd("YandexMusic/2024.12.1 (Android; 14)");
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -324,13 +462,15 @@ public sealed class YandexMusicClient : IExternalMusicSource
         }
 
         Interlocked.Add(ref _bytesSent, sentBytes);
-        return await Http.SendAsync(req, ct).ConfigureAwait(false);
+        var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+
+        if (resp.Content.Headers.ContentLength.HasValue)
+        {
+            Interlocked.Add(ref _bytesReceived, resp.Content.Headers.ContentLength.Value);
+        }
+
+        return resp;
     }
 
-    private async Task<byte[]> ReadMeasuredBytesAsync(HttpResponseMessage resp, CancellationToken ct)
-    {
-        var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-        Interlocked.Add(ref _bytesReceived, bytes.Length);
-        return bytes;
-    }
+    #endregion
 }

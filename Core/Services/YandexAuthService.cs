@@ -3,16 +3,13 @@
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Управление персистентным хранением OAuth-токена Яндекс Музыки через AtomicFile.
+/// Manages persistent storage of Yandex Music OAuth tokens via AtomicFile.
 /// </summary>
 public sealed class YandexAuthService
 {
     private static string TokenFilePath =>
         Path.Combine(Path.GetDirectoryName(G.FilePath.Database) ?? AppContext.BaseDirectory, "yandex_token.bin");
 
-    /// <summary>
-    /// Читает сохранённый токен с диска с автоматическим восстановлением из бэкапа при сбое.
-    /// </summary>
     public string? GetSavedToken()
     {
         try
@@ -28,15 +25,12 @@ public sealed class YandexAuthService
         }
         catch (Exception ex)
         {
-            Log.Warn($"[YandexAuth] Не удалось прочитать токен: {ex.Message}");
+            Log.Warn($"[YandexAuth] Failed to read token: {ex.Message}");
         }
 
         return null;
     }
 
-    /// <summary>
-    /// Атомарно сохраняет токен на диск с созданием резервной копии (.bak).
-    /// </summary>
     public void SaveToken(string token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
@@ -44,17 +38,14 @@ public sealed class YandexAuthService
         try
         {
             AtomicFile.WriteText(TokenFilePath, token.Trim(), createBackup: true);
-            Log.Info("[YandexAuth] Токен успешно сохранён через AtomicFile.");
+            Log.Info("[YandexAuth] Token saved successfully via AtomicFile.");
         }
         catch (Exception ex)
         {
-            Log.Error($"[YandexAuth] Сбой атомарной записи токена: {ex.Message}");
+            Log.Error($"[YandexAuth] Failed to write token atomically: {ex.Message}");
         }
     }
 
-    /// <summary>
-    /// Удаляет сохранённый токен и его резервную копию.
-    /// </summary>
     public void ClearToken()
     {
         try
@@ -70,11 +61,11 @@ public sealed class YandexAuthService
                 File.Delete(backupPath);
             }
 
-            Log.Info("[YandexAuth] Токен удалён.");
+            Log.Info("[YandexAuth] Token purged.");
         }
         catch (Exception ex)
         {
-            Log.Warn($"[YandexAuth] Не удалось удалить файл токена: {ex.Message}");
+            Log.Warn($"[YandexAuth] Failed to delete token file: {ex.Message}");
         }
     }
 }
