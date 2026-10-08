@@ -474,6 +474,7 @@ public sealed class AppEntry
         services.AddSingleton<CookieAuthService>();
         services.AddSingleton<LocalAuthServer>();
         services.AddSingleton<YoutubeUserDataService>();
+        services.AddSingleton<GoogleAiService>();
         services.AddSingleton<YoutubeProvider>();
         services.AddTransient(sp => new Lazy<YoutubeProvider>(sp.GetRequiredService<YoutubeProvider>));
 
