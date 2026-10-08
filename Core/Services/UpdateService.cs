@@ -362,6 +362,7 @@ public sealed partial class UpdateService : IDisposable
 
     /// <summary>
     /// Очищает устаревшие резервные копии (.old) и временные каталоги при старте.
+    /// Использует короткий retry-цикл для компенсации асинхронного освобождения дескрипторов ядром Windows NTFS.
     /// </summary>
     public static void CleanupPendingOldFiles()
     {
@@ -369,27 +370,48 @@ public sealed partial class UpdateService : IDisposable
         {
             string baseDir = AppContext.BaseDirectory;
             var oldFiles = Directory.GetFiles(baseDir, "*.old", SearchOption.TopDirectoryOnly);
-            if (oldFiles.Length > 0)
+            if (oldFiles.Length == 0) return;
+
+            Log.Info($"[UpdateService] Found {oldFiles.Length} obsolete .old binaries. Cleaning up...");
+            foreach (var oldFile in oldFiles)
             {
-                Log.Info($"[UpdateService] Found {oldFiles.Length} obsolete .old binaries. Cleaning up...");
-                foreach (var oldFile in oldFiles)
+                bool deleted = false;
+                for (int attempt = 1; attempt <= 4; attempt++)
                 {
                     try
                     {
                         File.Delete(oldFile);
-                        Log.Debug($"[UpdateService] Pruned obsolete binary: '{Path.GetFileName(oldFile)}'");
+                        Log.Debug($"[UpdateService] Pruned obsolete binary: '{Path.GetFileName(oldFile)}' (attempt {attempt})");
+                        deleted = true;
+                        break;
+                    }
+                    catch (IOException)
+                    {
+                        if (attempt < 4) Thread.Sleep(100 * attempt);
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        if (attempt < 4) Thread.Sleep(100 * attempt);
                     }
                     catch (Exception ex)
                     {
-                        Log.Debug($"[UpdateService] Could not prune locked file '{Path.GetFileName(oldFile)}': {ex.Message}");
+                        Log.Debug($"[UpdateService] Could not prune file '{Path.GetFileName(oldFile)}': {ex.Message}");
+                        break;
                     }
                 }
+
+                if (!deleted)
+                    Log.Debug($"[UpdateService] File '{Path.GetFileName(oldFile)}' still locked by OS driver. Will be pruned on next launch.");
             }
 
             if (Directory.Exists(G.Folder.Update))
             {
-                Directory.Delete(G.Folder.Update, recursive: true);
-                Log.Debug($"[UpdateService] Pruned temporary update directory '{G.Folder.Update}'");
+                try
+                {
+                    Directory.Delete(G.Folder.Update, recursive: true);
+                    Log.Debug($"[UpdateService] Pruned temporary update directory '{G.Folder.Update}'");
+                }
+                catch { }
             }
         }
         catch (Exception ex)

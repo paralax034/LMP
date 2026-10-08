@@ -297,6 +297,38 @@ public partial class App : Application
                     catch (Exception ex)
                     {
                         Log.Debug($"[App] Background update check ignored: {ex.Message}");
+                        Log.Debug($"[App] Background update check ignored: {ex.Message}");
+                    }
+                });
+
+                // Периодическая проверка обновлений в фоне во время непрерывной работы плеера
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var periodicTimer = new PeriodicTimer(TimeSpan.FromHours(1));
+                        while (await periodicTimer.WaitForNextTickAsync(_appLifetimeCts.Token).ConfigureAwait(false))
+                        {
+                            if (!library.Settings.Updates.AutoCheckUpdates) continue;
+
+                            var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
+                            var periodicResult = await updateService.CheckForUpdatesAsync(manual: false, _appLifetimeCts.Token).ConfigureAwait(false);
+                            if (periodicResult.HasUpdate)
+                            {
+                                Log.Info($"[App] Periodic background check detected new update '{periodicResult.VersionName}'. Dispatching info toast.");
+                                await notifications.ShowToastAsync(
+                                    titleKey: "Update_Available_Title",
+                                    messageKey: "Update_Available_Toast",
+                                    severity: NotificationSeverity.Info,
+                                    durationMs: 8000,
+                                    messageArgs: [periodicResult.VersionName]).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        Log.Debug($"[App] Periodic update watchdog loop error: {ex.Message}");
                     }
                 });
             }
