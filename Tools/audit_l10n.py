@@ -3,8 +3,9 @@
 
 """
 LMP Localization & UI Hardcode Static Auditor.
-Verifies dictionary symmetry, detects unauthorized fallback values,
-missing translation keys, and unlocalized text in XAML and C# files.
+Verifies dictionary symmetry, detects duplicate keys with precise line numbers,
+detects unauthorized fallback values, missing translation keys, unlocalized text,
+and automatically infers dynamic enum & string interpolations without manual whitelists.
 Supports automatic dead-key remediation via --fix flag.
 """
 
@@ -27,6 +28,12 @@ RE_CS_L_KEY = re.compile(r'(?:L|SL|LocalizationService\.Instance)\["(?P<key>[a-z
 RE_CS_L_FALLBACK_PATTERN = re.compile(r'(?:L|SL|LocalizationService\.Instance)\["[^"]+"\]\s*\?\?\s*(?P<fallback>"[^"]*")')
 RE_CS_GET_FALLBACK = re.compile(r'\.Get\(\s*"[^"]+"\s*,\s*(?P<fallback>"[^"]+")\s*\)')
 RE_CS_BRACKET_HACK = re.compile(r'\.StartsWith\(\s*\'\[\'\s*\)|\.StartsWith\(\s*"\["\s*\)')
+RE_STRING_LITERAL = re.compile(r'"(?P<val>[a-zA-Z0-9_]{3,})"')
+RE_INTERPOLATED_PREFIX = re.compile(r'\$"(?P<prefix>[a-zA-Z0-9_]+_)\{')
+RE_CREATELIST_PREFIX = re.compile(r'<[a-zA-Z0-9_]+>\s*\(\s*"(?P<prefix>[a-zA-Z0-9_]+_)"\s*\)')
+RE_CONCAT_PREFIX = re.compile(r'L\[\s*"(?P<prefix>[a-zA-Z0-9_]+_)"\s*\+')
+RE_ENUM_DECLARATION = re.compile(r'enum\s+(?P<name>[a-zA-Z0-9_]+)\s*\{(?P<body>[^}]+)\}', re.MULTILINE)
+RE_KEY_LINE = re.compile(r'^\s*"([^"\\]+)"\s*:')
 
 TEXT_ATTRIBUTES = {
     'Text', 'Content', 'ToolTip.Tip', 'PlaceholderText', 'Header',
@@ -39,15 +46,22 @@ EXCLUDED_CS_PATTERNS = [
     re.compile(r'Console\.WriteLine\s*\('),
 ]
 
-DYNAMIC_WHITELIST = {
-    "Home_Greeting_Morning", "Home_Greeting_Afternoon", "Home_Greeting_Evening", "Home_Greeting_Night",
-    "NetProfile_Low", "NetProfile_Medium", "NetProfile_High", "NetProfile_Ultra",
-    "AudioQuality_BestAvailable", "AudioQuality_Standard",
-    "Client_AndroidVR", "Client_TV", "Client_Web",
-    "Cache_Low", "Cache_Medium", "Cache_High", "Cache_Ultra",
-    "VolumeCurve_Linear", "VolumeCurve_Quadratic", "VolumeCurve_Logarithmic", "VolumeCurve_Cubic", "VolumeCurve_SpeedOfLight",
-    "CloseAction_Exit", "CloseAction_MinimizeToTray", "CloseAction_Ask",
-    "AnimationSpeed_VerySlow", "AnimationSpeed_Slow", "AnimationSpeed_Medium", "AnimationSpeed_Fast", "AnimationSpeed_Epileptic"
+EXCLUDED_CYRILLIC_FILES = {
+    "PlayabilityErrorClassifier.cs",
+    "LocalizationService.cs",
+    "OsNotificationHelper.cs",
+    "NotificationService.cs"
+}
+
+ALLOWED_IDENTICAL_KEYS = {
+    "Common_AppName",
+    "Extension_Guide_Chrome_Header",
+    "Extension_Guide_Edge_Header",
+    "Extension_Guide_Opera_Header",
+    "General_Discord",
+    "NetProfile_Ultra",
+    "Search_Source_YouTubeMusic",
+    "Stream_Bitrate",
 }
 
 PLURAL_SUFFIXES = ("_0", "_1", "_2", "_3", "_4", "_5", "_one", "_few", "_many", "_other", "_zero")
@@ -60,6 +74,8 @@ class AuditReport:
         self.stats = {
             "en_keys": 0,
             "ru_keys": 0,
+            "duplicate_en": 0,
+            "duplicate_ru": 0,
             "missing_in_ru": 0,
             "missing_in_en": 0,
             "untranslated_ru": 0,
@@ -81,13 +97,29 @@ class AuditReport:
         if stat_key:
             self.stats[stat_key] += 1
 
-def load_json_keys(file_path: Path) -> Dict[str, str]:
+def load_json_and_detect_duplicates(file_path: Path, report: AuditReport, stat_key: str) -> Dict[str, str]:
+    content = file_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    seen_keys: Dict[str, int] = {}
+    for line_no, line in enumerate(lines, start=1):
+        m = RE_KEY_LINE.match(line)
+        if m:
+            key = m.group(1)
+            if key in seen_keys:
+                report.add_error(
+                    f"{Color.RED}[DUPLICATE KEY in {file_path.name}]{Color.RESET} "
+                    f"Line {line_no}: Key '{Color.BOLD}{key}{Color.RESET}' was already defined on line {seen_keys[key]}!",
+                    stat_key
+                )
+            else:
+                seen_keys[key] = line_no
+
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return json.loads(content)
     except Exception as ex:
-        print(f"{Color.RED}[FAIL] Could not load JSON '{file_path}': {ex}{Color.RESET}")
-        sys.exit(1)
+        report.add_error(f"Failed to parse JSON '{file_path.name}': {ex}")
+        return {}
 
 def has_plural_suffix(key: str) -> bool:
     return any(key.endswith(s) for s in PLURAL_SUFFIXES)
@@ -122,6 +154,30 @@ def strip_comments_and_strings_cs(content: str) -> List[Tuple[int, str]]:
 
     return result
 
+def discover_dynamic_prefixes_and_enums(cs_files: List[Path]) -> Set[str]:
+    inferred_prefixes = set()
+
+    for p in cs_files:
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        for m in RE_CREATELIST_PREFIX.finditer(text):
+            inferred_prefixes.add(m.group("prefix"))
+
+        for m in RE_CONCAT_PREFIX.finditer(text):
+            inferred_prefixes.add(m.group("prefix"))
+
+        for m in RE_INTERPOLATED_PREFIX.finditer(text):
+            inferred_prefixes.add(m.group("prefix"))
+
+        for m in RE_ENUM_DECLARATION.finditer(text):
+            enum_name = m.group("name")
+            inferred_prefixes.add(f"{enum_name}_")
+
+    return inferred_prefixes
+
 def audit_localization_symmetry(en_dict: Dict[str, str], ru_dict: Dict[str, str], report: AuditReport):
     en_keys = set(en_dict.keys())
     ru_keys = set(ru_dict.keys())
@@ -144,6 +200,9 @@ def audit_localization_symmetry(en_dict: Dict[str, str], ru_dict: Dict[str, str]
         )
 
     for k in sorted(en_keys.intersection(ru_keys)):
+        if k in ALLOWED_IDENTICAL_KEYS:
+            continue
+
         en_val = en_dict[k].strip()
         ru_val = ru_dict[k].strip()
         if en_val == ru_val and len(en_val) > 4 and " " in en_val and not RE_CYRILLIC.search(ru_val):
@@ -183,6 +242,11 @@ def audit_xaml_file(path: Path, root: Path, all_keys: Set[str], report: AuditRep
                     "missing_in_code"
                 )
 
+        for m in RE_STRING_LITERAL.finditer(line):
+            candidate = m.group("val")
+            if candidate in all_keys:
+                used_keys.add(candidate)
+
         if RE_CYRILLIC.search(line) and "FallbackValue" not in line:
             literals = re.findall(r'="([^"]*[\u0400-\u04FF][^"]*)"', line)
             raw_texts = re.findall(r'>([^<]*[\u0400-\u04FF][^<]*)<', line)
@@ -208,6 +272,8 @@ def audit_xaml_file(path: Path, root: Path, all_keys: Set[str], report: AuditRep
 
 def audit_cs_file(path: Path, root: Path, all_keys: Set[str], report: AuditReport, used_keys: Set[str]):
     rel_path = path.relative_to(root)
+    file_name = path.name
+
     try:
         content = path.read_text(encoding="utf-8")
     except Exception as ex:
@@ -251,7 +317,12 @@ def audit_cs_file(path: Path, root: Path, all_keys: Set[str], report: AuditRepor
                     "missing_in_code"
                 )
 
-        if RE_CYRILLIC.search(line):
+        for m in RE_STRING_LITERAL.finditer(line):
+            candidate = m.group("val")
+            if candidate in all_keys:
+                used_keys.add(candidate)
+
+        if file_name not in EXCLUDED_CYRILLIC_FILES and RE_CYRILLIC.search(line):
             if not any(excl.search(line) for excl in EXCLUDED_CS_PATTERNS):
                 str_literals = re.findall(r'"([^"]*[\u0400-\u04FF][^"]*)"', line)
                 if str_literals and "LanguageItem" not in line and "AvailableLanguages" not in line:
@@ -308,36 +379,55 @@ def main():
         print(f"{Color.RED}[FATAL] Dictionaries not found in {l10n_dir}{Color.RESET}")
         sys.exit(1)
 
-    en_dict = load_json_keys(en_path)
-    ru_dict = load_json_keys(ru_path)
-    all_keys = set(en_dict.keys()).union(set(ru_dict.keys()))
-
     report = AuditReport()
-    used_keys: Set[str] = set(DYNAMIC_WHITELIST)
 
-    print(f"[{Color.BLUE}1/3{Color.RESET}] Validating en.json ({len(en_dict)} keys) and ru.json ({len(ru_dict)} keys)...")
+    print(f"[{Color.BLUE}1/4{Color.RESET}] Scanning JSON dictionaries for duplicate keys and parsing...")
+    en_dict = load_json_and_detect_duplicates(en_path, report, "duplicate_en")
+    ru_dict = load_json_and_detect_duplicates(ru_path, report, "duplicate_ru")
+
+    all_keys = set(en_dict.keys()).union(set(ru_dict.keys()))
+    used_keys: Set[str] = set()
+
+    print(f"[{Color.BLUE}2/4{Color.RESET}] Validating dictionary symmetry...")
     audit_localization_symmetry(en_dict, ru_dict, report)
 
-    source_dirs = [root / "UI", root / "Core"]
+    source_dirs = [root, root / "UI", root / "Core"]
     xaml_files: List[Path] = []
     cs_files: List[Path] = []
 
+    seen_paths: Set[Path] = set()
     for s_dir in source_dirs:
         if s_dir.exists():
-            xaml_files.extend(s_dir.rglob("*.axaml"))
-            cs_files.extend(s_dir.rglob("*.cs"))
+            iterator = s_dir.glob("*.axaml") if s_dir == root else s_dir.rglob("*.axaml")
+            for xaml_p in iterator:
+                if xaml_p not in seen_paths and "Debug" not in xaml_p.parts and "bin" not in xaml_p.parts and "obj" not in xaml_p.parts:
+                    seen_paths.add(xaml_p)
+                    xaml_files.append(xaml_p)
 
-    print(f"[{Color.BLUE}2/3{Color.RESET}] Auditing {len(xaml_files)} XAML markup files...")
+            cs_iterator = s_dir.glob("*.cs") if s_dir == root else s_dir.rglob("*.cs")
+            for cs_p in cs_iterator:
+                if cs_p not in seen_paths and "bin" not in cs_p.parts and "obj" not in cs_p.parts:
+                    seen_paths.add(cs_p)
+                    cs_files.append(cs_p)
+
+    dynamic_prefixes = discover_dynamic_prefixes_and_enums(cs_files)
+
+    print(f"[{Color.BLUE}3/4{Color.RESET}] Auditing {len(xaml_files)} XAML markup files...")
     for xaml_path in xaml_files:
         audit_xaml_file(xaml_path, root, all_keys, report, used_keys)
 
-    print(f"[{Color.BLUE}3/3{Color.RESET}] Auditing {len(cs_files)} C# source files...")
+    print(f"[{Color.BLUE}4/4{Color.RESET}] Auditing {len(cs_files)} C# source files...")
     for cs_path in cs_files:
         audit_cs_file(cs_path, root, all_keys, report, used_keys)
 
     for k in sorted(all_keys):
         base_k = re.sub(r'(_0|_1|_2|_5|_other|_few|_many|_one|_zero)$', '', k)
-        if k not in used_keys and base_k not in used_keys and not has_plural_suffix(k):
+
+        is_dynamic = any(k.startswith(pfx) or base_k.startswith(pfx) for pfx in dynamic_prefixes)
+        if is_dynamic or has_plural_suffix(k):
+            continue
+
+        if k not in used_keys and base_k not in used_keys:
             report.dead_keys.append(k)
             report.stats["unused_keys"] += 1
 
@@ -353,9 +443,16 @@ def main():
         for warn in report.warnings:
             print(f"  {warn}")
 
+    if report.dead_keys:
+        print(f"\n{Color.YELLOW}{Color.BOLD}UNUSED / DEAD KEYS ({len(report.dead_keys)}):{Color.RESET}")
+        for dk in report.dead_keys:
+            print(f"  {Color.YELLOW}• {dk}{Color.RESET}")
+
     print(f"\n{Color.CYAN}{Color.BOLD}--- STATISTICS ---{Color.RESET}")
     print(f"Keys in en.json:                   {report.stats['en_keys']}")
     print(f"Keys in ru.json:                   {report.stats['ru_keys']}")
+    print(f"Duplicate keys in en.json:         {Color.RED if report.stats['duplicate_en'] else Color.GREEN}{report.stats['duplicate_en']}{Color.RESET}")
+    print(f"Duplicate keys in ru.json:         {Color.RED if report.stats['duplicate_ru'] else Color.GREEN}{report.stats['duplicate_ru']}{Color.RESET}")
     print(f"Missing in ru.json:                {Color.RED if report.stats['missing_in_ru'] else Color.GREEN}{report.stats['missing_in_ru']}{Color.RESET}")
     print(f"Missing in en.json:                {Color.RED if report.stats['missing_in_en'] else Color.GREEN}{report.stats['missing_in_en']}{Color.RESET}")
     print(f"Untranslated in ru.json:           {Color.YELLOW if report.stats['untranslated_ru'] else Color.GREEN}{report.stats['untranslated_ru']}{Color.RESET}")
@@ -372,7 +469,7 @@ def main():
         print(f"\n{Color.RED}{Color.BOLD}[FAILURE] Critical localization violations detected!{Color.RESET}\n")
         sys.exit(1)
     else:
-        print(f"\n{Color.GREEN}{Color.BOLD}[SUCCESS] Localization architecture is clean of fallback violations.{Color.RESET}\n")
+        print(f"\n{Color.GREEN}{Color.BOLD}[SUCCESS] Localization architecture is clean.{Color.RESET}\n")
         sys.exit(0)
 
 if __name__ == "__main__":

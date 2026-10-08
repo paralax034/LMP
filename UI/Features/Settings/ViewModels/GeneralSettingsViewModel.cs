@@ -10,26 +10,54 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
     private readonly UpdateService _updateService;
 
     private DispatcherTimer? _suggestionsDebounceTimer;
+    private DispatcherTimer? _updateIntervalDebounceTimer;
     private bool _isLoading;
-    private GitHubAssetDto? _pendingAsset;
 
     [ObservableProperty] public partial bool DiscordRpcEnabled { get; set; }
     [ObservableProperty] public partial bool EnableSearchCache { get; set; }
     [ObservableProperty] public partial int SearchCacheTtlMinutes { get; set; }
     [ObservableProperty] public partial int MaxSuggestionsCount { get; set; }
 
-    // === Update State ===
+    // Update State
     [ObservableProperty] public partial bool AutoCheckUpdates { get; set; }
-    [ObservableProperty] public partial bool IncludePreReleases { get; set; }
+    [ObservableProperty] public partial int UpdateCheckIntervalHours { get; set; }
 
-    [ObservableProperty] public partial bool IsCheckingUpdates { get; private set; }
-    [ObservableProperty] public partial bool IsDownloadingUpdate { get; private set; }
-    [ObservableProperty] public partial bool IsUpdateAvailable { get; private set; }
-    [ObservableProperty] public partial bool IsUpdateReadyToInstall { get; private set; }
+    public string UpdateIntervalDisplayString => $"{UpdateCheckIntervalHours} {SL["Duration_Hours"]}";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCheckForUpdates))]
+    [NotifyPropertyChangedFor(nameof(IsUpdateActionIdle))]
+    [NotifyPropertyChangedFor(nameof(CanDownloadUpdate))]
+    [NotifyCanExecuteChangedFor(nameof(CheckUpdatesCommand))]
+    public partial bool IsCheckingUpdates { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCheckForUpdates))]
+    [NotifyPropertyChangedFor(nameof(IsUpdateActionIdle))]
+    [NotifyPropertyChangedFor(nameof(CanDownloadUpdate))]
+    [NotifyCanExecuteChangedFor(nameof(CheckUpdatesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DownloadUpdateCommand))]
+    public partial bool IsDownloadingUpdate { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDownloadUpdate))]
+    [NotifyCanExecuteChangedFor(nameof(DownloadUpdateCommand))]
+    public partial bool IsUpdateAvailable { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDownloadUpdate))]
+    [NotifyCanExecuteChangedFor(nameof(DownloadUpdateCommand))]
+    public partial bool IsUpdateReadyToInstall { get; private set; }
+
     [ObservableProperty] public partial double DownloadProgress { get; private set; }
+    [ObservableProperty] public partial string DownloadProgressText { get; private set; } = string.Empty;
     [ObservableProperty] public partial string UpdateStatusText { get; private set; } = string.Empty;
 
-    // === Telemetry & Build Info ===
+    public bool CanCheckForUpdates => !IsCheckingUpdates && !IsDownloadingUpdate;
+    public bool IsUpdateActionIdle => !IsCheckingUpdates && !IsDownloadingUpdate;
+    public bool CanDownloadUpdate => IsUpdateAvailable && !IsDownloadingUpdate && !IsUpdateReadyToInstall;
+
+    // Telemetry & Build Info
     public bool IsDebug => G.Build.IsDebug;
     public string GitCommitCount => $"#{G.Build.CommitCount}";
     public string GitCommitHash => G.Build.GitHash;
@@ -37,13 +65,15 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
     public string BuildProfileShort => G.Build.IsDebug ? "JIT" : "AOT";
 
     [ObservableProperty] public partial int RepoStars { get; private set; }
-    [ObservableProperty] public partial int RepoIssues { get; private set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RepoIssuesDisplayString))]
+    public partial int RepoIssues { get; private set; }
     [ObservableProperty] public partial int RepoForks { get; private set; }
     [ObservableProperty] public partial string RepoBranch { get; private set; } = "main";
     [ObservableProperty] public partial bool HasRepoInfo { get; private set; }
 
+    public string RepoIssuesDisplayString => string.Format(SL["Metadata_Issues_Format"], RepoIssues);
     public string CurrentVersionString => G.Build.FullVersionString;
-    public bool CanDownloadUpdate => IsUpdateAvailable && !IsDownloadingUpdate && !IsUpdateReadyToInstall;
 
     public IAsyncRelayCommand ResetLibraryCommand { get; }
     public IAsyncRelayCommand CheckUpdatesCommand { get; }
@@ -66,8 +96,8 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
         _updateService = updateService;
 
         ResetLibraryCommand = new AsyncRelayCommand(ResetLibraryAsync);
-        CheckUpdatesCommand = new AsyncRelayCommand(CheckUpdatesAsync);
-        DownloadUpdateCommand = new AsyncRelayCommand(DownloadUpdateAsync);
+        CheckUpdatesCommand = new AsyncRelayCommand(CheckUpdatesAsync, () => CanCheckForUpdates);
+        DownloadUpdateCommand = new AsyncRelayCommand(DownloadUpdateAsync, () => CanDownloadUpdate);
         ApplyUpdateCommand = new RelayCommand(ApplyUpdate);
         SimulateUpdateFlowCommand = new AsyncRelayCommand(SimulateUpdateFlowAsync);
         OpenGitHubRepoCommand = new RelayCommand(() =>
@@ -83,8 +113,22 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
             catch { }
         });
 
+        _updateService.StateChanged += OnUpdateServiceStateChanged;
+
         LoadSettings();
         _ = LoadRepoInfoAsync();
+    }
+
+    private void OnUpdateServiceStateChanged()
+    {
+        Dispatcher.UIThread.Post(SyncUpdateStateFromService);
+    }
+
+    public void RefreshLists()
+    {
+        OnPropertyChanged(nameof(UpdateIntervalDisplayString));
+        OnPropertyChanged(nameof(RepoIssuesDisplayString));
+        SyncUpdateStateFromService();
     }
 
     public void LoadSettings()
@@ -99,12 +143,64 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
             MaxSuggestionsCount = s.MaxSuggestionsCount > 0 ? s.MaxSuggestionsCount : 8;
 
             AutoCheckUpdates = s.Updates.AutoCheckUpdates;
-            IncludePreReleases = s.Updates.IncludePreReleases;
+            UpdateCheckIntervalHours = s.Updates.UpdateCheckIntervalHours > 0 ? s.Updates.UpdateCheckIntervalHours : 2;
+
+            OnPropertyChanged(nameof(UpdateIntervalDisplayString));
+            SyncUpdateStateFromService();
         }
         finally
         {
             _isLoading = false;
         }
+    }
+
+    private void SyncUpdateStateFromService()
+    {
+        IsCheckingUpdates = _updateService.IsChecking;
+        IsDownloadingUpdate = _updateService.IsDownloading;
+        DownloadProgress = _updateService.DownloadProgress;
+        IsUpdateReadyToInstall = _updateService.IsUpdateReadyToInstall;
+        IsUpdateAvailable = _updateService.IsUpdateAvailable;
+
+        if (IsDownloadingUpdate)
+        {
+            DownloadProgressText = string.Format(SL["Settings_DownloadingUpdate"], DownloadProgress);
+            UpdateStatusText = DownloadProgressText;
+        }
+        else if (IsCheckingUpdates)
+        {
+            UpdateStatusText = SL["Settings_CheckingUpdates"];
+        }
+        else if (IsUpdateReadyToInstall)
+        {
+            UpdateStatusText = SL["Settings_UpdateReadyToInstall"];
+        }
+        else if (_updateService.LastCheckResult is { } res)
+        {
+            if (!res.IsSuccess)
+            {
+                UpdateStatusText = string.Format(SL["Settings_UpdateFailed"], res.ErrorMessage);
+            }
+            else if (res.HasUpdate)
+            {
+                UpdateStatusText = string.Format(SL["Settings_UpdateAvailable"], res.VersionName);
+            }
+            else
+            {
+                UpdateStatusText = SL["Settings_UpToDate"];
+            }
+        }
+        else if (_library.Settings.Updates.LastUpdateCheckUtc.HasValue)
+        {
+            UpdateStatusText = SL["Settings_UpToDate"];
+        }
+        else
+        {
+            UpdateStatusText = string.Empty;
+        }
+
+        CheckUpdatesCommand.NotifyCanExecuteChanged();
+        DownloadUpdateCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnAutoCheckUpdatesChanged(bool value)
@@ -113,10 +209,22 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
         _library.UpdateSettings(s => s.Updates.AutoCheckUpdates = value);
     }
 
-    partial void OnIncludePreReleasesChanged(bool value)
+    partial void OnUpdateCheckIntervalHoursChanged(int value)
     {
         if (_isLoading) return;
-        _library.UpdateSettings(s => s.Updates.IncludePreReleases = value);
+        OnPropertyChanged(nameof(UpdateIntervalDisplayString));
+
+        _updateIntervalDebounceTimer?.Stop();
+        _updateIntervalDebounceTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(400),
+            DispatcherPriority.Normal,
+            (_, _) =>
+            {
+                _updateIntervalDebounceTimer?.Stop();
+                _library.UpdateSettings(s => s.Updates.UpdateCheckIntervalHours = value);
+                Log.Info($"[GeneralSettings] Update check interval saved: {value}h.");
+            });
+        _updateIntervalDebounceTimer.Start();
     }
 
     partial void OnDiscordRpcEnabledChanged(bool value)
@@ -153,6 +261,11 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
         _suggestionsDebounceTimer.Start();
     }
 
+    partial void OnDownloadProgressChanged(double value)
+    {
+        DownloadProgressText = string.Format(SL["Settings_DownloadingUpdate"], value);
+    }
+
     private async Task LoadRepoInfoAsync()
     {
         if (HasRepoInfo) return;
@@ -170,7 +283,7 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
 
     private async Task CheckUpdatesAsync()
     {
-        if (IsCheckingUpdates) return;
+        if (!CanCheckForUpdates) return;
 
         IsCheckingUpdates = true;
         UpdateStatusText = SL["Settings_CheckingUpdates"];
@@ -188,15 +301,17 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
             }
             else if (result.HasUpdate && result.Asset != null)
             {
-                _pendingAsset = result.Asset;
-                IsUpdateAvailable = true;
+                IsUpdateAvailable = !IsUpdateReadyToInstall;
                 UpdateStatusText = string.Format(SL["Settings_UpdateAvailable"], result.VersionName);
-                Log.Info($"[GeneralSettings] Update available: '{result.VersionName}' (Asset: '{result.Asset.Name}', Size: {result.Asset.Size} bytes)");
+                Log.Info($"[GeneralSettings] Update available: '{result.VersionName}'");
             }
             else
             {
                 IsUpdateAvailable = false;
-                UpdateStatusText = SL["Settings_UpToDate"];
+                if (!IsUpdateReadyToInstall)
+                {
+                    UpdateStatusText = SL["Settings_UpToDate"];
+                }
                 Log.Info("[GeneralSettings] Player is up-to-date.");
             }
         }
@@ -209,18 +324,19 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
         finally
         {
             IsCheckingUpdates = false;
-            OnPropertyChanged(nameof(CanDownloadUpdate));
+            SyncUpdateStateFromService();
         }
     }
 
     private async Task DownloadUpdateAsync()
     {
-        if (_pendingAsset == null || IsDownloadingUpdate) return;
+        var asset = _updateService.PendingAsset;
+        if (asset == null || !CanDownloadUpdate) return;
 
         IsDownloadingUpdate = true;
         DownloadProgress = 0;
-        OnPropertyChanged(nameof(CanDownloadUpdate));
-        Log.Info($"[GeneralSettings] Starting download of update asset: '{_pendingAsset.Name}'");
+        DownloadProgressText = string.Format(SL["Settings_DownloadingUpdate"], 0.0);
+        Log.Info($"[GeneralSettings] Starting download of update asset: '{asset.Name}'");
 
         try
         {
@@ -233,10 +349,11 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
                 });
             });
 
-            await _updateService.DownloadUpdateAsync(_pendingAsset, progressReporter);
+            await _updateService.DownloadUpdateAsync(asset, progressReporter);
 
+            IsUpdateAvailable = false;
             IsUpdateReadyToInstall = true;
-            UpdateStatusText = SL["Settings_RestartToApply"];
+            UpdateStatusText = SL["Settings_UpdateReadyToInstall"];
             Log.Info("[GeneralSettings] Update downloaded successfully. Prompting user to restart.");
         }
         catch (Exception ex)
@@ -247,7 +364,7 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
         finally
         {
             IsDownloadingUpdate = false;
-            OnPropertyChanged(nameof(CanDownloadUpdate));
+            SyncUpdateStateFromService();
         }
     }
 
@@ -262,13 +379,13 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
 
         IsCheckingUpdates = false;
         IsUpdateAvailable = true;
-        UpdateStatusText = "Доступно тестовое обновление #999";
-        OnPropertyChanged(nameof(CanDownloadUpdate));
+        IsUpdateReadyToInstall = false;
+        UpdateStatusText = SL["Settings_Update_SimulatedAvailable"];
 
         await Task.Delay(400);
         IsDownloadingUpdate = true;
         DownloadProgress = 0;
-        OnPropertyChanged(nameof(CanDownloadUpdate));
+        DownloadProgressText = string.Format(SL["Settings_DownloadingUpdate"], 0.0);
 
         for (int i = 1; i <= 100; i += 4)
         {
@@ -279,9 +396,9 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
 
         DownloadProgress = 100;
         IsDownloadingUpdate = false;
+        IsUpdateAvailable = false;
         IsUpdateReadyToInstall = true;
-        UpdateStatusText = SL["Settings_RestartToApply"];
-        OnPropertyChanged(nameof(CanDownloadUpdate));
+        UpdateStatusText = SL["Settings_UpdateReadyToInstall"];
         Log.Info("[GeneralSettings] [DEBUG] Update simulation reached ReadyToInstall state.");
     }
 
@@ -311,7 +428,9 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposabl
     {
         if (disposing)
         {
+            _updateService.StateChanged -= OnUpdateServiceStateChanged;
             _suggestionsDebounceTimer?.Stop();
+            _updateIntervalDebounceTimer?.Stop();
         }
         base.Dispose(disposing);
     }

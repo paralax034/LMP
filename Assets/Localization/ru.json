@@ -62,8 +62,6 @@
   "Auth_Tooltip_ToProtocol": "Нажмите, чтобы перейти к Инструкции Входа",
   "Auth_Tooltip_ToggleView": "Переключить вид интерфейса",
 
-  "Build_CommitsCount": "{0} коммитов",
-
   "Button_Cancel": "Отмена",
   "Button_Create": "Создать",
   "Button_Delete": "Удалить",
@@ -80,10 +78,6 @@
   "Category_RecentlyPlayed": "Недавнее",
   "Category_Rock": "Рок",
   "Category_Trending": "В тренде",
-
-  "Client_AndroidVR": "Android VR (Рекомендуется)",
-  "Client_TV": "Smart TV / Консоль",
-  "Client_Web": "Веб-браузер",
 
   "CloseAction_Ask": "Спрашивать каждый раз",
   "CloseAction_Exit": "Закрыть приложение",
@@ -286,6 +280,14 @@
 
   "Merge_Error_Msg": "Не удалось объединить плейлисты.",
   "Merge_Success_Msg": "Плейлисты успешно объединены.",
+
+  "Metadata_Issues_Format": "Задачи: {0}",
+  "Metadata_Tooltip_Branch": "Текущая ветка Git",
+  "Metadata_Tooltip_BuildDate": "Дата и время сборки",
+  "Metadata_Tooltip_Commit": "Общее количество коммитов",
+  "Metadata_Tooltip_Hash": "Хэш коммита",
+  "Metadata_Tooltip_Issues": "Открытые задачи на GitHub",
+  "Metadata_Tooltip_Stars": "Звёзды на GitHub",
 
   "Nav_Home": "Главная",
   "Nav_Home_Tip": "Главная — рекомендации и недавнее",
@@ -534,8 +536,6 @@
   "Settings_GpuTextureCacheDesc": "Лимит кэша Skia для обложек на GPU. Больше = плавнее скролл, но выше потребление RAM. Требует перезапуска.",
   "Settings_ImageCache": "Кэш изображений",
   "Settings_ImagesLimit": "Изображения",
-  "Settings_IncludePreReleases": "Предварительные сборки",
-  "Settings_IncludePreReleasesDesc": "Получать тестовые сборки сразу после публикации",
   "Settings_Language": "Язык",
   "Settings_Limits": "Лимиты кэша",
   "Settings_ManualCleanup": "Ручная очистка",
@@ -595,7 +595,13 @@
   "Settings_UpToDate": "У вас установлена актуальная версия",
   "Settings_UpdateAvailable": "Доступно обновление: {0}",
   "Settings_UpdateFailed": "Сбой обновления: {0}",
+  "Settings_UpdateInterval": "Интервал проверки",
+  "Settings_UpdateIntervalDesc": "Как часто выполнять фоновый опрос репозитория на наличие новых релизов",
   "Settings_UpdateNoAssets": "В релизе отсутствует архив обновления (.zip)",
+  "Settings_UpdateReadyToInstall": "Обновление готово к установке",
+  "Settings_Update_SimulateButton": "Тест загрузки",
+  "Settings_Update_SimulateTooltip": "Симуляция загрузки обновления (Debug)",
+  "Settings_Update_SimulatedAvailable": "Доступно тестовое обновление #999",
   "Settings_UseWaveAnimation": "Живая волновая анимация",
   "Settings_UseWaveAnimationDesc": "Гидродинамический волновод для играющего трека. При отключении используется классическая пульсация.",
   "Settings_VolumeBoost": "Усиление громкости",

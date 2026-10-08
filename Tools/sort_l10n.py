@@ -4,6 +4,7 @@
 """
 LMP Localization JSON Sorter & Formatter.
 Sorts localization keys alphabetically and groups them by prefix with clean blank line separation.
+Validates duplicate keys before overwriting files to prevent silent data loss.
 """
 
 import sys
@@ -17,18 +18,31 @@ if str(tools_dir) not in sys.path:
 
 from common import Color, get_project_root, print_banner
 
-RE_KEY_VALUE = re.compile(r'^\s*"([^"]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+RE_KEY_VALUE = re.compile(r'^\s*"([^"\\]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 def sort_localization_file(file_path: Path):
     print(f"  {Color.YELLOW}Sorting {file_path.name}...{Color.RESET}")
 
     lines = file_path.read_text(encoding="utf-8").splitlines()
     dictionary: Dict[str, str] = {}
+    seen_keys: Dict[str, int] = {}
+    duplicates: list[str] = []
 
-    for line in lines:
+    for line_no, line in enumerate(lines, start=1):
         m = RE_KEY_VALUE.match(line)
         if m:
-            dictionary[m.group(1)] = m.group(2)
+            key, val = m.group(1), m.group(2)
+            if key in seen_keys:
+                duplicates.append(f"Key '{key}' duplicated on lines {seen_keys[key]} and {line_no}")
+            else:
+                seen_keys[key] = line_no
+                dictionary[key] = val
+
+    if duplicates:
+        print(f"  {Color.RED}[ERROR] Duplicates detected in {file_path.name}! Sorting aborted to prevent data loss:{Color.RESET}")
+        for d in duplicates:
+            print(f"    {Color.RED}• {d}{Color.RESET}")
+        sys.exit(1)
 
     sorted_keys = sorted(dictionary.keys())
     output_lines = ["{"]

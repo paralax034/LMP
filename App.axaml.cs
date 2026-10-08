@@ -277,15 +277,20 @@ public partial class App : Application
             }
             else if (library.Settings.Updates.AutoCheckUpdates)
             {
+                var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
+
+                // Фоновая проверка при старте без ожидания кулдауна (с таймаутом 15с во избежание зависания)
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
-                        var checkResult = await updateService.CheckForUpdatesAsync(manual: false).ConfigureAwait(false);
+                        using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(_appLifetimeCts.Token);
+                        startupCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+                        var checkResult = await updateService.CheckForUpdatesAsync(manual: false, ignoreCooldown: true, startupCts.Token).ConfigureAwait(false);
                         if (checkResult.HasUpdate)
                         {
-                            Log.Info($"[App] Background check detected new update '{checkResult.VersionName}'. Dispatching info toast.");
+                            Log.Info($"[App] Startup check detected new update '{checkResult.VersionName}'. Dispatching info toast.");
                             await notifications.ShowToastAsync(
                                 titleKey: "Update_Available_Title",
                                 messageKey: "Update_Available_Toast",
@@ -294,14 +299,14 @@ public partial class App : Application
                                 messageArgs: [checkResult.VersionName]).ConfigureAwait(false);
                         }
                     }
+                    catch (OperationCanceledException) { }
                     catch (Exception ex)
                     {
-                        Log.Debug($"[App] Background update check ignored: {ex.Message}");
-                        Log.Debug($"[App] Background update check ignored: {ex.Message}");
+                        Log.Debug($"[App] Startup background update check ignored: {ex.Message}");
                     }
                 });
 
-                // Периодическая проверка обновлений в фоне во время непрерывной работы плеера
+                // Периодическая проверка обновлений в фоне с соблюдением пользовательского интервала
                 _ = Task.Run(async () =>
                 {
                     try
@@ -311,8 +316,7 @@ public partial class App : Application
                         {
                             if (!library.Settings.Updates.AutoCheckUpdates) continue;
 
-                            var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
-                            var periodicResult = await updateService.CheckForUpdatesAsync(manual: false, _appLifetimeCts.Token).ConfigureAwait(false);
+                            var periodicResult = await updateService.CheckForUpdatesAsync(manual: false, ignoreCooldown: false, _appLifetimeCts.Token).ConfigureAwait(false);
                             if (periodicResult.HasUpdate)
                             {
                                 Log.Info($"[App] Periodic background check detected new update '{periodicResult.VersionName}'. Dispatching info toast.");

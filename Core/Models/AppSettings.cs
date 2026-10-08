@@ -342,13 +342,10 @@ public sealed class UpdateSettings
     public bool AutoCheckUpdates { get; set; } = true;
 
     /// <summary>Интервал проверки обновлений в часах.</summary>
-    public int UpdateCheckIntervalHours { get; set; } = 12;
+    public int UpdateCheckIntervalHours { get; set; } = 2;
 
     /// <summary>Время последней проверки обновлений в UTC.</summary>
     public DateTime? LastUpdateCheckUtc { get; set; }
-
-    /// <summary>Проверять ли предварительные (pre-release) сборки.</summary>
-    public bool IncludePreReleases { get; set; } = false;
 }
 
 /// <summary>

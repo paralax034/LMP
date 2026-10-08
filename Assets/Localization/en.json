@@ -62,8 +62,6 @@
   "Auth_Tooltip_ToProtocol": "Click to go to Login Instructions",
   "Auth_Tooltip_ToggleView": "Switch interface layout",
 
-  "Build_CommitsCount": "{0} commits",
-
   "Button_Cancel": "Cancel",
   "Button_Create": "Create",
   "Button_Delete": "Delete",
@@ -80,10 +78,6 @@
   "Category_RecentlyPlayed": "Recently Played",
   "Category_Rock": "Rock Classics",
   "Category_Trending": "Trending",
-
-  "Client_AndroidVR": "Android VR (Recommended)",
-  "Client_TV": "Smart TV / Console",
-  "Client_Web": "Web Browser",
 
   "CloseAction_Ask": "Ask every time",
   "CloseAction_Exit": "Close application",
@@ -286,6 +280,14 @@
 
   "Merge_Error_Msg": "Failed to merge playlists.",
   "Merge_Success_Msg": "Playlists merged successfully.",
+
+  "Metadata_Issues_Format": "Issues: {0}",
+  "Metadata_Tooltip_Branch": "Active Git branch",
+  "Metadata_Tooltip_BuildDate": "Build timestamp",
+  "Metadata_Tooltip_Commit": "Total repository commits",
+  "Metadata_Tooltip_Hash": "Commit SHA hash",
+  "Metadata_Tooltip_Issues": "Open GitHub issues",
+  "Metadata_Tooltip_Stars": "GitHub stars",
 
   "Nav_Home": "Home",
   "Nav_Home_Tip": "Home — recommendations & recent",
@@ -534,8 +536,6 @@
   "Settings_GpuTextureCacheDesc": "Skia texture cache limit for album art on GPU. Higher = smoother scrolling, but more RAM usage. Requires restart.",
   "Settings_ImageCache": "Image Cache",
   "Settings_ImagesLimit": "Images",
-  "Settings_IncludePreReleases": "Pre-release builds",
-  "Settings_IncludePreReleasesDesc": "Receive test builds immediately after publication",
   "Settings_Language": "Language",
   "Settings_Limits": "Cache Limits",
   "Settings_ManualCleanup": "Manual Cleanup",
@@ -595,7 +595,13 @@
   "Settings_UpToDate": "You are using the latest version",
   "Settings_UpdateAvailable": "Update available: {0}",
   "Settings_UpdateFailed": "Update error: {0}",
+  "Settings_UpdateInterval": "Check interval",
+  "Settings_UpdateIntervalDesc": "How often to check GitHub repository for new releases in background",
   "Settings_UpdateNoAssets": "No update archive (.zip) found in the release",
+  "Settings_UpdateReadyToInstall": "Update is ready to install",
+  "Settings_Update_SimulateButton": "Test download",
+  "Settings_Update_SimulateTooltip": "Simulate update download flow (Debug)",
+  "Settings_Update_SimulatedAvailable": "Test update available #999",
   "Settings_UseWaveAnimation": "Live Wave Animation",
   "Settings_UseWaveAnimationDesc": "Fluid audio-reactive waveform border for the currently playing track. When disabled, uses classic pulse highlight.",
   "Settings_VolumeBoost": "Volume Boost",

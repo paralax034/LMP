@@ -48,7 +48,6 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(GitHubAssetDto))]
 [JsonSerializable(typeof(List<GitHubAssetDto>))]
 [JsonSerializable(typeof(GitHubRepoInfoDto))]
-[JsonSerializable(typeof(List<GitHubAssetDto>))]
 [JsonSerializable(typeof(CloseAction))]
 [JsonSerializable(typeof(RepeatMode))]
 [JsonSerializable(typeof(AudioQualityPreference))]

@@ -35,7 +35,22 @@ public sealed partial class UpdateService : IDisposable
 
     private readonly LibraryService _library;
     private readonly NetworkManager _networkManager;
+    private readonly Lock _syncLock = new();
+
+    private Task<UpdateCheckResult>? _inFlightCheckTask;
     private bool _disposed;
+
+    public event Action? StateChanged;
+
+    public UpdateCheckResult? LastCheckResult { get; private set; }
+    public GitHubAssetDto? PendingAsset { get; private set; }
+    public int DownloadedCommitCount { get; private set; }
+
+    public bool IsChecking { get; private set; }
+    public bool IsDownloading { get; private set; }
+    public bool IsUpdateAvailable { get; private set; }
+    public bool IsUpdateReadyToInstall { get; private set; }
+    public double DownloadProgress { get; private set; }
 
 #if DEBUG
     /// <summary>
@@ -49,7 +64,33 @@ public sealed partial class UpdateService : IDisposable
         _library = library;
         _networkManager = networkManager;
 
+        CheckExistingDownloadedPackage();
         Log.Debug($"[UpdateService] Initialized via NetworkManager. Target repo: '{G.RepoSlug}', Current commit: #{G.Build.CommitCount}");
+    }
+
+    private void CheckExistingDownloadedPackage()
+    {
+        try
+        {
+            if (File.Exists(G.FilePath.UpdatePayloadZip))
+            {
+                var fileInfo = new FileInfo(G.FilePath.UpdatePayloadZip);
+                if (fileInfo.Length > 1024 * 1024)
+                {
+                    IsUpdateReadyToInstall = true;
+                    IsUpdateAvailable = false;
+                    Log.Info($"[UpdateService] Found ready-to-install update package on disk ({fileInfo.Length} bytes).");
+                }
+                else
+                {
+                    PurgeDownloadedPayload();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[UpdateService] Failed to inspect existing update payload: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -80,66 +121,117 @@ public sealed partial class UpdateService : IDisposable
 
     /// <summary>
     /// Выполняет проверку обновлений через GitHub Releases API с поддержкой rolling-релиза 'dev' и снимков.
+    /// Гарантирует дедупликацию параллельных сетевых запросов и изолированный таймаут.
     /// </summary>
-    public async Task<UpdateCheckResult> CheckForUpdatesAsync(bool manual = false, CancellationToken ct = default)
+    public async Task<UpdateCheckResult> CheckForUpdatesAsync(
+        bool manual = false,
+        bool ignoreCooldown = false,
+        CancellationToken ct = default)
     {
+        Task<UpdateCheckResult>? taskToAwait;
+        bool isInitiator = false;
+
+        lock (_syncLock)
+        {
+            if (_inFlightCheckTask != null && !_inFlightCheckTask.IsCompleted)
+            {
+                Log.Info("[UpdateService] Update check already in progress. Reusing in-flight task.");
+                taskToAwait = _inFlightCheckTask;
+            }
+            else
+            {
+                var settings = _library.Settings.Updates;
+                if (!manual)
+                {
+                    if (!settings.AutoCheckUpdates)
+                    {
+                        Log.Debug("[UpdateService] Auto-check is disabled in settings. Skipping.");
+                        return LastCheckResult ?? new UpdateCheckResult(true, false, 0, string.Empty, null, null, null);
+                    }
+
+                    if (!ignoreCooldown && settings.LastUpdateCheckUtc.HasValue)
+                    {
+                        var elapsed = DateTime.UtcNow - settings.LastUpdateCheckUtc.Value;
+                        if (elapsed < TimeSpan.FromHours(settings.UpdateCheckIntervalHours))
+                        {
+                            Log.Info($"[UpdateService] Update check skipped by cooldown: {elapsed.TotalHours:F1}h elapsed < {settings.UpdateCheckIntervalHours}h interval.");
+                            return LastCheckResult ?? new UpdateCheckResult(true, false, 0, string.Empty, null, null, null);
+                        }
+                    }
+                }
+
+                IsChecking = true;
+                isInitiator = true;
+                taskToAwait = ExecuteCheckForUpdatesInternalAsync(manual, ct);
+                _inFlightCheckTask = taskToAwait;
+            }
+        }
+
+        if (isInitiator)
+            NotifyStateChanged();
+
+        try
+        {
+            return await taskToAwait.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (isInitiator)
+            {
+                lock (_syncLock)
+                {
+                    IsChecking = false;
+                    _inFlightCheckTask = null;
+                }
+                NotifyStateChanged();
+            }
+        }
+    }
+
+    private async Task<UpdateCheckResult> ExecuteCheckForUpdatesInternalAsync(bool manual, CancellationToken ct)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linkedCts.CancelAfter(TimeSpan.FromSeconds(20));
+
         try
         {
             var settings = _library.Settings.Updates;
-            Log.Info($"[UpdateService] Starting update check (manual={manual}, autoCheck={settings.AutoCheckUpdates}, repo='{G.RepoSlug}')...");
-
-            if (!manual)
-            {
-                if (!settings.AutoCheckUpdates)
-                {
-                    Log.Debug("[UpdateService] Auto-check is disabled in settings. Skipping.");
-                    return new UpdateCheckResult(true, false, 0, string.Empty, null, null, null);
-                }
-
-                if (settings.LastUpdateCheckUtc.HasValue)
-                {
-                    var elapsed = DateTime.UtcNow - settings.LastUpdateCheckUtc.Value;
-                    if (elapsed < TimeSpan.FromHours(settings.UpdateCheckIntervalHours))
-                    {
-                        Log.Info($"[UpdateService] Update check skipped by cooldown: {elapsed.TotalHours:F1}h elapsed < {settings.UpdateCheckIntervalHours}h interval.");
-                        return new UpdateCheckResult(true, false, 0, string.Empty, null, null, null);
-                    }
-                }
-            }
+            Log.Info($"[UpdateService] Starting update check (manual={manual}, repo='{G.RepoSlug}')...");
 
             string url = $"https://api.github.com/repos/{G.RepoSlug}/releases?per_page=10";
-            Log.Debug($"[UpdateService] Sending GET request to {url} via NetworkManager.UpdateClient");
-
             using var request = CreateGitHubRequest(HttpMethod.Get, url);
-            using var response = await _networkManager.UpdateClient.SendAsync(request, ct).ConfigureAwait(false);
-            Log.Debug($"[UpdateService] GitHub HTTP response: {(int)response.StatusCode} {response.ReasonPhrase}");
+            using var response = await _networkManager.UpdateClient.SendAsync(request, linkedCts.Token).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorMsg = $"GitHub API error: {(int)response.StatusCode} ({response.ReasonPhrase})";
                 Log.Warn($"[UpdateService] {errorMsg}");
-                return new UpdateCheckResult(false, false, 0, string.Empty, null, null, errorMsg);
+                var failResult = new UpdateCheckResult(false, false, 0, string.Empty, null, null, errorMsg);
+                ApplyCheckResult(failResult);
+                return failResult;
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
             var releases = await JsonSerializer.DeserializeAsync(
                 stream,
                 AppJsonContext.Default.ListGitHubReleaseDto,
-                ct).ConfigureAwait(false);
+                linkedCts.Token).ConfigureAwait(false);
 
             if (releases is null || releases.Count == 0)
             {
                 Log.Warn("[UpdateService] No releases found in repository response.");
-                return new UpdateCheckResult(false, false, 0, string.Empty, null, null, "No releases found.");
+                var noReleasesResult = new UpdateCheckResult(false, false, 0, string.Empty, null, null, "No releases found.");
+                ApplyCheckResult(noReleasesResult);
+                return noReleasesResult;
             }
-
-            Log.Debug($"[UpdateService] Received {releases.Count} releases from GitHub API. Resolving latest build...");
 
             var resolved = ResolveCandidateRelease(releases);
             if (resolved is null)
             {
                 Log.Warn("[UpdateService] Could not resolve any valid release candidate from GitHub.");
-                return new UpdateCheckResult(false, false, 0, string.Empty, null, null, "Unable to resolve release.");
+                var unresResult = new UpdateCheckResult(false, false, 0, string.Empty, null, null, "Unable to resolve release.");
+                ApplyCheckResult(unresResult);
+                return unresResult;
             }
 
             var (candidateRelease, remoteCommit) = resolved.Value;
@@ -163,8 +255,6 @@ public sealed partial class UpdateService : IDisposable
                 ? candidateRelease.TagName
                 : candidateRelease.Name;
 
-            Log.Info($"[UpdateService] Check finished. Local: #{currentCommit}, Remote: #{remoteCommit} ('{versionName}'). Update available: {hasUpdate}. Asset: '{zipAsset?.Name ?? "(none)"}'");
-
             string? error = null;
             if (remoteCommit > currentCommit && zipAsset == null)
             {
@@ -172,7 +262,7 @@ public sealed partial class UpdateService : IDisposable
                 Log.Warn($"[UpdateService] Remote build #{remoteCommit} is newer, but no .zip asset was found in release '{candidateRelease.TagName}'.");
             }
 
-            return new UpdateCheckResult(
+            var result = new UpdateCheckResult(
                 IsSuccess: true,
                 HasUpdate: hasUpdate,
                 RemoteCommitCount: remoteCommit,
@@ -180,16 +270,48 @@ public sealed partial class UpdateService : IDisposable
                 ReleaseNotes: candidateRelease.Body,
                 Asset: zipAsset,
                 ErrorMessage: error);
+
+            ApplyCheckResult(result);
+            return result;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            Log.Debug("[UpdateService] Update check was cancelled.");
-            throw;
+            Log.Warn("[UpdateService] Update check timed out or was cancelled.");
+            var cancelResult = new UpdateCheckResult(false, false, 0, string.Empty, null, null, "Request timed out.");
+            ApplyCheckResult(cancelResult);
+            return cancelResult;
         }
         catch (Exception ex)
         {
             Log.Error($"[UpdateService] Update check exception: {ex.Message}");
-            return new UpdateCheckResult(false, false, 0, string.Empty, null, null, ex.Message);
+            var exResult = new UpdateCheckResult(false, false, 0, string.Empty, null, null, ex.Message);
+            ApplyCheckResult(exResult);
+            return exResult;
+        }
+    }
+
+    private void ApplyCheckResult(UpdateCheckResult result)
+    {
+        lock (_syncLock)
+        {
+            LastCheckResult = result;
+
+            if (result.IsSuccess && result.HasUpdate && result.Asset != null)
+            {
+                if (IsUpdateReadyToInstall && result.RemoteCommitCount > DownloadedCommitCount)
+                {
+                    Log.Info($"[UpdateService] Newer update #{result.RemoteCommitCount} available while older #{DownloadedCommitCount} was downloaded. Invalidating stale package.");
+                    PurgeDownloadedPayload();
+                    IsUpdateReadyToInstall = false;
+                }
+
+                PendingAsset = result.Asset;
+                IsUpdateAvailable = !IsUpdateReadyToInstall;
+            }
+            else if (result.IsSuccess && !result.HasUpdate)
+            {
+                IsUpdateAvailable = false;
+            }
         }
     }
 
@@ -203,63 +325,85 @@ public sealed partial class UpdateService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(asset);
 
+        lock (_syncLock)
+        {
+            if (IsDownloading)
+                throw new InvalidOperationException("Download already in progress.");
+
+            IsDownloading = true;
+            DownloadProgress = 0;
+            NotifyStateChanged();
+        }
+
         Log.Info($"[UpdateService] Initiating download: '{asset.Name}' ({asset.Size / (1024 * 1024.0):F2} MB) from '{asset.BrowserDownloadUrl}'");
 
-        if (Directory.Exists(G.Folder.Update))
+        try
         {
-            Log.Debug($"[UpdateService] Cleaning existing update directory: {G.Folder.Update}");
-            Directory.Delete(G.Folder.Update, recursive: true);
-        }
-
-        Directory.CreateDirectory(G.Folder.Update);
-
-        using var request = CreateGitHubRequest(HttpMethod.Get, asset.BrowserDownloadUrl);
-        using var response = await _networkManager.UpdateClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            ct).ConfigureAwait(false);
-
-        response.EnsureSuccessStatusCode();
-
-        long totalBytes = response.Content.Headers.ContentLength ?? asset.Size;
-        Log.Debug($"[UpdateService] Server confirmed stream size: {totalBytes} bytes. Writing to '{G.FilePath.UpdatePayloadZip}'");
-
-        await using var sourceStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        await using var fileStream = new FileStream(
-            G.FilePath.UpdatePayloadZip,
-            FileMode.Create,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 81920,
-            useAsync: true);
-
-        var buffer = new byte[81920];
-        long totalRead = 0;
-        int bytesRead;
-        int lastReportedPercent = -1;
-
-        while ((bytesRead = await sourceStream.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
-        {
-            await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
-            totalRead += bytesRead;
-
-            if (totalBytes > 0)
+            if (Directory.Exists(G.Folder.Update))
             {
-                double percentage = Math.Clamp((double)totalRead / totalBytes * 100.0, 0, 100);
-                int currentPercentInt = (int)percentage;
+                Log.Debug($"[UpdateService] Cleaning existing update directory: {G.Folder.Update}");
+                Directory.Delete(G.Folder.Update, recursive: true);
+            }
 
-                if (currentPercentInt >= lastReportedPercent + 25)
+            Directory.CreateDirectory(G.Folder.Update);
+
+            using var request = CreateGitHubRequest(HttpMethod.Get, asset.BrowserDownloadUrl);
+            using var response = await _networkManager.UpdateClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct).ConfigureAwait(false);
+
+            response.EnsureSuccessStatusCode();
+
+            long totalBytes = response.Content.Headers.ContentLength ?? asset.Size;
+            Log.Debug($"[UpdateService] Server confirmed stream size: {totalBytes} bytes. Writing to '{G.FilePath.UpdatePayloadZip}'");
+
+            await using var sourceStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var fileStream = new FileStream(
+                G.FilePath.UpdatePayloadZip,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                useAsync: true);
+
+            var buffer = new byte[81920];
+            long totalRead = 0;
+            int bytesRead;
+
+            while ((bytesRead = await sourceStream.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+            {
+                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
+                totalRead += bytesRead;
+
+                if (totalBytes > 0)
                 {
-                    lastReportedPercent = currentPercentInt;
-                    Log.Debug($"[UpdateService] Download progress: {percentage:F0}% ({totalRead / (1024 * 1024.0):F1} MB / {totalBytes / (1024 * 1024.0):F1} MB)");
+                    double percentage = Math.Clamp((double)totalRead / totalBytes * 100.0, 0, 100);
+                    DownloadProgress = percentage;
+                    progress?.Report(percentage);
+                    NotifyStateChanged();
                 }
+            }
 
-                progress?.Report(percentage);
+            lock (_syncLock)
+            {
+                DownloadedCommitCount = ParseCommitCountFromTag(asset.Name);
+                IsUpdateAvailable = false;
+                IsUpdateReadyToInstall = true;
+                DownloadProgress = 100;
+            }
+
+            Log.Info($"[UpdateService] Download complete. Successfully saved payload ({totalRead} bytes) to '{G.FilePath.UpdatePayloadZip}'");
+            return G.FilePath.UpdatePayloadZip;
+        }
+        finally
+        {
+            lock (_syncLock)
+            {
+                IsDownloading = false;
+                NotifyStateChanged();
             }
         }
-
-        Log.Info($"[UpdateService] Download complete. Successfully saved payload ({totalRead} bytes) to '{G.FilePath.UpdatePayloadZip}'");
-        return G.FilePath.UpdatePayloadZip;
     }
 
     /// <summary>
@@ -420,6 +564,32 @@ public sealed partial class UpdateService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Безвозвратно удаляет скачанный локальный архив обновления и распакованные файлы,
+    /// если в репозитории появился более актуальный релиз до применения предыдущего.
+    /// </summary>
+    public static void PurgeDownloadedPayload()
+    {
+        try
+        {
+            if (File.Exists(G.FilePath.UpdatePayloadZip))
+            {
+                File.Delete(G.FilePath.UpdatePayloadZip);
+                Log.Info($"[UpdateService] Stale update payload purged: {G.FilePath.UpdatePayloadZip}");
+            }
+
+            if (Directory.Exists(G.Folder.UpdateExtracted))
+            {
+                Directory.Delete(G.Folder.UpdateExtracted, recursive: true);
+                Log.Info($"[UpdateService] Stale extracted directory pruned: {G.Folder.UpdateExtracted}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[UpdateService] Failed to purge stale update files: {ex.Message}");
+        }
+    }
+
     private static HttpRequestMessage CreateGitHubRequest(HttpMethod method, string url)
     {
         var request = new HttpRequestMessage(method, url);
@@ -428,9 +598,6 @@ public sealed partial class UpdateService : IDisposable
         return request;
     }
 
-    /// <summary>
-    /// Разрешает наиболее релевантный релиз (среди плавающего 'dev' и снимков 'dev-<commit>').
-    /// </summary>
     private static (GitHubReleaseDto Release, int CommitCount)? ResolveCandidateRelease(List<GitHubReleaseDto> releases)
     {
         GitHubReleaseDto? bestRelease = null;
@@ -452,9 +619,6 @@ public sealed partial class UpdateService : IDisposable
         return null;
     }
 
-    /// <summary>
-    /// Извлекает числовой номер коммита из релиза (анализирует тег, заголовок и markdown-тело).
-    /// </summary>
     public static int ExtractCommitCountFromRelease(GitHubReleaseDto release)
     {
         int fromTag = ParseCommitCountFromTag(release.TagName);
@@ -480,9 +644,6 @@ public sealed partial class UpdateService : IDisposable
         return 0;
     }
 
-    /// <summary>
-    /// Извлекает числовой номер коммита/билда из строки тега GitHub.
-    /// </summary>
     public static int ParseCommitCountFromTag(ReadOnlySpan<char> tag)
     {
         tag = tag.Trim();
@@ -511,6 +672,11 @@ public sealed partial class UpdateService : IDisposable
             return commitCount;
 
         return 0;
+    }
+
+    private void NotifyStateChanged()
+    {
+        StateChanged?.Invoke();
     }
 
     public void Dispose()

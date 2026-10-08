@@ -45,13 +45,14 @@
                             Command="{Binding SimulateUpdateFlowCommand}"
                             IsVisible="{Binding IsDebug}"
                             Height="28" Padding="10,0"
-                            ToolTip.Tip="Симуляция загрузки обновления (Debug)">
+                            ToolTip.Tip="{Binding L[Settings_Update_SimulateTooltip]}">
                             <StackPanel Orientation="Horizontal" Spacing="6"
                                 VerticalAlignment="Center">
                                 <PathIcon Data="{StaticResource Icon.Bug}" Width="12" Height="12"
                                     Foreground="{DynamicResource AccentBrush}"
                                     VerticalAlignment="Center" />
-                                <TextBlock Text="Тест загрузки" FontSize="11"
+                                <TextBlock Text="{Binding L[Settings_Update_SimulateButton]}"
+                                    FontSize="11"
                                     Foreground="{DynamicResource AccentBrush}"
                                     VerticalAlignment="Center" />
                             </StackPanel>
@@ -66,40 +67,60 @@
                                 VerticalAlignment="Center" HorizontalAlignment="Center" />
                         </Button>
 
-                        <!-- Кнопка Проверить обновления -->
+                        <!-- Кнопка Проверить обновления / Скачивание -->
                         <Button Command="{Binding CheckUpdatesCommand}"
-                            IsEnabled="{Binding !IsCheckingUpdates}"
+                            IsEnabled="{Binding CanCheckForUpdates}"
                             Height="28" Padding="12,0"
                             MinWidth="170">
                             <StackPanel Orientation="Horizontal" Spacing="8"
                                 VerticalAlignment="Center">
+                                <!-- Иконка в покое -->
                                 <PathIcon Data="{StaticResource Icon.Refresh}"
                                     Width="12" Height="12"
                                     VerticalAlignment="Center"
-                                    IsVisible="{Binding !IsCheckingUpdates}" />
+                                    IsVisible="{Binding IsUpdateActionIdle}" />
+
+                                <!-- Иконка при проверке или скачивании (вращается) -->
                                 <PathIcon Data="{StaticResource Icon.Refresh}"
                                     Width="12" Height="12"
                                     Classes="spinning"
                                     Foreground="{DynamicResource AccentBrush}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding IsCheckingUpdates}" />
+                                    VerticalAlignment="Center">
+                                    <PathIcon.IsVisible>
+                                        <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                                            <Binding Path="IsCheckingUpdates" />
+                                            <Binding Path="IsDownloadingUpdate" />
+                                        </MultiBinding>
+                                    </PathIcon.IsVisible>
+                                </PathIcon>
+
+                                <!-- Текст в покое -->
                                 <TextBlock Text="{Binding L[Settings_CheckUpdates]}"
-                                    IsVisible="{Binding !IsCheckingUpdates}" FontSize="12"
+                                    IsVisible="{Binding IsUpdateActionIdle}" FontSize="12"
                                     VerticalAlignment="Center" />
+
+                                <!-- Текст при проверке -->
                                 <TextBlock Text="{Binding L[Settings_CheckingUpdates]}"
                                     IsVisible="{Binding IsCheckingUpdates}" FontSize="12"
+                                    VerticalAlignment="Center" />
+
+                                <!-- Текст при скачивании -->
+                                <TextBlock Text="{Binding DownloadProgressText}"
+                                    IsVisible="{Binding IsDownloadingUpdate}" FontSize="12"
                                     VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
 
-                        <!-- Кнопка Скачать обновление -->
+                        <!-- Кнопка Скачать обновление (показывается только когда архив еще не
+                        загружен) -->
                         <Button Classes="primary-btn"
                             Content="{Binding L[Settings_DownloadUpdate]}"
                             Command="{Binding DownloadUpdateCommand}"
                             IsVisible="{Binding CanDownloadUpdate}"
                             Height="28" Padding="12,0" />
 
-                        <!-- Кнопка Перезапустить и применить -->
+                        <!-- Кнопка Перезапустить и применить (показывается взамен кнопки
+                        скачивания) -->
                         <Button Classes="primary-btn"
                             Content="{Binding L[Settings_RestartToApply]}"
                             Command="{Binding ApplyUpdateCommand}"
@@ -109,63 +130,79 @@
 
                     <!-- Строка 1: Метаданные слева и статус справа -->
                     <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                        ColumnDefinitions="Auto, *, Auto" Height="20" Margin="0,8,0,0">
-                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8"
+                        ColumnDefinitions="Auto, *, Auto" Height="24" Margin="0,8,0,0">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6"
                             VerticalAlignment="Center">
-                            <TextBlock Text="{Binding GitCommitCount}" FontSize="11"
-                                FontFamily="Consolas, monospace"
-                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                VerticalAlignment="Center" />
-                            <TextBlock Text="•" FontSize="10"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding GitCommitHash}" FontSize="11"
-                                FontFamily="Consolas, monospace"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                VerticalAlignment="Center" />
-                            <TextBlock Text="•" FontSize="10"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding BuildDateString}" FontSize="11"
-                                FontFamily="Consolas, monospace"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                VerticalAlignment="Center" />
+
+                            <!-- Номер коммита -->
+                            <Border Classes="meta-chip"
+                                ToolTip.Tip="{Binding L[Metadata_Tooltip_Commit]}">
+                                <TextBlock Text="{Binding GitCommitCount}" FontSize="11"
+                                    FontFamily="Consolas, monospace"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    VerticalAlignment="Center" />
+                            </Border>
+
+                            <!-- Хэш коммита -->
+                            <Border Classes="meta-chip"
+                                ToolTip.Tip="{Binding L[Metadata_Tooltip_Hash]}">
+                                <TextBlock Text="{Binding GitCommitHash}" FontSize="11"
+                                    FontFamily="Consolas, monospace"
+                                    Foreground="{DynamicResource TextMutedBrush}"
+                                    VerticalAlignment="Center" />
+                            </Border>
+
+                            <!-- Дата сборки -->
+                            <Border Classes="meta-chip"
+                                ToolTip.Tip="{Binding L[Metadata_Tooltip_BuildDate]}">
+                                <TextBlock Text="{Binding BuildDateString}" FontSize="11"
+                                    FontFamily="Consolas, monospace"
+                                    Foreground="{DynamicResource TextMutedBrush}"
+                                    VerticalAlignment="Center" />
+                            </Border>
 
                             <!-- Метаданные репозитория GitHub -->
-                            <StackPanel Orientation="Horizontal" Spacing="8"
+                            <StackPanel Orientation="Horizontal" Spacing="6"
                                 IsVisible="{Binding HasRepoInfo}"
                                 VerticalAlignment="Center">
-                                <TextBlock Text="•" FontSize="10"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    VerticalAlignment="Center" />
-                                <StackPanel Orientation="Horizontal" Spacing="4"
-                                    VerticalAlignment="Center">
-                                    <PathIcon Data="{StaticResource Icon.Heart}" Width="10"
-                                        Height="10" Foreground="{DynamicResource AccentBrush}"
-                                        VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding RepoStars}" FontSize="11"
-                                        Foreground="{DynamicResource TextMutedBrush}"
-                                        VerticalAlignment="Center" />
-                                </StackPanel>
-                                <TextBlock Text="•" FontSize="10"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    VerticalAlignment="Center" />
-                                <StackPanel Orientation="Horizontal" Spacing="4"
-                                    VerticalAlignment="Center">
-                                    <PathIcon Data="{StaticResource Icon.Bug}" Width="10"
-                                        Height="10" Foreground="{DynamicResource TextMutedBrush}"
-                                        VerticalAlignment="Center" />
-                                    <TextBlock
-                                        Text="{Binding RepoIssues, StringFormat='Issues: {0}'}"
+
+                                <!-- Звёзды -->
+                                <Border Classes="meta-chip"
+                                    ToolTip.Tip="{Binding L[Metadata_Tooltip_Stars]}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4"
+                                        VerticalAlignment="Center">
+                                        <PathIcon Data="{StaticResource Icon.Heart}" Width="10"
+                                            Height="10" Foreground="{DynamicResource AccentBrush}"
+                                            VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding RepoStars}" FontSize="11"
+                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Открытые задачи (Issues) -->
+                                <Border Classes="meta-chip"
+                                    ToolTip.Tip="{Binding L[Metadata_Tooltip_Issues]}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4"
+                                        VerticalAlignment="Center">
+                                        <PathIcon Data="{StaticResource Icon.Bug}" Width="10"
+                                            Height="10"
+                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding RepoIssuesDisplayString}"
+                                            FontSize="11"
+                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Ветка Git -->
+                                <Border Classes="meta-chip"
+                                    ToolTip.Tip="{Binding L[Metadata_Tooltip_Branch]}">
+                                    <TextBlock Text="{Binding RepoBranch, StringFormat='git:{0}'}"
                                         FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
                                         VerticalAlignment="Center" />
-                                </StackPanel>
-                                <TextBlock Text="•" FontSize="10"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding RepoBranch, StringFormat='git:{0}'}"
-                                    FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
-                                    VerticalAlignment="Center" />
+                                </Border>
                             </StackPanel>
                         </StackPanel>
 
@@ -202,14 +239,24 @@
                         VerticalAlignment="Center" />
                 </Grid>
 
-                <Grid ColumnDefinitions="*, Auto">
+                <!--  Интервал автопроверки  -->
+                <Grid ColumnDefinitions="*, 200, 70"
+                    IsEnabled="{Binding AutoCheckUpdates}">
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Classes="label" Text="{Binding L[Settings_IncludePreReleases]}" />
-                        <TextBlock Classes="desc"
-                            Text="{Binding L[Settings_IncludePreReleasesDesc]}" />
+                        <TextBlock Classes="label" Text="{Binding L[Settings_UpdateInterval]}" />
+                        <TextBlock Classes="desc" Text="{Binding L[Settings_UpdateIntervalDesc]}" />
                     </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludePreReleases}"
-                        VerticalAlignment="Center" />
+                    <Slider Grid.Column="1"
+                        Minimum="1" Maximum="24"
+                        TickFrequency="1"
+                        IsSnapToTickEnabled="True"
+                        Value="{Binding UpdateCheckIntervalHours}"
+                        VerticalAlignment="Center"
+                        Margin="12,0" />
+                    <TextBlock Grid.Column="2" Classes="value-label"
+                        Text="{Binding UpdateIntervalDisplayString}"
+                        VerticalAlignment="Center"
+                        TextAlignment="Right" />
                 </Grid>
             </StackPanel>
         </Border>

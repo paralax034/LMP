@@ -133,6 +133,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmo
                 case AudioSettingsViewModel aud: aud.RefreshLists(); break;
                 case PlaybackSettingsViewModel pb: pb.RefreshLists(); break;
                 case WindowBehaviorSettingsViewModel win: win.RefreshLists(); break;
+                case GeneralSettingsViewModel gen: gen.RefreshLists(); break;
             }
         }
     }

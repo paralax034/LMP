@@ -119,10 +119,6 @@ public partial class MainWindow
 
     /// <summary>
     /// Потеря фокуса. Запускает debounce-таймер на <see cref="DeactivateSuspendDelayMs"/>.
-    ///
-    /// <remarks><see cref="_isRestoringFromTray"/> guard блокирует deactivation
-    /// во время restore из трея — на Windows <c>Show()</c> + <c>Activate()</c>
-    /// часто вызывают Deactivated до получения foreground focus.</remarks>
     /// </summary>
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
@@ -132,9 +128,10 @@ public partial class MainWindow
         _deactivateCts = new CancellationTokenSource();
         var token = _deactivateCts.Token;
 
-        _ = Task.Delay(DeactivateSuspendDelayMs, token).ContinueWith(t =>
+        _ = Task.Run(async () =>
         {
-            if (t.IsCanceled) return;
+            bool completedNormal = await DelayNoThrowAsync(TimeSpan.FromMilliseconds(DeactivateSuspendDelayMs), token).ConfigureAwait(false);
+            if (!completedNormal) return;
 
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
@@ -145,7 +142,7 @@ public partial class MainWindow
                     Log.Debug("[Window] Deactivated → Soft Suspend");
                 }
             });
-        }, TaskScheduler.Default);
+        });
     }
 
     /// <summary>
@@ -213,14 +210,24 @@ public partial class MainWindow
 
     private static async Task<bool> DelayNoThrowAsync(TimeSpan delay, CancellationToken token)
     {
-        try
-        {
-            await Task.Delay(delay, token).ConfigureAwait(false);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
+        if (token.IsCancellationRequested)
             return false;
-        }
+
+        if (delay <= TimeSpan.Zero)
+            return true;
+
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var timer = new Timer(
+            static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true),
+            tcs,
+            delay,
+            Timeout.InfiniteTimeSpan);
+
+        using var registration = token.UnsafeRegister(
+            static state => ((TaskCompletionSource<bool>)state!).TrySetResult(false),
+            tcs);
+
+        return await tcs.Task.ConfigureAwait(false);
     }
 }
