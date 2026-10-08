@@ -256,11 +256,14 @@ public sealed class TestConfig
         public string? Description { get; init; }
     }
 
-    /// <summary>
-    /// Общие параметры тестов.
-    /// </summary>
     public sealed class GeneralConfig
     {
+        /// <summary>
+        /// Симуляция устаревшего номера коммита для отладки автообновления в Debug (0 = отключено).
+        /// </summary>
+        [JsonPropertyName("simulateOldCommitCount")]
+        public int SimulateOldCommitCount { get; init; } = 0;
+
         /// <summary>
         /// Дефолтный таймаут для тестов с сетью, секунды.
         /// </summary>

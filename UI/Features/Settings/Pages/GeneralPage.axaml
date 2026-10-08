@@ -5,8 +5,8 @@
     x:DataType="vm:GeneralSettingsViewModel"
     x:CompileBindings="True">
 
-    <StackPanel Margin="32,24">
-        <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,16">
+    <StackPanel Margin="32,24" Spacing="20">
+        <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,4">
             <PathIcon Grid.Column="0" Data="{StaticResource Icon.Settings}"
                 Width="20" Height="20" VerticalAlignment="Center"
                 Foreground="{DynamicResource AccentBrush}" />
@@ -15,6 +15,184 @@
                 VerticalAlignment="Center" Margin="8,0,0,0" />
         </Grid>
 
+        <!-- Блок «О программе и обновления» с нулевым сдвигом компоновки -->
+        <Border Classes="card">
+            <StackPanel Spacing="14">
+
+                <Grid ColumnDefinitions="*, Auto" RowDefinitions="Auto, Auto">
+
+                    <!-- Строка 0, Левая колонка: Заголовок и бейдж профиля сборки -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="8"
+                        VerticalAlignment="Center">
+                        <TextBlock Classes="label" Text="{Binding L[Settings_About_Section]}"
+                            VerticalAlignment="Center" />
+                        <Border BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="6,1" VerticalAlignment="Center"
+                            Background="Transparent">
+                            <TextBlock Text="{Binding BuildProfileShort}" FontSize="10"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource AccentBrush}" />
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Строка 0, Правая колонка: Все элементы управления в одну стабильную линию -->
+                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                        VerticalAlignment="Center">
+                        <!-- Кнопка симуляции загрузки (активна только в Debug) -->
+                        <Button Classes="ghost-btn"
+                            Command="{Binding SimulateUpdateFlowCommand}"
+                            IsVisible="{Binding IsDebug}"
+                            Height="28" Padding="10,0"
+                            ToolTip.Tip="Симуляция загрузки обновления (Debug)">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <PathIcon Data="{StaticResource Icon.Bug}" Width="12" Height="12"
+                                    Foreground="{DynamicResource AccentBrush}" />
+                                <TextBlock Text="Тест загрузки" FontSize="11"
+                                    Foreground="{DynamicResource AccentBrush}"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Ссылка на репозиторий GitHub -->
+                        <Button Classes="icon-btn ghost-btn"
+                            Command="{Binding OpenGitHubRepoCommand}"
+                            Width="28" Height="28" Padding="6"
+                            ToolTip.Tip="{Binding L[Common_OpenGitHub]}">
+                            <PathIcon Data="{StaticResource Icon.Web}" Width="14" Height="14" />
+                        </Button>
+
+                        <!-- Кнопка Проверить обновления -->
+                        <Button Command="{Binding CheckUpdatesCommand}"
+                            IsEnabled="{Binding !IsCheckingUpdates}"
+                            Height="28" Padding="12,0"
+                            MinWidth="170">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <PathIcon Data="{StaticResource Icon.Refresh}"
+                                    Width="12" Height="12"
+                                    IsVisible="{Binding !IsCheckingUpdates}" />
+                                <PathIcon Data="{StaticResource Icon.Refresh}"
+                                    Width="12" Height="12"
+                                    Classes="spinning"
+                                    Foreground="{DynamicResource AccentBrush}"
+                                    IsVisible="{Binding IsCheckingUpdates}" />
+                                <TextBlock Text="{Binding L[Settings_CheckUpdates]}"
+                                    IsVisible="{Binding !IsCheckingUpdates}" FontSize="12"
+                                    VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding L[Settings_CheckingUpdates]}"
+                                    IsVisible="{Binding IsCheckingUpdates}" FontSize="12"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Кнопка Скачать обновление -->
+                        <Button Classes="primary-btn"
+                            Content="{Binding L[Settings_DownloadUpdate]}"
+                            Command="{Binding DownloadUpdateCommand}"
+                            IsVisible="{Binding CanDownloadUpdate}"
+                            Height="28" Padding="12,0" />
+
+                        <!-- Кнопка Перезапустить и применить -->
+                        <Button Classes="primary-btn"
+                            Content="{Binding L[Settings_RestartToApply]}"
+                            Command="{Binding ApplyUpdateCommand}"
+                            IsVisible="{Binding IsUpdateReadyToInstall}"
+                            Height="28" Padding="12,0" />
+                    </StackPanel>
+
+                    <!-- Строка 1: Метаданные слева и статус обновления справа (в одну линию без
+                    сдвигов) -->
+                    <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                        ColumnDefinitions="Auto, *, Auto" Margin="0,8,0,0">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8"
+                            VerticalAlignment="Center">
+                            <TextBlock Text="{Binding GitCommitCount}" FontSize="11"
+                                FontFamily="Consolas, monospace"
+                                Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBlock Text="•" FontSize="10"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding GitCommitHash}" FontSize="11"
+                                FontFamily="Consolas, monospace"
+                                Foreground="{DynamicResource TextMutedBrush}" />
+                            <TextBlock Text="•" FontSize="10"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding BuildDateString}" FontSize="11"
+                                Foreground="{DynamicResource TextMutedBrush}" />
+
+                            <!-- Метаданные репозитория GitHub -->
+                            <StackPanel Orientation="Horizontal" Spacing="8"
+                                IsVisible="{Binding HasRepoInfo}">
+                                <TextBlock Text="•" FontSize="10"
+                                    Foreground="{DynamicResource TextMutedBrush}"
+                                    VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Spacing="4"
+                                    VerticalAlignment="Center">
+                                    <PathIcon Data="{StaticResource Icon.Heart}" Width="10"
+                                        Height="10" Foreground="{DynamicResource AccentBrush}" />
+                                    <TextBlock Text="{Binding RepoStars}" FontSize="11"
+                                        Foreground="{DynamicResource TextMutedBrush}" />
+                                </StackPanel>
+                                <TextBlock Text="•" FontSize="10"
+                                    Foreground="{DynamicResource TextMutedBrush}"
+                                    VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Spacing="4"
+                                    VerticalAlignment="Center">
+                                    <PathIcon Data="{StaticResource Icon.Bug}" Width="10"
+                                        Height="10" Foreground="{DynamicResource TextMutedBrush}" />
+                                    <TextBlock
+                                        Text="{Binding RepoIssues, StringFormat='Issues: {0}'}"
+                                        FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                </StackPanel>
+                                <TextBlock Text="•" FontSize="10"
+                                    Foreground="{DynamicResource TextMutedBrush}"
+                                    VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding RepoBranch, StringFormat='git:{0}'}"
+                                    FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Статус обновления пристыкован справа в той же строке -->
+                        <TextBlock Grid.Column="2"
+                            Text="{Binding UpdateStatusText}"
+                            FontSize="11"
+                            Foreground="{DynamicResource TextSecondaryBrush}"
+                            VerticalAlignment="Center"
+                            TextAlignment="Right" />
+                    </Grid>
+
+                </Grid>
+
+                <!-- Невесомый прогресс-бар загрузки, привязанный к разделителю (2px) -->
+                <ProgressBar Value="{Binding DownloadProgress}" Maximum="100"
+                    Height="2" BorderThickness="0" Margin="0,-6,0,-6"
+                    IsVisible="{Binding IsDownloadingUpdate}"
+                    Background="{DynamicResource BgHighlightBrush}"
+                    Foreground="{DynamicResource AccentBrush}" />
+
+                <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
+
+                <!--  Настройки автопроверки  -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Settings_AutoCheckUpdates]}" />
+                        <TextBlock Classes="desc" Text="{Binding L[Settings_AutoCheckUpdatesDesc]}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoCheckUpdates}" />
+                </Grid>
+
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Settings_IncludePreReleases]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_IncludePreReleasesDesc]}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludePreReleases}" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Общие параметры -->
         <Border Classes="card">
             <StackPanel Spacing="16">
 

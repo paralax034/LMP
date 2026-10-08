@@ -8,8 +8,24 @@ public static class G
 {
     public const string AppId = "LMP";
     public const string AppName = "Lite Music Player";
-    public const string GitHubUrl = "https://github.com/Scream034/LMP";
-    public const string GithubExtensionAuthUrl = "https://github.com/Scream034/LMP-Auth";
+    public const string GitHubUrl = "https://github.com/paralax034/LMP";
+
+    /// <summary>
+    /// Slug репозитория GitHub в формате "owner/repo" для вызовов GitHub API.
+    /// </summary>
+    public static string RepoSlug
+    {
+        get
+        {
+            var url = GitHubUrl.TrimEnd('/');
+            const string prefix = "https://github.com/";
+            if (url.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return url[prefix.Length..];
+
+            return "paralax034/LMP";
+        }
+    }
+    public const string GithubExtensionAuthUrl = "https://github.com/paralax034/LMP-Auth";
 
     public static string DisplayGithubUrl => GitHubUrl[8..];
     public static string AuthExtensionDownloadUrl => GithubExtensionAuthUrl + "/archive/refs/heads/main.zip";
@@ -153,6 +169,9 @@ public static class G
         /// </summary>
         public static readonly string TestData = Path.Combine(Cache, "TestData");
 
+        public static readonly string Update = Path.Combine(Cache, "Update");
+        public static readonly string UpdateExtracted = Path.Combine(Update, "Extracted");
+
         public static void Create()
         {
             Directory.CreateDirectory(Data);
@@ -166,6 +185,7 @@ public static class G
             Directory.CreateDirectory(Logs);
             Directory.CreateDirectory(TestData);
             Directory.CreateDirectory(StreamCache);
+            Directory.CreateDirectory(Update);
         }
     }
 
@@ -194,6 +214,7 @@ public static class G
         public static readonly string TestConfig = Path.Combine(Folder.Cache, "test-config.json");
 
         public static readonly string TempAuthExtensionZipFile = Path.Combine(Folder.Cache, "LMP-Auth-main.zip");
+        public static readonly string UpdatePayloadZip = Path.Combine(Folder.Update, "update_payload.zip");
 
         public static readonly string CdnHostStats = Path.Combine(Folder.StreamCache, "cdn_hosts.bin");
         public static readonly string SessionCache = Path.Combine(Folder.StreamCache, "session_cache.bin");

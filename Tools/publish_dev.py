@@ -4,7 +4,7 @@
 """
 LMP Standalone Dev Build & Release Publisher.
 Implements dual-channel release publishing on GitHub:
-1. Floating release 'dev' with static links to *-latest.7z.
+1. Floating release 'dev' with static links to *-latest.7z and *-latest.zip.
 2. Versioned snapshots 'dev-<commitCount>' for rollback and history.
 """
 
@@ -159,7 +159,11 @@ def main():
     print(f"{Color.YELLOW}>>> Packing Release package (LZMA2 Ultra, 64MB dict)...{Color.RESET}")
     run_cmd([seven_zip, "a", "-t7z", "-m0=lzma2", "-mx=9", "-md=64m", "-mfb=64", "-ms=on", "-mmt=8", str(versioned_release_7z), f"{publish_dir}/*"], root, "Release archiving failed")
 
-    versioned_files = [str(versioned_release_7z)]
+    versioned_release_zip = artifacts_dir / f"LMP-Release-v{full_version}.zip"
+    print(f"{Color.YELLOW}>>> Packing Release package (Standard ZIP for auto-updater)...{Color.RESET}")
+    shutil.make_archive(str(artifacts_dir / f"LMP-Release-v{full_version}"), 'zip', publish_dir)
+
+    versioned_files = [str(versioned_release_7z), str(versioned_release_zip)]
     versioned_debug_7z = artifacts_dir / f"LMP-Debug-v{full_version}.7z"
 
     if not release_only and debug_dir.exists():
@@ -169,7 +173,11 @@ def main():
 
     latest_release_7z = artifacts_dir / "LMP-Release-latest.7z"
     shutil.copy2(versioned_release_7z, latest_release_7z)
-    latest_files = [str(latest_release_7z)]
+
+    latest_release_zip = artifacts_dir / "LMP-Release-latest.zip"
+    shutil.copy2(versioned_release_zip, latest_release_zip)
+
+    latest_files = [str(latest_release_7z), str(latest_release_zip)]
 
     if versioned_debug_7z.exists():
         latest_debug_7z = artifacts_dir / "LMP-Debug-latest.7z"
@@ -199,7 +207,8 @@ def main():
         f"| Environment | {source_env} |\n"
         f"| Updated At | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} |\n\n"
         f"### 📥 Permanent Download Links:\n"
-        f"- **[Download LMP-Release-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Release-latest.7z)** — Native AOT Standalone (Recommended)\n"
+        f"- **[Download LMP-Release-latest.zip](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Release-latest.zip)** — Native In-App Updater Package (Fast Extraction)\n"
+        f"- **[Download LMP-Release-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Release-latest.7z)** — Native AOT Standalone (Maximum LZMA2 Compression)\n"
         f"- **[Download LMP-Debug-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Debug-latest.7z)** — Debug build with logging console\n"
     )
 

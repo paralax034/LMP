@@ -3,8 +3,7 @@
     xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
     xmlns:ui="using:LMP.UI.Controls"
     x:Class="LMP.UI.Features.Settings.Pages.AccountLanguagePage"
-    x:DataType="vm:AccountLanguageSettingsViewModel"
-    x:CompileBindings="True">
+    x:DataType="vm:AccountLanguageSettingsViewModel">
 
     <!--
         DataContext = SettingsViewModel (установлен родительским DataTemplate).

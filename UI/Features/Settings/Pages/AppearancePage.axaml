@@ -3,8 +3,7 @@
     xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
     xmlns:controls="using:LMP.UI.Features.Settings.Controls"
     x:Class="LMP.UI.Features.Settings.Pages.AppearancePage"
-    x:DataType="vm:AppearanceSettingsViewModel"
-    x:CompileBindings="True">
+    x:DataType="vm:AppearanceSettingsViewModel">
 
     <StackPanel Margin="32,24">
         <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,16">

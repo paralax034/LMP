@@ -23,6 +23,7 @@ public sealed class NetworkManager : IDisposable
     private volatile HttpClient _apiClient;
     private volatile HttpClient _imageClient;
     private volatile HttpClient _probeClient;
+    private volatile HttpClient _updateClient;
 
     private ProxySettings? _currentProxy;
     private readonly InternetProfile _currentProfile = InternetProfile.Medium;
@@ -46,6 +47,11 @@ public sealed class NetworkManager : IDisposable
 
     /// <inheritdoc/>
     public HttpClient ProbeClient => _probeClient;
+
+    /// <summary>
+    /// Клиент для проверки и скачивания обновлений с поддержкой редиректов (GitHub Releases / S3 CDN).
+    /// </summary>
+    public HttpClient UpdateClient => _updateClient;
 
     /// <inheritdoc/>
     public ProxySettings? CurrentProxy
@@ -127,7 +133,7 @@ public sealed class NetworkManager : IDisposable
         _lastOutboundIp = outboundIp;
         _isVpnActive = isVpn;
 
-        (_audioClient, _apiClient, _imageClient, _probeClient) = CreateClientCluster(_currentProxy);
+        (_audioClient, _apiClient, _imageClient, _probeClient, _updateClient) = CreateClientCluster(_currentProxy);
 
         NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
         _watchdogTask = Task.Run(NetworkWatchdogLoopAsync);
@@ -162,8 +168,8 @@ public sealed class NetworkManager : IDisposable
 
         Volatile.Write(ref _lastRebuildTick, now);
 
-        HttpClient oldAudio, oldApi, oldImage, oldProbe;
-        HttpClient newAudio, newApi, newImage, newProbe;
+        HttpClient oldAudio, oldApi, oldImage, oldProbe, oldUpdate;
+        HttpClient newAudio, newApi, newImage, newProbe, newUpdate;
 
         ProxySettings? proxy;
         lock (_stateLock)
@@ -171,7 +177,7 @@ public sealed class NetworkManager : IDisposable
             proxy = _currentProxy;
         }
 
-        (newAudio, newApi, newImage, newProbe) = CreateClientCluster(proxy);
+        (newAudio, newApi, newImage, newProbe, newUpdate) = CreateClientCluster(proxy);
 
         lock (_rebuildLock)
         {
@@ -179,12 +185,13 @@ public sealed class NetworkManager : IDisposable
             oldApi = Interlocked.Exchange(ref _apiClient, newApi);
             oldImage = Interlocked.Exchange(ref _imageClient, newImage);
             oldProbe = Interlocked.Exchange(ref _probeClient, newProbe);
+            oldUpdate = Interlocked.Exchange(ref _updateClient, newUpdate);
         }
 
         DohResolver.InvalidateCache();
         AudioSourceFactory.CdnBlacklist.Clear();
 
-        ScheduleDrainDisposal(oldAudio, oldApi, oldImage, oldProbe);
+        ScheduleDrainDisposal(oldAudio, oldApi, oldImage, oldProbe, oldUpdate);
 
         Log.Info($"[NetworkManager] Network cluster rebuilt. Reason: {reason}, Force: {force}");
 
@@ -198,7 +205,7 @@ public sealed class NetworkManager : IDisposable
         }
     }
 
-    private static (HttpClient Audio, HttpClient Api, HttpClient Image, HttpClient Probe) CreateClientCluster(ProxySettings? proxy)
+    private static (HttpClient Audio, HttpClient Api, HttpClient Image, HttpClient Probe, HttpClient Update) CreateClientCluster(ProxySettings? proxy)
     {
         AudioSourceFactory.CurrentProxySettings = proxy;
         var customProxy = ProxyHelper.CreateWebProxy(proxy);
@@ -303,7 +310,26 @@ public sealed class NetworkManager : IDisposable
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
         };
 
-        return (audioClient, apiClient, imageClient, probeClient);
+        // 5. Update Client (HTTP/1.1, автоматические редиректы для GitHub Releases и S3 CDN)
+        var updateHandler = new SocketsHttpHandler
+        {
+            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
+            Proxy = effectiveProxy,
+            UseProxy = true,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5
+        };
+
+        var updateClient = new HttpClient(updateHandler)
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
+
+        return (audioClient, apiClient, imageClient, probeClient, updateClient);
     }
 
     /// <summary>
@@ -610,5 +636,6 @@ public sealed class NetworkManager : IDisposable
         _apiClient.Dispose();
         _imageClient.Dispose();
         _probeClient.Dispose();
+        _updateClient.Dispose();
     }
 }

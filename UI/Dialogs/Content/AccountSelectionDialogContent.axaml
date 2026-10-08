@@ -5,7 +5,6 @@
     xmlns:ui="using:LMP.UI.Controls"
     x:Class="LMP.UI.Dialogs.Content.AccountSelectionDialogContent"
     x:DataType="dialogs:AccountSelectionDialogViewModel"
-    x:CompileBindings="True"
     Name="AccountDialogRoot"
     Width="420">
 

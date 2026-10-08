@@ -334,6 +334,24 @@ public sealed class MemorySettings
 }
 
 /// <summary>
+/// Настройки автоматического обновления приложения.
+/// </summary>
+public sealed class UpdateSettings
+{
+    /// <summary>Включить автоматическую проверку обновлений.</summary>
+    public bool AutoCheckUpdates { get; set; } = true;
+
+    /// <summary>Интервал проверки обновлений в часах.</summary>
+    public int UpdateCheckIntervalHours { get; set; } = 12;
+
+    /// <summary>Время последней проверки обновлений в UTC.</summary>
+    public DateTime? LastUpdateCheckUtc { get; set; }
+
+    /// <summary>Проверять ли предварительные (pre-release) сборки.</summary>
+    public bool IncludePreReleases { get; set; } = false;
+}
+
+/// <summary>
 /// Application settings. Stored as JSON in Settings table.
 /// </summary>
 public sealed class AppSettings
@@ -418,6 +436,11 @@ public sealed class AppSettings
     /// Настройки управления памятью (27).
     /// </summary>
     public MemorySettings Memory { get; set; } = new();
+
+    /// <summary>
+    /// Настройки обновлений приложения (28).
+    /// </summary>
+    public UpdateSettings Updates { get; set; } = new();
 
     /// <summary>
     /// Использовать живую волновую анимацию для активного играющего трека.

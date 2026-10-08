@@ -2,8 +2,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
     x:Class="LMP.UI.Features.Settings.Pages.StorageCachePage"
-    x:DataType="vm:StorageCacheSettingsViewModel"
-    x:CompileBindings="True">
+    x:DataType="vm:StorageCacheSettingsViewModel">
 
     <StackPanel Margin="32,24">
         <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,16">

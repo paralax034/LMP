@@ -17,6 +17,21 @@ namespace LMP.UI.Features.Debug;
 /// </summary>
 public sealed partial class DebugViewModel : ViewModelBase
 {
+    [GeneratedRegex(@"^[a-zA-Z0-9_-]{11}$")]
+    private static partial Regex VideoIdExactRegex();
+
+    [GeneratedRegex(@"[?&]v=([a-zA-Z0-9_-]{11})")]
+    private static partial Regex VideoIdQueryRegex();
+
+    [GeneratedRegex(@"youtu\.be/([a-zA-Z0-9_-]{11})")]
+    private static partial Regex VideoIdShortUrlRegex();
+
+    [GeneratedRegex(@"embed/([a-zA-Z0-9_-]{11})")]
+    private static partial Regex VideoIdEmbedRegex();
+
+    [GeneratedRegex(@"shorts/([a-zA-Z0-9_-]{11})")]
+    private static partial Regex VideoIdShortsRegex();
+
     private readonly Lazy<YoutubeProvider> _youtubeLazy;
     private YoutubeProvider Youtube => _youtubeLazy.Value;
 
@@ -509,19 +524,19 @@ public sealed partial class DebugViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(input)) return null;
         input = input.Trim();
 
-        if (Regex.IsMatch(input, @"^[a-zA-Z0-9_-]{11}$"))
+        if (VideoIdExactRegex().IsMatch(input))
             return input;
 
-        var match = Regex.Match(input, @"[?&]v=([a-zA-Z0-9_-]{11})");
+        var match = VideoIdQueryRegex().Match(input);
         if (match.Success) return match.Groups[1].Value;
 
-        match = Regex.Match(input, @"youtu\.be/([a-zA-Z0-9_-]{11})");
+        match = VideoIdShortUrlRegex().Match(input);
         if (match.Success) return match.Groups[1].Value;
 
-        match = Regex.Match(input, @"embed/([a-zA-Z0-9_-]{11})");
+        match = VideoIdEmbedRegex().Match(input);
         if (match.Success) return match.Groups[1].Value;
 
-        match = Regex.Match(input, @"shorts/([a-zA-Z0-9_-]{11})");
+        match = VideoIdShortsRegex().Match(input);
         if (match.Success) return match.Groups[1].Value;
 
         return null;

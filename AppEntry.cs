@@ -57,6 +57,41 @@ public sealed class AppEntry
         }
         catch { }
 
+        // 2. Ожидание завершения родительского процесса при обновлении и безопасная очистка .old файлов
+        int waitPid = 0;
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (arg.StartsWith("--wait-pid=", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(arg.AsSpan(11), out var parsedPid) && parsedPid > 0)
+                    waitPid = parsedPid;
+            }
+        }
+
+        if (waitPid > 0)
+        {
+            Log.Info($"[AppEntry] Launched after in-place update. Waiting for parent process {waitPid} to terminate...");
+            try
+            {
+                using var parentProcess = System.Diagnostics.Process.GetProcessById(waitPid);
+                if (parentProcess.WaitForExit(7000))
+                    Log.Info($"[AppEntry] Parent process {waitPid} successfully exited.");
+                else
+                    Log.Warn($"[AppEntry] Parent process {waitPid} did not exit within timeout. Proceeding...");
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"[AppEntry] Parent process {waitPid} inspection exception: {ex.Message}");
+            }
+        }
+
+        UpdateService.CleanupPendingOldFiles();
+
+#if DEBUG
+        UpdateService.DebugSimulatedCommitCount = LMP.Tests.Framework.TestConfig.Get().General.SimulateOldCommitCount;
+#endif
+
         // 2. Защита от параллельного запуска: удерживает мьютекс на всё время жизни процесса
         using var instanceGuard = SingleInstanceGuard.TryAcquire();
         if (instanceGuard is null)
@@ -531,6 +566,7 @@ public sealed class AppEntry
 
         services.AddSingleton<PlaybackErrorOrchestrator>();
 
+        services.AddSingleton<UpdateService>();
         services.AddSingleton<DominantColorService>();
         services.AddSingleton(sp => new PlayerControlService(
             sp.GetRequiredService<AudioEngine>(),

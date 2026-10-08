@@ -67,14 +67,14 @@
         <Grid Grid.Row="0" Height="46" Background="{DynamicResource BgSecondaryBrush}"
             ColumnDefinitions="Auto, Auto, *, Auto, Auto" Name="TitleBar">
 
-            <!-- Col 0: App Logo + Version info -->
+            <!-- Col 0: App Logo -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Background="Transparent" BorderThickness="0"
                     Padding="12,0,8,0" Margin="0" VerticalAlignment="Stretch"
                     Cursor="Hand" Name="AppLogoButton"
                     Classes="titlebar-brand-btn"
-                    Command="{Binding ToggleVersionInfoCommand}"
-                    ToolTip.Tip="{Binding L[Common_AppName]}">
+                    Command="{Binding OpenGitHubCommand}"
+                    ToolTip.Tip="{Binding L[Common_OpenGitHub]}">
 
                     <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                         <Grid Width="24" Height="24">
@@ -102,30 +102,6 @@
                         <TextBlock Text="LMP" FontSize="12" FontWeight="Bold"
                             VerticalAlignment="Center" LetterSpacing="2"
                             Foreground="{DynamicResource TextMutedBrush}" />
-                    </StackPanel>
-                </Button>
-
-                <Button Background="Transparent" BorderThickness="0"
-                    Padding="0" Margin="0" VerticalAlignment="Center"
-                    Classes="titlebar-brand-btn titlebar-version-btn"
-                    IsVisible="{Binding IsVersionInfoVisible}"
-                    Cursor="Hand"
-                    Command="{Binding OpenGitHubCommand}"
-                    ToolTip.Tip="{Binding L[Common_OpenGitHub]}">
-
-                    <StackPanel Orientation="Horizontal" Spacing="6" Opacity="0.5">
-                        <Border Width="1" Height="12"
-                            Background="{DynamicResource BgHighlightBrush}" Margin="4,0" />
-                        <TextBlock Text="{Binding VersionDisplay}" FontSize="10"
-                            FontFamily="Consolas, monospace"
-                            Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding GitHashDisplay}" FontSize="10"
-                            FontFamily="Consolas, monospace"
-                            Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"
-                            Opacity="0.7" />
-                        <TextBlock Text="{Binding CommitsDisplay}" FontSize="10"
-                            Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"
-                            Opacity="0.5" />
                     </StackPanel>
                 </Button>
             </StackPanel>

@@ -172,6 +172,15 @@ public static class ManualTests
     public static Task GenerateTestNotificationsAsync(int count = 100) =>
         Integration.NotificationTests.TestGenerateNotificationsAsync(AppEntry.Services, count);
 
+    /// <summary>Быстрый запуск тестов подсистемы автообновления.</summary>
+    public static async Task TestUpdateSystemAsync()
+    {
+        await Unit.UpdateTests.TestCommitCountParsingAsync();
+        await Unit.UpdateTests.TestRollingDevReleaseExtractionAsync();
+        await Unit.UpdateTests.TestReleaseDtoDeserializationAsync();
+        await Unit.UpdateTests.TestCleanupPassAsync();
+    }
+
     /// <summary>Очистка всех уведомлений.</summary>
     public static Task ClearNotificationsAsync() =>
         Integration.NotificationTests.TestClearAllNotificationsAsync(AppEntry.Services);

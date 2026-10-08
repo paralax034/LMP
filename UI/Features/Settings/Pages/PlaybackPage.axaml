@@ -1,18 +1,17 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
-             x:Class="LMP.UI.Features.Settings.Pages.PlaybackPage"
-             x:DataType="vm:PlaybackSettingsViewModel"
-             x:CompileBindings="True">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
+    x:Class="LMP.UI.Features.Settings.Pages.PlaybackPage"
+    x:DataType="vm:PlaybackSettingsViewModel">
 
     <StackPanel Margin="32,24">
         <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,16">
             <PathIcon Grid.Column="0" Data="{StaticResource Icon.Play}"
-                      Width="20" Height="20" VerticalAlignment="Center"
-                      Foreground="{DynamicResource AccentBrush}" />
+                Width="20" Height="20" VerticalAlignment="Center"
+                Foreground="{DynamicResource AccentBrush}" />
             <TextBlock Grid.Column="1" Classes="h2"
-                       Text="{Binding L[Settings_Playback]}"
-                       VerticalAlignment="Center" Margin="8,0,0,0" />
+                Text="{Binding L[Settings_Playback]}"
+                VerticalAlignment="Center" Margin="8,0,0,0" />
         </Grid>
 
         <Border Classes="card">
@@ -31,8 +30,8 @@
 
                 <!--  Error Handling & Warnings (Moved from AudioPage & Expanded)  -->
                 <TextBlock Text="{Binding L[Audio_ErrorSection]}"
-                           FontWeight="SemiBold" FontSize="14"
-                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                    FontWeight="SemiBold" FontSize="14"
+                    Foreground="{DynamicResource TextSecondaryBrush}" />
 
                 <!-- Реакция на критические ошибки -->
                 <Grid ColumnDefinitions="*, Auto">
@@ -41,22 +40,24 @@
                         <TextBlock Classes="desc" Text="{Binding L[Settings_ErrorBehaviorDesc]}" />
                     </StackPanel>
                     <ComboBox Grid.Column="1"
-                              ItemsSource="{Binding ErrorBehaviorOptions}"
-                              SelectedItem="{Binding SelectedErrorBehavior}"
-                              MinWidth="280" />
+                        ItemsSource="{Binding ErrorBehaviorOptions}"
+                        SelectedItem="{Binding SelectedErrorBehavior}"
+                        MinWidth="280" />
                 </Grid>
 
                 <!-- Автоматическое действие после ошибки -->
                 <Grid ColumnDefinitions="*, Auto"
-                      IsEnabled="{Binding IsPlaybackFailureActionEnabled}">
+                    IsEnabled="{Binding IsPlaybackFailureActionEnabled}">
                     <StackPanel>
-                        <TextBlock Classes="label" Text="{Binding L[Settings_PlaybackFailureAction]}" />
-                        <TextBlock Classes="desc" Text="{Binding L[Settings_PlaybackFailureActionDesc]}" />
+                        <TextBlock Classes="label"
+                            Text="{Binding L[Settings_PlaybackFailureAction]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_PlaybackFailureActionDesc]}" />
                     </StackPanel>
                     <ComboBox Grid.Column="1"
-                              ItemsSource="{Binding PlaybackFailureOptions}"
-                              SelectedItem="{Binding SelectedPlaybackFailure}"
-                              MinWidth="280" />
+                        ItemsSource="{Binding PlaybackFailureOptions}"
+                        SelectedItem="{Binding SelectedPlaybackFailure}"
+                        MinWidth="280" />
                 </Grid>
 
                 <!-- Звуковой сигнал ошибки -->
@@ -71,13 +72,15 @@
                 <!-- Предупреждение о дешифровке n-токена -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
-                        <TextBlock Classes="label" Text="{Binding L[Settings_NTokenDecryptionNotification]}" />
-                        <TextBlock Classes="desc" Text="{Binding L[Settings_NTokenDecryptionNotificationDesc]}" />
+                        <TextBlock Classes="label"
+                            Text="{Binding L[Settings_NTokenDecryptionNotification]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_NTokenDecryptionNotificationDesc]}" />
                     </StackPanel>
                     <ComboBox Grid.Column="1"
-                              ItemsSource="{Binding NTokenNotificationOptions}"
-                              SelectedItem="{Binding SelectedNTokenNotification}"
-                              MinWidth="280" />
+                        ItemsSource="{Binding NTokenNotificationOptions}"
+                        SelectedItem="{Binding SelectedNTokenNotification}"
+                        MinWidth="280" />
                 </Grid>
 
                 <!-- Пропуск треков со сложным n-токеном -->

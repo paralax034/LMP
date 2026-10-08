@@ -4,7 +4,6 @@
     xmlns:ctrl="using:LMP.UI.Controls"
     xmlns:ir="using:Avalonia.Controls"
     x:Class="LMP.UI.Controls.TrackListControl"
-    x:CompileBindings="True"
     x:Name="Root"
     Focusable="True">
 

@@ -264,6 +264,43 @@ public partial class App : Application
 
             Log.Info($"Main window ready. Total splash time: {stopwatch.ElapsedMilliseconds}ms");
 
+            // Проверка и уведомление об обновлении
+            if (BootstrapSettings.Current.AppUpdatedThisRun)
+            {
+                Log.Info($"[App] Detected successful version upgrade to v{G.Build.DisplayVersion}. Dispatching success toast.");
+                _ = notifications.ShowToastAsync(
+                    titleKey: "Dialog_Done_Title",
+                    messageKey: "Update_InstalledToast_Message",
+                    severity: NotificationSeverity.Success,
+                    durationMs: 7000,
+                    messageArgs: [G.Build.DisplayVersion]);
+            }
+            else if (library.Settings.Updates.AutoCheckUpdates)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
+                        var checkResult = await updateService.CheckForUpdatesAsync(manual: false).ConfigureAwait(false);
+                        if (checkResult.HasUpdate)
+                        {
+                            Log.Info($"[App] Background check detected new update '{checkResult.VersionName}'. Dispatching info toast.");
+                            await notifications.ShowToastAsync(
+                                titleKey: "Update_Available_Title",
+                                messageKey: "Update_Available_Toast",
+                                severity: NotificationSeverity.Info,
+                                durationMs: 8000,
+                                messageArgs: [checkResult.VersionName]).ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Debug($"[App] Background update check ignored: {ex.Message}");
+                    }
+                });
+            }
+
             // Post-Startup GC Compaction
             _ = Task.Run(async () =>
             {

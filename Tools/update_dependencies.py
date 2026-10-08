@@ -90,6 +90,7 @@ def main():
         {"id": "MemoryPack", "major": "1", "target": "Core", "pattern": r'Include="MemoryPack" Version="([^"]+)"', "fmt": 'Include="MemoryPack" Version="{0}"'},
 
         {"id": "Microsoft.Extensions.DependencyInjection", "major": "10", "target": "Both", "pattern": r'<MsExtVersion>([^<]+)</MsExtVersion>', "fmt": '<MsExtVersion>{0}</MsExtVersion>'},
+        {"id": "Microsoft.Diagnostics.NETCore.Client", "major": "0", "target": "Core", "pattern": r'Include="Microsoft\.Diagnostics\.NETCore\.Client" Version="([^"]+)"', "fmt": 'Include="Microsoft.Diagnostics.NETCore.Client" Version="{0}"'},
         {"id": "SQLitePCLRaw.bundle_e_sqlite3", "major": "3", "target": "Core", "pattern": r'Include="SQLitePCLRaw\.bundle_e_sqlite3" Version="([^"]+)"', "fmt": 'Include="SQLitePCLRaw.bundle_e_sqlite3" Version="{0}"'},
         {"id": "Tmds.DBus.Protocol", "major": "", "target": "Main", "pattern": r'Include="Tmds\.DBus\.Protocol" Version="([^"]+)"', "fmt": 'Include="Tmds.DBus.Protocol" Version="{0}"'},
 

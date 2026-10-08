@@ -21,18 +21,6 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly IServiceProvider _services;
     private readonly Dictionary<string, ViewModelBase> _pageCache = new(StringComparer.Ordinal);
 
-    // VERSION INFO
-    [ObservableProperty] public partial bool IsVersionInfoVisible { get; set; } = true;
-    public static string VersionDisplay => G.Build.DisplayVersion;
-    public static string GitHashDisplay => G.Build.GitHash;
-
-    private string _commitsDisplay = "";
-    public string CommitsDisplay
-    {
-        get => _commitsDisplay;
-        private set => SetProperty(ref _commitsDisplay, value);
-    }
-
     // NAVIGATION
     [ObservableProperty] public partial ViewModelBase? CurrentPage { get; private set; }
     [ObservableProperty] public partial PlayerBarViewModel PlayerBar { get; private set; }
@@ -81,11 +69,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         library.OnAccountHydrated += HandleGlobalAccountHydrated;
 
-        UpdateCommitsDisplay();
-
         LocalizationService.Instance.LanguageChanged += (_, _) =>
         {
-            UpdateCommitsDisplay();
             OnPropertyChanged(nameof(L));
         };
 
@@ -111,12 +96,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             ViewModelBase.BroadcastAccountChanged();
         }, DispatcherPriority.Normal);
-    }
-
-    private void UpdateCommitsDisplay()
-    {
-        var L = LocalizationService.Instance;
-        CommitsDisplay = $"({string.Format(L["Build_CommitsCount"], G.Build.CommitCount)})";
     }
 
     public void LockNavigation(string reason)
@@ -170,12 +149,6 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _ = DeferredInitAsync(page, pageName, isInitialNavigation: true);
         }
-    }
-
-    [RelayCommand]
-    private void ToggleVersionInfo()
-    {
-        IsVersionInfoVisible = !IsVersionInfoVisible;
     }
 
     [RelayCommand]

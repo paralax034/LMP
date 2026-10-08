@@ -63,8 +63,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Diagnostics">
-    <!-- Wildcard: подтягивает последний патч 0.2.x автоматически -->
-    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.*" />
+    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.750501" />
   </ItemGroup>
 
   <ItemGroup Label="Data &amp; Security">

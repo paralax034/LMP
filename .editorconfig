@@ -75,3 +75,6 @@ dotnet_diagnostic.CA1859.severity = warning
 
 # IDE0150: Предпочитать проверку "null" проверке типа
 dotnet_diagnostic.IDE0150.severity = warning
+
+# SYSLIB1045: Преобразовать в "GeneratedRegexAttribute".
+dotnet_diagnostic.SYSLIB1045.severity = warning
