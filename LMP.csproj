@@ -2,7 +2,7 @@
 
   <!--      ВЕРСИИ ПАКЕТОВ        -->
   <PropertyGroup Label="Package Versions">
-    <AvaloniaVersion>12.1.3</AvaloniaVersion>
+    <AvaloniaVersion>12.1.4</AvaloniaVersion>
 
     <!-- MVVM стек CommunityToolkit: современный генератор кода свойств и команд -->
     <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>

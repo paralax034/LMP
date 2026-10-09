@@ -1,11 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:vm="using:LMP.UI.Features.Library"
-    xmlns:local="using:LMP.UI.Converters"
-    xmlns:controls="using:LMP.UI.Controls"
-    x:Class="LMP.UI.Features.Library.LibraryView"
-    x:DataType="vm:LibraryViewModel"
-    x:Name="LibraryRoot">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:LMP.UI.Features.Library"
+             xmlns:local="using:LMP.UI.Converters"
+             xmlns:controls="using:LMP.UI.Controls"
+             x:Class="LMP.UI.Features.Library.LibraryView"
+             x:DataType="vm:LibraryViewModel"
+             x:Name="LibraryRoot">
 
     <UserControl.Styles>
 
@@ -37,12 +37,11 @@
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
 
-        <Style Selector="Border.stat-block:pointerover PathIcon">
-            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Style Selector="Border.stat-block">
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         </Style>
-
-        <Style Selector="Border.stat-block:pointerover TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Style Selector="Border.stat-block:pointerover">
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentBrush}" />
         </Style>
 
         <Style Selector="Border.stat-block PathIcon">
@@ -193,108 +192,108 @@
 
                 <!-- LEFT: Блоки статистики -->
                 <StackPanel Grid.Column="0"
-                    Orientation="Horizontal"
-                    Spacing="0"
-                    VerticalAlignment="Stretch"
-                    IsVisible="{Binding !IsSyncing}"
-                    Opacity="{Binding IsStatsVisible, Converter={StaticResource BoolToOpacity}}">
+                            Orientation="Horizontal"
+                            Spacing="0"
+                            VerticalAlignment="Stretch"
+                            IsVisible="{Binding !IsSyncing}"
+                            Opacity="{Binding IsStatsVisible, Converter={StaticResource BoolToOpacity}}">
                     <StackPanel.Transitions>
                         <Transitions>
                             <DoubleTransition Property="Opacity"
-                                Duration="0:0:0.4"
-                                Easing="CubicEaseOut" />
+                                              Duration="0:0:0.4"
+                                              Easing="CubicEaseOut" />
                         </Transitions>
                     </StackPanel.Transitions>
 
                     <Border Classes="stat-block"
-                        ToolTip.Tip="{Binding L[Library_Tip_PlaylistCount]}">
+                            ToolTip.Tip="{Binding L[Library_Tip_PlaylistCount]}">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
-                            IsHitTestVisible="False">
+                                    IsHitTestVisible="False">
                             <PathIcon Data="{StaticResource Icon.PlaylistMusic}" Width="16"
-                                Height="16" />
+                                      Height="16" />
                             <TextBlock Text="{Binding PlaylistCountText}" FontSize="13"
-                                FontWeight="SemiBold" />
+                                       FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
 
                     <Border Classes="stat-block" ToolTip.Tip="{Binding L[Library_Tip_TrackCount]}">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
-                            IsHitTestVisible="False">
+                                    IsHitTestVisible="False">
                             <PathIcon Data="{StaticResource Icon.MusicNote}" Width="16" Height="16" />
                             <TextBlock Text="{Binding TotalTracksText}" FontSize="13"
-                                FontWeight="SemiBold" />
+                                       FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
 
                     <Border Classes="stat-block"
-                        ToolTip.Tip="{Binding L[Library_Tip_TotalDuration]}">
+                            ToolTip.Tip="{Binding L[Library_Tip_TotalDuration]}">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
-                            IsHitTestVisible="False">
+                                    IsHitTestVisible="False">
                             <PathIcon Data="{StaticResource Icon.ClockOutline}" Width="16"
-                                Height="16" />
+                                      Height="16" />
                             <TextBlock Text="{Binding TotalDurationText}" FontSize="13" />
                         </StackPanel>
                     </Border>
 
                     <Border Classes="stat-block"
-                        IsVisible="{Binding AvgTrackDurationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        ToolTip.Tip="{Binding L[Library_Tip_AvgTrack]}">
+                            IsVisible="{Binding AvgTrackDurationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                            ToolTip.Tip="{Binding L[Library_Tip_AvgTrack]}">
                         <TextBlock Text="{Binding AvgTrackDurationText}" FontSize="12"
-                            VerticalAlignment="Center" IsHitTestVisible="False" />
+                                   VerticalAlignment="Center" IsHitTestVisible="False" />
                     </Border>
 
                     <Border Classes="stat-block"
-                        IsVisible="{Binding AvgPlaylistDurationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        ToolTip.Tip="{Binding L[Library_Tip_AvgPlaylist]}">
+                            IsVisible="{Binding AvgPlaylistDurationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                            ToolTip.Tip="{Binding L[Library_Tip_AvgPlaylist]}">
                         <TextBlock Text="{Binding AvgPlaylistDurationText}" FontSize="12"
-                            VerticalAlignment="Center" IsHitTestVisible="False" />
+                                   VerticalAlignment="Center" IsHitTestVisible="False" />
                     </Border>
                 </StackPanel>
 
                 <!-- CENTER: Синхронизация -->
                 <StackPanel Grid.Column="1"
-                    Orientation="Horizontal"
-                    Spacing="8"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding IsSyncing}">
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsVisible="{Binding IsSyncing}">
                     <PathIcon Data="{StaticResource Icon.Sync}"
-                        Classes="spinning"
-                        Width="14"
-                        Height="14"
-                        Foreground="{DynamicResource AccentBrush}"
-                        VerticalAlignment="Center"
-                        IsHitTestVisible="False" />
+                              Classes="spinning"
+                              Width="14"
+                              Height="14"
+                              Foreground="{DynamicResource AccentBrush}"
+                              VerticalAlignment="Center"
+                              IsHitTestVisible="False" />
                     <TextBlock Text="{Binding SyncStatus}"
-                        FontSize="12"
-                        Foreground="{DynamicResource TextMutedBrush}"
-                        VerticalAlignment="Center"
-                        IsHitTestVisible="False" />
+                               FontSize="12"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False" />
                 </StackPanel>
 
                 <!-- RIGHT: Действия -->
                 <StackPanel Grid.Column="2"
-                    Orientation="Horizontal"
-                    Spacing="6"
-                    VerticalAlignment="Center"
-                    Margin="0,0,12,0">
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            VerticalAlignment="Center"
+                            Margin="0,0,12,0">
 
                     <Button Command="{Binding SyncAccountPlaylistsCommand}"
-                        Classes="header-action-btn"
-                        ToolTip.Tip="{Binding L[Library_SyncYoutube]}">
+                            Classes="header-action-btn"
+                            ToolTip.Tip="{Binding L[Library_SyncYoutube]}">
                         <Panel Width="20" Height="20" IsHitTestVisible="False">
                             <PathIcon Data="{StaticResource Icon.CloudSync}"
-                                IsVisible="{Binding !IsSyncing}" />
+                                      IsVisible="{Binding !IsSyncing}" />
                             <PathIcon Data="{StaticResource Icon.Cloud}"
-                                Foreground="{DynamicResource AccentBrush}"
-                                IsVisible="{Binding IsSyncing}" />
+                                      Foreground="{DynamicResource AccentBrush}"
+                                      IsVisible="{Binding IsSyncing}" />
                         </Panel>
                     </Button>
 
                     <Button Command="{Binding OpenCreateCommand}"
-                        Classes="header-action-btn"
-                        IsEnabled="{Binding !IsSyncing}"
-                        ToolTip.Tip="{Binding L[Library_CreatePlaylist]}">
+                            Classes="header-action-btn"
+                            IsEnabled="{Binding !IsSyncing}"
+                            ToolTip.Tip="{Binding L[Library_CreatePlaylist]}">
                         <PathIcon Data="{StaticResource Icon.Plus}" IsHitTestVisible="False" />
                     </Button>
                 </StackPanel>
@@ -303,12 +302,12 @@
 
         <!-- ROW 1: SYNC PROGRESS -->
         <ProgressBar Grid.Row="1" Height="2" Margin="0" IsHitTestVisible="False"
-            IsVisible="{Binding IsSyncing}"
-            Minimum="0" Maximum="1"
-            Value="{Binding SyncProgress}"
-            Background="{DynamicResource BgHighlightBrush}"
-            Foreground="{DynamicResource AccentBrush}"
-            BorderThickness="0">
+                     IsVisible="{Binding IsSyncing}"
+                     Minimum="0" Maximum="1"
+                     Value="{Binding SyncProgress}"
+                     Background="{DynamicResource BgHighlightBrush}"
+                     Foreground="{DynamicResource AccentBrush}"
+                     BorderThickness="0">
             <ProgressBar.Transitions>
                 <Transitions>
                     <DoubleTransition Property="Value" Duration="0:0:0.2" Easing="CubicEaseOut" />
@@ -329,21 +328,21 @@
                 </ScrollViewer.IsVisible>
 
                 <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                    Margin="24,4,24,100" IsHitTestVisible="False">
+                           Margin="24,4,24,100" IsHitTestVisible="False">
                     <Border Classes="playlist-skeleton" Margin="10">
                         <Grid RowDefinitions="220, *">
                             <Border Grid.Row="0" Background="{DynamicResource BgSkeletonBrush}"
-                                CornerRadius="7,7,0,0" ClipToBounds="True" />
+                                    CornerRadius="7,7,0,0" ClipToBounds="True" />
                             <Border Grid.Row="1" Classes="card-info" Padding="12,10,12,14">
                                 <StackPanel Spacing="8" VerticalAlignment="Center">
                                     <Border Height="12" Width="150" HorizontalAlignment="Left"
-                                        CornerRadius="4"
-                                        Background="{DynamicResource BgSkeletonDeepBrush}"
-                                        Classes="skeleton" />
+                                            CornerRadius="4"
+                                            Background="{DynamicResource BgSkeletonDeepBrush}"
+                                            Classes="skeleton" />
                                     <Border Height="10" Width="90" HorizontalAlignment="Left"
-                                        CornerRadius="3"
-                                        Background="{DynamicResource BgSkeletonDeepBrush}"
-                                        Classes="skeleton" />
+                                            CornerRadius="3"
+                                            Background="{DynamicResource BgSkeletonDeepBrush}"
+                                            Classes="skeleton" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -351,17 +350,17 @@
                     <Border Classes="playlist-skeleton" Margin="10" Opacity="0.7">
                         <Grid RowDefinitions="220, *">
                             <Border Grid.Row="0" Background="{DynamicResource BgSkeletonBrush}"
-                                CornerRadius="7,7,0,0" ClipToBounds="True" />
+                                    CornerRadius="7,7,0,0" ClipToBounds="True" />
                             <Border Grid.Row="1" Classes="card-info" Padding="12,10,12,14">
                                 <StackPanel Spacing="8" VerticalAlignment="Center">
                                     <Border Height="12" Width="130" HorizontalAlignment="Left"
-                                        CornerRadius="4"
-                                        Background="{DynamicResource BgSkeletonDeepBrush}"
-                                        Classes="skeleton" />
+                                            CornerRadius="4"
+                                            Background="{DynamicResource BgSkeletonDeepBrush}"
+                                            Classes="skeleton" />
                                     <Border Height="10" Width="100" HorizontalAlignment="Left"
-                                        CornerRadius="3"
-                                        Background="{DynamicResource BgSkeletonDeepBrush}"
-                                        Classes="skeleton" />
+                                            CornerRadius="3"
+                                            Background="{DynamicResource BgSkeletonDeepBrush}"
+                                            Classes="skeleton" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -369,17 +368,17 @@
                     <Border Classes="playlist-skeleton" Margin="10" Opacity="0.5">
                         <Grid RowDefinitions="220, *">
                             <Border Grid.Row="0" Background="{DynamicResource BgSkeletonBrush}"
-                                CornerRadius="7,7,0,0" ClipToBounds="True" />
+                                    CornerRadius="7,7,0,0" ClipToBounds="True" />
                             <Border Grid.Row="1" Classes="card-info" Padding="12,10,12,14">
                                 <StackPanel Spacing="8" VerticalAlignment="Center">
                                     <Border Height="12" Width="160" HorizontalAlignment="Left"
-                                        CornerRadius="4"
-                                        Background="{DynamicResource BgSkeletonDeepBrush}"
-                                        Classes="skeleton" />
+                                            CornerRadius="4"
+                                            Background="{DynamicResource BgSkeletonDeepBrush}"
+                                            Classes="skeleton" />
                                     <Border Height="10" Width="80" HorizontalAlignment="Left"
-                                        CornerRadius="3"
-                                        Background="{DynamicResource BgSkeletonDeepBrush}"
-                                        Classes="skeleton" />
+                                            CornerRadius="3"
+                                            Background="{DynamicResource BgSkeletonDeepBrush}"
+                                            Classes="skeleton" />
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -407,27 +406,27 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PlaylistCardViewModel">
                                 <Button Classes="playlist-card-inner"
-                                    Classes.visible="{Binding IsVisible}"
-                                    Classes.is-active="{Binding IsActive}"
-                                    Classes.is-liked="{Binding IsLikedPlaylist}"
-                                    Classes.menu-open="{Binding IsMenuOpen}"
-                                    Command="{Binding OpenCommand}">
+                                        Classes.visible="{Binding IsVisible}"
+                                        Classes.is-active="{Binding IsActive}"
+                                        Classes.is-liked="{Binding IsLikedPlaylist}"
+                                        Classes.menu-open="{Binding IsMenuOpen}"
+                                        Command="{Binding OpenCommand}">
 
                                     <!-- Строго типизированный ContextMenu со 100% корректным
                                     локальным DataContext -->
                                     <Button.ContextMenu>
                                         <ContextMenu Opened="OnPlaylistContextMenuOpened"
-                                            Closed="OnPlaylistContextMenuClosed">
+                                                     Closed="OnPlaylistContextMenuClosed">
                                             <MenuItem Header="{Binding PlayMenuHeader}"
-                                                Command="{Binding PlayCommand}">
+                                                      Command="{Binding PlayCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon Data="{Binding PlayMenuIcon}"
-                                                        Width="16" Height="16" />
+                                                              Width="16" Height="16" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
 
                                             <MenuItem Header="{Binding L[Playlist_Open]}"
-                                                Command="{Binding OpenCommand}">
+                                                      Command="{Binding OpenCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon
                                                         Data="{StaticResource Icon.FolderOpen}"
@@ -436,16 +435,16 @@
                                             </MenuItem>
 
                                             <MenuItem Header="{Binding L[EditPlaylist_Title]}"
-                                                Command="{Binding EditCommand}"
-                                                IsVisible="{Binding CanEdit}">
+                                                      Command="{Binding EditCommand}"
+                                                      IsVisible="{Binding CanEdit}">
                                                 <MenuItem.Icon>
                                                     <PathIcon Data="{StaticResource Icon.Pencil}"
-                                                        Width="16" Height="16" />
+                                                              Width="16" Height="16" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
 
                                             <MenuItem Header="{Binding L[Queue_AddAll]}"
-                                                Command="{Binding AddToQueueCommand}">
+                                                      Command="{Binding AddToQueueCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon
                                                         Data="{StaticResource Icon.PlaylistPlus}"
@@ -454,7 +453,7 @@
                                             </MenuItem>
 
                                             <MenuItem Header="{Binding L[Track_CopyLink]}"
-                                                Command="{Binding CopyLinkCommand}">
+                                                      Command="{Binding CopyLinkCommand}">
                                                 <MenuItem.Icon>
                                                     <PathIcon
                                                         Data="{StaticResource Icon.LinkVariant}"
@@ -465,11 +464,11 @@
                                             <Separator Classes="menu-separator" />
 
                                             <MenuItem Header="{Binding L[Button_Delete]}"
-                                                Command="{Binding DeleteCommand}"
-                                                IsVisible="{Binding CanDelete}" Classes="danger">
+                                                      Command="{Binding DeleteCommand}"
+                                                      IsVisible="{Binding CanDelete}" Classes="danger">
                                                 <MenuItem.Icon>
                                                     <PathIcon Data="{StaticResource Icon.Delete}"
-                                                        Width="16" Height="16" />
+                                                              Width="16" Height="16" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
                                         </ContextMenu>
@@ -478,8 +477,8 @@
                                     <Grid RowDefinitions="220,*">
                                         <!-- COVER AREA -->
                                         <Border Grid.Row="0" CornerRadius="7,7,0,0"
-                                            ClipToBounds="True" IsHitTestVisible="False" Margin="0"
-                                            Background="{DynamicResource BgSkeletonBrush}">
+                                                ClipToBounds="True" IsHitTestVisible="False" Margin="0"
+                                                Background="{DynamicResource BgSkeletonBrush}">
                                             <Grid>
                                                 <Image
                                                     controls:SmartImage.Quality="High"
@@ -504,57 +503,57 @@
                                                 </Border>
 
                                                 <Border IsVisible="{Binding IsLikedPlaylist}"
-                                                    Background="{DynamicResource BgSkeletonBrush}"
-                                                    HorizontalAlignment="Stretch"
-                                                    VerticalAlignment="Stretch">
+                                                        Background="{DynamicResource BgSkeletonBrush}"
+                                                        HorizontalAlignment="Stretch"
+                                                        VerticalAlignment="Stretch">
                                                     <PathIcon Data="{StaticResource Icon.Heart}"
-                                                        Width="64" Height="64"
-                                                        Foreground="{DynamicResource AccentBrush}"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        Opacity="0.95" />
+                                                              Width="64" Height="64"
+                                                              Foreground="{DynamicResource AccentBrush}"
+                                                              HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"
+                                                              Opacity="0.95" />
                                                 </Border>
                                             </Grid>
                                         </Border>
 
                                         <!-- INFO AREA -->
                                         <Border Grid.Row="1" Classes="card-info"
-                                            Padding="12,10,12,14">
+                                                Padding="12,10,12,14">
                                             <StackPanel>
                                                 <TextBlock Classes="card-title"
-                                                    Text="{Binding Name}"
-                                                    FontSize="13"
-                                                    TextWrapping="NoWrap"
-                                                    TextTrimming="CharacterEllipsis"
-                                                    IsHitTestVisible="False" />
+                                                           Text="{Binding Name}"
+                                                           FontSize="13"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           IsHitTestVisible="False" />
 
                                                 <TextBlock Text="{Binding AuthorDisplayText}"
-                                                    FontSize="11"
-                                                    Foreground="{DynamicResource TextMutedBrush}"
-                                                    TextTrimming="CharacterEllipsis"
-                                                    MaxLines="1"
-                                                    IsVisible="{Binding ShowAuthor}"
-                                                    Margin="0,2,0,0"
-                                                    ToolTip.Tip="{Binding AuthorTooltip}" />
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextMutedBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1"
+                                                           IsVisible="{Binding ShowAuthor}"
+                                                           Margin="0,2,0,0"
+                                                           ToolTip.Tip="{Binding AuthorTooltip}" />
 
                                                 <StackPanel Orientation="Horizontal" Spacing="6"
-                                                    Margin="0,4,0,0">
+                                                            Margin="0,4,0,0">
                                                     <TextBlock Text="{Binding FormattedTrackCount}"
-                                                        FontSize="11"
-                                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                                        IsHitTestVisible="False" />
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               IsHitTestVisible="False" />
 
                                                     <PathIcon Data="{StaticResource Icon.Lock}"
-                                                        Width="12" Height="12"
-                                                        Foreground="{DynamicResource TextMutedBrush}"
-                                                        IsVisible="{Binding IsPrivate}"
-                                                        ToolTip.Tip="{Binding L[Playlist_Private_Tooltip],TargetNullValue=''}" />
+                                                              Width="12" Height="12"
+                                                              Foreground="{DynamicResource TextMutedBrush}"
+                                                              IsVisible="{Binding IsPrivate}"
+                                                              ToolTip.Tip="{Binding L[Playlist_Private_Tooltip],TargetNullValue=''}" />
 
                                                     <PathIcon Data="{StaticResource Icon.Link}"
-                                                        Width="12" Height="12"
-                                                        Foreground="{DynamicResource TextMutedBrush}"
-                                                        IsVisible="{Binding IsUnlisted}"
-                                                        ToolTip.Tip="{Binding L[Playlist_Unlisted_Tooltip],TargetNullValue=''}" />
+                                                              Width="12" Height="12"
+                                                              Foreground="{DynamicResource TextMutedBrush}"
+                                                              IsVisible="{Binding IsUnlisted}"
+                                                              ToolTip.Tip="{Binding L[Playlist_Unlisted_Tooltip],TargetNullValue=''}" />
 
                                                     <PathIcon
                                                         Data="{StaticResource Icon.CloudCheck}"
@@ -572,13 +571,13 @@
                     </ItemsControl>
 
                     <StackPanel IsVisible="{Binding !HasPlaylists}" HorizontalAlignment="Center"
-                        Margin="0,60,0,0">
+                                Margin="0,60,0,0">
                         <PathIcon Data="{StaticResource Icon.PlaylistMusic}" Width="64" Height="64"
-                            Foreground="{DynamicResource TextMutedBrush}"
-                            HorizontalAlignment="Center" />
+                                  Foreground="{DynamicResource TextMutedBrush}"
+                                  HorizontalAlignment="Center" />
                         <TextBlock Text="{Binding L[Library_Empty]}" FontSize="16"
-                            Foreground="{DynamicResource TextSecondaryBrush}"
-                            HorizontalAlignment="Center" Margin="0,16,0,0" />
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   HorizontalAlignment="Center" Margin="0,16,0,0" />
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>

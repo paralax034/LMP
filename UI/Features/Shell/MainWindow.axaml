@@ -2,11 +2,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:shell="using:LMP.UI.Features.Shell"
     xmlns:notifications="using:LMP.UI.Features.Notifications"
-    xmlns:homeV="using:LMP.UI.Features.Home"
-    xmlns:searchV="using:LMP.UI.Features.Search"
-    xmlns:libV="using:LMP.UI.Features.Library"
-    xmlns:settingsV="using:LMP.UI.Features.Settings"
-    xmlns:playlistV="using:LMP.UI.Features.Playlist"
     xmlns:playerV="using:LMP.UI.Features.Player"
     xmlns:queueV="using:LMP.UI.Features.Queue"
     xmlns:playerBarV="using:LMP.UI.Features.Player"
@@ -20,27 +15,6 @@
     ExtendClientAreaToDecorationsHint="True"
     ExtendClientAreaTitleBarHeightHint="-1"
     WindowDecorations="BorderOnly">
-
-    <Window.DataTemplates>
-        <DataTemplate DataType="{x:Type homeV:HomeViewModel}">
-            <homeV:HomeView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type searchV:SearchViewModel}">
-            <searchV:SearchView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type libV:LibraryViewModel}">
-            <libV:LibraryView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type settingsV:SettingsViewModel}">
-            <settingsV:SettingsView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type playlistV:PlaylistViewModel}">
-            <playlistV:PlaylistView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type queueV:QueueViewModel}">
-            <queueV:QueueView />
-        </DataTemplate>
-    </Window.DataTemplates>
 
     <Window.Styles>
         <Style

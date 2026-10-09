@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
 using LMP.UI.Dialogs;
-using LMP.UI.Features.Shared;
 using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,7 +11,7 @@ namespace LMP.UI.Features.Playlist;
 /// <summary>
 /// ViewModel экрана плейлиста.
 /// </summary>
-public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, ISmoothTransitionViewModel
+public sealed partial class PlaylistViewModel : TrackListBaseViewModel, ISmoothTransitionViewModel
 {
     #region Fields
 
@@ -21,7 +20,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     private readonly MainWindowViewModel _mainWindow;
     private readonly PlaylistEditService _editService;
     private readonly PlaylistService _playlistService;
-    private readonly PlayerControlService _playerControl;
     private readonly CookieAuthService _auth;
 
     private readonly EventHandler<string> _languageChangedHandler;
@@ -87,10 +85,13 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     partial void OnCanEditChanged(bool value)
     {
-        CanReorderItems = value && CanReorder;
+        _items.IsPlaylistContext = value;
+        OnPropertyChanged(nameof(CanReorderItems));
         MergePlaylistCommand.NotifyCanExecuteChanged();
         EditPlaylistCommand.NotifyCanExecuteChanged();
     }
+
+    public override bool CanReorderItems => CanEdit && CanReorder;
 
     #endregion
 
@@ -113,7 +114,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     [ObservableProperty] public partial bool IsPlayingThisPlaylist { get; private set; }
     [ObservableProperty] public partial bool IsShuffleActive { get; private set; }
     [ObservableProperty] public partial bool IsDownloadingActive { get; private set; }
-    [ObservableProperty] public partial bool CanReorderItems { get; private set; }
     [ObservableProperty] public partial bool IsQueuePure { get; private set; }
     [ObservableProperty] public partial bool IsPlayingPure { get; private set; }
 
@@ -163,7 +163,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
     public IAsyncRelayCommand MergePlaylistCommand { get; }
     public IAsyncRelayCommand RefreshPlaylistCommand { get; }
     public IRelayCommand AddToQueueCommand { get; }
-    public IAsyncRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
     public IAsyncRelayCommand EditPlaylistCommand { get; }
     public IAsyncRelayCommand CopyPlaylistLinkCommand { get; }
     public IRelayCommand OpenAuthorCommand { get; }
@@ -181,15 +180,17 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         PlaylistEditService editService,
         PlayerControlService playerControl,
         CookieAuthService auth)
-        : base(audio, downloads, vmFactory)
+        : base(audio, downloads, vmFactory, playerControl)
     {
         _dialog = dialog;
         _dominantColor = dominantColor;
         _mainWindow = mainWindow;
         _playlistService = playlistService;
         _editService = editService;
-        _playerControl = playerControl;
         _auth = auth;
+
+        _items.RemoveFromPlaylistAction = HandleRemoveFromPlaylistAction;
+        _items.StartRadioAction = t => Log.Info($"[Playlist] Start radio requested for {t.Title}");
 
         _languageChangedHandler = (_, _) => OnPropertyChanged(nameof(FormattedTrackCount));
         LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
@@ -231,13 +232,6 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         MergePlaylistCommand = new AsyncRelayCommand(MergePlaylistAsync, () => CanEdit);
         AddToQueueCommand = new RelayCommand(EnqueueUniquePlaylistTracks, () => TrackCount > 0);
 
-        MoveItemCommand = new AsyncRelayCommand<(int oldIndex, int newIndex)>(async tuple =>
-        {
-            if (!CanReorderItems) return;
-            _lastLocalMutationTime = DateTime.Now;
-            await MoveItemAsync(tuple.oldIndex, tuple.newIndex);
-        });
-
         EditPlaylistCommand = new AsyncRelayCommand(EditPlaylistAsync, () => CanEdit);
         CopyPlaylistLinkCommand = new AsyncRelayCommand(CopyPlaylistLinkAsync, () => HasYoutubeLink);
 
@@ -262,7 +256,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
         LibService.OnDataChanged += OnLibraryDataChanged;
         _playlistService.OnPlaylistChanged += OnServicePlaylistChanged;
-        _playerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
+        PlayerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
     }
 
     private void OnServicePlaylistChanged(Core.Models.Playlist playlist)
@@ -329,63 +323,46 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     #endregion
 
-    #region TrackListReorderableViewModel
-
-    protected override TrackItemViewModel CreateViewModel(TrackInfo item)
-    {
-        var vm = base.CreateViewModel(item);
-
-        vm.SourceContextId = _currentPlaylistId;
-        vm.IsPlaylistContext = CanEdit;
-
-        vm.RemoveFromPlaylistAction = async targets =>
-        {
-            if (!CanEdit || targets.Count == 0) return;
-
-            _lastLocalMutationTime = DateTime.Now;
-
-            TimeSpan durationRemoved = TimeSpan.Zero;
-            for (int i = 0; i < targets.Count; i++)
-            {
-                var t = targets[i];
-                RemoveItemLocally(t.Id);
-                if (t.Duration > TimeSpan.Zero)
-                    durationRemoved += t.Duration;
-            }
-
-            TrackCount = Math.Max(0, TrackCount - targets.Count);
-            OnPropertyChanged(nameof(FormattedTrackCount));
-
-            if (durationRemoved > TimeSpan.Zero)
-            {
-                TotalDuration = TotalDuration > durationRemoved
-                    ? TotalDuration - durationRemoved
-                    : TimeSpan.Zero;
-                FormatDuration();
-            }
-
-            for (int i = 0; i < targets.Count; i++)
-            {
-                await _playlistService.RemoveTrackFromPlaylistAsync(_currentPlaylistId, targets[i].Id);
-            }
-        };
-
-        vm.StartRadioAction = t => Log.Info($"[Playlist] Start radio requested for {t.Title}");
-        return vm;
-    }
-
-    protected override async Task<List<TrackInfo>> LoadTracksAsync(IEnumerable<string> ids, CancellationToken ct) =>
-        await _playlistService.GetPlaylistTracksAsync(_currentPlaylistId, ct);
-
-    protected override async Task SaveMoveAsync(int fromMasterIndex, int toMasterIndex, CancellationToken ct) =>
-        await _playlistService.MovePlaylistTrackAsync(_currentPlaylistId, fromMasterIndex, toMasterIndex, ct);
+    #region TrackListBaseViewModel Implementation
 
     protected override void OnPlay(TrackInfo track) => _ = PlayFromPlaylistAsync(track);
 
-    protected override void RebuildVisibleItems()
+    protected override async Task SaveMoveAsync(int fromVisualIndex, int toVisualIndex, CancellationToken ct)
     {
-        base.RebuildVisibleItems();
-        CanReorderItems = CanEdit && CanReorder;
+        _lastLocalMutationTime = DateTime.Now;
+        await _playlistService.MovePlaylistTrackAsync(_currentPlaylistId, fromVisualIndex, toVisualIndex, ct);
+    }
+
+    private async void HandleRemoveFromPlaylistAction(IReadOnlyList<TrackInfo> targets)
+    {
+        if (!CanEdit || targets.Count == 0) return;
+
+        _lastLocalMutationTime = DateTime.Now;
+
+        TimeSpan durationRemoved = TimeSpan.Zero;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            var t = targets[i];
+            RemoveTrackLocally(t.Id);
+            if (t.Duration > TimeSpan.Zero)
+                durationRemoved += t.Duration;
+        }
+
+        TrackCount = Math.Max(0, TrackCount - targets.Count);
+        OnPropertyChanged(nameof(FormattedTrackCount));
+
+        if (durationRemoved > TimeSpan.Zero)
+        {
+            TotalDuration = TotalDuration > durationRemoved
+                ? TotalDuration - durationRemoved
+                : TimeSpan.Zero;
+            FormatDuration();
+        }
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            await _playlistService.RemoveTrackFromPlaylistAsync(_currentPlaylistId, targets[i].Id);
+        }
     }
 
     #endregion
@@ -409,6 +386,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var loadCt = loadCts.Token;
 
         _currentPlaylistId = playlistId;
+        _items.SourceContextId = playlistId;
         IsLoading = showLoader;
 
         try
@@ -442,7 +420,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
                 if (loadCt.IsCancellationRequested) return;
 
                 ApplyLoadedPayload(payload);
-                InitializeWithPreloadedData(payload.TrackIds, payload.Tracks);
+                SetTracks(payload.Tracks, payload.TrackIds);
 
                 _ = LoadHeaderGradientAsync();
                 _ = HydrateCacheStatusAsync(loadCt);
@@ -478,6 +456,8 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         CanEdit = playlist.IsEditable;
         IsPrivate = playlist.Visibility == PlaylistVisibility.Private;
         IsUnlisted = playlist.Visibility == PlaylistVisibility.Unlisted;
+
+        _items.IsPlaylistContext = CanEdit;
 
         IsTwoWaySynced = playlist.SyncMode == PlaylistSyncMode.TwoWaySync;
         HasCloudSource = playlist.HasCloudLink || (IsLikedPlaylist && _auth.IsAuthenticated);
@@ -564,11 +544,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     #region Playback
 
-    private List<TrackInfo> GetPlaylistTracksSnapshot()
-    {
-        var snapshot = GetLoadedItemsSnapshot();
-        return snapshot.Count > 0 ? snapshot : [];
-    }
+    private List<TrackInfo> GetPlaylistTracksSnapshot() => GetItemsSnapshot();
 
     private async Task PlayAllAsync()
     {
@@ -576,7 +552,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
         if (IsQueuePure)
         {
-            await _playerControl.PlayPauseAsync();
+            await PlayerControl.PlayPauseAsync();
             return;
         }
 
@@ -584,7 +560,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         if (allTracks.Count == 0) return;
 
         IsShuffleActive = false;
-        await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, allTracks[0], enableShuffle: false);
+        await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, allTracks[0], enableShuffle: false);
     }
 
     private async Task ShufflePlayAsync()
@@ -593,7 +569,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var allTracks = GetPlaylistTracksSnapshot();
         if (allTracks.Count == 0) return;
 
-        await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, enableShuffle: true);
+        await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, enableShuffle: true);
 
         IsShuffleActive = true;
         _shuffleAnimationTimer?.Stop();
@@ -617,14 +593,14 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
             if (!allTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
             {
-                var visibleTracks = GetLoadedItemsSnapshot();
+                var visibleTracks = GetPlaylistTracksSnapshot();
                 if (visibleTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
                     allTracks = visibleTracks;
                 else
                     allTracks = [track, .. allTracks];
             }
 
-            await _playerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: null);
+            await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: null);
             _ = LibService.AddToRecentlyPlayedAsync(track);
         }
         catch (Exception ex)
@@ -654,7 +630,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     private void EnqueueUniquePlaylistTracks()
     {
-        var tracks = GetLoadedItemsSnapshot();
+        var tracks = GetPlaylistTracksSnapshot();
         if (tracks.Count == 0) return;
         Audio.EnqueuePlaylistWithNotification(tracks, PlaylistName);
     }
@@ -663,10 +639,10 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
 
     private void UpdatePlaybackState()
     {
-        bool isThis = string.Equals(_playerControl.ActivePlaylistId, _currentPlaylistId, StringComparison.Ordinal);
+        bool isThis = string.Equals(PlayerControl.ActivePlaylistId, _currentPlaylistId, StringComparison.Ordinal);
         IsPlayingThisPlaylist = isThis;
-        IsQueuePure = isThis && _playerControl.IsQueuePure;
-        IsPlayingPure = isThis && _playerControl.IsPlayingPure;
+        IsQueuePure = isThis && PlayerControl.IsQueuePure;
+        IsPlayingPure = isThis && PlayerControl.IsPlayingPure;
         OnPropertyChanged(nameof(PlayButtonTooltip));
     }
 
@@ -874,7 +850,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         var diff = DateTime.UtcNow - utcTime.Value;
         if (diff.TotalMinutes < 1) return SL["Playlist_Synced_JustNow"];
         if (diff.TotalHours < 1) return string.Format(SL["Playlist_Synced_MinutesAgo"], (int)diff.TotalMinutes);
-        if (diff.TotalDays < 1) return string.Format(SL["Playlist_Synced_HoursAgo"], (int)diff.TotalHours);
+        if (diff.TotalDays < 1) return string.Format(SL["Playlist_Synced_HoursAgo"], (int)diff.TotalDays);
         if (diff.TotalDays < 7) return string.Format(SL["Playlist_Synced_DaysAgo"], (int)diff.TotalDays);
         if (diff.TotalDays < 30) return string.Format(SL["Playlist_Synced_WeeksAgo"], (int)(diff.TotalDays / 7));
         return string.Format(SL["Playlist_Synced_MonthsAgo"], (int)(diff.TotalDays / 30));
@@ -899,7 +875,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
             _downloadAnimationTimer?.Stop();
             _downloadAnimationTimer = null;
 
-            _playerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
+            PlayerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
 
             _playlistLoadCts?.Cancel();
             _playlistLoadCts?.Dispose();

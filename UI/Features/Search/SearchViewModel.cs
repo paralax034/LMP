@@ -15,7 +15,7 @@ public sealed record SearchSuggestionItem(string Text, bool IsFromHistory, Searc
 /// <summary>
 /// ViewModel экрана поиска треков с поддержкой Ghost Text, in-place обновлением подсказок и приоритизацией прямых URL.
 /// </summary>
-public sealed partial class SearchViewModel : TrackListPaginatedViewModel
+public sealed partial class SearchViewModel : TrackListBaseViewModel
 {
     #region Constants
 
@@ -476,7 +476,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
                 Source = result;
         });
 
-        ((INotifyCollectionChanged)Items).CollectionChanged += OnItemsCollectionChanged;
+        Items.CollectionChanged += OnItemsCollectionChanged;
 
         IsLoading = false;
         IsFetchingFromNetwork = false;
@@ -530,7 +530,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
     {
         if (_isDisposed) return;
 
-        await base.OnNavigatedToAsync();
+        await base.OnNavigatedToAsync().ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(_currentQuery))
         {
@@ -549,7 +549,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
 
     #endregion
 
-    #region TrackListPaginatedViewModel Implementation
+    #region TrackListBaseViewModel Implementation
 
     protected override void OnPlay(TrackInfo track)
     {
@@ -1266,7 +1266,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         {
             _isDisposed = true;
 
-            ((INotifyCollectionChanged)Items).CollectionChanged -= OnItemsCollectionChanged;
+            Items.CollectionChanged -= OnItemsCollectionChanged;
 
             _suggestDebounceTimer.Stop();
             _localSearchDebounceTimer.Stop();

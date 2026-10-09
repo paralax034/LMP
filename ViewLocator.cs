@@ -20,10 +20,10 @@ namespace LMP;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Стандартная реализация Avalonia <c>ViewLocator</c> использует динамический поиск типов через 
+/// Стандартная реализация Avalonia <c>ViewLocator</c> использует динамический поиск типов через
 /// <see cref="Type.GetType(string)"/> и создание экземпляров через <see cref="Activator.CreateInstance(Type)"/>.
 /// При публикации в режиме <b>Native AOT</b> (<c>PublishAot=true</c>) и полном тримминге (<c>TrimMode=full</c>)
-/// метаданные и неиспользуемые напрямую типы вырезаются компилятором ILC, из-за чего рефлексивный поиск 
+/// метаданные и неиспользуемые напрямую типы вырезаются компилятором ILC, из-за чего рефлексивный поиск
 /// всегда завершается неудачей (<c>null</c>) и интерфейс ломается.
 /// </para>
 /// <para>
@@ -38,22 +38,24 @@ namespace LMP;
 /// </remarks>
 public sealed class ViewLocator : IDataTemplate
 {
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ViewModelBase, Control> _viewCache = new();
+
     /// <summary>
-    /// Создаёт и возвращает визуальный элемент (Control), соответствующий переданной модели представления.
+    /// Создаёт или возвращает закэшированный визуальный элемент, соответствующий переданной модели представления.
     /// </summary>
-    /// <param name="data">Экземпляр модели представления (ViewModel), для которой запрашивается View.</param>
-    /// <returns>
-    /// Сконструированный экземпляр пользовательского элемента управления (<see cref="Control"/>) 
-    /// или заглушка с сообщением об ошибке, если привязка для типа не зарегистрирована.
-    /// </returns>
     public Control? Build(object? data)
     {
         if (data is null)
             return null;
 
-        return data switch
+        if (data is ViewModelBase vm && _viewCache.TryGetValue(vm, out var cachedView))
         {
-            // Главные экраны приложения
+            return cachedView;
+        }
+
+        Control created = data switch
+        {
+            // Главные экраны приложения (кэшируются вместе с ViewModel)
             HomeViewModel => new HomeView(),
             SearchViewModel => new SearchView(),
             LibraryViewModel => new LibraryView(),
@@ -73,26 +75,23 @@ public sealed class ViewLocator : IDataTemplate
             MainWindowViewModel => new MainWindow(),
 
 #if DEBUG
-            // Окно отладочных инструментов (только в конфигурации Debug)
             DebugViewModel => new DebugWindow(),
 #endif
 
-            // Fallback-заглушка на случай передачи незарегистрированной модели
-            _ => new TextBlock
-            {
-                Text = $"View Not Registered for: {data.GetType().FullName}"
-            }
+            _ => new TextBlock { Text = $"View Not Registered for: {data.GetType().FullName}" }
         };
+
+        if (data is ViewModelBase viewModel)
+        {
+            _viewCache.AddOrUpdate(viewModel, created);
+        }
+
+        return created;
     }
 
     /// <summary>
     /// Проверяет, применим ли данный шаблон данных к переданному объекту.
     /// </summary>
-    /// <param name="data">Проверяемый объект данных.</param>
-    /// <returns>
-    /// <c>true</c>, если объект является наследником базового класса <see cref="ViewModelBase"/>; 
-    /// иначе — <c>false</c>.
-    /// </returns>
     public bool Match(object? data)
     {
         return data is ViewModelBase;

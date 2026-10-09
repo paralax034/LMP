@@ -5,12 +5,20 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using LMP.Core.Models;
 using LMP.UI.Features.Shared;
+using LMP.UI.Services;
+using LMP.UI.ViewModels;
 
 namespace LMP.UI.Controls;
 
+/// <summary>
+/// Высокопроизводительный виртуализированный элемент управления списком музыкальных треков.
+/// Координирует ввод пользователя, Drag-and-Drop, плавный скроллинг и единый контракт выбора.
+/// </summary>
 public partial class TrackListControl : UserControl
 {
     #region Constants
@@ -21,12 +29,12 @@ public partial class TrackListControl : UserControl
         DataFormat.CreateInProcessFormat<string>(DragFormatTrackIndex);
 
     /// <summary>
-    /// Фиксированная высота строки трека с учетом Margin="0,1" из AppComponents.axaml (60px + 2px = 62px)
+    /// Фиксированная высота строки трека с учетом внешних отступов (60px + 2px).
     /// </summary>
     private const double ItemHeight = 62.0;
 
     /// <summary>
-    /// Минимальное смещение в пикселях для начала drag.
+    /// Порог смещения курсора в пикселях для активации операции перетаскивания.
     /// </summary>
     private const double DragThreshold = 6.0;
 
@@ -40,29 +48,27 @@ public partial class TrackListControl : UserControl
 
     private readonly EventHandler<string> _languageChangedHandler;
 
-    // Selection Engine
-    private readonly HashSet<TrackItemViewModel> _selectedSet = [];
-    private readonly HashSet<TrackItemViewModel> _preDragSelectionSnapshot = [];
     private int _selectionAnchorIndex = -1;
     private int _leadIndex = -1;
     private TrackItemViewModel? _deferredSingleSelectVm;
     private int _deferredSingleSelectIndex = -1;
 
-    // Drag & Drop
     private Point _dragStartPoint;
     private int _dragSourceIndex = -1;
     private bool _isDragging;
     private Border? _dropIndicatorLine;
+    private TranslateTransform? _dropIndicatorTransform;
     private PointerPressedEventArgs? _dragPressedArgs;
     private static IReadOnlyList<int>? _activeInProcessDragIndices;
 
-    // Scroll & Layout
     private ScrollViewer? _scrollViewer;
     private ItemsRepeater? _repeater;
     private DispatcherTimer? _autoScrollTimer;
     private double _autoScrollOffset;
 
     private SnapScrollHelper? _snapScroll;
+    private Action? _virtualSelectionHandler;
+    private bool _isAttachedToVisualTree;
 
     #endregion
 
@@ -72,9 +78,7 @@ public partial class TrackListControl : UserControl
         AvaloniaProperty.Register<TrackListControl, bool>(nameof(EnableSnapScroll), true);
 
     /// <summary>
-    /// Включает выравнивание позиции скролла по сетке высоты трека (60px).
-    /// Устраняет sub-pixel рендеринг текста и иконок, снижает нагрузку на GPU.
-    /// Touchpad не затрагивается — пропорциональный scroll сохраняется.
+    /// Включает выравнивание позиции скролла по сетке высоты трека для устранения субпиксельного размытия.
     /// </summary>
     public bool EnableSnapScroll
     {
@@ -85,6 +89,9 @@ public partial class TrackListControl : UserControl
     public static readonly StyledProperty<IEnumerable?> ItemsProperty =
         AvaloniaProperty.Register<TrackListControl, IEnumerable?>(nameof(Items));
 
+    /// <summary>
+    /// Источник данных элементов списка, реализующий <see cref="IVirtualTrackList"/>.
+    /// </summary>
     public IEnumerable? Items
     {
         get => GetValue(ItemsProperty);
@@ -176,8 +183,7 @@ public partial class TrackListControl : UserControl
         AvaloniaProperty.Register<TrackListControl, string?>(nameof(FilterText));
 
     /// <summary>
-    /// Текст локального фильтра. При изменении сбрасывает вертикальный скролл в начало,
-    /// предотвращая десинхронизацию виртуализации ItemsRepeater.
+    /// Текст поискового фильтра. При изменении сбрасывает вертикальный скролл в начало.
     /// </summary>
     public string? FilterText
     {
@@ -194,16 +200,10 @@ public partial class TrackListControl : UserControl
         set => SetValue(IsQueueContextProperty, value);
     }
 
-    /// <summary>
-    /// Прямое свойство вычисления видимости футера без использования MultiBinding-конвертеров.
-    /// </summary>
     public static readonly DirectProperty<TrackListControl, bool> IsLoaderOrFooterVisibleProperty =
         AvaloniaProperty.RegisterDirect<TrackListControl, bool>(
             nameof(IsLoaderOrFooterVisible), static o => o.IsLoaderOrFooterVisible);
 
-    /// <summary>
-    /// Возвращает истину, если отображается индикатор дозагрузки либо плашка конца списка.
-    /// </summary>
     public bool IsLoaderOrFooterVisible => IsLoadingMore || IsFooterVisible;
 
     #endregion
@@ -254,7 +254,7 @@ public partial class TrackListControl : UserControl
         AvaloniaProperty.RegisterDirect<TrackListControl, int>(
             nameof(SelectedCount), static o => o.SelectedCount);
 
-    public int SelectedCount => _selectedSet.Count;
+    public int SelectedCount => Items is IVirtualTrackList vtl ? vtl.SelectedCount : 0;
 
     #endregion
 
@@ -286,17 +286,23 @@ public partial class TrackListControl : UserControl
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _isAttachedToVisualTree = true;
+
         LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
         UpdateLocalizedTexts();
 
         _repeater = this.FindControl<ItemsRepeater>("MainRepeater");
         _dropIndicatorLine = this.FindControl<Border>("DropIndicatorLine");
+        _dropIndicatorTransform = _dropIndicatorLine?.RenderTransform as TranslateTransform;
 
         SubscribeToCollectionChanged(Items);
-        ResyncSelectionFromItems();
+        HookVirtualListSelection(Items);
+        UpdateItemsContext();
 
         Dispatcher.UIThread.Post(() =>
         {
+            if (!_isAttachedToVisualTree) return;
+
             _scrollViewer = this.FindAncestorOfType<ScrollViewer>();
 
             if (_scrollViewer != null && EnableSnapScroll)
@@ -312,11 +318,21 @@ public partial class TrackListControl : UserControl
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        _isAttachedToVisualTree = false;
         LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
         base.OnDetachedFromVisualTree(e);
 
         UnsubscribeFromCollectionChanged(Items);
+        UnhookVirtualListSelection();
         DetachSelectionState();
+
+        if (Items is IVirtualTrackList virtualList)
+        {
+            if (ReferenceEquals(virtualList.SelectionProvider?.Target, this))
+            {
+                virtualList.SelectionProvider = null;
+            }
+        }
 
         _autoScrollTimer?.Stop();
         _autoScrollTimer = null;
@@ -324,6 +340,8 @@ public partial class TrackListControl : UserControl
         _snapScroll = null;
         _repeater = null;
         _scrollViewer = null;
+        _dropIndicatorLine = null;
+        _dropIndicatorTransform = null;
     }
 
     #endregion
@@ -354,6 +372,7 @@ public partial class TrackListControl : UserControl
             {
                 ClearSelection();
             }
+
             e.Handled = true;
         }
         else if (e.Key is Key.Delete or Key.Back)
@@ -386,31 +405,30 @@ public partial class TrackListControl : UserControl
         }
         else if (e.Key == Key.Space)
         {
-            if (Items is IList list && _leadIndex >= 0 && _leadIndex < list.Count)
+            if (Items is IVirtualTrackList virtualList && (uint)_leadIndex < (uint)virtualList.FilteredCount)
             {
-                if (list[_leadIndex] is TrackItemViewModel vm)
+                if (isCtrlOrMeta)
                 {
-                    if (isCtrlOrMeta)
-                    {
-                        ToggleItemSelection(vm);
-                        _selectionAnchorIndex = _leadIndex;
-                    }
-                    else
-                    {
-                        vm.PlayCommand.Execute(null);
-                    }
-                    e.Handled = true;
+                    virtualList.ToggleIndexSelected(_leadIndex);
+                    _selectionAnchorIndex = _leadIndex;
                 }
+                else
+                {
+                    virtualList[_leadIndex]?.PlayCommand.Execute(null);
+                }
+
+                e.Handled = true;
             }
         }
     }
 
     private void HandleArrowNavigation(bool isDown, bool isShift, bool isCtrl)
     {
-        if (Items is not IList list || list.Count == 0) return;
+        if (Items is not IVirtualTrackList virtualList || virtualList.FilteredCount == 0) return;
 
-        int current = _leadIndex >= 0 ? _leadIndex : (isDown ? -1 : list.Count);
-        int target = isDown ? Math.Min(current + 1, list.Count - 1) : Math.Max(current - 1, 0);
+        int count = virtualList.FilteredCount;
+        int current = _leadIndex >= 0 ? _leadIndex : (isDown ? -1 : count);
+        int target = isDown ? Math.Min(current + 1, count - 1) : Math.Max(current - 1, 0);
 
         _leadIndex = target;
 
@@ -424,19 +442,13 @@ public partial class TrackListControl : UserControl
         {
             int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : current;
             if (_selectionAnchorIndex < 0) _selectionAnchorIndex = anchor;
-            SelectRange(anchor, target, addToExisting: true);
+            virtualList.SelectRange(anchor, target, addToExisting: true);
         }
         else
         {
-            int oldCount = _selectedSet.Count;
-            ClearSelectionInternal();
-            if (list[target] is TrackItemViewModel vm)
-            {
-                vm.IsSelected = true;
-                _selectedSet.Add(vm);
-                _selectionAnchorIndex = target;
-                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
-            }
+            virtualList.ClearSelection();
+            virtualList.SetIndexSelected(target, true);
+            _selectionAnchorIndex = target;
         }
 
         ScrollToTrackIndex(target, smooth: false);
@@ -444,27 +456,21 @@ public partial class TrackListControl : UserControl
 
     private void HandleHomeEndNavigation(bool isHome, bool isShift)
     {
-        if (Items is not IList list || list.Count == 0) return;
+        if (Items is not IVirtualTrackList virtualList || virtualList.FilteredCount == 0) return;
 
-        int target = isHome ? 0 : list.Count - 1;
+        int target = isHome ? 0 : virtualList.FilteredCount - 1;
         _leadIndex = target;
 
         if (isShift)
         {
             int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : 0;
-            SelectRange(anchor, target, addToExisting: true);
+            virtualList.SelectRange(anchor, target, addToExisting: true);
         }
         else
         {
-            int oldCount = _selectedSet.Count;
-            ClearSelectionInternal();
-            if (list[target] is TrackItemViewModel vm)
-            {
-                vm.IsSelected = true;
-                _selectedSet.Add(vm);
-                _selectionAnchorIndex = target;
-                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
-            }
+            virtualList.ClearSelection();
+            virtualList.SetIndexSelected(target, true);
+            _selectionAnchorIndex = target;
         }
 
         ScrollToTrackIndex(target, smooth: false);
@@ -472,9 +478,13 @@ public partial class TrackListControl : UserControl
 
     private void ExecuteDeleteSelection()
     {
-        if (_selectedSet.Count == 0) return;
+        if (Items is not IVirtualTrackList virtualList || virtualList.SelectedCount == 0) return;
 
-        var rep = _selectedSet.FirstOrDefault();
+        var ordered = virtualList.GetSelectedViewModelsOrdered();
+        var rep = ordered.Count > 0
+            ? ordered[0]
+            : ((uint)_leadIndex < (uint)virtualList.FilteredCount ? virtualList[_leadIndex] : null);
+
         if (rep == null) return;
 
         if (IsPlaylistContext)
@@ -503,9 +513,14 @@ public partial class TrackListControl : UserControl
         else if (change.Property == ItemsProperty)
         {
             UnsubscribeFromCollectionChanged(change.GetOldValue<IEnumerable?>());
-            SubscribeToCollectionChanged(change.GetNewValue<IEnumerable?>());
+            UnhookVirtualListSelection();
 
-            ResyncSelectionFromItems();
+            var newItems = change.GetNewValue<IEnumerable?>();
+            SubscribeToCollectionChanged(newItems);
+            HookVirtualListSelection(newItems);
+
+            DetachSelectionState();
+            UpdateItemsContext();
         }
         else if (change.Property == IsPlaylistContextProperty ||
                  change.Property == IsQueueContextProperty)
@@ -548,54 +563,48 @@ public partial class TrackListControl : UserControl
             incc.CollectionChanged -= OnItemsCollectionChanged;
     }
 
+    private void HookVirtualListSelection(IEnumerable? items)
+    {
+        if (items is IVirtualTrackList vtl)
+        {
+            _virtualSelectionHandler = OnVirtualSelectionChanged;
+            vtl.SelectionChanged += _virtualSelectionHandler;
+            RaisePropertyChanged(SelectedCountProperty, -1, vtl.SelectedCount);
+        }
+    }
+
+    private void OnVirtualSelectionChanged()
+    {
+        if (Items is IVirtualTrackList vtl)
+        {
+            RaisePropertyChanged(SelectedCountProperty, -1, vtl.SelectedCount);
+        }
+    }
+
+    private void UnhookVirtualListSelection()
+    {
+        if (Items is IVirtualTrackList vtl && _virtualSelectionHandler != null)
+        {
+            vtl.SelectionChanged -= _virtualSelectionHandler;
+            _virtualSelectionHandler = null;
+        }
+    }
+
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Remove && e.OldItems != null)
+        if (Items is IVirtualTrackList virtualList)
         {
-            int oldCount = _selectedSet.Count;
-            bool selectionChanged = false;
-            for (int i = 0; i < e.OldItems.Count; i++)
-            {
-                if (e.OldItems[i] is TrackItemViewModel vm && _selectedSet.Remove(vm))
-                {
-                    vm.IsSelected = false;
-                    selectionChanged = true;
-                }
-            }
-
-            if (selectionChanged)
-            {
-                RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
-            }
-
-            if (Items is IList list)
-            {
-                _selectionAnchorIndex = Math.Clamp(_selectionAnchorIndex, -1, list.Count - 1);
-                _leadIndex = Math.Clamp(_leadIndex, -1, list.Count - 1);
-            }
-            else
-            {
-                _selectionAnchorIndex = -1;
-                _leadIndex = -1;
-            }
-        }
-        else if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
-        {
-            for (int i = 0; i < e.NewItems.Count; i++)
-            {
-                if (e.NewItems[i] is TrackItemViewModel vm)
-                    vm.SelectionProvider = GetSelectedTrackInfos;
-            }
-        }
-        else if (e.Action is NotifyCollectionChangedAction.Reset)
-        {
-            ResyncSelectionFromItems();
+            RaisePropertyChanged(SelectedCountProperty, -1, virtualList.SelectedCount);
         }
     }
 
     private void UpdateFooterVisibility(Vector offset)
     {
-        if (_scrollViewer == null) { IsFooterVisible = false; return; }
+        if (_scrollViewer == null)
+        {
+            IsFooterVisible = false;
+            return;
+        }
 
         double distanceToBottom =
             _scrollViewer.Extent.Height - _scrollViewer.Viewport.Height - offset.Y;
@@ -610,263 +619,40 @@ public partial class TrackListControl : UserControl
 
     public void ClearSelection()
     {
-        if (_selectedSet.Count == 0) return;
-
-        int oldCount = _selectedSet.Count;
-        ClearSelectionInternal();
-        RaisePropertyChanged(SelectedCountProperty, oldCount, 0);
-    }
-
-    private void ClearSelectionInternal()
-    {
-        foreach (var item in _selectedSet)
+        if (Items is IVirtualTrackList virtualList)
         {
-            item.IsSelected = false;
+            virtualList.ClearSelection();
+            DetachSelectionState();
         }
-
-        _selectedSet.Clear();
-        _selectionAnchorIndex = -1;
-        _leadIndex = -1;
-        _deferredSingleSelectVm = null;
-        _deferredSingleSelectIndex = -1;
     }
 
     private void DetachSelectionState()
     {
-        _selectedSet.Clear();
-        _preDragSelectionSnapshot.Clear();
         _selectionAnchorIndex = -1;
         _leadIndex = -1;
         _deferredSingleSelectVm = null;
         _deferredSingleSelectIndex = -1;
-    }
-
-    private void ResyncSelectionFromItems()
-    {
-        int oldCount = _selectedSet.Count;
-        _selectedSet.Clear();
-        _preDragSelectionSnapshot.Clear();
-        _selectionAnchorIndex = -1;
-        _leadIndex = -1;
-        _deferredSingleSelectVm = null;
-        _deferredSingleSelectIndex = -1;
-
-        if (Items == null)
-        {
-            if (oldCount != 0)
-                RaisePropertyChanged(SelectedCountProperty, oldCount, 0);
-            return;
-        }
-
-        int firstIndex = -1;
-        var isPlaylist = IsPlaylistContext;
-        var isQueue = IsQueueContext;
-
-        if (Items is IList<TrackItemViewModel> list)
-        {
-            int count = list.Count;
-            for (int i = 0; i < count; i++)
-            {
-                var vm = list[i];
-                vm.SelectionProvider = GetSelectedTrackInfos;
-                if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
-                if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
-
-                if (vm.IsSelected)
-                {
-                    _selectedSet.Add(vm);
-                    if (firstIndex < 0) firstIndex = i;
-                }
-            }
-        }
-        else if (Items is IList objList)
-        {
-            int count = objList.Count;
-            for (int i = 0; i < count; i++)
-            {
-                if (objList[i] is TrackItemViewModel vm)
-                {
-                    vm.SelectionProvider = GetSelectedTrackInfos;
-                    if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
-                    if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
-
-                    if (vm.IsSelected)
-                    {
-                        _selectedSet.Add(vm);
-                        if (firstIndex < 0) firstIndex = i;
-                    }
-                }
-            }
-        }
-        else
-        {
-            int currentIndex = 0;
-            foreach (var item in Items)
-            {
-                if (item is TrackItemViewModel vm)
-                {
-                    vm.SelectionProvider = GetSelectedTrackInfos;
-                    if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
-                    if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
-
-                    if (vm.IsSelected)
-                    {
-                        _selectedSet.Add(vm);
-                        if (firstIndex < 0) firstIndex = currentIndex;
-                    }
-                }
-                currentIndex++;
-            }
-        }
-
-        _selectionAnchorIndex = firstIndex;
-        _leadIndex = firstIndex;
-
-        if (oldCount != _selectedSet.Count)
-            RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
     }
 
     public void SelectAll()
     {
-        if (Items == null) return;
-
-        int oldCount = _selectedSet.Count;
-
-        if (Items is IList list)
+        if (Items is IVirtualTrackList virtualList)
         {
-            int count = list.Count;
-            for (int i = 0; i < count; i++)
-            {
-                if (list[i] is TrackItemViewModel vm && _selectedSet.Add(vm))
-                {
-                    vm.IsSelected = true;
-                }
-            }
-            _leadIndex = list.Count - 1;
-            if (_selectionAnchorIndex < 0 && list.Count > 0)
+            virtualList.SelectAll();
+            _leadIndex = virtualList.FilteredCount - 1;
+            if (_selectionAnchorIndex < 0 && virtualList.FilteredCount > 0)
                 _selectionAnchorIndex = 0;
         }
-        else
-        {
-            int idx = 0;
-            foreach (var item in Items)
-            {
-                if (item is TrackItemViewModel vm && _selectedSet.Add(vm))
-                {
-                    vm.IsSelected = true;
-                }
-                idx++;
-            }
-            _leadIndex = idx - 1;
-            if (_selectionAnchorIndex < 0 && idx > 0)
-                _selectionAnchorIndex = 0;
-        }
-
-        if (_selectedSet.Count != oldCount)
-        {
-            RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
-        }
-    }
-
-    private void SelectRange(int fromIndex, int toIndex, bool addToExisting)
-    {
-        if (Items is not IList list || list.Count == 0) return;
-
-        int start = Math.Clamp(Math.Min(fromIndex, toIndex), 0, list.Count - 1);
-        int end = Math.Clamp(Math.Max(fromIndex, toIndex), 0, list.Count - 1);
-
-        int oldCount = _selectedSet.Count;
-
-        if (!addToExisting)
-        {
-            foreach (var item in _selectedSet)
-            {
-                item.IsSelected = false;
-            }
-            _selectedSet.Clear();
-        }
-
-        for (int i = start; i <= end; i++)
-        {
-            if (list[i] is TrackItemViewModel vm && _selectedSet.Add(vm))
-            {
-                vm.IsSelected = true;
-            }
-        }
-
-        if (oldCount != _selectedSet.Count)
-            RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
-    }
-
-    private void ToggleItemSelection(TrackItemViewModel vm)
-    {
-        int oldCount = _selectedSet.Count;
-
-        if (vm.IsSelected)
-        {
-            vm.IsSelected = false;
-            _selectedSet.Remove(vm);
-        }
-        else
-        {
-            vm.IsSelected = true;
-            _selectedSet.Add(vm);
-        }
-
-        RaisePropertyChanged(SelectedCountProperty, oldCount, _selectedSet.Count);
     }
 
     private List<TrackInfo> GetSelectedTrackInfos()
     {
-        if (_selectedSet.Count == 0) return [];
-
-        var result = new List<TrackInfo>(_selectedSet.Count);
-
-        if (Items is IList list)
+        if (Items is IVirtualTrackList virtualList)
         {
-            int count = list.Count;
-            for (int i = 0; i < count; i++)
-            {
-                if (list[i] is TrackItemViewModel vm && _selectedSet.Contains(vm))
-                {
-                    result.Add(vm.Track);
-                }
-            }
-        }
-        else if (Items != null)
-        {
-            foreach (var item in Items)
-            {
-                if (item is TrackItemViewModel vm && _selectedSet.Contains(vm))
-                {
-                    result.Add(vm.Track);
-                }
-            }
+            return virtualList.GetSelectedTracks();
         }
 
-        return result;
-    }
-
-    private List<TrackItemViewModel> GetSelectedViewModelsOrdered()
-    {
-        var result = new List<TrackItemViewModel>(_selectedSet.Count);
-        if (Items is IList list)
-        {
-            for (int i = 0; i < list.Count; i++)
-            {
-                if (list[i] is TrackItemViewModel vm && _selectedSet.Contains(vm))
-                    result.Add(vm);
-            }
-        }
-        else if (Items != null)
-        {
-            foreach (var item in Items)
-            {
-                if (item is TrackItemViewModel vm && _selectedSet.Contains(vm))
-                    result.Add(vm);
-            }
-        }
-        return result;
+        return [];
     }
 
     #endregion
@@ -891,8 +677,6 @@ public partial class TrackListControl : UserControl
         {
             bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
             bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
-
-            this.Focus();
 
             if (!isShift && !isCtrl)
             {
@@ -921,54 +705,56 @@ public partial class TrackListControl : UserControl
         if (sender is not Control sourceControl || sourceControl.DataContext is not TrackItemViewModel vm)
             return;
 
-        this.Focus();
-
-        int itemIndex = Items is IList list ? list.IndexOf(vm) : -1;
+        int itemIndex = _repeater?.GetElementIndex(sourceControl) ?? (Items is IList list ? list.IndexOf(vm) : -1);
         if (itemIndex < 0) return;
+
+        this.Focus();
 
         var point = e.GetCurrentPoint(this);
 
         if (point.Properties.IsLeftButtonPressed)
         {
+            e.Handled = true;
+
             bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
             bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
 
-            if (isShift)
+            if (Items is IVirtualTrackList virtualList)
             {
-                int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : itemIndex;
-                if (_selectionAnchorIndex < 0) _selectionAnchorIndex = itemIndex;
+                if (isShift)
+                {
+                    int anchor = _selectionAnchorIndex >= 0 ? _selectionAnchorIndex : itemIndex;
+                    if (_selectionAnchorIndex < 0) _selectionAnchorIndex = itemIndex;
 
-                SelectRange(anchor, itemIndex, addToExisting: true);
-                _leadIndex = itemIndex;
-                _deferredSingleSelectVm = null;
-                _deferredSingleSelectIndex = -1;
-            }
-            else if (isCtrl)
-            {
-                ToggleItemSelection(vm);
-                _selectionAnchorIndex = itemIndex;
-                _leadIndex = itemIndex;
-                _deferredSingleSelectVm = null;
-                _deferredSingleSelectIndex = -1;
-            }
-            else
-            {
-                if (vm.IsSelected)
-                {
-                    _deferredSingleSelectVm = vm;
-                    _deferredSingleSelectIndex = itemIndex;
+                    virtualList.SelectRange(anchor, itemIndex, addToExisting: true);
+                    _leadIndex = itemIndex;
+                    _deferredSingleSelectVm = null;
+                    _deferredSingleSelectIndex = -1;
                 }
-                else
+                else if (isCtrl)
                 {
-                    int oldCount = _selectedSet.Count;
-                    ClearSelectionInternal();
-                    vm.IsSelected = true;
-                    _selectedSet.Add(vm);
+                    virtualList.ToggleIndexSelected(itemIndex);
                     _selectionAnchorIndex = itemIndex;
                     _leadIndex = itemIndex;
                     _deferredSingleSelectVm = null;
                     _deferredSingleSelectIndex = -1;
-                    RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+                }
+                else
+                {
+                    if (virtualList.IsIndexSelected(itemIndex))
+                    {
+                        _deferredSingleSelectVm = vm;
+                        _deferredSingleSelectIndex = itemIndex;
+                    }
+                    else
+                    {
+                        virtualList.ClearSelection();
+                        virtualList.SetIndexSelected(itemIndex, true);
+                        _selectionAnchorIndex = itemIndex;
+                        _leadIndex = itemIndex;
+                        _deferredSingleSelectVm = null;
+                        _deferredSingleSelectIndex = -1;
+                    }
                 }
             }
 
@@ -981,15 +767,15 @@ public partial class TrackListControl : UserControl
         }
         else if (point.Properties.IsRightButtonPressed)
         {
-            if (!vm.IsSelected)
+            if (Items is IVirtualTrackList virtualList)
             {
-                int oldCount = _selectedSet.Count;
-                ClearSelectionInternal();
-                vm.IsSelected = true;
-                _selectedSet.Add(vm);
-                _selectionAnchorIndex = itemIndex;
-                _leadIndex = itemIndex;
-                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+                if (!virtualList.IsIndexSelected(itemIndex))
+                {
+                    virtualList.ClearSelection();
+                    virtualList.SetIndexSelected(itemIndex, true);
+                    _selectionAnchorIndex = itemIndex;
+                    _leadIndex = itemIndex;
+                }
             }
 
             vm.SelectionProvider = GetSelectedTrackInfos;
@@ -1017,18 +803,18 @@ public partial class TrackListControl : UserControl
         _isDragging = true;
 
         IReadOnlyList<int> dragIndices;
-        if (source.DataContext is TrackItemViewModel vm && vm.IsSelected && _selectedSet.Count > 1)
+
+        if (source.DataContext is TrackItemViewModel vm && vm.IsSelected && SelectedCount > 1 &&
+            Items is IVirtualTrackList vtl)
         {
-            var orderedVms = GetSelectedViewModelsOrdered();
+            var orderedVms = vtl.GetSelectedViewModelsOrdered();
             var indices = new List<int>(orderedVms.Count);
-            if (Items is IList list)
+            for (int i = 0; i < orderedVms.Count; i++)
             {
-                for (int i = 0; i < orderedVms.Count; i++)
-                {
-                    int idx = list.IndexOf(orderedVms[i]);
-                    if (idx >= 0) indices.Add(idx);
-                }
+                int idx = vtl.IndexOf(orderedVms[i]);
+                if (idx >= 0) indices.Add(idx);
             }
+
             dragIndices = indices.Count > 0 ? indices : [_dragSourceIndex];
         }
         else
@@ -1070,6 +856,8 @@ public partial class TrackListControl : UserControl
     {
         if (e.InitialPressMouseButton == MouseButton.Left)
         {
+            e.Handled = true;
+
             bool isShift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
             bool isCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
 
@@ -1079,15 +867,12 @@ public partial class TrackListControl : UserControl
             _deferredSingleSelectVm = null;
             _deferredSingleSelectIndex = -1;
 
-            if (!_isDragging && deferredVm != null && !isShift && !isCtrl)
+            if (!_isDragging && deferredVm != null && !isShift && !isCtrl && Items is IVirtualTrackList virtualList)
             {
-                int oldCount = _selectedSet.Count;
-                ClearSelectionInternal();
-                deferredVm.IsSelected = true;
-                _selectedSet.Add(deferredVm);
+                virtualList.ClearSelection();
+                virtualList.SetIndexSelected(deferredIdx, true);
                 _selectionAnchorIndex = deferredIdx;
                 _leadIndex = deferredIdx;
-                RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
             }
 
             _isDragging = false;
@@ -1126,7 +911,11 @@ public partial class TrackListControl : UserControl
                 }
             }
 
-            _dropIndicatorLine.Margin = new Thickness(8, targetY, 8, 0);
+            if (_dropIndicatorTransform != null)
+            {
+                _dropIndicatorTransform.Y = targetY;
+            }
+
             _dropIndicatorLine.IsVisible = true;
         }
 
@@ -1135,7 +924,8 @@ public partial class TrackListControl : UserControl
 
     private void OnDragLeave(object? sender, RoutedEventArgs e)
     {
-        if (e.Source is Visual visual && this.Bounds.Contains(visual.TranslatePoint(new Point(0, 0), this) ?? new Point(-1, -1)))
+        if (e.Source is Visual visual &&
+            this.Bounds.Contains(visual.TranslatePoint(new Point(0, 0), this) ?? new Point(-1, -1)))
         {
             return;
         }
@@ -1163,7 +953,7 @@ public partial class TrackListControl : UserControl
         if (oldIndices.Count == 1)
         {
             int oldIndex = oldIndices[0];
-            int maxValidIndex = (Items is IList l ? l.Count : 1) - 1;
+            int maxValidIndex = (Items is ICollection c ? c.Count : 1) - 1;
             int clampedTarget = Math.Clamp(finalTargetIndex, 0, Math.Max(0, maxValidIndex));
 
             if (oldIndex != clampedTarget)
@@ -1173,7 +963,12 @@ public partial class TrackListControl : UserControl
                 else
                     MoveItemCommand?.Execute((oldIndex, clampedTarget));
 
-                ResyncSelectionFromItems();
+                if (Items is IVirtualTrackList virtualList)
+                {
+                    virtualList.ClearSelection();
+                    virtualList.SetIndexSelected(clampedTarget, true);
+                }
+
                 _selectionAnchorIndex = clampedTarget;
                 _leadIndex = clampedTarget;
             }
@@ -1186,36 +981,34 @@ public partial class TrackListControl : UserControl
 
     private async Task ExecuteBatchMoveAsync(IReadOnlyList<int> sourceIndices, int targetIndex)
     {
-        if (Items is not IList list || list.Count == 0) return;
+        if (Items is not IVirtualTrackList virtualList || virtualList.FilteredCount == 0) return;
 
         var sortedSources = sourceIndices.Distinct().OrderBy(x => x).ToList();
         var movingVms = new List<TrackItemViewModel>(sortedSources.Count);
         for (int i = 0; i < sortedSources.Count; i++)
         {
             int idx = sortedSources[i];
-            if (idx >= 0 && idx < list.Count && list[idx] is TrackItemViewModel vm)
-                movingVms.Add(vm);
+            if (idx >= 0 && idx < virtualList.FilteredCount)
+                movingVms.Add(virtualList[idx]);
         }
 
         if (movingVms.Count == 0) return;
 
-        int clampedTarget = Math.Clamp(targetIndex, 0, list.Count - 1);
-        var targetVm = list[clampedTarget] as TrackItemViewModel;
+        int clampedTarget = Math.Clamp(targetIndex, 0, virtualList.FilteredCount - 1);
+        var targetVm = virtualList[clampedTarget];
         if (targetVm == null || movingVms.Contains(targetVm)) return;
 
-        int initialTargetIdx = list.IndexOf(targetVm);
-        bool isMovingDownwards = sortedSources.First() < initialTargetIdx;
+        int initialTargetIdx = virtualList.IndexOf(targetVm);
+        bool isMovingDownwards = sortedSources[0] < initialTargetIdx;
 
-        // При перемещении вниз обходим элементы в обратном порядке (снизу вверх),
-        // чтобы предотвратить инверсию относительного порядка треков внутри переносимой пачки
         var orderedMovingVms = isMovingDownwards
             ? movingVms.AsEnumerable().Reverse()
             : movingVms;
 
         foreach (var vm in orderedMovingVms)
         {
-            int currentFrom = list.IndexOf(vm);
-            int currentTarget = list.IndexOf(targetVm);
+            int currentFrom = virtualList.IndexOf(vm);
+            int currentTarget = virtualList.IndexOf(targetVm);
 
             if (currentFrom < 0 || currentTarget < 0 || currentFrom == currentTarget)
                 continue;
@@ -1226,31 +1019,31 @@ public partial class TrackListControl : UserControl
                 MoveItemCommand?.Execute((currentFrom, currentTarget));
         }
 
-        ClearSelectionInternal();
+        virtualList.ClearSelection();
         for (int i = 0; i < movingVms.Count; i++)
         {
-            movingVms[i].IsSelected = true;
-            _selectedSet.Add(movingVms[i]);
+            int newIdx = virtualList.IndexOf(movingVms[i]);
+            if (newIdx >= 0)
+                virtualList.SetIndexSelected(newIdx, true);
         }
-        RaisePropertyChanged(SelectedCountProperty, -1, _selectedSet.Count);
 
-        int newAnchor = list.IndexOf(targetVm);
+        int newAnchor = virtualList.IndexOf(targetVm);
         _selectionAnchorIndex = newAnchor >= 0 ? newAnchor : clampedTarget;
         _leadIndex = _selectionAnchorIndex;
     }
 
     private (int index, Control? rowControl, bool isBelow) ResolveDropTarget(DragEventArgs e)
     {
-        if (_repeater == null || Items is not IList list || list.Count == 0)
+        if (_repeater == null || Items is not ICollection col || col.Count == 0)
             return (-1, null, false);
 
-        // 1. Быстрый поиск через Visual Tree, если курсор находится над содержимым строки
         Visual? visual = e.Source as Visual;
         while (visual != null && visual != _repeater && visual != this)
         {
-            if (visual is Border border && border.Classes.Contains("track-row") && border.DataContext is TrackItemViewModel vm)
+            if (visual is Border border && border.Classes.Contains("track-row") &&
+                border.DataContext is TrackItemViewModel)
             {
-                int idx = list.IndexOf(vm);
+                int idx = _repeater.GetElementIndex(border);
                 if (idx >= 0)
                 {
                     var pos = e.GetPosition(border);
@@ -1258,19 +1051,18 @@ public partial class TrackListControl : UserControl
                     return (idx, border, isBelow);
                 }
             }
+
             visual = visual.GetVisualParent();
         }
 
-        // 2. O(1) математический расчёт слота без слепых зон.
-        // Исключает падение в хвост списка при попадании курсора ровно в 2px зазор между треками.
         var repeaterPos = e.GetPosition(_repeater);
         if (repeaterPos.Y < 0)
             return (0, _repeater.TryGetElement(0), false);
 
         int estimatedIndex = (int)(repeaterPos.Y / ItemHeight);
-        if (estimatedIndex >= list.Count)
+        if (estimatedIndex >= col.Count)
         {
-            int lastIdx = list.Count - 1;
+            int lastIdx = col.Count - 1;
             return (lastIdx, _repeater.TryGetElement(lastIdx), true);
         }
 
@@ -1313,6 +1105,7 @@ public partial class TrackListControl : UserControl
                     if (int.TryParse(parts[j], out int idx))
                         list.Add(idx);
                 }
+
                 if (list.Count > 0) return list;
             }
         }
@@ -1322,7 +1115,8 @@ public partial class TrackListControl : UserControl
 
     private void CleanupDragStyles()
     {
-        _dropIndicatorLine?.IsVisible = false;
+        if (_dropIndicatorLine != null)
+            _dropIndicatorLine.IsVisible = false;
     }
 
     private static bool IsInteractiveChild(Visual visual)
@@ -1334,6 +1128,7 @@ public partial class TrackListControl : UserControl
             if (parent is Border border && border.Classes.Contains("track-row")) return false;
             parent = parent.GetVisualParent();
         }
+
         return false;
     }
 
@@ -1341,20 +1136,12 @@ public partial class TrackListControl : UserControl
 
     #region Scroll
 
-    /// <summary>
-    /// Гарантирует наличие ссылки на родительский ScrollViewer.
-    /// </summary>
     private ScrollViewer? EnsureScrollViewer()
     {
         _scrollViewer ??= this.FindAncestorOfType<ScrollViewer>();
         return _scrollViewer;
     }
 
-    /// <summary>
-    /// Прокручивает список так, чтобы трек с указанным индексом отобразился на экране.
-    /// </summary>
-    /// <param name="index">Индекс целевого элемента.</param>
-    /// <param name="smooth">Использовать плавное перемещение (true) или мгновенное позиционирование (false).</param>
     public void ScrollToTrackIndex(int index, bool smooth = true)
     {
         var sv = EnsureScrollViewer();
@@ -1382,9 +1169,6 @@ public partial class TrackListControl : UserControl
         }
     }
 
-    /// <summary>
-    /// Сбрасывает вертикальную позицию скролла в начало списка при обновлении фильтра.
-    /// </summary>
     public void ResetScrollPosition()
     {
         var sv = EnsureScrollViewer();
@@ -1400,11 +1184,20 @@ public partial class TrackListControl : UserControl
         var pos = e.GetPosition(_scrollViewer);
 
         if (pos.Y < AutoScrollMargin)
-        { _autoScrollOffset = -AutoScrollAmount; _autoScrollTimer?.Start(); }
+        {
+            _autoScrollOffset = -AutoScrollAmount;
+            _autoScrollTimer?.Start();
+        }
         else if (pos.Y > _scrollViewer.Bounds.Height - AutoScrollMargin)
-        { _autoScrollOffset = AutoScrollAmount; _autoScrollTimer?.Start(); }
+        {
+            _autoScrollOffset = AutoScrollAmount;
+            _autoScrollTimer?.Start();
+        }
         else
-        { _autoScrollOffset = 0; _autoScrollTimer?.Stop(); }
+        {
+            _autoScrollOffset = 0;
+            _autoScrollTimer?.Stop();
+        }
     }
 
     private void OnAutoScrollTick(object? sender, EventArgs e)
@@ -1422,28 +1215,23 @@ public partial class TrackListControl : UserControl
         if (sender is not Control c || c.DataContext is not TrackItemViewModel vm) return;
 
         this.Focus();
-        int itemIndex = Items is IList list ? list.IndexOf(vm) : -1;
 
-        if (!vm.IsSelected)
+        if (Items is IVirtualTrackList virtualList)
         {
-            int oldCount = _selectedSet.Count;
-            ClearSelectionInternal();
-            vm.IsSelected = true;
-            _selectedSet.Add(vm);
-            _selectionAnchorIndex = itemIndex;
-            _leadIndex = itemIndex;
-            RaisePropertyChanged(SelectedCountProperty, oldCount, 1);
+            int itemIndex = virtualList.IndexOf(vm);
+            if (itemIndex >= 0 && !virtualList.IsIndexSelected(itemIndex))
+            {
+                virtualList.ClearSelection();
+                virtualList.SetIndexSelected(itemIndex, true);
+                _selectionAnchorIndex = itemIndex;
+                _leadIndex = itemIndex;
+            }
         }
 
         vm.SelectionProvider = GetSelectedTrackInfos;
         ShowSharedFlyout(c, false);
     }
 
-    /// <summary>
-    /// Показывает контекстное меню трека.
-    /// showAtPointer=true — при ПКМ, меню под курсором.
-    /// showAtPointer=false — при клике на "три точки", меню привязано к кнопке.
-    /// </summary>
     private void ShowSharedFlyout(Control target, bool showAtPointer)
     {
         if (this.Resources.TryGetValue("SharedTrackMenuFlyout", out var res) && res is MenuFlyout f)
@@ -1480,39 +1268,13 @@ public partial class TrackListControl : UserControl
         EndOfListText = L["Search_EndOfList"];
     }
 
-    /// <summary>
-    /// Проставляет контекстные флаги всем VM в коллекции.
-    /// Пропускает VM, у которых значение уже совпадает — устраняет
-    /// лавину RaisePropertyChanged при повторных вызовах с теми же данными.
-    /// Исключает аллокацию IEnumerator при приведении к списочному интерфейсу.
-    /// </summary>
     private void UpdateItemsContext()
     {
-        if (Items == null) return;
+        if (Items is not IVirtualTrackList virtualList) return;
 
-        var isPlaylist = IsPlaylistContext;
-        var isQueue = IsQueueContext;
-
-        if (Items is IList<TrackItemViewModel> list)
-        {
-            int count = list.Count;
-            for (int i = 0; i < count; i++)
-            {
-                var vm = list[i];
-                if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
-                if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
-                vm.SelectionProvider = GetSelectedTrackInfos;
-            }
-            return;
-        }
-
-        foreach (var item in Items)
-        {
-            if (item is not TrackItemViewModel vm) continue;
-            if (vm.IsPlaylistContext != isPlaylist) vm.IsPlaylistContext = isPlaylist;
-            if (vm.IsQueueContext != isQueue) vm.IsQueueContext = isQueue;
-            vm.SelectionProvider = GetSelectedTrackInfos;
-        }
+        virtualList.IsPlaylistContext = IsPlaylistContext;
+        virtualList.IsQueueContext = IsQueueContext;
+        virtualList.SelectionProvider = GetSelectedTrackInfos;
     }
 
     #endregion

@@ -18,7 +18,7 @@
     <!-- Entity Framework Core: 10.0.11 (патчи безопасности/багфиксы) -->
     <MsExtVersion>10.0.12</MsExtVersion>
     <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
-    <AvaloniaVersion>12.1.3</AvaloniaVersion>
+    <AvaloniaVersion>12.1.4</AvaloniaVersion>
     <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
     <SkiaSharpVersion>4.153.1</SkiaSharpVersion>
   </PropertyGroup>

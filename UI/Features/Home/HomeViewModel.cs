@@ -1,13 +1,12 @@
+
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
-using LMP.UI.Features.Shell;
 
 namespace LMP.UI.Features.Home;
-
 /// <summary>
 /// ViewModel главного экрана. Категории + поиск через YouTube с кэшированием.
 /// </summary>
-public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoothTransitionViewModel
+public sealed partial class HomeViewModel : TrackListBaseViewModel
 {
     #region Constants
 
@@ -36,8 +35,6 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
 
     public ObservableCollection<CategoryItem> Categories { get; } = [];
 
-    public bool CanReorderItems => CanReorder;
-
     partial void OnSelectedCategoryChanged(CategoryItem? value)
     {
         if (_isDisposed || value is null) return;
@@ -49,7 +46,6 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
     #region Commands
 
     public IAsyncRelayCommand RefreshCommand { get; }
-    public IAsyncRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
 
     #endregion
 
@@ -80,9 +76,6 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
         InitializeCategories();
 
         RefreshCommand = new AsyncRelayCommand(async () => await LoadTracksAsync(force: true));
-
-        MoveItemCommand = new AsyncRelayCommand<(int oldIndex, int newIndex)>(
-            async tuple => await MoveItemAsync(tuple.oldIndex, tuple.newIndex));
     }
 
     #endregion
@@ -106,7 +99,7 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
     {
         if (_isDisposed) return;
 
-        await base.OnNavigatedToAsync();
+        await base.OnNavigatedToAsync().ConfigureAwait(false);
 
         if (!_isDataLoaded)
         {
@@ -121,27 +114,12 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
 
     #endregion
 
-    #region TrackListReorderableViewModel Implementation
+    #region Base Implementation
 
     protected override void OnPlay(TrackInfo track)
     {
         Task.Run(async () => await Audio.PlayTrackAsync(track));
         _ = LibService.AddToRecentlyPlayedAsync(track);
-    }
-
-    protected override async Task<List<TrackInfo>> LoadTracksAsync(
-        IEnumerable<string> ids, CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(_currentQuery)) return [];
-
-        var cached = await _searchCache.GetAsync(_currentQuery, SearchSource.YouTube, 30);
-        if (cached is { Count: > 0 })
-        {
-            var idSet = ids.ToHashSet();
-            return [.. cached.Where(t => idSet.Contains(t.Id))];
-        }
-
-        return [];
     }
 
     /// <inheritdoc />
@@ -154,12 +132,6 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
         {
             _ = Dispatcher.UIThread.InvokeAsync(async () => await LoadTracksAsync(force: true), DispatcherPriority.Background);
         }
-    }
-
-    protected override void RebuildVisibleItems()
-    {
-        base.RebuildVisibleItems();
-        OnPropertyChanged(nameof(CanReorderItems));
     }
 
     #endregion
@@ -186,7 +158,7 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
             {
                 var recent = await LibService.GetRecentlyPlayedAsync(DefaultFetchSize);
                 if (ct.IsCancellationRequested) return;
-                InitializeWithData(recent);
+                SetTracks(recent);
             }
             else
             {
@@ -218,7 +190,7 @@ public sealed partial class HomeViewModel : TrackListReorderableViewModel, ISmoo
                 _ = _imageCache.PrefetchAsync(imageUrls!, ct);
 
                 if (ct.IsCancellationRequested) return;
-                InitializeWithData(tracks);
+                SetTracks(tracks);
             }
 
             _ = HydrateCacheStatusAsync(ct);

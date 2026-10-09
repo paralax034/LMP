@@ -160,16 +160,16 @@
                             Classes.is-selected="{Binding IsSelected}"
                             Classes.menu-open="{Binding IsMenuOpen}"
                             Height="60"
+                            Background="Transparent"
                             UseLayoutRounding="True"
                             PointerPressed="OnItemPointerPressed"
                             PointerMoved="OnItemPointerMoved"
                             PointerReleased="OnItemPointerReleased"
                             DoubleTapped="OnItemDoubleTapped">
 
-                            <Panel>
-                                <!-- Оптимизированные фиксированные колонки: 52px, *, 44px, 40px,
-                                56px -->
-                                <Grid ColumnDefinitions="52, *, 44, 40, 56">
+                            <Panel Background="Transparent">
+                                <Grid ColumnDefinitions="52, *, 44, 40, 56"
+                                    Background="Transparent">
 
                                     <!-- COL 0: ОБЛОЖКА / КНОПКА PLAY -->
                                     <Button Grid.Column="0"
@@ -321,7 +321,11 @@
                 VerticalAlignment="Top"
                 IsVisible="False"
                 IsHitTestVisible="False"
-                Margin="8,0" />
+                Margin="8,0">
+                <Border.RenderTransform>
+                    <TranslateTransform Y="0" />
+                </Border.RenderTransform>
+            </Border>
         </Panel>
     </DockPanel>
 </UserControl>

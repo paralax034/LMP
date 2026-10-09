@@ -13,7 +13,7 @@ public partial class TrackListControl
 {
     /// <summary>
     /// Обеспечивает ультра-плавную интерполяцию прокрутки ScrollViewer.
-    /// Поддерживает как прокрутку колесиком (с накоплением), так и плавное «догоняние» 
+    /// Поддерживает как прокрутку колесиком (с накоплением), так и плавное «догоняние»
     /// при кликах по треку скроллбара и нажатиях клавиш (PageUp/PageDown, стрелки).
     /// Автоматически отключается при ручном перетаскивании ползунка мыши, исключая лаги.
     /// </summary>
@@ -21,7 +21,9 @@ public partial class TrackListControl
     {
         #region Constants
 
-        private const double ScrollStep = ItemHeight * 2; // Ровно 2 трека (124px) за щелчок мыши без накопительного сдвига
+        private const double
+            ScrollStep = ItemHeight * 2; // Ровно 2 трека (124px) за щелчок мыши без накопительного сдвига
+
         private const double Smoothness = 16.0;
         private const double Epsilon = 0.5;
 
@@ -105,7 +107,8 @@ public partial class TrackListControl
         {
             if (_disposed) return;
 
-            _verticalScrollBar = _sv.GetTemplateDescendants().OfType<ScrollBar>().FirstOrDefault(x => x.Name == "PART_VerticalScrollBar");
+            _verticalScrollBar = _sv.GetTemplateDescendants().OfType<ScrollBar>()
+                .FirstOrDefault(x => x.Name == "PART_VerticalScrollBar");
             _verticalScrollBar ??= _sv.FindDescendantOfType<ScrollBar>();
 
             if (_verticalScrollBar != null)
@@ -246,6 +249,9 @@ public partial class TrackListControl
             _disposed = true;
 
             _isAnimating = false;
+            _isDraggingScrollbar = false;
+            _topLevel = null;
+
             _sv.RemoveHandler(PointerWheelChangedEvent, OnWheel);
             _sv.ScrollChanged -= OnScrollChanged;
 
@@ -253,6 +259,7 @@ public partial class TrackListControl
             {
                 _verticalScrollBar.Scroll -= OnScrollBarScroll;
                 _verticalScrollBar.RemoveHandler(PointerReleasedEvent, OnScrollBarPointerReleased);
+                _verticalScrollBar = null;
             }
         }
     }

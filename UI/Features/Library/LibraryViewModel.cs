@@ -142,7 +142,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     public void PrepareForTransition()
     {
         _isViewActive = false;
-        IsContentReady = false;
+        if (!_isDataLoaded)
+        {
+            IsContentReady = false;
+        }
     }
 
     /// <inheritdoc />

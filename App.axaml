@@ -1,8 +1,12 @@
 <Application xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:LMP"
-    x:Class="LMP.App"
-    RequestedThemeVariant="Dark">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:LMP"
+             x:Class="LMP.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.DataTemplates>
+        <local:ViewLocator />
+    </Application.DataTemplates>
 
     <Application.Resources>
         <ResourceDictionary>

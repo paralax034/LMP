@@ -1,56 +1,30 @@
-using System.Collections.ObjectModel;
+
 using Avalonia.Threading;
-using LMP.UI.Features.Shared;
-using LMP.UI.Features.Shell;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Queue;
-
 /// <summary>
 /// ViewModel экрана текущей очереди воспроизведения.
 /// Синхронизирует состав очереди с <see cref="AudioEngine"/> и активное состояние треков с <see cref="PlayerControlService"/>.
 /// </summary>
-public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionViewModel
+public sealed partial class QueueViewModel : TrackListBaseViewModel
 {
-    private readonly AudioEngine _audio;
-    private readonly PlayerControlService _playerControl;
     private readonly PlaylistService _playlistService;
     private readonly CookieAuthService _auth;
     private readonly DialogService _dialog;
-    private readonly TrackViewModelFactory _vmFactory;
-    private readonly DownloadService _downloads;
+    private int _selfMoveCounter;
 
-    private readonly List<TrackItemViewModel> _allQueueItems = [];
-    private TrackItemViewModel? _currentActiveVm;
+    [ObservableProperty] public partial string FormattedTotalDuration { get; private set; } = string.Empty;
 
-    private bool _isTransitioning;
-
-    public ObservableCollection<TrackItemViewModel> QueueItems { get; } = [];
-    public ObservableCollection<TrackItemViewModel> QueueTracks => QueueItems;
-
-    [ObservableProperty] public partial int TotalCount { get; private set; }
-    [ObservableProperty] public partial string FormattedTotalDuration { get; private set; } = "";
-    [ObservableProperty] public partial string FilterQuery { get; set; } = string.Empty;
-    [ObservableProperty] public partial bool IsFilterEmpty { get; private set; }
-    public bool IsLoading
-    {
-        get => _isTransitioning;
-        private set
-        {
-            if (_isTransitioning == value) return;
-            _isTransitioning = value;
-            OnPropertyChanged(nameof(IsLoading));
-        }
-    }
+    public IVirtualTrackList QueueItems => Items;
+    public IVirtualTrackList QueueTracks => Items;
 
     public bool IsEmpty => TotalCount == 0;
-    public bool CanReorderItems => string.IsNullOrWhiteSpace(FilterQuery) && TotalCount > 1;
+    public override bool CanReorderItems => CanReorder && TotalCount > 1;
 
     public IRelayCommand ClearQueueCommand { get; }
     public IRelayCommand ShuffleQueueCommand { get; }
     public IAsyncRelayCommand DownloadAllCommand { get; }
     public IAsyncRelayCommand SaveQueueToPlaylistCommand { get; }
-    public IRelayCommand<(int oldIndex, int newIndex)> MoveItemCommand { get; }
 
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="QueueViewModel"/>.
@@ -70,201 +44,75 @@ public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionVie
         TrackViewModelFactory vmFactory,
         DownloadService downloads,
         PlayerControlService? playerControl = null)
+        : base(audio, downloads, vmFactory, playerControl)
     {
-        _audio = audio;
-        _playerControl = playerControl ?? AppEntry.Services.GetRequiredService<PlayerControlService>();
         _playlistService = playlistService;
         _auth = auth;
         _dialog = dialog;
-        _vmFactory = vmFactory;
-        _downloads = downloads;
 
-        ClearQueueCommand = new RelayCommand(_audio.ClearQueue, () => TotalCount > 0);
-        ShuffleQueueCommand = new RelayCommand(_audio.ShuffleQueue, () => TotalCount > 1);
+        _items.IsQueueContext = true;
+
+        ClearQueueCommand = new RelayCommand(_audioClearQueue, () => TotalCount > 0);
+        ShuffleQueueCommand = new RelayCommand(_audioShuffleQueue, () => TotalCount > 1);
         DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TotalCount > 0);
         SaveQueueToPlaylistCommand = new AsyncRelayCommand(SaveQueueToPlaylistAsync, () => TotalCount > 0);
 
-        MoveItemCommand = new RelayCommand<(int oldIndex, int newIndex)>(tuple =>
-        {
-            if (!CanReorderItems) return;
-            _audio.MoveQueueItem(tuple.oldIndex, tuple.newIndex);
-        });
-
-        _audio.OnQueueItemMoved += OnAudioQueueItemMoved;
-        _audio.OnQueueItemInserted += OnAudioQueueItemInserted;
-        _audio.OnQueueItemRemoved += OnAudioQueueItemRemoved;
-        _audio.OnQueueRangeInserted += OnAudioQueueRangeInserted;
-        _audio.OnQueueChanged += OnAudioQueueChanged;
-
-        _playerControl.CurrentTrackChanged += OnPlayerControlTrackChanged;
-        _playerControl.IsPlayingChanged += OnPlayerControlIsPlayingChanged;
-        _playerControl.ForceSyncTriggered += OnPlayerControlForceSyncTriggered;
+        Audio.OnQueueItemMoved += OnAudioQueueItemMoved;
+        Audio.OnQueueItemInserted += OnAudioQueueItemInserted;
+        Audio.OnQueueItemRemoved += OnAudioQueueItemRemoved;
+        Audio.OnQueueRangeInserted += OnAudioQueueRangeInserted;
+        Audio.OnQueueChanged += OnAudioQueueChanged;
 
         SyncWithAudioQueue();
-    }
-
-    /// <inheritdoc />
-    public void PrepareForTransition()
-    {
-        IsLoading = true;
-    }
-
-    /// <inheritdoc />
-    public override Task OnNavigatedToAsync()
-    {
         IsLoading = false;
-        return Task.CompletedTask;
     }
 
-    partial void OnFilterQueryChanged(string value)
+    private void _audioClearQueue() => Audio.ClearQueue();
+    private void _audioShuffleQueue() => Audio.ShuffleQueue();
+
+    protected override void OnPlay(TrackInfo track)
     {
-        ApplyFilter();
-        OnPropertyChanged(nameof(CanReorderItems));
+        _ = Audio.PlayTrackAsync(track);
+    }
+
+    protected override Task SaveMoveAsync(int fromVisualIndex, int toVisualIndex, CancellationToken ct)
+    {
+        Interlocked.Increment(ref _selfMoveCounter);
+        try
+        {
+            Audio.MoveQueueItem(fromVisualIndex, toVisualIndex);
+        }
+        finally
+        {
+            Dispatcher.UIThread.Post(() => Interlocked.Decrement(ref _selfMoveCounter), DispatcherPriority.Background);
+        }
+        return Task.CompletedTask;
     }
 
     private void OnAudioQueueItemMoved(int from, int to)
     {
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => OnAudioQueueItemMoved(from, to));
-            return;
-        }
-
-        if (from >= 0 && from < _allQueueItems.Count && to >= 0 && to < _allQueueItems.Count && from != to)
-        {
-            var item = _allQueueItems[from];
-            _allQueueItems.RemoveAt(from);
-            _allQueueItems.Insert(to, item);
-            ApplyFilter();
-        }
+        if (Volatile.Read(ref _selfMoveCounter) > 0) return;
+        Dispatcher.UIThread.Post(SyncWithAudioQueue);
     }
 
-    private void OnAudioQueueItemInserted(int index, TrackInfo track)
-    {
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => OnAudioQueueItemInserted(index, track));
-            return;
-        }
+    private void OnAudioQueueItemInserted(int index, TrackInfo track) =>
+        Dispatcher.UIThread.Post(SyncWithAudioQueue);
 
-        if (index >= 0 && index <= _allQueueItems.Count)
-        {
-            var vm = _vmFactory.CreateForQueue(track, t => _ = _audio.PlayTrackAsync(t));
-            _allQueueItems.Insert(index, vm);
-            TotalCount = _allQueueItems.Count;
-            ApplyFilter();
-        }
-    }
+    private void OnAudioQueueItemRemoved(int index, TrackInfo track) =>
+        Dispatcher.UIThread.Post(SyncWithAudioQueue);
 
-    private void OnAudioQueueItemRemoved(int index, TrackInfo track)
-    {
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => OnAudioQueueItemRemoved(index, track));
-            return;
-        }
-
-        if (index >= 0 && index < _allQueueItems.Count)
-        {
-            var vm = _allQueueItems[index];
-            _allQueueItems.RemoveAt(index);
-            if (ReferenceEquals(_currentActiveVm, vm))
-                _currentActiveVm = null;
-            vm.Dispose();
-            TotalCount = _allQueueItems.Count;
-            ApplyFilter();
-        }
-    }
-
-    private void OnAudioQueueRangeInserted(int startIndex, int count)
-    {
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => OnAudioQueueRangeInserted(startIndex, count));
-            return;
-        }
-
-        var rawQueue = _audio.Queue;
-        for (int i = 0; i < count; i++)
-        {
-            int targetIndex = startIndex + i;
-            if (targetIndex >= 0 && targetIndex < rawQueue.Count)
-            {
-                var track = rawQueue[targetIndex];
-                var vm = _vmFactory.CreateForQueue(track, t => _ = _audio.PlayTrackAsync(t));
-                _allQueueItems.Insert(targetIndex, vm);
-            }
-        }
-        TotalCount = _allQueueItems.Count;
-        ApplyFilter();
-    }
+    private void OnAudioQueueRangeInserted(int startIndex, int count) =>
+        Dispatcher.UIThread.Post(SyncWithAudioQueue);
 
     private void OnAudioQueueChanged()
     {
-        if (Dispatcher.UIThread.CheckAccess())
-            SyncWithAudioQueue();
-        else
-            Dispatcher.UIThread.Post(SyncWithAudioQueue);
-    }
-
-    private void OnPlayerControlTrackChanged(TrackInfo? track)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-            UpdatePlaybackState(track, _playerControl.IsPlaying);
-        else
-            Dispatcher.UIThread.Post(() => UpdatePlaybackState(track, _playerControl.IsPlaying));
-    }
-
-    private void OnPlayerControlIsPlayingChanged(bool isPlaying)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-            UpdatePlaybackState(_playerControl.CurrentTrack, isPlaying);
-        else
-            Dispatcher.UIThread.Post(() => UpdatePlaybackState(_playerControl.CurrentTrack, isPlaying));
-    }
-
-    private void OnPlayerControlForceSyncTriggered()
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-            UpdatePlaybackState(_playerControl.CurrentTrack, _playerControl.IsPlaying);
-        else
-            Dispatcher.UIThread.Post(() => UpdatePlaybackState(_playerControl.CurrentTrack, _playerControl.IsPlaying));
-    }
-
-    /// <summary>
-    /// Централизованно обновляет флаги активности и воспроизведения для моделей представления элементов очереди.
-    /// </summary>
-    /// <param name="currentTrack">Текущий воспроизводимый трек.</param>
-    /// <param name="isPlaying">Флаг активного физического воспроизведения.</param>
-    private void UpdatePlaybackState(TrackInfo? currentTrack, bool isPlaying)
-    {
-        if (_currentActiveVm != null && _currentActiveVm.Id != currentTrack?.Id)
-        {
-            _currentActiveVm.SetActive(false, false);
-            _currentActiveVm = null;
-        }
-
-        if (currentTrack is null) return;
-
-        if (_currentActiveVm == null)
-        {
-            for (int i = 0; i < _allQueueItems.Count; i++)
-            {
-                if (string.Equals(_allQueueItems[i].Id, currentTrack.Id, StringComparison.Ordinal))
-                {
-                    _currentActiveVm = _allQueueItems[i];
-                    break;
-                }
-            }
-        }
-
-        _currentActiveVm?.SetActive(true, isPlaying);
+        if (Volatile.Read(ref _selfMoveCounter) > 0) return;
+        Dispatcher.UIThread.Post(SyncWithAudioQueue);
     }
 
     private void SyncWithAudioQueue()
     {
-        var rawQueue = _audio.Queue;
-        TotalCount = rawQueue.Count;
+        var rawQueue = Audio.Queue;
 
         TimeSpan duration = TimeSpan.Zero;
         for (int i = 0; i < rawQueue.Count; i++)
@@ -274,51 +122,7 @@ public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionVie
             ? duration.ToString(@"h\:mm\:ss")
             : duration.ToString(@"m\:ss");
 
-        if (_allQueueItems.Count == rawQueue.Count)
-        {
-            bool match = true;
-            for (int i = 0; i < rawQueue.Count; i++)
-            {
-                if (!string.Equals(_allQueueItems[i].Id, rawQueue[i].Id, StringComparison.Ordinal))
-                {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match)
-            {
-                ApplyFilter();
-                OnPropertyChanged(nameof(IsEmpty));
-                OnPropertyChanged(nameof(CanReorderItems));
-                NotifyCommandStates();
-                return;
-            }
-        }
-
-        for (int i = 0; i < _allQueueItems.Count; i++)
-            _allQueueItems[i].Dispose();
-
-        _allQueueItems.Clear();
-        QueueItems.Clear();
-        _currentActiveVm = null;
-
-        var currentTrack = _playerControl.CurrentTrack;
-        bool isPlaying = _playerControl.IsPlaying;
-
-        for (int i = 0; i < rawQueue.Count; i++)
-        {
-            var item = rawQueue[i];
-            var vm = _vmFactory.CreateForQueue(item, t => _ = _audio.PlayTrackAsync(t));
-            if (_currentActiveVm == null && currentTrack != null && string.Equals(item.Id, currentTrack.Id, StringComparison.Ordinal))
-            {
-                vm.SetActive(true, isPlaying);
-                _currentActiveVm = vm;
-            }
-            _allQueueItems.Add(vm);
-        }
-
-        ApplyFilter();
+        SetTracks(rawQueue, explicitOrder: null, preserveSelection: true);
 
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(CanReorderItems));
@@ -333,81 +137,14 @@ public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionVie
         SaveQueueToPlaylistCommand.NotifyCanExecuteChanged();
     }
 
-    private void ApplyFilter()
-    {
-        if (string.IsNullOrWhiteSpace(FilterQuery))
-        {
-            IsFilterEmpty = false;
-
-            if (QueueItems.Count == _allQueueItems.Count)
-            {
-                bool identical = true;
-                for (int i = 0; i < _allQueueItems.Count; i++)
-                {
-                    if (!ReferenceEquals(QueueItems[i], _allQueueItems[i]))
-                    {
-                        identical = false;
-                        break;
-                    }
-                }
-                if (identical) return;
-            }
-
-            QueueItems.Clear();
-            for (int i = 0; i < _allQueueItems.Count; i++)
-                QueueItems.Add(_allQueueItems[i]);
-
-            return;
-        }
-
-        var query = FilterQuery.Trim();
-        var matched = new List<TrackItemViewModel>(_allQueueItems.Count);
-
-        for (int i = 0; i < _allQueueItems.Count; i++)
-        {
-            var item = _allQueueItems[i];
-            if (item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.Author.Contains(query, StringComparison.OrdinalIgnoreCase))
-            {
-                matched.Add(item);
-            }
-        }
-
-        IsFilterEmpty = matched.Count == 0 && _allQueueItems.Count > 0;
-
-        // In-place дифференциальное обновление: исключает множественные события CollectionChanged
-        for (int i = QueueItems.Count - 1; i >= 0; i--)
-        {
-            if (!matched.Contains(QueueItems[i]))
-                QueueItems.RemoveAt(i);
-        }
-
-        for (int targetIndex = 0; targetIndex < matched.Count; targetIndex++)
-        {
-            var desired = matched[targetIndex];
-            if (targetIndex < QueueItems.Count && ReferenceEquals(QueueItems[targetIndex], desired))
-                continue;
-
-            int existingIndex = QueueItems.IndexOf(desired);
-            if (existingIndex >= 0)
-            {
-                QueueItems.Move(existingIndex, targetIndex);
-            }
-            else
-            {
-                QueueItems.Insert(targetIndex, desired);
-            }
-        }
-    }
-
     private Task DownloadAllAsync()
     {
-        var rawQueue = _audio.Queue;
+        var rawQueue = Audio.Queue;
         for (int i = 0; i < rawQueue.Count; i++)
         {
             var track = rawQueue[i];
             if (!track.IsDownloaded)
-                _downloads.StartDownload(track);
+                Downloads.StartDownload(track);
         }
         return Task.CompletedTask;
     }
@@ -423,7 +160,7 @@ public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionVie
         var trimmedName = result.Name.Trim();
         var playlist = await _playlistService.CreatePlaylistAsync(trimmedName);
 
-        var tracks = _audio.Queue.ToList();
+        var tracks = Audio.Queue.ToList();
         if (tracks.Count > 0)
         {
             await _playlistService.AddTracksToPlaylistAsync(playlist.Id, tracks);
@@ -439,22 +176,11 @@ public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionVie
     {
         if (disposing)
         {
-            _audio.OnQueueItemMoved -= OnAudioQueueItemMoved;
-            _audio.OnQueueItemInserted -= OnAudioQueueItemInserted;
-            _audio.OnQueueItemRemoved -= OnAudioQueueItemRemoved;
-            _audio.OnQueueRangeInserted -= OnAudioQueueRangeInserted;
-            _audio.OnQueueChanged -= OnAudioQueueChanged;
-
-            _playerControl.CurrentTrackChanged -= OnPlayerControlTrackChanged;
-            _playerControl.IsPlayingChanged -= OnPlayerControlIsPlayingChanged;
-            _playerControl.ForceSyncTriggered -= OnPlayerControlForceSyncTriggered;
-
-            for (int i = 0; i < _allQueueItems.Count; i++)
-                _allQueueItems[i].Dispose();
-
-            _allQueueItems.Clear();
-            QueueItems.Clear();
-            _currentActiveVm = null;
+            Audio.OnQueueItemMoved -= OnAudioQueueItemMoved;
+            Audio.OnQueueItemInserted -= OnAudioQueueItemInserted;
+            Audio.OnQueueItemRemoved -= OnAudioQueueItemRemoved;
+            Audio.OnQueueRangeInserted -= OnAudioQueueRangeInserted;
+            Audio.OnQueueChanged -= OnAudioQueueChanged;
         }
         base.Dispose(disposing);
     }
