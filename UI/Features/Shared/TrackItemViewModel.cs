@@ -239,7 +239,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         var targets = GetActionTargets();
         AddToPlaylistHeader = targets.Count > 1
             ? string.Format(L["AddToPlaylist_BatchHeader"], targets.Count)
-            : (L["AddToPlaylist_Title"]);
+            : L["AddToPlaylist_Title"];
     }
 
     public async Task PreparePlaylistSubmenuAsync(CancellationToken ct = default)

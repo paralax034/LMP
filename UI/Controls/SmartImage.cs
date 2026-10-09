@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
-using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Controls;
@@ -116,15 +115,14 @@ public static class SmartImage
     private static async void BeginLoad(Image image)
     {
         // Quality == 0 означает default(ImageQuality): шаблон ещё не применил значение.
-        // Дожидаемся QualityProperty.Changed, который вызовет BeginLoad с корректным quality.
         if (GetQuality(image) == 0) return;
 
-        // Отменяем предыдущую pending-загрузку (рециклинг элемента)
+        // СИНХРОННАЯ отмена: не тратим время на await и стейт-машины
         if (_pending.TryGetValue(image, out var oldCts))
         {
-            await oldCts.CancelAsync();
-            oldCts.Dispose();
             _pending.Remove(image);
+            try { oldCts.Cancel(); } catch { }
+            oldCts.Dispose();
         }
 
         var url = GetSource(image);
@@ -136,6 +134,12 @@ public static class SmartImage
             return;
         }
 
+        if (image.Source != null)
+        {
+            DisposeOwned(image);
+            image.Source = null;
+        }
+
         var cts = new CancellationTokenSource();
         _pending.AddOrUpdate(image, cts);
 
@@ -145,23 +149,13 @@ public static class SmartImage
 
             if (debounceMs > 0)
             {
-                // Phase 1: yield — UI thread завершает layout + render текущего кадра.
-                // Без этого декодирование блокирует Dispatcher до отрисовки placeholders.
-                await Dispatcher.UIThread.InvokeAsync(
-                    static () => { }, DispatcherPriority.Background);
-
-                if (cts.IsCancellationRequested) return;
-
-                // Phase 2: фильтруем промежуточные рециклинги при быстром скролле.
-                await Task.Delay(debounceMs);
-
-                if (cts.IsCancellationRequested) return;
+                if (!await cts.Token.DelayNoThrowAsync(debounceMs))
+                    return;
             }
 
             if (cts.IsCancellationRequested) return;
 
-            // URL мог смениться за время debounce (новый BeginLoad отменил бы CTS,
-            // но проверяем явно как defence-in-depth).
+            // URL мог смениться за время debounce
             if (GetSource(image) != url) return;
 
             var decodeWidth = (int)GetQuality(image);
@@ -176,7 +170,7 @@ public static class SmartImage
         }
         catch (OperationCanceledException)
         {
-            // Ожидаемо: элемент рециклирован до завершения загрузки
+            // Ожидаемо: отмена сетевых или дисковых I/O операций
         }
         catch (Exception ex)
         {
@@ -186,7 +180,6 @@ public static class SmartImage
         }
         finally
         {
-            // Удаляем только свой CTS — к этому моменту мог появиться более новый
             if (_pending.TryGetValue(image, out var current) && ReferenceEquals(current, cts))
                 _pending.Remove(image);
 

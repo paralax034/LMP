@@ -13,6 +13,7 @@ global using LMP.Core.Models;
 global using LMP.Core.Services;
 global using LMP.Core.ViewModels;
 global using LMP.Core.Helpers;
+global using LMP.Core.Helpers.Extensions;
 global using LMP.Core.Audio;
 global using Log = LMP.Core.Logger.Log;
 

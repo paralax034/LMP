@@ -731,7 +731,7 @@ public sealed class AudioWaveBorder : Decorator
             for (int i = 0; i < railSamples; i++)
             {
                 double u = i / (double)(railSamples - 1);
-                _railPoints[i] = new Point((left + radius) + (u * horizLen), top - CalculateOrganicDisplacement(u));
+                _railPoints[i] = new Point(left + radius + (u * horizLen), top - CalculateOrganicDisplacement(u));
             }
 
             ctx.BeginFigure(_railPoints[0], isFilled: false);
@@ -748,7 +748,7 @@ public sealed class AudioWaveBorder : Decorator
             for (int i = 0; i < railSamples; i++)
             {
                 double u = 1.0 - (i / (double)(railSamples - 1));
-                _railPoints[i] = new Point((left + radius) + (u * horizLen), bottom + CalculateOrganicDisplacement(u));
+                _railPoints[i] = new Point(left + radius + (u * horizLen), bottom + CalculateOrganicDisplacement(u));
             }
             DrawSpline(ctx, _railPoints, railSamples);
 
@@ -881,7 +881,7 @@ public sealed class AudioWaveBorder : Decorator
             {
                 var col = scb.Color;
                 if (alpha < 255)
-                    col = Color.FromArgb((byte)((col.A * alpha) / 255), col.R, col.G, col.B);
+                    col = Color.FromArgb((byte)(col.A * alpha / 255), col.R, col.G, col.B);
 
                 _cachedPen = new ImmutablePen(
                     col.ToUInt32(),

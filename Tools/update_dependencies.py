@@ -81,7 +81,6 @@ def main():
     targets: List[Dict[str, Any]] = [
         {"id": "Avalonia", "major": "12", "target": "Both", "pattern": r'<AvaloniaVersion>([^<]+)</AvaloniaVersion>', "fmt": '<AvaloniaVersion>{0}</AvaloniaVersion>'},
         {"id": "Xaml.Behaviors.Avalonia", "major": "12", "target": "Main", "pattern": r'<XamlBehaviorsVersion>([^<]+)</XamlBehaviorsVersion>', "fmt": '<XamlBehaviorsVersion>{0}</XamlBehaviorsVersion>'},
-        {"id": "Avalonia.Controls.ItemsRepeater", "major": "12", "target": "Main", "pattern": r'Include="Avalonia\.Controls\.ItemsRepeater" Version="([^"]+)"', "fmt": 'Include="Avalonia.Controls.ItemsRepeater" Version="{0}"'},
         {"id": "AvaloniaUI.DiagnosticsSupport", "major": "2", "target": "Main", "pattern": r'Include="AvaloniaUI\.DiagnosticsSupport" Version="([^"]+)"', "fmt": 'Include="AvaloniaUI.DiagnosticsSupport" Version="{0}"'},
         {"id": "AsyncImageLoader.Avalonia", "major": "3", "target": "Both", "pattern": r'<AsyncImageLoaderVersion>([^<]+)</AsyncImageLoaderVersion>', "fmt": '<AsyncImageLoaderVersion>{0}</AsyncImageLoaderVersion>'},
         {"id": "SkiaSharp", "major": "4", "target": "Core", "pattern": r'<SkiaSharpVersion>([^<]+)</SkiaSharpVersion>', "fmt": '<SkiaSharpVersion>{0}</SkiaSharpVersion>'},

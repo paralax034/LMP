@@ -1,6 +1,4 @@
 using System.Text.Json;
-using LMP.Core.Models;
-using LMP.Core.Services;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;

@@ -423,11 +423,11 @@ public sealed class AudioPipeline : IAsyncDisposable
     }
 
     private async Task DecoderLoopAsync(
-       Func<CancellationToken, Task<string?>>? urlRefresher,
-       AudioPlayerOptions options,
-       Action? onTrackEnded,
-       Action<Exception>? onError,
-       CancellationToken ct)
+           Func<CancellationToken, Task<string?>>? urlRefresher,
+           AudioPlayerOptions options,
+           Action? onTrackEnded,
+           Action<Exception>? onError,
+           CancellationToken ct)
     {
         int retryCount = 0;
         int requiredSpace = _decoder.MaxFrameSize * _decoder.Channels;
@@ -442,7 +442,9 @@ public sealed class AudioPipeline : IAsyncDisposable
                     // Медленный путь: жесткая синхронизация (внутри обновит кэш, если Tail сдвинулся)
                     if (_pcmBuffer.Available < requiredSpace)
                     {
-                        await Task.Delay(BufferFullDelayMs, ct).ConfigureAwait(false);
+                        await Task.Delay(BufferFullDelayMs).ConfigureAwait(false);
+                        if (ct.IsCancellationRequested)
+                            break;
                         continue;
                     }
                 }
@@ -457,8 +459,8 @@ public sealed class AudioPipeline : IAsyncDisposable
                 catch (OperationCanceledException) when (retryCount++ < options.MaxRetryAttempts)
                 {
                     Log.Warn($"[AudioPipeline] Read transient cancel (retry {retryCount}/{options.MaxRetryAttempts})");
-                    try { await Task.Delay(options.RetryDelay, ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
+                    await Task.Delay(options.RetryDelay).ConfigureAwait(false);
+                    if (ct.IsCancellationRequested) break;
                     continue;
                 }
                 catch (OperationCanceledException ex)
@@ -521,8 +523,8 @@ public sealed class AudioPipeline : IAsyncDisposable
                 catch (Exception ex) when (ex is not CacheInvalidatedException && retryCount++ < options.MaxRetryAttempts)
                 {
                     Log.Warn($"[AudioPipeline] Read retry {retryCount}: {ex.Message}");
-                    try { await Task.Delay(options.RetryDelay, ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
+                    await Task.Delay(options.RetryDelay).ConfigureAwait(false);
+                    if (ct.IsCancellationRequested) break;
                     continue;
                 }
 
@@ -919,22 +921,16 @@ public sealed class AudioPipeline : IAsyncDisposable
             return true;
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         try
         {
-            var delayTask = Task.Delay(maxWaitMs, timeoutCts.Token);
+            // Ожидаем без токена: устраняем исключение TaskCanceledException при отмене таймаута
+            var delayTask = Task.Delay(maxWaitMs);
             var completedTask = await Task.WhenAny(tcs.Task, delayTask).ConfigureAwait(false);
 
-            if (completedTask == tcs.Task)
-            {
-                timeoutCts.Cancel(); // Отменяем таймер, т.к. мы завершились по сигналу
-                return true;
-            }
-            else
-            {
-                ct.ThrowIfCancellationRequested(); // Если отменили извне
-                return false; // Завершились по таймауту
-            }
+            if (ct.IsCancellationRequested)
+                return false;
+
+            return completedTask == tcs.Task;
         }
         finally
         {

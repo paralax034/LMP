@@ -21,6 +21,7 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
 
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _filterDebounceCts;
+    private const int FilterDebounceMs = 200;
     private bool _canFetchMore;
     private bool _isDisposed;
 
@@ -104,14 +105,19 @@ public abstract partial class PaginatedViewModel<TSource, TViewModel> : ViewMode
 
         _filterDebounceCts?.Cancel();
         _filterDebounceCts?.Dispose();
-        _filterDebounceCts = new CancellationTokenSource();
-        var token = _filterDebounceCts.Token;
+        var cts = new CancellationTokenSource();
+        _filterDebounceCts = cts;
 
-        _ = Task.Delay(200, token).ContinueWith(t =>
-        {
-            if (t.IsCanceled || _isDisposed) return;
-            Dispatcher.UIThread.Post(ApplyFilter);
-        }, TaskScheduler.Default);
+        _ = DebounceFilterAsync(cts.Token);
+    }
+
+    private async Task DebounceFilterAsync(CancellationToken token)
+    {
+        if (!await token.DelayNoThrowAsync(FilterDebounceMs, continueOnCapturedContext: false))
+            return;
+
+        if (_isDisposed) return;
+        Dispatcher.UIThread.Post(ApplyFilter);
     }
 
     private void ApplyFilter()

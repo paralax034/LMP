@@ -103,8 +103,8 @@ public sealed partial class CachingStreamSource
 
                             Log.Debug($"[CachingSource] Transient preload fatal in suspend, " +
                                       $"backing off: {ex.Message}");
-                            try { await Task.Delay(3000, ct).ConfigureAwait(false); }
-                            catch (OperationCanceledException) { break; }
+                            if (!await ct.DelayNoThrowAsync(3000, continueOnCapturedContext: false))
+                                break;
                         }
                         catch (Exception ex)
                         {
@@ -124,8 +124,8 @@ public sealed partial class CachingStreamSource
                 // Критическая сетевая операция seek в процессе — уступаем ей весь канал
                 if (_seekInProgress)
                 {
-                    try { await Task.Delay(_config.PreloadIntervalMs, ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
+                    if (!await ct.DelayNoThrowAsync(_config.PreloadIntervalMs, continueOnCapturedContext: false))
+                        break;
                     continue;
                 }
 
@@ -133,8 +133,8 @@ public sealed partial class CachingStreamSource
                 if (justResumed)
                 {
                     justResumed = false;
-                    try { await Task.Delay(_config.PreloadIntervalMs, ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
+                    if (!await ct.DelayNoThrowAsync(_config.PreloadIntervalMs, continueOnCapturedContext: false))
+                        break;
                     continue;
                 }
 

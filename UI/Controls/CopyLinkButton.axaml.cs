@@ -147,7 +147,8 @@ public partial class CopyLinkButton : UserControl
                 _copyButton.Classes.Set("success", success);
             }
 
-            await Task.Delay(StateDurationMs, cts.Token);
+            if (!await cts.Token.DelayNoThrowAsync(StateDurationMs))
+                return;
 
             HideHint();
             ApplyIdleState();

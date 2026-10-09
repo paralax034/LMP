@@ -209,7 +209,7 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
         ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Tracks"], DisplayTrackCount)
         : Suggestions.Count > 0
             ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Suggestions"], Suggestions.Count)
-            : (LocalizationService.Instance["Search_BadgeTooltip_Empty"]);
+            : LocalizationService.Instance["Search_BadgeTooltip_Empty"];
 
     /// <summary>
     /// Текст-заглушка ленты подсказок, когда подсказки отсутствуют.
@@ -223,8 +223,8 @@ public sealed partial class SearchViewModel : TrackListPaginatedViewModel
                 return LocalizationService.Instance["Search_DirectUrlHint"];
 
             return string.IsNullOrWhiteSpace(trimmed)
-                ? (LocalizationService.Instance["Search_NoHistoryPlaceholder"])
-                : (LocalizationService.Instance["Search_NoSuggestionsPlaceholder"]);
+                ? LocalizationService.Instance["Search_NoHistoryPlaceholder"]
+                : LocalizationService.Instance["Search_NoSuggestionsPlaceholder"];
         }
     }
 

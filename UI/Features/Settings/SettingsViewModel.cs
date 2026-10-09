@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Avalonia.Threading;
 using LMP.UI.Features.Settings.ViewModels;
 using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;

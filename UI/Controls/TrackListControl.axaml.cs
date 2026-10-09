@@ -21,7 +21,7 @@ public partial class TrackListControl : UserControl
         DataFormat.CreateInProcessFormat<string>(DragFormatTrackIndex);
 
     /// <summary>
-    /// Фиксированная высота строки трека — O(1) hit-test при drag-and-drop.
+    /// Фиксированная высота строки трека с учетом Margin="0,1" из AppComponents.axaml (60px + 2px = 62px)
     /// </summary>
     private const double ItemHeight = 62.0;
 
@@ -1182,20 +1182,6 @@ public partial class TrackListControl : UserControl
         {
             await ExecuteBatchMoveAsync(oldIndices, finalTargetIndex);
         }
-
-        // Устранение дефекта ItemsRepeater: порт WinUI не обрабатывает NotifyCollectionChangedAction.Move,
-        // из-за чего элементы отбрасываются в координаты (-10000, -10000) до первого скролла.
-        // Микросдвиг с возвратом принудительно запускает EffectiveViewportChanged и восстанавливает треки.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_scrollViewer != null)
-            {
-                var cur = _scrollViewer.Offset;
-                double delta = cur.Y > 1.0 ? -0.1 : 0.1;
-                _scrollViewer.Offset = new Vector(cur.X, cur.Y + delta);
-                _scrollViewer.Offset = cur;
-            }
-        }, DispatcherPriority.Render);
     }
 
     private async Task ExecuteBatchMoveAsync(IReadOnlyList<int> sourceIndices, int targetIndex)

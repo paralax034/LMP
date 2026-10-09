@@ -792,27 +792,22 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private async Task WatchPipelineLifetimeAsync(AudioPipeline pipeline, int sessionId)
     {
+        await pipeline.LifetimeToken.WhenCanceledAsync().ConfigureAwait(false);
+
+        if (_disposed || _session.IsStale(sessionId) || _activePipeline != pipeline)
+            return;
+
         try
         {
-            await Task.Delay(Timeout.Infinite, pipeline.LifetimeToken).ConfigureAwait(false);
+            _commandChannel.Writer.TryWrite(new PlayerErrorCommand(
+                sessionId,
+                pipeline,
+                new AudioDeviceException(GetDeviceErrorMessage())));
+
+            _commandChannel.Writer.TryWrite(new StopCommand(sessionId));
         }
-        catch (OperationCanceledException)
+        catch (ChannelClosedException)
         {
-            if (_disposed || _session.IsStale(sessionId) || _activePipeline != pipeline)
-                return;
-
-            try
-            {
-                _commandChannel.Writer.TryWrite(new PlayerErrorCommand(
-                    sessionId,
-                    pipeline,
-                    new AudioDeviceException(GetDeviceErrorMessage())));
-
-                _commandChannel.Writer.TryWrite(new StopCommand(sessionId));
-            }
-            catch (ChannelClosedException)
-            {
-            }
         }
     }
 

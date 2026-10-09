@@ -163,11 +163,6 @@
   </ItemGroup>
 
   <ItemGroup Label="Avalonia Community">
-    <!--
-      Avalonia.Controls.ItemsRepeater официально перенесён начиная с Avalonia 12.
-      Удаление невозможно: ItemsRepeater активно используется в TrackListControl.
-    -->
-    <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="12.0.0" />
     <PackageReference Include="Xaml.Behaviors.Avalonia" Version="$(XamlBehaviorsVersion)" />
   </ItemGroup>
 

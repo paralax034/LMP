@@ -145,12 +145,11 @@
         <Panel>
             <ir:ItemsRepeater x:Name="MainRepeater"
                 ItemsSource="{Binding Items, ElementName=Root}"
-                VerticalCacheLength="1.0"
                 TextOptions.BaselinePixelAlignment="Unaligned"
                 TextOptions.TextHintingMode="None">
 
                 <ir:ItemsRepeater.Layout>
-                    <StackLayout Spacing="0" />
+                    <StackLayout Spacing="0" EstimatedItemSize="62" />
                 </ir:ItemsRepeater.Layout>
 
                 <ir:ItemsRepeater.ItemTemplate>

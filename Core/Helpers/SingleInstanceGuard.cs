@@ -15,6 +15,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
     private const string PipeName = "LMP_SingleInstance_IPC_paralax034";
     private const byte CommandWakeUp = 0x01;
     private const int IpcConnectTimeoutMs = 200;
+    private const int IpcConnectDebounceMs = 300;
 
     private const int SwRestore = 9;
     private const int SwShow = 5;
@@ -176,8 +177,8 @@ public sealed partial class SingleInstanceGuard : IDisposable
                 }
                 catch
                 {
-                    try { await Task.Delay(250, ct).ConfigureAwait(false); }
-                    catch { break; }
+                    if (!await ct.DelayNoThrowAsync(IpcConnectDebounceMs, continueOnCapturedContext: false))
+                        break;
                 }
             }
         }, ct);

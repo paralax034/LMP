@@ -38,6 +38,7 @@ public abstract partial class ReorderableViewModel<TSource, TViewModel> : ViewMo
     private bool _isTransitioning;
     private TaskCompletionSource? _transitionTcs;
     private CancellationTokenSource? _filterDebounceCts;
+    private const int FilterDebounceMs = 200;
 
     #endregion
 
@@ -68,14 +69,19 @@ public abstract partial class ReorderableViewModel<TSource, TViewModel> : ViewMo
 
         _filterDebounceCts?.Cancel();
         _filterDebounceCts?.Dispose();
-        _filterDebounceCts = new CancellationTokenSource();
-        var token = _filterDebounceCts.Token;
+        var cts = new CancellationTokenSource();
+        _filterDebounceCts = cts;
 
-        _ = Task.Delay(150, token).ContinueWith(t =>
-        {
-            if (t.IsCanceled || _isDisposed) return;
-            Dispatcher.UIThread.Post(RebuildVisibleItems);
-        }, TaskScheduler.Default);
+        _ = DebounceFilterAsync(cts.Token);
+    }
+
+    private async Task DebounceFilterAsync(CancellationToken token)
+    {
+        if (!await token.DelayNoThrowAsync(FilterDebounceMs, continueOnCapturedContext: false))
+            return;
+
+        if (_isDisposed) return;
+        Dispatcher.UIThread.Post(RebuildVisibleItems);
     }
 
     public AvaloniaList<TViewModel> Items { get; } = [];

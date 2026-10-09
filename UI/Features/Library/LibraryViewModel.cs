@@ -341,10 +341,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     }
 
     private async Task AnimateStatsOnUIAsync(
-        int targetPlaylists,
-        int targetTracks,
-        Task<long> durationTask,
-        CancellationToken ct)
+          int targetPlaylists,
+          int targetTracks,
+          Task<long> durationTask,
+          CancellationToken ct)
     {
         if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
@@ -369,8 +369,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 if (!IsStatsVisible)
                     IsStatsVisible = true;
 
-                try { await Task.Delay(16, ct); }
-                catch (OperationCanceledException) { break; }
+                if (!await ct.DelayNoThrowAsync(16))
+                    break;
             }
         }
 

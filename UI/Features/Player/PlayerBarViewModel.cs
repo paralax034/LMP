@@ -408,10 +408,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             try
             {
-                await Task.Delay(NavigationDebounceMs, cts.Token);
+                if (!await cts.Token.DelayNoThrowAsync(NavigationDebounceMs))
+                    return;
+
                 await _playerControl.NextAsync();
             }
-            catch (OperationCanceledException) { }
             finally
             {
                 if (ReferenceEquals(_nextDebounceCts, cts))
@@ -429,10 +430,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             try
             {
-                await Task.Delay(NavigationDebounceMs, cts.Token);
+                if (!await cts.Token.DelayNoThrowAsync(NavigationDebounceMs))
+                    return;
+
                 await _playerControl.PreviousAsync();
             }
-            catch (OperationCanceledException) { }
             finally
             {
                 if (ReferenceEquals(_prevDebounceCts, cts))
@@ -697,14 +699,13 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         var cts = new CancellationTokenSource();
         _activeHintCts = cts;
 
-        try
-        {
-            setText();
-            setVisible(true);
-            await Task.Delay(durationMs, cts.Token);
-            setVisible(false);
-        }
-        catch (OperationCanceledException) { }
+        setText();
+        setVisible(true);
+
+        if (!await cts.Token.DelayNoThrowAsync(durationMs))
+            return;
+
+        setVisible(false);
     }
 
     #endregion

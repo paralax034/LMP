@@ -31,6 +31,7 @@ public partial class TrackListControl
 
         private readonly ScrollViewer _sv;
         private ScrollBar? _verticalScrollBar;
+        private TopLevel? _topLevel;
 
         private double _targetY;
         private double _currentY;
@@ -38,7 +39,7 @@ public partial class TrackListControl
         private bool _isUpdatingOffset;
         private bool _isDraggingScrollbar;
         private bool _disposed;
-        private DateTime _lastTickTime;
+        private long _lastTickTimestamp;
 
         #endregion
 
@@ -51,6 +52,7 @@ public partial class TrackListControl
             _sv = sv;
             _currentY = sv.Offset.Y;
             _targetY = _currentY;
+            _topLevel = TopLevel.GetTopLevel(sv);
 
             sv.AddHandler(
                 PointerWheelChangedEvent,
@@ -185,11 +187,12 @@ public partial class TrackListControl
         {
             if (!_isAnimating || _disposed || _isDraggingScrollbar) return;
 
-            var now = DateTime.UtcNow;
-            double dt = (now - _lastTickTime).TotalSeconds;
-            _lastTickTime = now;
+            long currentTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+            double dt = (double)(currentTimestamp - _lastTickTimestamp) / System.Diagnostics.Stopwatch.Frequency;
+            _lastTickTimestamp = currentTimestamp;
 
-            if (dt > 0.1) dt = 0.1;
+            if (dt > 0.05) dt = 0.05;
+            if (dt <= 0.0) return;
 
             double maxScroll = GetMaxScrollY();
             _targetY = Math.Clamp(_targetY, 0, maxScroll);
@@ -207,7 +210,7 @@ public partial class TrackListControl
 
             ApplyOffset(_currentY);
 
-            TopLevel.GetTopLevel(_sv)?.RequestAnimationFrame(OnAnimationFrame);
+            (_topLevel ??= TopLevel.GetTopLevel(_sv))?.RequestAnimationFrame(OnAnimationFrame);
         }
 
         private void StartAnimation()
@@ -215,9 +218,9 @@ public partial class TrackListControl
             if (_isAnimating || _isDraggingScrollbar) return;
 
             _isAnimating = true;
-            _lastTickTime = DateTime.UtcNow;
+            _lastTickTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
 
-            TopLevel.GetTopLevel(_sv)?.RequestAnimationFrame(OnAnimationFrame);
+            (_topLevel ??= TopLevel.GetTopLevel(_sv))?.RequestAnimationFrame(OnAnimationFrame);
         }
 
         private void StopAnimation()

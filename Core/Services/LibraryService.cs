@@ -79,7 +79,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         try
         {
-            await Task.Delay(HydrationDebounceMs, ct).ConfigureAwait(false);
+            if (!await ct.DelayNoThrowAsync(HydrationDebounceMs, continueOnCapturedContext: false))
+                return;
 
             var ownerId = CurrentOwnerId;
             if (string.Equals(ownerId, _lastHydratedOwnerId, StringComparison.Ordinal))

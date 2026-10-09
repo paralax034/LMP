@@ -130,7 +130,9 @@ public partial class MainWindow
 
         _ = Task.Run(async () =>
         {
-            bool completedNormal = await DelayNoThrowAsync(TimeSpan.FromMilliseconds(DeactivateSuspendDelayMs), token).ConfigureAwait(false);
+            bool completedNormal = await token.DelayNoThrowAsync(
+                TimeSpan.FromMilliseconds(DeactivateSuspendDelayMs),
+                continueOnCapturedContext: false);
             if (!completedNormal) return;
 
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -187,7 +189,7 @@ public partial class MainWindow
 
         _ = Task.Run(async () =>
         {
-            bool completedNormal = await DelayNoThrowAsync(delay, token);
+            bool completedNormal = await token.DelayNoThrowAsync(delay, continueOnCapturedContext: false);
             if (!completedNormal) return;
 
             var now = DateTime.UtcNow;
@@ -206,28 +208,5 @@ public partial class MainWindow
         _cleanupCts.Cancel();
         _cleanupCts.Dispose();
         _cleanupCts = null;
-    }
-
-    private static async Task<bool> DelayNoThrowAsync(TimeSpan delay, CancellationToken token)
-    {
-        if (token.IsCancellationRequested)
-            return false;
-
-        if (delay <= TimeSpan.Zero)
-            return true;
-
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        using var timer = new Timer(
-            static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true),
-            tcs,
-            delay,
-            Timeout.InfiniteTimeSpan);
-
-        using var registration = token.UnsafeRegister(
-            static state => ((TaskCompletionSource<bool>)state!).TrySetResult(false),
-            tcs);
-
-        return await tcs.Task.ConfigureAwait(false);
     }
 }

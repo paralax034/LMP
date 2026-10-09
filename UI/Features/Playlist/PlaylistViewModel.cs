@@ -122,7 +122,7 @@ public sealed partial class PlaylistViewModel : TrackListReorderableViewModel, I
         get
         {
             if (IsQueuePure)
-                return IsPlayingPure ? (SL["Player_Pause"]) : (SL["Player_Play"]);
+                return IsPlayingPure ? SL["Player_Pause"] : SL["Player_Play"];
             return SL["Playlist_PlayAll"];
         }
     }
