@@ -375,9 +375,29 @@ public sealed partial class QueueViewModel : ViewModelBase, ISmoothTransitionVie
 
         IsFilterEmpty = matched.Count == 0 && _allQueueItems.Count > 0;
 
-        QueueItems.Clear();
-        for (int i = 0; i < matched.Count; i++)
-            QueueItems.Add(matched[i]);
+        // In-place дифференциальное обновление: исключает множественные события CollectionChanged
+        for (int i = QueueItems.Count - 1; i >= 0; i--)
+        {
+            if (!matched.Contains(QueueItems[i]))
+                QueueItems.RemoveAt(i);
+        }
+
+        for (int targetIndex = 0; targetIndex < matched.Count; targetIndex++)
+        {
+            var desired = matched[targetIndex];
+            if (targetIndex < QueueItems.Count && ReferenceEquals(QueueItems[targetIndex], desired))
+                continue;
+
+            int existingIndex = QueueItems.IndexOf(desired);
+            if (existingIndex >= 0)
+            {
+                QueueItems.Move(existingIndex, targetIndex);
+            }
+            else
+            {
+                QueueItems.Insert(targetIndex, desired);
+            }
+        }
     }
 
     private Task DownloadAllAsync()

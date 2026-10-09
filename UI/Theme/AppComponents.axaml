@@ -14,7 +14,6 @@
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
@@ -69,11 +68,6 @@
     <Style Selector="Border.track-row TextBlock.track-title">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="FontWeight" Value="Normal" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
     </Style>
 
     <Style Selector="Border.track-row.is-active TextBlock.track-title">

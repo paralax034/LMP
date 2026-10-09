@@ -91,6 +91,39 @@ public sealed class ImageCacheService : IDisposable
         _ = Task.Run(InitializeDiskCacheAsync);
     }
 
+    /// <summary>
+    /// Синхронно предоставляет растровое изображение из оперативной памяти без задержек и аллокаций Task.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetFromMemory(string url, int decodeWidth, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        if (_isDisposed || string.IsNullOrEmpty(url)) return false;
+
+        int normalizedWidth = decodeWidth switch
+        {
+            <= 0 => 0,
+            <= 120 => 120,
+            <= 200 => 200,
+            <= 400 => 400,
+            _ => 800
+        };
+
+        var memKey = ComputeMemoryKeyHash(url, normalizedWidth);
+
+        lock (_lruLock)
+        {
+            if (_memoryCache.TryGetValue(memKey, out var cached))
+            {
+                TouchLruUnsafe(memKey);
+                bitmap = cached.Bitmap;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public Task<Bitmap?> GetImageAsync(string url, ImageQuality quality = ImageQuality.Low, CancellationToken ct = default)
         => GetImageAsync(url, (int)quality, ct);
 

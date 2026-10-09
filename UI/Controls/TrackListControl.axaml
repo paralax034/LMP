@@ -106,7 +106,7 @@
         </MenuFlyout>
     </UserControl.Resources>
 
-    <DockPanel IsVisible="{Binding !IsLoading, ElementName=Root}"
+    <DockPanel
         Background="Transparent"
         PointerPressed="OnRootPointerPressed"
         DragDrop.AllowDrop="{Binding EnableReordering, ElementName=Root}">

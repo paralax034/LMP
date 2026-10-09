@@ -114,31 +114,36 @@ public static class SmartImage
     /// </summary>
     private static async void BeginLoad(Image image)
     {
-        // Quality == 0 означает default(ImageQuality): шаблон ещё не применил значение.
         if (GetQuality(image) == 0) return;
-
-        // СИНХРОННАЯ отмена: не тратим время на await и стейт-машины
-        if (_pending.TryGetValue(image, out var oldCts))
-        {
-            _pending.Remove(image);
-            try { oldCts.Cancel(); } catch { }
-            oldCts.Dispose();
-        }
 
         var url = GetSource(image);
 
         if (string.IsNullOrEmpty(url))
         {
+            CancelPending(image);
             DisposeOwned(image);
             image.Source = null;
             return;
         }
 
-        if (image.Source != null)
+        var decodeWidth = (int)GetQuality(image);
+
+        if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            DisposeOwned(image);
-            image.Source = null;
+            _imageCache ??= AppEntry.Services.GetService<ImageCacheService>();
+            if (_imageCache != null && _imageCache.TryGetFromMemory(url, decodeWidth, out var memoryBitmap))
+            {
+                CancelPending(image);
+                DisposeOwned(image);
+                image.Source = memoryBitmap;
+                image.SetValue(IsOwnedProperty, false);
+                return;
+            }
         }
+
+        CancelPending(image);
+        DisposeOwned(image);
+        image.Source = null;
 
         var cts = new CancellationTokenSource();
         _pending.AddOrUpdate(image, cts);
@@ -155,10 +160,8 @@ public static class SmartImage
 
             if (cts.IsCancellationRequested) return;
 
-            // URL мог смениться за время debounce
             if (GetSource(image) != url) return;
 
-            var decodeWidth = (int)GetQuality(image);
             var urlSpan = url.AsSpan();
 
             if (urlSpan.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -170,7 +173,6 @@ public static class SmartImage
         }
         catch (OperationCanceledException)
         {
-            // Ожидаемо: отмена сетевых или дисковых I/O операций
         }
         catch (Exception ex)
         {
@@ -187,6 +189,17 @@ public static class SmartImage
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CancelPending(Image image)
+    {
+        if (_pending.TryGetValue(image, out var oldCts))
+        {
+            _pending.Remove(image);
+            try { oldCts.Cancel(); } catch { }
+            oldCts.Dispose();
+        }
+    }
+
     #endregion
 
     #region Loaders
@@ -199,13 +212,11 @@ public static class SmartImage
     /// </summary>
     private static async Task LoadHttpAsync(Image image, string url, int decodeWidth, CancellationToken ct)
     {
-        // Ленивая инициализация: всегда на UI-потоке, гонки нет.
         _imageCache ??= AppEntry.Services.GetService<ImageCacheService>();
         if (_imageCache == null) return;
 
         var bitmap = await _imageCache.GetImageAsync(url, decodeWidth, ct);
 
-        // bitmap == null: CT отменён (рециклинг) или ошибка загрузки.
         if (bitmap == null || ct.IsCancellationRequested || GetSource(image) != url) return;
 
         DisposeOwned(image);
@@ -223,7 +234,6 @@ public static class SmartImage
         var uri = new Uri(url);
         if (!Avalonia.Platform.AssetLoader.Exists(uri)) return;
 
-        // Читаем байты на UI-потоке (AssetLoader требует UI context), декодируем на threadpool
         byte[] bytes;
         using (var assetStream = Avalonia.Platform.AssetLoader.Open(uri))
         {
