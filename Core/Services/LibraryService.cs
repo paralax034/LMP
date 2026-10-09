@@ -509,8 +509,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         SaveSettingsSync();
         await _saveDebounceTimer.DisposeAsync().ConfigureAwait(false);
         _settingsLock.Dispose();
-
-        GC.SuppressFinalize(this);
     }
 
     #endregion

@@ -921,7 +921,6 @@ public sealed class WebMParser : IDisposable
     {
         while (_lacedFrames.TryDequeue(out var frame))
             frame.Owner.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     #endregion

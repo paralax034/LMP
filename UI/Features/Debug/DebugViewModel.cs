@@ -42,23 +42,17 @@ public sealed partial class DebugViewModel : ViewModelBase
 
     // EXISTING PROPERTIES (YouTube / Memory / Audio)
 
-    [ObservableProperty]
-    public partial string LogOutput { get; set; } = "Debug Session Started...\n";
+    [ObservableProperty] public partial string LogOutput { get; set; } = "Debug Session Started...\n";
 
-    [ObservableProperty]
-    public partial string SearchQuery { get; set; } = "Linkin Park";
+    [ObservableProperty] public partial string SearchQuery { get; set; } = "Linkin Park";
 
-    [ObservableProperty]
-    public partial bool IsBusy { get; set; }
+    [ObservableProperty] public partial bool IsBusy { get; set; }
 
-    [ObservableProperty]
-    public partial string AudioTestInput { get; set; } = "aG_i7fvGSXU";
+    [ObservableProperty] public partial string AudioTestInput { get; set; } = "aG_i7fvGSXU";
 
-    [ObservableProperty]
-    public partial int AudioTestDuration { get; set; } = 10;
+    [ObservableProperty] public partial int AudioTestDuration { get; set; } = 10;
 
-    [ObservableProperty]
-    public partial bool IsAudioPlaying { get; set; }
+    [ObservableProperty] public partial bool IsAudioPlaying { get; set; }
 
     /// <summary> Активен ли в данный момент фоновый мониторинг зависаний UI-потока. </summary>
     [ObservableProperty]
@@ -110,7 +104,8 @@ public sealed partial class DebugViewModel : ViewModelBase
         // ПРИМЕЧАНИЕ: CheckVmLeaksCommand переведен в no-op, так как фабрика бесстейтовая.
         CheckVmLeaksCommand = new RelayCommand(() =>
         {
-            AppendLog("\n[Debug] Track VM cache monitoring disabled (Factory is stateless). VM leaks are impossible.");
+            AppendLog(
+                "\n[Debug] Track VM cache monitoring disabled (Factory is stateless). VM leaks are impossible.");
         });
 
         PlayYoutubeAudioCommand = new AsyncRelayCommand(ExecutePlayYoutubeAudio);
@@ -181,6 +176,7 @@ public sealed partial class DebugViewModel : ViewModelBase
                 AppendLog($"  ❌ Invalid YouTube URL/ID");
                 return;
             }
+
             AppendLog($"  Video ID: {videoId}");
 
             AppendLog($"  → Getting stream URL...");
@@ -218,7 +214,8 @@ public sealed partial class DebugViewModel : ViewModelBase
             var descriptor = resolved.Value;
 
             AppendLog($"  ✓ Codec: {descriptor.Codec}, Bitrate: {descriptor.BitrateKbps}kbps");
-            AppendLog($"  ✓ Container: {descriptor.Format}, Size: {descriptor.ContentLengthBytes / 1024.0 / 1024.0:F1}MB");
+            AppendLog(
+                $"  ✓ Container: {descriptor.Format}, Size: {descriptor.ContentLengthBytes / 1024.0 / 1024.0:F1}MB");
             AppendLog($"  ✓ HLS: {descriptor.Format == AudioFormat.Hls}");
 
             AppendLog($"  → Creating AudioPlayer...");
@@ -369,9 +366,16 @@ public sealed partial class DebugViewModel : ViewModelBase
                 var files = Directory.GetFiles(cacheDir);
                 foreach (var file in files)
                 {
-                    try { File.Delete(file); }
-                    catch { /* ignored */ }
+                    try
+                    {
+                        File.Delete(file);
+                    }
+                    catch
+                    {
+                        /* ignored */
+                    }
                 }
+
                 AppendLog($"  ✓ Deleted {files.Length} files");
             }
             else
@@ -482,7 +486,9 @@ public sealed partial class DebugViewModel : ViewModelBase
                             pcmBuffer.Write(decodeOutput.AsSpan(0, samples * decoder.Channels));
                     }
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException)
+                {
+                }
             });
 
             await Task.Delay(500, _audioTestCts.Token);
@@ -500,6 +506,14 @@ public sealed partial class DebugViewModel : ViewModelBase
 
             backend.Stop();
             _audioTestCts.Cancel();
+
+            try
+            {
+                await decodeTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
 
             backend.Dispose();
             decoder.Dispose();
@@ -555,7 +569,8 @@ public sealed partial class DebugViewModel : ViewModelBase
         AppendLog($"║ GC Heap:        {gcInfo.HeapSizeBytes / 1024 / 1024,6} MB              ║");
         AppendLog($"║ Memory Load:    {gcInfo.MemoryLoadBytes / 1024 / 1024,6} MB              ║");
         AppendLog($"║ High Threshold: {gcInfo.HighMemoryLoadThresholdBytes / 1024 / 1024,6} MB              ║");
-        AppendLog($"║ Gen0/1/2: {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2),-6}                   ║");
+        AppendLog(
+            $"║ Gen0/1/2: {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2),-6}                   ║");
         AppendLog("╚══════════════════════════════════════════╝\n");
     }
 
@@ -689,6 +704,8 @@ public sealed partial class DebugViewModel : ViewModelBase
             _uiWatchdog = null;
             TestRunner.Dispose();
         }
+
         base.Dispose(disposing);
     }
 }
+

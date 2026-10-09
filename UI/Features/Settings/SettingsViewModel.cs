@@ -9,7 +9,7 @@ namespace LMP.UI.Features.Settings;
 /// Фасад страницы настроек с полностью ленивой (on-demand) инициализацией дочерних секций.
 /// Предотвращает синхронные блокировки UI-потока при первом входе в настройки.
 /// </summary>
-public sealed partial class SettingsViewModel : ViewModelBase, IDisposable, ISmoothTransitionViewModel
+public sealed partial class SettingsViewModel : ViewModelBase, ISmoothTransitionViewModel
 {
     private readonly IServiceProvider _services;
     private readonly Dictionary<Type, ViewModelBase> _initializedSections = new(capacity: 9);

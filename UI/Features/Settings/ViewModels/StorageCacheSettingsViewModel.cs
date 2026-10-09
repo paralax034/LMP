@@ -3,7 +3,7 @@ using LMP.Core.Audio.Cache;
 
 namespace LMP.UI.Features.Settings.ViewModels;
 
-public sealed partial class StorageCacheSettingsViewModel : ViewModelBase, IDisposable
+public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 {
     private readonly LibraryService _library;
     private readonly TrackRegistry _registry;

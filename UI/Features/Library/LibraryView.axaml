@@ -1,7 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:LMP.UI.Features.Library"
-             xmlns:local="using:LMP.UI.Converters"
              xmlns:controls="using:LMP.UI.Controls"
              x:Class="LMP.UI.Features.Library.LibraryView"
              x:DataType="vm:LibraryViewModel"

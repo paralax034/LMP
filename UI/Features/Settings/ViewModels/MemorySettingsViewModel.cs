@@ -2,7 +2,7 @@ using Avalonia.Threading;
 
 namespace LMP.UI.Features.Settings.ViewModels;
 
-public sealed partial class MemorySettingsViewModel : ViewModelBase, IDisposable
+public sealed partial class MemorySettingsViewModel : ViewModelBase
 {
     private readonly LibraryService _library;
     private DispatcherTimer? _memoryIntervalDebounceTimer;

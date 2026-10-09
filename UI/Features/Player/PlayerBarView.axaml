@@ -11,10 +11,10 @@
     UseLayoutRounding="True">
 
     <Border Background="{DynamicResource BgPrimaryBrush}"
-        BorderBrush="{DynamicResource BgHighlightBrush}"
-        BorderThickness="0,1,0,0"
-        UseLayoutRounding="True"
-        ClipToBounds="False">
+            BorderBrush="{DynamicResource BgHighlightBrush}"
+            BorderThickness="0,1,0,0"
+            UseLayoutRounding="True"
+            ClipToBounds="False">
         <Grid RowDefinitions="Auto,*">
 
             <Grid
@@ -49,18 +49,18 @@
 
                     <!-- Единая сквозная искра по всему таймлайну при загрузке -->
                     <Border Name="SparkContainer"
-                        ClipToBounds="True"
-                        CornerRadius="2"
-                        HorizontalAlignment="Stretch"
-                        VerticalAlignment="Top"
-                        Height="4"
-                        IsHitTestVisible="False"
-                        IsVisible="{Binding IsLoading}">
-                        <Border Name="SparkRunner"
-                            Width="120" Height="4"
-                            HorizontalAlignment="Left"
+                            ClipToBounds="True"
                             CornerRadius="2"
-                            RenderTransformOrigin="0,0.5">
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Top"
+                            Height="4"
+                            IsHitTestVisible="False"
+                            IsVisible="{Binding IsLoading}">
+                        <Border Name="SparkRunner"
+                                Width="120" Height="4"
+                                HorizontalAlignment="Left"
+                                CornerRadius="2"
+                                RenderTransformOrigin="0,0.5">
                             <Border.RenderTransform>
                                 <TranslateTransform X="-120" />
                             </Border.RenderTransform>
@@ -68,8 +68,8 @@
                                 <Style Selector="Border#SparkRunner">
                                     <Style.Animations>
                                         <Animation Duration="0:0:1.8"
-                                            IterationCount="INFINITE"
-                                            Easing="CubicEaseInOut">
+                                                   IterationCount="Infinite"
+                                                   Easing="CubicEaseInOut">
                                             <!-- Фаза 1: Быстрый старт -->
                                             <KeyFrame Cue="0%">
                                                 <Setter Property="TranslateTransform.X" Value="-120" />
@@ -241,10 +241,10 @@
                         </Border.RenderTransform>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <PathIcon Width="14" Height="14"
-                                Foreground="{DynamicResource AccentBrush}"
-                                Data="{StaticResource Icon.InformationOutline}" />
+                                      Foreground="{DynamicResource AccentBrush}"
+                                      Data="{StaticResource Icon.InformationOutline}" />
                             <TextBlock Name="SeekHintText" FontSize="11" FontWeight="SemiBold"
-                                Foreground="{DynamicResource AccentBrush}" />
+                                       Foreground="{DynamicResource AccentBrush}" />
                         </StackPanel>
                     </Border>
                 </Canvas>
@@ -266,222 +266,206 @@
             <!-- КНОПКИ УПРАВЛЕНИЯ -->
             <Grid Grid.Row="1" Margin="8,4,8,4" ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                 <StackPanel Grid.Column="0" VerticalAlignment="Center" Orientation="Horizontal"
-                    Spacing="2">
+                            Spacing="2">
                     <Button x:Name="ShuffleButton" Width="40" Height="40" Classes="playback-btn"
-                        Classes.active="{Binding IsShuffleAnimating}"
-                        Classes.auto-enabled="{Binding AutoShuffleEnabled}"
-                        Command="{Binding ShuffleQueueCommand}" CornerRadius="20"
-                        PointerEntered="OnShuffleButtonEntered"
-                        PointerExited="OnShuffleButtonExited"
-                        PointerPressed="OnShuffleButtonPressed">
-                        <Panel Classes="shuffle-content" Width="18" Height="18"
-                            RenderTransformOrigin="0.5,0.5">
-                            <Panel.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="1" />
-                            </Panel.RenderTransform>
-                            <Panel Classes="shuffle-normal" Width="18" Height="18"
-                                IsVisible="{Binding !AutoShuffleEnabled}">
-                                <PathIcon Width="18" Height="18"
-                                    Data="{StaticResource Icon.Shuffle}" />
+                            Classes.active="{Binding IsShuffleAnimating}"
+                            Classes.auto-enabled="{Binding AutoShuffleEnabled}"
+                            Command="{Binding ShuffleQueueCommand}" CornerRadius="20"
+                            PointerEntered="OnShuffleButtonEntered"
+                            PointerExited="OnShuffleButtonExited"
+                            PointerPressed="OnShuffleButtonPressed">
+                        <Panel Width="18" Height="18" RenderTransformOrigin="0.5,0.5">
+                            <Panel Width="18" Height="18" IsVisible="{Binding !AutoShuffleEnabled}">
+                                <PathIcon Width="18" Height="18" Data="{StaticResource Icon.Shuffle}" />
                             </Panel>
-                            <Panel Classes="shuffle-auto" Width="18" Height="18"
-                                IsVisible="{Binding AutoShuffleEnabled}">
-                                <PathIcon Width="18" Height="18"
-                                    Data="{StaticResource Icon.ShuffleAuto}" />
+                            <Panel Width="18" Height="18" IsVisible="{Binding AutoShuffleEnabled}">
+                                <PathIcon Width="18" Height="18" Data="{StaticResource Icon.ShuffleAuto}" />
                             </Panel>
-                            <PathIcon Classes="shuffle-flash" Width="18" Height="18" Opacity="0"
-                                Foreground="{DynamicResource AccentBrush}"
-                                Data="{StaticResource Icon.Shuffle}"
-                                IsVisible="{Binding !AutoShuffleEnabled}" />
-                            <PathIcon Classes="shuffle-flash" Width="18" Height="18" Opacity="0"
-                                Foreground="{DynamicResource AccentBrush}"
-                                Data="{StaticResource Icon.ShuffleAuto}"
-                                IsVisible="{Binding AutoShuffleEnabled}" />
                         </Panel>
                     </Button>
                     <Popup x:Name="ShufflePopup" ShouldUseOverlayLayer="True"
-                        IsLightDismissEnabled="False" Placement="Top"
-                        PlacementTarget="{Binding #ShuffleButton}" Topmost="True"
-                        VerticalOffset="-8">
+                           IsLightDismissEnabled="False" Placement="Top"
+                           PlacementTarget="{Binding #ShuffleButton}" Topmost="True"
+                           VerticalOffset="-8">
                         <Border Padding="10,7" Background="{DynamicResource BgPrimaryBrush}"
-                            BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                            CornerRadius="8">
+                                BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+                                CornerRadius="8">
                             <StackPanel Spacing="3" MinWidth="160">
                                 <StackPanel Orientation="Horizontal" Spacing="6"
-                                    VerticalAlignment="Center">
+                                            VerticalAlignment="Center">
                                     <PathIcon Width="13" Height="13" VerticalAlignment="Center"
-                                        Foreground="{DynamicResource AccentBrush}"
-                                        Data="{StaticResource Icon.ShuffleAuto}"
-                                        IsVisible="{Binding AutoShuffleEnabled}" />
+                                              Foreground="{DynamicResource AccentBrush}"
+                                              Data="{StaticResource Icon.ShuffleAuto}"
+                                              IsVisible="{Binding AutoShuffleEnabled}" />
                                     <PathIcon Width="13" Height="13" VerticalAlignment="Center"
-                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                        Data="{StaticResource Icon.Shuffle}"
-                                        IsVisible="{Binding !AutoShuffleEnabled}" />
+                                              Foreground="{DynamicResource TextSecondaryBrush}"
+                                              Data="{StaticResource Icon.Shuffle}"
+                                              IsVisible="{Binding !AutoShuffleEnabled}" />
                                     <TextBlock FontSize="13" FontWeight="SemiBold"
-                                        VerticalAlignment="Center"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        Text="{Binding ShuffleTooltip}" />
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               Text="{Binding ShuffleTooltip}" />
                                 </StackPanel>
                                 <TextBlock FontSize="11"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    Text="{Binding L[Player_Shuffle_Hint]}" />
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           Text="{Binding L[Player_Shuffle_Hint]}" />
                             </StackPanel>
                         </Border>
                     </Popup>
                     <Button Width="40" Height="40" Classes="playback-btn"
-                        Command="{Binding PreviousCommand}" CornerRadius="20"
-                        ToolTip.Tip="{Binding PreviousTooltip}" ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6">
+                            Command="{Binding PreviousCommand}" CornerRadius="20"
+                            ToolTip.Tip="{Binding PreviousTooltip}" ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6">
                         <PathIcon Width="20" Height="20" Data="{StaticResource Icon.SkipPrevious}" />
                     </Button>
                     <Button Width="52" Height="52" Classes="playback-btn-main"
-                        Command="{Binding PlayPauseCommand}" CornerRadius="26"
-                        ToolTip.Tip="{Binding PlayPauseTooltip}" ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6">
+                            Command="{Binding PlayPauseCommand}" CornerRadius="26"
+                            ToolTip.Tip="{Binding PlayPauseTooltip}" ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6">
                         <Panel>
                             <PathIcon Width="26" Height="26" Data="{StaticResource Icon.Pause}"
-                                IsVisible="{Binding IsPlaying}" />
+                                      IsVisible="{Binding IsPlaying}" />
                             <PathIcon Width="26" Height="26" Data="{StaticResource Icon.Play}"
-                                IsVisible="{Binding !IsPlaying}" />
+                                      IsVisible="{Binding !IsPlaying}" />
                         </Panel>
                     </Button>
                     <Button Width="40" Height="40" Classes="playback-btn"
-                        Command="{Binding NextCommand}" CornerRadius="20"
-                        ToolTip.Tip="{Binding NextTooltip}" ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6">
+                            Command="{Binding NextCommand}" CornerRadius="20"
+                            ToolTip.Tip="{Binding NextTooltip}" ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6">
                         <PathIcon Width="20" Height="20" Data="{StaticResource Icon.SkipNext}" />
                     </Button>
                     <Button x:Name="RepeatButton" Width="40" Height="40" Classes="playback-btn"
-                        Classes.active="{Binding !IsRepeatNone}"
-                        Command="{Binding ToggleRepeatCommand}" CornerRadius="20"
-                        ToolTip.Tip="{Binding RepeatTooltip}" ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6">
+                            Classes.active="{Binding !IsRepeatNone}"
+                            Command="{Binding ToggleRepeatCommand}" CornerRadius="20"
+                            ToolTip.Tip="{Binding RepeatTooltip}" ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6">
                         <Grid>
                             <PathIcon Width="18" Height="18" Data="{StaticResource Icon.Repeat}"
-                                IsVisible="{Binding IsRepeatNone}" />
+                                      IsVisible="{Binding IsRepeatNone}" />
                             <PathIcon Width="18" Height="18" Data="{StaticResource Icon.RepeatOnce}"
-                                IsVisible="{Binding IsRepeatOne}" />
+                                      IsVisible="{Binding IsRepeatOne}" />
                             <PathIcon Width="18" Height="18" Data="{StaticResource Icon.Repeat}"
-                                IsVisible="{Binding IsRepeatAll}" />
+                                      IsVisible="{Binding IsRepeatAll}" />
                         </Grid>
                     </Button>
                     <Popup ShouldUseOverlayLayer="True" HorizontalOffset="0"
-                        IsLightDismissEnabled="False"
-                        IsOpen="{Binding IsRepeatHintVisible}" Placement="Top"
-                        PlacementTarget="{Binding #RepeatButton}" Topmost="True" VerticalOffset="-8">
+                           IsLightDismissEnabled="False"
+                           IsOpen="{Binding IsRepeatHintVisible}" Placement="Top"
+                           PlacementTarget="{Binding #RepeatButton}" Topmost="True" VerticalOffset="-8">
                         <Border Classes="mode-hint" Classes.visible="{Binding IsRepeatHintVisible}"
-                            Padding="10,7" Background="{DynamicResource BgPrimaryBrush}"
-                            BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                            CornerRadius="8">
+                                Padding="10,7" Background="{DynamicResource BgPrimaryBrush}"
+                                BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
+                                CornerRadius="8">
                             <StackPanel Orientation="Horizontal" Spacing="6"
-                                VerticalAlignment="Center">
+                                        VerticalAlignment="Center">
                                 <PathIcon Width="13" Height="13" VerticalAlignment="Center"
-                                    Foreground="{DynamicResource AccentBrush}"
-                                    Data="{StaticResource Icon.Repeat}" />
+                                          Foreground="{DynamicResource AccentBrush}"
+                                          Data="{StaticResource Icon.Repeat}" />
                                 <TextBlock FontSize="12" FontWeight="SemiBold"
-                                    VerticalAlignment="Center"
-                                    Foreground="{DynamicResource TextPrimaryBrush}"
-                                    Text="{Binding RepeatHintText}" />
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           Text="{Binding RepeatHintText}" />
                             </StackPanel>
                         </Border>
                     </Popup>
                     <Border Width="1" Height="28" Margin="6,0"
-                        Background="{DynamicResource BgHighlightBrush}" />
+                            Background="{DynamicResource BgHighlightBrush}" />
                     <controls:VolumeControl Volume="{Binding Volume}"
-                        MaxVolume="{Binding MaxVolume}" />
+                                            MaxVolume="{Binding MaxVolume}" />
                     <Border Width="1" Height="28" Margin="6,0"
-                        Background="{DynamicResource BgHighlightBrush}" />
+                            Background="{DynamicResource BgHighlightBrush}" />
                     <Panel>
                         <Button x:Name="LikeButton" Width="40" Height="40" Classes="playback-btn"
-                            Classes.active="{Binding IsLiked}"
-                            Command="{Binding ToggleLikeCommand}" CornerRadius="20"
-                            ToolTip.Tip="{Binding LikeTooltip}" ToolTip.Placement="Top"
-                            ToolTip.VerticalOffset="-6">
-                            <PathIcon Width="18" Height="18" Classes="heart-icon"
-                                Data="{Binding IsLiked, Converter={StaticResource BoolToGeometryConverter}, ConverterParameter='Heart|HeartOutline'}" />
+                                Classes.active="{Binding IsLiked}"
+                                Command="{Binding ToggleLikeCommand}" CornerRadius="20"
+                                ToolTip.Tip="{Binding LikeTooltip}" ToolTip.Placement="Top"
+                                ToolTip.VerticalOffset="-6">
+                            <PathIcon Width="18" Height="18"
+                                      Data="{Binding IsLiked, Converter={StaticResource BoolToGeometryConverter}, ConverterParameter='Heart|HeartOutline'}" />
                         </Button>
                         <Popup ShouldUseOverlayLayer="True" HorizontalOffset="0"
-                            IsLightDismissEnabled="False"
-                            IsOpen="{Binding IsLikeHintVisible}" Placement="Top"
-                            PlacementTarget="{Binding #LikeButton}" VerticalOffset="-8">
+                               IsLightDismissEnabled="False"
+                               IsOpen="{Binding IsLikeHintVisible}" Placement="Top"
+                               PlacementTarget="{Binding #LikeButton}" VerticalOffset="-8">
                             <Border Classes="mode-hint"
-                                Classes.visible="{Binding IsLikeHintVisible}">
+                                    Classes.visible="{Binding IsLikeHintVisible}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock FontSize="12" FontWeight="SemiBold"
-                                        Foreground="{DynamicResource TextPrimaryBrush}"
-                                        Text="{Binding LikeHintText}" />
+                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                               Text="{Binding LikeHintText}" />
                                 </StackPanel>
                             </Border>
                         </Popup>
                     </Panel>
                     <controls:CopyLinkButton CopyUrl="{Binding CurrentTrackUrl}"
-                        SuccessText="{Binding L[Track_Copied]}"
-                        ToolTipText="{Binding L[Track_CopyLink]}" ButtonSize="36" IconSize="16" />
+                                             SuccessText="{Binding L[Track_Copied]}"
+                                             ToolTipText="{Binding L[Track_CopyLink]}" ButtonSize="36" IconSize="16" />
                 </StackPanel>
                 <Border Grid.Column="1" Width="1" Margin="10,10"
-                    Background="{DynamicResource BgHighlightBrush}" />
+                        Background="{DynamicResource BgHighlightBrush}" />
                 <Grid Grid.Column="2" VerticalAlignment="Center" ColumnDefinitions="Auto,*">
                     <Border Grid.Column="0" Width="52" Height="52" Margin="0,0,12,0"
-                        Background="Transparent"
-                        BorderBrush="{DynamicResource BgHighlightBrush}"
-                        BorderThickness="1"
-                        ClipToBounds="True"
-                        CornerRadius="4">
+                            Background="Transparent"
+                            BorderBrush="{DynamicResource BgHighlightBrush}"
+                            BorderThickness="1"
+                            ClipToBounds="True"
+                            CornerRadius="4">
                         <Panel>
                             <PathIcon Width="22" Height="22"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                Data="{StaticResource Icon.MusicNote}"
-                                IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}, ConverterParameter=invert}" />
+                                      Foreground="{DynamicResource TextMutedBrush}"
+                                      Data="{StaticResource Icon.MusicNote}"
+                                      IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}, ConverterParameter=invert}" />
                             <Image controls:SmartImage.Source="{Binding SafeThumbnail}"
-                                controls:SmartImage.Quality="Low"
-                                IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}}"
-                                Stretch="UniformToFill" />
+                                   controls:SmartImage.Quality="Low"
+                                   IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}}"
+                                   Stretch="UniformToFill" />
                         </Panel>
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="0">
                         <TextBlock FontSize="14" FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            Text="{Binding SafeTitle}" TextTrimming="CharacterEllipsis" />
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                   Text="{Binding SafeTitle}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Margin="0,2,0,0" FontSize="12"
-                            Foreground="{DynamicResource TextSecondaryBrush}"
-                            Text="{Binding SafeAuthor}" TextTrimming="CharacterEllipsis" />
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="{Binding SafeAuthor}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </Grid>
                 <Border Grid.Column="3" Width="1" Margin="10,10"
-                    Background="{DynamicResource BgHighlightBrush}" />
+                        Background="{DynamicResource BgHighlightBrush}" />
                 <StackPanel Grid.Column="4" Width="230" VerticalAlignment="Center" Spacing="4">
                     <Grid ColumnDefinitions="*,*">
                         <StackPanel Grid.Column="0" HorizontalAlignment="Left"
-                            IsVisible="{Binding TotalTracksInQueue, Converter={StaticResource GreaterThanConverter}, ConverterParameter=0}"
-                            Orientation="Horizontal" Spacing="3"
-                            ToolTip.Tip="{Binding TrackNumberTooltip}" ToolTip.Placement="Top"
-                            ToolTip.VerticalOffset="-6">
+                                    IsVisible="{Binding TotalTracksInQueue, Converter={StaticResource GreaterThanConverter}, ConverterParameter=0}"
+                                    Orientation="Horizontal" Spacing="3"
+                                    ToolTip.Tip="{Binding TrackNumberTooltip}" ToolTip.Placement="Top"
+                                    ToolTip.VerticalOffset="-6">
                             <TextBlock FontSize="12" FontWeight="Bold"
-                                Foreground="{DynamicResource AccentBrush}"
-                                Text="{Binding CurrentTrackIndexDisplay}" />
+                                       Foreground="{DynamicResource AccentBrush}"
+                                       Text="{Binding CurrentTrackIndexDisplay}" />
                             <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
-                                Text="/" />
+                                       Text="/" />
                             <TextBlock FontSize="12" Foreground="{DynamicResource TextMutedBrush}"
-                                Text="{Binding TotalTracksInQueue}" />
+                                       Text="{Binding TotalTracksInQueue}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" HorizontalAlignment="Right"
-                            Orientation="Horizontal" Spacing="2"
-                            ToolTip.Tip="{Binding DurationTooltip}" ToolTip.Placement="Top"
-                            ToolTip.VerticalOffset="-6">
+                                    Orientation="Horizontal" Spacing="2"
+                                    ToolTip.Tip="{Binding DurationTooltip}" ToolTip.Placement="Top"
+                                    ToolTip.VerticalOffset="-6">
                             <TextBlock FontSize="12" FontWeight="SemiBold"
-                                Foreground="{DynamicResource AccentBrush}"
-                                Text="{Binding Position, Converter={StaticResource TimeSpanConverter}}" />
+                                       Foreground="{DynamicResource AccentBrush}"
+                                       Text="{Binding Position, Converter={StaticResource TimeSpanConverter}}" />
                             <TextBlock FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
-                                Text="/" />
+                                       Text="/" />
                             <TextBlock FontSize="12" Foreground="{DynamicResource TextMutedBrush}"
-                                Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}" />
+                                       Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}" />
                         </StackPanel>
                     </Grid>
                     <Panel>
                         <Button x:Name="FormatButton" Padding="8,4" HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center" Classes="format-btn"
-                            Command="{Binding LoadFormatsCommand}"
-                            IsVisible="{Binding ShowStreamInfo}">
+                                HorizontalContentAlignment="Center" Classes="format-btn"
+                                Command="{Binding LoadFormatsCommand}"
+                                IsVisible="{Binding ShowStreamInfo}">
                             <Button.Flyout>
                                 <Flyout Placement="Top">
                                     <StackPanel MinWidth="250" Spacing="6" Margin="4">
@@ -489,56 +473,56 @@
                                         <!-- Шапка с заголовком и кнопкой принудительного обновления -->
                                         <Grid ColumnDefinitions="*,Auto" Margin="4,2,4,6">
                                             <TextBlock Grid.Column="0"
-                                                FontWeight="Bold"
-                                                FontSize="13"
-                                                HorizontalAlignment="Left"
-                                                VerticalAlignment="Center"
-                                                Text="{Binding L[Stream_SelectQuality]}" />
+                                                       FontWeight="Bold"
+                                                       FontSize="13"
+                                                       HorizontalAlignment="Left"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding L[Stream_SelectQuality]}" />
 
                                             <Button Grid.Column="1"
-                                                Width="26" Height="26"
-                                                Classes="icon-btn"
-                                                Command="{Binding ForceLoadFormatsCommand}"
-                                                ToolTip.Tip="{Binding L[Stream_RefreshFormats]}"
-                                                HorizontalAlignment="Right"
-                                                VerticalAlignment="Center"
-                                                CornerRadius="6">
+                                                    Width="26" Height="26"
+                                                    Classes="icon-btn"
+                                                    Command="{Binding ForceLoadFormatsCommand}"
+                                                    ToolTip.Tip="{Binding L[Stream_RefreshFormats]}"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    CornerRadius="6">
                                                 <Panel Width="14" Height="14">
                                                     <PathIcon Width="14" Height="14"
-                                                        Data="{StaticResource Icon.Refresh}"
-                                                        Classes.spinning="{Binding IsFormatsLoading}"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center" />
+                                                              Data="{StaticResource Icon.Refresh}"
+                                                              Classes.spinning="{Binding IsFormatsLoading}"
+                                                              HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center" />
                                                 </Panel>
                                             </Button>
                                         </Grid>
 
                                         <StackPanel Orientation="Horizontal" Spacing="10"
-                                            Margin="4,12"
-                                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                                            IsVisible="{Binding IsFormatsLoading}">
+                                                    Margin="4,12"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                    IsVisible="{Binding IsFormatsLoading}">
                                             <TextBlock Text="{Binding L[Nav_PleaseWait]}"
-                                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                                FontSize="13"
-                                                VerticalAlignment="Center" />
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       FontSize="13"
+                                                       VerticalAlignment="Center" />
                                             <PathIcon Data="{StaticResource Icon.Sync}"
-                                                Classes="spinning"
-                                                Width="14" Height="14"
-                                                Foreground="{DynamicResource AccentBrush}"
-                                                VerticalAlignment="Center" />
+                                                      Classes="spinning"
+                                                      Width="14" Height="14"
+                                                      Foreground="{DynamicResource AccentBrush}"
+                                                      VerticalAlignment="Center" />
                                         </StackPanel>
 
                                         <!-- Табличная сетка на основе высокопроизводительного Grid -->
                                         <ItemsControl ItemsSource="{Binding AvailableFormats}"
-                                            IsVisible="{Binding !IsFormatsLoading}">
+                                                      IsVisible="{Binding !IsFormatsLoading}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
                                                     <Button HorizontalAlignment="Stretch"
-                                                        Margin="0,2"
-                                                        Classes="format-item-btn"
-                                                        Classes.active="{Binding IsActive}"
-                                                        Command="{Binding $parent[UserControl].DataContext.SwitchFormatCommand}"
-                                                        CommandParameter="{Binding}">
+                                                            Margin="0,2"
+                                                            Classes="format-item-btn"
+                                                            Classes.active="{Binding IsActive}"
+                                                            Command="{Binding $parent[UserControl].((vm:PlayerBarViewModel)DataContext).SwitchFormatCommand}"
+                                                            CommandParameter="{Binding}">
 
                                                         <Grid
                                                             ColumnDefinitions="24, 45, 65, 45, *, 24, 45">
@@ -546,28 +530,28 @@
                                                             <!-- Столбец 0: Статус скачивания -->
                                                             <Panel Grid.Column="0">
                                                                 <PathIcon Width="14" Height="14"
-                                                                    Foreground="{DynamicResource AccentBrush}"
-                                                                    Data="{StaticResource Icon.CheckCircle}"
-                                                                    IsVisible="{Binding IsDownloaded}" />
+                                                                          Foreground="{DynamicResource AccentBrush}"
+                                                                          Data="{StaticResource Icon.CheckCircle}"
+                                                                          IsVisible="{Binding IsDownloaded}" />
                                                             </Panel>
 
                                                             <!-- Столбец 1: Кодек (Opus/AAC) -->
                                                             <TextBlock Grid.Column="1"
-                                                                Text="{Binding Codec}"
-                                                                VerticalAlignment="Center" />
+                                                                       Text="{Binding Codec}"
+                                                                       VerticalAlignment="Center" />
 
                                                             <!-- Столбец 2: Битрейт с округлением на
                                                             лету -->
                                                             <TextBlock Grid.Column="2"
-                                                                Text="{Binding Bitrate, StringFormat={}{0:F0} kbps}"
-                                                                VerticalAlignment="Center" />
+                                                                       Text="{Binding Bitrate, StringFormat={}{0:F0} kbps}"
+                                                                       VerticalAlignment="Center" />
 
                                                             <!-- Столбец 3: Расширение в скобках -->
                                                             <TextBlock Grid.Column="3"
-                                                                Text="{Binding Container, StringFormat=({0})}"
-                                                                FontSize="11"
-                                                                Foreground="{DynamicResource TextMutedBrush}"
-                                                                VerticalAlignment="Center" />
+                                                                       Text="{Binding Container, StringFormat=({0})}"
+                                                                       FontSize="11"
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       VerticalAlignment="Center" />
 
                                                             <!-- Столбец 4: Пружина-растяжка
                                                             (сдвигает индикатор и вес вправо) -->
@@ -575,18 +559,18 @@
                                                             <!-- Столбец 5: Динамик активного потока -->
                                                             <Panel Grid.Column="5">
                                                                 <PathIcon Width="14" Height="14"
-                                                                    Foreground="{DynamicResource AccentBrush}"
-                                                                    Data="{StaticResource Icon.VolumeHighSmall}"
-                                                                    IsVisible="{Binding IsActive}" />
+                                                                          Foreground="{DynamicResource AccentBrush}"
+                                                                          Data="{StaticResource Icon.VolumeHigh}"
+                                                                          IsVisible="{Binding IsActive}" />
                                                             </Panel>
 
                                                             <!-- Столбец 6: Размер файла -->
                                                             <TextBlock Grid.Column="6"
-                                                                HorizontalAlignment="Right"
-                                                                FontSize="11"
-                                                                VerticalAlignment="Center"
-                                                                Foreground="{DynamicResource TextMutedBrush}"
-                                                                Text="{Binding SizeMbFormatted}" />
+                                                                       HorizontalAlignment="Right"
+                                                                       FontSize="11"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       Text="{Binding SizeMbFormatted}" />
                                                         </Grid>
                                                     </Button>
                                                 </DataTemplate>
@@ -596,31 +580,31 @@
                                 </Flyout>
                             </Button.Flyout>
                             <StackPanel Orientation="Horizontal" Spacing="5"
-                                VerticalAlignment="Center">
+                                        VerticalAlignment="Center">
                                 <TextBlock FontSize="10"
-                                    FontWeight="SemiBold"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    Text="{Binding StreamInfo}" />
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           Text="{Binding StreamInfo}" />
                                 <Ellipse Width="3" Height="3"
-                                    Fill="{DynamicResource BgHighlightBrush}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding ShowNetworkStats}" />
+                                         Fill="{DynamicResource BgHighlightBrush}"
+                                         VerticalAlignment="Center"
+                                         IsVisible="{Binding ShowNetworkStats}" />
                                 <TextBlock FontSize="10"
-                                    FontWeight="{Binding PingWeight}"
-                                    Foreground="{Binding PingBrush}"
-                                    Text="{Binding PingText}"
-                                    IsVisible="{Binding ShowNetworkStats}"
-                                    VerticalAlignment="Center" />
+                                           FontWeight="{Binding PingWeight}"
+                                           Foreground="{Binding PingBrush}"
+                                           Text="{Binding PingText}"
+                                           IsVisible="{Binding ShowNetworkStats}"
+                                           VerticalAlignment="Center" />
                                 <Ellipse Width="3" Height="3"
-                                    Fill="{DynamicResource BgHighlightBrush}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding ShowNetworkStats}" />
+                                         Fill="{DynamicResource BgHighlightBrush}"
+                                         VerticalAlignment="Center"
+                                         IsVisible="{Binding ShowNetworkStats}" />
                                 <TextBlock FontSize="10"
-                                    FontWeight="Bold"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    Text="{Binding NetworkSpeedText}"
-                                    IsVisible="{Binding ShowNetworkStats}"
-                                    VerticalAlignment="Center" />
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           Text="{Binding NetworkSpeedText}"
+                                           IsVisible="{Binding ShowNetworkStats}"
+                                           VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                     </Panel>

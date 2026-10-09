@@ -54,14 +54,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     [ObservableProperty] public partial bool IsAuthenticated { get; private set; }
     [ObservableProperty] public partial bool HasPlaylists { get; private set; }
 
-    partial void OnIsSyncingChanged(bool value)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-            SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
-        else
-            Dispatcher.UIThread.Post(() => SyncAccountPlaylistsCommand.NotifyCanExecuteChanged());
-    }
-
     #endregion
 
     #region Статистика
@@ -196,8 +188,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (_isDirty)
         {
             _isDirty = false;
-            await RefreshLikedTrackCountAsync().ConfigureAwait(false);
-            UpdateStatsInBackground();
+            try
+            {
+                await RefreshLikedTrackCountAsync().ConfigureAwait(false);
+                UpdateStatsInBackground();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[Library] OnResume refresh error: {ex.Message}");
+            }
         }
     }
 
@@ -220,38 +219,45 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _isDirty = true;
         }
 
-        Dispatcher.UIThread.Post(async () =>
+        _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
-            var result = await _playlistService.GetPlaylistWithCountAsync(playlist.Id);
-            if (result == null) return;
-
-            var (freshPlaylist, trackCount) = result.Value;
-            var existingVm = Playlists.FirstOrDefault(vm => vm.Id == playlist.Id);
-
-            if (existingVm != null)
+            try
             {
-                existingVm.UpdateFrom(freshPlaylist, trackCount);
-            }
-            else
-            {
-                var vm = CreatePlaylistCardVm(freshPlaylist, trackCount);
-                int insertIndex = CalculateInsertIndex(freshPlaylist);
+                var result = await _playlistService.GetPlaylistWithCountAsync(playlist.Id);
+                if (result == null) return;
 
-                if (insertIndex >= Playlists.Count)
-                    Playlists.Add(vm);
+                var (freshPlaylist, trackCount) = result.Value;
+                var existingVm = Playlists.FirstOrDefault(vm => vm.Id == playlist.Id);
+
+                if (existingVm != null)
+                {
+                    existingVm.UpdateFrom(freshPlaylist, trackCount);
+                }
                 else
-                    Playlists.Insert(insertIndex, vm);
+                {
+                    var vm = CreatePlaylistCardVm(freshPlaylist, trackCount);
+                    int insertIndex = CalculateInsertIndex(freshPlaylist);
 
-                vm.Show();
-            }
+                    if (insertIndex >= Playlists.Count)
+                        Playlists.Add(vm);
+                    else
+                        Playlists.Insert(insertIndex, vm);
 
-            if (_isViewActive)
-            {
-                UpdateStatsInBackground();
+                    vm.Show();
+                }
+
+                if (_isViewActive)
+                {
+                    UpdateStatsInBackground();
+                }
+                else
+                {
+                    _isDirty = true;
+                }
             }
-            else
+            catch (Exception ex)
             {
-                _isDirty = true;
+                Log.Warn($"[Library] Incremental playlist update error: {ex.Message}");
             }
         });
     }
@@ -305,13 +311,24 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _dataChangedTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(300),
             DispatcherPriority.Background,
-            async (_, _) =>
+            (_, _) =>
             {
                 _dataChangedTimer?.Stop();
                 if (_isDisposed || IsSyncing) return;
 
-                await RefreshLikedTrackCountAsync().ConfigureAwait(false);
-                UpdateStatsInBackground();
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_isDisposed || IsSyncing) return;
+                        await RefreshLikedTrackCountAsync().ConfigureAwait(false);
+                        UpdateStatsInBackground();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"[Library] Debounced data change handler error: {ex.Message}");
+                    }
+                });
             });
         _dataChangedTimer.Start();
     }
@@ -330,7 +347,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         var durationTask = Task.Run(() => _library.GetTotalLibraryDurationAsync(ct), ct);
 
-        Dispatcher.UIThread.Post(async () =>
+        _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
             try
             {
@@ -344,10 +361,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     }
 
     private async Task AnimateStatsOnUIAsync(
-          int targetPlaylists,
-          int targetTracks,
-          Task<long> durationTask,
-          CancellationToken ct)
+        int targetPlaylists,
+        int targetTracks,
+        Task<long> durationTask,
+        CancellationToken ct)
     {
         if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
@@ -366,7 +383,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 double t = (double)i / steps;
                 double ease = 1 - Math.Pow(1 - t, 3);
 
-                PlaylistCountText = (startPlaylists + (int)Math.Round((targetPlaylists - startPlaylists) * ease)).ToString();
+                PlaylistCountText = (startPlaylists + (int)Math.Round((targetPlaylists - startPlaylists) * ease))
+                    .ToString();
                 TotalTracksText = (startTracks + (int)Math.Round((targetTracks - startTracks) * ease)).ToString();
 
                 if (!IsStatsVisible)
@@ -378,13 +396,22 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
 
         long totalTicks = 0;
-        try { totalTicks = await durationTask.ConfigureAwait(true); } catch { }
+        try
+        {
+            totalTicks = await durationTask.ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"[Library] Duration calculation exception: {ex.Message}");
+        }
 
         if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
 
         var finalDuration = TimeSpan.FromTicks(totalTicks);
         var finalAvgTrack = targetTracks > 0 ? TimeSpan.FromTicks(finalDuration.Ticks / targetTracks) : TimeSpan.Zero;
-        var finalAvgPlaylist = targetPlaylists > 0 ? TimeSpan.FromTicks(finalDuration.Ticks / targetPlaylists) : TimeSpan.Zero;
+        var finalAvgPlaylist = targetPlaylists > 0
+            ? TimeSpan.FromTicks(finalDuration.Ticks / targetPlaylists)
+            : TimeSpan.Zero;
 
         PlaylistCountText = targetPlaylists.ToString();
         TotalTracksText = targetTracks.ToString();
@@ -403,9 +430,19 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         int index = 0;
         foreach (var vm in Playlists)
         {
-            if (vm.IsLikedPlaylist) { index++; continue; }
+            if (vm.IsLikedPlaylist)
+            {
+                index++;
+                continue;
+            }
+
             if (playlist.IsLocal && !vm.IsLocal) break;
-            if (!playlist.IsLocal && vm.IsLocal) { index++; continue; }
+            if (!playlist.IsLocal && vm.IsLocal)
+            {
+                index++;
+                continue;
+            }
+
             if (string.Compare(playlist.Name, vm.Name, StringComparison.Ordinal) < 0) break;
             index++;
         }
@@ -521,19 +558,26 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 SyncProgress = 0.1;
 
                 var filtered = ytPlaylists
-                    .Where(p => !string.IsNullOrEmpty(p.YoutubeId) && p.YoutubeId != "LM" && p.YoutubeId != "VLLM" && !p.YoutubeId.StartsWith("RD"))
+                    .Where(p => !string.IsNullOrEmpty(p.YoutubeId) && p.YoutubeId != "LM" && p.YoutubeId != "VLLM" &&
+                                !p.YoutubeId.StartsWith("RD"))
                     .ToList();
 
-                playlistsToImport = [.. filtered.Select(p =>
-                {
-                    var pid = new Core.Youtube.Playlists.PlaylistId(p.YoutubeId!);
-                    var thumbs = new List<Thumbnail>();
-                    if (!string.IsNullOrEmpty(p.ThumbnailUrl))
-                        thumbs.Add(new Thumbnail(p.ThumbnailUrl, new Resolution(0, 0)));
-                    return new PlaylistSearchResult(pid, p.Name, null, thumbs);
-                })];
+                playlistsToImport =
+                [
+                    .. filtered.Select(p =>
+                    {
+                        var pid = new Core.Youtube.Playlists.PlaylistId(p.YoutubeId!);
+                        var thumbs = new List<Thumbnail>();
+                        if (!string.IsNullOrEmpty(p.ThumbnailUrl))
+                            thumbs.Add(new Thumbnail(p.ThumbnailUrl, new Resolution(0, 0)));
+                        return new PlaylistSearchResult(pid, p.Name, null, thumbs);
+                    })
+                ];
             }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
             catch (Exception ex)
             {
                 Log.Error($"[Library] Failed to fetch account playlists: {ex.Message}");
@@ -694,14 +738,28 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             await Task.Delay(300);
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                try { _mainWindow.UnlockNavigation(); } catch { }
+                try
+                {
+                    _mainWindow.UnlockNavigation();
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug($"[Library] Navigation unlock suppressed: {ex.Message}");
+                }
 
                 if (!_isDisposed)
                 {
                     IsSyncing = false;
                     SyncProgress = 0;
                     SyncStatus = string.Empty;
-                    try { await LoadPlaylistsAsync(); } catch { }
+                    try
+                    {
+                        await LoadPlaylistsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"[Library] Post-sync reload playlists failed: {ex.Message}");
+                    }
                 }
             });
         }
@@ -781,7 +839,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
     {
         if (_isDisposed) return;
 
-        var countResult = await _playlistService.GetPlaylistWithCountAsync(LibraryService.LikedPlaylistId).ConfigureAwait(false);
+        var countResult = await _playlistService.GetPlaylistWithCountAsync(LibraryService.LikedPlaylistId)
+            .ConfigureAwait(false);
         if (countResult == null) return;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -994,6 +1053,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _syncCts?.Cancel();
             _syncCts?.Dispose();
         }
+
         base.Dispose(disposing);
     }
 }

@@ -5,7 +5,7 @@ using LMP.Core.Youtube.Utils;
 
 namespace LMP.UI.Features.Settings.ViewModels;
 
-public sealed partial class NetworkSettingsViewModel : ViewModelBase, IDisposable
+public sealed partial class NetworkSettingsViewModel : ViewModelBase
 {
     private readonly NetworkManager _networkManager;
     private readonly LibraryService _library;

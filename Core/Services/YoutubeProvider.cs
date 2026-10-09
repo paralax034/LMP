@@ -1188,7 +1188,6 @@ public partial class YoutubeProvider : IDisposable
             }
 
             _sessionCts.Dispose();
-            GC.SuppressFinalize(this);
         }
 
         public void Dispose()
@@ -1216,7 +1215,6 @@ public partial class YoutubeProvider : IDisposable
             }
 
             _sessionCts.Dispose();
-            GC.SuppressFinalize(this);
         }
     }
 
@@ -1779,8 +1777,6 @@ public partial class YoutubeProvider : IDisposable
         _poTokenProvider = null;
 
         _manifestRamCache.Clear();
-
-        GC.SuppressFinalize(this);
         Log.Info("[YouTube] Provider disposed");
     }
 

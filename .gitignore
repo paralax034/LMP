@@ -23,6 +23,7 @@ __pycache__/
 ## --- [ JetBrains Rider / IntelliJ ] ---
 .idea/
 *.sln.iml
+qodana.yaml
 
 ## --- [ NuGet пакеты ] ---
 *.nupkg

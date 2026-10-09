@@ -11,7 +11,7 @@ namespace LMP.UI.Features.Playlist;
 /// <summary>
 /// ViewModel экрана плейлиста.
 /// </summary>
-public sealed partial class PlaylistViewModel : TrackListBaseViewModel, ISmoothTransitionViewModel
+public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 {
     #region Fields
 

@@ -35,17 +35,9 @@ public sealed class NetworkManager : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private CancellationTokenSource? _addressChangeDebounceCts;
     private readonly Task _watchdogTask;
-
-    /// <inheritdoc/>
     public HttpClient AudioClient => _audioClient;
-
-    /// <inheritdoc/>
     public HttpClient ApiClient => _apiClient;
-
-    /// <inheritdoc/>
     public HttpClient ImageClient => _imageClient;
-
-    /// <inheritdoc/>
     public HttpClient ProbeClient => _probeClient;
 
     /// <summary>
@@ -53,22 +45,23 @@ public sealed class NetworkManager : IDisposable
     /// </summary>
     public HttpClient UpdateClient => _updateClient;
 
-    /// <inheritdoc/>
     public ProxySettings? CurrentProxy
     {
-        get { lock (_stateLock) return _currentProxy; }
+        get
+        {
+            lock (_stateLock) return _currentProxy;
+        }
     }
 
-    /// <inheritdoc/>
     public InternetProfile CurrentProfile
     {
-        get { lock (_stateLock) return _currentProfile; }
+        get
+        {
+            lock (_stateLock) return _currentProfile;
+        }
     }
 
-    /// <inheritdoc/>
     public string? OutboundIp => Volatile.Read(ref _lastOutboundIp);
-
-    /// <inheritdoc/>
     public bool IsVpnActive => Volatile.Read(ref _isVpnActive);
 
     /// <summary>
@@ -118,7 +111,6 @@ public sealed class NetworkManager : IDisposable
         return (false, string.Empty, 0, false);
     }
 
-    /// <inheritdoc/>
     public event Action? NetworkRebuilt;
 
     /// <summary>
@@ -141,17 +133,16 @@ public sealed class NetworkManager : IDisposable
         Log.Info($"[NetworkManager] Initialized. Outbound IP: {_lastOutboundIp ?? "(none)"}, VPN: {_isVpnActive}");
     }
 
-    /// <inheritdoc/>
     public void UpdateProxy(ProxySettings? proxy)
     {
         lock (_stateLock)
         {
             _currentProxy = proxy;
         }
+
         RebuildAll("Proxy settings updated", force: true);
     }
 
-    /// <inheritdoc/>
     public void RebuildAll(string reason, bool force = false)
     {
         long now = Environment.TickCount64;
@@ -161,7 +152,8 @@ public sealed class NetworkManager : IDisposable
             long elapsed = now - Volatile.Read(ref _lastRebuildTick);
             if (elapsed < RebuildCooldownMs)
             {
-                Log.Debug($"[NetworkManager] Rebuild skipped (cooldown: {elapsed}ms < {RebuildCooldownMs}ms). Reason: {reason}");
+                Log.Debug(
+                    $"[NetworkManager] Rebuild skipped (cooldown: {elapsed}ms < {RebuildCooldownMs}ms). Reason: {reason}");
                 return;
             }
         }
@@ -205,7 +197,8 @@ public sealed class NetworkManager : IDisposable
         }
     }
 
-    private static (HttpClient Audio, HttpClient Api, HttpClient Image, HttpClient Probe, HttpClient Update) CreateClientCluster(ProxySettings? proxy)
+    private static (HttpClient Audio, HttpClient Api, HttpClient Image, HttpClient Probe, HttpClient Update)
+        CreateClientCluster(ProxySettings? proxy)
     {
         AudioSourceFactory.CurrentProxySettings = proxy;
         var customProxy = ProxyHelper.CreateWebProxy(proxy);
@@ -222,8 +215,8 @@ public sealed class NetworkManager : IDisposable
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
             Proxy = effectiveProxy,
             UseProxy = true,
-            // Отключаем клиентские таймауты. 
-            // Позволяем серверу YouTube самому закрыть соединение (TCP FIN). 
+            // Отключаем клиентские таймауты.
+            // Позволяем серверу YouTube самому закрыть соединение (TCP FIN).
             // Тогда чтение вернет 0 байт, и IOException не возникнет!
             PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
             PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
@@ -256,15 +249,13 @@ public sealed class NetworkManager : IDisposable
             KeepAlivePingDelay = TimeSpan.FromSeconds(30),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
             ConnectTimeout = TimeSpan.FromSeconds(6),
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+            AutomaticDecompression =
+                DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             AllowAutoRedirect = false,
             UseCookies = false
         };
 
-        var apiClient = new HttpClient(apiHandler)
-        {
-            Timeout = Timeout.InfiniteTimeSpan
-        };
+        var apiClient = new HttpClient(apiHandler) { Timeout = Timeout.InfiniteTimeSpan };
 
         // 3. Image Client (HTTP/2)
         var imageHandler = new SocketsHttpHandler
@@ -324,12 +315,15 @@ public sealed class NetworkManager : IDisposable
             MaxAutomaticRedirections = 5
         };
 
-        var updateClient = new HttpClient(updateHandler)
-        {
-            Timeout = TimeSpan.FromSeconds(30)
-        };
+        var updateClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(30) };
 
         return (audioClient, apiClient, imageClient, probeClient, updateClient);
+    }
+
+    private sealed class DrainDisposalState(HttpClient[] clients)
+    {
+        public readonly HttpClient[] Clients = clients;
+        public Timer? Timer;
     }
 
     /// <summary>
@@ -338,24 +332,29 @@ public sealed class NetworkManager : IDisposable
     /// </summary>
     private static void ScheduleDrainDisposal(params HttpClient[] oldClients)
     {
-        Timer? timer = null;
-        timer = new Timer(_ =>
+        var state = new DrainDisposalState(oldClients);
+        state.Timer = new Timer(static s =>
         {
-            for (int i = 0; i < oldClients.Length; i++)
+            var drain = (DrainDisposalState)s!;
+            for (int i = 0; i < drain.Clients.Length; i++)
             {
                 try
                 {
-                    oldClients[i].CancelPendingRequests();
-                    oldClients[i].Dispose();
+                    drain.Clients[i].CancelPendingRequests();
+                    drain.Clients[i].Dispose();
                 }
-                catch (ObjectDisposedException) { /* Игнорируем штатный dispose */ }
+                catch (ObjectDisposedException)
+                {
+                    /* Игнорируем штатный dispose */
+                }
                 catch (Exception ex)
                 {
                     Log.Debug($"[NetworkManager] Silent exception during graceful client disposal: {ex.Message}");
                 }
             }
-            timer?.Dispose();
-        }, null, TimeSpan.FromSeconds(ClientDrainTimeoutSeconds), Timeout.InfiniteTimeSpan);
+
+            drain.Timer?.Dispose();
+        }, state, TimeSpan.FromSeconds(ClientDrainTimeoutSeconds), Timeout.InfiniteTimeSpan);
     }
 
     #region Network Watchdog & Address Monitoring
@@ -401,13 +400,17 @@ public sealed class NetworkManager : IDisposable
 
             if (string.Equals(currentIp, previousIp, StringComparison.Ordinal) && previousVpn == isVpn)
             {
-                Log.Debug($"[NetworkManager] Address change ignored — outbound IP and VPN state unchanged ({currentIp})");
+                Log.Debug(
+                    $"[NetworkManager] Address change ignored — outbound IP and VPN state unchanged ({currentIp})");
                 return;
             }
 
-            RebuildAll($"Adapter route changed ({previousIp ?? "(none)"} → {currentIp}, VPN: {previousVpn} → {isVpn})", force: false);
+            RebuildAll($"Adapter route changed ({previousIp ?? "(none)"} → {currentIp}, VPN: {previousVpn} → {isVpn})",
+                force: false);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
             Log.Warn($"[NetworkManager] Address change resolution failed: {ex.Message}");
@@ -428,14 +431,19 @@ public sealed class NetworkManager : IDisposable
                 var previousIp = Volatile.Read(ref _lastOutboundIp);
                 bool previousVpn = Volatile.Read(ref _isVpnActive);
 
-                if (currentIp != null && (previousIp == null || !string.Equals(currentIp, previousIp, StringComparison.Ordinal) || previousVpn != isVpn))
+                if (currentIp != null && (previousIp == null ||
+                                          !string.Equals(currentIp, previousIp, StringComparison.Ordinal) ||
+                                          previousVpn != isVpn))
                 {
-                    Log.Info($"[NetworkManager] Watchdog detected unhandled route change: {previousIp} (VPN: {previousVpn}) → {currentIp} (VPN: {isVpn})");
+                    Log.Info(
+                        $"[NetworkManager] Watchdog detected unhandled route change: {previousIp} (VPN: {previousVpn}) → {currentIp} (VPN: {isVpn})");
                     OnNetworkAddressChanged(this, EventArgs.Empty);
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
             Log.Warn($"[NetworkManager] Watchdog error: {ex.Message}");
@@ -540,7 +548,8 @@ public sealed class NetworkManager : IDisposable
     {
         if (iface.NetworkInterfaceType is NetworkInterfaceType.Tunnel or NetworkInterfaceType.Ppp)
         {
-            Log.Debug($"[NetworkManager] Active interface detected as VPN by type: {iface.NetworkInterfaceType} ({iface.Name} / {iface.Description})");
+            Log.Debug(
+                $"[NetworkManager] Active interface detected as VPN by type: {iface.NetworkInterfaceType} ({iface.Name} / {iface.Description})");
             return true;
         }
 
@@ -611,12 +620,12 @@ public sealed class NetworkManager : IDisposable
                     return true;
             }
         }
+
         return false;
     }
 
     #endregion
 
-    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -630,7 +639,9 @@ public sealed class NetworkManager : IDisposable
         {
             _watchdogTask.Wait(TimeSpan.FromMilliseconds(200));
         }
-        catch { }
+        catch
+        {
+        }
 
         _audioClient.Dispose();
         _apiClient.Dispose();

@@ -3,7 +3,7 @@ using LMP.Core.Audio.Normalization;
 
 namespace LMP.UI.Features.Settings.ViewModels;
 
-public sealed partial class AudioSettingsViewModel : ViewModelBase, IDisposable
+public sealed partial class AudioSettingsViewModel : ViewModelBase
 {
     private readonly LibraryService _library;
     private readonly AudioEngine _audio;

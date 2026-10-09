@@ -1,7 +1,5 @@
 <Styles xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:l10n="using:LMP.UI.Converters"
-    xmlns:services="using:LMP.Core.Services">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- Убираем обводку фокуса -->
     <Style Selector="Control:focus-visible">

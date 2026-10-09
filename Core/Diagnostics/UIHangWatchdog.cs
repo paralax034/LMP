@@ -14,6 +14,7 @@ public sealed class UIHangWatchdog : IDisposable
 {
     private readonly Thread _watchdogThread;
     private readonly CancellationTokenSource _cts = new();
+    private readonly ManualResetEventSlim _pingEvent = new(false);
     private readonly string _dumpDirectory;
     private readonly int _hangThresholdMs;
     private volatile bool _disposed;
@@ -77,18 +78,16 @@ public sealed class UIHangWatchdog : IDisposable
     public UIHangWatchdog(string? dumpDirectory = null, int hangThresholdMs = 500)
     {
         _dumpDirectory = dumpDirectory
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "LMP", "Logs");
+                         ?? Path.Combine(
+                             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                             "LMP", "Logs");
         _hangThresholdMs = hangThresholdMs;
 
         Directory.CreateDirectory(_dumpDirectory);
 
         _watchdogThread = new Thread(WatchdogLoop)
         {
-            Name = "LMP-UI-Hang-Watchdog",
-            IsBackground = true,
-            Priority = ThreadPriority.Highest
+            Name = "LMP-UI-Hang-Watchdog", IsBackground = true, Priority = ThreadPriority.Highest
         };
     }
 
@@ -112,14 +111,20 @@ public sealed class UIHangWatchdog : IDisposable
             {
                 Thread.Sleep(PollIntervalMs);
 
-                using var pingEvent = new ManualResetEventSlim(false);
+                _pingEvent.Reset();
 
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(static state =>
                 {
-                    pingEvent.Set();
-                }, DispatcherPriority.Send);
+                    try
+                    {
+                        ((ManualResetEventSlim)state!).Set();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
+                }, _pingEvent, DispatcherPriority.Send);
 
-                if (!pingEvent.Wait(_hangThresholdMs, token))
+                if (!_pingEvent.Wait(_hangThresholdMs, token))
                 {
                     HandleUIHang();
                     Thread.Sleep(CooldownAfterHangMs);
@@ -254,7 +259,8 @@ public sealed class UIHangWatchdog : IDisposable
     private static void LogAnalysisInstructions()
     {
         Log.Error("[Watchdog] 💡 ANALYSIS OPTIONS:");
-        Log.Error("[Watchdog]   1. Visual Studio: Open .dmp → 'Debug with Managed Only' → Debug > Windows > Parallel Stacks");
+        Log.Error(
+            "[Watchdog]   1. Visual Studio: Open .dmp → 'Debug with Managed Only' → Debug > Windows > Parallel Stacks");
         Log.Error("[Watchdog]   2. CLI: dotnet-dump analyze <file> → 'clrstack -all' → 'syncblk' → 'dumpasync'");
         Log.Error("[Watchdog]   3. WinDbg: Open .dmp → .loadby sos coreclr → !clrstack → !threads → !syncblk");
     }
@@ -270,6 +276,8 @@ public sealed class UIHangWatchdog : IDisposable
         {
             _watchdogThread.Join(500);
         }
+
+        _pingEvent.Dispose();
         _cts.Dispose();
     }
 }

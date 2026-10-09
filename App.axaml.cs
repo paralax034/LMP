@@ -177,7 +177,7 @@ public partial class App : Application
             _splash?.SetProgress(55);
 
             // PlaybackErrorOrchestrator после NotificationService
-            var orchestrator = AppEntry.Services.GetRequiredService<PlaybackErrorOrchestrator>();
+            _ = AppEntry.Services.GetRequiredService<PlaybackErrorOrchestrator>();
             Log.Info("[Startup] PlaybackErrorOrchestrator ready");
             _splash?.SetProgress(60);
 
@@ -245,10 +245,9 @@ public partial class App : Application
                 {
                     try
                     {
-                        var notifications = AppEntry.Services.GetRequiredService<NotificationService>();
                         var dialogService = AppEntry.Services.GetRequiredService<DialogService>();
 
-                        // Отправляем предупреждающий Toast
+                        // Отправляем предупреждающий Toast через уже объявленный экземпляр notifications
                         await notifications.ShowToastAsync(
                             "Dialog_Warning_Title",
                             "Library_LegacyPlaylists_Message",
@@ -370,8 +369,8 @@ public partial class App : Application
                 e.Cancel = true;
                 isCleaningUp = true;
 
-                // Перенаправляем выполнение очистки в очередь UI-потока с высоким приоритетом
-                Dispatcher.UIThread.Post(async () =>
+                // Перенаправляем выполнение очистки в очередь UI-потока с отслеживанием Task (без async void)
+                _ = Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     try
                     {

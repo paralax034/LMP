@@ -14,23 +14,11 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 {
     private const string PrefixLastUpdatedOn = "Last updated on ";
     private const string PrefixUpdated = "Updated ";
-
-    /// <inheritdoc />
     public bool IsAvailable { get; init; }
-
-    /// <inheritdoc />
     public string? Title { get; init; }
-
-    /// <inheritdoc />
     public string? Author { get; init; }
-
-    /// <inheritdoc />
     public string? ChannelId { get; init; }
-
-    /// <inheritdoc />
     public string? Description { get; init; }
-
-    /// <inheritdoc />
     public int? Count { get; init; }
 
     /// <summary>
@@ -52,8 +40,6 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     /// Для owned playlists берётся из privacy dropdown, для остальных остаётся Unknown.
     /// </summary>
     public PlaylistVisibility Visibility { get; init; } = PlaylistVisibility.Unknown;
-
-    /// <inheritdoc />
     public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
     /// <summary>

@@ -55,7 +55,10 @@ public sealed class AppEntry
         {
             SQLitePCL.Batteries_V2.Init();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug($"[AppEntry] SQLite batteries initialization notice: {ex.Message}");
+        }
 
         // 2. Ожидание завершения родительского процесса при обновлении и безопасная очистка .old файлов
         int waitPid = 0;
@@ -71,7 +74,8 @@ public sealed class AppEntry
 
         if (waitPid > 0)
         {
-            Log.Info($"[AppEntry] Launched after in-place update. Waiting for parent process {waitPid} to terminate...");
+            Log.Info(
+                $"[AppEntry] Launched after in-place update. Waiting for parent process {waitPid} to terminate...");
             try
             {
                 using var parentProcess = System.Diagnostics.Process.GetProcessById(waitPid);
@@ -176,14 +180,12 @@ public sealed class AppEntry
         var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
-            .With(new SkiaOptions
-            {
-                MaxGpuResourceSizeBytes = gpuCacheBytes
-            });
+            .With(new SkiaOptions { MaxGpuResourceSizeBytes = gpuCacheBytes });
 
         if (OperatingSystem.IsWindows() && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
-            Log.Info("[AppEntry] Windows 10 detected. Using RedirectionSurface to prevent dcomp.dll compositor crashes.");
+            Log.Info(
+                "[AppEntry] Windows 10 detected. Using RedirectionSurface to prevent dcomp.dll compositor crashes.");
 
             builder.With(new Win32PlatformOptions
             {
@@ -256,7 +258,8 @@ public sealed class AppEntry
                 connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
+                connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None)
+                    .GetAwaiter().GetResult();
 
                 Log.Info($"[DB] Schema upgrade complete (Version: {DatabaseExtensions.CurrentDbVersion})");
             }
@@ -286,7 +289,8 @@ public sealed class AppEntry
             connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
             connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
             connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-            connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter().GetResult();
+            connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter()
+                .GetResult();
 
             Log.Info($"[DB] Fresh database created (Version: {DatabaseExtensions.CurrentDbVersion})");
         }
@@ -343,17 +347,17 @@ public sealed class AppEntry
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO Notifications (
-                    Id, TitleKey, TitleRaw, MessageKey, MessageRaw,
-                    MessageArgsJson, RecommendationKey, Severity, IsRead,
-                    TrackId, TrackTitle, ExceptionDetails, AttemptsJson, CreatedAt
-                )
-                VALUES (
-                    @id, @titleKey, NULL, @messageKey, NULL,
-                    NULL, @recommendationKey, @severity, 0,
-                    NULL, NULL, NULL, NULL, @createdAt
-                );
-                """;
+                              INSERT INTO Notifications (
+                                  Id, TitleKey, TitleRaw, MessageKey, MessageRaw,
+                                  MessageArgsJson, RecommendationKey, Severity, IsRead,
+                                  TrackId, TrackTitle, ExceptionDetails, AttemptsJson, CreatedAt
+                              )
+                              VALUES (
+                                  @id, @titleKey, NULL, @messageKey, NULL,
+                                  NULL, @recommendationKey, @severity, 0,
+                                  NULL, NULL, NULL, NULL, @createdAt
+                              );
+                              """;
 
             var pId = cmd.CreateParameter();
             pId.ParameterName = "@id";
@@ -402,11 +406,13 @@ public sealed class AppEntry
             try
             {
                 var msg = e.Exception?.InnerException?.Message
-                       ?? e.Exception?.Message
-                       ?? "unknown";
+                          ?? e.Exception?.Message
+                          ?? "unknown";
                 Log.Debug($"[UnobservedTask] Suppressed: {msg}");
             }
-            catch { }
+            catch
+            {
+            }
         };
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -429,7 +435,9 @@ public sealed class AppEntry
                     Log.Error($"[AppDomain] Unhandled non-exception: {e.ExceptionObject}");
                 }
             }
-            catch { }
+            catch
+            {
+            }
         };
     }
 

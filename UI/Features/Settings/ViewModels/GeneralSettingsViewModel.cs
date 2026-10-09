@@ -2,7 +2,7 @@ using Avalonia.Threading;
 
 namespace LMP.UI.Features.Settings.ViewModels;
 
-public sealed partial class GeneralSettingsViewModel : ViewModelBase, IDisposable
+public sealed partial class GeneralSettingsViewModel : ViewModelBase
 {
     private readonly LibraryService _library;
     private readonly SearchCacheService _searchCache;

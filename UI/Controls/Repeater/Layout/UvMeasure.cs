@@ -1,12 +1,11 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
-namespace Avalonia.Layout
-{    
-    internal struct UvMeasure
-    {
-        internal static readonly UvMeasure Zero = default;
 
+namespace Avalonia.Layout
+{
+    internal struct UvMeasure : IEquatable<UvMeasure>
+    {
         internal double U { get; set; }
 
         internal double V { get; set; }
@@ -25,19 +24,22 @@ namespace Avalonia.Layout
             }
         }
 
-        public override bool Equals(object? obj)
+        public readonly bool Equals(UvMeasure other)
         {
-            if (obj is UvMeasure measure)
-            {
-                return (measure.U == U) && (measure.V == V);
-            }
-
-            return false;
+            return other.U.Equals(U) && other.V.Equals(V);
         }
 
-        public override int GetHashCode()
+        public override readonly bool Equals(object? obj)
         {
-            return base.GetHashCode();
+            return obj is UvMeasure measure && Equals(measure);
         }
+
+        public override readonly int GetHashCode()
+        {
+            return HashCode.Combine(U, V);
+        }
+
+        public static bool operator ==(UvMeasure left, UvMeasure right) => left.Equals(right);
+        public static bool operator !=(UvMeasure left, UvMeasure right) => !left.Equals(right);
     }
 }

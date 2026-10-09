@@ -36,8 +36,8 @@ internal static class DohResolver
         "googlevideo.com",
     ];
 
-    private const long PositiveTtlTicks = 5 * 60 * TimeSpan.TicksPerSecond;  // 5 минут
-    private const long NegativeTtlTicks = 30 * TimeSpan.TicksPerSecond;       // 30 секунд
+    private const long PositiveTtlTicks = 5 * 60 * TimeSpan.TicksPerSecond; // 5 минут
+    private const long NegativeTtlTicks = 30 * TimeSpan.TicksPerSecond; // 30 секунд
     private const int DohTimeoutMs = 4000;
 
     /// <summary>
@@ -70,6 +70,7 @@ internal static class DohResolver
             if (host.EndsWith(FallbackDomains[i], StringComparison.OrdinalIgnoreCase))
                 return true;
         }
+
         return false;
     }
 
@@ -138,9 +139,7 @@ internal static class DohResolver
 
             // Google DNS: JSON API — проще парсить, следует CNAME автоматически
             // Cloudflare: тот же формат при Accept: application/dns-json
-            string url = endpoint.Contains("cloudflare")
-                ? $"{endpoint}?name={Uri.EscapeDataString(host)}&type=A"
-                : $"{endpoint}?name={Uri.EscapeDataString(host)}&type=A";
+            string url = $"{endpoint}?name={Uri.EscapeDataString(host)}&type=A";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Accept.Add(
@@ -211,10 +210,7 @@ internal static class DohResolver
             ConnectTimeout = TimeSpan.FromSeconds(4),
         };
 
-        return new HttpClient(handler)
-        {
-            Timeout = TimeSpan.FromSeconds(5),
-        };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5), };
     }
 
     private static string GetEndpointName(string endpoint) => endpoint switch

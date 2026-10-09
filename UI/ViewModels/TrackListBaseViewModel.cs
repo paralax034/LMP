@@ -9,8 +9,7 @@ namespace LMP.UI.ViewModels;
 /// Исключает дублирование реактивности плеера, загрузок, SIMD-фильтрации,
 /// переходов навигации и перемещения элементов.
 /// </summary>
-public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterable, ISmoothTransitionViewModel,
-    IAccountAware
+public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterable, ISmoothTransitionViewModel
 {
     protected readonly LibraryService LibService;
     protected readonly AudioEngine Audio;

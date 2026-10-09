@@ -213,7 +213,7 @@ namespace Avalonia.Layout
 
         public void EnsureElementRealized(bool forward, int dataIndex, string? layoutId)
         {
-            if (IsDataIndexRealized(dataIndex) == false)
+            if (!IsDataIndexRealized(dataIndex))
             {
                 var element = _context!.GetOrCreateElementAt(
                     dataIndex,

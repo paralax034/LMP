@@ -1273,7 +1273,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         _sharedBackend.Dispose();
         _lifetimeCts.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     /// <inheritdoc/>
@@ -1307,8 +1306,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         _sharedBackend.Dispose();
         _lifetimeCts.Dispose();
-
-        GC.SuppressFinalize(this);
     }
 
     #endregion

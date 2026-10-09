@@ -61,6 +61,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     /// Не включает сетевые ошибки — они транзиентны и не кэшируются.
     /// </summary>
     private readonly Dictionary<string, LoginRequiredReason> _restrictedTracks = [];
+
     private CancellationTokenSource? _formatsCts;
 
     private DispatcherTimer? _fallbackTimer;
@@ -71,7 +72,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private bool _isSeeking;
 
-    private int _lastVolumeBeforeMute = DefaultVolume;
+    private int _lastVolumeBeforeMute;
 
     private DateTime _trackResetStartTime;
     private string? _pendingStreamInfoTrackId;
@@ -127,7 +128,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #region Properties - Buffer Progress
 
     [ObservableProperty] public partial double BufferProgressPercent { get; private set; }
-    [ObservableProperty] public partial IReadOnlyList<(double Start, double End)> BufferedRanges { get; private set; } = [];
+
+    [ObservableProperty]
+    public partial IReadOnlyList<(double Start, double End)> BufferedRanges { get; private set; } = [];
+
     public bool UseSegmentedBuffer => BufferedRanges.Count > 1;
     [ObservableProperty] public partial bool IsFullyBuffered { get; private set; }
 
@@ -161,7 +165,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     public bool IsMuted => Volume < 1;
     public bool IsVolumeLow => Volume >= 1 && !IsReallyBoosted && _cachedEffectivePercent <= VolumeLowThresholdPercent;
-    public bool IsVolumeMedium => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeLowThresholdPercent && _cachedEffectivePercent <= VolumeMediumThresholdPercent;
+
+    public bool IsVolumeMedium => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeLowThresholdPercent &&
+                                  _cachedEffectivePercent <= VolumeMediumThresholdPercent;
+
     public bool IsVolumeHigh => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeMediumThresholdPercent;
     public bool IsVolumeBoosted => IsReallyBoosted;
 
@@ -391,7 +398,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         RaiseVolumePropertiesChanged();
         UpdateQueueState();
 
-        Log.Info($"[PlayerBar] Initialized: Vol={Volume}, MaxVol={MaxVolume}, AutoShuffle={AutoShuffleEnabled}, Repeat={RepeatMode}");
+        Log.Info(
+            $"[PlayerBar] Initialized: Vol={Volume}, MaxVol={MaxVolume}, AutoShuffle={AutoShuffleEnabled}, Repeat={RepeatMode}");
     }
 
     private void SetupCommands()
@@ -539,7 +547,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         _library.OnTrackUpdated += OnLibraryTrackUpdated;
 
         var cacheManager = AudioSourceFactory.GlobalCache
-            ?? throw new NullReferenceException("AudioSourceFactory.GlobalCache is not initialized");
+                           ?? throw new NullReferenceException("AudioSourceFactory.GlobalCache is not initialized");
 
         cacheManager.OnFormatCached += OnFormatCachedHandler;
         cacheManager.OnCacheCleared += OnCacheClearedHandler;
@@ -579,6 +587,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         {
             IsSeekBusy = false;
         }
+
         OnPropertyChanged(nameof(PlayPauseTooltip));
         if (isPlaying && IsTrackResetting)
         {
@@ -789,6 +798,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
                 adjustedRanges.Add((start, end));
             }
+
             BufferedRanges = adjustedRanges;
         }
         else
@@ -833,7 +843,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (pingMs < 200)
         {
             // Стабильный пинг: обычный цвет как у формата (TextMutedBrush), начертание по умолчанию
-            if (app?.Resources.TryGetResource("TextMutedBrush", app.ActualThemeVariant, out var b) == true && b is IBrush brush)
+            if (app?.Resources.TryGetResource("TextMutedBrush", app.ActualThemeVariant, out var b) == true &&
+                b is IBrush brush)
                 PingBrush = brush;
             else
                 PingBrush = Brushes.Gray;
@@ -843,7 +854,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         else if (pingMs < 500)
         {
             // Менее стабильный: акцентный цвет плеера, начертание по умолчанию
-            if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true && b is IBrush brush)
+            if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true &&
+                b is IBrush brush)
                 PingBrush = brush;
             else
                 PingBrush = Brushes.DodgerBlue;
@@ -853,7 +865,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         else
         {
             // Критическая задержка: системный красный цвет и сверхжирное начертание (Heavy)
-            if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true && b is IBrush brush)
+            if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true &&
+                b is IBrush brush)
                 PingBrush = brush;
             else
                 PingBrush = Brushes.Red;
@@ -970,10 +983,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void RefreshCommandStates()
     {
-        PlayPauseCommand?.NotifyCanExecuteChanged();
-        NextCommand?.NotifyCanExecuteChanged();
-        PreviousCommand?.NotifyCanExecuteChanged();
-        ToggleLikeCommand?.NotifyCanExecuteChanged();
+        PlayPauseCommand.NotifyCanExecuteChanged();
+        NextCommand.NotifyCanExecuteChanged();
+        PreviousCommand.NotifyCanExecuteChanged();
+        ToggleLikeCommand.NotifyCanExecuteChanged();
     }
 
     private void UpdateQueueState()
@@ -1001,7 +1014,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         OnPropertyChanged(nameof(CurrentTrackIndexDisplay));
         OnPropertyChanged(nameof(TrackNumberTooltip));
-        ShuffleQueueCommand?.NotifyCanExecuteChanged();
+        ShuffleQueueCommand.NotifyCanExecuteChanged();
     }
 
     private void ResetToNoTrack()
@@ -1139,7 +1152,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             // Защита от зависания состояния сброса: если звук играет дольше таймаута — принудительно сбрасываем флаг
             if (audioIsPlaying && elapsed > TimeSpan.FromSeconds(StaleResetTimeoutSec))
             {
-                Log.Warn($"[PlayerBar] TrackReset stuck for {elapsed.TotalSeconds:F1}s while audio is playing — force clearing");
+                Log.Warn(
+                    $"[PlayerBar] TrackReset stuck for {elapsed.TotalSeconds:F1}s while audio is playing — force clearing");
                 IsTrackResetting = false;
                 SyncPositionFromEngine();
                 SyncBufferState();
@@ -1158,6 +1172,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                 SyncPositionFromEngine();
                 SyncBufferState();
             }
+
             return;
         }
 
@@ -1365,8 +1380,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         // Phase 2: Explicit download — closest match по контейнеру
         bool isExplicitDownload = CurrentTrack.IsDownloaded
-            && !string.IsNullOrEmpty(CurrentTrack.LocalPath)
-            && File.Exists(CurrentTrack.LocalPath);
+                                  && !string.IsNullOrEmpty(CurrentTrack.LocalPath)
+                                  && File.Exists(CurrentTrack.LocalPath);
 
         if (isExplicitDownload)
         {
@@ -1533,6 +1548,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             {
                 _restrictedTracks.TryAdd(CurrentTrack.Id, LoginRequiredReason.Unknown);
             }
+
             await HandleMissingFormatsNotificationAsync(caughtException, errorMessage);
         }
 
@@ -1754,6 +1770,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                 cacheManager.OnCacheCleared -= OnCacheClearedHandler;
             }
         }
+
         base.Dispose(disposing);
     }
 

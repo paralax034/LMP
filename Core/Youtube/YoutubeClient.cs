@@ -81,6 +81,5 @@ public sealed class YoutubeClient : IDisposable
     public void Dispose()
     {
         if (_ownsHttpClient) _youtubeHttp.Dispose();
-        GC.SuppressFinalize(this);
     }
 }

@@ -13,12 +13,22 @@ public sealed partial class CachingStreamSource
     {
         if (cts == null) return;
 
-        ThreadPool.UnsafeQueueUserWorkItem(static async state =>
-        {
-            var (source, delay) = ((CancellationTokenSource Source, int DelayMs))state!;
-            try { await Task.Delay(delay).ConfigureAwait(false); } catch { }
-            try { source.Dispose(); } catch (ObjectDisposedException) { }
-        }, (cts, delayMs));
+        _ = Task.Delay(delayMs).ContinueWith(
+            static (_, state) =>
+            {
+                var source = (CancellationTokenSource)state!;
+                try
+                {
+                    source.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            },
+            cts,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>Отменяет все загрузки текущей эпохи и создаёт новую.</summary>
@@ -38,8 +48,13 @@ public sealed partial class CachingStreamSource
             {
                 ThreadPool.UnsafeQueueUserWorkItem(static state =>
                 {
-                    try { ((CancellationTokenSource)state!).Cancel(); }
-                    catch (ObjectDisposedException) { }
+                    try
+                    {
+                        ((CancellationTokenSource)state!).Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
                 }, oldCts);
 
                 DeferDisposeCancellationTokenSource(oldCts, DeferredEpochDisposeDelayMs);
@@ -92,20 +107,36 @@ public sealed partial class CachingStreamSource
 
         if (downloadCtsToDispose != null)
         {
-            try { downloadCtsToDispose.Cancel(); }
-            catch (ObjectDisposedException) { }
+            try
+            {
+                downloadCtsToDispose.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
 
             DeferDisposeCancellationTokenSource(downloadCtsToDispose, DeferredEpochDisposeDelayMs);
         }
 
-        try { _lifetimeCts?.Cancel(); }
-        catch (ObjectDisposedException) { }
+        try
+        {
+            _lifetimeCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     /// <summary>Общий эпилог dispose: освобождение всех ресурсов.</summary>
     private void DisposeSharedResources()
     {
-        try { _lifetimeCts?.Dispose(); } catch (ObjectDisposedException) { }
+        try
+        {
+            _lifetimeCts?.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
 
         _readStream?.Dispose();
         DisposeAllRamChunks();
@@ -117,8 +148,21 @@ public sealed partial class CachingStreamSource
             tcs?.TrySetResult(null);
         }
 
-        try { _refreshLock.Dispose(); } catch (ObjectDisposedException) { }
-        try { _downloadSlots.Dispose(); } catch (ObjectDisposedException) { }
+        try
+        {
+            _refreshLock.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        try
+        {
+            _downloadSlots.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
 
         _suspendGate.Dispose();
         _playbackGate.Dispose();
@@ -158,7 +202,9 @@ public sealed partial class CachingStreamSource
                     .WaitAsync(TimeSpan.FromMilliseconds(PreloadTaskDisposeWaitTimeoutMs))
                     .ConfigureAwait(false);
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         await DrainPendingDiskWritesAsync().ConfigureAwait(false);

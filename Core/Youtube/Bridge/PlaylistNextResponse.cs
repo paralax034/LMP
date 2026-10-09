@@ -10,25 +10,12 @@ namespace LMP.Core.Youtube.Bridge;
 /// </summary>
 internal partial class PlaylistNextResponse : IPlaylistData
 {
-    /// <inheritdoc />
     public bool IsAvailable { get; init; }
-
-    /// <inheritdoc />
     public string? Title { get; init; }
-
-    /// <inheritdoc />
     public string? Author { get; init; }
-
-    /// <inheritdoc />
     public string? ChannelId => null;
-
-    /// <inheritdoc />
     public string? Description => null;
-
-    /// <inheritdoc />
     public int? Count { get; init; }
-
-    /// <inheritdoc />
     public IReadOnlyList<ThumbnailData> Thumbnails => Videos.Count > 0 ? Videos[0].Thumbnails : [];
 
     /// <summary>

@@ -82,11 +82,16 @@ public sealed partial class AudioEngine
             if (!float.IsNaN(resolvedGain))
             {
                 pipeline.Analyzer.LockResolvedGain(resolvedGain);
-                Log.Info($"[AudioEngine] Normalization gain locked from LUFS metadata: {resolvedGain:F4}x for {trackId}");
+                Log.Info(
+                    $"[AudioEngine] Normalization gain locked from LUFS metadata: {resolvedGain:F4}x for {trackId}");
             }
-            else if (track != null && !(pipeline.Source is Audio.Sources.CachingStreamSource { IsFullyBuffered: false }))
+            else if (track != null && !(pipeline.Source is Audio.Sources.CachingStreamSource
+                     {
+                         IsFullyBuffered: false
+                     }))
             {
-                Log.Warn($"[AudioEngine] Normalization resolver returned NaN for {trackId}. EBU R128 Pre-scan is REQUIRED.");
+                Log.Warn(
+                    $"[AudioEngine] Normalization resolver returned NaN for {trackId}. EBU R128 Pre-scan is REQUIRED.");
             }
         }
 
@@ -133,16 +138,13 @@ public sealed partial class AudioEngine
     {
         if (_pendingNormalizationWrites.IsEmpty) return;
 
-        lock (_normalizationBatch)
-        {
-            _normalizationBatch.Clear();
-            while (_pendingNormalizationWrites.TryDequeue(out var pending))
-                _normalizationBatch[pending.TrackId] = (pending.IntegratedLufs, pending.Source);
-        }
+        var localBatch = new Dictionary<string, (float IntegratedLufs, LoudnessSource Source)>(StringComparer.Ordinal);
+        while (_pendingNormalizationWrites.TryDequeue(out var pending))
+            localBatch[pending.TrackId] = (pending.IntegratedLufs, pending.Source);
 
-        if (_normalizationBatch.Count == 0) return;
+        if (localBatch.Count == 0) return;
 
-        foreach (var (trackId, data) in _normalizationBatch)
+        foreach (var (trackId, data) in localBatch)
         {
             try
             {
@@ -210,7 +212,8 @@ public sealed partial class AudioEngine
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Log.Warn($"[AudioEngine] Failed to sync persist normalization metadata for {trackId}: {ex.Message}");
+                    Log.Warn(
+                        $"[AudioEngine] Failed to sync persist normalization metadata for {trackId}: {ex.Message}");
                 }
             }
         }
@@ -244,7 +247,8 @@ public sealed partial class AudioEngine
         if (float.IsNaN(gain)) return;
 
         pipeline.Analyzer.LockResolvedGain(gain);
-        Log.Info($"[AudioEngine] Normalization gain updated from YouTube LUFS: {gain:F4}x (lufs={integratedLufs:F2}) for {trackId}");
+        Log.Info(
+            $"[AudioEngine] Normalization gain updated from YouTube LUFS: {gain:F4}x (lufs={integratedLufs:F2}) for {trackId}");
     }
 
     /// <summary>

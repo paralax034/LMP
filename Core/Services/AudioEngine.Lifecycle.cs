@@ -278,14 +278,11 @@ public sealed partial class AudioEngine
 
         await _player.DisposeAsync().ConfigureAwait(false);
         _lifetimeCts.Dispose();
-
-        GC.SuppressFinalize(this);
     }
 
     public void Dispose()
     {
         Dispose(true);
-        GC.SuppressFinalize(this);
     }
 
     #endregion

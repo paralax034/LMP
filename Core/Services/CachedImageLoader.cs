@@ -61,6 +61,5 @@ public sealed class CachedImageLoader : IAsyncImageLoader
     public void Dispose()
     {
         // Ничего не делаем - ImageCacheService управляет своим lifecycle
-        GC.SuppressFinalize(this);
     }
 }

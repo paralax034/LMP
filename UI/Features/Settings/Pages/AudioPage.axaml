@@ -128,16 +128,16 @@
                 </Grid>
 
                 <Border Background="{DynamicResource BgElevatedBrush}"
-                    CornerRadius="6" Padding="12,10" Margin="0,0,0,4"
-                    IsVisible="{Binding AudioNormalizationEnabled}">
+                        CornerRadius="6" Padding="12,10" Margin="0,0,0,4"
+                        IsVisible="{Binding AudioNormalizationEnabled}">
                     <StackPanel Orientation="Horizontal" Spacing="10">
-                        <PathIcon Data="{StaticResource Icon.Info}"
-                            Width="16" Height="16"
-                            Foreground="{DynamicResource TextSecondaryBrush}"
-                            VerticalAlignment="Top" Margin="0,2,0,0" />
+                        <PathIcon Data="{StaticResource Icon.InformationOutline}"
+                                  Width="16" Height="16"
+                                  Foreground="{DynamicResource TextSecondaryBrush}"
+                                  VerticalAlignment="Top" Margin="0,2,0,0" />
                         <TextBlock Text="{Binding L[Settings_NormalizationTarget_Note]}"
-                            Foreground="{DynamicResource TextSecondaryBrush}"
-                            FontSize="12" TextWrapping="Wrap" MaxWidth="600" />
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   FontSize="12" TextWrapping="Wrap" MaxWidth="600" />
                     </StackPanel>
                 </Border>
 

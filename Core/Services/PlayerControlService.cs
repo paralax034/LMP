@@ -36,29 +36,21 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     private readonly HashSet<string> _activePlaylistTrackIds = new(StringComparer.Ordinal);
     private int _expectedPlaylistTrackCount;
 
-    [ObservableProperty]
-    public partial bool IsPlaying { get; set; }
+    [ObservableProperty] public partial bool IsPlaying { get; set; }
 
-    [ObservableProperty]
-    public partial bool IsPaused { get; set; }
+    [ObservableProperty] public partial bool IsPaused { get; set; }
 
-    [ObservableProperty]
-    public partial bool IsLoading { get; set; }
+    [ObservableProperty] public partial bool IsLoading { get; set; }
 
-    [ObservableProperty]
-    public partial TrackInfo? CurrentTrack { get; set; }
+    [ObservableProperty] public partial TrackInfo? CurrentTrack { get; set; }
 
-    [ObservableProperty]
-    public partial RepeatMode RepeatMode { get; set; }
+    [ObservableProperty] public partial RepeatMode RepeatMode { get; set; }
 
-    [ObservableProperty]
-    public partial bool ShuffleEnabled { get; set; }
+    [ObservableProperty] public partial bool ShuffleEnabled { get; set; }
 
-    [ObservableProperty]
-    public partial int QueueCount { get; set; }
+    [ObservableProperty] public partial int QueueCount { get; set; }
 
-    [ObservableProperty]
-    public partial int CurrentVolume { get; set; }
+    [ObservableProperty] public partial int CurrentVolume { get; set; }
 
     /// <summary>
     /// ID плейлиста, из которого была запущена текущая очередь.
@@ -201,7 +193,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         {
             RepeatMode.None => RepeatMode.All,
             RepeatMode.All => RepeatMode.One,
-            RepeatMode.One => RepeatMode.None,
             _ => RepeatMode.None
         };
 
@@ -303,7 +294,10 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
             _activePlaylistTrackIds.Add(effectiveTracks[i].Id);
         }
 
-        var targetStartTrack = startTrack ?? (isShuffled ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)] : effectiveTracks[0]);
+        var targetStartTrack = startTrack ??
+                               (isShuffled
+                                   ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)]
+                                   : effectiveTracks[0]);
         await _audio.StartQueueAsync(effectiveTracks, targetStartTrack).ConfigureAwait(false);
 
         UpdatePurityState();
@@ -321,8 +315,8 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     public async Task ToggleLikeAsync(TrackInfo track, CancellationToken ct = default)
     {
         var canonical = _trackRegistry?.RegisterOrUpdate(track, hasUserContext: true)
-            ?? _library.GetTrack(track.Id)
-            ?? track;
+                        ?? _library.GetTrack(track.Id)
+                        ?? track;
 
         bool targetLikedState = !canonical.IsLiked;
 
@@ -623,3 +617,4 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
     #endregion
 }
+

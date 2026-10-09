@@ -23,7 +23,8 @@ public sealed partial class AudioEngine
     {
         var requested = StreamSelectionHint.FromTrack(track, _library.Settings.RememberTrackFormat);
 
-        Log.Debug($"[AudioEngine] ResolveStreamAsync start: track={track.Id}, seek={seekPosition?.TotalMilliseconds ?? 0}ms, requestedFormat={requested.Format?.ToContainerName() ?? "-"}, requestedBitrate={requested.BitrateKbps}");
+        Log.Debug(
+            $"[AudioEngine] ResolveStreamAsync start: track={track.Id}, seek={seekPosition?.TotalMilliseconds ?? 0}ms, requestedFormat={requested.Format?.ToContainerName() ?? "-"}, requestedBitrate={requested.BitrateKbps}");
 
         var rawId = track.GetRawIdSpan().ToString();
 
@@ -63,7 +64,8 @@ public sealed partial class AudioEngine
         // --- Path 1: Full disk cache (exact match by format+bitrate bucket) ---
         if (requested.HasFormat && requested.HasBitrate)
         {
-            string exactCacheKey = AudioSourceFactory.BuildCacheKey(track.Id, requested.Format!.Value, requested.BitrateKbps);
+            string exactCacheKey =
+                AudioSourceFactory.BuildCacheKey(track.Id, requested.Format!.Value, requested.BitrateKbps);
             if (AudioSourceFactory.GlobalCache is { } exactCache && exactCache.IsFullyCached(exactCacheKey))
             {
                 var exactEntry = exactCache.GetCacheInfo(exactCacheKey);
@@ -93,7 +95,7 @@ public sealed partial class AudioEngine
         if (!requested.HasFormat)
         {
             var fullCache = AudioSourceFactory.FindAnyCachedTrack(track.Id)
-                         ?? (rawId != track.Id ? AudioSourceFactory.FindAnyCachedTrack(rawId) : null);
+                            ?? (rawId != track.Id ? AudioSourceFactory.FindAnyCachedTrack(rawId) : null);
 
             if (fullCache != null && IsCacheSizePlausible(fullCache.Value.Entry, track.Duration))
             {
@@ -213,7 +215,8 @@ public sealed partial class AudioEngine
 
         if (memDescriptor != null)
         {
-            if (memDescriptor.Value.ExpireUtc == default || DateTime.UtcNow.AddMinutes(5) < memDescriptor.Value.ExpireUtc)
+            if (memDescriptor.Value.ExpireUtc == default ||
+                DateTime.UtcNow.AddMinutes(5) < memDescriptor.Value.ExpireUtc)
             {
                 var cacheEntry = FindNormalizationCacheEntry(track.Id);
                 if (cacheEntry != null)
@@ -231,7 +234,7 @@ public sealed partial class AudioEngine
 
         // --- Path 5: YouTube API call (cold path) ---
         var freshDescriptor = await _youtube.RefreshStreamAsync(track, false, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Failed to resolve stream URL for {track.Id}");
+                              ?? throw new InvalidOperationException($"Failed to resolve stream URL for {track.Id}");
 
         Log.Info($"[AudioEngine] ResolveStreamAsync YOUTUBE API -> {freshDescriptor}");
         return freshDescriptor;
@@ -259,8 +262,8 @@ public sealed partial class AudioEngine
     }
 
     private async Task<ContinuationUrlResult?> AcquireContinuationUrlCoreAsync(
-      TrackInfo track,
-      CancellationToken ct)
+        TrackInfo track,
+        CancellationToken ct)
     {
         var requested = StreamSelectionHint.FromTrack(track, _library.Settings.RememberTrackFormat);
 
@@ -319,8 +322,8 @@ public sealed partial class AudioEngine
         if (IsSealedFailedTrack(trackId)) return null;
 
         var track = (CurrentTrack?.Id == trackId ? CurrentTrack : null)
-            ?? _trackRegistry.TryGet(trackId)
-            ?? await _library.GetTrackAsync(trackId, ct).ConfigureAwait(false);
+                    ?? _trackRegistry.TryGet(trackId)
+                    ?? await _library.GetTrackAsync(trackId, ct).ConfigureAwait(false);
 
         if (track == null || IsSealedFailedTrack(trackId)) return null;
 
@@ -334,9 +337,9 @@ public sealed partial class AudioEngine
 
             Log.Info($"[AudioEngine] 403 refresh: per-track caches invalidated for {trackId}");
 
-            var descriptor = await Task.Run(
-                () => _youtube.RefreshStreamAsync(track, false, linked.Token),
-                linked.Token).ConfigureAwait(false);
+            var descriptor = await _youtube
+                .RefreshStreamAsync(track, false, linked.Token)
+                .ConfigureAwait(false);
 
             if (descriptor is { HasLiveUrl: true })
             {
@@ -346,15 +349,15 @@ public sealed partial class AudioEngine
 
             Log.Warn($"[AudioEngine] Soft refresh failed for {trackId}, falling back to force refresh");
 
-            descriptor = await Task.Run(
-                () => _youtube.RefreshStreamAsync(track, true, linked.Token),
-                linked.Token).ConfigureAwait(false);
+            descriptor = await _youtube
+                .RefreshStreamAsync(track, true, linked.Token)
+                .ConfigureAwait(false);
 
             return descriptor is { HasLiveUrl: true } ? descriptor.Value.Url : null;
         }
         catch (Exception) when (linked.IsCancellationRequested
-            || sessionToken.IsCancellationRequested
-            || !string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal))
+                                || sessionToken.IsCancellationRequested
+                                || !string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal))
         {
             return null;
         }
@@ -372,8 +375,8 @@ public sealed partial class AudioEngine
             return null;
 
         var track = (CurrentTrack?.Id == trackId ? CurrentTrack : null)
-            ?? _trackRegistry.TryGet(trackId)
-            ?? await _library.GetTrackAsync(trackId, ct).ConfigureAwait(false);
+                    ?? _trackRegistry.TryGet(trackId)
+                    ?? await _library.GetTrackAsync(trackId, ct).ConfigureAwait(false);
 
         if (track == null || IsSealedFailedTrack(trackId))
             return null;
@@ -560,9 +563,9 @@ public sealed partial class AudioEngine
     }
 
     private static bool IsContinuationVariantCompatible(
-         AudioCacheEntry expectedEntry,
-         AudioFormat format,
-         int bitrate)
+        AudioCacheEntry expectedEntry,
+        AudioFormat format,
+        int bitrate)
     {
         if (format == AudioFormat.Unknown)
             return false;
@@ -582,9 +585,9 @@ public sealed partial class AudioEngine
     }
 
     private bool TryGetCompatibleContinuationUrl(
-     TrackInfo track,
-     AudioCacheEntry expectedEntry,
-     out string url)
+        TrackInfo track,
+        AudioCacheEntry expectedEntry,
+        out string url)
     {
         url = string.Empty;
 

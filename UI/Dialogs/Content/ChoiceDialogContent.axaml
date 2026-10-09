@@ -1,7 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:dialogs="using:LMP.UI.Dialogs"
-    xmlns:content="using:LMP.UI.Dialogs.Content"
     x:Class="LMP.UI.Dialogs.Content.ChoiceDialogContent"
     x:DataType="dialogs:ChoiceDialogViewModel">
 

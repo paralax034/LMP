@@ -80,7 +80,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
             mutex = new Mutex(true, MutexName, out _);
         }
 
-        if (isOnlyInstance && mutex != null)
+        if (isOnlyInstance)
             return new SingleInstanceGuard(mutex);
 
         mutex?.Dispose();
@@ -113,14 +113,13 @@ public sealed partial class SingleInstanceGuard : IDisposable
                     }
                 }
 
-                if (isOnlyInstance && mutex != null)
+                if (isOnlyInstance)
                     return new SingleInstanceGuard(mutex);
             }
             catch (AbandonedMutexException)
             {
                 mutex = new Mutex(true, MutexName, out _);
-                if (mutex != null)
-                    return new SingleInstanceGuard(mutex);
+                return new SingleInstanceGuard(new Mutex(true, MutexName, out _));
             }
             finally
             {
@@ -220,6 +219,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
                     {
                         proc.Dispose();
                     }
+
                     continue;
                 }
 
@@ -266,12 +266,13 @@ public sealed partial class SingleInstanceGuard : IDisposable
     private static bool PromptTerminateExistingProcess()
     {
         string title = "Lite Music Player";
-        string question = "Lite Music Player is already running.\n\nWould you like to terminate the existing instance and start a new one?";
+        string question =
+            "Lite Music Player is already running.\n\nWould you like to terminate the existing instance and start a new one?";
 
         try
         {
             BootstrapSettings.Initialize();
-            var lang = BootstrapSettings.Current.LanguageCode ?? "en";
+            var lang = BootstrapSettings.Current.LanguageCode;
             LocalizationService.Instance.Initialize(lang);
 
             var locTitle = LocalizationService.Instance["Notification_AlreadyRunning_Title"];
@@ -288,7 +289,8 @@ public sealed partial class SingleInstanceGuard : IDisposable
 
         if (OperatingSystem.IsWindows())
         {
-            int result = MessageBox(IntPtr.Zero, question, title, MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND);
+            int result = MessageBox(IntPtr.Zero, question, title,
+                MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND);
             return result == IDYES;
         }
 
@@ -296,7 +298,8 @@ public sealed partial class SingleInstanceGuard : IDisposable
         {
             try
             {
-                var script = $"display dialog \"{EscapeAppleScript(question)}\" with title \"{EscapeAppleScript(title)}\" buttons {{\"No\", \"Yes\"}} default button \"Yes\" with icon caution";
+                var script =
+                    $"display dialog \"{EscapeAppleScript(question)}\" with title \"{EscapeAppleScript(title)}\" buttons {{\"No\", \"Yes\"}} default button \"Yes\" with icon caution";
                 using var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = "osascript",
@@ -313,7 +316,9 @@ public sealed partial class SingleInstanceGuard : IDisposable
                     return output.Contains("button returned:Yes", StringComparison.OrdinalIgnoreCase);
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -322,7 +327,8 @@ public sealed partial class SingleInstanceGuard : IDisposable
                 using var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = "zenity",
-                    Arguments = $"--question --title=\"{EscapeShell(title)}\" --text=\"{EscapeShell(question)}\" --ok-label=\"Yes\" --cancel-label=\"No\"",
+                    Arguments =
+                        $"--question --title=\"{EscapeShell(title)}\" --text=\"{EscapeShell(question)}\" --ok-label=\"Yes\" --cancel-label=\"No\"",
                     UseShellExecute = false,
                     CreateNoWindow = true
                 });
@@ -333,7 +339,9 @@ public sealed partial class SingleInstanceGuard : IDisposable
                     return proc.ExitCode == 0;
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return false;
@@ -373,25 +381,26 @@ public sealed partial class SingleInstanceGuard : IDisposable
     {
         IntPtr result = IntPtr.Zero;
 
-        EnumWindows((hWnd, _) =>
+        EnumWindows((hWnd, lParam) =>
+        {
+            GetWindowThreadProcessId(hWnd, out uint pid);
+            if (pid == (uint)processId)
             {
-                _ = GetWindowThreadProcessId(hWnd, out uint pid);
-                if (pid == (uint)processId)
-                {
-                    result = hWnd;
-                    return false;
-                }
-                return true;
-            }, IntPtr.Zero);
+                result = hWnd;
+                return false;
+            }
+
+            return true;
+        }, IntPtr.Zero);
 
         return result;
     }
 
     private static string EscapeShell(string s) =>
-        s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
+        s.Replace("\\", @"\\\\").Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
 
     private static string EscapeAppleScript(string s) =>
-        s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        s.Replace("\\", @"\\\\").Replace("\"", "\\\"");
 
     #region Win32 P/Invoke
 
@@ -428,10 +437,17 @@ public sealed partial class SingleInstanceGuard : IDisposable
             _serverCts.Cancel();
             _serverCts.Dispose();
         }
-        catch { }
+        catch
+        {
+        }
 
-        try { _mutex.ReleaseMutex(); }
-        catch { }
+        try
+        {
+            _mutex.ReleaseMutex();
+        }
+        catch
+        {
+        }
 
         _mutex.Dispose();
     }

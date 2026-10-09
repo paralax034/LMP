@@ -136,7 +136,8 @@ public sealed class PlaylistSyncService
             // Деструктивный даунгрейд допустим только при подтвержденных ошибках 404/Unavailable в блоках catch.
             if (string.IsNullOrEmpty(fullData.Title) && fullData.Tracks.Count == 0)
             {
-                Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) received empty metadata from cloud. Marking unavailable without downgrade.");
+                Log.Warn(
+                    $"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) received empty metadata from cloud. Marking unavailable without downgrade.");
                 playlist.IsCloudUnavailable = true;
                 await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
                 return null;
@@ -183,13 +184,15 @@ public sealed class PlaylistSyncService
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) returned 404 Not Found. Downgrading to LocalOnly...");
+            Log.Warn(
+                $"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) returned 404 Not Found. Downgrading to LocalOnly...");
             await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
             return null;
         }
         catch (PlaylistUnavailableException)
         {
-            Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) is unavailable. Downgrading to LocalOnly...");
+            Log.Warn(
+                $"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) is unavailable. Downgrading to LocalOnly...");
             await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
             return null;
         }
@@ -199,8 +202,15 @@ public sealed class PlaylistSyncService
             if (ex is HttpRequestException)
             {
                 playlist.IsCloudUnavailable = true;
-                try { await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false); } catch { }
+                try
+                {
+                    await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                }
             }
+
             return null;
         }
     }
@@ -224,14 +234,16 @@ public sealed class PlaylistSyncService
             int addedLocally = 0, addedToCloud = 0, removedLocally = 0, removedFromCloud = 0;
 
             var cloudData = preview.CachedCloudData
-                ?? await _youtube.GetFullPlaylistDataAsync(playlist.YoutubeId!, ct).ConfigureAwait(false);
+                            ?? await _youtube.GetFullPlaylistDataAsync(playlist.YoutubeId!, ct).ConfigureAwait(false);
 
             if (options.SyncTracks && cloudData != null)
             {
                 (addedLocally, addedToCloud, removedLocally, removedFromCloud) = options.Strategy switch
                 {
-                    PlaylistSyncStrategy.ReplaceLocal => await ReplaceLocalTracksAsync(playlist, cloudData, ct).ConfigureAwait(false),
-                    PlaylistSyncStrategy.ReplaceCloud => await ReplaceCloudTracksAsync(playlist, cloudData, ct).ConfigureAwait(false),
+                    PlaylistSyncStrategy.ReplaceLocal => await ReplaceLocalTracksAsync(playlist, cloudData, ct)
+                        .ConfigureAwait(false),
+                    PlaylistSyncStrategy.ReplaceCloud => await ReplaceCloudTracksAsync(playlist, cloudData, ct)
+                        .ConfigureAwait(false),
                     PlaylistSyncStrategy.Merge => await MergeTracksAsync(playlist, cloudData, ct).ConfigureAwait(false),
                     _ => (0, 0, 0, 0)
                 };
@@ -429,14 +441,17 @@ public sealed class PlaylistSyncService
     /// <summary>
     /// Пакетно добавляет треки в облачный плейлист.
     /// </summary>
-    public async Task AddTracksToCloudAsync(Playlist playlist, IReadOnlyList<string> trackIds, CancellationToken ct = default)
+    public async Task AddTracksToCloudAsync(Playlist playlist, IReadOnlyList<string> trackIds,
+        CancellationToken ct = default)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
+        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) ||
+            !_auth.IsAuthenticated)
             return;
 
         try
         {
-            var newSetVideoIds = await _youtube.AddTracksToPlaylistAsync(playlist.YoutubeId, trackIds).ConfigureAwait(false);
+            var newSetVideoIds =
+                await _youtube.AddTracksToPlaylistAsync(playlist.YoutubeId, trackIds).ConfigureAwait(false);
             var mappings = new List<(string TrackId, string SetVideoId)>(newSetVideoIds.Count);
 
             for (int i = 0; i < newSetVideoIds.Count && i < trackIds.Count; i++)
@@ -464,7 +479,8 @@ public sealed class PlaylistSyncService
     /// <summary>
     /// Получает сохраненный `setVideoId` или извлекает его через API YouTube, если он не сохранен.
     /// </summary>
-    public async Task<string?> GetOrFetchSetVideoIdAsync(Playlist playlist, string trackId, CancellationToken ct = default)
+    public async Task<string?> GetOrFetchSetVideoIdAsync(Playlist playlist, string trackId,
+        CancellationToken ct = default)
     {
         bool needsYoutubeSync = (playlist.CanSyncToCloud || playlist.SyncMode == PlaylistSyncMode.TwoWaySync)
                                 && !string.IsNullOrEmpty(playlist.YoutubeId)
@@ -518,7 +534,8 @@ public sealed class PlaylistSyncService
     /// <returns>Задача, представляющая асинхронную операцию удаления треков.</returns>
     public async Task RemoveTracksFromCloudAsync(Playlist playlist, IReadOnlyList<string> setVideoIds)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated || setVideoIds.Count == 0)
+        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) ||
+            !_auth.IsAuthenticated || setVideoIds.Count == 0)
             return;
 
         try
@@ -534,12 +551,15 @@ public sealed class PlaylistSyncService
     /// <summary>
     /// Изменяет порядок трека в облачном плейлисте.
     /// </summary>
-    public async Task MoveTrackInCloudAsync(Playlist playlist, string movingTrackId, int newIndex, List<string> newTrackIdsOrder, CancellationToken ct = default)
+    public async Task MoveTrackInCloudAsync(Playlist playlist, string movingTrackId, int newIndex,
+        List<string> newTrackIdsOrder, CancellationToken ct = default)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
+        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) ||
+            !_auth.IsAuthenticated)
             return;
 
-        var movingSetVideoId = await _playlists.GetSetVideoIdAsync(playlist.Id, movingTrackId, ct).ConfigureAwait(false);
+        var movingSetVideoId =
+            await _playlists.GetSetVideoIdAsync(playlist.Id, movingTrackId, ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(movingSetVideoId)) return;
 
         string? predecessor = null;
@@ -548,11 +568,13 @@ public sealed class PlaylistSyncService
         if (newIndex == 0)
         {
             if (newTrackIdsOrder.Count > 1)
-                successor = await _playlists.GetSetVideoIdAsync(playlist.Id, newTrackIdsOrder[1], ct).ConfigureAwait(false);
+                successor = await _playlists.GetSetVideoIdAsync(playlist.Id, newTrackIdsOrder[1], ct)
+                    .ConfigureAwait(false);
         }
         else
         {
-            predecessor = await _playlists.GetSetVideoIdAsync(playlist.Id, newTrackIdsOrder[newIndex - 1], ct).ConfigureAwait(false);
+            predecessor = await _playlists.GetSetVideoIdAsync(playlist.Id, newTrackIdsOrder[newIndex - 1], ct)
+                .ConfigureAwait(false);
         }
 
         if (!string.IsNullOrEmpty(predecessor) || !string.IsNullOrEmpty(successor))
@@ -583,7 +605,8 @@ public sealed class PlaylistSyncService
         playlist.IsCloudUnavailable = false;
         await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
 
-        Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' (ID: {playlist.Id}) returned 404. Converted to LocalOnly.");
+        Log.Warn(
+            $"[PlaylistSync] Playlist '{playlist.Name}' (ID: {playlist.Id}) returned 404. Converted to LocalOnly.");
 
         await _notifications.ShowToastAsync(
             titleKey: "Dialog_Warning_Title",
@@ -595,10 +618,10 @@ public sealed class PlaylistSyncService
     }
 
     private async Task<bool> SyncMetadataAsync(
-          Playlist playlist,
-          PlaylistSyncPreview preview,
-          PlaylistSyncOptions options,
-          CancellationToken ct)
+        Playlist playlist,
+        PlaylistSyncPreview preview,
+        PlaylistSyncOptions options,
+        CancellationToken ct)
     {
         bool changed = false;
         bool isCloudSource = options.Strategy == PlaylistSyncStrategy.ReplaceLocal;
@@ -612,8 +635,14 @@ public sealed class PlaylistSyncService
             }
             else
             {
-                try { await _youtube.RenamePlaylistAsync(playlist.YoutubeId!, playlist.Name).ConfigureAwait(false); }
-                catch (Exception ex) { Log.Error($"[PlaylistSync] Rename on YouTube failed: {ex.Message}"); }
+                try
+                {
+                    await _youtube.RenamePlaylistAsync(playlist.YoutubeId!, playlist.Name).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[PlaylistSync] Rename on YouTube failed: {ex.Message}");
+                }
             }
         }
 
@@ -631,7 +660,10 @@ public sealed class PlaylistSyncService
                     var targetDesc = playlist.Description?.Trim() ?? string.Empty;
                     await _youtube.EditPlaylistDescriptionAsync(playlist.YoutubeId!, targetDesc).ConfigureAwait(false);
                 }
-                catch (Exception ex) { Log.Error($"[PlaylistSync] Description update on YouTube failed: {ex.Message}"); }
+                catch (Exception ex)
+                {
+                    Log.Error($"[PlaylistSync] Description update on YouTube failed: {ex.Message}");
+                }
             }
         }
 
@@ -652,13 +684,17 @@ public sealed class PlaylistSyncService
             {
                 try
                 {
-                    var uploaded = await UploadThumbnailToYoutubeAsync(playlist.YoutubeId!, playlist.ThumbnailUrl, ct).ConfigureAwait(false);
+                    var uploaded = await UploadThumbnailToYoutubeAsync(playlist.YoutubeId!, playlist.ThumbnailUrl, ct)
+                        .ConfigureAwait(false);
                     if (uploaded)
                     {
                         changed = true;
                     }
                 }
-                catch (Exception ex) { Log.Error($"[PlaylistSync] Thumbnail upload failed: {ex.Message}"); }
+                catch (Exception ex)
+                {
+                    Log.Error($"[PlaylistSync] Thumbnail upload failed: {ex.Message}");
+                }
             }
             else if (string.IsNullOrEmpty(playlist.ThumbnailUrl) && !string.IsNullOrEmpty(preview.CloudThumbnailUrl))
             {
@@ -675,8 +711,6 @@ public sealed class PlaylistSyncService
         ReplaceLocalTracksAsync(Playlist playlist, FullPlaylistSyncData fullData, CancellationToken ct)
     {
         var localTrackIds = await _playlists.GetTrackIdsAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-
-        if (fullData == null) return (0, 0, 0, 0);
 
         int removedLocally = 0;
         for (int i = 0; i < localTrackIds.Count; i++)
@@ -713,8 +747,6 @@ public sealed class PlaylistSyncService
     {
         var youtubeId = playlist.YoutubeId!;
         var localTrackIds = await _playlists.GetTrackIdsAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-
-        if (fullData == null) return (0, 0, 0, 0);
 
         var localRawIdMap = new Dictionary<string, string>(localTrackIds.Count, StringComparer.Ordinal);
         for (int i = 0; i < localTrackIds.Count; i++)
@@ -849,8 +881,6 @@ public sealed class PlaylistSyncService
         var youtubeId = playlist.YoutubeId!;
         var localTrackIds = await _playlists.GetTrackIdsAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
 
-        if (fullData == null) return (0, 0, 0, 0);
-
         var localIdSet = new HashSet<string>(localTrackIds, StringComparer.Ordinal);
         var cloudIdSet = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
         for (int i = 0; i < fullData.Tracks.Count; i++)
@@ -872,7 +902,8 @@ public sealed class PlaylistSyncService
                 var track = CreateTrackInfo(remote);
                 var canonical = _registry.RegisterOrUpdate(track);
                 await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
-                await _playlists.AddTrackAsync(playlist.Id, canonical.Id, CurrentOwnerId, null, ct).ConfigureAwait(false);
+                await _playlists.AddTrackAsync(playlist.Id, canonical.Id, CurrentOwnerId, null, ct)
+                    .ConfigureAwait(false);
                 addedLocally++;
             }
         }
@@ -919,7 +950,8 @@ public sealed class PlaylistSyncService
     /// Выполняет загрузку пользовательской обложки плейлиста на серверы YouTube через Scotty Upload Protocol.
     /// Игнорирует изображения, уже размещенные на CDN YouTube, и безопасно обрабатывает ошибки недоступности источника.
     /// </summary>
-    private async Task<bool> UploadThumbnailToYoutubeAsync(string youtubePlaylistId, string thumbnailUrl, CancellationToken ct)
+    private async Task<bool> UploadThumbnailToYoutubeAsync(string youtubePlaylistId, string thumbnailUrl,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(thumbnailUrl) || string.IsNullOrWhiteSpace(youtubePlaylistId))
             return false;
@@ -942,7 +974,8 @@ public sealed class PlaylistSyncService
             {
                 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-                imageData = await _networkManager.ImageClient.GetByteArrayAsync(thumbnailUrl, linkedCts.Token).ConfigureAwait(false);
+                imageData = await _networkManager.ImageClient.GetByteArrayAsync(thumbnailUrl, linkedCts.Token)
+                    .ConfigureAwait(false);
             }
             else if (thumbnailUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
             {
