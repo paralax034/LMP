@@ -1,17 +1,18 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:svm="using:LMP.UI.Features.Shared"
-    xmlns:ctrl="using:LMP.UI.Controls"
-    xmlns:ir="using:Avalonia.Controls"
-    x:Class="LMP.UI.Controls.TrackListControl"
-    x:Name="Root"
-    Focusable="True">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svm="using:LMP.UI.Features.Shared"
+             xmlns:ctrl="using:LMP.UI.Controls"
+             xmlns:ir="using:Avalonia.Controls"
+             x:Class="LMP.UI.Controls.TrackListControl"
+             x:Name="Root"
+             x:DataType="ctrl:TrackListControl"
+             Focusable="True">
 
     <UserControl.Resources>
         <MenuFlyout x:Key="SharedTrackMenuFlyout"
-            x:DataType="svm:TrackItemViewModel"
-            Opened="OnMenuFlyoutOpened"
-            Closed="OnMenuFlyoutClosed">
+                    x:DataType="svm:TrackItemViewModel"
+                    Opened="OnMenuFlyoutOpened"
+                    Closed="OnMenuFlyoutClosed">
 
             <MenuItem Header="{Binding L[Player_Play]}" Command="{Binding PlayCommand}">
                 <MenuItem.Icon>
@@ -19,7 +20,7 @@
                 </MenuItem.Icon>
             </MenuItem>
             <MenuItem Header="{Binding L[Queue_Add]}" Command="{Binding AddToQueueCommand}"
-                IsVisible="{Binding ShowAddToQueue}">
+                      IsVisible="{Binding ShowAddToQueue}">
                 <MenuItem.Icon>
                     <PathIcon Data="{StaticResource Icon.PlaylistPlus}" Width="16" Height="16" />
                 </MenuItem.Icon>
@@ -27,20 +28,20 @@
 
             <!-- КАСКАДНОЕ ИНТЕРАКТИВНОЕ СУБМЕНЮ УПРАВЛЕНИЯ ПРИНАДЛЕЖНОСТЬЮ К ПЛЕЙЛИСТАМ -->
             <MenuItem Classes="playlist-submenu-root"
-                Header="{Binding AddToPlaylistHeader}"
-                ItemsSource="{Binding PlaylistMenuItems}">
+                      Header="{Binding AddToPlaylistHeader}"
+                      ItemsSource="{Binding PlaylistMenuItems}">
                 <MenuItem.Icon>
                     <PathIcon Data="{StaticResource Icon.PlaylistMusic}" Width="16" Height="16" />
                 </MenuItem.Icon>
                 <MenuItem.Styles>
                     <Style Selector="MenuItem.playlist-submenu-root MenuItem"
-                        x:DataType="svm:PlaylistMenuItemViewModel">
+                           x:DataType="svm:PlaylistMenuItemViewModel">
                         <Setter Property="Header" Value="{Binding Name}" />
                         <Setter Property="Icon">
                             <Template>
                                 <PathIcon Data="{Binding IconGeometry}" Width="14" Height="14"
-                                    Foreground="{DynamicResource AccentBrush}"
-                                    IsVisible="{Binding IconGeometry, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                          Foreground="{DynamicResource AccentBrush}"
+                                          IsVisible="{Binding IconGeometry, Converter={x:Static ObjectConverters.IsNotNull}}" />
                             </Template>
                         </Setter>
                         <Setter Property="Command" Value="{Binding Command}" />
@@ -72,16 +73,16 @@
             </MenuItem>
 
             <MenuItem Header="{Binding DownloadStatusText}"
-                Command="{Binding SaveToDownloadsCommand}"
-                IsEnabled="False"
-                IsVisible="{Binding IsDownloaded}">
+                      Command="{Binding SaveToDownloadsCommand}"
+                      IsEnabled="False"
+                      IsVisible="{Binding IsDownloaded}">
                 <MenuItem.Icon>
                     <PathIcon Data="{StaticResource Icon.CheckCircle}" Width="16" Height="16" />
                 </MenuItem.Icon>
             </MenuItem>
             <MenuItem Header="{Binding DownloadStatusText}"
-                Command="{Binding SaveToDownloadsCommand}"
-                IsVisible="{Binding !IsDownloaded}">
+                      Command="{Binding SaveToDownloadsCommand}"
+                      IsVisible="{Binding !IsDownloaded}">
                 <MenuItem.Icon>
                     <PathIcon Data="{StaticResource Icon.Download}" Width="16" Height="16" />
                 </MenuItem.Icon>
@@ -89,16 +90,16 @@
 
             <Separator Classes="menu-separator" IsVisible="{Binding IsPlaylistContext}" />
             <MenuItem Header="{Binding L[Playlist_RemoveFrom]}" Classes="danger"
-                Command="{Binding RemoveFromPlaylistCommand}"
-                IsVisible="{Binding IsPlaylistContext}">
+                      Command="{Binding RemoveFromPlaylistCommand}"
+                      IsVisible="{Binding IsPlaylistContext}">
                 <MenuItem.Icon>
                     <PathIcon Data="{StaticResource Icon.PlaylistRemove}" Width="16" Height="16" />
                 </MenuItem.Icon>
             </MenuItem>
             <Separator Classes="menu-separator" IsVisible="{Binding IsQueueContext}" />
             <MenuItem Header="{Binding L[Queue_Remove]}" Classes="danger"
-                Command="{Binding RemoveFromQueueCommand}"
-                IsVisible="{Binding IsQueueContext}">
+                      Command="{Binding RemoveFromQueueCommand}"
+                      IsVisible="{Binding IsQueueContext}">
                 <MenuItem.Icon>
                     <PathIcon Data="{StaticResource Icon.Close}" Width="16" Height="16" />
                 </MenuItem.Icon>
@@ -109,44 +110,43 @@
     <DockPanel
         Background="Transparent"
         PointerPressed="OnRootPointerPressed"
-        DragDrop.AllowDrop="{Binding EnableReordering, ElementName=Root}">
+        DragDrop.AllowDrop="{Binding #Root.EnableReordering}">
 
         <!-- FOOTER -->
         <StackPanel DockPanel.Dock="Bottom"
-            Margin="0,8,0,80"
-            DataContext="{Binding #Root}"
-            IsHitTestVisible="False"
-            IsVisible="{Binding IsLoaderOrFooterVisible}">
+                    Margin="0,8,0,80"
+                    IsHitTestVisible="False"
+                    IsVisible="{Binding #Root.IsLoaderOrFooterVisible}">
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                Margin="0,16,0,24" Opacity="0.6"
-                IsVisible="{Binding IsFetchingFromNetwork}">
-                <TextBlock Text="{Binding LoadingMoreText}" FontSize="13"
-                    Foreground="{DynamicResource TextMutedBrush}" />
+                        Margin="0,16,0,24" Opacity="0.6"
+                        IsVisible="{Binding #Root.IsFetchingFromNetwork}">
+                <TextBlock Text="{Binding #Root.LoadingMoreText}" FontSize="13"
+                           Foreground="{DynamicResource TextMutedBrush}" />
                 <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
-                    Classes="loading-dot1" Margin="2,0,0,0" />
+                           Classes="loading-dot1" Margin="2,0,0,0" />
                 <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
-                    Classes="loading-dot2" />
+                           Classes="loading-dot2" />
                 <TextBlock Text="." FontSize="13" Foreground="{DynamicResource AccentBrush}"
-                    Classes="loading-dot3" />
+                           Classes="loading-dot3" />
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" Spacing="8"
-                IsVisible="{Binding IsFooterVisible}"
-                Margin="0,16,0,32" HorizontalAlignment="Center" Opacity="0.5">
+                        IsVisible="{Binding #Root.IsFooterVisible}"
+                        Margin="0,16,0,32" HorizontalAlignment="Center" Opacity="0.5">
                 <PathIcon Data="{StaticResource Icon.CheckCircle}" Width="16" Height="16"
-                    Foreground="{DynamicResource TextMutedBrush}" />
-                <TextBlock Text="{Binding EndOfListText}"
-                    Foreground="{DynamicResource TextMutedBrush}" FontSize="13" />
+                          Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock Text="{Binding #Root.EndOfListText}"
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="13" />
             </StackPanel>
         </StackPanel>
 
         <!-- ITEMS REPEATER -->
         <Panel>
             <ir:ItemsRepeater x:Name="MainRepeater"
-                ItemsSource="{Binding Items, ElementName=Root}"
-                TextOptions.BaselinePixelAlignment="Unaligned"
-                TextOptions.TextHintingMode="None">
+                              ItemsSource="{Binding #Root.Items}"
+                              TextOptions.BaselinePixelAlignment="Unaligned"
+                              TextOptions.TextHintingMode="None">
 
                 <ir:ItemsRepeater.Layout>
                     <StackLayout Spacing="0" EstimatedItemSize="62" />
@@ -155,57 +155,57 @@
                 <ir:ItemsRepeater.ItemTemplate>
                     <DataTemplate x:DataType="svm:TrackItemViewModel">
                         <Border Classes="track-row"
-                            Classes.is-active="{Binding IsActive}"
-                            Classes.is-playing="{Binding IsPlaying}"
-                            Classes.is-selected="{Binding IsSelected}"
-                            Classes.menu-open="{Binding IsMenuOpen}"
-                            Height="60"
-                            Background="Transparent"
-                            UseLayoutRounding="True"
-                            PointerPressed="OnItemPointerPressed"
-                            PointerMoved="OnItemPointerMoved"
-                            PointerReleased="OnItemPointerReleased"
-                            DoubleTapped="OnItemDoubleTapped">
+                                Classes.is-active="{Binding IsActive}"
+                                Classes.is-playing="{Binding IsPlaying}"
+                                Classes.is-selected="{Binding IsSelected}"
+                                Classes.menu-open="{Binding IsMenuOpen}"
+                                Height="60"
+                                Background="Transparent"
+                                UseLayoutRounding="True"
+                                PointerPressed="OnItemPointerPressed"
+                                PointerMoved="OnItemPointerMoved"
+                                PointerReleased="OnItemPointerReleased"
+                                DoubleTapped="OnItemDoubleTapped">
 
                             <Panel Background="Transparent">
                                 <Grid ColumnDefinitions="52, *, 44, 40, 56"
-                                    Background="Transparent">
+                                      Background="Transparent">
 
                                     <!-- COL 0: ОБЛОЖКА / КНОПКА PLAY -->
                                     <Button Grid.Column="0"
-                                        Classes="cover-btn"
-                                        Width="44" Height="44"
-                                        Margin="8,0,0,0"
-                                        VerticalAlignment="Center"
-                                        Background="{DynamicResource BgSkeletonBrush}"
-                                        Command="{Binding PlayCommand}"
-                                        ToolTip.Tip="{Binding L[Player_Play]}">
+                                            Classes="cover-btn"
+                                            Width="44" Height="44"
+                                            Margin="8,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Background="{DynamicResource BgSkeletonBrush}"
+                                            Command="{Binding PlayCommand}"
+                                            ToolTip.Tip="{Binding L[Player_Play]}">
                                         <Panel>
                                             <Image Stretch="UniformToFill"
-                                                RenderOptions.BitmapInterpolationMode="LowQuality"
-                                                ctrl:SmartImage.Quality="Low"
-                                                ctrl:SmartImage.Debounce="80"
-                                                ctrl:SmartImage.Source="{Binding ThumbnailUrl}" />
+                                                   RenderOptions.BitmapInterpolationMode="LowQuality"
+                                                   ctrl:SmartImage.Quality="Low"
+                                                   ctrl:SmartImage.Debounce="80"
+                                                   ctrl:SmartImage.Source="{Binding ThumbnailUrl}" />
 
                                             <Border Classes="cover-overlay"
-                                                Background="{DynamicResource BgOverlayBrush}"
-                                                IsHitTestVisible="False">
+                                                    Background="{DynamicResource BgOverlayBrush}"
+                                                    IsHitTestVisible="False">
                                                 <PathIcon Width="24" Height="24"
-                                                    Classes.playing="{Binding IsPlaying}"
-                                                    Foreground="{DynamicResource TextPrimaryBrush}"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center" />
+                                                          Classes.playing="{Binding IsPlaying}"
+                                                          Foreground="{DynamicResource TextPrimaryBrush}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center" />
                                             </Border>
                                         </Panel>
                                     </Button>
 
                                     <!-- COL 1: НАЗВАНИЕ + АВТОР -->
                                     <StackPanel Grid.Column="1"
-                                        Orientation="Vertical"
-                                        VerticalAlignment="Center"
-                                        Margin="12,0"
-                                        Spacing="2"
-                                        IsHitTestVisible="False">
+                                                Orientation="Vertical"
+                                                VerticalAlignment="Center"
+                                                Margin="12,0"
+                                                Spacing="2"
+                                                IsHitTestVisible="False">
                                         <TextBlock
                                             Text="{Binding Title}"
                                             Classes="track-title"
@@ -224,10 +224,10 @@
 
                                     <!-- COL 2: СТАТУС КЭША / ЗАГРУЗКА -->
                                     <Panel Grid.Column="2"
-                                        Width="32" Height="16"
-                                        VerticalAlignment="Center"
-                                        Margin="6,0"
-                                        IsHitTestVisible="False">
+                                           Width="32" Height="16"
+                                           VerticalAlignment="Center"
+                                           Margin="6,0"
+                                           IsHitTestVisible="False">
 
                                         <PathIcon
                                             Width="16" Height="16"
@@ -262,50 +262,50 @@
 
                                     <!-- COL 3: ЛАЙК -->
                                     <Button Grid.Column="3"
-                                        Classes="like-btn"
-                                        Classes.is-liked="{Binding IsLiked}"
-                                        Width="28" Height="28"
-                                        VerticalAlignment="Center"
-                                        Margin="6,0"
-                                        Command="{Binding ToggleLikeCommand}"
-                                        ToolTip.Tip="{Binding L[Track_ToggleLike]}">
+                                            Classes="like-btn"
+                                            Classes.is-liked="{Binding IsLiked}"
+                                            Width="28" Height="28"
+                                            VerticalAlignment="Center"
+                                            Margin="6,0"
+                                            Command="{Binding ToggleLikeCommand}"
+                                            ToolTip.Tip="{Binding L[Track_ToggleLike]}">
                                         <PathIcon Width="16" Height="16" IsHitTestVisible="False" />
                                     </Button>
 
                                     <!-- COL 4: ВРЕМЯ И ОПЦИИ -->
                                     <TextBlock Grid.Column="4"
-                                        Classes="duration-text"
-                                        Width="46"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Center"
-                                        Margin="0,0,10,0"
-                                        TextAlignment="Center"
-                                        Foreground="{DynamicResource TextMutedBrush}"
-                                        FontSize="12"
-                                        Text="{Binding FormattedDuration}"
-                                        IsHitTestVisible="False" />
+                                               Classes="duration-text"
+                                               Width="46"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,10,0"
+                                               TextAlignment="Center"
+                                               Foreground="{DynamicResource TextMutedBrush}"
+                                               FontSize="12"
+                                               Text="{Binding FormattedDuration}"
+                                               IsHitTestVisible="False" />
 
                                     <Button Grid.Column="4"
-                                        Classes="more-btn"
-                                        Classes.active="{Binding IsMenuOpen}"
-                                        Width="32" Height="32"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Center"
-                                        Margin="0,0,8,0"
-                                        Click="OnMoreButtonClicked"
-                                        ToolTip.Tip="{Binding L[Track_MoreOptions]}">
+                                            Classes="more-btn"
+                                            Classes.active="{Binding IsMenuOpen}"
+                                            Width="32" Height="32"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,8,0"
+                                            Click="OnMoreButtonClicked"
+                                            ToolTip.Tip="{Binding L[Track_MoreOptions]}">
                                         <PathIcon Width="20" Height="20"
-                                            Data="{StaticResource Icon.DotsHorizontal}" />
+                                                  Data="{StaticResource Icon.DotsHorizontal}" />
                                     </Button>
 
                                 </Grid>
 
                                 <!-- АУДИО-РЕАКТИВНАЯ ВОЛНА ПО НИЖНЕЙ ГРАНИ ТРЕКА -->
                                 <ctrl:AudioWaveBorder Margin="-8,-6"
-                                    IsActive="{Binding IsActive}"
-                                    IsPlaying="{Binding IsPlaying}"
-                                    IsSelected="{Binding IsSelected}"
-                                    IsHitTestVisible="False" />
+                                                      IsActive="{Binding IsActive}"
+                                                      IsPlaying="{Binding IsPlaying}"
+                                                      IsSelected="{Binding IsSelected}"
+                                                      IsHitTestVisible="False" />
                             </Panel>
                         </Border>
                     </DataTemplate>
@@ -314,14 +314,14 @@
 
             <!-- ЕДИНАЯ ЛИНИЯ-ИНДИКАТОР ВСТАВКИ МЕЖДУ ТРЕКАМИ -->
             <Border x:Name="DropIndicatorLine"
-                Height="2"
-                CornerRadius="1"
-                Background="{DynamicResource AccentBrush}"
-                HorizontalAlignment="Stretch"
-                VerticalAlignment="Top"
-                IsVisible="False"
-                IsHitTestVisible="False"
-                Margin="8,0">
+                    Height="2"
+                    CornerRadius="1"
+                    Background="{DynamicResource AccentBrush}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Top"
+                    IsVisible="False"
+                    IsHitTestVisible="False"
+                    Margin="8,0">
                 <Border.RenderTransform>
                     <TranslateTransform Y="0" />
                 </Border.RenderTransform>

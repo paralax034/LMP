@@ -18,6 +18,16 @@ public partial class QueueView : UserControl
         DetachedFromVisualTree += OnDetachedFromVisualTreeHandler;
     }
 
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == Visual.IsVisibleProperty && change.GetNewValue<bool>())
+        {
+            Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Loaded);
+        }
+    }
+
     private void OnAttachedToVisualTreeHandler(object? sender, VisualTreeAttachmentEventArgs e)
     {
         _trackList = this.FindControl<TrackListControl>("QueueTrackList");

@@ -1,10 +1,11 @@
-
 using Avalonia.Threading;
 
 namespace LMP.UI.Features.Queue;
+
 /// <summary>
 /// ViewModel экрана текущей очереди воспроизведения.
 /// Синхронизирует состав очереди с <see cref="AudioEngine"/> и активное состояние треков с <see cref="PlayerControlService"/>.
+/// Исключает дублирующие подписки на избыточные атомарные события очереди.
 /// </summary>
 public sealed partial class QueueViewModel : TrackListBaseViewModel
 {
@@ -57,10 +58,10 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TotalCount > 0);
         SaveQueueToPlaylistCommand = new AsyncRelayCommand(SaveQueueToPlaylistAsync, () => TotalCount > 0);
 
+        // Оставляем только фундаментальные события очереди.
+        // OnQueueItemInserted, OnQueueItemRemoved и OnQueueRangeInserted удалены,
+        // так как AudioEngine уже транслирует результирующий OnQueueChanged при любых изменениях.
         Audio.OnQueueItemMoved += OnAudioQueueItemMoved;
-        Audio.OnQueueItemInserted += OnAudioQueueItemInserted;
-        Audio.OnQueueItemRemoved += OnAudioQueueItemRemoved;
-        Audio.OnQueueRangeInserted += OnAudioQueueRangeInserted;
         Audio.OnQueueChanged += OnAudioQueueChanged;
 
         SyncWithAudioQueue();
@@ -86,6 +87,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         {
             Dispatcher.UIThread.Post(() => Interlocked.Decrement(ref _selfMoveCounter), DispatcherPriority.Background);
         }
+
         return Task.CompletedTask;
     }
 
@@ -94,15 +96,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         if (Volatile.Read(ref _selfMoveCounter) > 0) return;
         Dispatcher.UIThread.Post(SyncWithAudioQueue);
     }
-
-    private void OnAudioQueueItemInserted(int index, TrackInfo track) =>
-        Dispatcher.UIThread.Post(SyncWithAudioQueue);
-
-    private void OnAudioQueueItemRemoved(int index, TrackInfo track) =>
-        Dispatcher.UIThread.Post(SyncWithAudioQueue);
-
-    private void OnAudioQueueRangeInserted(int startIndex, int count) =>
-        Dispatcher.UIThread.Post(SyncWithAudioQueue);
 
     private void OnAudioQueueChanged()
     {
@@ -146,6 +139,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
             if (!track.IsDownloaded)
                 Downloads.StartDownload(track);
         }
+
         return Task.CompletedTask;
     }
 
@@ -177,11 +171,9 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         if (disposing)
         {
             Audio.OnQueueItemMoved -= OnAudioQueueItemMoved;
-            Audio.OnQueueItemInserted -= OnAudioQueueItemInserted;
-            Audio.OnQueueItemRemoved -= OnAudioQueueItemRemoved;
-            Audio.OnQueueRangeInserted -= OnAudioQueueRangeInserted;
             Audio.OnQueueChanged -= OnAudioQueueChanged;
         }
+
         base.Dispose(disposing);
     }
 }

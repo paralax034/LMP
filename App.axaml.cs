@@ -45,10 +45,7 @@ public partial class App : Application
             _splash.Show();
 
             // Даём UI-потоку отрисовать splash
-            Dispatcher.UIThread.Post(() =>
-            {
-                _ = InitializeAppAsync(desktop);
-            }, DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() => { _ = InitializeAppAsync(desktop); }, DispatcherPriority.Background);
         }
 
         if (!OperatingSystem.IsWindows())
@@ -113,8 +110,8 @@ public partial class App : Application
 
             // Fire-and-forget: прогрев top CDN-кластеров пока UI продолжает инициализацию
             _ = CdnHostStatsStore.PreWarmTopClustersAsync(
-                    networkManager.AudioClient,
-                    _appLifetimeCts.Token);
+                networkManager.AudioClient,
+                _appLifetimeCts.Token);
 
             _splash?.SetProgress(20);
 
@@ -129,7 +126,9 @@ public partial class App : Application
                         SessionCacheStore.Save();
                     }
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException)
+                {
+                }
                 catch (Exception ex)
                 {
                     Log.Warn($"[App] Periodic stats save failed: {ex.Message}");
@@ -168,6 +167,7 @@ public partial class App : Application
                     L.CurrentLanguage = savedLang;
                 }
             }
+
             _splash?.SetProgress(50);
 
             // КРИТИЧНО: NotificationService после LibraryService
@@ -213,6 +213,8 @@ public partial class App : Application
 
             // Create Main Window
             _splash?.UpdateStatus(L["Splash_BuildingInterface"]);
+            await Task.Delay(200); // No overload
+            _splash?.SetProgress(85);
 
             MainWindow? mainWindow = null;
             MainWindowViewModel? mainWindowVM = null;
@@ -220,9 +222,10 @@ public partial class App : Application
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 mainWindowVM = AppEntry.Services.GetRequiredService<MainWindowViewModel>();
+                mainWindowVM.InitializeShellPages();
                 mainWindow = new MainWindow { DataContext = mainWindowVM };
             });
-            _splash?.SetProgress(93);
+            _splash?.SetProgress(96);
 
             // Ready!
             _splash?.UpdateStatus(L["Splash_Ready"]);
@@ -267,7 +270,8 @@ public partial class App : Application
             // Проверка и уведомление об обновлении
             if (BootstrapSettings.Current.AppUpdatedThisRun)
             {
-                Log.Info($"[App] Detected successful version upgrade to v{G.Build.DisplayVersion}. Dispatching success toast.");
+                Log.Info(
+                    $"[App] Detected successful version upgrade to v{G.Build.DisplayVersion}. Dispatching success toast.");
                 _ = notifications.ShowToastAsync(
                     titleKey: "Dialog_Done_Title",
                     messageKey: "Update_InstalledToast_Message",
@@ -287,10 +291,13 @@ public partial class App : Application
                         using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(_appLifetimeCts.Token);
                         startupCts.CancelAfter(TimeSpan.FromSeconds(15));
 
-                        var checkResult = await updateService.CheckForUpdatesAsync(manual: false, ignoreCooldown: true, startupCts.Token).ConfigureAwait(false);
+                        var checkResult = await updateService
+                            .CheckForUpdatesAsync(manual: false, ignoreCooldown: true, startupCts.Token)
+                            .ConfigureAwait(false);
                         if (checkResult.HasUpdate)
                         {
-                            Log.Info($"[App] Startup check detected new update '{checkResult.VersionName}'. Dispatching info toast.");
+                            Log.Info(
+                                $"[App] Startup check detected new update '{checkResult.VersionName}'. Dispatching info toast.");
                             await notifications.ShowToastAsync(
                                 titleKey: "Update_Available_Title",
                                 messageKey: "Update_Available_Toast",
@@ -299,7 +306,9 @@ public partial class App : Application
                                 messageArgs: [checkResult.VersionName]).ConfigureAwait(false);
                         }
                     }
-                    catch (OperationCanceledException) { }
+                    catch (OperationCanceledException)
+                    {
+                    }
                     catch (Exception ex)
                     {
                         Log.Debug($"[App] Startup background update check ignored: {ex.Message}");
@@ -316,10 +325,13 @@ public partial class App : Application
                         {
                             if (!library.Settings.Updates.AutoCheckUpdates) continue;
 
-                            var periodicResult = await updateService.CheckForUpdatesAsync(manual: false, ignoreCooldown: false, _appLifetimeCts.Token).ConfigureAwait(false);
+                            var periodicResult = await updateService
+                                .CheckForUpdatesAsync(manual: false, ignoreCooldown: false, _appLifetimeCts.Token)
+                                .ConfigureAwait(false);
                             if (periodicResult.HasUpdate)
                             {
-                                Log.Info($"[App] Periodic background check detected new update '{periodicResult.VersionName}'. Dispatching info toast.");
+                                Log.Info(
+                                    $"[App] Periodic background check detected new update '{periodicResult.VersionName}'. Dispatching info toast.");
                                 await notifications.ShowToastAsync(
                                     titleKey: "Update_Available_Title",
                                     messageKey: "Update_Available_Toast",
@@ -329,7 +341,9 @@ public partial class App : Application
                             }
                         }
                     }
-                    catch (OperationCanceledException) { }
+                    catch (OperationCanceledException)
+                    {
+                    }
                     catch (Exception ex)
                     {
                         Log.Debug($"[App] Periodic update watchdog loop error: {ex.Message}");
@@ -367,7 +381,7 @@ public partial class App : Application
                         CdnHostStatsStore.Save();
                         SessionCacheStore.Save();
 
-                        // МЯГКО высвобождаем аудиодвижок и кэш. 
+                        // МЯГКО высвобождаем аудиодвижок и кэш.
                         // Делаем это ДО отмены токена, чтобы потоки завершились штатно, без выброса IOException
                         await audioEngine.DisposeAsync().ConfigureAwait(false);
                         await audioCacheManager.DisposeAsync().ConfigureAwait(false);
@@ -396,15 +410,13 @@ public partial class App : Application
             };
 
 #if DEBUG
-            this.AttachDeveloperTools();
-
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 mainWindow?.KeyDown += (s, e) =>
-                    {
-                        if (e.Key == Avalonia.Input.Key.F9)
-                            new UI.Features.Debug.DebugWindow().Show();
-                    };
+                {
+                    if (e.Key == Avalonia.Input.Key.F9)
+                        new UI.Features.Debug.DebugWindow().Show();
+                };
             });
 #endif
         }
@@ -412,10 +424,7 @@ public partial class App : Application
         {
             Log.Fatal($"Initialization failed: {ex.Message}\n{ex.StackTrace}");
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                _splash?.UpdateStatus(L["Splash_Error_Title"]);
-            });
+            await Dispatcher.UIThread.InvokeAsync(() => { _splash?.UpdateStatus(L["Splash_Error_Title"]); });
 
             OsNotificationHelper.ShowFatalError(
                 "LMP Startup Error",

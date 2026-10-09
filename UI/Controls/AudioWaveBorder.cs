@@ -12,6 +12,7 @@ namespace LMP.UI.Controls;
 
 /// <summary>
 /// Граничный декоратор с непрерывным гидродинамическим волноводом, где длина волны отображает высоту ноты.
+/// Обеспечивает непрерывную анимацию активного трека без блокировок при смене страниц.
 /// </summary>
 public sealed class AudioWaveBorder : Decorator
 {
@@ -109,10 +110,8 @@ public sealed class AudioWaveBorder : Decorator
     #region Fields
 
     private readonly Action<TimeSpan> _frameCallback;
-    private readonly EventHandler<AvaloniaPropertyChangedEventArgs> _windowPropertyChangedHandler;
     private readonly Action _globalConfigChangedHandler;
     private readonly Action<SuspendLevel> _suspendLevelChangedHandler;
-    private readonly EventHandler _windowActivatedHandler;
 
     private readonly WavePacket[] _packets = new WavePacket[MaxActivePackets];
     private ulong _rngState;
@@ -133,7 +132,6 @@ public sealed class AudioWaveBorder : Decorator
     private long _lastFrameTimestamp;
     private bool _isFrameLoopActive;
     private TopLevel? _attachedTopLevel;
-    private Window? _subscribedWindow;
 
     private IBrush? _lastResolvedBrush;
     private IPen? _cachedPen;
@@ -247,10 +245,8 @@ public sealed class AudioWaveBorder : Decorator
     public AudioWaveBorder()
     {
         _frameCallback = OnAnimationFrame;
-        _windowPropertyChangedHandler = OnWindowPropertyChanged;
         _globalConfigChangedHandler = OnGlobalConfigChanged;
         _suspendLevelChangedHandler = OnSuspendLevelChanged;
-        _windowActivatedHandler = OnWindowActivated;
 
         _rngState = (ulong)Stopwatch.GetTimestamp() ^ 0x9E3779B97F4A7C15UL;
     }
@@ -274,19 +270,6 @@ public sealed class AudioWaveBorder : Decorator
 
     #region Lifecycle
 
-    private void OnActiveChanged()
-    {
-        if (!IsActive)
-        {
-            _isFrameLoopActive = false;
-            ClearAllPackets();
-            InvalidateVisual();
-            return;
-        }
-
-        EvaluateAnimationState();
-    }
-
     private void OnGlobalConfigChanged()
     {
         InvalidatePens();
@@ -302,8 +285,16 @@ public sealed class AudioWaveBorder : Decorator
             Dispatcher.UIThread.Post(EvaluateAnimationState);
     }
 
-    private void OnWindowActivated(object? sender, EventArgs e)
+    private void OnActiveChanged()
     {
+        if (!IsActive)
+        {
+            _isFrameLoopActive = false;
+            ClearAllPackets();
+            InvalidateVisual();
+            return;
+        }
+
         EvaluateAnimationState();
     }
 
@@ -317,26 +308,16 @@ public sealed class AudioWaveBorder : Decorator
         ViewModelBase.SuspendLevelChanged += _suspendLevelChangedHandler;
         _attachedTopLevel = TopLevel.GetTopLevel(this);
 
-        if (_attachedTopLevel is Window w)
+        if (IsActive)
         {
-            _subscribedWindow = w;
-            w.PropertyChanged += _windowPropertyChangedHandler;
-            w.Activated += _windowActivatedHandler;
+            EvaluateAnimationState();
         }
-
-        EvaluateAnimationState();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         GlobalConfigChanged -= _globalConfigChangedHandler;
         ViewModelBase.SuspendLevelChanged -= _suspendLevelChangedHandler;
-        if (_subscribedWindow != null)
-        {
-            _subscribedWindow.PropertyChanged -= _windowPropertyChangedHandler;
-            _subscribedWindow.Activated -= _windowActivatedHandler;
-            _subscribedWindow = null;
-        }
 
         _isFrameLoopActive = false;
         _attachedTopLevel = null;
@@ -379,15 +360,13 @@ public sealed class AudioWaveBorder : Decorator
     protected override Size ArrangeOverride(Size finalSize)
     {
         Child?.Arrange(new Rect(finalSize));
-        return finalSize;
-    }
 
-    private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (e.Property == Window.WindowStateProperty || e.Property == Visual.IsVisibleProperty)
+        if (!_isFrameLoopActive && ShouldAnimate())
         {
             EvaluateAnimationState();
         }
+
+        return finalSize;
     }
 
     private void ClearAllPackets()
@@ -437,12 +416,6 @@ public sealed class AudioWaveBorder : Decorator
         if (_attachedTopLevel == null)
             return false;
 
-        if (_subscribedWindow != null)
-        {
-            if (!_subscribedWindow.IsVisible || _subscribedWindow.WindowState == WindowState.Minimized)
-                return false;
-        }
-
         if (ViewModelBase.CurrentSuspendLevel == SuspendLevel.Hard)
             return false;
 
@@ -463,15 +436,14 @@ public sealed class AudioWaveBorder : Decorator
                 _lastFrameTimestamp = Stopwatch.GetTimestamp();
                 _attachedTopLevel.RequestAnimationFrame(_frameCallback);
             }
+
             InvalidateVisual();
         }
         else
         {
-            bool isHiddenOrSuspended = _attachedTopLevel == null ||
-                (_subscribedWindow != null && (!_subscribedWindow.IsVisible || _subscribedWindow.WindowState == WindowState.Minimized)) ||
-                ViewModelBase.CurrentSuspendLevel == SuspendLevel.Hard;
+            bool isSuspended = ViewModelBase.CurrentSuspendLevel == SuspendLevel.Hard;
 
-            if (isHiddenOrSuspended)
+            if (isSuspended)
             {
                 _isFrameLoopActive = false;
                 ClearAllPackets();
@@ -484,6 +456,7 @@ public sealed class AudioWaveBorder : Decorator
                     _lastFrameTimestamp = Stopwatch.GetTimestamp();
                     _attachedTopLevel!.RequestAnimationFrame(_frameCallback);
                 }
+
                 return;
             }
             else
@@ -501,13 +474,17 @@ public sealed class AudioWaveBorder : Decorator
         {
             if (_packets[i].IsActive) return true;
         }
+
         return false;
     }
 
     private void OnAnimationFrame(TimeSpan elapsed)
     {
         if (!_isFrameLoopActive || _attachedTopLevel == null || !IsActive)
+        {
+            _isFrameLoopActive = false;
             return;
+        }
 
         long currentTimestamp = Stopwatch.GetTimestamp();
         double dt = Stopwatch.GetElapsedTime(_lastFrameTimestamp, currentTimestamp).TotalSeconds;
@@ -610,8 +587,17 @@ public sealed class AudioWaveBorder : Decorator
 
         for (int i = 0; i < MaxActivePackets; i++)
         {
-            if (!_packets[i].IsActive) { targetIndex = i; break; }
-            if (_packets[i].Amplitude < minAmp) { minAmp = _packets[i].Amplitude; targetIndex = i; }
+            if (!_packets[i].IsActive)
+            {
+                targetIndex = i;
+                break;
+            }
+
+            if (_packets[i].Amplitude < minAmp)
+            {
+                minAmp = _packets[i].Amplitude;
+                targetIndex = i;
+            }
         }
 
         if (targetIndex < 0) return;
@@ -680,6 +666,13 @@ public sealed class AudioWaveBorder : Decorator
 
         if (!IsActive) return;
 
+        if (!_isFrameLoopActive && ShouldAnimate())
+        {
+            _isFrameLoopActive = true;
+            _lastFrameTimestamp = Stopwatch.GetTimestamp();
+            _attachedTopLevel?.RequestAnimationFrame(_frameCallback);
+        }
+
         var bounds = Bounds;
         if (bounds.Width < 32.0 || bounds.Height < 16.0) return;
 
@@ -711,7 +704,8 @@ public sealed class AudioWaveBorder : Decorator
             EnsurePen(thickness, (byte)Math.Clamp((int)(alphaRatio * 255.0), 0, 255));
             if (_cachedPen == null) return;
 
-            context.DrawRectangle(null, _cachedPen, new RoundedRect(new Rect(left, top, width, height), radius, radius));
+            context.DrawRectangle(null, _cachedPen,
+                new RoundedRect(new Rect(left, top, width, height), radius, radius));
             return;
         }
 
@@ -738,11 +732,13 @@ public sealed class AudioWaveBorder : Decorator
             DrawSpline(ctx, _railPoints, railSamples);
 
             // 2. ВЕРХНИЙ ПРАВЫЙ УГОЛ И ПРАВЫЙ ТОРЕЦ
-            ctx.CubicBezierTo(new Point(right - radius + k, top), new Point(right, top + radius - k), new Point(right, top + radius));
+            ctx.CubicBezierTo(new Point(right - radius + k, top), new Point(right, top + radius - k),
+                new Point(right, top + radius));
             ctx.LineTo(new Point(right, bottom - radius));
 
             // 3. НИЖНИЙ ПРАВЫЙ УГОЛ
-            ctx.CubicBezierTo(new Point(right, bottom - radius + k), new Point(right - radius + k, bottom), new Point(right - radius, bottom));
+            ctx.CubicBezierTo(new Point(right, bottom - radius + k), new Point(right - radius + k, bottom),
+                new Point(right - radius, bottom));
 
             // 4. НИЖНЯЯ ГРАНЬ (Справа налево: u идет от 1.0 к 0.0)
             for (int i = 0; i < railSamples; i++)
@@ -750,14 +746,17 @@ public sealed class AudioWaveBorder : Decorator
                 double u = 1.0 - (i / (double)(railSamples - 1));
                 _railPoints[i] = new Point(left + radius + (u * horizLen), bottom + CalculateOrganicDisplacement(u));
             }
+
             DrawSpline(ctx, _railPoints, railSamples);
 
             // 5. НИЖНИЙ ЛЕВЫЙ УГОЛ И ЛЕВЫЙ ТОРЕЦ
-            ctx.CubicBezierTo(new Point(left + radius - k, bottom), new Point(left, bottom - radius + k), new Point(left, bottom - radius));
+            ctx.CubicBezierTo(new Point(left + radius - k, bottom), new Point(left, bottom - radius + k),
+                new Point(left, bottom - radius));
             ctx.LineTo(new Point(left, top + radius));
 
             // 6. ВЕРХНИЙ ЛЕВЫЙ УГОЛ (Замыкание контура)
-            ctx.CubicBezierTo(new Point(left, top + radius - k), new Point(left + radius - k, top), new Point(left + radius, top));
+            ctx.CubicBezierTo(new Point(left, top + radius - k), new Point(left + radius - k, top),
+                new Point(left + radius, top));
 
             ctx.EndFigure(isClosed: true);
         }

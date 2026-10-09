@@ -40,6 +40,11 @@ public partial class MainWindowViewModel : ViewModelBase
     // DIALOG HOST
     [ObservableProperty] public partial DialogHostViewModel DialogHost { get; private set; }
 
+    /// <summary>
+    /// Коллекция основных страниц оболочки для полной предварительной материализации визуальных деревьев.
+    /// </summary>
+    public IReadOnlyList<ViewModelBase> PrewarmedPages { get; private set; } = [];
+
     private const int DeferredLoadDelayMs = 140;
     private static readonly TimeSpan StartupAuthValidationTtl = TimeSpan.FromHours(4);
 
@@ -50,13 +55,13 @@ public partial class MainWindowViewModel : ViewModelBase
     private int _startupAuthValidationStarted;
 
     public MainWindowViewModel(
-          IServiceProvider services,
-          PlayerBarViewModel playerBar,
-          NotificationButtonViewModel notificationButton,
-          NotificationPanelViewModel notificationPanel,
-          ToastOverlayViewModel toastOverlay,
-          DialogHostViewModel dialogHost,
-          LibraryService library)
+        IServiceProvider services,
+        PlayerBarViewModel playerBar,
+        NotificationButtonViewModel notificationButton,
+        NotificationPanelViewModel notificationPanel,
+        ToastOverlayViewModel toastOverlay,
+        DialogHostViewModel dialogHost,
+        LibraryService library)
     {
         Log.Info("MainWindowViewModel constructor started.");
 
@@ -69,10 +74,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         library.OnAccountHydrated += HandleGlobalAccountHydrated;
 
-        LocalizationService.Instance.LanguageChanged += (_, _) =>
-        {
-            OnPropertyChanged(nameof(L));
-        };
+        LocalizationService.Instance.LanguageChanged += (_, _) => { OnPropertyChanged(nameof(L)); };
 
         DialogHost.PropertyChanged += (s, e) =>
         {
@@ -88,14 +90,36 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Выполняет инициализацию всех страниц оболочки после полной готовности корневого синглтона в DI-контейнере.
+    /// Исключает циклическую блокировку конструкторов.
+    /// </summary>
+    public void InitializeShellPages()
+    {
+        var home = _pageCache.TryGetValue("Home", out var cachedHome)
+            ? cachedHome
+            : _services.GetRequiredService<HomeViewModel>();
+
+        var search = _services.GetRequiredService<SearchViewModel>();
+        var library = _services.GetRequiredService<LibraryViewModel>();
+        var queue = _services.GetRequiredService<QueueViewModel>();
+        var settings = _services.GetRequiredService<SettingsViewModel>();
+
+        _pageCache["Home"] = home;
+        _pageCache["Search"] = search;
+        _pageCache["Library"] = library;
+        _pageCache["Queue"] = queue;
+        _pageCache["Settings"] = settings;
+
+        PrewarmedPages = [home, search, library, queue, settings];
+        OnPropertyChanged(nameof(PrewarmedPages));
+    }
+
+    /// <summary>
     /// Обрабатывает изменения авторизации на глобальном уровне после полной гидрации кэшей.
     /// </summary>
     private void HandleGlobalAccountHydrated()
     {
-        Dispatcher.UIThread.Post(() =>
-        {
-            ViewModelBase.BroadcastAccountChanged();
-        }, DispatcherPriority.Normal);
+        Dispatcher.UIThread.Post(() => { ViewModelBase.BroadcastAccountChanged(); }, DispatcherPriority.Normal);
     }
 
     public void LockNavigation(string reason)
@@ -115,15 +139,27 @@ public partial class MainWindowViewModel : ViewModelBase
     public async Task WithNavigationLockAsync(string reason, Func<Task> operation)
     {
         LockNavigation(reason);
-        try { await operation(); }
-        finally { UnlockNavigation(); }
+        try
+        {
+            await operation();
+        }
+        finally
+        {
+            UnlockNavigation();
+        }
     }
 
     public async Task<T> WithNavigationLockAsync<T>(string reason, Func<Task<T>> operation)
     {
         LockNavigation(reason);
-        try { return await operation(); }
-        finally { UnlockNavigation(); }
+        try
+        {
+            return await operation();
+        }
+        finally
+        {
+            UnlockNavigation();
+        }
     }
 
     /// <summary>
@@ -247,7 +283,8 @@ public partial class MainWindowViewModel : ViewModelBase
             smoothOldPage.PrepareForTransition();
         }
 
-        if (!_pageCache.TryGetValue("Playlist", out var playlistPage) || playlistPage is not PlaylistViewModel playlistVM)
+        if (!_pageCache.TryGetValue("Playlist", out var playlistPage) ||
+            playlistPage is not PlaylistViewModel playlistVM)
         {
             playlistVM = _services.GetRequiredService<PlaylistViewModel>();
             _pageCache["Playlist"] = playlistVM;
@@ -352,11 +389,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = G.GitHubUrl,
-                UseShellExecute = true
-            });
+            Process.Start(new ProcessStartInfo { FileName = G.GitHubUrl, UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -455,3 +488,4 @@ public partial class MainWindowViewModel : ViewModelBase
         base.Dispose(disposing);
     }
 }
+

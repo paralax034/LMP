@@ -1,185 +1,182 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!--      ВЕРСИИ ПАКЕТОВ        -->
-  <PropertyGroup Label="Package Versions">
-    <AvaloniaVersion>12.1.4</AvaloniaVersion>
+    <!--      ВЕРСИИ ПАКЕТОВ        -->
+    <PropertyGroup Label="Package Versions">
+        <AvaloniaVersion>12.1.4</AvaloniaVersion>
 
-    <!-- MVVM стек CommunityToolkit: современный генератор кода свойств и команд -->
-    <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
+        <!-- MVVM стек CommunityToolkit: современный генератор кода свойств и команд -->
+        <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
 
-    <!-- Microsoft Extensions (совпадает с TFM): 10.0.12 -->
-    <MsExtVersion>10.0.12</MsExtVersion>
+        <!-- Microsoft Extensions (совпадает с TFM): 10.0.12 -->
+        <MsExtVersion>10.0.12</MsExtVersion>
 
-    <!-- AsyncImageLoader: 3.8.0 — поддержка Avalonia 12 -->
-    <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
+        <!-- AsyncImageLoader: 3.8.0 — поддержка Avalonia 12 -->
+        <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
 
-    <!-- Поведение XAML для Avalonia 12 -->
-    <XamlBehaviorsVersion>12.0.7</XamlBehaviorsVersion>
-  </PropertyGroup>
+        <!-- Поведение XAML для Avalonia 12 -->
+        <XamlBehaviorsVersion>12.0.7</XamlBehaviorsVersion>
+    </PropertyGroup>
 
-  <!--   ОСНОВНЫЕ НАСТРОЙКИ       -->
-  <PropertyGroup Label="Core Settings">
-    <!-- В Release — без консольного окна, в Debug — с консолью для логов -->
-    <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
-    <OutputType Condition="'$(Configuration)' == 'Debug'">Exe</OutputType>
+    <!--   ОСНОВНЫЕ НАСТРОЙКИ       -->
+    <PropertyGroup Label="Core Settings">
+        <!-- В Release — без консольного окна, в Debug — с консолью для логов -->
+        <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
+        <OutputType Condition="'$(Configuration)' == 'Debug'">Exe</OutputType>
 
-    <!--
-      net11.0 — preview (GA ожидается ноябрь 2026).
-      Осознанный выбор: Runtime Async без EnablePreviewFeatures, JIT-улучшения.
-    -->
-    <TargetFramework>net11.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <LangVersion>latest</LangVersion>
+        <!--
+          net11.0 — preview (GA ожидается ноябрь 2026).
+          Осознанный выбор: Runtime Async без EnablePreviewFeatures, JIT-улучшения.
+        -->
+        <TargetFramework>net11.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <LangVersion>latest</LangVersion>
 
-    <RootNamespace>LMP</RootNamespace>
-    <AssemblyName>LMP</AssemblyName>
+        <RootNamespace>LMP</RootNamespace>
+        <AssemblyName>LMP</AssemblyName>
 
-    <!-- Исключаем папки субпроектов из корневого проекта на уровне файловой системы .NET -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Core/**;SharpJaad.AAC/**;Tools/**</DefaultItemExcludes>
+        <!-- Исключаем папки субпроектов из корневого проекта на уровне файловой системы .NET -->
+        <DefaultItemExcludes>$(DefaultItemExcludes);Core/**;SharpJaad.AAC/**;Tools/**</DefaultItemExcludes>
 
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets/app.ico</ApplicationIcon>
+        <ApplicationManifest>app.manifest</ApplicationManifest>
+        <ApplicationIcon>Assets/app.ico</ApplicationIcon>
 
-    <!-- Компилируемые биндинги по умолчанию: быстрее + проверка типов на этапе сборки -->
-    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+        <!-- Компилируемые биндинги по умолчанию: быстрее + проверка типов на этапе сборки -->
+        <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 
-    <!-- Нужно для низкоуровневых аудио-операций (PCM-буферы, нативный interop) -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- Нужно для низкоуровневых аудио-операций (PCM-буферы, нативный interop) -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- Раздельные lock-файлы под каждую конфигурацию (устраняет взаимную перезапись) -->
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <NuGetLockFilePath>packages.$(Configuration).lock.json</NuGetLockFilePath>
+        <!-- Раздельные lock-файлы под каждую конфигурацию (устраняет взаимную перезапись) -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+        <NuGetLockFilePath>packages.$(Configuration).lock.json</NuGetLockFilePath>
 
-    <!-- Подавляет IL20xx/IL30xx ошибки при AOT-анализе -->
-    <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
-  </PropertyGroup>
+        <!-- Подавляет IL20xx/IL30xx ошибки при AOT-анализе -->
+        <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
+        <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+        <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
+    </PropertyGroup>
 
-  <!--   ОПТИМИЗАЦИЯ ПАМЯТИ / JIT -->
-  <PropertyGroup Label="Runtime Tuning">
-    <!--
-      Workstation GC: меньше потребление RAM, лучше отзывчивость UI.
-      Server GC предназначен для серверных сценариев — нам не нужен.
-    -->
-    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <!--   ОПТИМИЗАЦИЯ ПАМЯТИ / JIT -->
+    <PropertyGroup Label="Runtime Tuning">
+        <!--
+          Workstation GC: меньше потребление RAM, лучше отзывчивость UI.
+          Server GC предназначен для серверных сценариев — нам не нужен.
+        -->
+        <ServerGarbageCollection>false</ServerGarbageCollection>
 
-    <!-- Background (Concurrent) GC: сборка мусора не блокирует UI-поток -->
-    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+        <!-- Background (Concurrent) GC: сборка мусора не блокирует UI-поток -->
+        <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
 
-    <!--
-      Отдаём память ОС после GC-цикла.
-      Для медиа-приложений с большими кэшами изображений/аудио — правильный выбор.
-    -->
-    <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
+        <!--
+          Отдаём память ОС после GC-цикла.
+          Для медиа-приложений с большими кэшами изображений/аудио — правильный выбор.
+        -->
+        <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
 
-    <!--
-      Компактификация Large Object Heap при следующем GC-цикле.
-      Борется с фрагментацией после выгрузки крупных аудио/картинок из памяти.
-    -->
-    <GCLargeObjectHeapCompactionMode>CompactOnce</GCLargeObjectHeapCompactionMode>
+        <!--
+          Компактификация Large Object Heap при следующем GC-цикле.
+          Борется с фрагментацией после выгрузки крупных аудио/картинок из памяти.
+        -->
+        <GCLargeObjectHeapCompactionMode>CompactOnce</GCLargeObjectHeapCompactionMode>
 
-    <!--
-      Tiered Compilation + Dynamic PGO:
-      - Быстрый старт (QuickJit для "холодного" кода)
-      - Авто-оптимизация горячих путей на лету (TieredPGO)
-    -->
-    <TieredCompilation>true</TieredCompilation>
-    <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
-    <TieredPGO>true</TieredPGO>
-  </PropertyGroup>
+        <!--
+          Tiered Compilation + Dynamic PGO:
+          - Быстрый старт (QuickJit для "холодного" кода)
+          - Авто-оптимизация горячих путей на лету (TieredPGO)
+        -->
+        <TieredCompilation>true</TieredCompilation>
+        <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
+        <TieredPGO>true</TieredPGO>
+    </PropertyGroup>
 
-  <!--   DEBUG КОНФИГУРАЦИЯ       -->
-  <PropertyGroup Label="Debug" Condition="'$(Configuration)' == 'Debug'">
-    <!-- Встроенные PDB + исходники: шаговая отладка без внешних файлов -->
-    <DebugType>embedded</DebugType>
-    <EmbedAllSources>true</EmbedAllSources>
-    <Optimize>false</Optimize>
-  </PropertyGroup>
+    <!--   DEBUG КОНФИГУРАЦИЯ       -->
+    <PropertyGroup Label="Debug" Condition="'$(Configuration)' == 'Debug'">
+        <!-- Встроенные PDB + исходники: шаговая отладка без внешних файлов -->
+        <DebugType>embedded</DebugType>
+        <EmbedAllSources>true</EmbedAllSources>
+        <Optimize>false</Optimize>
+    </PropertyGroup>
 
-  <!--   RELEASE & AOT КОНФИГУРАЦИЯ     -->
-  <PropertyGroup Label="Release" Condition="'$(Configuration)' == 'Release'">
-    <DebugType>none</DebugType>
-    <Optimize>true</Optimize>
+    <!--   RELEASE & AOT КОНФИГУРАЦИЯ     -->
+    <PropertyGroup Label="Release" Condition="'$(Configuration)' == 'Release'">
+        <DebugType>none</DebugType>
+        <Optimize>true</Optimize>
 
-    <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**</DefaultItemExcludes>
+        <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**</DefaultItemExcludes>
 
-    <!-- Native AOT и полный тримминг скомпилированного машинного кода -->
-    <PublishAot>true</PublishAot>
-    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>full</TrimMode>
-    <TrimmerRootDescriptor>trimming.xml</TrimmerRootDescriptor>
+        <!-- Native AOT и полный тримминг скомпилированного машинного кода -->
+        <PublishAot>true</PublishAot>
+        <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+        <PublishTrimmed>true</PublishTrimmed>
+        <TrimMode>full</TrimMode>
+        <TrimmerRootDescriptor>trimming.xml</TrimmerRootDescriptor>
 
-    <!-- Строго отключаем рефлексивный fallback для System.Text.Json -->
-    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+        <!-- Строго отключаем рефлексивный fallback для System.Text.Json -->
+        <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
-    <!-- Оптимизации компилятора ILC для Native AOT -->
-    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
-    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
-  </PropertyGroup>
+        <!-- Оптимизации компилятора ILC для Native AOT -->
+        <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+        <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
+    </PropertyGroup>
 
-  <!-- Конфигурация рантайма для Native AOT (заменяет runtimeconfig.template.json) -->
-  <ItemGroup Label="Runtime Host Configuration">
-    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
-    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false" />
-    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
-    <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="8" />
-  </ItemGroup>
+    <!-- Конфигурация рантайма для Native AOT (заменяет runtimeconfig.template.json) -->
+    <ItemGroup Label="Runtime Host Configuration">
+        <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false"/>
+        <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false"/>
+        <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="8"/>
+    </ItemGroup>
 
-  <ItemGroup Label="File Includes/Excludes">
-    <AvaloniaResource Include="Assets/**" />
-    <Content Include="Assets/app.ico" />
-  </ItemGroup>
+    <ItemGroup Label="File Includes/Excludes">
+        <AvaloniaResource Include="Assets/**"/>
+        <Content Include="Assets/app.ico"/>
+    </ItemGroup>
 
-  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
-    <Content Include="Native/quickjs_bridge_debug.dll">
-      <Link>quickjs_bridge.dll</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
-    </Content>
-  </ItemGroup>
+    <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+        <Content Include="Native/quickjs_bridge_debug.dll">
+            <Link>quickjs_bridge.dll</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
+        </Content>
+    </ItemGroup>
 
-  <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <Content Include="Native/quickjs_bridge_release.dll">
-      <Link>quickjs_bridge.dll</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
-    </Content>
-  </ItemGroup>
+    <ItemGroup Condition="'$(Configuration)' == 'Release'">
+        <Content Include="Native/quickjs_bridge_release.dll">
+            <Link>quickjs_bridge.dll</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
+        </Content>
+    </ItemGroup>
 
-  <ItemGroup Label="Avalonia Core">
-    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Concentus.Native" Version="1.5.2" />
-    <!-- Инструменты диагностики только в Debug: в Release не раздувают размер бинарника -->
-    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3"
-      Condition="'$(Configuration)' == 'Debug'" />
-  </ItemGroup>
+    <ItemGroup Label="Avalonia Core">
+        <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)"/>
+        <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)"/>
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)"/>
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)"/>
+        <PackageReference Include="Concentus.Native" Version="1.5.2"/>
+    </ItemGroup>
 
-  <ItemGroup Label="Avalonia Community">
-    <PackageReference Include="Xaml.Behaviors.Avalonia" Version="$(XamlBehaviorsVersion)" />
-  </ItemGroup>
+    <ItemGroup Label="Avalonia Community">
+        <PackageReference Include="Xaml.Behaviors.Avalonia" Version="$(XamlBehaviorsVersion)"/>
+    </ItemGroup>
 
-  <ItemGroup Label="MVVM">
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)" />
-  </ItemGroup>
+    <ItemGroup Label="MVVM">
+        <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)"/>
+    </ItemGroup>
 
-  <ItemGroup Label="UI Utilities">
-    <PackageReference Include="AsyncImageLoader.Avalonia" Version="$(AsyncImageLoaderVersion)" />
-  </ItemGroup>
+    <ItemGroup Label="UI Utilities">
+        <PackageReference Include="AsyncImageLoader.Avalonia" Version="$(AsyncImageLoaderVersion)"/>
+    </ItemGroup>
 
-  <ItemGroup Label="Linux Interop">
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.1" />
-  </ItemGroup>
+    <ItemGroup Label="Linux Interop">
+        <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.1"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="Core/LMP.Core.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="Core/LMP.Core.csproj"/>
+    </ItemGroup>
 
 </Project>

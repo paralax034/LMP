@@ -38,24 +38,26 @@ namespace LMP;
 /// </remarks>
 public sealed class ViewLocator : IDataTemplate
 {
-    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ViewModelBase, Control> _viewCache = new();
+    private readonly Dictionary<Type, Control> _persistentViewCache = new(8);
 
     /// <summary>
     /// Создаёт или возвращает закэшированный визуальный элемент, соответствующий переданной модели представления.
+    /// Корневые страницы приложения кэшируются постоянно для исключения style-recalculation churn.
     /// </summary>
     public Control? Build(object? data)
     {
         if (data is null)
             return null;
 
-        if (data is ViewModelBase vm && _viewCache.TryGetValue(vm, out var cachedView))
+        var type = data.GetType();
+        if (_persistentViewCache.TryGetValue(type, out var cachedView))
         {
             return cachedView;
         }
 
         Control created = data switch
         {
-            // Главные экраны приложения (кэшируются вместе с ViewModel)
+            // Главные экраны приложения (кэшируются строго как Singletons)
             HomeViewModel => new HomeView(),
             SearchViewModel => new SearchView(),
             LibraryViewModel => new LibraryView(),
@@ -81,9 +83,9 @@ public sealed class ViewLocator : IDataTemplate
             _ => new TextBlock { Text = $"View Not Registered for: {data.GetType().FullName}" }
         };
 
-        if (data is ViewModelBase viewModel)
+        if (data is ViewModelBase)
         {
-            _viewCache.AddOrUpdate(viewModel, created);
+            _persistentViewCache[type] = created;
         }
 
         return created;

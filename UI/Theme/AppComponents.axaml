@@ -1,5 +1,5 @@
 <Styles xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- TRACK ROW BASE -->
     <Style Selector="Border.track-row">
@@ -90,13 +90,13 @@
         <Setter Property="Template">
             <ControlTemplate TargetType="Button">
                 <Border Background="{TemplateBinding Background}"
-                    CornerRadius="{TemplateBinding CornerRadius}"
-                    ClipToBounds="True">
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        ClipToBounds="True">
                     <ContentPresenter Name="PART_ContentPresenter"
-                        Content="{TemplateBinding Content}"
-                        ContentTemplate="{TemplateBinding ContentTemplate}"
-                        HorizontalContentAlignment="Stretch"
-                        VerticalContentAlignment="Stretch" />
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                      HorizontalContentAlignment="Stretch"
+                                      VerticalContentAlignment="Stretch" />
                 </Border>
             </ControlTemplate>
         </Setter>
@@ -129,7 +129,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                    Easing="CubicEaseOut" />
+                                               Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -146,7 +146,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                    Easing="CubicEaseOut" />
+                                               Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -168,7 +168,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                    Easing="BackEaseOut" />
+                                               Easing="BackEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -240,22 +240,20 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <Style Selector="Border.track-row.menu-open Button.more-btn, Button.more-btn.active">
+    <Style Selector="Button.more-btn.active">
         <Setter Property="Opacity" Value="1" />
         <Setter Property="IsHitTestVisible" Value="True" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
-    <Style
-        Selector="Border.track-row.menu-open Button.more-btn > PathIcon, Button.more-btn.active > PathIcon">
+    <Style Selector="Button.more-btn.active > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style
-        Selector="Border.track-row.menu-open Button.more-btn:pointerover > PathIcon, Button.more-btn.active:pointerover > PathIcon">
+    <Style Selector="Button.more-btn.active:pointerover > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <Style Selector="Border.track-row TextBlock.duration-text">
+    <Style Selector="TextBlock.duration-text">
         <Setter Property="Opacity" Value="1" />
         <Setter Property="IsHitTestVisible" Value="False" />
         <Setter Property="Transitions">
