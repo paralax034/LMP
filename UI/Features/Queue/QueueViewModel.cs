@@ -5,7 +5,6 @@ namespace LMP.UI.Features.Queue;
 /// <summary>
 /// ViewModel экрана текущей очереди воспроизведения.
 /// Синхронизирует состав очереди с <see cref="AudioEngine"/> и активное состояние треков с <see cref="PlayerControlService"/>.
-/// Исключает дублирующие подписки на избыточные атомарные события очереди.
 /// </summary>
 public sealed partial class QueueViewModel : TrackListBaseViewModel
 {
@@ -30,13 +29,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     /// <summary>
     /// Инициализирует новый экземпляр <see cref="QueueViewModel"/>.
     /// </summary>
-    /// <param name="audio">Низкоуровневый звуковой движок.</param>
-    /// <param name="playlistService">Служба управления плейлистами.</param>
-    /// <param name="auth">Служба авторизации YouTube.</param>
-    /// <param name="dialog">Служба модальных диалогов.</param>
-    /// <param name="vmFactory">Фабрика создания моделей представления треков.</param>
-    /// <param name="downloads">Служба загрузки треков.</param>
-    /// <param name="playerControl">Единый координатор состояния воспроизведения.</param>
     public QueueViewModel(
         AudioEngine audio,
         PlaylistService playlistService,
@@ -53,14 +45,11 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
 
         _items.IsQueueContext = true;
 
-        ClearQueueCommand = new RelayCommand(_audioClearQueue, () => TotalCount > 0);
-        ShuffleQueueCommand = new RelayCommand(_audioShuffleQueue, () => TotalCount > 1);
+        ClearQueueCommand = new RelayCommand(AudioClearQueue, () => TotalCount > 0);
+        ShuffleQueueCommand = new RelayCommand(AudioShuffleQueue, () => TotalCount > 1);
         DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TotalCount > 0);
         SaveQueueToPlaylistCommand = new AsyncRelayCommand(SaveQueueToPlaylistAsync, () => TotalCount > 0);
 
-        // Оставляем только фундаментальные события очереди.
-        // OnQueueItemInserted, OnQueueItemRemoved и OnQueueRangeInserted удалены,
-        // так как AudioEngine уже транслирует результирующий OnQueueChanged при любых изменениях.
         Audio.OnQueueItemMoved += OnAudioQueueItemMoved;
         Audio.OnQueueChanged += OnAudioQueueChanged;
 
@@ -68,8 +57,8 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         IsLoading = false;
     }
 
-    private void _audioClearQueue() => Audio.ClearQueue();
-    private void _audioShuffleQueue() => Audio.ShuffleQueue();
+    private void AudioClearQueue() => Audio.ClearQueue();
+    private void AudioShuffleQueue() => Audio.ShuffleQueue();
 
     protected override void OnPlay(TrackInfo track)
     {

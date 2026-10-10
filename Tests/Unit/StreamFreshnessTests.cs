@@ -3,7 +3,6 @@ using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Sources;
 using LMP.Core.Youtube.Videos;
-using LMP.Core.Helpers.Extensions;
 using LMP.Tests.Framework;
 using Microsoft.Extensions.DependencyInjection;
 

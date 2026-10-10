@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using LMP.UI.Features.Settings.ViewModels;
-using LMP.UI.Features.Shell;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Features.Settings;

@@ -47,11 +47,6 @@ public sealed class StreamManifest
     }
 
     /// <summary>
-    /// Gets streams that contain audio (i.e. muxed and audio-only streams).
-    /// </summary>
-    public IReadOnlyList<IAudioStreamInfo> GetAudioStreams() => _audioStreams;
-
-    /// <summary>
     /// Gets audio-only streams.
     /// </summary>
     public IReadOnlyList<AudioOnlyStreamInfo> GetAudioOnlyStreams() => _audioOnlyStreams;

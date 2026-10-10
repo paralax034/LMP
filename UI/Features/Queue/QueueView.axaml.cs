@@ -9,7 +9,6 @@ namespace LMP.UI.Features.Queue;
 public partial class QueueView : UserControl
 {
     private TrackListControl? _trackList;
-    private EventHandler<AvaloniaPropertyChangedEventArgs>? _loadingChangedHandler;
 
     public QueueView()
     {
@@ -22,49 +21,28 @@ public partial class QueueView : UserControl
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == Visual.IsVisibleProperty && change.GetNewValue<bool>())
+        // В PersistentPageHost страницы постоянно смонтированы с IsVisible=true.
+        // Переход на страницу детектируется по активации IsHitTestVisible (свойство InputElement).
+        if ((change.Property == IsHitTestVisibleProperty || change.Property == IsVisibleProperty)
+            && change.GetNewValue<bool>())
         {
-            Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Background);
         }
     }
 
     private void OnAttachedToVisualTreeHandler(object? sender, VisualTreeAttachmentEventArgs e)
     {
         _trackList = this.FindControl<TrackListControl>("QueueTrackList");
-        if (_trackList == null) return;
 
-        if (!_trackList.IsLoading)
+        if (IsHitTestVisible)
         {
-            Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Loaded);
-        }
-        else
-        {
-            _loadingChangedHandler = (s, args) =>
-            {
-                if (args.Property == TrackListControl.IsLoadingProperty && _trackList != null && !_trackList.IsLoading)
-                {
-                    DetachLoadingHandler();
-                    Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Loaded);
-                }
-            };
-
-            _trackList.PropertyChanged += _loadingChangedHandler;
+            Dispatcher.UIThread.Post(ScrollToPlayingTrack, DispatcherPriority.Background);
         }
     }
 
     private void OnDetachedFromVisualTreeHandler(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        DetachLoadingHandler();
         _trackList = null;
-    }
-
-    private void DetachLoadingHandler()
-    {
-        if (_trackList != null && _loadingChangedHandler != null)
-        {
-            _trackList.PropertyChanged -= _loadingChangedHandler;
-            _loadingChangedHandler = null;
-        }
     }
 
     private void ScrollToPlayingTrack()

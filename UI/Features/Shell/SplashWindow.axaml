@@ -19,7 +19,7 @@
 
         <Grid RowDefinitions="*, Auto, Auto, Auto, 56">
 
-            <!-- ═══ LOGO SECTION ═══ -->
+            <!-- LOGO SECTION -->
             <StackPanel Grid.Row="0"
                 VerticalAlignment="Center"
                 HorizontalAlignment="Center"
@@ -83,7 +83,7 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- ═══ STATUS TEXT ═══ -->
+            <!-- STATUS TEXT -->
             <TextBlock Grid.Row="1"
                 x:Name="StatusText"
                 Text="Initializing..."
@@ -92,7 +92,7 @@
                 HorizontalAlignment="Center"
                 Margin="0,0,0,16" />
 
-            <!-- ═══ PROGRESS BAR ═══ -->
+            <!-- PROGRESS BAR -->
             <Border Grid.Row="2"
                 Height="3"
                 Margin="48,0"
@@ -115,7 +115,7 @@
                 </Border>
             </Border>
 
-            <!-- ═══ VERSION + BUILD INFO ═══ -->
+            <!-- VERSION + BUILD INFO -->
             <StackPanel Grid.Row="3"
                 HorizontalAlignment="Center"
                 Spacing="4"
@@ -150,7 +150,7 @@
                     Opacity="0.6" />
             </StackPanel>
 
-            <!-- ═══ FOOTER: GitHub Link ═══ -->
+            <!-- FOOTER: GitHub Link -->
             <Border Grid.Row="4"
                 Background="{DynamicResource BgSecondaryBrush}"
                 CornerRadius="0,0,16,16">

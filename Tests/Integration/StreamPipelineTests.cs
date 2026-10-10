@@ -5,7 +5,6 @@ using LMP.Core.Audio.Http;
 using LMP.Core.Youtube.Videos;
 using LMP.Core.Youtube.Videos.Streams;
 using LMP.Tests.Framework;
-using LMP.Core.Helpers.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.Tests.Integration;

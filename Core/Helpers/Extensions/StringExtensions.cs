@@ -33,28 +33,6 @@ internal static class StringExtensions
             !string.IsNullOrWhiteSpace(str) ? str : null;
 
         /// <summary>
-        /// Возвращает подстроку до первого вхождения <paramref name="sub"/>.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string SubstringUntil(string sub, StringComparison comparison = StringComparison.Ordinal)
-        {
-            var index = str.IndexOf(sub, comparison);
-            return index < 0 ? str : str[..index];
-        }
-
-        /// <summary>
-        /// Возвращает подстроку после первого вхождения <paramref name="sub"/> или пустую строку.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public string SubstringAfter(string sub, StringComparison comparison = StringComparison.Ordinal)
-        {
-            var index = str.IndexOf(sub, comparison);
-            return index < 0
-                ? string.Empty
-                : str[(index + sub.Length)..];
-        }
-
-        /// <summary>
         /// Разворачивает строку без аллокации массивов.
         /// </summary>
         public string Reverse()

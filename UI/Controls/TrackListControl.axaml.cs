@@ -8,10 +8,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using LMP.Core.Models;
 using LMP.UI.Features.Shared;
-using LMP.UI.Services;
-using LMP.UI.ViewModels;
 
 namespace LMP.UI.Controls;
 

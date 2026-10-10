@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using LMP.Core.Helpers.Extensions;
 using LMP.Core.Youtube.Bridge;
 using LMP.Core.Youtube.Music;
 using LMP.Tests.Framework;
