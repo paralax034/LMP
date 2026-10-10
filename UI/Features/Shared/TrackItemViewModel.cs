@@ -88,6 +88,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     private ICommand? _removeFromPlaylistCommand;
     private ICommand? _removeFromQueueCommand;
     private ICommand? _copyLinkCommand;
+    private IAsyncRelayCommand<object?>? _copyTitleCommand;
 
     public TrackInfo Track { get; }
     public bool IsDisposed { get; private set; }
@@ -163,6 +164,10 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     public ICommand RemoveFromQueueCommand =>
         _removeFromQueueCommand ??= new TrackSyncCommand(OnRemoveFromQueue);
+
+    public IAsyncRelayCommand<object?> CopyTitleCommand =>
+        _copyTitleCommand ??= new AsyncRelayCommand<object?>(CopyTitleAsync);
+
 
     public TrackItemViewModel(
         TrackInfo track,
@@ -478,6 +483,12 @@ public sealed partial class TrackItemViewModel : ViewModelBase
             await _audio.SetPlaybackStateAsync(!_audio.IsPlaying).ConfigureAwait(false);
         else
             _onPlay?.Invoke(Track);
+    }
+
+    private async Task CopyTitleAsync(object? parameter)
+    {
+        if (IsDisposed) return;
+        await TrackCopyHelper.CopyTrackTitlesAsync(GetActionTargets(), parameter).ConfigureAwait(false);
     }
 
     private async Task SaveToDownloadsAsync()

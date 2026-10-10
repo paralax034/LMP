@@ -199,27 +199,45 @@
                                         </Panel>
                                     </Button>
 
-                                    <!-- COL 1: НАЗВАНИЕ + АВТОР -->
+                                    <!-- COL 1: НАЗВАНИЕ + АВТОР + COPY-->
                                     <StackPanel Grid.Column="1"
                                                 Orientation="Vertical"
                                                 VerticalAlignment="Center"
                                                 Margin="12,0"
-                                                Spacing="2"
-                                                IsHitTestVisible="False">
-                                        <TextBlock
-                                            Text="{Binding Title}"
-                                            Classes="track-title"
-                                            TextWrapping="NoWrap"
-                                            TextTrimming="CharacterEllipsis"
-                                            MaxLines="1"
-                                            FontSize="14" />
+                                                Spacing="2">
+
+                                        <!-- Название трека + кнопка копирования -->
+                                        <Grid ColumnDefinitions="*, Auto"
+                                              HorizontalAlignment="Left">
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                Text="{Binding Title}"
+                                                Classes="track-title"
+                                                TextWrapping="NoWrap"
+                                                TextTrimming="CharacterEllipsis"
+                                                MaxLines="1"
+                                                FontSize="14"
+                                                IsHitTestVisible="False" />
+
+                                            <Button
+                                                Grid.Column="1"
+                                                Classes="track-copy-btn"
+                                                Click="OnTrackCopyTitleClick"
+                                                ToolTip.Tip="{Binding L[ContextMenu_Copy]}"
+                                                Margin="6,0,0,0">
+                                                <PathIcon Data="{StaticResource Icon.ContentCopy}"
+                                                          Width="12" Height="12" />
+                                            </Button>
+                                        </Grid>
+
                                         <TextBlock
                                             Text="{Binding Author}"
                                             Foreground="{DynamicResource TextMutedBrush}"
                                             TextWrapping="NoWrap"
                                             TextTrimming="CharacterEllipsis"
                                             MaxLines="1"
-                                            FontSize="12" />
+                                            FontSize="12"
+                                            IsHitTestVisible="False" />
                                     </StackPanel>
 
                                     <!-- COL 2: СТАТУС КЭША / ЗАГРУЗКА -->

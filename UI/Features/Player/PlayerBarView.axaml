@@ -420,7 +420,15 @@
                 </StackPanel>
                 <Border Grid.Column="1" Width="1" Margin="10,10"
                     Background="{DynamicResource BgHighlightBrush}" />
-                <Grid Grid.Column="2" VerticalAlignment="Center" ColumnDefinitions="Auto,*">
+
+                <!-- БЛОК ТЕКУЩЕГО ТРЕКА -->
+                <Grid Grid.Column="2"
+                      Classes="player-track-info"
+                      Background="Transparent"
+                      VerticalAlignment="Center"
+                      ColumnDefinitions="Auto,*">
+
+                    <!-- Обложка трека -->
                     <Border Grid.Column="0" Width="52" Height="52" Margin="0,0,12,0"
                         Background="Transparent"
                         BorderBrush="{DynamicResource BgHighlightBrush}"
@@ -438,15 +446,34 @@
                                 Stretch="UniformToFill" />
                         </Panel>
                     </Border>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="0">
-                        <TextBlock FontSize="14" FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            Text="{Binding SafeTitle}" TextTrimming="CharacterEllipsis" />
+
+                    <!-- Название и автор -->
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="0" Background="Transparent">
+
+                        <!-- Название + кнопка копирования -->
+                        <Grid ColumnDefinitions="*, Auto" HorizontalAlignment="Left" Background="Transparent">
+                            <TextBlock Grid.Column="0"
+                                       FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                       Text="{Binding SafeTitle}"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <Button Grid.Column="1"
+                                    Classes="track-copy-btn"
+                                    Click="OnCopyTitleClick"
+                                    ToolTip.Tip="{Binding L[ContextMenu_Copy]}"
+                                    Margin="6,0,0,0">
+                                <PathIcon Data="{StaticResource Icon.ContentCopy}"
+                                          Width="12" Height="12" />
+                            </Button>
+                        </Grid>
+
                         <TextBlock Margin="0,2,0,0" FontSize="12"
                             Foreground="{DynamicResource TextSecondaryBrush}"
                             Text="{Binding SafeAuthor}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </Grid>
+
                 <Border Grid.Column="3" Width="1" Margin="10,10"
                     Background="{DynamicResource BgHighlightBrush}" />
                 <StackPanel Grid.Column="4" Width="230" VerticalAlignment="Center" Spacing="4">

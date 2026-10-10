@@ -158,6 +158,12 @@
         <Setter Property="Opacity" Value="1" />
     </Style>
 
+    <!-- Появление кнопки копирования при наведении на блок трека в нижней панели -->
+    <Style Selector="Grid.player-track-info:pointerover Button.track-copy-btn">
+        <Setter Property="Opacity" Value="1" />
+        <Setter Property="IsHitTestVisible" Value="True" />
+    </Style>
+
     <!-- ФОРМАТЫ СТРИМА: Стабильная геометрия без scale и без изменения толщины границ -->
     <Style Selector="Button.format-item-btn">
         <Setter Property="Background" Value="Transparent" />

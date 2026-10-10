@@ -277,6 +277,7 @@ public partial class TrackListControl : UserControl
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
         AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
+        AddHandler(InputElement.PointerPressedEvent, (s, e) => _lastCopyClickModifiers = e.KeyModifiers, RoutingStrategies.Tunnel);
     }
 
     #endregion
@@ -1276,6 +1277,16 @@ public partial class TrackListControl : UserControl
         virtualList.IsQueueContext = IsQueueContext;
         virtualList.SelectionProvider = GetSelectedTrackInfos;
     }
+    private KeyModifiers _lastCopyClickModifiers;
 
+    private void OnTrackCopyTitleClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control c || c.DataContext is not TrackItemViewModel vm)
+            return;
+
+        bool withAuthor = _lastCopyClickModifiers.HasFlag(KeyModifiers.Shift);
+        _lastCopyClickModifiers = KeyModifiers.None;
+        vm.CopyTitleCommand.Execute(withAuthor);
+    }
     #endregion
 }

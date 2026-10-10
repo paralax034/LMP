@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 
@@ -93,6 +94,7 @@ public partial class PlayerBarView : UserControl
         InitializeComponent();
         CacheRenderTransforms();
         SetupEventHandlers();
+        AddHandler(InputElement.PointerPressedEvent, (s, e) => _lastCopyClickModifiers = e.KeyModifiers, RoutingStrategies.Tunnel);
     }
 
     private void CacheRenderTransforms()
@@ -729,6 +731,22 @@ public partial class PlayerBarView : UserControl
         CancelSeekDrag();
 
         if (hadSeek) e.Handled = true;
+    }
+
+    #endregion
+
+    #region Copy
+
+    private KeyModifiers _lastCopyClickModifiers;
+
+    private void OnCopyTitleClick(object? sender, RoutedEventArgs e)
+    {
+        if (_currentViewModel?.CurrentTrack == null)
+            return;
+
+        bool withAuthor = _lastCopyClickModifiers.HasFlag(KeyModifiers.Shift);
+        _lastCopyClickModifiers = KeyModifiers.None;
+        _currentViewModel.CopyTitleCommand.Execute(withAuthor);
     }
 
     #endregion

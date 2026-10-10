@@ -300,6 +300,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #region Commands
 
     public IAsyncRelayCommand PlayPauseCommand { get; private set; } = null!;
+    public IAsyncRelayCommand<object?> CopyTitleCommand { get; private set; } = null!;
     public IAsyncRelayCommand PreviousCommand { get; private set; } = null!;
     public IAsyncRelayCommand NextCommand { get; private set; } = null!;
     public IRelayCommand ShuffleQueueCommand { get; private set; } = null!;
@@ -419,6 +420,12 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                     IsNavigating = false;
             }
         }, () => HasTrack);
+
+        CopyTitleCommand = new AsyncRelayCommand<object?>(async param =>
+        {
+            if (CurrentTrack == null) return;
+            await TrackCopyHelper.CopyTrackTitleAsync(CurrentTrack, param).ConfigureAwait(false);
+        });
 
         PreviousCommand = new AsyncRelayCommand(async () =>
         {
@@ -974,6 +981,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         NextCommand?.NotifyCanExecuteChanged();
         PreviousCommand?.NotifyCanExecuteChanged();
         ToggleLikeCommand?.NotifyCanExecuteChanged();
+        CopyTitleCommand?.NotifyCanExecuteChanged();
     }
 
     private void UpdateQueueState()
