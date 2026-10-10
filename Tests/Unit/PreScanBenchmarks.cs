@@ -28,14 +28,7 @@ public static class PreScanBenchmarks
         TimeoutSeconds = 120)]
     public static async Task BenchmarkIsolatedPreScanAsync()
     {
-        var cacheManager = AudioSourceFactory.GlobalCache;
-        if (cacheManager == null)
-        {
-            Log.Warn("[Benchmark] AudioSourceFactory.GlobalCache is null — skipping");
-            return;
-        }
-
-        var candidates = CollectCandidates(cacheManager);
+        var candidates = CollectCandidates(AudioSourceFactory.GlobalCache);
         if (candidates.Count == 0)
         {
             Log.Warn("[Benchmark] No fully cached tracks found. Play some tracks first.");
@@ -94,14 +87,7 @@ public static class PreScanBenchmarks
         TimeoutSeconds = 120)]
     public static async Task BenchmarkScopeComparisonAsync()
     {
-        var cacheManager = AudioSourceFactory.GlobalCache;
-        if (cacheManager == null)
-        {
-            Log.Warn("[Benchmark] AudioSourceFactory.GlobalCache is null — skipping");
-            return;
-        }
-
-        var candidates = CollectCandidates(cacheManager)
+        var candidates = CollectCandidates(AudioSourceFactory.GlobalCache)
             .Where(c => c.Entry.Codec == AudioCodec.Opus)
             .Take(3)
             .ToList();

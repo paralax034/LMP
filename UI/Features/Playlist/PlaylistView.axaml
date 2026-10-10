@@ -155,7 +155,7 @@
             <Setter Property="Opacity" Value="1" />
         </Style>
 
-        <!-- Equalizer Bars Base (Stopped / Paused State) -->
+        <!-- Equalizer Bars Base -->
         <Style Selector="Border.eq-bar">
             <Setter Property="Width" Value="4" />
             <Setter Property="Height" Value="5" />

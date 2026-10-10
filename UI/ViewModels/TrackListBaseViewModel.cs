@@ -9,7 +9,7 @@ namespace LMP.UI.ViewModels;
 /// Исключает дублирование реактивности плеера, загрузок, SIMD-фильтрации,
 /// переходов навигации и перемещения элементов.
 /// </summary>
-public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterable, ISmoothTransitionViewModel
+public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterable
 {
     protected readonly LibraryService LibService;
     protected readonly AudioEngine Audio;
@@ -24,8 +24,6 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
     private int _consecutiveEmptyLoads;
 
     private bool _isDataLoading = true;
-    private bool _isTransitioning;
-    private TaskCompletionSource? _transitionTcs;
 
     public IVirtualTrackList Items => _items;
 
@@ -36,7 +34,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
 
     public bool IsLoading
     {
-        get => _isDataLoading || _isTransitioning;
+        get => _isDataLoading;
         protected set
         {
             if (_isDataLoading == value) return;
@@ -106,42 +104,12 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         Downloads.OnProgress += HandleDownloadProgress;
         Downloads.OnCompleted += HandleDownloadCompleted;
 
-        var cache = AudioSourceFactory.GlobalCache;
-        if (cache != null)
-        {
-            cache.OnFormatCached += HandleFormatCached;
-        }
-    }
-
-    public virtual void PrepareForTransition()
-    {
-        _isTransitioning = true;
-        _transitionTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        OnPropertyChanged(nameof(IsLoading));
-        OnPropertyChanged(nameof(CanReorderItems));
+        AudioSourceFactory.GlobalCache.OnFormatCached += HandleFormatCached;
     }
 
     public override async Task OnNavigatedToAsync()
     {
-        _isTransitioning = false;
-        _transitionTcs?.TrySetResult();
-        OnPropertyChanged(nameof(IsLoading));
-        OnPropertyChanged(nameof(CanReorderItems));
         await base.OnNavigatedToAsync().ConfigureAwait(false);
-    }
-
-    protected async Task WaitForTransitionAsync(CancellationToken ct)
-    {
-        var tcs = _transitionTcs;
-        if (!_isTransitioning || tcs == null) return;
-
-        try
-        {
-            await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-        }
     }
 
     partial void OnFilterQueryChanged(string value)
@@ -349,15 +317,14 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
 
     protected async Task HydrateCacheStatusAsync(CancellationToken ct = default)
     {
-        var cache = AudioSourceFactory.GlobalCache;
-        if (cache == null || TotalCount == 0) return;
+        if (TotalCount == 0) return;
 
         try
         {
             var tracks = GetItemsSnapshot();
             if (tracks.Count == 0) return;
 
-            await Task.Run(() => cache.HydrateCacheStatus(tracks), ct).ConfigureAwait(false);
+            await Task.Run(() => AudioSourceFactory.GlobalCache.HydrateCacheStatus(tracks), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -419,11 +386,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
             Downloads.OnProgress -= HandleDownloadProgress;
             Downloads.OnCompleted -= HandleDownloadCompleted;
 
-            var cache = AudioSourceFactory.GlobalCache;
-            if (cache != null)
-            {
-                cache.OnFormatCached -= HandleFormatCached;
-            }
+            AudioSourceFactory.GlobalCache.OnFormatCached -= HandleFormatCached;
 
             _items.Dispose();
         }

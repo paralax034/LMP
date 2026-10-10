@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using Avalonia.Threading;
 using LMP.Core.Youtube.Search;
 using LMP.UI.Dialogs;
@@ -8,11 +9,18 @@ using LMP.UI.Features.Shell;
 namespace LMP.UI.Features.Library;
 
 /// <summary>
-/// ViewModel страницы «Библиотека» — управление плейлистами пользователя.
+/// ViewModel страницы «Библиотека» — высокопроизводительное управление плейлистами пользователя.
+/// Поддерживает кинематический параллельный счетчик статистики со сглаживанием CubicEaseOut и потокобезопасную предварительную загрузку.
 /// </summary>
-public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionViewModel
+public sealed partial class LibraryViewModel : ViewModelBase
 {
-    #region Зависимости
+    #region Constants
+
+    private const double StatsAnimationDurationMs = 380.0;
+
+    #endregion
+
+    #region Dependencies
 
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
@@ -27,47 +35,61 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     #endregion
 
-    #region Внутреннее состояние
+    #region Internal State
 
     private CancellationTokenSource? _syncCts;
-    private CancellationTokenSource? _staggerCts;
-    private CancellationTokenSource? _statsAnimCts;
+    private CancellationTokenSource? _loadCts;
     private DispatcherTimer? _dataChangedTimer;
-    private bool _isDisposed;
-    private int _prevPlaylistCount;
-    private int _prevTrackCount;
+    private DispatcherTimer? _statsRollTimer;
+    private Stopwatch? _statsRollStopwatch;
 
+    private Task? _initialLoadTask;
+    private bool _isDisposed;
     private bool _isDataLoaded;
-    private string _loadedOwnerId = string.Empty;
     private bool _isDirty;
     private bool _isViewActive = true;
+    private bool _hasAnimatedStatsOnce;
+    private string _loadedOwnerId = string.Empty;
+
+    // Снапшоты анимации
+    private int _startPlaylists;
+    private int _targetPlaylists;
+    private int _startTracks;
+    private int _targetTracks;
+    private long _startDurationTicks;
+    private long _targetDurationTicks;
+
+    // Последние зафиксированные значения счетчиков
+    private int _lastRenderedPlaylists;
+    private int _lastRenderedTracks;
+    private long _lastRenderedDurationTicks;
 
     #endregion
 
-    #region Свойства
+    #region Properties — State & Progress
 
     [ObservableProperty] public partial bool IsContentReady { get; private set; }
-    [ObservableProperty] public partial bool IsLoading { get; private set; }
+    public bool IsLoading { get; private set; }
     [ObservableProperty] public partial bool IsSyncing { get; private set; }
     [ObservableProperty] public partial double SyncProgress { get; private set; }
-    [ObservableProperty] public partial string SyncStatus { get; private set; } = "";
+    [ObservableProperty] public partial string SyncStatus { get; private set; } = string.Empty;
     [ObservableProperty] public partial bool IsAuthenticated { get; private set; }
     [ObservableProperty] public partial bool HasPlaylists { get; private set; }
 
     #endregion
 
-    #region Статистика
+    #region Properties — Statistics (Rolling Counter)
 
     [ObservableProperty] public partial bool IsStatsVisible { get; private set; }
-    [ObservableProperty] public partial string PlaylistCountText { get; private set; } = "";
-    [ObservableProperty] public partial string TotalTracksText { get; private set; } = "";
-    [ObservableProperty] public partial string TotalDurationText { get; private set; } = "";
-    [ObservableProperty] public partial string AvgTrackDurationText { get; private set; } = "";
-    [ObservableProperty] public partial string AvgPlaylistDurationText { get; private set; } = "";
+    [ObservableProperty] public partial string PlaylistCountText { get; private set; } = "0";
+    [ObservableProperty] public partial string TotalTracksText { get; private set; } = "0";
+    [ObservableProperty] public partial string TotalDurationText { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string AvgTrackDurationText { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string AvgPlaylistDurationText { get; private set; } = string.Empty;
 
     #endregion
 
-    #region Коллекция и команды
+    #region Collections & Commands
 
     public ObservableCollection<PlaylistCardViewModel> Playlists { get; } = [];
 
@@ -122,22 +144,36 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         HasPlaylists = Playlists.Count > 0;
 
         LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
+
+        // Потокобезопасная предварительная загрузка данных на этапе Splash Screen
+        _initialLoadTask = PreloadDataInBackgroundAsync();
+    }
+
+    private async Task PreloadDataInBackgroundAsync()
+    {
+        try
+        {
+            await LoadPlaylistsCoreAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[Library] Preload failed: {ex.Message}");
+        }
     }
 
     private void OnLanguageChanged(object? sender, string lang)
     {
         if (_isDisposed) return;
-        UpdateStatsInBackground();
+        UpdateStatsInBackground(animateFromZero: false);
     }
 
+    #region Navigation Lifecycle
+
     /// <inheritdoc />
-    public void PrepareForTransition()
+    public override void OnNavigatedFrom()
     {
         _isViewActive = false;
-        if (!_isDataLoaded)
-        {
-            IsContentReady = false;
-        }
+        StopStatsRollAnimation();
     }
 
     /// <inheritdoc />
@@ -147,18 +183,34 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
         _isViewActive = true;
 
+        // Если предварительная загрузка со сплэша еще завершается, ожидаем её без перезапуска
+        if (_initialLoadTask is { IsCompleted: false } task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"[Library] Initial task join notice: {ex.Message}");
+            }
+        }
+
         var currentOwnerId = _auth.State.DisplayId;
         if (_isDataLoaded && string.Equals(_loadedOwnerId, currentOwnerId, StringComparison.Ordinal))
         {
             await RefreshLikedTrackCountAsync().ConfigureAwait(false);
 
-            int currentPlaylists = Playlists.Count;
-            int currentTracks = Playlists.Sum(p => p.TrackCount);
-
-            if (_isDirty || currentPlaylists != _prevPlaylistCount || currentTracks != _prevTrackCount)
+            if (_isDirty)
             {
                 _isDirty = false;
-                UpdateStatsInBackground();
+                await LoadPlaylistsAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                bool isFirstVisit = !_hasAnimatedStatsOnce;
+                _hasAnimatedStatsOnce = true;
+                UpdateStatsInBackground(animateFromZero: isFirstVisit);
             }
 
             IsContentReady = true;
@@ -166,19 +218,21 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
 
         await LoadPlaylistsAsync().ConfigureAwait(false);
+        _hasAnimatedStatsOnce = true;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (_isDisposed) return;
-            _isDataLoaded = true;
-            _loadedOwnerId = _auth.State.DisplayId;
-            _isDirty = false;
             IsContentReady = true;
         });
     }
 
     /// <inheritdoc />
-    protected override void OnSuspend() => _isViewActive = false;
+    protected override void OnSuspend()
+    {
+        _isViewActive = false;
+        StopStatsRollAnimation();
+    }
 
     /// <inheritdoc />
     protected override async void OnResume()
@@ -191,7 +245,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             try
             {
                 await RefreshLikedTrackCountAsync().ConfigureAwait(false);
-                UpdateStatsInBackground();
+                UpdateStatsInBackground(animateFromZero: false);
             }
             catch (Exception ex)
             {
@@ -200,9 +254,10 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
     }
 
-    /// <summary>
-    /// Оформляет подписки на события сервисов библиотеки и плейлистов.
-    /// </summary>
+    #endregion
+
+    #region Event Subscriptions & Incremental Updates
+
     private void SubscribeToEvents()
     {
         _playlistService.OnPlaylistChanged += OnPlaylistChangedIncremental;
@@ -217,6 +272,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (!_isViewActive)
         {
             _isDirty = true;
+            return;
         }
 
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
@@ -246,14 +302,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                     vm.Show();
                 }
 
-                if (_isViewActive)
-                {
-                    UpdateStatsInBackground();
-                }
-                else
-                {
-                    _isDirty = true;
-                }
+                UpdateStatsInBackground(animateFromZero: false);
             }
             catch (Exception ex)
             {
@@ -269,6 +318,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (!_isViewActive)
         {
             _isDirty = true;
+            return;
         }
 
         Dispatcher.UIThread.Post(() =>
@@ -278,15 +328,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             {
                 vm.Dispose();
                 Playlists.Remove(vm);
-
-                if (_isViewActive)
-                {
-                    UpdateStatsInBackground();
-                }
-                else
-                {
-                    _isDirty = true;
-                }
+                UpdateStatsInBackground(animateFromZero: false);
             }
         });
     }
@@ -314,15 +356,15 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             (_, _) =>
             {
                 _dataChangedTimer?.Stop();
-                if (_isDisposed || IsSyncing) return;
+                if (_isDisposed || IsSyncing || !_isViewActive) return;
 
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        if (_isDisposed || IsSyncing) return;
+                        if (_isDisposed || IsSyncing || !_isViewActive) return;
                         await RefreshLikedTrackCountAsync().ConfigureAwait(false);
-                        UpdateStatsInBackground();
+                        UpdateStatsInBackground(animateFromZero: false);
                     }
                     catch (Exception ex)
                     {
@@ -333,94 +375,213 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         _dataChangedTimer.Start();
     }
 
-    private void UpdateStatsInBackground()
+    #endregion
+
+    #region Rolling Statistics Engine (Juicy Delta & Rolling Animation)
+
+    private void UpdateStatsInBackground(bool animateFromZero)
     {
         if (_isDisposed || !_isViewActive) return;
 
-        _statsAnimCts?.Cancel();
-        _statsAnimCts?.Dispose();
-        _statsAnimCts = new CancellationTokenSource();
-        var ct = _statsAnimCts.Token;
+        int targetPlaylists = Playlists.Count;
+        int targetTracks = Playlists.Sum(static p => p.TrackCount);
 
-        var targetPlaylists = Playlists.Count;
-        var targetTracks = Playlists.Sum(p => p.TrackCount);
-
-        var durationTask = Task.Run(() => _library.GetTotalLibraryDurationAsync(ct), ct);
-
-        _ = Dispatcher.UIThread.InvokeAsync(async () =>
+        _ = Task.Run(async () =>
         {
+            long targetTicks = 0;
             try
             {
-                await AnimateStatsOnUIAsync(targetPlaylists, targetTracks, durationTask, ct);
+                targetTicks = await _library.GetTotalLibraryDurationAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                Log.Warn($"[Library] Update stats error: {ex.Message}");
+                Log.Debug($"[Library] Duration query notice: {ex.Message}");
             }
+
+            if (_isDisposed || !_isViewActive) return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_isDisposed || !_isViewActive) return;
+
+                StartHarmoniousStatsAnimation(targetPlaylists, targetTracks, targetTicks, animateFromZero);
+            }, DispatcherPriority.Render);
         });
     }
 
-    private async Task AnimateStatsOnUIAsync(
+    private void StartHarmoniousStatsAnimation(
         int targetPlaylists,
         int targetTracks,
-        Task<long> durationTask,
-        CancellationToken ct)
+        long targetDurationTicks,
+        bool animateFromZero)
     {
-        if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
+        StopStatsRollAnimation();
 
-        int startPlaylists = _prevPlaylistCount;
-        int startTracks = _prevTrackCount;
-        int diff = Math.Abs(targetPlaylists - startPlaylists) + Math.Abs(targetTracks - startTracks);
+        _targetPlaylists = targetPlaylists;
+        _targetTracks = targetTracks;
+        _targetDurationTicks = targetDurationTicks;
 
-        if (diff > 0)
+        if (animateFromZero)
         {
-            int steps = diff <= 3 ? 15 : 25;
+            _startPlaylists = 0;
+            _startTracks = 0;
+            _startDurationTicks = 0;
+        }
+        else
+        {
+            _startPlaylists = _lastRenderedPlaylists;
+            _startTracks = _lastRenderedTracks;
+            _startDurationTicks = _lastRenderedDurationTicks;
 
-            for (int i = 1; i <= steps; i++)
+            // Если изменений нет, мгновенно фиксируем финальные значения
+            if (_startPlaylists == _targetPlaylists &&
+                _startTracks == _targetTracks &&
+                _startDurationTicks == _targetDurationTicks)
             {
-                if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
-
-                double t = (double)i / steps;
-                double ease = 1 - Math.Pow(1 - t, 3);
-
-                PlaylistCountText = (startPlaylists + (int)Math.Round((targetPlaylists - startPlaylists) * ease))
-                    .ToString();
-                TotalTracksText = (startTracks + (int)Math.Round((targetTracks - startTracks) * ease)).ToString();
-
-                if (!IsStatsVisible)
-                    IsStatsVisible = true;
-
-                if (!await ct.DelayNoThrowAsync(16))
-                    break;
+                RenderStatsFrame(1.0);
+                IsStatsVisible = true;
+                return;
             }
         }
 
-        long totalTicks = 0;
-        try
-        {
-            totalTicks = await durationTask.ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            Log.Debug($"[Library] Duration calculation exception: {ex.Message}");
-        }
-
-        if (ct.IsCancellationRequested || _isDisposed || !_isViewActive) return;
-
-        var finalDuration = TimeSpan.FromTicks(totalTicks);
-        var finalAvgTrack = targetTracks > 0 ? TimeSpan.FromTicks(finalDuration.Ticks / targetTracks) : TimeSpan.Zero;
-        var finalAvgPlaylist = targetPlaylists > 0
-            ? TimeSpan.FromTicks(finalDuration.Ticks / targetPlaylists)
-            : TimeSpan.Zero;
-
-        PlaylistCountText = targetPlaylists.ToString();
-        TotalTracksText = targetTracks.ToString();
-        TotalDurationText = FormatDurationLocalized(finalDuration);
-        AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(finalAvgTrack)}";
-        AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(finalAvgPlaylist)}";
-        _prevPlaylistCount = targetPlaylists;
-        _prevTrackCount = targetTracks;
+        RenderStatsFrame(0.0);
         IsStatsVisible = true;
+
+        _statsRollStopwatch = Stopwatch.StartNew();
+        _statsRollTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(16),
+            DispatcherPriority.Render,
+            OnStatsAnimationTick);
+        _statsRollTimer.Start();
+    }
+
+    private void OnStatsAnimationTick(object? sender, EventArgs e)
+    {
+        if (_statsRollStopwatch is null || !_isViewActive || _isDisposed)
+        {
+            StopStatsRollAnimation();
+            return;
+        }
+
+        double elapsed = _statsRollStopwatch.Elapsed.TotalMilliseconds;
+        double progress = Math.Clamp(elapsed / StatsAnimationDurationMs, 0.0, 1.0);
+
+        // Кинематическая кривая замедления Cubic Ease-Out: 1 - (1 - t)^3
+        double ease = 1.0 - Math.Pow(1.0 - progress, 3);
+
+        RenderStatsFrame(ease);
+
+        if (progress >= 1.0)
+        {
+            StopStatsRollAnimation();
+            RenderStatsFrame(1.0);
+        }
+    }
+
+    private void RenderStatsFrame(double ease)
+    {
+        int curPlaylists = (int)Math.Round(_startPlaylists + ((_targetPlaylists - _startPlaylists) * ease));
+        int curTracks = (int)Math.Round(_startTracks + ((_targetTracks - _startTracks) * ease));
+        long curTicks = (long)Math.Round(_startDurationTicks + ((_targetDurationTicks - _startDurationTicks) * ease));
+
+        _lastRenderedPlaylists = curPlaylists;
+        _lastRenderedTracks = curTracks;
+        _lastRenderedDurationTicks = curTicks;
+
+        var curDuration = TimeSpan.FromTicks(Math.Max(0, curTicks));
+        var curAvgTrack = curTracks > 0 ? TimeSpan.FromTicks(curDuration.Ticks / curTracks) : TimeSpan.Zero;
+        var curAvgPlaylist = curPlaylists > 0 ? TimeSpan.FromTicks(curDuration.Ticks / curPlaylists) : TimeSpan.Zero;
+
+        PlaylistCountText = curPlaylists.ToString();
+        TotalTracksText = curTracks.ToString();
+        TotalDurationText = FormatDurationLocalized(curDuration);
+
+        AvgTrackDurationText = $"⌀ {SL["Library_AvgTrack"]}: {FormatDurationShort(curAvgTrack)}";
+        AvgPlaylistDurationText = $"⌀ {SL["Library_AvgPlaylist"]}: {FormatDurationLocalized(curAvgPlaylist)}";
+    }
+
+    private void StopStatsRollAnimation()
+    {
+        _statsRollTimer?.Stop();
+        _statsRollTimer = null;
+        _statsRollStopwatch?.Stop();
+        _statsRollStopwatch = null;
+    }
+
+    #endregion
+
+    #region Loading & Data Operations
+
+    private async Task LoadPlaylistsAsync()
+    {
+        if (_isDisposed) return;
+
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        await LoadPlaylistsCoreAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task LoadPlaylistsCoreAsync(CancellationToken ct)
+    {
+        var allPlaylistsWithCounts = await _playlistService.GetAllPlaylistsWithCountsAsync(ct).ConfigureAwait(false);
+
+        if (_isDisposed || ct.IsCancellationRequested) return;
+
+        var sorted = allPlaylistsWithCounts
+            .OrderByDescending(static x => x.Playlist.Id == LibraryService.LikedPlaylistId)
+            .ThenByDescending(static x => x.Playlist.IsLocal)
+            .ThenBy(static x => x.Playlist.Name)
+            .ToList();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ct.IsCancellationRequested || _isDisposed) return;
+
+            var existingDict = Playlists.ToDictionary(static vm => vm.Id);
+            var newIdSet = new HashSet<string>(sorted.Select(static x => x.Playlist.Id));
+
+            for (int i = Playlists.Count - 1; i >= 0; i--)
+            {
+                if (!newIdSet.Contains(Playlists[i].Id))
+                {
+                    Playlists[i].Dispose();
+                    Playlists.RemoveAt(i);
+                }
+            }
+
+            int index = 0;
+            foreach (var item in sorted)
+            {
+                var playlist = item.Playlist;
+                int trackCount = item.TrackCount;
+
+                if (existingDict.TryGetValue(playlist.Id, out var existingVm))
+                {
+                    existingVm.UpdateFrom(playlist, trackCount);
+                }
+                else
+                {
+                    var vm = CreatePlaylistCardVm(playlist, trackCount);
+                    vm.Show();
+
+                    if (index >= Playlists.Count)
+                        Playlists.Add(vm);
+                    else
+                        Playlists.Insert(index, vm);
+                }
+
+                index++;
+            }
+
+            _isDataLoaded = true;
+            _loadedOwnerId = _auth.State.DisplayId;
+            _isDirty = false;
+
+            UpdateStatsInBackground(animateFromZero: !_hasAnimatedStatsOnce);
+        }, DispatcherPriority.Normal, ct);
     }
 
     private int CalculateInsertIndex(Core.Models.Playlist playlist)
@@ -450,9 +611,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         return index;
     }
 
-    /// <summary>
-    /// Открывает диалог создания плейлиста и передает управление в доменный сервис с сохранением всех метаданных.
-    /// </summary>
     private async Task OpenCreateDialogAsync()
     {
         if (_isDisposed) return;
@@ -501,7 +659,12 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         bool wasActive = IsContentReady;
         _isDataLoaded = false;
         _loadedOwnerId = string.Empty;
+        _hasAnimatedStatsOnce = false;
         IsContentReady = false;
+
+        foreach (var playlist in Playlists)
+            playlist.Dispose();
+
         Playlists.Clear();
 
         if (wasActive)
@@ -531,6 +694,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         if (_isDisposed) return;
 
         _syncCts?.Cancel();
+        _syncCts?.Dispose();
         _syncCts = new CancellationTokenSource();
         var ct = _syncCts.Token;
 
@@ -550,10 +714,9 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 return;
             }
 
-            List<Core.Models.Playlist> ytPlaylists;
             try
             {
-                ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync();
+                var ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync();
                 ct.ThrowIfCancellationRequested();
                 SyncProgress = 0.1;
 
@@ -657,9 +820,8 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                     bool tracksChanged = false;
                     bool metadataChanged = ApplyMergedCloudMetadata(existing, fullPlaylist);
 
-                    for (int i = 0; i < fullPlaylist.TrackIds.Count; i++)
+                    foreach (var trackId in fullPlaylist.TrackIds)
                     {
-                        var trackId = fullPlaylist.TrackIds[i];
                         if (existingTrackSet.Add(trackId))
                         {
                             existing.TrackIds.Add(trackId);
@@ -735,7 +897,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         }
         finally
         {
-            await Task.Delay(300);
+            await Task.Delay(300, CancellationToken.None);
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
                 try
@@ -744,7 +906,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
                 }
                 catch (Exception ex)
                 {
-                    Log.Debug($"[Library] Navigation unlock suppressed: {ex.Message}");
+                    Log.Debug($"[Library] Navigation unlock notice: {ex.Message}");
                 }
 
                 if (!_isDisposed)
@@ -846,7 +1008,7 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (_isDisposed) return;
-            var likedCard = Playlists.FirstOrDefault(p => p.IsLikedPlaylist);
+            var likedCard = Playlists.FirstOrDefault(static p => p.IsLikedPlaylist);
             if (likedCard != null && likedCard.TrackCount != countResult.Value.TrackCount)
             {
                 likedCard.TrackCount = countResult.Value.TrackCount;
@@ -867,73 +1029,6 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
 
     private static string FormatDurationShort(TimeSpan ts) =>
         ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
-
-    private async Task LoadPlaylistsAsync()
-    {
-        if (_isDisposed) return;
-
-        _staggerCts?.Cancel();
-        _staggerCts?.Dispose();
-        _staggerCts = new CancellationTokenSource();
-        var ct = _staggerCts.Token;
-
-        // Скрываем плашку только если данные еще ни разу не были загружены
-        if (!_isDataLoaded)
-        {
-            IsStatsVisible = false;
-        }
-
-        var allPlaylistsWithCounts = await Task.Run(
-            () => _playlistService.GetAllPlaylistsWithCountsAsync(ct), ct).ConfigureAwait(false);
-
-        if (_isDisposed || ct.IsCancellationRequested) return;
-
-        var sorted = allPlaylistsWithCounts
-            .OrderByDescending(x => x.Playlist.Id == LibraryService.LikedPlaylistId)
-            .ThenByDescending(x => x.Playlist.IsLocal)
-            .ThenBy(x => x.Playlist.Name)
-            .ToList();
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (ct.IsCancellationRequested || _isDisposed) return;
-
-            var existingDict = Playlists.ToDictionary(vm => vm.Id);
-            var newIdSet = new HashSet<string>(sorted.Select(x => x.Playlist.Id));
-
-            for (int i = Playlists.Count - 1; i >= 0; i--)
-            {
-                if (!newIdSet.Contains(Playlists[i].Id))
-                {
-                    Playlists[i].Dispose();
-                    Playlists.RemoveAt(i);
-                }
-            }
-
-            for (int i = 0; i < sorted.Count; i++)
-            {
-                var (playlist, trackCount) = sorted[i];
-
-                if (existingDict.TryGetValue(playlist.Id, out var existingVm))
-                {
-                    existingVm.UpdateFrom(playlist, trackCount);
-                }
-                else
-                {
-                    var vm = CreatePlaylistCardVm(playlist, trackCount);
-                    vm.Show();
-
-                    if (i >= Playlists.Count)
-                        Playlists.Add(vm);
-                    else
-                        Playlists.Insert(i, vm);
-                }
-            }
-
-            _loadedOwnerId = _auth.State.DisplayId;
-            UpdateStatsInBackground();
-        }, DispatcherPriority.Normal, ct);
-    }
 
     private PlaylistCardViewModel CreatePlaylistCardVm(Core.Models.Playlist playlist, int trackCount)
     {
@@ -1016,16 +1111,18 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
         HasPlaylists = Playlists.Count > 0;
     }
 
-    /// <summary>
-    /// Освобождает управляемые ресурсы и отписывается от событий сервисов.
-    /// </summary>
-    /// <param name="disposing">Флаг явного вызова Dispose.</param>
+    #endregion
+
+    #region IDisposable
+
     protected override void Dispose(bool disposing)
     {
         if (_isDisposed) return;
         if (disposing)
         {
             _isDisposed = true;
+
+            StopStatsRollAnimation();
 
             LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
 
@@ -1037,23 +1134,24 @@ public sealed partial class LibraryViewModel : ViewModelBase, ISmoothTransitionV
             _dataChangedTimer?.Stop();
             _dataChangedTimer = null;
 
-            _staggerCts?.Cancel();
-            _staggerCts?.Dispose();
+            _loadCts?.Cancel();
+            _loadCts?.Dispose();
+            _loadCts = null;
 
-            _statsAnimCts?.Cancel();
-            _statsAnimCts?.Dispose();
+            _syncCts?.Cancel();
+            _syncCts?.Dispose();
+            _syncCts = null;
 
-            for (int i = 0; i < Playlists.Count; i++)
-                Playlists[i].Dispose();
+            foreach (var playlist in Playlists)
+                playlist.Dispose();
 
             Playlists.Clear();
 
             _auth.OnAuthStateChanged -= OnAuthChanged;
-
-            _syncCts?.Cancel();
-            _syncCts?.Dispose();
         }
 
         base.Dispose(disposing);
     }
+
+    #endregion
 }

@@ -494,10 +494,9 @@ public partial class YoutubeProvider : IDisposable
         if (!forceRefresh && requested.HasFormat && requested.HasBitrate)
         {
             string cacheKey = AudioSourceFactory.BuildCacheKey(track.Id, requested.Format!.Value, requested.BitrateKbps);
-            var cache = AudioSourceFactory.GlobalCache;
-            if (cache != null && cache.IsFullyCached(cacheKey))
+            if (AudioSourceFactory.GlobalCache.IsFullyCached(cacheKey))
             {
-                var entry = cache.GetCacheInfo(cacheKey);
+                var entry = AudioSourceFactory.GlobalCache.GetCacheInfo(cacheKey);
                 // Sanity check: отсекаем огрызки, размер которых не соответствует длительности
                 if (entry != null && (track.Duration <= TimeSpan.FromSeconds(5) || entry.TotalSize >= (long)(track.Duration.TotalSeconds * entry.Bitrate * 1000.0 / 8.0 * 0.50)))
                 {

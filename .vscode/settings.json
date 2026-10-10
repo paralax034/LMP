@@ -42,6 +42,14 @@
     "[powershell]": {
         "files.encoding": "utf8bom"
     },
+    "[xml]": {
+        "editor.defaultFormatter": "redhat.vscode-xml",
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
+    "xml.format.enabled": true,
+    "xml.format.splitAttributes": "preserve",
+    "xml.format.spaceBeforeEmptyCloseTag": true,
     "terminal.integrated.defaultProfile.windows": "Command Prompt",
     "terminal.integrated.profiles.windows": {
         "Command Prompt": {

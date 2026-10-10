@@ -259,7 +259,7 @@ public sealed class LocalFileSource : IAudioSource
                              $"(Range {alignedStart}-{alignedStart + alignmentBytes - 1}). " +
                              $"Performing surgical invalidation.");
 
-                    AudioSourceFactory.GlobalCache?.InvalidateRangeByTrackId(_trackId, alignedStart, alignmentBytes);
+                    AudioSourceFactory.GlobalCache.InvalidateRangeByTrackId(_trackId, alignedStart, alignmentBytes);
 
                     throw new CacheInvalidatedException(
                         $"Cache corruption detected at byte {ex.AbsoluteBytePosition} " +
@@ -295,7 +295,7 @@ public sealed class LocalFileSource : IAudioSource
     {
         if (!string.IsNullOrEmpty(_trackId))
         {
-            int alignment = AudioSourceFactory.GlobalCache?.FindBestCache(_trackId)?.AlignmentBytes ?? 0;
+            int alignment = AudioSourceFactory.GlobalCache.FindBestCache(_trackId)?.AlignmentBytes ?? 0;
             if (alignment > 0)
                 return alignment;
         }

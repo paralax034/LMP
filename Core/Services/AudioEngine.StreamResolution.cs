@@ -66,9 +66,9 @@ public sealed partial class AudioEngine
         {
             string exactCacheKey =
                 AudioSourceFactory.BuildCacheKey(track.Id, requested.Format!.Value, requested.BitrateKbps);
-            if (AudioSourceFactory.GlobalCache is { } exactCache && exactCache.IsFullyCached(exactCacheKey))
+            if (AudioSourceFactory.GlobalCache.IsFullyCached(exactCacheKey))
             {
-                var exactEntry = exactCache.GetCacheInfo(exactCacheKey);
+                var exactEntry = AudioSourceFactory.GlobalCache.GetCacheInfo(exactCacheKey);
                 if (exactEntry != null && IsCacheSizePlausible(exactEntry, track.Duration))
                 {
                     TrackNormalizationHydrator.HydrateNormalization(track, exactEntry);
@@ -520,7 +520,7 @@ public sealed partial class AudioEngine
     {
         if (variants.Count == 0) return null;
 
-        var blacklist = Audio.AudioSourceFactory.CdnBlacklist;
+        var blacklist = AudioSourceFactory.CdnBlacklist;
 
         // Предикат допустимости: только стерео/моно потоки (YouTube itag 328/338 и 5.1 surround исключаются)
         static bool IsStereoCompatible(VariantEntry v) =>
@@ -660,7 +660,7 @@ public sealed partial class AudioEngine
             manifest.IntegratedLufs,
             LoudnessSource.YoutubePerceptual);
 
-        AudioSourceFactory.GlobalCache?.TryUpdateIntegratedLufs(
+        AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(
             track.Id,
             manifest.IntegratedLufs,
             LoudnessSource.YoutubePerceptual);

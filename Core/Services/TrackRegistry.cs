@@ -49,12 +49,6 @@ public sealed class TrackRegistry
     private string CurrentOwnerId => _auth?.State?.DisplayId ?? "guest";
 
     /// <summary>
-    /// Извлекает глобальный экземпляр менеджера кэша аудиофайлов.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static AudioCacheManager? GetAudioCache() => AudioSourceFactory.GlobalCache;
-
-    /// <summary>
     /// Регистрирует новый трек в кэше или обновляет метаданные существующего канонического экземпляра.
     /// </summary>
     /// <param name="incoming">Входящий экземпляр трека с новыми метаданными.</param>
@@ -82,14 +76,12 @@ public sealed class TrackRegistry
             Task.Run(CleanupDeadReferences);
         }
 
-        var audioCache = GetAudioCache();
-
         lock (_registryLock)
         {
             if (_pinned.TryGetValue(incoming.Id, out var pinned))
             {
                 pinned.UpdateMetadata(incoming, hasUserContext);
-                HydrateTrackFromAudioCache(pinned, audioCache);
+                HydrateTrackFromAudioCache(pinned, AudioSourceFactory.GlobalCache);
                 UpdatePinStatusInternal(pinned);
                 return pinned;
             }
@@ -97,13 +89,13 @@ public sealed class TrackRegistry
             if (_cache.TryGetValue(incoming.Id, out var weakRef) && weakRef.TryGetTarget(out var cached))
             {
                 cached.UpdateMetadata(incoming, hasUserContext);
-                HydrateTrackFromAudioCache(cached, audioCache);
+                HydrateTrackFromAudioCache(cached, AudioSourceFactory.GlobalCache);
                 UpdatePinStatusInternal(cached);
                 return cached;
             }
 
             _cache[incoming.Id] = new WeakReference<TrackInfo>(incoming);
-            HydrateTrackFromAudioCache(incoming, audioCache);
+            HydrateTrackFromAudioCache(incoming, AudioSourceFactory.GlobalCache);
             UpdatePinStatusInternal(incoming);
             return incoming;
         }
@@ -352,8 +344,7 @@ public sealed class TrackRegistry
             }
         }
 
-        var audioCache = GetAudioCache();
-        audioCache?.HydrateCacheStatus(_pinned.Values);
+        AudioSourceFactory.GlobalCache.HydrateCacheStatus(_pinned.Values);
 
         sw.Stop();
         Log.Info($"[TrackRegistry] Hydrated {_pinned.Count} pinned tracks in {sw.ElapsedMilliseconds}ms");
@@ -444,15 +435,8 @@ public sealed class TrackRegistry
     /// </summary>
     public void SubscribeToCacheEvents()
     {
-        var audioCache = GetAudioCache();
-        if (audioCache == null)
-        {
-            Log.Warn("[TrackRegistry] AudioCache not available for event subscription");
-            return;
-        }
-
-        audioCache.OnCacheCleared += HandleCacheCleared;
-        audioCache.OnFormatCached += HandleFormatCached;
+        AudioSourceFactory.GlobalCache.OnCacheCleared += HandleCacheCleared;
+        AudioSourceFactory.GlobalCache.OnFormatCached += HandleFormatCached;
 
         Log.Info("[TrackRegistry] Subscribed to AudioCache events");
     }

@@ -490,10 +490,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
             if (targetTrack.IsCached)
             {
-                var cache = AudioSourceFactory.GlobalCache;
-                if (cache == null) continue;
-
-                bool success = await cache.ExportTrackToDownloadsAsync(
+                bool success = await AudioSourceFactory.GlobalCache.ExportTrackToDownloadsAsync(
                     targetTrack.Id,
                     async id => await _library.GetTrackAsync(id).ConfigureAwait(false),
                     async t => await _library.AddOrUpdateTrackAsync(t).ConfigureAwait(false)).ConfigureAwait(false);

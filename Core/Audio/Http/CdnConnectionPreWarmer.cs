@@ -10,10 +10,10 @@ internal static class CdnConnectionPreWarmer
     private const string GoogleVideoCdnSuffix = ".googlevideo.com";
     private const string GenerateEndpoint = "/generate_204";
     private const int MaxTrackedHosts = 4;
-    private const int TunnelDeadTimeoutThreshold = 4;
+    private const int TunnelDeadTimeoutThreshold = 3;
 
     private static readonly TimeSpan WarmCooldown = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan WarmTimeout = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan WarmTimeout = TimeSpan.FromMilliseconds(5000);
     private static readonly TimeSpan SpeculativeThrottle = TimeSpan.FromSeconds(30);
 
     private static DateTime _lastSpeculativeWarmTime = DateTime.MinValue;
@@ -151,7 +151,6 @@ internal static class CdnConnectionPreWarmer
 
             sw.Stop();
 
-            // Успех — сбрасываем счётчик таймаутов для этого хоста
             _consecutiveTimeouts.TryRemove(host, out _);
 
             CdnHostStatsStore.RecordTtfb(host, sw.ElapsedMilliseconds);
@@ -165,7 +164,9 @@ internal static class CdnConnectionPreWarmer
         {
             sw.Stop();
 
-            // Timeout — инкрементируем счётчик и проверяем порог
+            // Пенализируем кластер в хранилище, чтобы мёртвая нода не всплывала на следующем старте
+            CdnHostStatsStore.RecordFailure(host);
+
             int count = _consecutiveTimeouts.AddOrUpdate(host, 1, (_, c) => c + 1);
 
             Log.Debug($"[CdnPreWarmer] {TruncateHost(host)}... timed out ({sw.ElapsedMilliseconds}ms) " +
@@ -177,13 +178,15 @@ internal static class CdnConnectionPreWarmer
                          $"{TunnelDeadTimeoutThreshold} consecutive timeouts — tunnel likely dead, " +
                          "firing OnTunnelDeadDetected");
 
-                _consecutiveTimeouts.TryRemove(host, out _); // сбрасываем чтобы не спамить
+                AudioSourceFactory.CdnBlacklist.MarkBlocked(host);
+                _consecutiveTimeouts.TryRemove(host, out _);
                 OnTunnelDeadDetected?.Invoke();
             }
         }
         catch (Exception ex)
         {
             sw.Stop();
+            CdnHostStatsStore.RecordFailure(host);
             Log.Debug($"[CdnPreWarmer] {TruncateHost(host)}... failed ({sw.ElapsedMilliseconds}ms): {ex.Message}");
         }
     }

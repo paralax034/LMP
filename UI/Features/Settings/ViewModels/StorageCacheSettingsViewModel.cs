@@ -53,12 +53,8 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
         ClearImageCacheCommand = new AsyncRelayCommand(ClearImageCacheAsync);
         ClearAudioCacheCommand = new AsyncRelayCommand(ClearAudioCacheAsync);
 
-        var cache = AudioSourceFactory.GlobalCache;
-        if (cache != null)
-        {
-            cache.OnFormatCached += OnAudioFormatCached;
-            cache.OnCacheCleared += OnAudioCacheCleared;
-        }
+        AudioSourceFactory.GlobalCache.OnFormatCached += OnAudioFormatCached;
+        AudioSourceFactory.GlobalCache.OnCacheCleared += OnAudioCacheCleared;
 
         RefreshLists();
         LoadSettings();
@@ -203,8 +199,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
     {
         var (memItems, _, imgCount, imgSizeMb) = _imageCache.GetStats();
 
-        var cache = AudioSourceFactory.GlobalCache;
-        var (audioFileCount, audioSizeMb) = cache?.GetStatsCompact() ?? (0, 0);
+        var (audioFileCount, audioSizeMb) = AudioSourceFactory.GlobalCache.GetStatsCompact();
         var (downloadFileCount, downloadSizeMb) = AudioCacheManager.GetDownloadsStats();
 
         ImageCacheStats = $"{imgSizeMb} MB / {ImageCacheLimitMb} MB ({imgCount} {SL["Common_Files"]}, RAM: {memItems})";

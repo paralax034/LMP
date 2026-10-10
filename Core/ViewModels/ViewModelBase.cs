@@ -28,7 +28,8 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     /// <summary>
     /// Указывает, находится ли текущий компонент в состоянии приостановки (фоновом режиме).
     /// </summary>
-    [ObservableProperty] public partial bool IsSuspended { get; private set; }
+    [ObservableProperty]
+    public partial bool IsSuspended { get; private set; }
 
     /// <summary>
     /// Предоставляет доступ к службе локализации для одноуровневого биндинга (требование IFilterable).
@@ -74,6 +75,13 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     /// </summary>
     public virtual Task OnNavigatedToAsync() => Task.CompletedTask;
 
+    /// <summary>
+    /// Вызывается при уходе с данной страницы навигации на другой экран.
+    /// </summary>
+    public virtual void OnNavigatedFrom()
+    {
+    }
+
     #endregion
 
     #region ISuspendable Explicit Implementation
@@ -109,12 +117,16 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     /// <summary>
     /// Вызывается при переходе компонента в фоновый режим без параметров.
     /// </summary>
-    protected virtual void OnSuspend() { }
+    protected virtual void OnSuspend()
+    {
+    }
 
     /// <summary>
     /// Вызывается при возвращении компонента в активный режим без параметров.
     /// </summary>
-    protected virtual void OnResume() { }
+    protected virtual void OnResume()
+    {
+    }
 
     /// <summary>
     /// Вызывается при переходе компонента в фоновый режим с указанием уровня приостановки.
@@ -131,7 +143,9 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     /// <summary>
     /// Вызывается при изменении профиля пользователя.
     /// </summary>
-    protected virtual void OnAccountChanged() { }
+    protected virtual void OnAccountChanged()
+    {
+    }
 
     #endregion
 
@@ -146,6 +160,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
         {
             Disposables.Add(command);
         }
+
         return command;
     }
 
@@ -154,7 +169,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region Static Lifecycle Broadcasts
 
     /// <summary>
-    /// Распространяет уровень приостановки по системе. Применяет каскадную модель навигации 
+    /// Распространяет уровень приостановки по системе. Применяет каскадную модель навигации
     /// и точечно оповещает фоновые службы .
     /// </summary>
     public static void BroadcastSuspendLevel(SuspendLevel level, bool forceOptimize = false)
@@ -218,6 +233,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
                 {
                     Disposables[i].Dispose();
                 }
+
                 Disposables.Clear();
             }
         }

@@ -507,23 +507,6 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
 
     #endregion
 
-    #region ISmoothTransitionViewModel
-
-    /// <inheritdoc />
-    public override void PrepareForTransition()
-    {
-        if (IsBusy)
-        {
-            base.PrepareForTransition();
-        }
-        else
-        {
-            IsLoading = false;
-        }
-    }
-
-    #endregion
-
     #region Navigation
 
     public override async Task OnNavigatedToAsync()
@@ -594,7 +577,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
 
             if (newTracks.Count > 0)
             {
-                AudioSourceFactory.GlobalCache?.HydrateCacheStatus(newTracks);
+                AudioSourceFactory.GlobalCache.HydrateCacheStatus(newTracks);
 
                 if (LibService.Settings.EnableSearchCache)
                 {

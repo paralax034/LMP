@@ -86,9 +86,9 @@ public sealed partial class AudioEngine
                     $"[AudioEngine] Normalization gain locked from LUFS metadata: {resolvedGain:F4}x for {trackId}");
             }
             else if (track != null && !(pipeline.Source is Audio.Sources.CachingStreamSource
-                     {
-                         IsFullyBuffered: false
-                     }))
+            {
+                IsFullyBuffered: false
+            }))
             {
                 Log.Warn(
                     $"[AudioEngine] Normalization resolver returned NaN for {trackId}. EBU R128 Pre-scan is REQUIRED.");
@@ -126,7 +126,7 @@ public sealed partial class AudioEngine
             current.SetIntegratedLufs(integratedLufs, source);
         }
 
-        AudioSourceFactory.GlobalCache?.TryUpdateIntegratedLufs(trackId, integratedLufs, source);
+        AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(trackId, integratedLufs, source);
 
         _pendingNormalizationWrites.Enqueue((trackId, integratedLufs, source));
     }

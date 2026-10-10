@@ -37,7 +37,8 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
 
     partial void OnSelectedCategoryChanged(CategoryItem? value)
     {
-        if (_isDisposed || value is null) return;
+        if (_isDisposed || value is null || !_isDataLoaded) return;
+
         _ = LoadTracksAsync();
     }
 
@@ -80,19 +81,6 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
 
     #endregion
 
-    #region ISmoothTransitionViewModel
-
-    public override void PrepareForTransition()
-    {
-        base.PrepareForTransition();
-        if (!_isDataLoaded)
-        {
-            IsLoading = true;
-        }
-    }
-
-    #endregion
-
     #region Navigation
 
     public override async Task OnNavigatedToAsync()
@@ -105,10 +93,6 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
         {
             await LoadTracksAsync();
             _isDataLoaded = true;
-        }
-        else
-        {
-            IsLoading = false;
         }
     }
 

@@ -212,7 +212,7 @@ public sealed partial class AudioEngine
             Volatile.Write(ref _nTokenActiveTrackId, track.Id);
             Volatile.Write(ref _nTokenWarnedTrackId, null);
 
-            Audio.AudioSourceFactory.PreWarmCdnConnections(
+            AudioSourceFactory.PreWarmCdnConnections(
                 Audio.Http.SharedHttpClient.Instance, _lifetimeCts.Token);
 
             const int maxStartupAttempts = 3;
@@ -250,7 +250,7 @@ public sealed partial class AudioEngine
 
                     if (descriptor.HasPerceptualLufs)
                     {
-                        Audio.AudioSourceFactory.GlobalCache?.TryUpdateIntegratedLufs(
+                        AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(
                             track.Id,
                             descriptor.IntegratedLufs,
                             Audio.Normalization.LoudnessSource.YoutubePerceptual);
@@ -275,7 +275,7 @@ public sealed partial class AudioEngine
                              $"attempt={attempt}/{maxCdnFailoverAttempts}. " +
                              "Blacklisting host and forcing manifest refresh.");
 
-                    Audio.AudioSourceFactory.CdnBlacklist.MarkBlocked(cdnEx.Host);
+                    AudioSourceFactory.CdnBlacklist.MarkBlocked(cdnEx.Host);
                     _youtube.InvalidateMemoryCache(track.Id);
                     Audio.Http.SessionCacheStore.Invalidate(track.Id);
 

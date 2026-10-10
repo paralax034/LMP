@@ -54,18 +54,15 @@ public sealed class DownloadService
                 return;
         }
 
-        var cache = Audio.AudioSourceFactory.GlobalCache;
-        if (cache == null) return;
-
         // Path 1: Already fully cached → instant export (0 network bytes)
-        if (cache.IsTrackFullyCached(track.Id))
+        if (AudioSourceFactory.GlobalCache.IsTrackFullyCached(track.Id))
         {
             lock (_lock)
             {
                 _activeTasks[track.Id] = new DownloadTask { Progress = 0f };
             }
 
-            _ = RunInstantExportAsync(track, cache);
+            _ = RunInstantExportAsync(track, AudioSourceFactory.GlobalCache);
             return;
         }
 
@@ -161,13 +158,6 @@ public sealed class DownloadService
                 return;
             }
 
-            var cache = Audio.AudioSourceFactory.GlobalCache;
-            if (cache == null)
-            {
-                OnCompleted?.Invoke(track.Id, false, null);
-                return;
-            }
-
             // Step 2: Gap-fill download (only missing ranges)
             var progress = new Progress<float>(p =>
             {
@@ -182,7 +172,7 @@ public sealed class DownloadService
             bool cached = await Audio.Cache.CacheDownloadHelper.EnsureFullyCachedAsync(
                 descriptor.Value,
                 Audio.Http.SharedHttpClient.Instance,
-                cache,
+                AudioSourceFactory.GlobalCache,
                 progress,
                 ct).ConfigureAwait(false);
 
@@ -196,7 +186,7 @@ public sealed class DownloadService
             ct.ThrowIfCancellationRequested();
 
             // Step 3: Export completed cache to Downloads
-            bool exported = await cache.ExportTrackToDownloadsAsync(
+            bool exported = await AudioSourceFactory.GlobalCache.ExportTrackToDownloadsAsync(
                 track.Id,
                 async id => await _library.GetTrackAsync(id).ConfigureAwait(false),
                 async t => await _library.AddOrUpdateTrackAsync(t).ConfigureAwait(false),

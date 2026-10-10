@@ -300,16 +300,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         _dataChangedDebounceTimer.Start();
     }
 
-    #region ISmoothTransitionViewModel
-
-    public override void PrepareForTransition()
-    {
-        base.PrepareForTransition();
-        IsLoading = true;
-    }
-
-    #endregion
-
     #region Lifecycle
 
     protected override void OnSuspend() => _isSuspended = true;
@@ -412,7 +402,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
             if (payload is null || loadCt.IsCancellationRequested) return;
 
-            await WaitForTransitionAsync(loadCt).ConfigureAwait(false);
             loadCt.ThrowIfCancellationRequested();
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -850,7 +839,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         var diff = DateTime.UtcNow - utcTime.Value;
         if (diff.TotalMinutes < 1) return SL["Playlist_Synced_JustNow"];
         if (diff.TotalHours < 1) return string.Format(SL["Playlist_Synced_MinutesAgo"], (int)diff.TotalMinutes);
-        if (diff.TotalDays < 1) return string.Format(SL["Playlist_Synced_HoursAgo"], (int)diff.TotalDays);
+        if (diff.TotalDays < 1) return string.Format(SL["Playlist_Synced_HoursAgo"], (int)diff.TotalHours);
         if (diff.TotalDays < 7) return string.Format(SL["Playlist_Synced_DaysAgo"], (int)diff.TotalDays);
         if (diff.TotalDays < 30) return string.Format(SL["Playlist_Synced_WeeksAgo"], (int)(diff.TotalDays / 7));
         return string.Format(SL["Playlist_Synced_MonthsAgo"], (int)(diff.TotalDays / 30));

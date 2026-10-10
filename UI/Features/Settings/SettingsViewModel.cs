@@ -9,10 +9,10 @@ namespace LMP.UI.Features.Settings;
 /// Фасад страницы настроек с полностью ленивой (on-demand) инициализацией дочерних секций.
 /// Предотвращает синхронные блокировки UI-потока при первом входе в настройки.
 /// </summary>
-public sealed partial class SettingsViewModel : ViewModelBase, ISmoothTransitionViewModel
+public sealed partial class SettingsViewModel : ViewModelBase
 {
     private readonly IServiceProvider _services;
-    private readonly Dictionary<Type, ViewModelBase> _initializedSections = new(capacity: 9);
+    private readonly Dictionary<Type, ViewModelBase> _initializedSections = new(9);
     private bool _isDataLoaded;
     private bool _isDisposed;
 
@@ -75,11 +75,6 @@ public sealed partial class SettingsViewModel : ViewModelBase, ISmoothTransition
         {
             _ = Task.Run(storageVm.UpdateCacheStats);
         }
-    }
-
-    public void PrepareForTransition()
-    {
-        IsContentReady = false;
     }
 
     public override async Task OnNavigatedToAsync()

@@ -286,6 +286,34 @@ internal static class CdnHostStatsStore
         FlushIfNeeded();
     }
 
+    /// <summary>
+    /// Фиксирует сбой или таймаут обращения к CDN-кластеру и пенализирует его score.
+    /// Предотвращает циклическое залипание мёртвых/заблокированных ТСПУ кластеров в топе стартового прогрева.
+    /// </summary>
+    /// <param name="host">Hostname CDN-ноды.</param>
+    public static void RecordFailure(string host)
+    {
+        var clusterId = ExtractClusterId(host);
+        if (clusterId is null)
+            return;
+
+        lock (_lock)
+        {
+            var cluster = FindClusterMustHoldLock(clusterId);
+            if (cluster is null)
+                return;
+
+            // Срезаем накопленный рейтинг и отодвигаем LastSeen назад, чтобы выбить ноду из топа
+            cluster.HitCount = Math.Max(0, cluster.HitCount / 2);
+            cluster.LastSeenUtc = cluster.LastSeenUtc.AddDays(-14);
+            cluster.AvgTtfbMs = double.NaN;
+
+            MarkDirtyMustHoldLock();
+        }
+
+        FlushIfNeeded();
+    }
+
 
     // Query
 

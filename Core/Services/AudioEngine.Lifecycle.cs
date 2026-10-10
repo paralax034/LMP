@@ -144,7 +144,7 @@ public sealed partial class AudioEngine
                 {
                     try
                     {
-                        AudioSourceFactory.GlobalCache?.RemoveTrackCache(trackId);
+                        AudioSourceFactory.GlobalCache.RemoveTrackCache(trackId);
                         Log.Info($"[AudioEngine] Removed missing cache registry for retry: {trackId}");
                     }
                     catch (Exception removeEx)
@@ -171,7 +171,7 @@ public sealed partial class AudioEngine
 
         if (!string.IsNullOrEmpty(trackId))
         {
-            try { AudioSourceFactory.GlobalCache?.RemoveTrackCache(trackId); }
+            try { AudioSourceFactory.GlobalCache.RemoveTrackCache(trackId); }
             catch (Exception ex) { Log.Warn($"[AudioEngine] Failed to remove cache: {ex.Message}"); }
         }
 

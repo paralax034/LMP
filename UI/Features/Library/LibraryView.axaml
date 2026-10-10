@@ -314,86 +314,10 @@
             </ProgressBar.Transitions>
         </ProgressBar>
 
-        <!-- ROW 2: CONTENT -->
+        <!-- ROW 2: CONTENT (Постоянно доступен для LayoutManager, без скрытия скроллера) -->
         <Grid Grid.Row="2" Margin="0,8,0,0">
 
-            <!-- SKELETON -->
             <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                <ScrollViewer.IsVisible>
-                    <MultiBinding Converter="{x:Static BoolConverters.Or}">
-                        <Binding Path="!IsContentReady" />
-                        <Binding Path="IsSyncing" />
-                    </MultiBinding>
-                </ScrollViewer.IsVisible>
-
-                <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                           Margin="24,4,24,100" IsHitTestVisible="False">
-                    <Border Classes="playlist-skeleton" Margin="10">
-                        <Grid RowDefinitions="220, *">
-                            <Border Grid.Row="0" Background="{DynamicResource BgSkeletonBrush}"
-                                    CornerRadius="7,7,0,0" ClipToBounds="True" />
-                            <Border Grid.Row="1" Classes="card-info" Padding="12,10,12,14">
-                                <StackPanel Spacing="8" VerticalAlignment="Center">
-                                    <Border Height="12" Width="150" HorizontalAlignment="Left"
-                                            CornerRadius="4"
-                                            Background="{DynamicResource BgSkeletonDeepBrush}"
-                                            Classes="skeleton" />
-                                    <Border Height="10" Width="90" HorizontalAlignment="Left"
-                                            CornerRadius="3"
-                                            Background="{DynamicResource BgSkeletonDeepBrush}"
-                                            Classes="skeleton" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </Border>
-                    <Border Classes="playlist-skeleton" Margin="10" Opacity="0.7">
-                        <Grid RowDefinitions="220, *">
-                            <Border Grid.Row="0" Background="{DynamicResource BgSkeletonBrush}"
-                                    CornerRadius="7,7,0,0" ClipToBounds="True" />
-                            <Border Grid.Row="1" Classes="card-info" Padding="12,10,12,14">
-                                <StackPanel Spacing="8" VerticalAlignment="Center">
-                                    <Border Height="12" Width="130" HorizontalAlignment="Left"
-                                            CornerRadius="4"
-                                            Background="{DynamicResource BgSkeletonDeepBrush}"
-                                            Classes="skeleton" />
-                                    <Border Height="10" Width="100" HorizontalAlignment="Left"
-                                            CornerRadius="3"
-                                            Background="{DynamicResource BgSkeletonDeepBrush}"
-                                            Classes="skeleton" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </Border>
-                    <Border Classes="playlist-skeleton" Margin="10" Opacity="0.5">
-                        <Grid RowDefinitions="220, *">
-                            <Border Grid.Row="0" Background="{DynamicResource BgSkeletonBrush}"
-                                    CornerRadius="7,7,0,0" ClipToBounds="True" />
-                            <Border Grid.Row="1" Classes="card-info" Padding="12,10,12,14">
-                                <StackPanel Spacing="8" VerticalAlignment="Center">
-                                    <Border Height="12" Width="160" HorizontalAlignment="Left"
-                                            CornerRadius="4"
-                                            Background="{DynamicResource BgSkeletonDeepBrush}"
-                                            Classes="skeleton" />
-                                    <Border Height="10" Width="80" HorizontalAlignment="Left"
-                                            CornerRadius="3"
-                                            Background="{DynamicResource BgSkeletonDeepBrush}"
-                                            Classes="skeleton" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </Border>
-                </WrapPanel>
-            </ScrollViewer>
-
-            <!-- MAIN CONTENT -->
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                <ScrollViewer.IsVisible>
-                    <MultiBinding Converter="{x:Static BoolConverters.And}">
-                        <Binding Path="IsContentReady" />
-                        <Binding Path="!IsSyncing" />
-                    </MultiBinding>
-                </ScrollViewer.IsVisible>
-
                 <StackPanel Margin="24,0,24,100">
                     <ItemsControl ItemsSource="{Binding Playlists}">
                         <ItemsControl.ItemsPanel>
@@ -411,8 +335,6 @@
                                         Classes.menu-open="{Binding IsMenuOpen}"
                                         Command="{Binding OpenCommand}">
 
-                                    <!-- Строго типизированный ContextMenu со 100% корректным
-                                    локальным DataContext -->
                                     <Button.ContextMenu>
                                         <ContextMenu Opened="OnPlaylistContextMenuOpened"
                                                      Closed="OnPlaylistContextMenuClosed">

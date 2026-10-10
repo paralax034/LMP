@@ -13,7 +13,7 @@ namespace LMP.Core.Audio;
 /// </summary>
 public static class AudioSourceFactory
 {
-    private static AudioCacheManager? _globalCacheManager;
+    private static AudioCacheManager _globalCacheManager = null!;
     private static volatile StreamingConfig _currentConfig = StreamingProfiles.Medium;
 
     /// <summary>
@@ -37,7 +37,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>Глобальный кэш-менеджер.</summary>
-    public static AudioCacheManager? GlobalCache => _globalCacheManager;
+    public static AudioCacheManager GlobalCache => _globalCacheManager;
 
     /// <summary>
     /// Обновляет конфигурацию стриминга.

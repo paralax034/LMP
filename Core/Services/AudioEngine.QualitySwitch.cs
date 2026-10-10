@@ -102,7 +102,7 @@ public sealed partial class AudioEngine
 
             if (d.HasPerceptualLufs)
             {
-                AudioSourceFactory.GlobalCache?.TryUpdateIntegratedLufs(
+                AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(
                     cmd.Track.Id, d.IntegratedLufs, LoudnessSource.YoutubePerceptual);
             }
 

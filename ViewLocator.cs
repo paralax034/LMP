@@ -17,47 +17,17 @@ namespace LMP;
 
 /// <summary>
 /// Статический сопоставитель моделей представления (ViewModel) и представлений (View).
+/// Работает по принципу чистого Pattern Matching без рефлексии и без избыточного глобального кэширования.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Стандартная реализация Avalonia <c>ViewLocator</c> использует динамический поиск типов через
-/// <see cref="Type.GetType(string)"/> и создание экземпляров через <see cref="Activator.CreateInstance(Type)"/>.
-/// При публикации в режиме <b>Native AOT</b> (<c>PublishAot=true</c>) и полном тримминге (<c>TrimMode=full</c>)
-/// метаданные и неиспользуемые напрямую типы вырезаются компилятором ILC, из-за чего рефлексивный поиск
-/// всегда завершается неудачей (<c>null</c>) и интерфейс ломается.
-/// </para>
-/// <para>
-/// Данная реализация построена на базе строго типизированного сопоставления с образцом (Pattern Matching),
-/// гарантируя:
-/// <list type="bullet">
-///   <item><description><b>Zero-Reflection:</b> полное отсутствие обращений к метаданным в рантайме.</description></item>
-///   <item><description><b>Full Native AOT &amp; Trimming Readiness:</b> компилятор видит прямые ссылки на конструкторы View.</description></item>
-///   <item><description><b>Zero-Alloc:</b> диспетчеризация происходит через опкод компилятора без аллокаций строк.</description></item>
-/// </list>
-/// </para>
-/// </remarks>
 public sealed class ViewLocator : IDataTemplate
 {
-    private readonly Dictionary<Type, Control> _persistentViewCache = new(8);
-
-    /// <summary>
-    /// Создаёт или возвращает закэшированный визуальный элемент, соответствующий переданной модели представления.
-    /// Корневые страницы приложения кэшируются постоянно для исключения style-recalculation churn.
-    /// </summary>
     public Control? Build(object? data)
     {
         if (data is null)
             return null;
 
-        var type = data.GetType();
-        if (_persistentViewCache.TryGetValue(type, out var cachedView))
+        return data switch
         {
-            return cachedView;
-        }
-
-        Control created = data switch
-        {
-            // Главные экраны приложения (кэшируются строго как Singletons)
             HomeViewModel => new HomeView(),
             SearchViewModel => new SearchView(),
             LibraryViewModel => new LibraryView(),
@@ -65,15 +35,12 @@ public sealed class ViewLocator : IDataTemplate
             QueueViewModel => new QueueView(),
             SettingsViewModel => new SettingsView(),
 
-            // Компоненты плеера и панели управления
             PlayerBarViewModel => new PlayerBarView(),
 
-            // Всплывающие панели и уведомления
             NotificationButtonViewModel => new NotificationButton(),
             NotificationPanelViewModel => new NotificationPanel(),
             ToastOverlayViewModel => new ToastOverlay(),
 
-            // Главная оболочка
             MainWindowViewModel => new MainWindow(),
 
 #if DEBUG
@@ -82,18 +49,8 @@ public sealed class ViewLocator : IDataTemplate
 
             _ => new TextBlock { Text = $"View Not Registered for: {data.GetType().FullName}" }
         };
-
-        if (data is ViewModelBase)
-        {
-            _persistentViewCache[type] = created;
-        }
-
-        return created;
     }
 
-    /// <summary>
-    /// Проверяет, применим ли данный шаблон данных к переданному объекту.
-    /// </summary>
     public bool Match(object? data)
     {
         return data is ViewModelBase;

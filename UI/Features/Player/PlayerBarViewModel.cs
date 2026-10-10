@@ -546,11 +546,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         _library.OnTrackUpdated += OnLibraryTrackUpdated;
 
-        var cacheManager = AudioSourceFactory.GlobalCache
-                           ?? throw new NullReferenceException("AudioSourceFactory.GlobalCache is not initialized");
-
-        cacheManager.OnFormatCached += OnFormatCachedHandler;
-        cacheManager.OnCacheCleared += OnCacheClearedHandler;
+        AudioSourceFactory.GlobalCache.OnFormatCached += OnFormatCachedHandler;
+        AudioSourceFactory.GlobalCache.OnCacheCleared += OnCacheClearedHandler;
 
         SubscribeHeavy();
     }
@@ -1353,8 +1350,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (CurrentTrack == null || AvailableFormats.Count == 0)
             return;
 
-        var cache = AudioSourceFactory.GlobalCache;
-        var cachedFormats = cache?.GetCachedFormats(CurrentTrack.Id) ?? [];
+        var cachedFormats = AudioSourceFactory.GlobalCache.GetCachedFormats(CurrentTrack.Id) ?? [];
 
         Log.Debug($"[PlayerBar] SyncDownloadStatus: track={CurrentTrack.Id}, " +
                   $"cachedFormats=[{string.Join(", ", cachedFormats.Select(f => $"{f.Format}/{f.Bitrate}"))}], " +
@@ -1764,11 +1760,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
             _library.OnTrackUpdated -= OnLibraryTrackUpdated;
 
-            if (AudioSourceFactory.GlobalCache is { } cacheManager)
-            {
-                cacheManager.OnFormatCached -= OnFormatCachedHandler;
-                cacheManager.OnCacheCleared -= OnCacheClearedHandler;
-            }
+            AudioSourceFactory.GlobalCache.OnFormatCached -= OnFormatCachedHandler;
+            AudioSourceFactory.GlobalCache.OnCacheCleared -= OnCacheClearedHandler;
         }
 
         base.Dispose(disposing);

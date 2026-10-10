@@ -45,7 +45,6 @@ public partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     public IReadOnlyList<ViewModelBase> PrewarmedPages { get; private set; } = [];
 
-    private const int DeferredLoadDelayMs = 140;
     private static readonly TimeSpan StartupAuthValidationTtl = TimeSpan.FromHours(4);
 
     private readonly CancellationTokenSource _lifetimeCts = new();
@@ -212,10 +211,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var oldPage = CurrentPage;
         var oldPageName = CurrentPageName;
 
-        if (oldPage is ISmoothTransitionViewModel smoothOldPage)
-        {
-            smoothOldPage.PrepareForTransition();
-        }
+        oldPage?.OnNavigatedFrom();
 
         if (!_pageCache.TryGetValue(pageName, out var newPage))
         {
@@ -238,16 +234,11 @@ public partial class MainWindowViewModel : ViewModelBase
             _pageCache[pageName] = newPage;
         }
 
-        if (newPage is ISmoothTransitionViewModel smoothNewPage)
-        {
-            smoothNewPage.PrepareForTransition();
-        }
-
         CurrentPage = newPage;
         CurrentPageName = pageName;
 
         sw.Stop();
-        Log.Info($"Page '{pageName}' ready in {sw.ElapsedMilliseconds}ms, scheduling deferred init...");
+        Log.Info($"Page '{pageName}' ready in {sw.ElapsedMilliseconds}ms, executing init...");
 
         bool isInitialNavigation = !_isShellShown && oldPage == null && string.IsNullOrEmpty(oldPageName);
         if (isInitialNavigation)
@@ -278,21 +269,13 @@ public partial class MainWindowViewModel : ViewModelBase
         var oldPage = CurrentPage;
         var oldPageName = CurrentPageName;
 
-        if (oldPage is ISmoothTransitionViewModel smoothOldPage)
-        {
-            smoothOldPage.PrepareForTransition();
-        }
+        oldPage?.OnNavigatedFrom();
 
         if (!_pageCache.TryGetValue("Playlist", out var playlistPage) ||
             playlistPage is not PlaylistViewModel playlistVM)
         {
             playlistVM = _services.GetRequiredService<PlaylistViewModel>();
             _pageCache["Playlist"] = playlistVM;
-        }
-
-        if (playlistVM is ISmoothTransitionViewModel smoothPlaylistPage)
-        {
-            smoothPlaylistPage.PrepareForTransition();
         }
 
         CurrentPage = playlistVM;
@@ -323,8 +306,7 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выполняет отложенную инициализацию страницы.
-    /// Для первой страницы приложения стартует после фактического показа окна без искусственной паузы.
+    /// Выполняет инициализацию страницы без искусственных задержек таймеров.
     /// </summary>
     private async Task DeferredInitAsync(ViewModelBase page, string pageName, bool isInitialNavigation)
     {
@@ -333,10 +315,6 @@ public partial class MainWindowViewModel : ViewModelBase
             if (isInitialNavigation)
             {
                 await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
-            }
-            else
-            {
-                await Task.Delay(DeferredLoadDelayMs, _lifetimeCts.Token);
             }
 
             if (_lifetimeCts.IsCancellationRequested)
@@ -352,7 +330,7 @@ public partial class MainWindowViewModel : ViewModelBase
             await page.OnNavigatedToAsync();
             sw.Stop();
 
-            Log.Info($"[Navigation] Deferred init for '{pageName}' completed in {sw.ElapsedMilliseconds}ms");
+            Log.Info($"[Navigation] Init for '{pageName}' completed in {sw.ElapsedMilliseconds}ms");
 
             if (isInitialNavigation && Interlocked.Exchange(ref _startupAuthValidationStarted, 1) == 0)
             {
@@ -364,7 +342,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Log.Error($"[Navigation] Deferred init failed for '{pageName}': {ex.Message}");
+            Log.Error($"[Navigation] Init failed for '{pageName}': {ex.Message}");
         }
     }
 
@@ -488,4 +466,3 @@ public partial class MainWindowViewModel : ViewModelBase
         base.Dispose(disposing);
     }
 }
-
