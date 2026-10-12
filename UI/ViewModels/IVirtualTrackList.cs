@@ -92,6 +92,16 @@ public interface IVirtualTrackList : IList<TrackItemViewModel>, IReadOnlyList<Tr
     List<TrackInfo> GetSelectedTracks();
 
     /// <summary>
+    /// Возвращает снимок всех треков мастер-индекса в их оригинальном порядке (без учета фильтра).
+    /// </summary>
+    List<TrackInfo> GetMasterTracks();
+
+    /// <summary>
+    /// Извлекает доменную модель трека по его абсолютному индексу в мастер-индексе (без учета фильтра).
+    /// </summary>
+    TrackInfo? GetMasterTrackAt(int masterIndex);
+
+    /// <summary>
     /// Возвращает упорядоченный список выделенных моделей представления для зоны видимости.
     /// </summary>
     List<TrackItemViewModel> GetSelectedViewModelsOrdered();

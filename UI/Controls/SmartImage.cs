@@ -142,8 +142,6 @@ public static class SmartImage
         }
 
         CancelPending(image);
-        DisposeOwned(image);
-        image.Source = null;
 
         var cts = new CancellationTokenSource();
         _pending.AddOrUpdate(image, cts);

@@ -618,6 +618,8 @@ public partial class TrackListControl : UserControl
     {
         if (Items is IVirtualTrackList virtualList)
         {
+            if (virtualList.SelectedCount == 0) return;
+
             virtualList.ClearSelection();
             DetachSelectionState();
         }
@@ -1169,7 +1171,7 @@ public partial class TrackListControl : UserControl
     public void ResetScrollPosition()
     {
         var sv = EnsureScrollViewer();
-        if (sv == null) return;
+        if (sv == null || sv.Offset.Y == 0) return;
 
         _snapScroll?.CancelAnimation();
         sv.Offset = new Vector(sv.Offset.X, 0);

@@ -1,5 +1,5 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- TRACK ROW BASE -->
     <Style Selector="Border.track-row">
@@ -11,16 +11,16 @@
         <Setter Property="Margin" Value="0,1" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Opacity" Value="1" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
     </Style>
 
     <Style Selector="Border.track-row:pointerover">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
     </Style>
 
     <!-- NON-ACTIVE SELECTED TRACK (Standard 1px accent border) -->
@@ -90,13 +90,13 @@
         <Setter Property="Template">
             <ControlTemplate TargetType="Button">
                 <Border Background="{TemplateBinding Background}"
-                        CornerRadius="{TemplateBinding CornerRadius}"
-                        ClipToBounds="True">
+                    CornerRadius="{TemplateBinding CornerRadius}"
+                    ClipToBounds="True">
                     <ContentPresenter Name="PART_ContentPresenter"
-                                      Content="{TemplateBinding Content}"
-                                      ContentTemplate="{TemplateBinding ContentTemplate}"
-                                      HorizontalContentAlignment="Stretch"
-                                      VerticalContentAlignment="Stretch" />
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
                 </Border>
             </ControlTemplate>
         </Setter>
@@ -129,7 +129,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                                               Easing="CubicEaseOut" />
+                    Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -146,7 +146,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                                               Easing="CubicEaseOut" />
+                    Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>
@@ -168,7 +168,7 @@
         <Setter Property="Transitions">
             <Transitions>
                 <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                                               Easing="BackEaseOut" />
+                    Easing="BackEaseOut" />
             </Transitions>
         </Setter>
     </Style>

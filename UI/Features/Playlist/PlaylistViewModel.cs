@@ -375,6 +375,11 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         var loadCts = ReplacePlaylistLoadCts(ct);
         var loadCt = loadCts.Token;
 
+        if (!string.Equals(_currentPlaylistId, playlistId, StringComparison.Ordinal))
+        {
+            FilterQuery = string.Empty;
+        }
+
         _currentPlaylistId = playlistId;
         _items.SourceContextId = playlistId;
         IsLoading = showLoader;

@@ -104,11 +104,30 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
             ? duration.ToString(@"h\:mm\:ss")
             : duration.ToString(@"m\:ss");
 
-        SetTracks(rawQueue, explicitOrder: null, preserveSelection: true);
+        if (!IsQueueContentIdentical(rawQueue))
+        {
+            SetTracks(rawQueue, explicitOrder: null, preserveSelection: true);
+        }
+        else
+        {
+            _items.UpdatePlaybackState(PlayerControl.CurrentTrack, PlayerControl.IsPlaying);
+        }
 
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(CanReorderItems));
         NotifyCommandStates();
+    }
+
+    private bool IsQueueContentIdentical(IReadOnlyList<TrackInfo> rawQueue)
+    {
+        if (_items.TotalCount != rawQueue.Count) return false;
+        for (int i = 0; i < rawQueue.Count; i++)
+        {
+            var existing = _items.GetTrackAt(i);
+            if (existing == null || !string.Equals(existing.Id, rawQueue[i].Id, StringComparison.Ordinal))
+                return false;
+        }
+        return true;
     }
 
     private void NotifyCommandStates()

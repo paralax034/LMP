@@ -160,13 +160,37 @@ public sealed class VirtualTrackList : IVirtualTrackList
         RebuildFilteredIndices(string.Empty);
         RaiseReset();
     }
-
     public void ApplyFilter(string query)
     {
-        ClearActiveViewModels();
         RebuildFilteredIndices(query);
+        PruneUnfilteredViewModels();
         RaiseReset();
         NotifySelectionChanged();
+    }
+
+    private void PruneUnfilteredViewModels()
+    {
+        if (_activeVms.Count == 0) return;
+
+        _evictionBuffer.Clear();
+        var span = _filteredIndices.AsSpan(0, _filteredCount);
+
+        foreach (var kvp in _activeVms)
+        {
+            if (!span.Contains(kvp.Key))
+            {
+                _evictionBuffer.Add(kvp.Key);
+            }
+        }
+
+        for (int i = 0; i < _evictionBuffer.Count; i++)
+        {
+            if (_activeVms.Remove(_evictionBuffer[i], out var vm))
+            {
+                vm.PropertyChanged -= HandleVmPropertyChanged;
+                vm.Dispose();
+            }
+        }
     }
 
     /// <summary>
@@ -355,6 +379,26 @@ public sealed class VirtualTrackList : IVirtualTrackList
     {
         if ((uint)visualIndex >= (uint)_filteredCount) return null;
         return _index.GetTrack(_filteredIndices[visualIndex]);
+    }
+
+    public TrackInfo? GetMasterTrackAt(int masterIndex)
+    {
+        if ((uint)masterIndex >= (uint)_index.Count) return null;
+        return _index.GetTrack(masterIndex);
+    }
+
+    public List<TrackInfo> GetMasterTracks()
+    {
+        int count = _index.Count;
+        if (count == 0) return [];
+
+        var list = new List<TrackInfo>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var t = _index.GetTrack(i);
+            if (t != null) list.Add(t);
+        }
+        return list;
     }
 
     public TrackItemViewModel? TryGetVm(string trackId)

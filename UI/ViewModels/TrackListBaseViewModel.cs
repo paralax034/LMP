@@ -19,7 +19,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
     protected readonly VirtualTrackList _items;
     private CancellationTokenSource? _filterDebounceCts;
     private CancellationTokenSource? _loadCts;
-    private const int FilterDebounceMs = 150;
+    private const int FilterDebounceMs = 250;
     private int _consecutiveEmptyLoads;
 
     private bool _isDataLoading = true;
@@ -139,7 +139,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
             OnPropertyChanged(nameof(IsFilterEmpty));
             OnPropertyChanged(nameof(CanReorderItems));
             OnFilterApplied();
-        }, DispatcherPriority.Normal, ct);
+        }, DispatcherPriority.Background, ct);
     }
 
     protected virtual void OnFilterApplied()
@@ -269,10 +269,16 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         NotifyCountProperties();
     }
 
-    public List<TrackInfo> GetItemsSnapshot()
+    public List<TrackInfo> GetItemsSnapshot() => _items.GetMasterTracks();
+
+    /// <summary>
+    /// Возвращает снимок только отфильтрованных (отображаемых на экране) треков.
+    /// </summary>
+    public List<TrackInfo> GetFilteredItemsSnapshot()
     {
-        var list = new List<TrackInfo>(TotalCount);
-        for (int i = 0; i < TotalCount; i++)
+        int count = _items.FilteredCount;
+        var list = new List<TrackInfo>(count);
+        for (int i = 0; i < count; i++)
         {
             var track = _items.GetTrackAt(i);
             if (track != null) list.Add(track);
@@ -294,9 +300,15 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
     }
 
     protected void SetTracks(IEnumerable<TrackInfo> tracks, IReadOnlyList<string>? explicitOrder = null,
-        bool preserveSelection = false)
+            bool preserveSelection = false)
     {
         _items.SetTracks(tracks, explicitOrder, preserveSelection);
+
+        if (!string.IsNullOrWhiteSpace(FilterQuery))
+        {
+            _items.ApplyFilter(FilterQuery);
+        }
+
         _items.UpdatePlaybackState(PlayerControl.CurrentTrack, PlayerControl.IsPlaying);
         _isDataLoading = false;
 
