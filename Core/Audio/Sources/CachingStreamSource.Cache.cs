@@ -64,12 +64,16 @@ public sealed partial class CachingStreamSource
         private readonly Lock _lock = new();
         private readonly List<RamRangeBlock> _blocks = new(32);
         private long _totalBytes;
+        private long _version;
 
         /// <summary>Суммарный объём данных во всех блоках кэша (байт).</summary>
         public long TotalBytes
         {
             get { lock (_lock) return _totalBytes; }
         }
+
+        /// <summary>Монотонно возрастающая версия состояния блоков в RAM-кэше.</summary>
+        public long Version => Volatile.Read(ref _version);
 
         /// <summary>
         /// Добавляет блок в кэш, сохраняя сортировку по смещению.
@@ -93,6 +97,7 @@ public sealed partial class CachingStreamSource
                 }
                 _blocks.Insert(insertAt, block);
                 _totalBytes += block.Length;
+                Interlocked.Increment(ref _version);
                 return true;
             }
         }
@@ -184,6 +189,7 @@ public sealed partial class CachingStreamSource
                     if (position >= current.EndOffsetExclusive) continue;
                     _blocks.RemoveAt(i);
                     _totalBytes -= current.Length;
+                    Interlocked.Increment(ref _version);
                     block = current;
                     return true;
                 }
@@ -195,9 +201,19 @@ public sealed partial class CachingStreamSource
         /// <summary>
         /// Возвращает снимок всех блоков кэша в порядке возрастания смещения.
         /// </summary>
-        public RamRangeBlock[] GetRangesSnapshot()
+        public RamRangeBlock[] GetRangesSnapshot() =>
+             GetRangesSnapshot(out _);
+
+        /// <summary>
+        /// Атомарно возвращает снимок блоков RAM-кэша и его версию под единой блокировкой.
+        /// </summary>
+        public RamRangeBlock[] GetRangesSnapshot(out long version)
         {
-            lock (_lock) { return _blocks.Count == 0 ? [] : [.. _blocks]; }
+            lock (_lock)
+            {
+                version = _version;
+                return _blocks.Count == 0 ? [] : [.. _blocks];
+            }
         }
 
         /// <summary>
@@ -210,6 +226,7 @@ public sealed partial class CachingStreamSource
         {
             lock (_lock)
             {
+                bool modified = false;
                 for (int i = _blocks.Count - 1; i >= 0; i--)
                 {
                     var current = _blocks[i];
@@ -219,6 +236,7 @@ public sealed partial class CachingStreamSource
                         _blocks.RemoveAt(i);
                         _totalBytes -= current.Length;
                         current.Dispose();
+                        modified = true;
                     }
                 }
                 while (_totalBytes > maxRamBytes && _blocks.Count > 0)
@@ -228,7 +246,10 @@ public sealed partial class CachingStreamSource
                     _blocks.RemoveAt(removeIndex);
                     _totalBytes -= removed.Length;
                     removed.Dispose();
+                    modified = true;
                 }
+                if (modified)
+                    Interlocked.Increment(ref _version);
             }
         }
 
@@ -239,8 +260,12 @@ public sealed partial class CachingStreamSource
         {
             lock (_lock)
             {
-                for (int i = 0; i < _blocks.Count; i++) _blocks[i].Dispose();
-                _blocks.Clear();
+                if (_blocks.Count > 0)
+                {
+                    for (int i = 0; i < _blocks.Count; i++) _blocks[i].Dispose();
+                    _blocks.Clear();
+                    Interlocked.Increment(ref _version);
+                }
                 _totalBytes = 0;
             }
         }

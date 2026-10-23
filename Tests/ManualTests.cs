@@ -130,15 +130,27 @@ public static class ManualTests
     }
 
     /// <summary>Запуск всех audio hot-path allocation тестов.</summary>
-    public static async Task TestAudioAllocationsAsync()
+    public static Task TestAudioAllocationsAsync() => TestAllHotPathZeroAllocAsync();
+
+    /// <summary>Единый пакетный запуск всех проверок нулевых аллокаций горячего пути аудио-движка.</summary>
+    public static async Task TestAllHotPathZeroAllocAsync()
     {
         await Unit.HotPathAllocationTests.TestGainProcessorSimdZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestGainProcessorRampZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestGainProcessorUnityBypassZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestSharedPlaybackStateInterpolationAsync();
         await Unit.HotPathAllocationTests.TestRingBufferWriteZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestRingBufferReadZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestRingBufferPropertiesZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestAudioCallbackSimulationZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestKWeightingFilterZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestSharedPlaybackStateZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestWebMParserLacingZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestMp4ParserAndDecoderSimdZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestOpusDecoderZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestAsyncCachingReadStreamRamHitZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestGetBufferedRangesAndCacheDirtyZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestEndToEndPipelineStepZeroAllocAsync();
     }
 
     /// <summary>Запуск audio бенчмарков (throughput + latency + alloc check).</summary>

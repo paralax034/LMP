@@ -226,61 +226,118 @@ public sealed class LocalFileSource : IAudioSource
     /// <para><b>Surgical Cache Repair:</b> при обнаружении коррупции в файле кэша
     /// выполняется точечная range-based инвалидация повреждённого сегмента на диске.</para>
     /// </remarks>
-    public async ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default)
+    public ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_initialized || _parser == null)
+        var parser = _parser;
+        if (!_initialized || parser == null)
             throw new InvalidOperationException("Source not initialized");
 
-        int maxHealingAttempts = 3;
+        if (ct.IsCancellationRequested)
+            return ValueTask.FromCanceled<AudioFrame?>(ct);
+
+        try
+        {
+            var vt = parser.ReadNextFrameAsync(ct);
+            if (vt.IsCompletedSuccessfully)
+            {
+                var frame = vt.Result;
+                if (frame != null)
+                    Volatile.Write(ref _positionMs, frame.Value.TimestampMs);
+                return new ValueTask<AudioFrame?>(frame);
+            }
+
+            return ReadFrameSlowAsync(vt, ct);
+        }
+        catch (ParserCorruptionException ex)
+        {
+            return HealAndReadFrameSlowAsync(ex, ct);
+        }
+    }
+
+    /// <summary>
+    /// Асинхронный путь чтения фрейма при промахе синхронного буфера парсера.
+    /// </summary>
+    private async ValueTask<AudioFrame?> ReadFrameSlowAsync(
+        ValueTask<AudioFrame?> pendingRead,
+        CancellationToken ct)
+    {
+        try
+        {
+            var frame = await pendingRead.ConfigureAwait(false);
+            if (frame != null)
+                Volatile.Write(ref _positionMs, frame.Value.TimestampMs);
+            return frame;
+        }
+        catch (ParserCorruptionException ex)
+        {
+            return await HealAndReadFrameSlowAsync(ex, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Медленный путь восстановления после ошибки структуры контейнера (Surgical Cache Repair / Resync).
+    /// </summary>
+    private async ValueTask<AudioFrame?> HealAndReadFrameSlowAsync(
+        ParserCorruptionException initialEx,
+        CancellationToken ct)
+    {
+        const int maxHealingAttempts = 3;
+        ParserCorruptionException? currentEx = initialEx;
+
         for (int attempt = 0; attempt < maxHealingAttempts; attempt++)
         {
-            try
+            if (currentEx != null)
             {
-                var frame = await _parser.ReadNextFrameAsync(ct).ConfigureAwait(false);
-                if (frame == null) return null;
-
-                Volatile.Write(ref _positionMs, frame.Value.TimestampMs);
-                return frame;
-            }
-            catch (ParserCorruptionException ex)
-            {
-                if (ct.IsCancellationRequested) throw;
+                if (ct.IsCancellationRequested) throw currentEx;
 
                 int alignmentBytes = ResolveRepairAlignmentBytes();
-                long alignedStart = ex.AbsoluteBytePosition - (ex.AbsoluteBytePosition % alignmentBytes);
+                long alignedStart = currentEx.AbsoluteBytePosition - (currentEx.AbsoluteBytePosition % alignmentBytes);
                 int logicalIndex = (int)(alignedStart / alignmentBytes);
 
                 if (!string.IsNullOrEmpty(_trackId) && _expectedSize > 0)
                 {
                     Log.Warn($"[LocalFileSource] Cache corruption detected for track {_trackId} " +
-                             $"at byte {ex.AbsoluteBytePosition} " +
+                             $"at byte {currentEx.AbsoluteBytePosition} " +
                              $"(Range {alignedStart}-{alignedStart + alignmentBytes - 1}). " +
                              $"Performing surgical invalidation.");
 
                     AudioSourceFactory.GlobalCache.InvalidateRangeByTrackId(_trackId, alignedStart, alignmentBytes);
 
                     throw new CacheInvalidatedException(
-                        $"Cache corruption detected at byte {ex.AbsoluteBytePosition} " +
+                        $"Cache corruption detected at byte {currentEx.AbsoluteBytePosition} " +
                         $"(Range {alignedStart}-{alignedStart + alignmentBytes - 1})",
                         CacheInvalidationKind.ParserResync,
                         isRecoverable: true,
                         trackId: _trackId,
                         chunkIndex: logicalIndex,
-                        inner: ex);
+                        inner: currentEx);
                 }
 
-                Log.Warn($"[LocalFileSource] Offline fallback: skipping corrupted range around byte {ex.AbsoluteBytePosition}");
+                Log.Warn($"[LocalFileSource] Offline fallback: skipping corrupted range around byte {currentEx.AbsoluteBytePosition}");
 
                 long nextBoundary = Math.Min(alignedStart + alignmentBytes, _fileStream!.Length);
                 if (nextBoundary >= _fileStream.Length)
                     return null;
 
                 _fileStream.Position = nextBoundary;
-                _parser.RequireResync();
+                _parser!.RequireResync();
 
                 Volatile.Write(ref _positionMs, DurationMs * nextBoundary / _fileStream.Length);
+            }
+
+            try
+            {
+                var frame = await _parser!.ReadNextFrameAsync(ct).ConfigureAwait(false);
+                if (frame == null) return null;
+
+                Volatile.Write(ref _positionMs, frame.Value.TimestampMs);
+                return frame;
+            }
+            catch (ParserCorruptionException nextEx)
+            {
+                currentEx = nextEx;
             }
         }
 
@@ -335,7 +392,7 @@ public sealed class LocalFileSource : IAudioSource
 
     /// <inheritdoc/>
     /// <remarks>Всегда возвращает полный диапазон [0, 1].</remarks>
-    public IReadOnlyList<(double Start, double End)> GetBufferedRanges() => [(BufferedRangeStart, BufferedRangeEnd)];
+    public IReadOnlyList<(double Start, double End)> GetBufferedRanges() => FullBufferedRanges;
 
     /// <inheritdoc/>
     /// <remarks>No-op — нет RAM буферов для локальных файлов.</remarks>

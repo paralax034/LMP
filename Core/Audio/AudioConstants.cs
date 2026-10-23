@@ -28,6 +28,13 @@ public static class AudioConstants
     /// <summary>Конец полного диапазона буферизации.</summary>
     public const double BufferedRangeEnd = 1.0;
 
+    /// <summary>
+    /// Pre-allocated single-element range list representing a 100% buffered stream [0.0, 1.0].
+    /// Eliminates per-tick array allocations in 500ms buffer state timers.
+    /// </summary>
+    public static readonly IReadOnlyList<(double Start, double End)> FullBufferedRanges =
+        [(BufferedRangeStart, BufferedRangeEnd)];
+
     // ═══════════════════════════════════════════════════════
     // CHUNK SETTINGS — Управление сегментацией данных
     // ═══════════════════════════════════════════════════════

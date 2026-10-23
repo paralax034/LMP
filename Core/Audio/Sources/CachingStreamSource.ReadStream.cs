@@ -144,10 +144,34 @@ public sealed partial class CachingStreamSource
             ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
 
         /// <inheritdoc/>
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
         {
+            if (_source._disposed || ct.IsCancellationRequested)
+                return ValueTask.FromResult(0);
+
             var readToken = GetCurrentReadToken();
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, readToken);
+            if (readToken.IsCancellationRequested)
+                return ValueTask.FromResult(0);
+
+            long posBefore = Volatile.Read(ref _position);
+            if (posBefore >= _source._contentLength)
+                return ValueTask.FromResult(0);
+
+            if (_source._ramCache.TryRead(posBefore, buffer, out int ramRead))
+            {
+                if (Interlocked.CompareExchange(ref _position, posBefore + ramRead, posBefore) == posBefore)
+                    return ValueTask.FromResult(ramRead);
+            }
+
+            return ReadAsyncSlowPath(buffer, ct, readToken);
+        }
+
+        private async ValueTask<int> ReadAsyncSlowPath(
+            Memory<byte> buffer,
+            CancellationToken externalCt,
+            CancellationToken readToken)
+        {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(externalCt, readToken);
             return await ReadAsyncCore(buffer, linkedCts.Token).ConfigureAwait(false);
         }
 

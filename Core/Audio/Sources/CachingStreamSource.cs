@@ -261,6 +261,12 @@ public sealed partial class CachingStreamSource : IAudioSource
     private volatile bool _initialized;
     private volatile bool _disposed;
 
+    // Кэширование вычисленных диапазонов буферизации для исключения аллокаций на 500ms таймере
+    private readonly Lock _bufferedRangesCacheLock = new();
+    private long _cachedDiskRangesVersion = -1;
+    private long _cachedRamRangesVersion = -1;
+    private List<(double Start, double End)> _cachedBufferedRanges = [];
+
     #endregion
 
     #region Properties
@@ -679,40 +685,109 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <para><b>Self-Healing:</b> При обнаружении коррупции парсером запускается
     /// точечное восстановление диапазона без прерывания воспроизведения.</para>
     /// </remarks>
-    public async ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default)
+    public ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_initialized || _parser == null)
+        var parser = _parser;
+        if (!_initialized || parser == null)
             throw new InvalidOperationException("Source not initialized");
 
+        if (ct.IsCancellationRequested || _seekInProgress)
+            return new ValueTask<AudioFrame?>((AudioFrame?)null);
+
+        try
+        {
+            var vt = parser.ReadNextFrameAsync(ct);
+            if (vt.IsCompletedSuccessfully)
+            {
+                var frame = vt.Result;
+                if (frame != null)
+                    OnFrameRead(frame.Value);
+                return new ValueTask<AudioFrame?>(frame);
+            }
+
+            return ReadFrameSlowAsync(vt, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return new ValueTask<AudioFrame?>((AudioFrame?)null);
+        }
+        catch (ParserCorruptionException ex)
+        {
+            return HealAndReadFrameSlowAsync(ex.AbsoluteBytePosition, ct);
+        }
+    }
+
+    /// <summary>
+    /// Фиксирует таймстемп и смещение потока после успешного чтения фрейма.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void OnFrameRead(in AudioFrame frame)
+    {
+        Volatile.Write(ref _positionMs, frame.TimestampMs);
+        if (_readStream != null)
+            Volatile.Write(ref _currentReadOffset, _readStream.Position);
+    }
+
+    /// <summary>
+    /// Асинхронный путь чтения фрейма при ожидании подкачки данных из диска или сети.
+    /// </summary>
+    private async ValueTask<AudioFrame?> ReadFrameSlowAsync(
+        ValueTask<AudioFrame?> pendingRead,
+        CancellationToken ct)
+    {
+        try
+        {
+            var frame = await pendingRead.ConfigureAwait(false);
+            if (frame != null)
+                OnFrameRead(frame.Value);
+            return frame;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (ParserCorruptionException ex)
+        {
+            return await HealAndReadFrameSlowAsync(ex.AbsoluteBytePosition, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Медленный путь восстановления контейнера после ошибки парсинга с повторными попытками чтения.
+    /// </summary>
+    private async ValueTask<AudioFrame?> HealAndReadFrameSlowAsync(
+        long initialCorruptBytePos,
+        CancellationToken ct)
+    {
         const int maxHealingAttempts = 3;
+        long corruptPos = initialCorruptBytePos;
 
         for (int attempt = 0; attempt < maxHealingAttempts; attempt++)
         {
             if (ct.IsCancellationRequested || _seekInProgress)
                 return null;
 
+            await HealCorruptionAsync(corruptPos, ct).ConfigureAwait(false);
+
+            if (ct.IsCancellationRequested || _seekInProgress)
+                return null;
+
             try
             {
-                var frame = await _parser.ReadNextFrameAsync(ct).ConfigureAwait(false);
+                var frame = await _parser!.ReadNextFrameAsync(ct).ConfigureAwait(false);
                 if (frame != null)
-                {
-                    Volatile.Write(ref _positionMs, frame.Value.TimestampMs);
-                    UpdateCurrentReadOffset();
-                }
+                    OnFrameRead(frame.Value);
                 return frame;
             }
             catch (OperationCanceledException)
             {
                 return null;
             }
-            catch (ParserCorruptionException ex)
+            catch (ParserCorruptionException nextEx)
             {
-                if (ct.IsCancellationRequested || _seekInProgress)
-                    return null;
-
-                await HealCorruptionAsync(ex.AbsoluteBytePosition, ct).ConfigureAwait(false);
+                corruptPos = nextEx.AbsoluteBytePosition;
             }
         }
 
@@ -769,13 +844,6 @@ public sealed partial class CachingStreamSource : IAudioSource
 
         if (nextBoundary < _contentLength)
             _parser.RequireResync();
-    }
-
-    /// <summary>Обновляет текущую абсолютную позицию чтения для preload/eviction.</summary>
-    private void UpdateCurrentReadOffset()
-    {
-        if (_readStream != null)
-            Volatile.Write(ref _currentReadOffset, _readStream.Position);
     }
 
     #endregion

@@ -16,10 +16,12 @@ namespace LMP.Core.Audio.Parsers;
 ///   <item><c>Mp4ContainerParser.Fragment.cs</c> — логика работы с фрагментированным MP4 (Dash/HLS).</item>
 /// </list>
 /// <para><b>Performance:</b> Использует <see cref="Mp4BinaryReader"/> для zero-alloc парсинга заголовков
-/// и <see cref="MemoryPool{T}"/> для zero-alloc чтения фреймов.</para>
+/// и переиспользуемый буфер из <see cref="ArrayPool{T}.Shared"/> для чтения фреймов без аллокаций в куче.</para>
 /// </remarks>
 public sealed partial class Mp4ContainerParser : IContainerParser
 {
+    private const int InitialFrameBufferSize = 4096;
+
     private readonly Mp4BinaryReader _reader;
 
     private long _durationMs;
@@ -42,7 +44,7 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     private long _lastMdatDataEnd;
 
     private bool _disposed;
-    private IMemoryOwner<byte>? _currentFrameOwner;
+    private byte[]? _frameBuffer;
 
     public long DurationMs => _durationMs;
     public AudioCodec Codec => AudioCodec.Aac;
@@ -141,36 +143,87 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         }
     }
 
-    public async ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Читает следующий аудио-фрейм. При наличии семпла в таблице и синхронном чтении из потока
+    /// возвращает результат мгновенно без аллокаций в куче.
+    /// </summary>
+    public ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default)
     {
-        ReleaseCurrentFrame();
-
         if (_isFragmented)
-            return await ReadNextFragmentedFrameAsync(ct).ConfigureAwait(false);
+        {
+            if (_fragmentSamples.Count > 0)
+                return ReadSampleAsFrameAsync(_fragmentSamples.Dequeue(), ct);
+
+            return ReadNextFragmentedFrameAsync(ct);
+        }
 
         if (_currentSampleIndex >= _samples.Count)
-            return null;
+            return new ValueTask<AudioFrame?>((AudioFrame?)null);
 
-        return await ReadSampleAsFrameAsync(_samples[_currentSampleIndex++], ct).ConfigureAwait(false);
+        return ReadSampleAsFrameAsync(_samples[_currentSampleIndex++], ct);
+    }
+
+    private Memory<byte> RentFrameMemory(int requiredSize)
+    {
+        var buf = _frameBuffer;
+        if (buf == null || buf.Length < requiredSize)
+        {
+            if (buf != null)
+                ArrayPool<byte>.Shared.Return(buf);
+
+            buf = ArrayPool<byte>.Shared.Rent(Math.Max(requiredSize, InitialFrameBufferSize));
+            _frameBuffer = buf;
+        }
+
+        return buf.AsMemory(0, requiredSize);
     }
 
     /// <summary>
-    /// Считывает сэмпл MP4. При отмене операции или смене позиции возвращает null,
-    /// предотвращая ложный ParserCorruptionException.
+    /// Считывает сэмпл MP4 в переиспользуемый буфер. При отмене операции возвращает null,
+    /// предотвращая ложный <see cref="ParserCorruptionException"/>.
     /// </summary>
-    private async ValueTask<AudioFrame?> ReadSampleAsFrameAsync(SampleInfo sample, CancellationToken ct)
+    private ValueTask<AudioFrame?> ReadSampleAsFrameAsync(SampleInfo sample, CancellationToken ct)
     {
         if (ct.IsCancellationRequested)
-            return null;
+            return new ValueTask<AudioFrame?>((AudioFrame?)null);
 
         _reader.Position = sample.Offset;
-        var owner = MemoryPool<byte>.Shared.Rent(sample.Size);
-        var memory = owner.Memory[..sample.Size];
+        var memory = RentFrameMemory(sample.Size);
 
         try
         {
-            await _reader.ReadExactlyAsync(memory, ct).ConfigureAwait(false);
-            _currentFrameOwner = owner;
+            var readTask = _reader.ReadExactlyAsync(memory, ct);
+            if (readTask.IsCompletedSuccessfully)
+            {
+                return new ValueTask<AudioFrame?>(new AudioFrame
+                {
+                    Data = memory,
+                    TimestampMs = sample.TimestampMs,
+                    DurationMs = sample.DurationMs,
+                    IsKeyFrame = sample.IsKeyFrame
+                });
+            }
+
+            return ReadSampleAsFrameSlowAsync(readTask, memory, sample, ct);
+        }
+        catch (Exception ex)
+        {
+            if (ct.IsCancellationRequested || Helpers.CancellationHelper.IsCancellationLike(ex))
+                return new ValueTask<AudioFrame?>((AudioFrame?)null);
+
+            throw new ParserCorruptionException(sample.Offset, $"Failed to read MP4 sample at offset {sample.Offset}", ex);
+        }
+    }
+
+    private static async ValueTask<AudioFrame?> ReadSampleAsFrameSlowAsync(
+        ValueTask readTask,
+        Memory<byte> memory,
+        SampleInfo sample,
+        CancellationToken ct)
+    {
+        try
+        {
+            await readTask.ConfigureAwait(false);
 
             return new AudioFrame
             {
@@ -182,8 +235,6 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         }
         catch (Exception ex)
         {
-            owner.Dispose();
-
             if (ct.IsCancellationRequested || Helpers.CancellationHelper.IsCancellationLike(ex))
                 return null;
 
@@ -205,19 +256,21 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     {
         _currentSampleIndex = 0;
         _fragmentSamples.Clear();
-        ReleaseCurrentFrame();
     }
 
-    private void ReleaseCurrentFrame()
+    private void ReleaseFrameBuffer()
     {
-        _currentFrameOwner?.Dispose();
-        _currentFrameOwner = null;
+        var buf = _frameBuffer;
+        if (buf != null)
+        {
+            _frameBuffer = null;
+            ArrayPool<byte>.Shared.Return(buf);
+        }
     }
 
     /// <inheritdoc/>
     public void RequireResync()
     {
-        ReleaseCurrentFrame();
         long currentPos = _reader.Position;
 
         if (_isFragmented)
@@ -238,7 +291,7 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     {
         if (_disposed) return;
         _disposed = true;
-        ReleaseCurrentFrame();
+        ReleaseFrameBuffer();
     }
 
     public ValueTask DisposeAsync()

@@ -328,14 +328,44 @@ public sealed partial class CachingStreamSource
     /// </remarks>
     public IReadOnlyList<(double Start, double End)> GetBufferedRanges()
     {
-        if (_cacheEntry == null || _contentLength <= 0)
+        var entry = _cacheEntry;
+        if (entry == null || _contentLength <= 0)
             return [];
 
-        var diskRanges = _cacheEntry.GetDownloadedRangesSnapshot();
-        var ramBlocks = _ramCache.GetRangesSnapshot();
+        if (entry.IsComplete)
+        {
+            if (_cachedBufferedRanges.Count > 0)
+            {
+                lock (_bufferedRangesCacheLock)
+                {
+                    _cachedBufferedRanges = [];
+                }
+            }
+            return AudioConstants.FullBufferedRanges;
+        }
+
+        long diskVer = entry.RangesVersion;
+        long ramVer = _ramCache.Version;
+
+        lock (_bufferedRangesCacheLock)
+        {
+            if (diskVer == _cachedDiskRangesVersion && ramVer == _cachedRamRangesVersion)
+                return _cachedBufferedRanges;
+        }
+
+        var diskRanges = entry.GetDownloadedRangesSnapshot(out long snapDiskVer);
+        var ramBlocks = _ramCache.GetRangesSnapshot(out long snapRamVer);
 
         if (diskRanges.Length == 0 && ramBlocks.Length == 0)
-            return [];
+        {
+            lock (_bufferedRangesCacheLock)
+            {
+                _cachedDiskRangesVersion = snapDiskVer;
+                _cachedRamRangesVersion = snapRamVer;
+                _cachedBufferedRanges = [];
+                return _cachedBufferedRanges;
+            }
+        }
 
         var all = new List<(long Start, long End)>(diskRanges.Length + ramBlocks.Length);
 
@@ -345,9 +375,9 @@ public sealed partial class CachingStreamSource
         for (int i = 0; i < ramBlocks.Length; i++)
             all.Add((ramBlocks[i].StartOffset, ramBlocks[i].EndOffsetExclusive));
 
-        all.Sort((a, b) => a.Start.CompareTo(b.Start));
+        all.Sort(static (a, b) => a.Start.CompareTo(b.Start));
 
-        var merged = new List<(double, double)>(all.Count);
+        var merged = new List<(double Start, double End)>(all.Count);
         long mergedStart = -1;
         long mergedEnd = -1;
 
@@ -378,7 +408,13 @@ public sealed partial class CachingStreamSource
         if (mergedStart >= 0)
             merged.Add(((double)mergedStart / _contentLength, (double)mergedEnd / _contentLength));
 
-        return merged;
+        lock (_bufferedRangesCacheLock)
+        {
+            _cachedDiskRangesVersion = snapDiskVer;
+            _cachedRamRangesVersion = snapRamVer;
+            _cachedBufferedRanges = merged;
+            return _cachedBufferedRanges;
+        }
     }
 
     #endregion

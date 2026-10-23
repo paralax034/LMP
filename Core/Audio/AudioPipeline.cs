@@ -676,11 +676,10 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// <param name="timeoutMs">Максимальное время ожидания в миллисекундах.</param>
     /// <param name="ct">Токен отмены.</param>
     /// <returns>Задача, возвращающая <c>true</c> если прогрев успешен.</returns>
-    public async ValueTask<bool> WaitForBackendWarmupAsync(int timeoutMs, CancellationToken ct)
+    public ValueTask<bool> WaitForBackendWarmupAsync(int timeoutMs, CancellationToken ct)
     {
-        if (_disposed) return false;
-        // Оборачиваем синхронный Wait в задачу, чтобы освободить вызывающий поток (Actor Thread).
-        return await Task.Run(() => _backend.WaitForWarmup(timeoutMs), ct).ConfigureAwait(false);
+        if (_disposed || ct.IsCancellationRequested) return ValueTask.FromResult(false);
+        return ValueTask.FromResult(_backend.WaitForWarmup(timeoutMs));
     }
 
     public void Start()

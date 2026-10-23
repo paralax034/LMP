@@ -1,11 +1,11 @@
-using LMP.Core.Audio.Interfaces;
-using LMP.Core.Audio.Helpers;
 using System.Buffers;
+using LMP.Core.Audio.Helpers;
+using LMP.Core.Audio.Interfaces;
 
 namespace LMP.Core.Audio.Parsers;
 
 /// <summary>
-/// Адаптер WebMParser для IContainerParser.
+/// Адаптер <see cref="WebMParser"/> для <see cref="IContainerParser"/>.
 /// Инкапсулирует логику управления памятью (Zero-Allocation) для аудио-фреймов.
 /// </summary>
 public sealed class WebMContainerParser : IContainerParser
@@ -33,31 +33,46 @@ public sealed class WebMContainerParser : IContainerParser
         _parser = new WebMParser(stream);
     }
 
-    public async ValueTask<bool> ParseHeadersAsync(CancellationToken ct = default)
+    public ValueTask<bool> ParseHeadersAsync(CancellationToken ct = default)
     {
-        return await _parser.ParseHeadersAsync(ct);
+        return _parser.ParseHeadersAsync(ct);
     }
 
-    public async ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Читает следующий аудио-фрейм. Использует синхронный fast-path без аллокации async state machine,
+    /// когда блок доступен из внутреннего буфера парсера мгновенно.
+    /// </summary>
+    public ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default)
     {
-        // GC ZERO: Возвращаем ПРЕДЫДУЩИЙ буфер в пул
-        // Декодер уже отработал с ним в предыдущей итерации цикла.
         ReleaseCurrentFrame();
 
-        var block = await _parser.ReadNextBlockAsync(ct);
+        var blockTask = _parser.ReadNextBlockAsync(ct);
+        if (blockTask.IsCompletedSuccessfully)
+        {
+            return new ValueTask<AudioFrame?>(WrapBlock(blockTask.Result));
+        }
 
+        return ReadNextFrameSlowAsync(blockTask);
+    }
+
+    private async ValueTask<AudioFrame?> ReadNextFrameSlowAsync(ValueTask<WebMParser.AudioBlock?> blockTask)
+    {
+        var block = await blockTask.ConfigureAwait(false);
+        return WrapBlock(block);
+    }
+
+    private AudioFrame? WrapBlock(WebMParser.AudioBlock? block)
+    {
         if (block == null)
             return null;
 
-        // Сохраняем владельца, чтобы освободить его при следующем вызове
         _currentFrameOwner = block.Value.Owner;
 
         return new AudioFrame
         {
-            // Передаём только ту часть памяти, где реально лежат данные фрейма
             Data = _currentFrameOwner.Memory[..block.Value.Length],
             TimestampMs = block.Value.TimestampMs,
-            DurationMs = 20, // Typical Opus frame
+            DurationMs = 20, // Стандартная длительность Opus-фрейма
             IsKeyFrame = block.Value.IsKeyFrame
         };
     }

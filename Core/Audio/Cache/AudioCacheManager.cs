@@ -59,6 +59,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     private readonly CancellationTokenSource _timerCts = new();
     private readonly Task _autoSaveTask;
     private volatile bool _disposed;
+    private int _dirty;
 
     public event Action<string, AudioFormat, int, bool>? OnFormatCached;
     public event Action? OnCacheCleared;
@@ -233,6 +234,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                     entry.MarkFullyDownloaded();
 
                     AddToTrackIndex(trackId, cacheKey);
+                    MarkDirty();
                     anyRecovered = true;
 
                     Log.Info($"[AudioCache] Orphaned cache file verified and recovered: {cacheKey} ({fi.Length / 1024} KB)");
@@ -298,6 +300,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             entry.IntegratedLufs = integratedLufs;
             entry.IntegratedLufsSource = (int)source;
             entry.LastAccessedAt = DateTime.UtcNow;
+            MarkDirty();
             anyUpdated = true;
         }
 
@@ -469,7 +472,10 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     public void Touch(string cacheKey)
     {
         if (_entries.TryGetValue(cacheKey, out var entry))
+        {
             entry.LastAccessedAt = DateTime.UtcNow;
+            MarkDirty();
+        }
     }
 
     /// <summary>
@@ -514,6 +520,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             entry.AlignmentBytes = alignmentBytes;
 
         AddToTrackIndex(trackId, cacheKey);
+        MarkDirty();
         return entry;
     }
 
@@ -527,6 +534,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         var filePath = GetCachePath(cacheKey);
         try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
 
+        MarkDirty();
         _ = SaveIndexAsync();
     }
 
@@ -537,6 +545,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         entry.ResetDownloadedRanges();
         entry.ActualFileSize = 0;
         ForceCloseHandle(entry.CacheKey);
+        MarkDirty();
         _ = SaveIndexAsync();
     }
 
@@ -572,6 +581,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
             entry.MarkRangeDownloaded(offset, data.Length);
             entry.LastAccessedAt = DateTime.UtcNow;
+            MarkDirty();
 
             long writtenEnd = offset + data.Length;
             if (writtenEnd > entry.ActualFileSize)
@@ -641,6 +651,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             {
                 memoryOwner.Dispose();
                 entry.InvalidateRange(offset, expectedLength);
+                MarkDirty();
                 Log.Warn($"[AudioCache] Short read range of {cacheKey}: " +
                          $"offset={offset}, expected={expectedLength}, got={totalRead}. Range invalidated.");
                 return null;
@@ -1027,6 +1038,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             {
                 entry.MarkFullyDownloaded();
                 entry.ActualFileSize = actualLength;
+                MarkDirty();
                 Log.Info($"[AudioCache] Self-healed integrity: {entry.CacheKey}");
                 _ = SaveIndexAsync();
             }
@@ -1052,6 +1064,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             entry.IsComplete = false;
             entry.CompletedAt = null;
             entry.InvalidateRange(offset, length);
+            MarkDirty();
             UpdateFileSizeCache(entry);
             _ = SaveIndexAsync();
 
@@ -1075,6 +1088,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     #endregion
 
     #region Private Helpers
+
+    private void MarkDirty() => Volatile.Write(ref _dirty, 1);
 
     private void AddToTrackIndex(string trackId, string cacheKey)
     {
@@ -1207,6 +1222,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                     Log.Info($"[AudioCache] Binary index loaded successfully (MemoryPack, v{envelope.SchemaVersion}): {restoredCount} entries restored");
                     if (loadedFromBinaryBackup)
                     {
+                        MarkDirty();
                         _ = SaveIndexAsync();
                     }
                     return;
@@ -1342,8 +1358,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 AddToTrackIndex(entry.TrackId, entry.CacheKey);
             }
 
-            Log.Info($"[AudioCache] Legacy JSON index migrated to MemoryPack (Schema v{loadedSchemaVersion}→v{CurrentSchemaVersion}): " +
-                     $"{_entries.Count} entries restored");
+            Log.Info($"[AudioCache] Legacy JSON index migrated to MemoryPack (Schema v{loadedSchemaVersion}→v{CurrentSchemaVersion}): {_entries.Count} entries restored");
+            MarkDirty();
             SaveIndexSync();
 
             try
@@ -1371,10 +1387,14 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     private async Task SaveIndexAsync()
     {
         if (_disposed) return;
+        if (Volatile.Read(ref _dirty) == 0) return;
         if (!await _saveLock.WaitAsync(CacheSaveLockTimeoutMs).ConfigureAwait(false)) return;
 
         try
         {
+            if (Interlocked.Exchange(ref _dirty, 0) == 0)
+                return;
+
             var envelope = BuildIndexEnvelope();
             byte[] bytes = MemoryPackSerializer.Serialize(envelope);
             var binPath = Path.Combine(_cacheDirectory, CacheMetadataBinFileName);
@@ -1382,6 +1402,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
         catch (Exception ex)
         {
+            MarkDirty();
             Log.Warn($"[AudioCache] Failed to atomic save index: {ex.Message}");
         }
         finally
@@ -1396,10 +1417,14 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     private void SaveIndexSync()
     {
         if (_disposed) return;
+        if (Volatile.Read(ref _dirty) == 0) return;
         if (!_saveLock.Wait(CacheSaveLockTimeoutMs)) return;
 
         try
         {
+            if (Interlocked.Exchange(ref _dirty, 0) == 0)
+                return;
+
             var envelope = BuildIndexEnvelope();
             byte[] bytes = MemoryPackSerializer.Serialize(envelope);
             var binPath = Path.Combine(_cacheDirectory, CacheMetadataBinFileName);
@@ -1407,6 +1432,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
         catch (Exception ex)
         {
+            MarkDirty();
             Log.Warn($"[AudioCache] Failed to sync atomic save index: {ex.Message}");
         }
         finally

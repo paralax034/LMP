@@ -73,6 +73,9 @@ public sealed partial class AudioCacheEntry
     [MemoryPackIgnore]
     private long _downloadedBytes;
 
+    [MemoryPackIgnore]
+    private long _rangesVersion;
+
     [JsonIgnore]
     [MemoryPackIgnore]
     private List<CacheByteRange>? _downloadedRanges;
@@ -89,6 +92,11 @@ public sealed partial class AudioCacheEntry
     [JsonIgnore]
     [MemoryPackIgnore]
     public long DownloadedBytes => Volatile.Read(ref _downloadedBytes);
+
+    /// <summary>Монотонно возрастающая версия списка скачанных диапазонов для zero-alloc кэширования в UI.</summary>
+    [JsonIgnore]
+    [MemoryPackIgnore]
+    internal long RangesVersion => Volatile.Read(ref _rangesVersion);
 
     /// <summary>Прогресс загрузки в процентах.</summary>
     [JsonIgnore]
@@ -178,6 +186,7 @@ public sealed partial class AudioCacheEntry
 
             _downloadedRanges.Insert(removeStart, new CacheByteRange(mergedStart, mergedEnd));
             addedBytes = endExclusive - start - overlapBytes;
+            Interlocked.Increment(ref _rangesVersion);
         }
 
         if (addedBytes > 0)
@@ -225,6 +234,7 @@ public sealed partial class AudioCacheEntry
             }
 
             _downloadedRanges = updated.Count == 0 ? null : updated;
+            Interlocked.Increment(ref _rangesVersion);
         }
 
         if (removedBytes > 0)
@@ -237,7 +247,10 @@ public sealed partial class AudioCacheEntry
     public void ResetDownloadedRanges()
     {
         lock (_rangesLock)
+        {
             _downloadedRanges = null;
+            Interlocked.Increment(ref _rangesVersion);
+        }
 
         DownloadedRangesData = null;
         Volatile.Write(ref _downloadedBytes, 0);
@@ -251,12 +264,13 @@ public sealed partial class AudioCacheEntry
         lock (_rangesLock)
         {
             _downloadedRanges = TotalSize > 0
-                ? new List<CacheByteRange>(1) { new CacheByteRange(0, TotalSize) }
+                ? [new CacheByteRange(0, TotalSize)]
                 : null;
+            Interlocked.Increment(ref _rangesVersion);
         }
 
         DownloadedRangesData = TotalSize > 0
-            ? new List<SerializedDownloadedRange>(1) { new() { Start = 0, EndExclusive = TotalSize } }
+            ? [new() { Start = 0, EndExclusive = TotalSize }]
             : null;
 
         Volatile.Write(ref _downloadedBytes, Math.Max(0, TotalSize));
@@ -317,10 +331,17 @@ public sealed partial class AudioCacheEntry
     /// <summary>
     /// Возвращает snapshot скачанных диапазонов.
     /// </summary>
-    internal CacheByteRange[] GetDownloadedRangesSnapshot()
+    internal CacheByteRange[] GetDownloadedRangesSnapshot() =>
+          GetDownloadedRangesSnapshot(out _);
+
+    /// <summary>
+    /// Атомарно возвращает снимок скачанных диапазонов и текущую версию под единой блокировкой.
+    /// </summary>
+    internal CacheByteRange[] GetDownloadedRangesSnapshot(out long version)
     {
         lock (_rangesLock)
         {
+            version = _rangesVersion;
             if (_downloadedRanges is not { Count: > 0 })
                 return [];
 

@@ -151,14 +151,35 @@ public sealed class Mp4BinaryReader
     }
 
     /// <summary>
-    /// Читает заголовок MP4 box. Zero-alloc: использует <see cref="_ioBuffer"/>.
+    /// Читает заголовок MP4 box. Использует синхронный fast-path при мгновенном ответе потока.
     /// </summary>
     /// <param name="ct">Токен отмены.</param>
     /// <returns>Заголовок box. <see cref="BoxHeader.IsEmpty"/> = true при EOF.</returns>
-    public async ValueTask<BoxHeader> ReadBoxHeaderAsync(CancellationToken ct)
+    public ValueTask<BoxHeader> ReadBoxHeaderAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        int read = await _stream.ReadAsync(_ioBuffer.AsMemory(0, 8), ct).ConfigureAwait(false);
+        var readTask = _stream.ReadAsync(_ioBuffer.AsMemory(0, 8), ct);
+        if (readTask.IsCompletedSuccessfully)
+        {
+            int read = readTask.Result;
+            if (read < 8)
+                return new ValueTask<BoxHeader>(default(BoxHeader));
+
+            uint size = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer);
+            uint type = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer.AsSpan(4));
+
+            if (size != 1)
+                return new ValueTask<BoxHeader>(new BoxHeader(size, type, 8));
+
+            return ReadExtendedBoxHeaderSlowAsync(type, ct);
+        }
+
+        return ReadBoxHeaderSlowAsync(readTask, ct);
+    }
+
+    private async ValueTask<BoxHeader> ReadBoxHeaderSlowAsync(ValueTask<int> initialReadTask, CancellationToken ct)
+    {
+        int read = await initialReadTask.ConfigureAwait(false);
         if (read < 8)
             return default;
 
@@ -166,13 +187,16 @@ public sealed class Mp4BinaryReader
         uint type = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer.AsSpan(4));
 
         if (size == 1)
-        {
-            await ReadExactlyAsync(_ioBuffer.AsMemory(0, 8), ct).ConfigureAwait(false);
-            long extSize = (long)BinaryPrimitives.ReadUInt64BigEndian(_ioBuffer);
-            return new BoxHeader(extSize, type, 16);
-        }
+            return await ReadExtendedBoxHeaderSlowAsync(type, ct).ConfigureAwait(false);
 
         return new BoxHeader(size, type, 8);
+    }
+
+    private async ValueTask<BoxHeader> ReadExtendedBoxHeaderSlowAsync(uint type, CancellationToken ct)
+    {
+        await ReadExactlyAsync(_ioBuffer.AsMemory(0, 8), ct).ConfigureAwait(false);
+        long extSize = (long)BinaryPrimitives.ReadUInt64BigEndian(_ioBuffer);
+        return new BoxHeader(extSize, type, 16);
     }
 
     #endregion
@@ -253,15 +277,55 @@ public sealed class Mp4BinaryReader
 
     /// <summary>
     /// Читает ровно <paramref name="buffer"/>.Length байт.
-    /// Бросает <see cref="EndOfStreamException"/> при преждевременном EOF.
+    /// При синхронном завершении первого чтения из потока (RAM-кэш или буфер ОС) не выделяет async state machine.
     /// </summary>
-    public async ValueTask ReadExactlyAsync(Memory<byte> buffer, CancellationToken ct)
+    public ValueTask ReadExactlyAsync(Memory<byte> buffer, CancellationToken ct)
     {
-        int totalRead = 0;
-        while (totalRead < buffer.Length)
+        if (buffer.IsEmpty)
+            return ValueTask.CompletedTask;
+
+        ct.ThrowIfCancellationRequested();
+        var readTask = _stream.ReadAsync(buffer, ct);
+        if (readTask.IsCompletedSuccessfully)
+        {
+            int read = readTask.Result;
+            if (read == buffer.Length)
+                return ValueTask.CompletedTask;
+
+            if (read == 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                throw new EndOfStreamException();
+            }
+
+            return ReadExactlySlowAsync(buffer[read..], ct);
+        }
+
+        return ReadExactlyAwaitFirstAsync(readTask, buffer, ct);
+    }
+
+    private async ValueTask ReadExactlyAwaitFirstAsync(ValueTask<int> firstReadTask, Memory<byte> buffer, CancellationToken ct)
+    {
+        int read = await firstReadTask.ConfigureAwait(false);
+        if (read == buffer.Length)
+            return;
+
+        if (read == 0)
         {
             ct.ThrowIfCancellationRequested();
-            int read = await _stream.ReadAsync(buffer[totalRead..], ct).ConfigureAwait(false);
+            throw new EndOfStreamException();
+        }
+
+        await ReadExactlySlowAsync(buffer[read..], ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask ReadExactlySlowAsync(Memory<byte> remainingBuffer, CancellationToken ct)
+    {
+        int totalRead = 0;
+        while (totalRead < remainingBuffer.Length)
+        {
+            ct.ThrowIfCancellationRequested();
+            int read = await _stream.ReadAsync(remainingBuffer[totalRead..], ct).ConfigureAwait(false);
             if (read == 0)
             {
                 ct.ThrowIfCancellationRequested();
