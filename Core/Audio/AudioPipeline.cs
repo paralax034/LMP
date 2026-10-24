@@ -37,6 +37,13 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// <summary>Минимум секунд аудио для адекватного EBU R128 pre-scan (±1-2 LU).</summary>
     private const float MinPreScanSeconds = 10f;
 
+    /// <summary>
+    /// Длина живого wave-to-wave кроссфейда при Seek в стерео-фреймах (960 фреймов = 20 мс при 48 кГц).
+    /// Сохраняет реальное продолжение старой звуковой волны из кольцевого буфера перед его очисткой,
+    /// обеспечивая 100% непрерывность всех производных сигнала на стыке DMA-буфера без провала громкости.
+    /// </summary>
+    private const int SeekCrossfadeFrames = 960;
+
     #endregion
 
     #region Fields
@@ -46,6 +53,11 @@ public sealed class AudioPipeline : IAsyncDisposable
     private readonly IPlaybackBackend _backend;
     private readonly LockFreeRingBuffer<float> _pcmBuffer;
     private readonly float[] _decodeBuffer;
+    private readonly float[] _seekCrossfadeTail;
+    private int _seekCrossfadeRemainingFrames;
+    private int _seekCrossfadeTotalFrames;
+    private float _lastOutputSampleL;
+    private float _lastOutputSampleR;
     private readonly AudioStreamInfo _streamInfo;
     private readonly CancellationTokenSource _lifetimeCts;
     private readonly EbuR128Analyzer _analyzer;
@@ -144,6 +156,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         _streamInfo = streamInfo;
         _lifetimeCts = lifetimeCts;
 
+        _seekCrossfadeTail = new float[SeekCrossfadeFrames * decoder.Channels];
         _analyzer = new EbuR128Analyzer();
         _truePeakLimiter = new TruePeakLimiter(decoder.SampleRate);
         _analyzer3Band = new Audio3BandAnalyzer(decoder.SampleRate, decoder.Channels);
@@ -190,7 +203,6 @@ public sealed class AudioPipeline : IAsyncDisposable
             }
             catch (Exception ex) when (ex is CdnUnavailableException or UrlExpiredException or HttpRequestException && urlRefresher != null)
             {
-                // Если сбой произошёл из-за блокировки CDN — немедленно заносим хост в блэклист ДО запроса рефреша
                 if (ex is CdnUnavailableException cdnEx && !string.IsNullOrEmpty(cdnEx.Host))
                 {
                     AudioSourceFactory.CdnBlacklist.MarkBlocked(cdnEx.Host);
@@ -439,19 +451,14 @@ CancellationToken ct)
     {
         int retryCount = 0;
         int requiredSpace = _decoder.MaxFrameSize * _decoder.Channels;
-        // Пакетный гистерезис (Batch Low Watermark): когда кольцевой буфер полон,
-        // декодер засыпает до тех пор, пока не освободится минимум ~25% буфера (около 450-500 мс аудио),
-        // чтобы за одно пробуждение декодировать сразу пачку из 20-25 фреймов подряд без переключений контекста.
         int batchRefillSpace = Math.Max(requiredSpace * MinBatchRefillFrames, _pcmBuffer.Capacity / BatchRefillCapacityDivisor);
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                // Быстрый путь: проверяем место по кэшированному Tail, не дергая шину памяти
                 if (_pcmBuffer.ProducerCachedAvailable < requiredSpace)
                 {
-                    // Медленный путь: жесткая синхронизация (внутри обновит кэш, если Tail сдвинулся)
                     if (_pcmBuffer.Available < requiredSpace)
                     {
                         while (_pcmBuffer.Available < batchRefillSpace && !ct.IsCancellationRequested)
@@ -571,30 +578,38 @@ CancellationToken ct)
 
                 try
                 {
-                    int skipCount = Volatile.Read(ref _skipFramesCounter);
-
-                    if (skipCount > 0)
+                    if (Interlocked.CompareExchange(ref _decoderResetNeeded, 0, 1) == 1)
                     {
-                        if (Interlocked.CompareExchange(ref _decoderResetNeeded, 0, 1) == 1)
-                            _decoder.FlushState();
-
-                        _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
-                        Interlocked.Decrement(ref _skipFramesCounter);
-                        continue;
+                        _decoder.FlushState();
                     }
 
                     long seekTarget = Volatile.Read(ref _seekTargetMs);
                     if (seekTarget >= 0)
                     {
-                        if (frame.Value.TimestampMs < seekTarget)
+                        const long DecoderPreRollMs = 100;
+                        long frameTs = frame.Value.TimestampMs;
+
+                        if (frameTs < seekTarget)
                         {
-                            // Мы обязаны "прокрутить" сжатый фрейм через декодер,
-                            // чтобы не сломать его внутренний state (overlap-add для Opus/AAC).
-                            // Иначе при достижении seekTarget мы получим звуковые артефакты.
-                            _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                            if (frameTs + DecoderPreRollMs >= seekTarget)
+                            {
+                                _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                            }
                             continue;
                         }
+
                         Volatile.Write(ref _seekTargetMs, -1L);
+                        Volatile.Write(ref _skipFramesCounter, 0);
+                    }
+                    else
+                    {
+                        int skipCount = Volatile.Read(ref _skipFramesCounter);
+                        if (skipCount > 0)
+                        {
+                            _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                            Interlocked.Decrement(ref _skipFramesCounter);
+                            continue;
+                        }
                     }
 
                     int samplesDecoded = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
@@ -636,10 +651,6 @@ CancellationToken ct)
     /// Вычисляет адаптивную задержку цикла декодера при заполненном кольцевом буфере,
     /// снижая количество переключений контекста ОС при большом запасе декодированного PCM.
     /// </summary>
-    /// <param name="bufferedSamples">Текущее количество сэмплов в кольцевом буфере.</param>
-    /// <param name="sampleRate">Частота дискретизации.</param>
-    /// <param name="channels">Количество каналов.</param>
-    /// <returns>Время ожидания в миллисекундах.</returns>
     internal static int ComputeBufferFullDelayMs(int bufferedSamples, int sampleRate, int channels)
     {
         int samplesPerSec = sampleRate * channels;
@@ -709,12 +720,6 @@ CancellationToken ct)
         return _backend.WaitForWarmup(timeoutMs);
     }
 
-    /// <summary>
-    /// Асинхронно ожидает готовности backend без блокировки вызывающего потока.
-    /// </summary>
-    /// <param name="timeoutMs">Максимальное время ожидания в миллисекундах.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Задача, возвращающая <c>true</c> если прогрев успешен.</returns>
     public ValueTask<bool> WaitForBackendWarmupAsync(int timeoutMs, CancellationToken ct)
     {
         if (_disposed || ct.IsCancellationRequested) return ValueTask.FromResult(false);
@@ -739,7 +744,69 @@ CancellationToken ct)
     public void Flush()
     {
         if (_disposed) return;
+
         _backend.Flush();
+
+        int channels = _decoder.Channels;
+        int maxTailFloats = _seekCrossfadeTail.Length;
+
+        if (_seekCrossfadeRemainingFrames > 0)
+        {
+            int consumedFrames = _seekCrossfadeTotalFrames - _seekCrossfadeRemainingFrames;
+            if (consumedFrames > 0)
+            {
+                int remFloats = _seekCrossfadeRemainingFrames * channels;
+                _seekCrossfadeTail.AsSpan(consumedFrames * channels, remFloats)
+                    .CopyTo(_seekCrossfadeTail.AsSpan(0, remFloats));
+                _seekCrossfadeTotalFrames = _seekCrossfadeRemainingFrames;
+            }
+        }
+        else
+        {
+            int readFloats = _pcmBuffer.Read(_seekCrossfadeTail.AsSpan(0, maxTailFloats));
+            int readFrames = channels > 0 ? readFloats / channels : 0;
+
+            if (readFrames > 0)
+            {
+                float currentNormGain = _gainCrossfader.CurrentGain;
+                if (MathF.Abs(currentNormGain - 1.0f) > 0.0001f)
+                {
+                    SpanMathHelper.MultiplyByConstant(_seekCrossfadeTail.AsSpan(0, readFrames * channels), currentNormGain);
+                }
+            }
+
+            float anchorL = readFrames > 0
+                ? _seekCrossfadeTail[(readFrames - 1) * channels]
+                : _lastOutputSampleL;
+            float anchorR = readFrames > 0 && channels >= 2
+                ? _seekCrossfadeTail[(readFrames - 1) * channels + 1]
+                : _lastOutputSampleR;
+
+            if (readFrames < SeekCrossfadeFrames && (MathF.Abs(anchorL) > 0.0005f || MathF.Abs(anchorR) > 0.0005f))
+            {
+                int missingFrames = SeekCrossfadeFrames - readFrames;
+                float invMissing = 1.0f / missingFrames;
+
+                for (int f = 0; f < missingFrames; f++)
+                {
+                    float t = (f + 1) * invMissing;
+                    float w = 1.0f - (t * t * (3.0f - 2.0f * t));
+                    int baseIdx = (readFrames + f) * channels;
+                    _seekCrossfadeTail[baseIdx] = anchorL * w;
+                    if (channels >= 2)
+                        _seekCrossfadeTail[baseIdx + 1] = anchorR * w;
+                }
+
+                _seekCrossfadeTotalFrames = SeekCrossfadeFrames;
+                _seekCrossfadeRemainingFrames = SeekCrossfadeFrames;
+            }
+            else if (readFrames > 0)
+            {
+                _seekCrossfadeTotalFrames = readFrames;
+                _seekCrossfadeRemainingFrames = readFrames;
+            }
+        }
+
         _pcmBuffer.Clear();
 
         Volatile.Write(ref _warmupThreshold, 0);
@@ -747,7 +814,6 @@ CancellationToken ct)
         tcs?.TrySetResult();
 
         _analyzer3Band.Reset();
-        Log.Debug("[AudioPipeline] Flushed");
     }
 
     internal void NotifyStarvation()
@@ -778,12 +844,6 @@ CancellationToken ct)
         tcs?.TrySetResult();
     }
 
-    /// <summary>
-    /// Выполняет pre-scan нормализации через isolated pipeline.
-    /// Поддерживает <see cref="Sources.LocalFileSource"/> (полный кэш)
-    /// и <see cref="Sources.CachingStreamSource"/> (partial cache с достаточным contiguous prefix).
-    /// </summary>
-    /// <param name="ct">Токен отмены.</param>
     public async Task PreScanNormalizationAsync(CancellationToken ct)
     {
         if (!_analyzer.IsEnabled) return;
@@ -924,11 +984,49 @@ CancellationToken ct)
                 _truePeakLimiter!.Process(samples, ref _gainCrossfader);
             }
 
-            // 3-полосный sidechain-анализ: Low, Mid, High, Kick Transient
+            if (_seekCrossfadeRemainingFrames > 0)
+            {
+                int channels = _decoder.Channels;
+                int framesInBuffer = read / channels;
+                int cfFrames = Math.Min(_seekCrossfadeRemainingFrames, framesInBuffer);
+
+                if (cfFrames > 0)
+                {
+                    int totalCf = _seekCrossfadeTotalFrames;
+                    int startOffsetFrames = totalCf - _seekCrossfadeRemainingFrames;
+                    float invTotal = 1.0f / totalCf;
+
+                    Span<float> tailSpan = _seekCrossfadeTail.AsSpan(startOffsetFrames * channels, cfFrames * channels);
+
+                    for (int f = 0; f < cfFrames; f++)
+                    {
+                        float t = (startOffsetFrames + f + 1) * invTotal;
+                        float newWeight = t * t * (3.0f - 2.0f * t);
+                        float oldWeight = 1.0f - newWeight;
+
+                        int baseIdx = f * channels;
+                        for (int ch = 0; ch < channels; ch++)
+                        {
+                            samples[baseIdx + ch] = tailSpan[baseIdx + ch] * oldWeight + samples[baseIdx + ch] * newWeight;
+                        }
+                    }
+
+                    _seekCrossfadeRemainingFrames -= cfFrames;
+                }
+            }
+
+            if (samples.Length >= 2)
+            {
+                _lastOutputSampleL = samples[^2];
+                _lastOutputSampleR = samples[^1];
+            }
+
             _analyzer3Band.ProcessBlock(samples, _decoder.Channels);
         }
         else
         {
+            _lastOutputSampleL = 0f;
+            _lastOutputSampleR = 0f;
             _analyzer3Band.Reset();
         }
 
@@ -941,34 +1039,32 @@ CancellationToken ct)
 
     public async Task<bool> WaitForBufferAsync(int minSamples, int maxWaitMs, CancellationToken ct)
     {
-        // Быстрый путь: если буфер уже готов, выходим немедленно, не создавая TCS.
         if (_disposed || _pcmBuffer.Count >= minSamples) return true;
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Volatile.Write(ref _warmupTcs, tcs);
         Volatile.Write(ref _warmupThreshold, minSamples);
 
-        // Повторная проверка ПОСЛЕ публикации TCS.
-        // Это закрывает race window: если декодер заполнил буфер между первой проверкой и публикацией TCS,
-        // мы это здесь поймаем и не будем ждать таймаут.
         if (_pcmBuffer.Count >= minSamples)
         {
             Volatile.Write(ref _warmupThreshold, 0);
-            Interlocked.CompareExchange(ref _warmupTcs, null, tcs); // Безопасно убираем наш TCS
-            tcs.TrySetResult(); // Сигнализируем на случай, если кто-то уже подписался
+            Interlocked.CompareExchange(ref _warmupTcs, null, tcs);
+            tcs.TrySetResult();
             return true;
         }
 
         try
         {
-            // Ожидаем без токена: устраняем исключение TaskCanceledException при отмене таймаута
-            var delayTask = Task.Delay(maxWaitMs);
-            var completedTask = await Task.WhenAny(tcs.Task, delayTask).ConfigureAwait(false);
-
-            if (ct.IsCancellationRequested)
-                return false;
-
-            return completedTask == tcs.Task;
+            await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(maxWaitMs), ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return _pcmBuffer.Count >= minSamples;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
         finally
         {

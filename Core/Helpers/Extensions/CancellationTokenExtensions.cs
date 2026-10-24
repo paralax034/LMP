@@ -66,16 +66,20 @@ public static class CancellationTokenExtensions
         if (token.IsCancellationRequested)
             return Task.CompletedTask;
 
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reg = token.UnsafeRegister(static s => ((TaskCompletionSource)s!).TrySetResult(), tcs);
+        var state = new WhenCanceledState();
+        state.Registration = token.UnsafeRegister(static s =>
+        {
+            var self = (WhenCanceledState)s!;
+            self.Registration.Dispose();
+            self.Tcs.TrySetResult();
+        }, state);
 
-        tcs.Task.ContinueWith(
-            static (_, r) => ((CancellationTokenRegistration)r!).Dispose(),
-            reg,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        return state.Tcs.Task;
+    }
 
-        return tcs.Task;
+    private sealed class WhenCanceledState
+    {
+        public readonly TaskCompletionSource Tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CancellationTokenRegistration Registration;
     }
 }

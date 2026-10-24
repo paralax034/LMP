@@ -8,7 +8,6 @@ namespace LMP.Core.Audio;
 
 public sealed partial class AudioPlayer
 {
-
     #region Seek Constants
 
     private const int SeekLoopMaxIterations = 50;
@@ -141,7 +140,7 @@ public sealed partial class AudioPlayer
     #region Seek Command Handler
 
     /// <summary>
-    /// Обрабатывает seek-команду.
+    /// Обрабатывает seek-команду с бесшовным сохранением хвоста старой волны для кроссфейда.
     /// </summary>
     private async Task HandleSeekAsync(SeekCommand cmd)
     {
@@ -175,7 +174,7 @@ public sealed partial class AudioPlayer
                 _ = cachingSource.TryPrefetchChunkForSeekAsync(posMs, _lifetimeCts.Token);
 
             await pipeline.StopDecodingAsync(
-                        TimeSpan.FromMilliseconds(DecoderStopTimeoutSeekMs)).ConfigureAwait(false);
+                TimeSpan.FromMilliseconds(DecoderStopTimeoutSeekMs)).ConfigureAwait(false);
 
             if (_session.IsStale(cmd.SessionId))
             {
@@ -185,7 +184,8 @@ public sealed partial class AudioPlayer
                 return;
             }
 
-            pipeline.Stop();
+            // Вызываем напрямую pipeline.Flush() без предварительного pipeline.Stop():
+            // Flush() закрывает гейт бэкенда и спасает 512 фреймов живого продолжения волны из _pcmBuffer для кроссфейда!
             pipeline.Flush();
             pipeline.PrepareForSeek(posMs);
 
@@ -261,7 +261,6 @@ public sealed partial class AudioPlayer
 
             while (iteration++ < SeekLoopMaxIterations)
             {
-                // Создаем CTS для текущей итерации, который можно прервать извне.
                 using var iterInterruptCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token, seekCt);
                 _seekIterationInterruptCts = iterInterruptCts;
                 var iterCt = iterInterruptCts.Token;
@@ -270,12 +269,10 @@ public sealed partial class AudioPlayer
 
                 try
                 {
-                    // Фаза A: Ожидание Source Seek
                     await pipeline.Source.SeekAsync(currentTargetMs, iterCt).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (iterInterruptCts.IsCancellationRequested && !seekCt.IsCancellationRequested)
                 {
-                    // Прервано новым SeekAsync: сбрасываем и на следующую итерацию.
                     long drained = DrainPendingSeekMs();
                     if (drained >= 0)
                     {
@@ -285,7 +282,7 @@ public sealed partial class AudioPlayer
                         Log.Debug($"[SeekTelemetry] Phase A interrupted, coalescing to {drained}ms");
                         continue;
                     }
-                    throw; // Настоящая отмена (seekCts или lifetimeCts)
+                    throw;
                 }
                 catch (OperationCanceledException)
                 {
@@ -294,7 +291,6 @@ public sealed partial class AudioPlayer
                 }
                 finally
                 {
-                    // Убираем ссылку на CTS итерации, чтобы его нельзя было отменить повторно.
                     Interlocked.CompareExchange(ref _seekIterationInterruptCts, null, iterInterruptCts);
                 }
 
@@ -380,7 +376,7 @@ public sealed partial class AudioPlayer
                     RestorePlaybackActiveState(pipeline);
 
                     ResumeOrDefer(pipeline, pcmReady, sourceReady, warmupPlan, sessionAtStart,
-                        startTimers: false, configurePipeline: true, trackId: _currentTrackId, logContext: "Seek warmup");
+                        startTimers: false, configurePipeline: false, trackId: _currentTrackId, logContext: "Seek warmup");
                 }
                 else
                 {
@@ -460,11 +456,6 @@ public sealed partial class AudioPlayer
                 bool pcmReady = seekThreshold <= 0 || pipeline.BufferedSamples >= seekThreshold;
                 bool sourceReady = IsSourceReadyForResume(pipeline, sourceAheadMs);
 
-                // pcmReady override через source-ahead:
-                // активируется ТОЛЬКО если ring содержит реальные данные (BufferedSamples > 0).
-                // In-flight downloads создают ложный source-ahead: RegisterOrGetActiveDownload
-                // регистрирует запись немедленно после SetPlaybackActive, но данные ещё не пришли.
-                // При starvation это приводит к открытию gate с ring=0 → тишина.
                 if (!pcmReady
                     && seekThreshold > 0
                     && pipeline.BufferedSamples > 0
@@ -576,7 +567,7 @@ public sealed partial class AudioPlayer
         {
             Log.Debug($"[SeekTelemetry] Deferred resume dropped: " +
                       $"disposed={_disposed}, pipelineMatch={_activePipeline == cmd.Pipeline}, " +
-                      $"stale={_session.IsStale(cmd.SessionId)}, " +
+                      $"stale={_session.IsStale(sessionId: cmd.SessionId)}, " +
                       $"generationMatch={cmd.SeekGeneration == currentSeekGeneration}, " +
                       $"state={_state}");
             return Task.CompletedTask;
@@ -637,7 +628,6 @@ public sealed partial class AudioPlayer
         await pipeline.StopDecodingAsync(
             TimeSpan.FromMilliseconds(ReSeekDecoderStopTimeoutMs)).ConfigureAwait(false);
 
-        pipeline.Stop();
         pipeline.Flush();
     }
 

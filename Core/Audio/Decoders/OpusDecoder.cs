@@ -165,7 +165,17 @@ public sealed partial class OpusDecoder : IAudioDecoder
     /// </summary>
     public void FlushState()
     {
-        // Intentionally no-op for Opus.
+        if (_disposed) return;
+
+        if (_nativeDecoder != IntPtr.Zero)
+        {
+            const int OPUS_RESET_STATE = 4028;
+            _ = NativeOpus.opus_decoder_ctl(_nativeDecoder, OPUS_RESET_STATE);
+        }
+        else
+        {
+            _managedDecoder?.ResetState();
+        }
     }
 
     private unsafe int DecodePLC(Span<float> outputBuffer)
@@ -282,6 +292,10 @@ public sealed partial class OpusDecoder : IAudioDecoder
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         internal static partial void opus_decoder_destroy(IntPtr st);
+
+        [LibraryImport(LibraryName)]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        internal static partial int opus_decoder_ctl(IntPtr st, int request);
 
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

@@ -60,13 +60,13 @@ internal static class StringExtensions
 
             ReadOnlySpan<char> span = str.AsSpan();
             int start = 0;
-            while (start < span.Length && (span[start] is '\r' or '\n' or '\t' || char.IsWhiteSpace(span[start]) || char.IsControl(span[start])))
+            while (start < span.Length && (char.IsWhiteSpace(span[start]) || char.IsControl(span[start])))
             {
                 start++;
             }
 
             int end = span.Length - 1;
-            while (end >= start && (span[end] is '\r' or '\n' or '\t' || char.IsWhiteSpace(span[end]) || char.IsControl(span[end])))
+            while (end >= start && (char.IsWhiteSpace(span[end]) || char.IsControl(span[end])))
             {
                 end--;
             }
@@ -79,8 +79,7 @@ internal static class StringExtensions
             bool hasControlChars = false;
             for (int i = 0; i < trimmed.Length; i++)
             {
-                char c = trimmed[i];
-                if (c is '\r' or '\n' or '\t' || char.IsControl(c))
+                if (char.IsControl(trimmed[i]))
                 {
                     hasControlChars = true;
                     break;
@@ -103,7 +102,7 @@ internal static class StringExtensions
                 for (int i = 0; i < trimmed.Length; i++)
                 {
                     char c = trimmed[i];
-                    if (c is '\r' or '\n' or '\t' || char.IsControl(c) || char.IsWhiteSpace(c))
+                    if (char.IsWhiteSpace(c) || char.IsControl(c))
                     {
                         if (!lastWasWhitespace && writeIndex > 0)
                         {

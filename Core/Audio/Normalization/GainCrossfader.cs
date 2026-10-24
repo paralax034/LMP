@@ -3,12 +3,12 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Audio.Normalization;
 
 /// <summary>
-/// Per-sample линейный интерполятор gain для устранения щелчков
+/// Линейный интерполятор gain для устранения щелчков и смещения стерео-образа
 /// при смене целевого значения gain нормализации или громкости.
 ///
 /// <para><b>Принцип работы:</b></para>
 /// <para>При изменении целевого gain вызывается <see cref="SetTarget"/>.
-/// Последующие вызовы <see cref="Advance"/> возвращают линейно
+/// Последующие вызовы <see cref="Advance"/> или <see cref="AdvanceFrame"/> возвращают линейно
 /// интерполированное значение от <c>fromGain</c> до <c>toGain</c>
 /// на протяжении <c>fadeSamples</c> сэмплов. После завершения интерполяции
 /// возвращается константный <c>toGain</c>.</para>
@@ -111,6 +111,27 @@ public struct GainCrossfader
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public float Advance()
     {
+        return AdvanceFrame(1);
+    }
+
+    /// <summary>
+    /// Возвращает единый gain для всего многоканального фрейма и продвигает интерполяцию на <paramref name="channels"/> сэмплов,
+    /// исключая фазовый и амплитудный перекос между левым и правым каналами.
+    /// </summary>
+    /// <param name="channels">Количество каналов в одном аудио-фрейме.</param>
+    /// <returns>Текущий интерполированный gain для фрейма.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public float AdvanceFrame(int channels)
+    {
+        if (_remainingSamples <= 0)
+        {
+            _currentGain = _targetGain;
+            return _targetGain;
+        }
+
+        int step = Math.Min(channels, _remainingSamples);
+        _remainingSamples -= step;
+
         if (_remainingSamples <= 0)
         {
             _currentGain = _targetGain;
@@ -119,7 +140,6 @@ public struct GainCrossfader
 
         float t = 1f - (float)_remainingSamples / _totalFadeSamples;
         _currentGain = _startGain + (_targetGain - _startGain) * t;
-        _remainingSamples--;
         return _currentGain;
     }
 

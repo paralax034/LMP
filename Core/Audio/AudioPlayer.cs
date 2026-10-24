@@ -555,7 +555,14 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private static PlaybackWarmupPlan ComputePlaybackWarmupPlan(AudioPipeline pipeline, bool isSeek)
     {
         if (pipeline.Source.IsFullyBuffered || pipeline.Source is Sources.LocalFileSource)
-            return new PlaybackWarmupPlan(0, 0, 0);
+        {
+            // Даже для локального файла/полного кэша при Seek декодеру нужно прокрутить фреймы
+            // от ближайшего ключевого кадра (WebM CuePoint раз в 10 сек) до целевой точки (5–25 мс).
+            // Ожидание 60 мс реальных декодированных PCM-сэмплов перед открытием гейта WASAPI
+            // полностью исключает сухое чтение и чередование звука с нулями ("пузырчатую плёнку")!
+            int localPcmSamples = pipeline.SampleRate * pipeline.Channels * 60 / 1000;
+            return new PlaybackWarmupPlan(Math.Max(localPcmSamples, pipeline.Channels * 2), 0, 250);
+        }
 
         double avgPingMs = pipeline.Source is Sources.CachingStreamSource cs
             ? cs.AveragePingMs
@@ -945,9 +952,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             _lastRawPlayedSamples = -1;
 
             await pipeline.StopDecodingAsync(
-                TimeSpan.FromMilliseconds(RewindDecoderStopTimeoutMs)).ConfigureAwait(false);
+                 TimeSpan.FromMilliseconds(RewindDecoderStopTimeoutMs)).ConfigureAwait(false);
 
-            pipeline.Stop();
             pipeline.Flush();
             pipeline.PrepareForSeek(0);
 
@@ -995,11 +1001,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 return true;
             }
 
-            if (pipeline.Source.IsFullyBuffered)
-                ResumePlaybackSequence(pipeline, startTimers: true, configurePipeline: false);
-            else
-                ResumeOrDefer(pipeline, pcmReady, sourceReady, warmupPlan, sessionId,
-                    startTimers: true, configurePipeline: false, logContext: "Fast rewind warmup");
+            ResumeOrDefer(pipeline, pcmReady, sourceReady, warmupPlan, sessionId,
+                     startTimers: true, configurePipeline: false, logContext: "Fast rewind warmup");
 
             Log.Info("[AudioPlayer] Fast rewind completed (repeat-one)");
             return true;

@@ -214,19 +214,6 @@ public partial class PlayerBarView : UserControl
 
         switch (e.PropertyName)
         {
-            case nameof(PlayerBarViewModel.IsLoading):
-            case nameof(PlayerBarViewModel.IsTrackResetting):
-                if (vm.IsTrackResetting) ApplySliderReset();
-                else RemoveSliderReset();
-
-                SparkContainer.IsVisible = vm.IsLoading;
-                return;
-        }
-
-        if (_isSuspended || !IsWindowVisibleForAnimation()) return;
-
-        switch (e.PropertyName)
-        {
             case nameof(PlayerBarViewModel.IsPlaying):
             case nameof(PlayerBarViewModel.PositionSeconds):
             case nameof(PlayerBarViewModel.DurationSeconds):

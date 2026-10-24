@@ -423,16 +423,31 @@ public static partial class HotPathAllocationTests
         var snapAfter = CaptureProcessThreadsSnapshot();
 
         uint totalCs = 0;
+        var perThreadDeltas = new List<(int Tid, uint DeltaCs)>(snapAfter.Count);
+
         foreach (var (tid, after) in snapAfter)
         {
             if (snapBefore.TryGetValue(tid, out var before))
             {
                 uint delta = after.ContextSwitches - before.ContextSwitches;
                 totalCs += delta;
+                if (delta > 0)
+                    perThreadDeltas.Add((tid, delta));
             }
         }
 
-        Log.Info($"[CS-Diagnostic] Threads analyzed: {snapAfter.Count}, Context switches over 2.0s: {totalCs} ({totalCs / 2.0:F0} CS/sec)");
+        perThreadDeltas.Sort(static (a, b) => b.DeltaCs.CompareTo(a.DeltaCs));
+
+        var topBuilder = new System.Text.StringBuilder(128);
+        int topCount = Math.Min(5, perThreadDeltas.Count);
+        for (int i = 0; i < topCount; i++)
+        {
+            if (i > 0) topBuilder.Append(", ");
+            var item = perThreadDeltas[i];
+            topBuilder.Append($"TID {item.Tid}={item.DeltaCs / 2.0:F0}/s");
+        }
+
+        Log.Info($"[CS-Diagnostic] Threads analyzed: {snapAfter.Count}, Context switches over 2.0s: {totalCs} ({totalCs / 2.0:F0} CS/sec) | Top: [{topBuilder}]");
     }
 
     private readonly record struct ThreadKernelInfo(uint ContextSwitches, long KernelTime, long UserTime);

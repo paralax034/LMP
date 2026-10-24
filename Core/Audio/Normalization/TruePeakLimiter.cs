@@ -44,8 +44,11 @@ public sealed class TruePeakLimiter
 {
     #region Constants
 
-    /// <summary>Ceiling для True Peak защиты (0 dBFS = 1.0).</summary>
-    private const float Ceiling = 1.0f;
+    /// <summary>
+    /// Потолок True Peak защиты (-0.13 dBFS = 0.985f).
+    /// Предотвращает срабатывание системного лимитера Windows (CAudioLimiter APO в audiodg.exe) на 95-100% громкости.
+    /// </summary>
+    private const float Ceiling = 0.985f;
 
     /// <summary>Attack time в миллисекундах.</summary>
     /// <remarks>
@@ -146,25 +149,44 @@ public sealed class TruePeakLimiter
         float attackCoef = _attackCoef;
         float releaseCoef = _releaseCoef;
 
-        for (int i = 0; i < length; i++)
-        {
-            float gain = crossfader.Advance();
-            float amplified = Unsafe.Add(ref samplesRef, i) * gain;
+        int i = 0;
+        int pairLimit = length & ~1;
 
+        // Stereo-linked обработка: вычисляем единый пик по обоим каналам фрейма (max(|L|, |R|))
+        // и применяем одинаковый envGain к L и R, исключая щелчки в правом канале и смещение панорамы.
+        for (; i < pairLimit; i += 2)
+        {
+            float gain = crossfader.AdvanceFrame(2);
+            float ampL = Unsafe.Add(ref samplesRef, i) * gain;
+            float ampR = Unsafe.Add(ref samplesRef, i + 1) * gain;
+
+            float absPeak = MathF.Max(MathF.Abs(ampL), MathF.Abs(ampR));
+
+            float desiredEnv = absPeak > Ceiling
+                ? Ceiling / (absPeak + Epsilon)
+                : 1.0f;
+
+            envGain = desiredEnv < envGain
+                ? attackCoef * envGain + (1f - attackCoef) * desiredEnv
+                : releaseCoef * envGain + (1f - releaseCoef) * desiredEnv;
+
+            Unsafe.Add(ref samplesRef, i) = ampL * envGain;
+            Unsafe.Add(ref samplesRef, i + 1) = ampR * envGain;
+        }
+
+        for (; i < length; i++)
+        {
+            float gain = crossfader.AdvanceFrame(1);
+            float amplified = Unsafe.Add(ref samplesRef, i) * gain;
             float absAmp = MathF.Abs(amplified);
 
-            // Желаемый envelope gain: 1.0 если не клипает, ceiling/abs если клипает.
-            // Epsilon защищает от деления на ноль при тишине.
             float desiredEnv = absAmp > Ceiling
                 ? Ceiling / (absAmp + Epsilon)
                 : 1.0f;
 
-            // Attack/Release сглаживание envelope.
-            // Attack (снижение): быстро, защита от клиппинга критична.
-            // Release (рост): медленно, предотвращает pumping.
             envGain = desiredEnv < envGain
-                ? attackCoef * envGain + (1f - attackCoef) * desiredEnv   // attack
-                : releaseCoef * envGain + (1f - releaseCoef) * desiredEnv; // release
+                ? attackCoef * envGain + (1f - attackCoef) * desiredEnv
+                : releaseCoef * envGain + (1f - releaseCoef) * desiredEnv;
 
             Unsafe.Add(ref samplesRef, i) = amplified * envGain;
         }
