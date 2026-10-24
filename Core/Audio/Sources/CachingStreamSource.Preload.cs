@@ -157,7 +157,8 @@ public sealed partial class CachingStreamSource
 
                 if (pending >= adaptiveMaxDownloads)
                 {
-                    await Task.Delay(_config.PreloadIntervalMs, ct).ConfigureAwait(false);
+                    if (!await ct.DelayNoThrowAsync(_config.PreloadIntervalMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                        break;
                     continue;
                 }
 
@@ -232,7 +233,8 @@ public sealed partial class CachingStreamSource
                 }
 #endif
 
-                await Task.Delay(_config.PreloadIntervalMs, ct).ConfigureAwait(false);
+                if (!await ct.DelayNoThrowAsync(_config.PreloadIntervalMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                    break;
             }
             catch (OperationCanceledException) { break; }
             catch { /* Защита от неожиданных исключений в фоновом цикле */ }

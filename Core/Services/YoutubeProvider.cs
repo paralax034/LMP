@@ -116,6 +116,8 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public void ReloadClient()
     {
+        if (_disposed) return;
+
         // VisitorData привязан к сессии — при смене клиента он невалиден.
         _poTokenProvider?.Invalidate();
 
@@ -127,13 +129,26 @@ public partial class YoutubeProvider : IDisposable
             Timeout = Timeout.InfiniteTimeSpan
         };
 
-        _youtube = new YoutubeClient(
+        var newClient = new YoutubeClient(
             wrappedClient,
             _nTokenDecryptor,
             _sigCipherDecryptor,
             isAuthenticatedCheck: () => AuthService?.IsAuthenticated ?? false,
             ownsHttpClient: true,
             poTokenProvider: _poTokenProvider);
+
+        var oldClient = Interlocked.Exchange(ref _youtube, newClient);
+        if (oldClient != null)
+        {
+            // Отложенное освобождение старой обёртки клиента, чтобы не оборвать активные вызовы
+            _ = Task.Run(async () =>
+            {
+                if (await CancellationToken.None.DelayNoThrowAsync(15_000, continueOnCapturedContext: false).ConfigureAwait(false))
+                {
+                    try { oldClient.Dispose(); } catch { }
+                }
+            });
+        }
 
         Log.Info($"[YouTube] Client reloaded via NetworkManager. Auth: {AuthService?.IsAuthenticated ?? false}");
     }

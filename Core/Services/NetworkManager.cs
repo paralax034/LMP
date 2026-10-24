@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using LMP.Core.Audio.Http;
 
 namespace LMP.Core.Services;
@@ -8,14 +9,18 @@ namespace LMP.Core.Services;
 /// <summary>
 /// Централизованный сервис управления жизненным циклом сетевых клиентов и состоянием адаптеров.
 /// </summary>
-public sealed class NetworkManager : IDisposable
+public sealed partial class NetworkManager : IDisposable
 {
     private const int RebuildCooldownMs = 15_000;
     private const int ClientDrainTimeoutSeconds = 30;
+    private const int AddressChangeDebounceMs = 3_000;
+    private const int AddressEventRearmCooldownMs = 250;
 
     private readonly Lock _rebuildLock = new();
     private readonly Lock _stateLock = new();
+    private static uint _cachedBestIfIndex;
     private static IPAddress? _cachedOutboundIp;
+    private static string? _cachedOutboundIpStr;
     private static bool _cachedVpnStatus;
     private static readonly Lock _routeCacheLock = new();
 
@@ -30,10 +35,12 @@ public sealed class NetworkManager : IDisposable
     private string? _lastOutboundIp;
     private bool _isVpnActive;
     private long _lastRebuildTick;
+    private long _lastAddressEventTick;
+    private int _isEvaluatingRoute;
     private bool _disposed;
 
     private readonly CancellationTokenSource _cts = new();
-    private CancellationTokenSource? _addressChangeDebounceCts;
+    private readonly Timer _addressDebounceTimer;
     private readonly Task _watchdogTask;
     public HttpClient AudioClient => _audioClient;
     public HttpClient ApiClient => _apiClient;
@@ -69,8 +76,8 @@ public sealed class NetworkManager : IDisposable
     /// </summary>
     public bool CheckIsVpnActive()
     {
-        var ip = GetOutboundIpAddress();
-        return ip != null && DetectVpnRoute(ip);
+        var (_, isVpn) = EvaluateOutboundRoute();
+        return isVpn;
     }
 
     /// <summary>
@@ -127,6 +134,7 @@ public sealed class NetworkManager : IDisposable
 
         (_audioClient, _apiClient, _imageClient, _probeClient, _updateClient) = CreateClientCluster(_currentProxy);
 
+        _addressDebounceTimer = new Timer(OnAddressDebounceTimerCallback, this, Timeout.Infinite, Timeout.Infinite);
         NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
         _watchdogTask = Task.Run(NetworkWatchdogLoopAsync);
 
@@ -361,59 +369,79 @@ public sealed class NetworkManager : IDisposable
 
     private void OnNetworkAddressChanged(object? sender, EventArgs e)
     {
-        Log.Debug("[NetworkManager] System NetworkAddressChanged event received");
+        if (Volatile.Read(ref _disposed)) return;
 
-        lock (_routeCacheLock)
-        {
-            _cachedOutboundIp = null;
-        }
+        long now = Environment.TickCount64;
+        long prev = Volatile.Read(ref _lastAddressEventTick);
+        if (now - prev < AddressEventRearmCooldownMs)
+            return;
 
-        lock (_stateLock)
-        {
-            _addressChangeDebounceCts?.Cancel();
-            _addressChangeDebounceCts?.Dispose();
-            _addressChangeDebounceCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-        }
+        Volatile.Write(ref _lastAddressEventTick, now);
+        Log.Debug("[NetworkManager] System NetworkAddressChanged event received (debouncing)");
 
-        _ = HandleAddressChangedDebouncedAsync(_addressChangeDebounceCts.Token);
-    }
-
-    private async Task HandleAddressChangedDebouncedAsync(CancellationToken ct)
-    {
         try
         {
-            // Увеличенный дебаунс: даём TUN/VPN адаптеру стабилизировать таблицу маршрутизации
-            await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+            _addressDebounceTimer.Change(AddressChangeDebounceMs, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
 
-            var (currentIp, isVpn) = EvaluateOutboundRoute();
+    private static void OnAddressDebounceTimerCallback(object? state)
+    {
+        var self = (NetworkManager)state!;
+        self.EvaluateAndRebuildIfRouteChanged(fromWatchdog: false);
+    }
+
+    private void EvaluateAndRebuildIfRouteChanged(bool fromWatchdog)
+    {
+        if (Volatile.Read(ref _disposed)) return;
+        if (Interlocked.CompareExchange(ref _isEvaluatingRoute, 1, 0) != 0)
+            return;
+
+        try
+        {
+            var (currentIp, isVpn) = EvaluateOutboundRoute(verifySocketIp: true);
             if (currentIp == null)
             {
-                Log.Debug("[NetworkManager] Address change ignored — no outbound route");
+                if (!fromWatchdog)
+                    Log.Debug("[NetworkManager] Address change ignored — no outbound route");
                 return;
             }
 
             var previousIp = Volatile.Read(ref _lastOutboundIp);
             bool previousVpn = Volatile.Read(ref _isVpnActive);
 
+            if (string.Equals(currentIp, previousIp, StringComparison.Ordinal) && previousVpn == isVpn)
+            {
+                if (!fromWatchdog)
+                {
+                    Log.Debug(
+                        $"[NetworkManager] Address change ignored — outbound IP and VPN state unchanged ({currentIp})");
+                }
+                return;
+            }
+
             Volatile.Write(ref _isVpnActive, isVpn);
             Volatile.Write(ref _lastOutboundIp, currentIp);
 
-            if (string.Equals(currentIp, previousIp, StringComparison.Ordinal) && previousVpn == isVpn)
+            if (fromWatchdog)
             {
-                Log.Debug(
-                    $"[NetworkManager] Address change ignored — outbound IP and VPN state unchanged ({currentIp})");
-                return;
+                Log.Info(
+                    $"[NetworkManager] Watchdog detected unhandled route change: {previousIp ?? "(none)"} (VPN: {previousVpn}) → {currentIp} (VPN: {isVpn})");
             }
 
             RebuildAll($"Adapter route changed ({previousIp ?? "(none)"} → {currentIp}, VPN: {previousVpn} → {isVpn})",
                 force: false);
         }
-        catch (OperationCanceledException)
-        {
-        }
         catch (Exception ex)
         {
-            Log.Warn($"[NetworkManager] Address change resolution failed: {ex.Message}");
+            Log.Warn($"[NetworkManager] Route evaluation failed: {ex.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _isEvaluatingRoute, 0);
         }
     }
 
@@ -421,28 +449,16 @@ public sealed class NetworkManager : IDisposable
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token).ConfigureAwait(false);
+            if (!await _cts.Token.DelayNoThrowAsync(30_000, continueOnCapturedContext: false).ConfigureAwait(false))
+                return;
 
             while (!_cts.Token.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromMinutes(5), _cts.Token).ConfigureAwait(false);
+                if (!await _cts.Token.DelayNoThrowAsync(300_000, continueOnCapturedContext: false).ConfigureAwait(false))
+                    break;
 
-                var (currentIp, isVpn) = EvaluateOutboundRoute();
-                var previousIp = Volatile.Read(ref _lastOutboundIp);
-                bool previousVpn = Volatile.Read(ref _isVpnActive);
-
-                if (currentIp != null && (previousIp == null ||
-                                          !string.Equals(currentIp, previousIp, StringComparison.Ordinal) ||
-                                          previousVpn != isVpn))
-                {
-                    Log.Info(
-                        $"[NetworkManager] Watchdog detected unhandled route change: {previousIp} (VPN: {previousVpn}) → {currentIp} (VPN: {isVpn})");
-                    OnNetworkAddressChanged(this, EventArgs.Empty);
-                }
+                EvaluateAndRebuildIfRouteChanged(fromWatchdog: true);
             }
-        }
-        catch (OperationCanceledException)
-        {
         }
         catch (Exception ex)
         {
@@ -450,23 +466,48 @@ public sealed class NetworkManager : IDisposable
         }
     }
 
-    private static (string? OutboundIp, bool IsVpn) EvaluateOutboundRoute()
+    private static (string? OutboundIp, bool IsVpn) EvaluateOutboundRoute(bool verifySocketIp = false)
     {
+        // Fast-path на Windows: проверяем индекс лучшего интерфейса маршрутизации через iphlpapi.dll (0 B аллокаций, ~1.5 мкс).
+        // 0x08080808 = 8.8.8.8 (в network byte order и little-endian представление идентично).
+        uint currentIfIndex = 0;
+        if (OperatingSystem.IsWindows())
+        {
+            if (GetBestInterface(0x08080808u, out uint bestIfIndex) == 0 && bestIfIndex != 0)
+            {
+                currentIfIndex = bestIfIndex;
+                if (!verifySocketIp)
+                {
+                    lock (_routeCacheLock)
+                    {
+                        if (currentIfIndex == _cachedBestIfIndex && _cachedOutboundIpStr != null)
+                        {
+                            return (_cachedOutboundIpStr, _cachedVpnStatus);
+                        }
+                    }
+                }
+            }
+        }
+
         var ip = GetOutboundIpAddress();
         if (ip == null)
             return (null, false);
 
         lock (_routeCacheLock)
         {
-            if (ip.Equals(_cachedOutboundIp))
+            if (ip.Equals(_cachedOutboundIp) && _cachedOutboundIpStr != null)
             {
-                return (ip.ToString(), _cachedVpnStatus);
+                _cachedBestIfIndex = currentIfIndex;
+                return (_cachedOutboundIpStr, _cachedVpnStatus);
             }
 
             bool isVpn = DetectVpnRoute(ip);
+            string ipStr = ip.ToString();
+            _cachedBestIfIndex = currentIfIndex;
             _cachedOutboundIp = ip;
+            _cachedOutboundIpStr = ipStr;
             _cachedVpnStatus = isVpn;
-            return (ip.ToString(), isVpn);
+            return (ipStr, isVpn);
         }
     }
 
@@ -504,13 +545,17 @@ public sealed class NetworkManager : IDisposable
 
     private static bool IsSpecialTunIpRange(IPAddress ip)
     {
-        var bytes = ip.GetAddressBytes();
-        if (bytes.Length != 4) return false;
+        if (ip.AddressFamily != AddressFamily.InterNetwork)
+            return false;
 
-        // RFC 2544 — Benchmark / Fake-IP (используется Clash, sing-box, Mihomo, v2ray в TUN-режиме)
+        Span<byte> bytes = stackalloc byte[16];
+        if (!ip.TryWriteBytes(bytes, out int bytesWritten) || bytesWritten != 4)
+            return false;
+
+        // RFC 2544 — Benchmark / Fake-IP (Clash, sing-box, Mihomo, v2ray TUN)
         if (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19)) return true;
 
-        // RFC 5737 — Documentation ranges (используются некоторыми виртуальными TUN-адаптерами)
+        // RFC 5737 — Documentation ranges used by virtual TUN adapters
         if (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100) return true;
         if (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113) return true;
 
@@ -624,14 +669,18 @@ public sealed class NetworkManager : IDisposable
         return false;
     }
 
+    [LibraryImport("iphlpapi.dll")]
+    private static partial int GetBestInterface(uint dwDestAddr, out uint pdwBestIfIndex);
+
     #endregion
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Volatile.Read(ref _disposed)) return;
+        Volatile.Write(ref _disposed, true);
 
         NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+        _addressDebounceTimer.Dispose();
         _cts.Cancel();
         _cts.Dispose();
 

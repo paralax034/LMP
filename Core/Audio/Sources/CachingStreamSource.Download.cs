@@ -206,8 +206,9 @@ public sealed partial class CachingStreamSource
                             if (diskRead > 0) return diskRead;
 
                             Log.Debug($"[CachingSource] ReadAt {position}: data not at expected " +
-                                      "offset after successful download, retrying alignment...");
-                            await Task.Delay(ReadAtEpochRetryDelayMs, ct).ConfigureAwait(false);
+                                        "offset after successful download, retrying alignment...");
+                            if (!await ct.DelayNoThrowAsync(ReadAtEpochRetryDelayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                ct.ThrowIfCancellationRequested();
                             continue;
                         }
 
@@ -219,7 +220,8 @@ public sealed partial class CachingStreamSource
                                 ref networkStallPublished, consecutiveNetworkFailures, position);
 
                             int backoffMs = ComputeNetworkRetryBackoff(consecutiveNetworkFailures);
-                            await Task.Delay(backoffMs, ct).ConfigureAwait(false);
+                            if (!await ct.DelayNoThrowAsync(backoffMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                ct.ThrowIfCancellationRequested();
                             continue;
                         }
 
@@ -230,7 +232,8 @@ public sealed partial class CachingStreamSource
                             epochRetries++;
                             if (epochRetries >= MaxEpochRetries)
                                 throw CreateReadAtFatalException(position);
-                            await Task.Delay(EpochRetryDelayMs, ct).ConfigureAwait(false);
+                            if (!await ct.DelayNoThrowAsync(EpochRetryDelayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                ct.ThrowIfCancellationRequested();
                         }
                         else
                         {
@@ -238,16 +241,22 @@ public sealed partial class CachingStreamSource
                             consecutiveNetworkFailures++;
                             CheckAndPublishNetworkStall(
                                 ref networkStallPublished, consecutiveNetworkFailures, position);
-                            await Task.Delay(
-                                ComputeNetworkRetryBackoff(consecutiveNetworkFailures), ct)
-                                .ConfigureAwait(false);
+                            if (!await ct.DelayNoThrowAsync(
+                                ComputeNetworkRetryBackoff(consecutiveNetworkFailures), continueOnCapturedContext: false)
+                                .ConfigureAwait(false))
+                            {
+                                ct.ThrowIfCancellationRequested();
+                            }
                         }
                         continue;
 
                     default:
                         consecutiveNetworkFailures++;
-                        await Task.Delay(ComputeNetworkRetryBackoff(consecutiveNetworkFailures), ct)
-                            .ConfigureAwait(false);
+                        if (!await ct.DelayNoThrowAsync(ComputeNetworkRetryBackoff(consecutiveNetworkFailures), continueOnCapturedContext: false)
+                            .ConfigureAwait(false))
+                        {
+                            ct.ThrowIfCancellationRequested();
+                        }
                         continue;
                 }
             }
@@ -266,7 +275,8 @@ public sealed partial class CachingStreamSource
 
                 Log.Debug($"[CachingSource] ReadAt at {position}: epoch changed, " +
                           $"retry {epochRetries}/{MaxEpochRetries}");
-                await Task.Delay(EpochRetryDelayMs, ct).ConfigureAwait(false);
+                if (!await ct.DelayNoThrowAsync(EpochRetryDelayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                    ct.ThrowIfCancellationRequested();
             }
         }
     }
@@ -364,7 +374,8 @@ public sealed partial class CachingStreamSource
         if (IsSourceCircuitBreakerOpen(out int cbRemainingMs))
         {
             int cbDelay = Math.Min(cbRemainingMs, 1000);
-            await Task.Delay(cbDelay, ct).ConfigureAwait(false);
+            if (!await ct.DelayNoThrowAsync(cbDelay, continueOnCapturedContext: false).ConfigureAwait(false))
+                return RangeDownloadResult.Cancelled;
             return RangeDownloadResult.NetworkError;
         }
 
@@ -472,14 +483,16 @@ public sealed partial class CachingStreamSource
 
                                 // Exponential backoff: 1s, 2s, 4s
                                 int backoffMs = (int)Math.Pow(2, consecutiveStaleRefreshes - 1) * 1000;
-                                await Task.Delay(backoffMs, ct).ConfigureAwait(false);
+                                if (!await ct.DelayNoThrowAsync(backoffMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                    return RangeDownloadResult.Cancelled;
                                 continue;
 
                             case UrlRefreshOutcome.NoChange:
                                 Log.Warn($"[CachingSource] [{_trackId}] Refresh returned no new URL. " +
                                         $"Backing off before retry ({attempt + 1}/{maxAttempts})...");
                                 int noUrlBackoffMs = Math.Min((attempt + 1) * 2000, 8000);
-                                await Task.Delay(noUrlBackoffMs, ct).ConfigureAwait(false);
+                                if (!await ct.DelayNoThrowAsync(noUrlBackoffMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                    return RangeDownloadResult.Cancelled;
                                 continue;
 
                             default:
@@ -502,7 +515,8 @@ public sealed partial class CachingStreamSource
 
                         // Quadratic backoff: 100ms, 400ms, 900ms, 1600ms, 2000ms (cap)
                         int delay = (int)Math.Min(2000, 100 * Math.Pow(attempt + 1, 2));
-                        await Task.Delay(delay, ct).ConfigureAwait(false);
+                        if (!await ct.DelayNoThrowAsync(delay, continueOnCapturedContext: false).ConfigureAwait(false))
+                            return RangeDownloadResult.Cancelled;
                         continue;
                     }
 
@@ -609,7 +623,8 @@ public sealed partial class CachingStreamSource
         if (IsSourceCircuitBreakerOpen(out int remainingBackoffMs))
         {
             int delay = Math.Min(remainingBackoffMs, 500);
-            await Task.Delay(delay, ct).ConfigureAwait(false);
+            if (!await ct.DelayNoThrowAsync(delay, continueOnCapturedContext: false).ConfigureAwait(false))
+                return RangeDownloadResult.Cancelled;
             return RangeDownloadResult.NetworkError;
         }
 

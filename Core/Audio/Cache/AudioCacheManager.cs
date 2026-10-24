@@ -1541,7 +1541,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         {
             try
             {
-                await Task.Delay(CacheAutoSaveIntervalMs, ct).ConfigureAwait(false);
+                if (!await ct.DelayNoThrowAsync(CacheAutoSaveIntervalMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                    break;
+
                 await SaveIndexAsync().ConfigureAwait(false);
             }
             catch (OperationCanceledException)

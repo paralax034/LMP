@@ -152,6 +152,7 @@ public static class ManualTests
         await Unit.HotPathAllocationTests.TestGetBufferedRangesAndCacheDirtyZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestEndToEndPipelineStepZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestAdaptiveDecoderDelayAndTimerSuspendAsync();
+        await Unit.HotPathAllocationTests.TestNetworkManagerAndDelayNoThrowZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestThreadContextSwitchesDiagnosticAsync();
     }
 

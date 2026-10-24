@@ -662,7 +662,8 @@ CancellationToken ct)
                 ? remainingSamples * 1000 / samplesPerSecond / 2
                 : DrainMinDelayMs;
 
-            await Task.Delay(Math.Clamp(estimatedMs, DrainMinDelayMs, DrainMaxDelayMs), ct).ConfigureAwait(false);
+            if (!await ct.DelayNoThrowAsync(Math.Clamp(estimatedMs, DrainMinDelayMs, DrainMaxDelayMs), continueOnCapturedContext: false).ConfigureAwait(false))
+                break;
         }
     }
 

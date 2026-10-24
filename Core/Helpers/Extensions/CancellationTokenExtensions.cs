@@ -11,25 +11,37 @@ public static class CancellationTokenExtensions
     /// Ожидает задержку без генерации <see cref="OperationCanceledException"/>.
     /// Возвращает <see langword="false"/> при отмене и <see langword="true"/> по истечении времени.
     /// </summary>
-    public static async Task<bool> DelayNoThrowAsync(
+    private static readonly Task<bool> TrueTask = Task.FromResult(true);
+    private static readonly Task<bool> FalseTask = Task.FromResult(false);
+
+    /// <summary>
+    /// Ожидает задержку без генерации <see cref="OperationCanceledException"/>.
+    /// Возвращает <see langword="false"/> при отмене и <see langword="true"/> по истечении времени.
+    /// Синхронные ветки (уже отменённый токен или нулевая задержка) не аллоцируют стейт-машину (0 B).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Task<bool> DelayNoThrowAsync(
         this CancellationToken token,
         int millisecondsDelay,
         bool continueOnCapturedContext = true)
     {
-        if (token.IsCancellationRequested) return false;
-        if (millisecondsDelay <= 0) return true;
+        if (token.IsCancellationRequested) return FalseTask;
+        if (millisecondsDelay <= 0) return TrueTask;
 
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        return DelayNoThrowCoreAsync(token, millisecondsDelay, continueOnCapturedContext);
+    }
 
-        using var timer = new Timer(
-            static s => ((TaskCompletionSource<bool>)s!).TrySetResult(true),
-            tcs, millisecondsDelay, Timeout.Infinite);
+    private static async Task<bool> DelayNoThrowCoreAsync(
+        CancellationToken token,
+        int millisecondsDelay,
+        bool continueOnCapturedContext)
+    {
+        var options = continueOnCapturedContext
+            ? ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext
+            : ConfigureAwaitOptions.SuppressThrowing;
 
-        using var reg = token.UnsafeRegister(
-            static s => ((TaskCompletionSource<bool>)s!).TrySetResult(false),
-            tcs);
-
-        return await tcs.Task.ConfigureAwait(continueOnCapturedContext);
+        await Task.Delay(millisecondsDelay, token).ConfigureAwait(options);
+        return !token.IsCancellationRequested;
     }
 
     /// <summary>

@@ -1058,6 +1058,111 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
+    // Шаг 7b: NetworkManager (VPN route check, TUN IP span parser, AddressChanged burst) & DelayNoThrowAsync: 0 alloc + 0 First-Chance Exceptions
+
+    [TestMethod(TestCategory.Unit, "NetworkManager & DelayNoThrowAsync: 0 alloc & 0 exceptions", Group = TestGroups.Audio, Order = 29)]
+    public static async Task TestNetworkManagerAndDelayNoThrowZeroAllocAsync()
+    {
+        // 1. Привязываем делегаты к внутренним методам NetworkManager один раз (исключаем рефлексию из замера)
+        var isSpecialTunMethod = typeof(NetworkManager).GetMethod(
+            "IsSpecialTunIpRange",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?? throw new InvalidOperationException("NetworkManager.IsSpecialTunIpRange not found");
+
+        var containsVpnMethod = typeof(NetworkManager).GetMethod(
+            "ContainsVpnKeyword",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?? throw new InvalidOperationException("NetworkManager.ContainsVpnKeyword not found");
+
+        var evaluateRouteMethod = typeof(NetworkManager).GetMethod(
+                "EvaluateOutboundRoute",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                ?? throw new InvalidOperationException("NetworkManager.EvaluateOutboundRoute not found");
+
+        var isSpecialTunDel = (Func<System.Net.IPAddress, bool>)Delegate.CreateDelegate(
+            typeof(Func<System.Net.IPAddress, bool>), isSpecialTunMethod);
+        var containsVpnDel = (Func<string?, bool>)Delegate.CreateDelegate(
+            typeof(Func<string?, bool>), containsVpnMethod);
+        var evaluateRouteDel = (Func<bool, (string? OutboundIp, bool IsVpn)>)Delegate.CreateDelegate(
+            typeof(Func<bool, (string? OutboundIp, bool IsVpn)>), evaluateRouteMethod);
+
+        // Прогреваем кэш маршрута один раз перед замером
+        _ = evaluateRouteDel(true);
+
+        var tunIp = System.Net.IPAddress.Parse("198.18.0.1");
+        var lanIp = System.Net.IPAddress.Parse("192.168.1.100");
+        const string adapterName = "Mihomo Virtual TUN Adapter (sing-box)";
+        const string normalAdapterName = "Intel(R) Ethernet Controller I225-V";
+
+        using var cancelledCts = new CancellationTokenSource();
+        cancelledCts.Cancel();
+        var cancelledToken = cancelledCts.Token;
+        var activeToken = CancellationToken.None;
+
+        int sink = 0;
+
+        // 2. Замеряем 0 аллокаций на 2000 вызовов:
+        //    - EvaluateOutboundRoute(false) через нативный iphlpapi.GetBestInterface
+        //    - IsSpecialTunIpRange (stackalloc byte[16] + TryWriteBytes)
+        //    - ContainsVpnKeyword (ReadOnlySpan<char> slicing)
+        //    - DelayNoThrowAsync (fast-path: cancelled token и 0ms delay)
+        long allocated = MeasureAllocations(() =>
+        {
+            var route = evaluateRouteDel(false);
+            if (route.OutboundIp != null) sink++;
+            if (isSpecialTunDel(tunIp)) sink++;
+            if (!isSpecialTunDel(lanIp)) sink++;
+            if (containsVpnDel(adapterName)) sink++;
+            if (!containsVpnDel(normalAdapterName)) sink++;
+
+            var t1 = cancelledToken.DelayNoThrowAsync(1000, continueOnCapturedContext: false);
+            if (!t1.Result) sink++;
+
+            var t2 = activeToken.DelayNoThrowAsync(0, continueOnCapturedContext: false);
+            if (t2.Result) sink++;
+        });
+
+        Log.Info($"[HotPath] NetworkManager (GetBestInterface + TUN/VPN Span) + DelayNoThrowAsync: {allocated} B / {MeasureIterations} calls (sink={sink})");
+        AssertZeroAlloc(allocated, "NetworkManager.EvaluateOutboundRoute + IsSpecialTunIpRange + ContainsVpnKeyword + DelayNoThrowAsync");
+
+        // 3. Доказываем, что отмена активного DelayNoThrowAsync в .NET 11 (ConfigureAwaitOptions.SuppressThrowing)
+        //    НЕ генерирует ни одного First-Chance TaskCanceledException / OperationCanceledException!
+        int currentThreadId = Environment.CurrentManagedThreadId;
+        int cancelExceptionsCount = 0;
+
+        void OnFirstChanceException(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            if (e.Exception is OperationCanceledException)
+            {
+                Interlocked.Increment(ref cancelExceptionsCount);
+            }
+        }
+
+        AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+        try
+        {
+            using var cts = new CancellationTokenSource(millisecondsDelay: 15);
+            bool completedNormally = await cts.Token.DelayNoThrowAsync(5_000, continueOnCapturedContext: false).ConfigureAwait(false);
+
+            if (completedNormally)
+            {
+                throw new InvalidOperationException("[Assertion Failed] DelayNoThrowAsync should return false when token is canceled!");
+            }
+
+            if (cancelExceptionsCount != 0)
+            {
+                throw new InvalidOperationException(
+                    $"[Assertion Failed] Expected 0 First-Chance OperationCanceledException during DelayNoThrowAsync cancellation, got {cancelExceptionsCount}!");
+            }
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
+        }
+
+        Log.Info("[HotPath] DelayNoThrowAsync Active Cancellation: 0 First-Chance OperationCanceledExceptions verified ✓");
+    }
+
     // Шаг 8: Ядерная диагностика Context Switches по каждому потоку процесса через NtQuerySystemInformation
 
     [TestMethod(TestCategory.Unit, "Per-Thread Context Switches Diagnostic (Windows NT Kernel)", Group = TestGroups.Audio, Order = 30)]

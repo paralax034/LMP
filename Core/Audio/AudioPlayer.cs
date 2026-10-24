@@ -337,7 +337,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         try
         {
             await foreach (var command in _commandChannel.Reader
-                .ReadAllAsync(_lifetimeCts.Token)
+                .ReadAllAsync(CancellationToken.None)
                 .ConfigureAwait(false))
             {
                 if (_session.IsStale(command.SessionId) && command is not DisposeCommand)
@@ -412,7 +412,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
                         case DisposeCommand:
                             await HandleDisposeAsync().ConfigureAwait(false);
-                            break;
+                            return;
                     }
                 }
                 catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
@@ -1260,7 +1260,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         CancelActiveSeek();
 
         _commandChannel.Writer.TryWrite(new DisposeCommand(int.MaxValue));
-        _lifetimeCts.Cancel();
+        _commandChannel.Writer.TryComplete();
 
         try
         {
@@ -1270,6 +1270,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         {
         }
 
+        _lifetimeCts.Cancel();
         _sharedBackend.Dispose();
         _lifetimeCts.Dispose();
     }

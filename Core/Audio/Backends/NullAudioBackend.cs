@@ -82,11 +82,14 @@ public sealed class NullAudioBackend : IPlaybackBackend
     /// <inheritdoc/>
     public void Start()
     {
-        if (_playing || _callback == null) return;
+        if (_disposed || _playing || _callback == null) return;
 
         _playing = true;
-        _cts = new CancellationTokenSource();
-        _consumeTask = Task.Run(() => ConsumeLoopAsync(_cts.Token));
+        _cts?.Cancel();
+        _cts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _cts = cts;
+        _consumeTask = Task.Run(() => ConsumeLoopAsync(cts.Token));
 
         Log.Debug("[NullAudioBackend] Started");
     }
@@ -95,7 +98,8 @@ public sealed class NullAudioBackend : IPlaybackBackend
     public void Stop()
     {
         _playing = false;
-        _cts?.Cancel();
+        try { _cts?.Cancel(); }
+        catch (ObjectDisposedException) { }
 
         Log.Debug("[NullAudioBackend] Stopped");
     }
@@ -104,19 +108,19 @@ public sealed class NullAudioBackend : IPlaybackBackend
     public void Flush() { }
 
     /// <summary>
-    /// Симулирует потребление PCM с реальным темпом воспроизведения.
-    /// Задержка вычисляется из размера буфера и sample rate.
+    /// Simulates PCM consumption at real-time playback rate without throwing TaskCanceledException on stop.
     /// </summary>
     private async Task ConsumeLoopAsync(CancellationToken ct)
     {
-        var buffer = new float[1024 * _channels];
-        int samplesPerSecond = _sampleRate * _channels;
+        var buffer = new float[1024 * Math.Max(1, _channels)];
+        int samplesPerSecond = Math.Max(1, _sampleRate * _channels);
         int delayMs = Math.Max(1000 * buffer.Length / samplesPerSecond, 10);
 
         while (!ct.IsCancellationRequested && _playing)
         {
             _callback?.Invoke(buffer);
-            await Task.Delay(delayMs, ct).ConfigureAwait(false);
+            if (!await ct.DelayNoThrowAsync(delayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                break;
         }
     }
 
