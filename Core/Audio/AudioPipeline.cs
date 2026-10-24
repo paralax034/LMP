@@ -17,6 +17,14 @@ public sealed class AudioPipeline : IAsyncDisposable
     #region Constants
 
     private const int BufferFullDelayMs = 5;
+    private const int BufferModerateDelayMs = 25;
+    private const int BufferHighDelayMs = 100;
+    private const int BufferMaxDelayMs = 180;
+    private const int BufferModerateThresholdMs = 400;
+    private const int BufferHighThresholdMs = 1_000;
+    private const int BufferMaxThresholdMs = 1_400;
+    private const int BatchRefillCapacityDivisor = 4;
+    private const int MinBatchRefillFrames = 4;
     private const int DrainMinDelayMs = 50;
     private const int DrainMaxDelayMs = 150;
     private const int HResultFileNotFound = unchecked((int)0x80070002);
@@ -427,10 +435,14 @@ public sealed class AudioPipeline : IAsyncDisposable
            AudioPlayerOptions options,
            Action? onTrackEnded,
            Action<Exception>? onError,
-           CancellationToken ct)
+CancellationToken ct)
     {
         int retryCount = 0;
         int requiredSpace = _decoder.MaxFrameSize * _decoder.Channels;
+        // Пакетный гистерезис (Batch Low Watermark): когда кольцевой буфер полон,
+        // декодер засыпает до тех пор, пока не освободится минимум ~25% буфера (около 450-500 мс аудио),
+        // чтобы за одно пробуждение декодировать сразу пачку из 20-25 фреймов подряд без переключений контекста.
+        int batchRefillSpace = Math.Max(requiredSpace * MinBatchRefillFrames, _pcmBuffer.Capacity / BatchRefillCapacityDivisor);
 
         try
         {
@@ -442,7 +454,13 @@ public sealed class AudioPipeline : IAsyncDisposable
                     // Медленный путь: жесткая синхронизация (внутри обновит кэш, если Tail сдвинулся)
                     if (_pcmBuffer.Available < requiredSpace)
                     {
-                        await Task.Delay(BufferFullDelayMs).ConfigureAwait(false);
+                        while (_pcmBuffer.Available < batchRefillSpace && !ct.IsCancellationRequested)
+                        {
+                            int delayMs = ComputeBufferFullDelayMs(_pcmBuffer.Count, _decoder.SampleRate, _decoder.Channels);
+                            if (!await ct.DelayNoThrowAsync(delayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                break;
+                        }
+
                         if (ct.IsCancellationRequested)
                             break;
                         continue;
@@ -612,6 +630,26 @@ public sealed class AudioPipeline : IAsyncDisposable
             Log.Error($"[AudioPipeline] Decoder fatal: {ex.Message}", ex);
             onError?.Invoke(ex);
         }
+    }
+
+    /// <summary>
+    /// Вычисляет адаптивную задержку цикла декодера при заполненном кольцевом буфере,
+    /// снижая количество переключений контекста ОС при большом запасе декодированного PCM.
+    /// </summary>
+    /// <param name="bufferedSamples">Текущее количество сэмплов в кольцевом буфере.</param>
+    /// <param name="sampleRate">Частота дискретизации.</param>
+    /// <param name="channels">Количество каналов.</param>
+    /// <returns>Время ожидания в миллисекундах.</returns>
+    internal static int ComputeBufferFullDelayMs(int bufferedSamples, int sampleRate, int channels)
+    {
+        int samplesPerSec = sampleRate * channels;
+        if (samplesPerSec <= 0) return BufferFullDelayMs;
+
+        int bufferedMs = (int)((long)bufferedSamples * 1000 / samplesPerSec);
+        if (bufferedMs >= BufferMaxThresholdMs) return BufferMaxDelayMs;
+        if (bufferedMs >= BufferHighThresholdMs) return BufferHighDelayMs;
+        if (bufferedMs >= BufferModerateThresholdMs) return BufferModerateDelayMs;
+        return BufferFullDelayMs;
     }
 
     private async Task DrainBufferAsync(CancellationToken ct)

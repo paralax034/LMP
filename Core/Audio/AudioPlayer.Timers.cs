@@ -4,10 +4,33 @@ public sealed partial class AudioPlayer
 {
     private Timer? _positionTimer;
     private Timer? _bufferTimer;
+    private volatile bool _uiTimersSuspended;
+
+    /// <summary>
+    /// Приостанавливает или возобновляет работу таймеров оповещения UI-потока в фоновом режиме.
+    /// При выходе из режима приостановки во время воспроизведения немедленно публикует актуальные позицию и состояние буфера.
+    /// </summary>
+    /// <param name="suspended">Признак перевода UI в фоновый режим.</param>
+    public void SetUiTimersSuspended(bool suspended)
+    {
+        if (_disposed || _uiTimersSuspended == suspended) return;
+        _uiTimersSuspended = suspended;
+
+        if (suspended)
+        {
+            StopTimers();
+        }
+        else if (_state == PlayerState.Playing && _activePipeline != null)
+        {
+            StartTimers();
+        }
+    }
 
     /// <summary>Запускает таймеры позиции и буфера.</summary>
     private void StartTimers()
     {
+        if (_uiTimersSuspended || _disposed) return;
+
         int interval = (int)_options.PositionUpdateInterval.TotalMilliseconds;
 
         if (_positionTimer == null)
@@ -31,6 +54,8 @@ public sealed partial class AudioPlayer
     /// <summary>Запускает position timer с задержкой первого tick (после seek).</summary>
     private void StartPositionTimerDelayed()
     {
+        if (_uiTimersSuspended || _disposed) return;
+
         int interval = (int)_options.PositionUpdateInterval.TotalMilliseconds;
 
         if (_positionTimer == null)

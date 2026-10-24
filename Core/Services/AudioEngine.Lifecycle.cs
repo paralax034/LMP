@@ -11,6 +11,7 @@ public sealed partial class AudioEngine
     public void OnSuspend(SuspendLevel level)
     {
         _isSuspended = true;
+        _player.SetUiTimersSuspended(true);
 
         if (ShouldKeepSourceActiveWhileSuspended())
         {
@@ -25,6 +26,7 @@ public sealed partial class AudioEngine
     public void OnResume(SuspendLevel previousLevel)
     {
         _isSuspended = false;
+        _player.SetUiTimersSuspended(false);
         ApplyLifecycleSourceSuspendPolicy();
 
         AudioSourceFactory.PreWarmCdnConnections(

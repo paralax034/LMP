@@ -11,7 +11,7 @@ public sealed partial class CachingStreamSource
     ///   <item><see cref="SeekAndCancelPendingReads"/> — явный cancel для внешнего seek</item>
     /// </list>
     /// </summary>
-    private sealed class AsyncCachingReadStream : Stream
+    internal sealed class AsyncCachingReadStream : Stream
     {
         private readonly CachingStreamSource _source;
         private long _position;
@@ -103,6 +103,26 @@ public sealed partial class CachingStreamSource
         #endregion
 
         #region Read
+
+        /// <summary>
+        /// Пытается синхронно прочитать данные исключительно из RAM-кэша без блокировки потока и сетевого I/O.
+        /// Возвращает 0 при промахе RAM-кэша, позволяя вызывающему коду перейти на асинхронный путь без аллокаций в случае RAM-хита.
+        /// </summary>
+        internal int TryReadFromRamSync(Span<byte> destination)
+        {
+            if (_source._disposed) return 0;
+
+            long posBefore = Volatile.Read(ref _position);
+            if (posBefore >= _source._contentLength) return 0;
+
+            if (_source._ramCache.TryReadSpan(posBefore, destination, out int ramRead))
+            {
+                if (Interlocked.CompareExchange(ref _position, posBefore + ramRead, posBefore) == posBefore)
+                    return ramRead;
+            }
+
+            return 0;
+        }
 
         /// <inheritdoc/>
         /// <remarks>

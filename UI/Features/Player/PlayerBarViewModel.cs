@@ -353,6 +353,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         InitializeFromSettings();
         SubscribeEvents();
 
+        LifecycleRegistry.Instance?.RegisterBackgroundSuspendable(this);
+
         Log.Info("[PlayerBar] Initialization complete");
     }
 

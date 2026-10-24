@@ -22,7 +22,7 @@ namespace LMP.Tests.Unit;
 /// или непреднамеренный <c>new</c> в hot path.
 /// </para>
 /// </remarks>
-public static class HotPathAllocationTests
+public static partial class HotPathAllocationTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
@@ -784,9 +784,9 @@ public static class HotPathAllocationTests
         }
     }
 
-    // Шаг 6: Сквозной интеграционный Zero-Alloc тест всего конвейера (Source -> Parser -> Decoder -> RingBuffer -> DSP -> Gain)
+    // Шаг 6: Сквозной интеграционный Zero-Alloc тест всего конвейера (Source -> Parser(Laced) -> Decoder -> RingBuffer -> DSP -> Gain -> PlayerEvents -> Seek)
 
-    [TestMethod(TestCategory.Unit, "End-to-End Pipeline Step (Source→Decoder→Ring→DSP): 0 alloc", Group = TestGroups.Audio, Order = 28)]
+    [TestMethod(TestCategory.Unit, "End-to-End Pipeline Step (Source→Decoder→Ring→DSP→Events→Seek): 0 alloc", Group = TestGroups.Audio, Order = 28)]
     public static Task TestEndToEndPipelineStepZeroAllocAsync()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "LMP_TestE2E_" + Guid.NewGuid().ToString("N"));
@@ -794,32 +794,50 @@ public static class HotPathAllocationTests
         {
             Directory.CreateDirectory(tempDir);
 
-            // Формируем валидный WebM поток с 2015 Laced/SimpleBlock пакетами Opus (20ms stereo CELT silence: 0xFC, 0xFF, 0xFE)
-            ReadOnlySpan<byte> clusterHeader =
+            // Валидный WebM поток с CuePoint (для SeekAsync(0)) и Xiph-laced блоками по 2 Opus-фрейма (20ms stereo CELT silence: 0xFC, 0xFF, 0xFE)
+            ReadOnlySpan<byte> ebmlAndCuesAndClusterHeader =
             [
+                // Cues element (ID = 0x1C53BB6B, size = 15 bytes -> 0x8F)
+                0x1C, 0x53, 0xBB, 0x6B, 0x8F,
+                // CuePoint (ID = 0xBB, size = 13 bytes -> 0x8D)
+                0xBB, 0x8D,
+                // CueTime (ID = 0xB3, size = 1 -> 0x81, value = 0)
+                0xB3, 0x81, 0x00,
+                // CueTrackPositions (ID = 0xB7, size = 8 -> 0x88)
+                0xB7, 0x88,
+                // CueClusterPosition (ID = 0xF1, size = 1 -> 0x81, offset = 20 -> 0x14, прямо на начало CLUSTER_ID)
+                0xF1, 0x81, 0x14,
+                // Padding внутри CueTrackPositions (Void ID = 0xEC, size = 3 -> 0x83, 3 zero bytes)
+                0xEC, 0x83, 0x00, 0x00, 0x00,
+
+                // Cluster (начинается со смещения 20 = 0x14)
                 0x1F, 0x43, 0xB6, 0x75, // CLUSTER_ID
                 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Unknown cluster size
                 0xE7, 0x81, 0x00 // TIMECODE_ID = 0
             ];
 
-            ReadOnlySpan<byte> simpleBlock =
+            ReadOnlySpan<byte> lacedSimpleBlock =
             [
-                0xA3, 0x87, // SIMPLE_BLOCK_ID, size = 7 bytes
+                0xA3, 0x8C, // SIMPLE_BLOCK_ID (0xA3), size = 12 bytes (0x8C)
                 0x81,       // TrackNumber = 1
                 0x00, 0x00, // TimecodeOffset = 0
-                0x80,       // Flags: KeyFrame, no lacing
-                0xFC, 0xFF, 0xFE // Valid 3-byte Opus 20ms stereo frame
+                0x82,       // Flags: KeyFrame (0x80) | Xiph Lacing (0x02)
+                0x01,       // Lace frame count minus 1 = 1 (2 фрейма в блоке)
+                0x03,       // Frame 0 size = 3 bytes (Frame 1 = оставшиеся 3 байта)
+                0xFC, 0xFF, 0xFE, // Frame 0: Valid 3-byte Opus 20ms stereo frame
+                0xFC, 0xFF, 0xFE  // Frame 1: Valid 3-byte Opus 20ms stereo frame
             ];
 
-            int totalFrames = WarmupIterations + MeasureIterations + 16;
-            byte[] streamData = new byte[clusterHeader.Length + totalFrames * simpleBlock.Length];
-            clusterHeader.CopyTo(streamData);
+            // Создаём 256 laced-блоков (512 фреймов), чтобы за 2000 итераций гарантированно сработал периодический SeekAsync(0)
+            const int blocksInStream = 256;
+            byte[] streamData = new byte[ebmlAndCuesAndClusterHeader.Length + blocksInStream * lacedSimpleBlock.Length];
+            ebmlAndCuesAndClusterHeader.CopyTo(streamData);
 
-            int offset = clusterHeader.Length;
-            for (int i = 0; i < totalFrames; i++)
+            int offset = ebmlAndCuesAndClusterHeader.Length;
+            for (int i = 0; i < blocksInStream; i++)
             {
-                simpleBlock.CopyTo(streamData.AsSpan(offset));
-                offset += simpleBlock.Length;
+                lacedSimpleBlock.CopyTo(streamData.AsSpan(offset));
+                offset += lacedSimpleBlock.Length;
             }
 
             using var cacheManager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 16);
@@ -861,6 +879,11 @@ public static class HotPathAllocationTests
             using var readStream = (Stream)Activator.CreateInstance(streamType, [source])!;
             using var parser = new Core.Audio.Parsers.WebMContainerParser(readStream);
 
+            // Парсим CuePoints для работы FindSeekPosition(0)
+            var parsed = parser.ParseHeadersAsync().GetAwaiter().GetResult();
+            if (!parsed)
+                throw new InvalidOperationException("Failed to parse synthetic WebM headers with Cues");
+
             typeof(Core.Audio.Sources.CachingStreamSource)
                 .GetField("_cacheEntry", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                 .SetValue(source, entry);
@@ -890,6 +913,19 @@ public static class HotPathAllocationTests
             var gainProcessor = new GainProcessor();
             gainProcessor.SetVolumeGain(0.85f);
 
+            using var player = new AudioPlayer(new AudioPlayerOptions { UseNullBackend = true });
+            long eventsSink = 0;
+            player.Events.PositionChanged += pos => eventsSink += pos.Ticks;
+            player.Events.BufferStateChanged += state => eventsSink += state.Ranges.Count;
+
+            var raisePosMethod = typeof(AudioPlayerEvents)
+                .GetMethod("RaisePositionChanged", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+            var raiseBufMethod = typeof(AudioPlayerEvents)
+                .GetMethod("RaiseBufferState", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+            var raisePosDel = (Action<TimeSpan>)Delegate.CreateDelegate(typeof(Action<TimeSpan>), player.Events, raisePosMethod);
+            var raiseBufDel = (Action<BufferState>)Delegate.CreateDelegate(typeof(Action<BufferState>), player.Events, raiseBufMethod);
+
             float[] decodeBuffer = new float[decoder.MaxFrameSize * Channels];
             float[] backendBuffer = new float[960 * Channels];
 
@@ -901,10 +937,19 @@ public static class HotPathAllocationTests
                 gainProcessor.Process(backendBuffer.AsSpan());
 
             int totalRenderedSamples = 0;
+            int framesRead = 0;
 
             long allocated = MeasureAllocations(() =>
             {
-                // 1. Producer step (DecoderLoopAsync): Source.ReadFrameAsync -> OpusDecoder.Decode -> RingBuffer.Write
+                // Периодический сброс позиции на начало кластера при чтении 400 фреймов (проверка отсутствия утечек PooledFrameOwner при Reset)
+                if (++framesRead >= 400)
+                {
+                    framesRead = 0;
+                    readStream.Position = 20; // Смещение начала CLUSTER_ID
+                    parser.Reset();
+                }
+
+                // 1. Producer step (DecoderLoopAsync): Source.ReadFrameAsync (Xiph Laced) -> OpusDecoder.Decode -> RingBuffer.Write
                 var vt = source.ReadFrameAsync(ct);
                 var frame = vt.IsCompletedSuccessfully ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
 
@@ -928,12 +973,16 @@ public static class HotPathAllocationTests
                     totalRenderedSamples += read;
                 }
 
-                // 3. UI Timer step (500ms BufferState polling): GetBufferedRanges
-                totalRenderedSamples += source.GetBufferedRanges().Count;
+                // 3. UI Timer & Events step: Position + RaisePositionChanged + RaiseBufferState(GetBufferedRanges)
+                var pos = player.Position;
+                raisePosDel(pos);
+                var ranges = source.GetBufferedRanges();
+                raiseBufDel(new BufferState(source.BufferProgress, source.IsFullyBuffered, ranges, 0, 0));
+                totalRenderedSamples += ranges.Count;
             });
 
-            Log.Info($"[HotPath] End-to-End Pipeline Step: {allocated} B / {MeasureIterations} calls (rendered={totalRenderedSamples})");
-            AssertZeroAlloc(allocated, "End-to-End Pipeline Step (Source→Parser→OpusDecoder→RingBuffer→DSP→Gain→UI)");
+            Log.Info($"[HotPath] End-to-End Pipeline Step (Laced+Reset+Events): {allocated} B / {MeasureIterations} calls (rendered={totalRenderedSamples}, events={eventsSink})");
+            AssertZeroAlloc(allocated, "End-to-End Pipeline Step (Source→LacedParser→OpusDecoder→RingBuffer→DSP→Gain→Events)");
 
             return Task.CompletedTask;
         }
@@ -942,4 +991,241 @@ public static class HotPathAllocationTests
             try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
         }
     }
+
+    // Шаг 7: Проверка адаптивных задержек DecoderLoop и подавления UI-таймеров в Suspend
+
+    [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & UI Timers Suspend: 0 alloc", Group = TestGroups.Audio, Order = 29)]
+    public static Task TestAdaptiveDecoderDelayAndTimerSuspendAsync()
+    {
+        // 1. Проверяем шкалу задержек декодера при разном заполнении 2-секундного буфера (48kHz stereo = 96000 сэмплов/сек)
+        int delayEmpty = AudioPipeline.ComputeBufferFullDelayMs(0, SampleRate, Channels);
+        int delayLow = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 200 / 1000, SampleRate, Channels); // 200ms
+        int delayMid = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 500 / 1000, SampleRate, Channels); // 500ms
+        int delayHigh = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1500 / 1000, SampleRate, Channels); // 1500ms
+
+        if (delayEmpty != 5 || delayLow != 5 || delayMid != 25 || delayHigh != 180)
+        {
+            throw new InvalidOperationException(
+                $"[Assertion Failed] Unexpected adaptive decoder delays: empty={delayEmpty}ms, low={delayLow}ms, mid={delayMid}ms, high={delayHigh}ms");
+        }
+
+        // 2. Проверяем пакетный гистерезис декодера (Batch Low Watermark):
+        // за 1 секунду аудио (48kHz stereo, 10 тиков по 100мс от WinAudioBackend) декодер должен просыпаться <= 3 раз, а не 50-200 раз!
+        var ring = new LockFreeRingBuffer<float>(SampleRate * Channels * 2); // 2 сек буфер (степень двойки = 262144)
+        int frameSize = 960 * Channels; // 20ms Opus frame = 1920 float
+        int batchRefillSpace = Math.Max(frameSize * 4, ring.Capacity / 4);
+        float[] frameBuf = new float[frameSize];
+        float[] backendChunk = new float[SampleRate * Channels / 10]; // 100ms WinMM chunk = 9600 float
+
+        // Заполняем буфер полностью, как на старте трека
+        while (ring.Available >= frameSize)
+            ring.Write(frameBuf.AsSpan());
+
+        int decoderWakeups = 0;
+        for (int tick = 0; tick < 10; tick++) // Симулируем 1 секунду воспроизведения (10 тиков WinMM по 100 мс)
+        {
+            ring.Read(backendChunk.AsSpan());
+
+            // Декодер просыпается ТОЛЬКО когда освободилось >= batchRefillSpace (Low Watermark)
+            if (ring.Available >= batchRefillSpace)
+            {
+                decoderWakeups++;
+                while (ring.Available >= frameSize)
+                    ring.Write(frameBuf.AsSpan());
+            }
+        }
+
+        if (decoderWakeups > 3)
+        {
+            throw new InvalidOperationException(
+                $"[Assertion Failed] Excessive decoder wakeups per second: expected <= 3 with batch hysteresis, got {decoderWakeups}");
+        }
+
+        // 3. Проверяем подавление UI-таймеров в AudioPlayer при переводе в фоновый режим и 0 аллокаций
+        using var player = new AudioPlayer(new AudioPlayerOptions { UseNullBackend = true });
+        int sink = 0;
+
+        long allocated = MeasureAllocations(() =>
+        {
+            sink += AudioPipeline.ComputeBufferFullDelayMs(144_000, SampleRate, Channels);
+            player.SetUiTimersSuspended(true);
+            player.SetUiTimersSuspended(false);
+        });
+
+        Log.Info($"[HotPath] Adaptive Decoder Delay & Timer Suspend: {allocated} B / {MeasureIterations} calls, wakeups={decoderWakeups}/sec (sink={sink})");
+        AssertZeroAlloc(allocated, "ComputeBufferFullDelayMs + SetUiTimersSuspended");
+
+        return Task.CompletedTask;
+    }
+
+    // Шаг 8: Ядерная диагностика Context Switches по каждому потоку процесса через NtQuerySystemInformation
+
+    [TestMethod(TestCategory.Unit, "Per-Thread Context Switches Diagnostic (Windows NT Kernel)", Group = TestGroups.Audio, Order = 30)]
+    public static async Task TestThreadContextSwitchesDiagnosticAsync()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var snapBefore = CaptureProcessThreadsSnapshot();
+        await Task.Delay(2000).ConfigureAwait(false);
+        var snapAfter = CaptureProcessThreadsSnapshot();
+
+        var deltas = new List<(int ThreadId, uint CsDelta, double CpuMs, int Priority, int WaitReason, ulong StartAddr)>();
+        uint totalCs = 0;
+
+        foreach (var (tid, after) in snapAfter)
+        {
+            if (snapBefore.TryGetValue(tid, out var before))
+            {
+                uint delta = after.ContextSwitches - before.ContextSwitches;
+                if (delta > 0)
+                {
+                    totalCs += delta;
+                    double cpuDeltaMs = (after.KernelTime + after.UserTime - (before.KernelTime + before.UserTime)) / 10_000.0;
+                    deltas.Add((tid, delta, cpuDeltaMs, after.Priority, after.WaitReason, after.StartAddress));
+                }
+            }
+        }
+
+        deltas.Sort(static (a, b) => b.CsDelta.CompareTo(a.CsDelta));
+
+        Log.Info($"[CS-Diagnostic] ═══ Per-Thread Context Switches over 2.0s (Total: {totalCs} CS = {totalCs / 2.0:F1} CS/sec) ═══");
+        foreach (var item in deltas.Take(15))
+        {
+            string moduleName = ResolveAddressModuleName(item.StartAddr);
+            Log.Info($"[CS-Diagnostic]   TID={item.ThreadId,6} │ {item.CsDelta / 2.0,7:F1} CS/s ({item.CsDelta,5} total) │ CPU={item.CpuMs,6:F1}ms │ Prio={item.Priority,2} │ Wait={item.WaitReason,2} │ Start={moduleName}");
+        }
+        Log.Info("[CS-Diagnostic] ═══════════════════════════════════════════════════════════════════════════════════");
+    }
+
+    private readonly record struct ThreadKernelInfo(
+        uint ContextSwitches,
+        long KernelTime,
+        long UserTime,
+        int Priority,
+        int WaitReason,
+        ulong StartAddress);
+
+    private static unsafe Dictionary<int, ThreadKernelInfo> CaptureProcessThreadsSnapshot()
+    {
+        var result = new Dictionary<int, ThreadKernelInfo>(64);
+        int currentPid = Environment.ProcessId;
+
+        int bufferSize = 512 * 1024;
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
+        try
+        {
+            fixed (byte* pBuffer = buffer)
+            {
+                while (true)
+                {
+                    int status = NtQuerySystemInformation(5, (nint)pBuffer, buffer.Length, out int needed);
+                    if (status == unchecked((int)0xC0000004)) // STATUS_INFO_LENGTH_MISMATCH
+                    {
+                        System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+                        bufferSize = Math.Max(needed + 64 * 1024, bufferSize * 2);
+                        buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
+                        return CaptureProcessThreadsSnapshotWithSize(bufferSize);
+                    }
+                    if (status != 0) return result;
+                    break;
+                }
+            }
+
+            ParseSystemProcessInformation(buffer, currentPid, result);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return result;
+    }
+
+    private static unsafe Dictionary<int, ThreadKernelInfo> CaptureProcessThreadsSnapshotWithSize(int bufferSize)
+    {
+        var result = new Dictionary<int, ThreadKernelInfo>(64);
+        int currentPid = Environment.ProcessId;
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
+        try
+        {
+            fixed (byte* pBuffer = buffer)
+            {
+                int status = NtQuerySystemInformation(5, (nint)pBuffer, buffer.Length, out _);
+                if (status == 0)
+                    ParseSystemProcessInformation(buffer, currentPid, result);
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
+        return result;
+    }
+
+    private static void ParseSystemProcessInformation(byte[] buffer, int currentPid, Dictionary<int, ThreadKernelInfo> result)
+    {
+        ReadOnlySpan<byte> span = buffer;
+        int offset = 0;
+
+        // На Windows x64 sizeof(SYSTEM_PROCESS_INFORMATION) == 256 (0x100), включая IO_COUNTERS (с 0xD0 по 0x100).
+        // Смещения внутри SYSTEM_THREAD_INFORMATION (80 байт):
+        // +0x00: KernelTime (8B), +0x08: UserTime (8B), +0x10: CreateTime (8B), +0x18: WaitTime (4B + 4B pad)
+        // +0x20 (32): StartAddress (8B), +0x28 (40): UniqueProcess (8B), +0x30 (48): UniqueThread / TID (8B)
+        // +0x38 (56): Priority (4B), +0x3C (60): BasePriority (4B), +0x40 (64): ContextSwitches (4B), +0x48 (72): WaitReason (4B)
+        const int SystemProcessInfoSizeX64 = 256;
+        const int SystemThreadInfoSizeX64 = 80;
+
+        while (offset + SystemProcessInfoSizeX64 <= span.Length)
+        {
+            uint nextEntryOffset = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset, 4));
+            uint numberOfThreads = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset + 4, 4));
+            nint uniqueProcessId = (nint)System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(span.Slice(offset + 80, 8));
+
+            if (uniqueProcessId == currentPid)
+            {
+                int threadOffset = offset + SystemProcessInfoSizeX64;
+                for (uint i = 0; i < numberOfThreads && threadOffset + SystemThreadInfoSizeX64 <= span.Length; i++, threadOffset += SystemThreadInfoSizeX64)
+                {
+                    long kernelTime = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset, 8));
+                    long userTime = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset + 8, 8));
+                    ulong startAddr = System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(span.Slice(threadOffset + 32, 8));
+                    int tid = (int)System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset + 48, 8));
+                    int priority = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(span.Slice(threadOffset + 56, 4));
+                    uint contextSwitches = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(threadOffset + 64, 4));
+                    int waitReason = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(span.Slice(threadOffset + 72, 4));
+
+                    result[tid] = new ThreadKernelInfo(contextSwitches, kernelTime, userTime, priority, waitReason, startAddr);
+                }
+                break;
+            }
+
+            if (nextEntryOffset == 0) break;
+            offset += (int)nextEntryOffset;
+        }
+    }
+
+    private static string ResolveAddressModuleName(ulong address)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.GetCurrentProcess();
+            foreach (System.Diagnostics.ProcessModule mod in proc.Modules)
+            {
+                ulong baseAddr = (ulong)mod.BaseAddress;
+                ulong endAddr = baseAddr + (ulong)mod.ModuleMemorySize;
+                if (address >= baseAddr && address < endAddr)
+                    return $"{mod.ModuleName}+0x{address - baseAddr:X}";
+            }
+        }
+        catch { }
+        return $"0x{address:X}";
+    }
+
+    [System.Runtime.InteropServices.LibraryImport("ntdll.dll")]
+    private static partial int NtQuerySystemInformation(
+        int systemInformationClass,
+        nint systemInformation,
+        int systemInformationLength,
+        out int returnLength);
 }

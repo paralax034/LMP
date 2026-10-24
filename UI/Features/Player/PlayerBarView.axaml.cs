@@ -210,7 +210,20 @@ public partial class PlayerBarView : UserControl
                 return;
         }
 
-        if (_isSuspended) return;
+        if (_isSuspended || !IsWindowVisibleForAnimation()) return;
+
+        switch (e.PropertyName)
+        {
+            case nameof(PlayerBarViewModel.IsLoading):
+            case nameof(PlayerBarViewModel.IsTrackResetting):
+                if (vm.IsTrackResetting) ApplySliderReset();
+                else RemoveSliderReset();
+
+                SparkContainer.IsVisible = vm.IsLoading;
+                return;
+        }
+
+        if (_isSuspended || !IsWindowVisibleForAnimation()) return;
 
         switch (e.PropertyName)
         {
@@ -292,7 +305,7 @@ public partial class PlayerBarView : UserControl
 
     private void RefreshAllVisuals()
     {
-        if (_currentViewModel is { } vm)
+        if (_currentViewModel is { } vm && IsWindowVisibleForAnimation())
         {
             ApplySeekFromEngine(vm);
             EnsureRafRunning();
@@ -332,9 +345,17 @@ public partial class PlayerBarView : UserControl
 
     #region Seek RAF Loop
 
+    private bool IsWindowVisibleForAnimation()
+    {
+        if (_isSuspended || !IsEffectivelyVisible) return false;
+        if (_topLevel is Window w && (!w.IsVisible || w.WindowState == WindowState.Minimized))
+            return false;
+        return true;
+    }
+
     private void EnsureRafRunning()
     {
-        if (_isSuspended) return;
+        if (!IsWindowVisibleForAnimation()) return;
 
         _topLevel ??= TopLevel.GetTopLevel(this);
 
@@ -353,11 +374,15 @@ public partial class PlayerBarView : UserControl
 
     private void OnAnimationFrame(TimeSpan frameTime)
     {
-        if (!_isRafRunning) return;
+        if (!_isRafRunning || !IsWindowVisibleForAnimation())
+        {
+            _isRafRunning = false;
+            return;
+        }
 
         bool shouldContinue = ApplySeekFrame(frameTime);
 
-        if (shouldContinue)
+        if (shouldContinue && IsWindowVisibleForAnimation())
             _topLevel?.RequestAnimationFrame(OnAnimationFrame);
         else
             _isRafRunning = false;

@@ -17,6 +17,7 @@ public sealed class BufferedProgressBar : Control
         public const double TranslucentOpacity = 0.25;
         public const double UncachedOpacity = 0.30;
         public const double MinWidthHeight = 0.001;
+        public const double MinPixelDeltaForRedraw = 0.2;
     }
 
     #region Styled Properties
@@ -100,6 +101,7 @@ public sealed class BufferedProgressBar : Control
     private Color _lastForegroundColor;
     private IBrush? _cachedBufferBrush;
     private Color _lastBufferColor;
+    private double _lastRenderedPlayedWidth = -1000.0;
 
     private static readonly IReadOnlyList<(double Start, double End)> FullyBufferedTarget = new[] { (0.0, 1.0) };
 
@@ -108,7 +110,6 @@ public sealed class BufferedProgressBar : Control
     static BufferedProgressBar()
     {
         AffectsRender<BufferedProgressBar>(
-            ValueProperty,
             MaximumProperty,
             BufferedRangesProperty,
             IsFullyBufferedProperty,
@@ -136,8 +137,35 @@ public sealed class BufferedProgressBar : Control
     {
         base.OnPropertyChanged(change);
 
+        if (change.Property == ValueProperty)
+        {
+            double width = Bounds.Width;
+            double max = Math.Max(ProgressConstants.MinWidthHeight, Maximum);
+            double newVal = Math.Clamp(change.GetNewValue<double>(), 0.0, max);
+            double playedWidth = newVal / max * width;
+
+            // Перерисовываем полосу прогресс-бара только когда ширина заполнения реально изменилась >= 0.2 пикселя
+            if (Math.Abs(playedWidth - _lastRenderedPlayedWidth) >= ProgressConstants.MinPixelDeltaForRedraw || newVal <= 0.0 || newVal >= max)
+            {
+                _lastRenderedPlayedWidth = playedWidth;
+                InvalidateVisual();
+            }
+            return;
+        }
+
         if (change.Property == BufferedRangesProperty || change.Property == IsFullyBufferedProperty)
         {
+            if (IsFullyBuffered)
+            {
+                // Для полностью буферизованного трека устанавливаем (0.0, 1.0) мгновенно без раскрутки VSync-цикла
+                _smoothRanges.Clear();
+                _smoothRanges.Add((0.0, 1.0));
+                _isInterpolating = false;
+                _rafActive = false;
+                InvalidateVisual();
+                return;
+            }
+
             _isInterpolating = true;
             StartAnimationLoop();
         }

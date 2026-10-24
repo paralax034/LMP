@@ -232,7 +232,6 @@ public partial class MainWindow
         _isInTray = true;
         _isMinimized = false;
         _isDeactivated = false;
-        CancelDeactivateSuspend();
         ApplySuspendLevel();
 
         Hide();
@@ -251,7 +250,6 @@ public partial class MainWindow
         _isMinimized = false;
         _isDeactivated = false;
         _isRestoringFromTray = true;
-        CancelDeactivateSuspend();
         ApplySuspendLevel();
 
         WindowState = WindowState.Normal;

@@ -369,6 +369,14 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
                 if (_hWaveOut == 0 || _headers == null || _bufferPointers == null)
                     break;
 
+                if (!_gateOpen && !_fadingOut)
+                {
+                    // При закрытом гейте (пауза / стоп / ожидание) не гоняем пустые буферы через winmm.dll,
+                    // чтобы полностью исключить ~500 Context Switches/sec от системного микшера wdmaud.drv в простое.
+                    _waveCallbackEvent?.WaitOne(Timeout.Infinite);
+                    continue;
+                }
+
                 bool wroteAny = false;
 
                 for (int i = 0; i < NumberOfBuffers; i++)
@@ -562,6 +570,9 @@ public sealed partial class WinAudioBackend : IPlaybackBackend
             _fadingIn = true;
             if (_fadeGain <= 0f) _fadeGain = 0f;
         }
+
+        // Немедленно пробуждаем поток воспроизведения из глубокого сна
+        _waveCallbackEvent?.Set();
     }
 
     /// <inheritdoc/>

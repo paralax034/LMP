@@ -129,6 +129,7 @@ public sealed partial class AudioEngine
         AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(trackId, integratedLufs, source);
 
         _pendingNormalizationWrites.Enqueue((trackId, integratedLufs, source));
+        NotifyPersistenceNeeded();
     }
 
     /// <summary>

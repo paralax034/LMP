@@ -151,6 +151,8 @@ public static class ManualTests
         await Unit.HotPathAllocationTests.TestAsyncCachingReadStreamRamHitZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestGetBufferedRangesAndCacheDirtyZeroAllocAsync();
         await Unit.HotPathAllocationTests.TestEndToEndPipelineStepZeroAllocAsync();
+        await Unit.HotPathAllocationTests.TestAdaptiveDecoderDelayAndTimerSuspendAsync();
+        await Unit.HotPathAllocationTests.TestThreadContextSwitchesDiagnosticAsync();
     }
 
     /// <summary>Запуск audio бенчмарков (throughput + latency + alloc check).</summary>

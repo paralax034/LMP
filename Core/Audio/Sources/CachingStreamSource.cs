@@ -38,9 +38,6 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <summary>Короткая задержка перед окончательной утилизацией ресурсов (мс).</summary>
     private const int DisposalDelayMs = 32;
 
-    /// <summary>Таймаут ожидания открытия playback gate (мс).</summary>
-    private const int PlaybackGateTimeoutMs = 128;
-
     /// <summary>Критический таймаут suspend-mode подзагрузки (мс).</summary>
     private const int PlaybackGateCriticalTimeoutMs = 512;
 

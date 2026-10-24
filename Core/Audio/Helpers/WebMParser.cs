@@ -207,6 +207,40 @@ public sealed class WebMParser : IDisposable
         }
     }
 
+    /// <summary>
+    /// Пытается синхронно пополнить внутренний буфер, если входной поток хранит данные в памяти
+    /// (<see cref="MemoryStream"/>, <see cref="FileStream"/> или <c>AsyncCachingReadStream</c> при RAM-хите).
+    /// Исключает аллокацию async state machine при перезагрузке буфера.
+    /// </summary>
+    private bool TryFillBufferSync()
+    {
+        int available = _bufLen - _bufPos;
+        if (available > 0 && _bufPos > 0)
+            Buffer.BlockCopy(_readBuffer, _bufPos, _readBuffer, 0, available);
+
+        _bufPos = 0;
+        _bufLen = available;
+
+        int toRead = _readBuffer.Length - _bufLen;
+        if (toRead <= 0) return _bufLen > 0;
+
+        if (_stream is MemoryStream ms)
+        {
+            int read = ms.Read(_readBuffer.AsSpan(_bufLen, toRead));
+            _bufLen += read;
+            return read > 0;
+        }
+
+        if (_stream is Sources.CachingStreamSource.AsyncCachingReadStream cachingStream)
+        {
+            int read = cachingStream.TryReadFromRamSync(_readBuffer.AsSpan(_bufLen, toRead));
+            _bufLen += read;
+            return read > 0;
+        }
+
+        return false;
+    }
+
     private int BufferedReadByte()
     {
         if (_bufPos >= _bufLen) return -1;
@@ -581,11 +615,17 @@ public sealed class WebMParser : IDisposable
     /// </summary>
     public ValueTask<AudioBlock?> ReadNextBlockAsync(CancellationToken ct = default)
     {
-        if (!_requiresResync && _lacedFrames.TryDequeue(out var queuedFrame))
-            return new ValueTask<AudioBlock?>(queuedFrame);
+        if (!_requiresResync)
+        {
+            if (_lacedFrames.TryDequeue(out var queuedFrame))
+                return new ValueTask<AudioBlock?>(queuedFrame);
 
-        if (!_requiresResync && TryReadNextBlockFromBufferSync(ct, out var syncBlock))
-            return new ValueTask<AudioBlock?>(syncBlock);
+            if (TryReadNextBlockFromBufferSync(ct, out var syncBlock))
+                return new ValueTask<AudioBlock?>(syncBlock);
+
+            if (TryFillBufferSync() && TryReadNextBlockFromBufferSync(ct, out syncBlock))
+                return new ValueTask<AudioBlock?>(syncBlock);
+        }
 
         return ReadNextBlockSlowAsync(ct);
     }

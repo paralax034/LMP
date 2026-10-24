@@ -67,15 +67,15 @@ public sealed partial class CachingStreamSource
                 bool isSuspended = !_suspendGate.IsSet;
                 bool isPaused = !_playbackGate.IsSet;
 
-                //  Пауза: ждём открытия gate 
+                // Пауза: ждём открытия gate без периодических холостых пробуждений
                 if (isPaused)
                 {
-                    try { _playbackGate.Wait(PlaybackGateTimeoutMs, ct); }
+                    try { _playbackGate.Wait(ct); }
                     catch (OperationCanceledException) { break; }
                     continue;
                 }
 
-                //  Suspend mode: только critical read-ahead 
+                // Suspend mode: только critical read-ahead 
                 if (isSuspended)
                 {
                     long current = Volatile.Read(ref _currentReadOffset);
@@ -112,7 +112,14 @@ public sealed partial class CachingStreamSource
                         }
                     }
 
-                    try { _suspendGate.Wait(PlaybackGateCriticalTimeoutMs, ct); }
+                    int bufferedAheadMs = ConvertBufferedBytesToMs(bufferedAhead);
+                    int suspendWaitMs = bufferedAheadMs > 4000
+                        ? 2000
+                        : bufferedAheadMs > 2000
+                            ? 1000
+                            : PlaybackGateCriticalTimeoutMs;
+
+                    try { _suspendGate.Wait(suspendWaitMs, ct); }
                     catch (OperationCanceledException) { break; }
 
                     if (_suspendGate.IsSet)
@@ -129,7 +136,7 @@ public sealed partial class CachingStreamSource
                     continue;
                 }
 
-                //  Дебаунс после resume 
+                // Дебаунс после resume 
                 if (justResumed)
                 {
                     justResumed = false;
@@ -140,7 +147,7 @@ public sealed partial class CachingStreamSource
 
                 if (_cacheEntry.IsComplete) break;
 
-                //  Snapshot текущего состояния 
+                // Snapshot текущего состояния 
                 long epochAtLoopStart = Interlocked.Read(ref _downloadEpoch);
                 var token = CurrentDownloadToken;
                 long currentOffset = Volatile.Read(ref _currentReadOffset);
@@ -159,7 +166,7 @@ public sealed partial class CachingStreamSource
 
                 var degradation = GetNetworkDegradationLevel();
 
-                //  Prefetch loop: планируем запросы вперёд от текущей позиции 
+                // Prefetch loop: планируем запросы вперёд от текущей позиции 
                 while (pending < adaptiveMaxDownloads)
                 {
                     if (Interlocked.Read(ref _downloadEpoch) != epochAtLoopStart)
@@ -193,7 +200,7 @@ public sealed partial class CachingStreamSource
                         break;
                 }
 
-                //  Opportunistic completion fill 
+                // Opportunistic completion fill 
                 if (pending < adaptiveMaxDownloads && !_cacheEntry.IsComplete)
                 {
                     long downloadedBytes = _cacheEntry.DownloadedBytes;
@@ -211,7 +218,7 @@ public sealed partial class CachingStreamSource
                     }
                 }
 
-                //  Trim RAM cache 
+                // Trim RAM cache 
                 if (_ramCache.TotalBytes > _config.MaxRamBytes)
                     ReleaseRamBuffers();
 

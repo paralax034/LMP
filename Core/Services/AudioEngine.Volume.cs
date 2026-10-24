@@ -8,8 +8,9 @@ public sealed partial class AudioEngine
     private float _currentGain;
     private readonly Lock _volumeLock = new();
     private int _lastSavedVolume = -1;
+    private readonly SemaphoreSlim _persistenceSignal = new(0, 1);
 
-    private const int VolumeSaveIntervalMs = 2000;
+    private const int VolumeSaveDebounceMs = 2000;
 
     #endregion
 
@@ -21,13 +22,17 @@ public sealed partial class AudioEngine
     /// <summary>Устанавливает громкость мгновенно.</summary>
     public void SetVolumeInstant(float value)
     {
+        int clamped;
         lock (_volumeLock)
         {
-            _volumePercent = Math.Clamp(
+            clamped = Math.Clamp(
                 (int)Math.Round(value), 0,
                 Math.Max(_library.Settings.MaxVolumeLimit, 100));
+            _volumePercent = clamped;
         }
         ApplyGainToPipeline();
+        if (clamped != Volatile.Read(ref _lastSavedVolume))
+            NotifyPersistenceNeeded();
     }
 
     /// <summary>Обрабатывает изменение максимального лимита громкости.</summary>
@@ -66,6 +71,19 @@ public sealed partial class AudioEngine
     #endregion
 
     #region Internal Computation & Loop
+
+    /// <summary>
+    /// Сигнализирует фоновому циклу о необходимости сбросить изменённую громкость или LUFS в БД без периодического поллинга.
+    /// </summary>
+    private void NotifyPersistenceNeeded()
+    {
+        if (_persistenceSignal.CurrentCount == 0)
+        {
+            try { _persistenceSignal.Release(); }
+            catch (SemaphoreFullException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
 
     /// <summary>
     /// Единственный источник истины для вычисления финального gain.
@@ -117,14 +135,21 @@ public sealed partial class AudioEngine
         };
     }
 
-    /// <summary>Периодически сохраняет громкость и запускает сброс нормализации в БД.</summary>
+    /// <summary>
+    /// Событийный цикл сохранения громкости и нормализации в БД.
+    /// Спит с 0 переключений контекста до фактического изменения громкости или появления новых замеров LUFS.
+    /// </summary>
     private async Task VolumeSaveLoopAsync()
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(VolumeSaveIntervalMs));
         try
         {
-            while (await timer.WaitForNextTickAsync(_lifetimeCts.Token).ConfigureAwait(false))
+            while (!_lifetimeCts.Token.IsCancellationRequested)
             {
+                await _persistenceSignal.WaitAsync(_lifetimeCts.Token).ConfigureAwait(false);
+
+                if (!await _lifetimeCts.Token.DelayNoThrowAsync(VolumeSaveDebounceMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                    break;
+
                 int currentVol;
                 lock (_volumeLock)
                 {

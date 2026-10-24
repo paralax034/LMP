@@ -7,9 +7,6 @@ public partial class MainWindow
 {
     #region Constants
 
-    /// <summary>Задержка перед Soft Suspend при потере фокуса (мс).</summary>
-    private const int DeactivateSuspendDelayMs = 500;
-
     /// <summary>Минимальный интервал между GC-очистками (мс).</summary>
     private const int MinCleanupIntervalMs = 30_000;
 
@@ -18,7 +15,6 @@ public partial class MainWindow
     #region Fields — Suspend Timers
 
     private CancellationTokenSource? _cleanupCts;
-    private CancellationTokenSource? _deactivateCts;
     private DateTime _lastCleanupTime = DateTime.MinValue;
 
     #endregion
@@ -32,7 +28,6 @@ public partial class MainWindow
 
     private void CleanupLifecycle()
     {
-        CancelDeactivateSuspend();
         CancelCleanup();
 
         PropertyChanged -= OnWindowPropertyChanged;
@@ -46,7 +41,9 @@ public partial class MainWindow
     private SuspendLevel DetermineSuspendLevel()
     {
         if (_isInTray) return SuspendLevel.Hard;
-        if (_isMinimized || _isDeactivated) return SuspendLevel.Soft;
+        if (_isMinimized) return SuspendLevel.Soft;
+        // Пока окно открыто и видимо на экране (даже если фокус на соседнем окне или втором мониторе),
+        // не усыпляем UI и анимации. Suspend включается только при реальном сворачивании (Minimized / Tray).
         return SuspendLevel.None;
     }
 
@@ -57,7 +54,7 @@ public partial class MainWindow
     private void ApplySuspendLevel()
     {
         var level = DetermineSuspendLevel();
-        bool forceOptimize = level == SuspendLevel.Hard || ShouldOptimizeWhenInactive();
+        bool forceOptimize = level == SuspendLevel.Hard || (_isMinimized && ShouldOptimizeWhenInactive());
 
         ViewModelBase.BroadcastSuspendLevel(level, forceOptimize);
 
@@ -118,43 +115,19 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Потеря фокуса. Запускает debounce-таймер на <see cref="DeactivateSuspendDelayMs"/>.
+    /// Потеря фокуса окна. Окно остаётся видимым на экране, поэтому анимации не останавливаются.
     /// </summary>
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
         if (_isInTray || _isMinimized || _isRestoringFromTray) return;
-
-        CancelDeactivateSuspend();
-        _deactivateCts = new CancellationTokenSource();
-        var token = _deactivateCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            bool completedNormal = await token.DelayNoThrowAsync(
-                TimeSpan.FromMilliseconds(DeactivateSuspendDelayMs),
-                continueOnCapturedContext: false);
-            if (!completedNormal) return;
-
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                if (!IsActive && !_isInTray && !_isMinimized && !_isRestoringFromTray)
-                {
-                    _isDeactivated = true;
-                    ApplySuspendLevel();
-                    Log.Debug("[Window] Deactivated → Soft Suspend");
-                }
-            });
-        });
+        _isDeactivated = true;
     }
 
     /// <summary>
-    /// Возвращение фокуса. Отменяет pending suspend, снимает mouse hook,
-    /// сбрасывает <see cref="_isRestoringFromTray"/> guard.
+    /// Возвращение фокуса. Снимает mouse hook и сбрасывает <see cref="_isRestoringFromTray"/> guard.
     /// </summary>
     private void OnWindowActivated(object? sender, EventArgs e)
     {
-        CancelDeactivateSuspend();
-
         _isRestoringFromTray = false;
 
         if (_isInTray) return;
@@ -167,18 +140,8 @@ public partial class MainWindow
         if (_isDeactivated)
         {
             _isDeactivated = false;
-            ApplySuspendLevel();
-            Log.Debug("[Window] Activated → Suspend lifted");
+            Log.Debug("[Window] Activated");
         }
-    }
-
-    private void CancelDeactivateSuspend()
-    {
-        if (_deactivateCts is null) return;
-
-        _deactivateCts.Cancel();
-        _deactivateCts.Dispose();
-        _deactivateCts = null;
     }
 
     private void ScheduleCleanup(TimeSpan delay)

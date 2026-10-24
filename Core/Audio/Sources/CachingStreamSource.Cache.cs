@@ -130,6 +130,29 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
+        /// Пытается синхронно прочитать данные в <see cref="Span{T}"/> без создания <see cref="Memory{T}"/>.
+        /// </summary>
+        public bool TryReadSpan(long position, Span<byte> destination, out int read)
+        {
+            lock (_lock)
+            {
+                for (int i = 0; i < _blocks.Count; i++)
+                {
+                    var current = _blocks[i];
+                    if (current.StartOffset > position) break;
+                    if (position >= current.EndOffsetExclusive) continue;
+                    int offsetInBlock = (int)(position - current.StartOffset);
+                    read = Math.Min(destination.Length, current.Length - offsetInBlock);
+                    if (read <= 0) { read = 0; return false; }
+                    current.Memory.Span.Slice(offsetInBlock, read).CopyTo(destination);
+                    return true;
+                }
+            }
+            read = 0;
+            return false;
+        }
+
+        /// <summary>
         /// Проверяет, содержит ли кэш полный диапазон <c>[startOffset, startOffset+length)</c>.
         /// </summary>
         /// <param name="startOffset">Начало диапазона.</param>
