@@ -1,23 +1,19 @@
 using System.Diagnostics;
+using System.Reflection;
 
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Движок запуска тестов. Выполняет тесты с таймаутами, CancellationToken,
-/// и уведомляет о прогрессе через callback'и.
-/// <para>
-/// Все тесты запускаются в ThreadPool (не блокируют UI-поток).
-/// Callback'и вызываются из фонового потока — UI-маршалинг на стороне вызывающего.
-/// </para>
+/// Движок выполнения тестов с изоляцией от UI-потока, поддержкой CancellationToken и статуса Skipped.
 /// </summary>
 public sealed class TestRunner
 {
     private readonly IServiceProvider _services;
 
-    /// <summary>Вызывается перед запуском каждого теста.</summary>
+    /// <summary>Вызывается перед началом выполнения каждого теста.</summary>
     public event Action<TestDescriptor>? TestStarting;
 
-    /// <summary>Вызывается после завершения каждого теста.</summary>
+    /// <summary>Вызывается по завершении выполнения каждого теста.</summary>
     public event Action<TestDescriptor, TestResult>? TestCompleted;
 
     public TestRunner(IServiceProvider services)
@@ -25,37 +21,29 @@ public sealed class TestRunner
         _services = services;
     }
 
-    /// <summary>
-    /// Запускает один тест.
-    /// </summary>
-    /// <param name="descriptor">Дескриптор теста.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Результат выполнения.</returns>
+    /// <summary>Запускает один тест.</summary>
     public async Task<TestResult> RunAsync(TestDescriptor descriptor, CancellationToken ct = default)
     {
         TestStarting?.Invoke(descriptor);
 
-        var result = await ExecuteTestAsync(descriptor, ct);
+        var result = await ExecuteTestAsync(descriptor, ct).ConfigureAwait(false);
 
         TestCompleted?.Invoke(descriptor, result);
         return result;
     }
 
-    /// <summary>
-    /// Запускает список тестов последовательно.
-    /// Останавливается при отмене <paramref name="ct"/>, но уже запущенный тест дорабатывает.
-    /// </summary>
+    /// <summary>Запускает список тестов последовательно.</summary>
     public async Task<IReadOnlyList<TestResult>> RunBatchAsync(
         IReadOnlyList<TestDescriptor> tests,
         CancellationToken ct = default)
     {
         var results = new List<TestResult>(tests.Count);
 
-        foreach (var test in tests)
+        for (int i = 0; i < tests.Count; i++)
         {
+            var test = tests[i];
             if (ct.IsCancellationRequested)
             {
-                // Помечаем оставшиеся как Skipped
                 results.Add(new TestResult
                 {
                     TestId = test.Id,
@@ -66,7 +54,7 @@ public sealed class TestRunner
                 continue;
             }
 
-            var result = await RunAsync(test, ct);
+            var result = await RunAsync(test, ct).ConfigureAwait(false);
             results.Add(result);
         }
 
@@ -74,19 +62,24 @@ public sealed class TestRunner
     }
 
     /// <summary>
-    /// Запускает ВСЕ обнаруженные тесты в порядке: Unit → Integration → Benchmark.
+    /// Запускает все автоматические тесты (Unit, Integration, Benchmark, E2E).
+    /// Исключает деструктивные и ручные действия (<see cref="TestCategory.Action"/>).
     /// </summary>
-    public Task<IReadOnlyList<TestResult>> RunAllAsync(CancellationToken ct = default) =>
-        RunBatchAsync(TestDiscovery.GetAllOrdered(), ct);
+    public Task<IReadOnlyList<TestResult>> RunAllAsync(CancellationToken ct = default)
+    {
+        var all = TestDiscovery.GetAllOrdered();
+        var runnable = new List<TestDescriptor>(all.Count);
 
-    // 
-    // PRIVATE
-    // 
+        for (int i = 0; i < all.Count; i++)
+        {
+            var test = all[i];
+            if (test.Category != TestCategory.Action)
+                runnable.Add(test);
+        }
 
-    /// <summary>
-    /// Выполняет тест с обёрткой: таймаут, exception handling, замер времени.
-    /// Тест вызывается в ThreadPool чтобы не блокировать вызывающий поток.
-    /// </summary>
+        return RunBatchAsync(runnable, ct);
+    }
+
     private async Task<TestResult> ExecuteTestAsync(
         TestDescriptor descriptor,
         CancellationToken externalCt)
@@ -95,7 +88,6 @@ public sealed class TestRunner
 
         try
         {
-            // Создаём linked CTS: внешний cancellation + таймаут теста
             using var timeoutCts = descriptor.TimeoutSeconds > 0
                 ? new CancellationTokenSource(TimeSpan.FromSeconds(descriptor.TimeoutSeconds))
                 : new CancellationTokenSource();
@@ -103,10 +95,9 @@ public sealed class TestRunner
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
                 externalCt, timeoutCts.Token);
 
-            // Запускаем тест в ThreadPool
-            var task = Task.Run(() => InvokeTestMethod(descriptor), linkedCts.Token);
-
-            await task.WaitAsync(linkedCts.Token);
+            // Вызов метода ВСЕГДА выносится на пул потоков во избежание блокировки UI-диспетчера Avalonia
+            var task = Task.Run(() => InvokeTestMethod(descriptor, linkedCts.Token), linkedCts.Token);
+            await task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
 
             sw.Stop();
             return new TestResult
@@ -116,35 +107,46 @@ public sealed class TestRunner
                 Duration = sw.Elapsed,
             };
         }
-        catch (OperationCanceledException) when (externalCt.IsCancellationRequested)
-        {
-            sw.Stop();
-            return new TestResult
-            {
-                TestId = descriptor.Id,
-                State = TestRunState.Skipped,
-                Duration = sw.Elapsed,
-                ErrorMessage = "Cancelled by user",
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            sw.Stop();
-            return new TestResult
-            {
-                TestId = descriptor.Id,
-                State = TestRunState.Failed,
-                Duration = sw.Elapsed,
-                ErrorMessage = $"Timeout ({descriptor.TimeoutSeconds}s)",
-            };
-        }
         catch (Exception ex)
         {
             sw.Stop();
-            // Разворачиваем AggregateException / TargetInvocationException
+
             var inner = ex is AggregateException agg ? agg.InnerException ?? ex : ex;
-            if (inner is System.Reflection.TargetInvocationException tie)
+            if (inner is TargetInvocationException tie)
                 inner = tie.InnerException ?? tie;
+
+            if (inner is TestSkippedException skipped)
+            {
+                return new TestResult
+                {
+                    TestId = descriptor.Id,
+                    State = TestRunState.Skipped,
+                    Duration = sw.Elapsed,
+                    ErrorMessage = skipped.Reason,
+                };
+            }
+
+            if (inner is OperationCanceledException)
+            {
+                if (externalCt.IsCancellationRequested)
+                {
+                    return new TestResult
+                    {
+                        TestId = descriptor.Id,
+                        State = TestRunState.Skipped,
+                        Duration = sw.Elapsed,
+                        ErrorMessage = "Cancelled by user",
+                    };
+                }
+
+                return new TestResult
+                {
+                    TestId = descriptor.Id,
+                    State = TestRunState.Failed,
+                    Duration = sw.Elapsed,
+                    ErrorMessage = $"Timeout ({descriptor.TimeoutSeconds}s)",
+                };
+            }
 
             return new TestResult
             {
@@ -156,20 +158,18 @@ public sealed class TestRunner
         }
     }
 
-    /// <summary>
-    /// Вызывает тестовый метод через рефлексию.
-    /// Поддерживает сигнатуры: Task Foo() и Task Foo(IServiceProvider).
-    /// </summary>
-    private Task InvokeTestMethod(TestDescriptor descriptor)
+    private Task InvokeTestMethod(TestDescriptor descriptor, CancellationToken ct)
     {
-        object?[] args = descriptor.RequiresServices
-            ? [_services]
-            : [];
+        object?[] args = descriptor.Signature switch
+        {
+            TestParameterSignature.ServicesOnly => [_services],
+            TestParameterSignature.TokenOnly => [ct],
+            TestParameterSignature.ServicesAndToken => [_services, ct],
+            TestParameterSignature.TokenAndServices => [ct, _services],
+            _ => []
+        };
 
         var result = descriptor.Method.Invoke(null, args);
-
-        return result is Task task
-            ? task
-            : Task.CompletedTask;
+        return result is Task task ? task : Task.CompletedTask;
     }
 }

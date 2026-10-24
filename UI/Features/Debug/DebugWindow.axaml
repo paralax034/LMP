@@ -1,486 +1,650 @@
 <Window xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:LMP.UI.Features.Debug"
+    xmlns:tests="using:LMP.Tests.Framework"
+    xmlns:ir="using:Avalonia.Controls"
     x:Class="LMP.UI.Features.Debug.DebugWindow"
     x:DataType="vm:DebugViewModel"
-    Title="Debug Console" Width="1000" Height="800"
+    x:CompileBindings="True"
+    Title="Debug Console" Width="1160" Height="840"
     Background="{DynamicResource BgPrimaryBrush}"
     WindowStartupLocation="CenterScreen">
+
+    <Window.Styles>
+        <Style Selector="Button.filter-chip">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="9,4" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.filter-chip:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        </Style>
+        <Style Selector="Button.filter-chip.active">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <!-- Статусные интерактивные чипсы -->
+        <Style Selector="Button.status-chip">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.status-chip.failed">
+            <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
+        </Style>
+        <Style Selector="Button.status-chip.failed.active">
+            <Setter Property="Background" Value="{DynamicResource SystemErrorTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorBrush}" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="Button.status-chip.passed">
+            <Setter Property="Foreground" Value="{DynamicResource SystemSuccessGreenBrush}" />
+        </Style>
+        <Style Selector="Button.status-chip.passed.active">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemSuccessGreenBrush}" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="Button.status-chip.skipped">
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+        </Style>
+        <Style Selector="Button.status-chip.skipped.active">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource TextMutedBrush}" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+
+        <!-- Строка теста: полное отключение BrushTransition для исключения грязного мигания цветов
+        через альфа-канал -->
+        <Style Selector="Button.test-item-row">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="6,0,8,0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="RenderTransform" Value="none" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.test-item-row:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        </Style>
+        <Style Selector="Button.test-item-row:pressed">
+            <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="RenderTransform" Value="none" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+
+        <Style Selector="TextBlock.state-icon">
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.test-item-row.is-passed TextBlock.state-icon">
+            <Setter Property="Foreground" Value="{DynamicResource SystemSuccessGreenBrush}" />
+        </Style>
+        <Style Selector="Button.test-item-row.is-failed TextBlock.state-icon">
+            <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
+        </Style>
+        <Style Selector="Button.test-item-row.is-running TextBlock.state-icon">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.test-item-row.is-skipped TextBlock.state-icon">
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+        </Style>
+
+        <Style Selector="Border.test-chip-badge">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="4,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.test-chip-badge.is-action">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
+        </Style>
+        <Style Selector="Border.test-chip-badge.is-action TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+    </Window.Styles>
 
     <TabControl TabStripPlacement="Top" Padding="0">
 
         <!-- TAB 1: TESTS -->
-        <TabItem Header="🧪 Tests">
-            <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" DataContext="{Binding TestRunner}">
+        <TabItem Header="Tests">
+            <Grid RowDefinitions="Auto,Auto,Auto,2,*,Auto" DataContext="{Binding TestRunner}"
+                x:DataType="vm:TestRunnerViewModel">
 
-                <!-- Row 0: Run buttons -->
-                <Border Grid.Row="0" Background="{DynamicResource BgSecondaryBrush}" Padding="8">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Button Command="{Binding RunAllCommand}"
-                            Background="#4CAF50" Foreground="White" Padding="10,6"
-                            ToolTip.Tip="Run all tests">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <PathIcon Data="{StaticResource Icon.PlayCircle}" Width="14"
-                                    Height="14" />
-                                <TextBlock Text="Run All" FontSize="12" />
-                            </StackPanel>
-                        </Button>
+                <!-- Row 0: Главная панель запуска и категории -->
+                <Border Grid.Row="0"
+                    BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="12,8">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                            <Button Command="{Binding RunAllCommand}"
+                                Classes="accent"
+                                Padding="12,5"
+                                ToolTip.Tip="Run all automated tests (Unit, Integration, Benchmarks). Actions are excluded.">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <PathIcon Data="{StaticResource Icon.Play}" Width="12"
+                                        Height="12" />
+                                    <TextBlock Text="Run All" FontSize="12" />
+                                </StackPanel>
+                            </Button>
 
-                        <Button Command="{Binding RunUnitCommand}"
-                            Background="#2196F3" Foreground="White" Padding="8,6"
-                            ToolTip.Tip="Run unit tests only" FontSize="12">
-                            <TextBlock Text="Unit" />
-                        </Button>
+                            <Button Command="{Binding RunFilteredCommand}"
+                                Padding="10,5"
+                                ToolTip.Tip="Run currently visible filtered tests">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <PathIcon Data="{StaticResource Icon.FilterCheck}" Width="13"
+                                        Height="13" />
+                                    <TextBlock Text="Run Filtered" FontSize="12" />
+                                </StackPanel>
+                            </Button>
 
-                        <Button Command="{Binding RunIntegrationCommand}"
-                            Background="#FF9800" Foreground="White" Padding="8,6"
-                            ToolTip.Tip="Run integration tests" FontSize="12">
-                            <TextBlock Text="Integration" />
-                        </Button>
+                            <Button Command="{Binding CancelCommand}"
+                                Classes="icon-btn" Width="30" Height="30"
+                                ToolTip.Tip="Cancel active run">
+                                <PathIcon Data="{StaticResource Icon.Stop}" Width="13" Height="13" />
+                            </Button>
 
-                        <Button Command="{Binding RunBenchmarksCommand}"
-                            Background="#9C27B0" Foreground="White" Padding="8,6"
-                            ToolTip.Tip="Run benchmarks" FontSize="12">
-                            <TextBlock Text="Benchmarks" />
-                        </Button>
+                            <Button Command="{Binding ResetCommand}"
+                                Classes="icon-btn" Width="30" Height="30"
+                                ToolTip.Tip="Reset all statuses">
+                                <PathIcon Data="{StaticResource Icon.Refresh}" Width="13"
+                                    Height="13" />
+                            </Button>
 
-                        <Rectangle Width="1" Fill="{DynamicResource TextSecondaryBrush}"
-                            Margin="2,2" />
+                            <Rectangle Width="1" Fill="{DynamicResource BgHighlightBrush}"
+                                Margin="4,4" />
 
-                        <Button Command="{Binding RunFilteredCommand}"
-                            Background="#00897B" Foreground="White" Padding="10,6"
-                            ToolTip.Tip="Run only filtered tests (by current group/category/search)">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <PathIcon Data="{StaticResource Icon.FilterCheck}" Width="14"
-                                    Height="14" />
-                                <TextBlock Text="Run Filtered" FontSize="12" />
-                            </StackPanel>
-                        </Button>
+                            <Button Command="{Binding ToggleCategoryFilterCommand}"
+                                CommandParameter="{x:Null}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsAllCategoriesSelected}">
+                                <TextBlock Text="All Categories" />
+                            </Button>
+                            <Button Command="{Binding ToggleCategoryFilterCommand}"
+                                CommandParameter="{x:Static tests:TestCategory.Unit}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsUnitCategorySelected}">
+                                <TextBlock Text="Unit" />
+                            </Button>
+                            <Button Command="{Binding ToggleCategoryFilterCommand}"
+                                CommandParameter="{x:Static tests:TestCategory.Integration}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsIntegrationCategorySelected}">
+                                <TextBlock Text="Integration" />
+                            </Button>
+                            <Button Command="{Binding ToggleCategoryFilterCommand}"
+                                CommandParameter="{x:Static tests:TestCategory.Benchmark}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsBenchmarkCategorySelected}">
+                                <TextBlock Text="Benchmarks" />
+                            </Button>
+                            <Button Command="{Binding ToggleCategoryFilterCommand}"
+                                CommandParameter="{x:Static tests:TestCategory.Diagnostic}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsDiagnosticCategorySelected}">
+                                <TextBlock Text="Diagnostics" />
+                            </Button>
+                            <Button Command="{Binding ToggleCategoryFilterCommand}"
+                                CommandParameter="{x:Static tests:TestCategory.Action}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsActionCategorySelected}">
+                                <TextBlock Text="⚡ Actions" />
+                            </Button>
+                        </StackPanel>
 
-                        <Rectangle Width="1" Fill="{DynamicResource TextSecondaryBrush}"
-                            Margin="2,2" />
+                        <!-- Поиск и конфигурация -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                            <Border BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="8,0"
+                                Height="30">
+                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                    VerticalAlignment="Center">
+                                    <PathIcon Data="{StaticResource Icon.Magnify}"
+                                        Width="13" Height="13"
+                                        Foreground="{DynamicResource TextMutedBrush}" />
+                                    <TextBox Text="{Binding SearchFilter}"
+                                        Classes="flat-search-box"
+                                        Width="160"
+                                        PlaceholderText="Filter by name..."
+                                        FontSize="12" />
+                                </StackPanel>
+                            </Border>
 
-                        <Button Command="{Binding CancelCommand}"
-                            Background="#F44336" Foreground="White" Padding="8,6"
-                            ToolTip.Tip="Cancel running tests">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <PathIcon Data="{StaticResource Icon.Stop}" Width="14" Height="14" />
-                                <TextBlock Text="Cancel" FontSize="12" />
-                            </StackPanel>
-                        </Button>
-
-                        <Button Command="{Binding ResetCommand}"
-                            Padding="6,6" ToolTip.Tip="Reset all results">
-                            <PathIcon Data="{StaticResource Icon.Refresh}" Width="14" Height="14" />
-                        </Button>
-
-                        <Rectangle Width="1" Fill="{DynamicResource TextSecondaryBrush}"
-                            Margin="2,2" />
-
-                        <TextBox Text="{Binding SearchFilter}" Width="180"
-                            PlaceholderText="🔍 Filter tests..." VerticalAlignment="Center"
-                            FontSize="12" />
-
-                        <Rectangle Width="1" Fill="{DynamicResource TextSecondaryBrush}"
-                            Margin="2,2" />
-
-                        <Button Command="{Binding OpenConfigCommand}"
-                            Padding="8,6" ToolTip.Tip="Open test-config.json in default editor"
-                            Background="#607D8B" Foreground="White">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Button Command="{Binding OpenConfigCommand}"
+                                Classes="icon-btn" Width="30" Height="30"
+                                ToolTip.Tip="Open test-config.json">
                                 <PathIcon Data="{StaticResource Icon.FileEdit}" Width="14"
                                     Height="14" />
-                                <TextBlock Text="Config" FontSize="12" />
-                            </StackPanel>
-                        </Button>
+                            </Button>
 
-                        <Button Command="{Binding ReloadConfigCommand}"
-                            Padding="6,6" ToolTip.Tip="Reload config from disk">
-                            <PathIcon Data="{StaticResource Icon.Reload}" Width="14" Height="14" />
-                        </Button>
-                    </StackPanel>
+                            <Button Command="{Binding ReloadConfigCommand}"
+                                Classes="icon-btn" Width="30" Height="30"
+                                ToolTip.Tip="Reload test-config.json">
+                                <PathIcon Data="{StaticResource Icon.Reload}" Width="14" Height="14" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
                 </Border>
 
-                <!-- Row 1: Group filter buttons -->
-                <Border Grid.Row="1" Background="{DynamicResource BgElevatedBrush}"
-                    Padding="8,4">
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <TextBlock Text="Group:" VerticalAlignment="Center"
-                            FontSize="11" FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,4,0" />
+                <!-- Row 1: Группы с динамическими счётчиками -->
+                <Border Grid.Row="1"
+                    BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="12,6">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="GROUP"
+                                VerticalAlignment="Center"
+                                FontSize="10"
+                                FontWeight="Bold"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                Margin="0,0,4,0" />
 
-                        <Button Command="{Binding ToggleGroupFilterCommand}"
-                            CommandParameter="{x:Null}"
-                            Padding="8,4" CornerRadius="10" FontSize="11"
-                            ToolTip.Tip="Show all groups">
-                            <Button.Styles>
-                                <Style Selector="Button">
-                                    <Setter Property="Background"
-                                        Value="{DynamicResource BgHighlightBrush}" />
-                                    <Setter Property="Foreground"
-                                        Value="{DynamicResource TextPrimaryBrush}" />
-                                </Style>
-                            </Button.Styles>
-                            <TextBlock Text="All" />
-                        </Button>
+                            <Button Command="{Binding ToggleGroupFilterCommand}"
+                                CommandParameter="{x:Null}"
+                                Classes="filter-chip"
+                                Classes.active="{Binding IsAllGroupsSelected}">
+                                <TextBlock Text="All" />
+                            </Button>
 
-                        <ItemsControl ItemsSource="{Binding AvailableGroups}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="4" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Button
-                                        Command="{Binding $parent[ItemsControl].((vm:TestRunnerViewModel)DataContext).ToggleGroupFilterCommand}"
-                                        CommandParameter="{Binding Name}"
-                                        Padding="8,4" CornerRadius="10" FontSize="11"
-                                        ToolTip.Tip="{Binding Label}">
-                                        <Button.Styles>
-                                            <Style Selector="Button">
-                                                <Setter Property="Background"
-                                                    Value="{DynamicResource BgHighlightBrush}" />
-                                                <Setter Property="Foreground"
-                                                    Value="{DynamicResource TextSecondaryBrush}" />
-                                            </Style>
-                                        </Button.Styles>
-                                        <TextBlock Text="{Binding Label}"
-                                            FontWeight="{Binding IsSelected,
-                                                Converter={StaticResource BoolToFontWeight}}" />
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
-
-                <!-- Row 2: Progress bar -->
-                <ProgressBar Grid.Row="2" Value="{Binding Progress}" Maximum="100"
-                    Height="3" IsVisible="{Binding IsRunning}"
-                    Foreground="{DynamicResource AccentBrush}" />
-
-                <!-- Row 3: Split — Test List | Log -->
-                <Grid Grid.Row="3" ColumnDefinitions="*,*">
-
-                    <!-- Left: Test List -->
-                    <Border Grid.Column="0" Margin="5"
-                        BorderBrush="{DynamicResource BgHighlightBrush}"
-                        BorderThickness="1" CornerRadius="4">
-                        <ScrollViewer>
-                            <ItemsControl ItemsSource="{Binding FilteredTests}"
-                                Tag="{Binding}">
+                            <ItemsControl ItemsSource="{Binding AvailableGroups}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="6" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
+                                    <DataTemplate x:DataType="vm:GroupFilterItem">
                                         <Button
-                                            Command="{Binding $parent[ItemsControl].((vm:TestRunnerViewModel)Tag).RunSingleCommand}"
-                                            CommandParameter="{Binding}"
-                                            HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Stretch"
-                                            Padding="8,5" Margin="2,1"
-                                            Background="Transparent"
-                                            CornerRadius="4">
-                                            <Grid ColumnDefinitions="22,Auto,Auto,*,Auto,Auto">
-                                                <TextBlock Grid.Column="0"
-                                                    Text="{Binding StateIcon}"
-                                                    Foreground="{Binding StateColor}"
-                                                    FontSize="13" FontWeight="Bold"
-                                                    VerticalAlignment="Center" />
-
-                                                <Border Grid.Column="1"
-                                                    Background="{DynamicResource BgHighlightBrush}"
-                                                    CornerRadius="3" Padding="4,1" Margin="0,0,4,0"
-                                                    VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding CategoryBadge}"
-                                                        FontSize="8" FontWeight="Bold"
-                                                        Foreground="{DynamicResource TextSecondaryBrush}" />
-                                                </Border>
-
-                                                <Border Grid.Column="2"
-                                                    Background="{DynamicResource BgSecondaryBrush}"
-                                                    CornerRadius="3" Padding="4,1" Margin="0,0,6,0"
-                                                    VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Group}"
-                                                        FontSize="8"
-                                                        Foreground="{DynamicResource TextSecondaryBrush}" />
-                                                </Border>
-
-                                                <StackPanel Grid.Column="3" Orientation="Horizontal"
-                                                    Spacing="4" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding DisplayName}"
-                                                        FontSize="11.5"
-                                                        TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="🌐" FontSize="9"
-                                                        IsVisible="{Binding RequiresNetwork}"
-                                                        ToolTip.Tip="Requires network"
-                                                        VerticalAlignment="Center" />
-                                                </StackPanel>
-
-                                                <TextBlock Grid.Column="4"
-                                                    Text="{Binding Duration}"
-                                                    FontSize="10" Margin="6,0"
-                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                    VerticalAlignment="Center" />
-
-                                                <PathIcon Grid.Column="5"
-                                                    Data="{StaticResource Icon.AlertCircle}"
-                                                    Width="13" Height="13"
-                                                    Foreground="#F44336"
-                                                    IsVisible="{Binding ErrorMessage,
-                                                        Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                    ToolTip.Tip="{Binding ErrorMessage}" />
-                                            </Grid>
+                                            Command="{Binding $parent[ItemsControl].((vm:TestRunnerViewModel)DataContext).ToggleGroupFilterCommand}"
+                                            CommandParameter="{Binding Name}"
+                                            Classes="filter-chip"
+                                            Classes.active="{Binding IsSelected}">
+                                            <TextBlock Text="{Binding Label}" />
                                         </Button>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                        </ScrollViewer>
-                    </Border>
-
-                    <!-- Right: Log -->
-                    <Border Grid.Column="1" Margin="5"
-                        BorderBrush="{DynamicResource BgHighlightBrush}"
-                        BorderThickness="1" CornerRadius="4">
-                        <Grid RowDefinitions="Auto,*">
-                            <StackPanel Grid.Row="0" Orientation="Horizontal"
-                                Margin="8,4" Spacing="8">
-                                <TextBlock Text="Test Log" FontWeight="Bold" FontSize="11"
-                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                    VerticalAlignment="Center" />
-                                <Button Command="{Binding ClearLogCommand}"
-                                    Padding="6,2" FontSize="10">
-                                    <TextBlock Text="Clear" />
-                                </Button>
-                            </StackPanel>
-                            <ScrollViewer Grid.Row="1">
-                                <SelectableTextBlock Text="{Binding LogOutput}"
-                                    Margin="8"
-                                    FontFamily="Consolas, monospace"
-                                    FontSize="11"
-                                    TextWrapping="Wrap" />
-                            </ScrollViewer>
-                        </Grid>
-                    </Border>
-                </Grid>
-
-                <!-- Row 4: Summary bar -->
-                <Border Grid.Row="4" Background="{DynamicResource BgSecondaryBrush}"
-                    Padding="10,6">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <TextBlock Text="{Binding Summary}"
-                            FontSize="12" FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextPrimaryBrush}" />
-                        <TextBlock FontSize="11"
-                            Foreground="{DynamicResource TextSecondaryBrush}"
-                            VerticalAlignment="Center">
-                            <TextBlock.Text>
-                                <MultiBinding StringFormat="Showing {0} of {1}">
-                                    <Binding Path="FilteredTests.Count" />
-                                    <Binding Path="AllTests.Count" />
-                                </MultiBinding>
-                            </TextBlock.Text>
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </TabItem>
-
-        <!-- TAB 2: YOUTUBE — без изменений -->
-        <TabItem Header="📺 YouTube">
-            <Grid RowDefinitions="Auto,Auto,*">
-                <Border Grid.Row="0" Background="{DynamicResource BgSecondaryBrush}" Padding="10">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <TextBlock Text="Search Term:" VerticalAlignment="Center" />
-                        <TextBox Text="{Binding SearchQuery}" Width="200" VerticalAlignment="Center" />
-                        <Button Content="Clear Log" Command="{Binding ClearLogCommand}"
-                            Classes="accent accent-base" />
-                        <ProgressBar IsIndeterminate="True" Width="100" IsVisible="{Binding IsBusy}" />
-                    </StackPanel>
-                </Border>
-
-                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto"
-                    VerticalScrollBarVisibility="Disabled">
-                    <StackPanel Orientation="Horizontal" Margin="10,10,10,5" Spacing="8">
-                        <Button Content="1. YT Liked (Videos)"
-                            Command="{Binding GetLikedVideosCommand}"
-                            Background="#FF4444" Foreground="White" Padding="12,8" />
-                        <Button Content="2. YTM Liked (Tracks)"
-                            Command="{Binding GetLikedMusicCommand}"
-                            Background="#AA0000" Foreground="White" Padding="12,8" />
-                        <Button Content="3. YT Search 10 Videos"
-                            Command="{Binding SearchVideosCommand}"
-                            Background="#4444FF" Foreground="White" Padding="12,8" />
-                        <Button Content="4. YTM Search 10 Tracks"
-                            Command="{Binding SearchMusicCommand}"
-                            Background="#00AAAA" Foreground="White" Padding="12,8" />
-                    </StackPanel>
-                </ScrollViewer>
-
-                <Border Grid.Row="2" Margin="10"
-                    BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                    CornerRadius="4">
-                    <ScrollViewer>
-                        <SelectableTextBlock Text="{Binding LogOutput}"
-                            Margin="10" FontFamily="Consolas, monospace"
-                            FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
                     </ScrollViewer>
                 </Border>
+
+                <!-- Row 2: Быстрые интерактивные фильтры по статусу -->
+                <Border Grid.Row="2"
+                    BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="12,4">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="STATUS"
+                                VerticalAlignment="Center"
+                                FontSize="10"
+                                FontWeight="Bold"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                Margin="0,0,4,0" />
+
+                            <Button Command="{Binding SetStateFilterCommand}"
+                                CommandParameter="{x:Static vm:TestStateFilter.All}"
+                                Classes="status-chip"
+                                Classes.active="{Binding IsStateAllSelected}">
+                                <TextBlock Text="All Results" />
+                            </Button>
+
+                            <Button Command="{Binding SetStateFilterCommand}"
+                                CommandParameter="{x:Static vm:TestStateFilter.FailedOnly}"
+                                Classes="status-chip failed"
+                                Classes.active="{Binding IsStateFailedSelected}">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Text="✗ Failed" />
+                                    <TextBlock Text="{Binding FailedCount, StringFormat='({0})'}"
+                                        FontWeight="Bold" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button Command="{Binding SetStateFilterCommand}"
+                                CommandParameter="{x:Static vm:TestStateFilter.PassedOnly}"
+                                Classes="status-chip passed"
+                                Classes.active="{Binding IsStatePassedSelected}">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Text="✓ Passed" />
+                                    <TextBlock Text="{Binding PassedCount, StringFormat='({0})'}" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button Command="{Binding SetStateFilterCommand}"
+                                CommandParameter="{x:Static vm:TestStateFilter.SkippedOnly}"
+                                Classes="status-chip skipped"
+                                Classes.active="{Binding IsStateSkippedSelected}">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Text="⊘ Skipped" />
+                                    <TextBlock Text="{Binding SkippedCount, StringFormat='({0})'}" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                            <CheckBox IsChecked="{Binding ErrorsOnTop}"
+                                FontSize="11"
+                                VerticalAlignment="Center"
+                                Content="Errors on top" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Row 3: Прогресс -->
+                <ProgressBar Grid.Row="3"
+                    Value="{Binding Progress}"
+                    Maximum="100"
+                    Height="2"
+                    BorderThickness="0"
+                    IsVisible="{Binding IsRunning}"
+                    Background="Transparent"
+                    Foreground="{DynamicResource AccentBrush}" />
+
+                <!-- Row 4: Список тестов на всю ширину рабочей области -->
+                <Border Grid.Row="4" Margin="12,8"
+                    BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    ClipToBounds="True">
+                    <ScrollViewer x:Name="TestListScrollViewer"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+                        <ir:ItemsRepeater ItemsSource="{Binding FilteredTests}"
+                            Margin="4">
+                            <ir:ItemsRepeater.Layout>
+                                <StackLayout Spacing="1" EstimatedItemSize="32" />
+                            </ir:ItemsRepeater.Layout>
+                            <ir:ItemsRepeater.ItemTemplate>
+                                <DataTemplate x:DataType="vm:TestItemViewModel">
+                                    <!-- Строка теста без дублирующей иконки Play (треугольника)
+                                    слева -->
+                                    <Button Classes="test-item-row"
+                                        Classes.is-passed="{Binding IsPassed}"
+                                        Classes.is-failed="{Binding IsFailed}"
+                                        Classes.is-running="{Binding IsRunning}"
+                                        Classes.is-skipped="{Binding IsSkipped}"
+                                        Command="{Binding $parent[ir:ItemsRepeater].((vm:TestRunnerViewModel)DataContext).RunSingleCommand}"
+                                        CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="20,48,80,*,Auto,Auto"
+                                            Background="Transparent">
+                                            <TextBlock Grid.Column="0"
+                                                Text="{Binding StateIcon}"
+                                                Classes="state-icon" />
+
+                                            <Border Grid.Column="1"
+                                                Classes="test-chip-badge"
+                                                Classes.is-action="{Binding IsAction}"
+                                                Margin="0,0,4,0">
+                                                <TextBlock
+                                                    Text="{Binding CategoryBadge}"
+                                                    FontSize="9"
+                                                    FontWeight="SemiBold"
+                                                    HorizontalAlignment="Center"
+                                                    Foreground="{DynamicResource TextMutedBrush}" />
+                                            </Border>
+
+                                            <Border Grid.Column="2"
+                                                Classes="test-chip-badge"
+                                                Margin="0,0,8,0">
+                                                <TextBlock Text="{Binding Group}"
+                                                    FontSize="9"
+                                                    HorizontalAlignment="Center"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                                            </Border>
+
+                                            <StackPanel Grid.Column="3"
+                                                Orientation="Horizontal"
+                                                Spacing="6"
+                                                VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                    FontSize="12"
+                                                    Foreground="{DynamicResource TextPrimaryBrush}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <PathIcon
+                                                    Data="{StaticResource Icon.Cloud}"
+                                                    Width="11" Height="11"
+                                                    Foreground="{DynamicResource TextMutedBrush}"
+                                                    IsVisible="{Binding RequiresNetwork}"
+                                                    ToolTip.Tip="Requires network"
+                                                    VerticalAlignment="Center" />
+                                            </StackPanel>
+
+                                            <TextBlock Grid.Column="4"
+                                                Text="{Binding Duration}"
+                                                FontSize="11"
+                                                FontFamily="Consolas, monospace"
+                                                Margin="8,0"
+                                                Foreground="{DynamicResource TextMutedBrush}"
+                                                VerticalAlignment="Center" />
+
+                                            <PathIcon Grid.Column="5"
+                                                Data="{StaticResource Icon.AlertCircle}"
+                                                Width="14" Height="14"
+                                                Foreground="{DynamicResource SystemErrorBrush}"
+                                                IsVisible="{Binding HasError}"
+                                                ToolTip.Tip="{Binding ErrorMessage}"
+                                                VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ir:ItemsRepeater.ItemTemplate>
+                        </ir:ItemsRepeater>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Row 5: Статус-бар -->
+                <Border Grid.Row="5"
+                    BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,1,0,0"
+                    Padding="14,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0"
+                            Text="{Binding Summary}"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{DynamicResource TextPrimaryBrush}"
+                            VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1"
+                            Text="{Binding ShowingCountText}"
+                            FontSize="11"
+                            FontFamily="Consolas, monospace"
+                            Foreground="{DynamicResource TextMutedBrush}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
             </Grid>
         </TabItem>
 
-<!-- TAB 3: MEMORY -->
-        <TabItem Header="🧠 Memory">
+        <!-- TAB 2: YOUTUBE -->
+        <TabItem Header="YouTube">
             <Grid RowDefinitions="Auto,*">
-                <Border Grid.Row="0" Background="{DynamicResource BgElevatedBrush}"
-                    Padding="10,8" Margin="10,10,10,0">
+                <Border Grid.Row="0" BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,0,0,1" Padding="12,8">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button Command="{Binding DumpMemoryCommand}"
-                            Background="#9C27B0" Foreground="White" Padding="12,8"
-                            ToolTip.Tip="Dump full memory report">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <PathIcon Data="{StaticResource Icon.Memory}" Width="16" Height="16" />
-                                <TextBlock Text="Dump Report" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{Binding ForceGcCommand}"
-                            Background="#FF9800" Foreground="White" Padding="12,8"
-                            ToolTip.Tip="Force aggressive garbage collection">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <PathIcon Data="{StaticResource Icon.Broom}" Width="16" Height="16" />
-                                <TextBlock Text="Force GC" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{Binding ClearCachesCommand}"
-                            Background="#F44336" Foreground="White" Padding="12,8"
-                            ToolTip.Tip="Clear all memory caches">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <PathIcon Data="{StaticResource Icon.DeleteSweep}" Width="16"
-                                    Height="16" />
-                                <TextBlock Text="Clear All Caches" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{Binding CheckVmLeaksCommand}"
-                            Background="#E91E63" Foreground="White" Padding="12,8"
-                            ToolTip.Tip="Check TrackVM cache for leaks">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <PathIcon Data="{StaticResource Icon.BugCheck}" Width="16"
-                                    Height="16" />
-                                <TextBlock Text="Check VM Leaks" />
-                            </StackPanel>
-                        </Button>
+                        <TextBlock Text="Query:" VerticalAlignment="Center" FontSize="12"
+                            Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <TextBox Text="{Binding SearchQuery}" Width="200" VerticalAlignment="Center"
+                            FontSize="12" />
+                        <Button Content="YT Liked" Command="{Binding GetLikedVideosCommand}"
+                            Padding="10,6" FontSize="12" />
+                        <Button Content="YTM Liked" Command="{Binding GetLikedMusicCommand}"
+                            Padding="10,6" FontSize="12" />
+                        <Button Content="Search Videos" Command="{Binding SearchVideosCommand}"
+                            Padding="10,6" FontSize="12" />
+                        <Button Content="Search Music" Command="{Binding SearchMusicCommand}"
+                            Padding="10,6" FontSize="12" />
+                        <Button Content="Clear" Command="{Binding ClearLogCommand}"
+                            Classes="ghost-btn" Padding="10,6" FontSize="12" />
+                    </StackPanel>
+                </Border>
 
-                        <Rectangle Width="1" Fill="{DynamicResource TextSecondaryBrush}" Margin="2,2" />
+                <Border Grid.Row="1" Margin="12" BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="1" CornerRadius="8">
+                    <TextBox Text="{Binding LogOutput}" IsReadOnly="True"
+                        FontFamily="Consolas, monospace" FontSize="11.5"
+                        Foreground="{DynamicResource TextSecondaryBrush}" Background="Transparent"
+                        BorderThickness="0" Padding="10" TextWrapping="NoWrap"
+                        ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                </Border>
+            </Grid>
+        </TabItem>
 
-                        <Button Command="{Binding ToggleWatchdogCommand}"
-                            Background="#00897B" Foreground="White" Padding="12,8"
-                            ToolTip.Tip="Toggle UI Hang Watchdog monitoring (500ms threshold)">
+        <!-- TAB 3: MEMORY -->
+        <TabItem Header="Memory">
+            <Grid RowDefinitions="Auto,*">
+                <Border Grid.Row="0" BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,0,0,1" Padding="12,8">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Command="{Binding DumpMemoryCommand}" Padding="12,6"
+                            ToolTip.Tip="Dump memory report">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <PathIcon Data="{StaticResource Icon.AlertCircle}" Width="16" Height="16" />
-                                <TextBlock Text="{Binding WatchdogStatusText}" />
+                                <PathIcon Data="{StaticResource Icon.Memory}" Width="14" Height="14" />
+                                <TextBlock Text="Dump Report" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ForceGcCommand}" Padding="12,6"
+                            ToolTip.Tip="Force garbage collection">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <PathIcon Data="{StaticResource Icon.Broom}" Width="14" Height="14" />
+                                <TextBlock Text="Force GC" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ClearCachesCommand}" Padding="12,6"
+                            ToolTip.Tip="Clear memory caches">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <PathIcon Data="{StaticResource Icon.DeleteSweep}" Width="14"
+                                    Height="14" />
+                                <TextBlock Text="Clear Caches" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding CheckVmLeaksCommand}" Padding="12,6"
+                            ToolTip.Tip="Check TrackVM cache">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <PathIcon Data="{StaticResource Icon.BugCheck}" Width="14"
+                                    Height="14" />
+                                <TextBlock Text="Check VM Leaks" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                        <Rectangle Width="1" Fill="{DynamicResource BgHighlightBrush}" Margin="4,2" />
+                        <Button Command="{Binding ToggleWatchdogCommand}" Classes="accent"
+                            Padding="12,6" ToolTip.Tip="Toggle UI Hang Watchdog">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <PathIcon Data="{StaticResource Icon.AlertCircle}" Width="14"
+                                    Height="14" />
+                                <TextBlock Text="{Binding WatchdogStatusText}" FontSize="12" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1" Margin="10"
-                    BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                    CornerRadius="4">
-                    <ScrollViewer>
-                        <SelectableTextBlock Text="{Binding LogOutput}"
-                            Margin="10" FontFamily="Consolas, monospace"
-                            FontSize="12" TextWrapping="Wrap" />
-                    </ScrollViewer>
+                <Border Grid.Row="1" Margin="12" BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="1" CornerRadius="8">
+                    <TextBox Text="{Binding LogOutput}" IsReadOnly="True"
+                        FontFamily="Consolas, monospace" FontSize="11.5"
+                        Foreground="{DynamicResource TextSecondaryBrush}" Background="Transparent"
+                        BorderThickness="0" Padding="10" TextWrapping="NoWrap"
+                        ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto" />
                 </Border>
             </Grid>
         </TabItem>
 
         <!-- TAB 4: AUDIO -->
-        <TabItem Header="🎵 Audio">
+        <TabItem Header="Audio">
             <Grid RowDefinitions="Auto,*">
-                <Border Grid.Row="0" Background="{DynamicResource BgHighlightBrush}"
-                    Padding="10,8" Margin="10,10,10,0" CornerRadius="6">
+                <Border Grid.Row="0" BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="0,0,0,1" Padding="12,8">
                     <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <TextBlock Text="Audio Test:" VerticalAlignment="Center"
-                                FontWeight="Bold"
-                                Foreground="{DynamicResource AccentBrush}" />
-                            <TextBox Text="{Binding AudioTestInput}" Width="280"
-                                PlaceholderText="YouTube URL or Video ID"
-                                VerticalAlignment="Center" />
-                            <TextBlock Text="Duration (sec):" VerticalAlignment="Center" />
-                            <NumericUpDown Value="{Binding AudioTestDuration}"
-                                Minimum="5" Maximum="60" Width="80"
-                                VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Input:" VerticalAlignment="Center" FontSize="12"
+                                Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <TextBox Text="{Binding AudioTestInput}" Width="260"
+                                PlaceholderText="YouTube URL or Video ID" VerticalAlignment="Center"
+                                FontSize="12" />
+                            <TextBlock Text="Duration (s):" VerticalAlignment="Center" FontSize="12"
+                                Foreground="{DynamicResource TextSecondaryBrush}" />
+                            <NumericUpDown Value="{Binding AudioTestDuration}" Minimum="5"
+                                Maximum="60" Width="80" VerticalAlignment="Center" FontSize="12" />
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Command="{Binding PlayYoutubeAudioCommand}"
-                                Background="#4CAF50" Foreground="White" Padding="12,8"
-                                IsEnabled="{Binding !IsAudioPlaying}">
+                            <Button Command="{Binding PlayYoutubeAudioCommand}" Classes="accent"
+                                Padding="12,6" IsEnabled="{Binding !IsAudioPlaying}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Data="{StaticResource Icon.Play}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="Play (No Cache)" />
+                                    <PathIcon Data="{StaticResource Icon.Play}" Width="14"
+                                        Height="14" />
+                                    <TextBlock Text="Play (No Cache)" FontSize="12" />
                                 </StackPanel>
                             </Button>
-                            <Button Command="{Binding PlayYoutubeWithCacheCommand}"
-                                Background="#2196F3" Foreground="White" Padding="12,8"
+                            <Button Command="{Binding PlayYoutubeWithCacheCommand}" Padding="12,6"
                                 IsEnabled="{Binding !IsAudioPlaying}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Data="{StaticResource Icon.PlayCircle}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="Play (With Cache)" />
+                                    <PathIcon Data="{StaticResource Icon.PlayCircle}" Width="14"
+                                        Height="14" />
+                                    <TextBlock Text="Play (Cached)" FontSize="12" />
                                 </StackPanel>
                             </Button>
-                            <Button Command="{Binding StopAudioTestCommand}"
-                                Background="#f44336" Foreground="White" Padding="12,8"
+                            <Button Command="{Binding StopAudioTestCommand}" Padding="12,6"
                                 IsEnabled="{Binding IsAudioPlaying}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Data="{StaticResource Icon.Stop}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="Stop" />
+                                    <PathIcon Data="{StaticResource Icon.Stop}" Width="14"
+                                        Height="14" />
+                                    <TextBlock Text="Stop" FontSize="12" />
                                 </StackPanel>
                             </Button>
-
-                            <Rectangle Width="1" Fill="{DynamicResource TextSecondaryBrush}"
-                                Margin="4,0" />
-
-                            <Button Command="{Binding ShowCacheStatsCommand}"
-                                Background="#607D8B" Foreground="White" Padding="12,8">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Data="{StaticResource Icon.ChartBar}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="Cache Stats" />
-                                </StackPanel>
-                            </Button>
-                            <Button Command="{Binding ClearAudioCacheCommand}"
-                                Background="#795548" Foreground="White" Padding="12,8">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Data="{StaticResource Icon.FolderRemove}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="Clear Cache" />
-                                </StackPanel>
-                            </Button>
-                            <Button Command="{Binding TestLocalFileCommand}"
-                                Background="#9E9E9E" Foreground="White" Padding="12,8">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <PathIcon Data="{StaticResource Icon.FileMusic}" Width="16"
-                                        Height="16" />
-                                    <TextBlock Text="Test Local" />
-                                </StackPanel>
-                            </Button>
+                            <Rectangle Width="1" Fill="{DynamicResource BgHighlightBrush}"
+                                Margin="4,2" />
+                            <Button Command="{Binding ShowCacheStatsCommand}" Padding="10,6"
+                                FontSize="12" Content="Cache Stats" />
+                            <Button Command="{Binding ClearAudioCacheCommand}" Padding="10,6"
+                                FontSize="12" Content="Clear Cache" />
+                            <Button Command="{Binding TestLocalFileCommand}" Padding="10,6"
+                                FontSize="12" Content="Test Local" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1" Margin="10"
-                    BorderBrush="{DynamicResource BgHighlightBrush}" BorderThickness="1"
-                    CornerRadius="4">
-                    <ScrollViewer>
-                        <SelectableTextBlock Text="{Binding LogOutput}"
-                            Margin="10" FontFamily="Consolas, monospace"
-                            FontSize="12" TextWrapping="Wrap" />
-                    </ScrollViewer>
+                <Border Grid.Row="1" Margin="12" BorderBrush="{DynamicResource BgHighlightBrush}"
+                    BorderThickness="1" CornerRadius="8">
+                    <TextBox Text="{Binding LogOutput}" IsReadOnly="True"
+                        FontFamily="Consolas, monospace" FontSize="11.5"
+                        Foreground="{DynamicResource TextSecondaryBrush}" Background="Transparent"
+                        BorderThickness="0" Padding="10" TextWrapping="NoWrap"
+                        ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto" />
                 </Border>
             </Grid>
         </TabItem>

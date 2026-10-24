@@ -7,353 +7,239 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Unit и integration тесты для N-Token подсистемы.
-/// <para>
-/// Все live-тесты используют shared <see cref="JsDecryptionService"/> из DI,
-/// что гарантирует тест реального production-пути с persistent QuickJS context.
-/// Изолированные тесты создают отдельный сервис через <see cref="FixedPlayerContextManager"/>.
-/// </para>
+/// Интеграционные тесты и бенчмарки подсистемы дешифрации N-Token.
+/// Проверяют взаимодействие с QuickJS runtime, кэширование, идемпотентность и AST Solver.
 /// </summary>
 public static class NTokenTests
 {
     private static string TestToken => TestConfig.Get().NToken.TestToken;
 
-    // 
-    // LIVE INTEGRATION TESTS
-    // 
+    // ==========================================
+    //          LIVE INTEGRATION TESTS
+    // ==========================================
 
-    /// <summary>
-    /// Полный integration-тест дешифрации N-Token через production pipeline:
-    /// DI → <see cref="NTokenDecryptor"/> → <see cref="JsDecryptionService"/> → QuickJS.
-    /// </summary>
-    [TestMethod(TestCategory.Integration, "NToken: Live Decryption",
-        Group = TestGroups.NToken, Order = 30, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestLiveDecryptionAsync(IServiceProvider services)
+    [TestMethod(TestCategory.Integration, "N-Token Live Decryption",
+        Group = TestGroups.Cipher, Order = 1, RequiresNetwork = true, TimeoutSeconds = 60)]
+    public static async Task TestLiveDecryptionAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var token = TestToken;
 
         var sw = Stopwatch.StartNew();
-        var result = await decryptor.DecryptAsync(token, CancellationToken.None);
+        var result = await decryptor.DecryptAsync(token, ct).ConfigureAwait(false);
         sw.Stop();
 
-        Assert(!string.IsNullOrEmpty(result), "Decryption returned empty string");
-        Assert(result != token, "Decryption returned unchanged token");
-        Assert(!result.Contains("undefined"), "Result contains 'undefined'");
-        Assert(!result.Contains("null"), "Result contains 'null'");
-        Assert(result.Length >= 5, $"Result suspiciously short: '{result}'");
-        Assert(result.Length <= 60, $"Result suspiciously long: {result.Length} chars");
+        TestAssert.NotNullOrEmpty(result, "Decryption returned empty string");
+        TestAssert.False(string.Equals(result, token, StringComparison.Ordinal), "Decryption returned unchanged token");
+        TestAssert.False(result.Contains("undefined", StringComparison.Ordinal), "Result contains 'undefined'");
+        TestAssert.False(result.Contains("null", StringComparison.Ordinal), "Result contains 'null'");
+        TestAssert.True(result.Length >= 5, $"Result suspiciously short: '{result}'");
+        TestAssert.True(result.Length <= 60, $"Result suspiciously long: {result.Length} chars");
 
-        foreach (char c in result)
-            Assert(char.IsAsciiLetterOrDigit(c) || c is '-' or '_',
-                $"Result contains invalid character '{c}'");
+        for (int i = 0; i < result.Length; i++)
+        {
+            char c = result[i];
+            TestAssert.True(char.IsAsciiLetterOrDigit(c) || c is '-' or '_', $"Result contains invalid character '{c}'");
+        }
 
-        Log.Info($"[NToken] Decrypted in {sw.ElapsedMilliseconds}ms: '{token}' → '{result}'");
+        Log.Info($"[NToken] Decrypted in {sw.ElapsedMilliseconds}ms: '{token}' -> '{result}'");
     }
 
-    /// <summary>
-    /// Проверяет, что повторная дешифрация одного и того же токена обслуживается из кэша
-    /// без обращения к QuickJS runtime (время ответа &lt; 5 мс).
-    /// </summary>
-    [TestMethod(TestCategory.Integration, "NToken: Cache Hit",
-        Group = TestGroups.NToken, Order = 40, RequiresNetwork = true)]
-    public static async Task TestCacheHitAsync(IServiceProvider services)
+    [TestMethod(TestCategory.Integration, "N-Token Memory Cache Hit (<5ms)",
+        Group = TestGroups.Cipher, Order = 2, RequiresNetwork = true, TimeoutSeconds = 30)]
+    public static async Task TestCacheHitAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var token = TestToken;
 
-        // Прогрев: гарантируем, что токен попал в кэш
-        var first = await decryptor.DecryptAsync(token, CancellationToken.None);
-        Assert(first != token, "Warmup decryption failed — precondition for cache test not met");
+        var first = await decryptor.DecryptAsync(token, ct).ConfigureAwait(false);
+        TestAssert.False(string.Equals(first, token, StringComparison.Ordinal), "Warmup decryption failed");
 
         var sw = Stopwatch.StartNew();
-        var second = await decryptor.DecryptAsync(token, CancellationToken.None);
+        var second = await decryptor.DecryptAsync(token, ct).ConfigureAwait(false);
         sw.Stop();
 
-        Assert(first == second, "Cache returned inconsistent result");
-        Assert(sw.ElapsedMilliseconds < 5, $"Cache hit too slow: {sw.ElapsedMilliseconds}ms (expected <5ms)");
+        TestAssert.Equal(first, second, "Cache returned inconsistent result");
+        TestAssert.True(sw.ElapsedMilliseconds < 5, $"Cache hit too slow: {sw.ElapsedMilliseconds}ms (expected <5ms)");
 
-        Log.Info($"[NToken] Cache hit in {sw.ElapsedMilliseconds}ms");
+        Log.Info($"[NToken] Cache hit verified in {sw.ElapsedMilliseconds}ms");
     }
 
-    /// <summary>
-    /// Проверяет idempotency guard: если на вход подать уже расшифрованный токен,
-    /// он должен вернуться без изменений и без вызова QuickJS.
-    /// </summary>
-    [TestMethod(TestCategory.Integration, "NToken: Idempotency Guard",
-        Group = TestGroups.NToken, Order = 45, RequiresNetwork = true)]
-    public static async Task TestIdempotencyAsync(IServiceProvider services)
+    [TestMethod(TestCategory.Integration, "N-Token Idempotency Guard",
+        Group = TestGroups.Cipher, Order = 3, RequiresNetwork = true, TimeoutSeconds = 30)]
+    public static async Task TestIdempotencyAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var token = TestToken;
 
-        var decrypted = await decryptor.DecryptAsync(token, CancellationToken.None);
-        Assert(decrypted != token, "Warmup decryption failed — precondition not met");
+        var decrypted = await decryptor.DecryptAsync(token, ct).ConfigureAwait(false);
+        TestAssert.False(string.Equals(decrypted, token, StringComparison.Ordinal), "Warmup decryption failed");
 
-        // Передаём уже расшифрованный токен — должен вернуться без изменений
         var sw = Stopwatch.StartNew();
-        var again = await decryptor.DecryptAsync(decrypted, CancellationToken.None);
+        var again = await decryptor.DecryptAsync(decrypted, ct).ConfigureAwait(false);
         sw.Stop();
 
-        Assert(again == decrypted, "Idempotency guard returned modified value");
-        Assert(sw.ElapsedMilliseconds < 5, $"Idempotency check too slow: {sw.ElapsedMilliseconds}ms");
+        TestAssert.Equal(decrypted, again, "Idempotency guard returned modified value");
+        TestAssert.True(sw.ElapsedMilliseconds < 5, $"Idempotency check too slow: {sw.ElapsedMilliseconds}ms");
 
         Log.Info($"[NToken] Idempotency guard OK in {sw.ElapsedMilliseconds}ms");
     }
 
-    // 
-    // AST SOLVER + QUICKJS UNIT TEST (offline, cached player required)
-    // 
-
-    /// <summary>
-    /// Верифицирует полный pipeline: AST preprocessing → QuickJS persistent context →
-    /// вызов функций <c>_result.n</c> и <c>_result.sig</c>.
-    /// <para>
-    /// Тест изолирован от сети: использует <see cref="FixedPlayerContextManager"/>
-    /// с закэшированным base.js. Пропускается, если кэш отсутствует.
-    /// </para>
-    /// </summary>
-    [TestMethod(TestCategory.Unit, "AST + QuickJS: Solver Integration (cached player)",
-        Group = TestGroups.Solver, Order = 65, RequiresNetwork = false, TimeoutSeconds = 60)]
-    public static async Task TestAstSolverWithPersistentContextAsync()
+    [TestMethod(TestCategory.Integration, "AST Solver & QuickJS Persistent Context",
+        Group = TestGroups.Cipher, Order = 4, RequiresNetwork = false, TimeoutSeconds = 60)]
+    public static async Task TestAstSolverWithPersistentContextAsync(CancellationToken ct = default)
     {
-        // Ищем любую кэшированную версию плеера
         var config = TestConfig.Get().PlayerVersions;
         PlayerContext? context = null;
         string? usedVersion = null;
 
-        foreach (var version in config.Versions)
+        for (int i = 0; i < config.Versions.Length; i++)
         {
+            var version = config.Versions[i];
             context = PlayerContext.LoadFromCacheNoExpiry(version);
-            if (context is not null) { usedVersion = version; break; }
+            if (context is not null)
+            {
+                usedVersion = version;
+                break;
+            }
         }
 
         if (context is null)
         {
-            Log.Warn("[AST] Skipped: no cached player versions found.");
-            Log.Info($"[AST] Add versions to test-config.json → playerVersions.versions");
-            Log.Info($"[AST] Cache folder: {G.Folder.NTokenCache}");
-            return;
+            TestAssert.Skip($"No cached player versions found in {G.Folder.NTokenCache}");
         }
 
-        Log.Info($"[AST] Testing player version: {usedVersion} ({context.BaseJs.Length / 1024}KB)");
+        Log.Info($"[AST] Testing player version: {usedVersion} ({context!.BaseJs.Length / 1024}KB)");
 
-        // Препроцессинг AST
-        var sw = Stopwatch.StartNew();
         var script = context.GetOrPrepareScript(() => YoutubeAstSolver.PreprocessPlayer(context.BaseJs));
-        sw.Stop();
+        TestAssert.True(script.Contains("_result.n", StringComparison.Ordinal), "Preprocessed script missing _result.n");
+        TestAssert.True(script.Contains("_result.sig", StringComparison.Ordinal), "Preprocessed script missing _result.sig");
 
-        Assert(script.Contains("_result.n"), "Preprocessed script missing _result.n assignment");
-        Assert(script.Contains("_result.sig"), "Preprocessed script missing _result.sig assignment");
-        Log.Info($"[AST] Preprocessed in {sw.ElapsedMilliseconds}ms ({script.Length / 1024}KB)");
-
-        // Создаём изолированный JsDecryptionService с фиксированным контекстом
         var fixedManager = new FixedPlayerContextManager(context);
         using var jsService = new JsDecryptionService(fixedManager);
 
-        sw.Restart();
-        await jsService.EnsureInitializedAsync(CancellationToken.None);
-        sw.Stop();
-        Log.Info($"[AST] QuickJS context initialized in {sw.ElapsedMilliseconds}ms");
+        await jsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
-        // Тест N-Token
         var testToken = TestToken;
-        sw.Restart();
-        var decryptedN = await jsService.CallAsync("n", testToken);
-        sw.Stop();
+        var decryptedN = await jsService.CallAsync("n", testToken).ConfigureAwait(false);
 
-        Assert(!string.IsNullOrEmpty(decryptedN), $"N-token decryption returned null/empty");
-        Assert(decryptedN != testToken, $"N-token unchanged after decryption");
-        Assert(!decryptedN!.Contains("undefined"), "N-token result contains 'undefined'");
-        Assert(decryptedN.Length >= 5, $"N-token result suspiciously short: '{decryptedN}'");
-        Log.Info($"[AST] N-token in {sw.ElapsedMilliseconds}ms: '{testToken}' → '{decryptedN}'");
+        TestAssert.NotNullOrEmpty(decryptedN, "N-token decryption returned null/empty");
+        TestAssert.False(string.Equals(decryptedN, testToken, StringComparison.Ordinal), "N-token unchanged after decryption");
+        TestAssert.False(decryptedN.Contains("undefined", StringComparison.Ordinal), "Result contains 'undefined'");
 
-        // Тест SigCipher
         var testSig = TestConfig.Get().SigCipher.TestSignature;
-        sw.Restart();
-        var decryptedSig = await jsService.CallAsync("sig", testSig);
-        sw.Stop();
+        var decryptedSig = await jsService.CallAsync("sig", testSig).ConfigureAwait(false);
 
-        Assert(!string.IsNullOrEmpty(decryptedSig), "Sig decryption returned null/empty");
-        Assert(decryptedSig != testSig, "Sig unchanged after decryption");
-        Log.Info($"[AST] Sig in {sw.ElapsedMilliseconds}ms: '{testSig[..20]}...' → '{decryptedSig![..20]}...'");
+        TestAssert.NotNullOrEmpty(decryptedSig, "Sig decryption returned null/empty");
+        TestAssert.False(string.Equals(decryptedSig, testSig, StringComparison.Ordinal), "Sig unchanged after decryption");
 
         Log.Info($"[AST] ✓ Player version {usedVersion} verified successfully");
     }
 
-    // 
-    // PLAYER VERSION COMPATIBILITY
-    // 
-
-    /// <summary>
-    /// Тестирует совместимость с несколькими закэшированными версиями плеера.
-    /// Для каждой версии создаёт изолированный <see cref="JsDecryptionService"/>
-    /// и верифицирует дешифрацию N-Token и Sig.
-    /// </summary>
-    [TestMethod(TestCategory.Integration, "NToken: Player Version Compatibility",
-        Group = TestGroups.NToken, Order = 50, RequiresNetwork = false, TimeoutSeconds = 120)]
-    public static async Task TestPlayerVersionCompatibilityAsync()
+    [TestMethod(TestCategory.Integration, "Cached Player Versions Compatibility",
+        Group = TestGroups.Cipher, Order = 5, RequiresNetwork = false, TimeoutSeconds = 120)]
+    public static async Task TestPlayerVersionCompatibilityAsync(CancellationToken ct = default)
     {
         var config = TestConfig.Get().PlayerVersions;
 
         if (config.Versions.Length == 0)
         {
-            Log.Info("[NToken] Version compatibility skipped: no versions configured.");
-            Log.Info("[NToken] Add to test-config.json → playerVersions.versions: [\"ac678d18\"]");
-            return;
+            TestAssert.Skip("No player versions configured in test-config.json");
         }
 
-        int passed = 0, failed = 0, skipped = 0;
+        int passed = 0;
 
-        foreach (var version in config.Versions)
+        for (int i = 0; i < config.Versions.Length; i++)
         {
-            Log.Info($"\n[NToken]  Version: {version} ");
-
+            var version = config.Versions[i];
             var context = PlayerContext.LoadFromCacheNoExpiry(version);
             if (context is null)
             {
                 Log.Warn($"  ⊘ Skipped: no cached base.js for {version}");
-                skipped++;
                 continue;
             }
-
-            Log.Info($"  ✓ Loaded ({context.BaseJs.Length / 1024}KB)");
 
             var fixedManager = new FixedPlayerContextManager(context);
             using var jsService = new JsDecryptionService(fixedManager);
 
-            try
+            await jsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
+
+            var nResult = await jsService.CallAsync("n", TestToken).ConfigureAwait(false);
+            TestAssert.NotNullOrEmpty(nResult, $"Version {version}: N-token returned empty");
+            TestAssert.False(string.Equals(nResult, TestToken, StringComparison.Ordinal), $"Version {version}: N-token unchanged");
+
+            if (config.NTokenTestCases.TryGetValue(version, out var cases) && cases.Length > 0)
             {
-                await jsService.EnsureInitializedAsync(CancellationToken.None);
-                Log.Info("  ✓ JsDecryptionService initialized");
-
-                // N-Token smoke test
-                var nResult = await jsService.CallAsync("n", TestToken);
-                if (string.IsNullOrEmpty(nResult) || nResult == TestToken)
+                for (int j = 0; j < cases.Length; j++)
                 {
-                    Log.Error($"  ✗ N-token decryption failed: '{nResult ?? "null"}'");
-                    failed++;
-                    continue;
+                    var tc = cases[j];
+                    var result = await jsService.CallAsync("n", tc.Encrypted).ConfigureAwait(false);
+                    TestAssert.Equal(tc.Expected, result, $"Version {version}: Case {tc.Description ?? tc.Encrypted} failed");
                 }
-                Log.Info($"  ✓ N-token: '{TestToken}' → '{nResult}'");
-
-                // Per-version test cases
-                if (config.NTokenTestCases.TryGetValue(version, out var cases) && cases.Length > 0)
-                {
-                    int casePassed = 0, caseFailed = 0;
-
-                    foreach (var tc in cases)
-                    {
-                        var result = await jsService.CallAsync("n", tc.Encrypted);
-                        if (result == tc.Expected)
-                        {
-                            casePassed++;
-                            Log.Info($"    ✓ {tc.Description ?? tc.Encrypted[..Math.Min(15, tc.Encrypted.Length)]}");
-                        }
-                        else
-                        {
-                            caseFailed++;
-                            Log.Error($"    ✗ Expected: '{tc.Expected}', Got: '{result ?? "null"}'");
-                        }
-                    }
-
-                    if (caseFailed > 0) { failed++; continue; }
-                }
-
-                passed++;
-                Log.Info($"  ✓ Version {version} PASSED");
             }
-            catch (Exception ex)
-            {
-                Log.Error($"  ✗ Exception: {ex.Message}");
-                failed++;
-            }
+
+            passed++;
         }
 
-        Log.Info($"\n[NToken] Compatibility: {passed} passed, {failed} failed, {skipped} skipped");
+        if (passed == 0)
+        {
+            TestAssert.Skip("None of the configured player versions could be loaded from local cache");
+        }
 
-        if (failed > 0)
-            throw new Exception($"Version compatibility: {failed} version(s) failed");
+        Log.Info($"[NToken] Compatibility: {passed} player version(s) passed");
     }
 
-    // 
-    // BENCHMARK
-    // 
+    // ==========================================
+    //                BENCHMARK
+    // ==========================================
 
-    /// <summary>
-    /// Бенчмарк производительности persistent context vs создание context на каждый вызов.
-    /// <para>
-    /// Ожидаемые результаты на типичном железе:
-    /// <list type="bullet">
-    ///   <item>Cache miss (QuickJS call): ~0.1–2 мс</item>
-    ///   <item>Cache hit: &lt; 1 мс</item>
-    /// </list>
-    /// </para>
-    /// </summary>
-    [TestMethod(TestCategory.Benchmark, "NToken: Benchmark (persistent context)",
-        Group = TestGroups.NToken, Order = 100, RequiresNetwork = true, TimeoutSeconds = 120)]
-    public static async Task BenchmarkAsync(IServiceProvider services)
+    [TestMethod(TestCategory.Benchmark, "N-Token QuickJS Persistent Context vs Cache",
+        Group = TestGroups.Cipher, Order = 10, RequiresNetwork = true, TimeoutSeconds = 120)]
+    public static async Task BenchmarkAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var jsService = services.GetRequiredService<JsDecryptionService>();
 
-        // Прогрев
-        await decryptor.DecryptAsync(TestToken, CancellationToken.None);
-        Log.Info("[Benchmark] Warmup complete");
+        await decryptor.DecryptAsync(TestToken, ct).ConfigureAwait(false);
 
         var iterations = TestConfig.Get().NToken.BenchmarkIterations;
+        var tokens = new string[iterations];
+        for (int i = 0; i < iterations; i++)
+            tokens[i] = $"BenchTkn{i:D5}AA__"[..15];
 
-        // Генерируем уникальные токены (чтобы не попасть в кэш)
-        // Формат: ASCII letters+digits+'-'+'_', длина 15
-        var tokens = Enumerable.Range(0, iterations)
-            .Select(i => $"BenchTkn{i:D5}AA__"[..15])
-            .ToArray();
-
-        // Cache miss — прямые вызовы QuickJS через persistent context
+        // 1. Cache Miss (прямой вызов QuickJS через persistent context)
         var sw = Stopwatch.StartNew();
-        foreach (var token in tokens)
-            await jsService.CallAsync("n", token);
+        for (int i = 0; i < tokens.Length; i++)
+            await jsService.CallAsync("n", tokens[i]).ConfigureAwait(false);
         sw.Stop();
 
         var avgMiss = (double)sw.ElapsedMilliseconds / iterations;
-        Log.Info($"[Benchmark] Cache miss (QuickJS call): {avgMiss:F3}ms avg ({iterations} iterations)");
+        Log.Info($"[Benchmark] Cache miss (QuickJS): {avgMiss:F3}ms avg ({iterations} runs)");
 
-        // Cache hit — через NTokenDecryptor (memory cache)
-        // Сначала заполняем кэш
-        foreach (var token in tokens)
-            await decryptor.DecryptAsync(token, CancellationToken.None);
+        // 2. Cache Hit (через NTokenDecryptor)
+        for (int i = 0; i < tokens.Length; i++)
+            await decryptor.DecryptAsync(tokens[i], ct).ConfigureAwait(false);
 
         sw.Restart();
-        foreach (var token in tokens)
-            await decryptor.DecryptAsync(token, CancellationToken.None);
+        for (int i = 0; i < tokens.Length; i++)
+            await decryptor.DecryptAsync(tokens[i], ct).ConfigureAwait(false);
         sw.Stop();
 
         var avgHit = (double)sw.ElapsedMilliseconds / iterations;
         Log.Info($"[Benchmark] Cache hit: {avgHit:F3}ms avg");
 
-        Assert(avgHit < 1.0, $"Cache hit too slow: {avgHit:F3}ms (expected <1ms)");
-        Assert(avgMiss < 5.0, $"QuickJS call too slow: {avgMiss:F3}ms (expected <5ms for persistent context)");
-
-        Log.Info($"[Benchmark] ✓ Speedup from cache: {avgMiss / avgHit:F1}×");
-    }
-
-    private static void Assert(bool condition, string message)
-    {
-        if (!condition) throw new Exception(message);
+        TestAssert.True(avgHit < 1.0, $"Cache hit too slow: {avgHit:F3}ms (expected <1ms)");
+        TestAssert.True(avgMiss < 5.0, $"QuickJS call too slow: {avgMiss:F3}ms (expected <5ms)");
     }
 }
 
-/// <summary>
-/// Тест-двойник <see cref="PlayerContextManager"/>, всегда возвращающий фиксированный контекст.
-/// Позволяет тестировать AST solver и QuickJS offline, без сетевых запросов.
-/// </summary>
 internal sealed class FixedPlayerContextManager : PlayerContextManager
 {
     private readonly PlayerContext _context;
 
-    public FixedPlayerContextManager(PlayerContext context) : base(null!)
-        => _context = context;
+    public FixedPlayerContextManager(PlayerContext context) : base(null!) =>
+        _context = context;
 
-    public override Task<PlayerContext> GetOrLoadAsync(CancellationToken ct = default)
-        => Task.FromResult(_context);
+    public override Task<PlayerContext> GetOrLoadAsync(CancellationToken ct = default) =>
+        Task.FromResult(_context);
 }

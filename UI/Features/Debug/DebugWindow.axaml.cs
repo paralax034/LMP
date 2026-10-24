@@ -1,22 +1,41 @@
+using Avalonia;
 using Avalonia.Controls;
 
 namespace LMP.UI.Features.Debug;
 
 /// <summary>
 /// Debug-окно с вкладками: Tests, YouTube, Memory, Audio.
-/// Открывается по F9 в Debug-режиме.
+/// DataContext инициализируется до вызова InitializeComponent для исключения предупреждений привязки.
 /// </summary>
 public partial class DebugWindow : Window
 {
     public DebugWindow()
     {
+        var vm = new DebugViewModel();
+        DataContext = vm;
+
         InitializeComponent();
-        DataContext = new DebugViewModel();
+
+        vm.TestRunner.ScrollToIndexRequested += OnScrollToTestIndex;
+    }
+
+    private void OnScrollToTestIndex(int index)
+    {
+        var sv = this.FindControl<ScrollViewer>("TestListScrollViewer");
+        if (sv == null || index < 0) return;
+
+        double targetY = Math.Max(0, (index * 33.0) - 60.0);
+        sv.Offset = new Vector(sv.Offset.X, targetY);
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        if (DataContext is DebugViewModel vm)
+        {
+            vm.TestRunner.ScrollToIndexRequested -= OnScrollToTestIndex;
+            vm.Dispose();
+        }
+
         base.OnClosed(e);
-        (DataContext as DebugViewModel)?.Dispose();
     }
 }

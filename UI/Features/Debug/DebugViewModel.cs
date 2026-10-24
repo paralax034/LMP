@@ -37,8 +37,10 @@ public sealed partial class DebugViewModel : ViewModelBase
 
     // TEST RUNNER (вкладка Tests)
 
+    private TestRunnerViewModel? _testRunner;
+
     /// <summary>ViewModel для вкладки тестов. Создаётся лениво при первом обращении.</summary>
-    public TestRunnerViewModel TestRunner { get; } = new();
+    public TestRunnerViewModel TestRunner => _testRunner ??= new TestRunnerViewModel();
 
     // EXISTING PROPERTIES (YouTube / Memory / Audio)
 
@@ -95,7 +97,11 @@ public sealed partial class DebugViewModel : ViewModelBase
         GetLikedMusicCommand = new AsyncRelayCommand(ExecuteGetLikedMusic);
         SearchVideosCommand = new AsyncRelayCommand(ExecuteSearchVideos);
         SearchMusicCommand = new AsyncRelayCommand(ExecuteSearchMusic);
-        ClearLogCommand = new RelayCommand(() => LogOutput = "");
+        ClearLogCommand = new RelayCommand(() =>
+                {
+                    _debugLogBuilder.Clear();
+                    LogOutput = "";
+                });
 
         DumpMemoryCommand = new RelayCommand(ExecuteDumpMemory);
         ForceGcCommand = new RelayCommand(ExecuteForceGc);
@@ -687,8 +693,13 @@ public sealed partial class DebugViewModel : ViewModelBase
 
     // LOG
 
-    private void AppendLog(string text) =>
-        LogOutput += text + "\n";
+    private readonly System.Text.StringBuilder _debugLogBuilder = new(4096);
+
+    private void AppendLog(string text)
+    {
+        _debugLogBuilder.AppendLine(text);
+        LogOutput = _debugLogBuilder.ToString();
+    }
 
     // DISPOSE
 
@@ -702,7 +713,7 @@ public sealed partial class DebugViewModel : ViewModelBase
             _testCacheManager?.Dispose();
             _uiWatchdog?.Dispose();
             _uiWatchdog = null;
-            TestRunner.Dispose();
+            _testRunner?.Dispose();
         }
 
         base.Dispose(disposing);

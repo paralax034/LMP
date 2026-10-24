@@ -2,10 +2,14 @@ using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
 
+/// <summary>
+/// Модульные тесты механизмов атомарной записи и восстановления файлов AtomicFile.
+/// Проверяют текстовый и бинарный roundtrip, ротацию версий N-1 (.bak) и auto-heal при сбоях.
+/// </summary>
 public static class AtomicFileTests
 {
-    [TestMethod(TestCategory.Unit, "AtomicFile: Sync Text Roundtrip", Group = "Cache", Order = 10)]
-    public static async Task TestSyncRoundtripAsync()
+    [TestMethod(TestCategory.Unit, "Sync Text Atomic Roundtrip", Group = TestGroups.Storage, Order = 1)]
+    public static Task TestSyncRoundtripAsync()
     {
         var tempDir = CreateTempDirectory();
         try
@@ -17,19 +21,19 @@ public static class AtomicFileTests
 
             var read = AtomicFile.ReadTextWithFallback(path, out bool recovered);
 
-            Assert(read == payload, $"Payload mismatch. Expected '{payload}', got '{read}'");
-            Assert(!recovered, "Expected recovered == false on primary file read");
-            Assert(File.Exists(path), "Target file does not exist on disk");
+            TestAssert.Equal(payload, read, "Payload mismatch on primary file read");
+            TestAssert.False(recovered, "Expected recovered == false on normal read");
+            TestAssert.True(File.Exists(path), "Target file does not exist on disk");
         }
         finally
         {
             CleanupDirectory(tempDir);
         }
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "AtomicFile: Async Text Roundtrip", Group = "Cache", Order = 11)]
+    [TestMethod(TestCategory.Unit, "Async Text Atomic Roundtrip", Group = TestGroups.Storage, Order = 2)]
     public static async Task TestAsyncRoundtripAsync()
     {
         var tempDir = CreateTempDirectory();
@@ -38,12 +42,12 @@ public static class AtomicFileTests
             var path = Path.Combine(tempDir, "test_async.json");
             const string payload = "{\"async\": true, \"symbols\": \"♫♪\"}";
 
-            await AtomicFile.WriteTextAsync(path, payload, createBackup: true);
+            await AtomicFile.WriteTextAsync(path, payload, createBackup: true).ConfigureAwait(false);
 
-            var (read, recovered) = await AtomicFile.ReadTextWithFallbackAsync(path);
+            var (read, recovered) = await AtomicFile.ReadTextWithFallbackAsync(path).ConfigureAwait(false);
 
-            Assert(read == payload, $"Payload mismatch. Expected '{payload}', got '{read}'");
-            Assert(!recovered, "Expected recovered == false on primary file read");
+            TestAssert.Equal(payload, read, "Async payload mismatch");
+            TestAssert.False(recovered, "Expected recovered == false on async read");
         }
         finally
         {
@@ -51,8 +55,8 @@ public static class AtomicFileTests
         }
     }
 
-    [TestMethod(TestCategory.Unit, "AtomicFile: Backup Rotation (N-1 version)", Group = "Cache", Order = 12)]
-    public static async Task TestBackupRotationAsync()
+    [TestMethod(TestCategory.Unit, "Backup (.bak) Rotation on Overwrite", Group = TestGroups.Storage, Order = 3)]
+    public static Task TestBackupRotationAsync()
     {
         var tempDir = CreateTempDirectory();
         try
@@ -63,24 +67,24 @@ public static class AtomicFileTests
             const string v2 = "Version 2 content";
 
             AtomicFile.WriteText(path, v1, createBackup: false);
-            Assert(!File.Exists(backupPath), "Backup file shouldn't exist after initial write with createBackup=false");
+            TestAssert.False(File.Exists(backupPath), "Backup file should not exist on first write");
 
             AtomicFile.WriteText(path, v2, createBackup: true);
 
-            Assert(File.Exists(backupPath), "Backup file was not created");
-            Assert(File.ReadAllText(path) == v2, "Primary file does not contain V2");
-            Assert(File.ReadAllText(backupPath) == v1, "Backup file does not contain V1");
+            TestAssert.True(File.Exists(backupPath), "Backup file was not created on second write");
+            TestAssert.Equal(v2, File.ReadAllText(path));
+            TestAssert.Equal(v1, File.ReadAllText(backupPath));
         }
         finally
         {
             CleanupDirectory(tempDir);
         }
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "AtomicFile: Recovery from Corrupted File", Group = "Cache", Order = 13)]
-    public static async Task TestCorruptionRecoveryAsync()
+    [TestMethod(TestCategory.Unit, "Text Auto-Heal from Corrupted Primary", Group = TestGroups.Storage, Order = 4)]
+    public static Task TestTextCorruptionRecoveryAsync()
     {
         var tempDir = CreateTempDirectory();
         try
@@ -96,20 +100,56 @@ public static class AtomicFileTests
 
             var result = AtomicFile.ReadTextWithFallback(path, out bool recovered);
 
-            Assert(result == validPayload, "Failed to recover payload from backup");
-            Assert(recovered, "Expected recovered == true flag");
-            Assert(new FileInfo(path).Length > 0, "Auto-heal failed to repair primary file");
-            Assert(File.ReadAllText(path) == validPayload, "Repaired file content mismatch");
+            TestAssert.Equal(validPayload, result, "Failed to recover text payload from backup");
+            TestAssert.True(recovered, "Expected recovered flag to be true");
+            TestAssert.True(new FileInfo(path).Length > 0, "Auto-heal failed to repair primary file");
+            TestAssert.Equal(validPayload, File.ReadAllText(path));
         }
         finally
         {
             CleanupDirectory(tempDir);
         }
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "AtomicFile: Cancellation Cleans Temp", Group = "Cache", Order = 14)]
+    [TestMethod(TestCategory.Unit, "Binary Auto-Heal from Backup on Zero-Length File", Group = TestGroups.Storage, Order = 5)]
+    public static Task TestBinaryBakRecoveryAndAutoHealAsync()
+    {
+        var tempDir = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(tempDir, "binary_atomic.bin");
+            var backupPath = string.Concat(path, ".bak");
+
+            byte[] payloadV1 = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
+            byte[] payloadV2 = [0xAA, 0xBB, 0xCC, 0xDD];
+
+            AtomicFile.WriteBytes(path, payloadV1, createBackup: false);
+            AtomicFile.WriteBytes(path, payloadV2, createBackup: true);
+
+            // Имитируем повреждение целевого файла до 0 байт
+            File.WriteAllBytes(path, []);
+
+            var recoveredBytes = AtomicFile.ReadBytesWithFallback(path, out bool recovered);
+
+            TestAssert.True(recovered, "Expected recovered == true on binary fallback");
+            TestAssert.NotNull(recoveredBytes);
+            TestAssert.True(recoveredBytes.AsSpan().SequenceEqual(payloadV1), "Recovered payload mismatch");
+
+            // Проверяем факт починки основного файла
+            var healedBytes = File.ReadAllBytes(path);
+            TestAssert.True(healedBytes.AsSpan().SequenceEqual(payloadV1), "Primary file was not auto-healed");
+        }
+        finally
+        {
+            CleanupDirectory(tempDir);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Temp File Cleanup on Cancellation", Group = TestGroups.Storage, Order = 6)]
     public static async Task TestCancellationCleansTempAsync()
     {
         var tempDir = CreateTempDirectory();
@@ -124,16 +164,16 @@ public static class AtomicFileTests
             bool threw = false;
             try
             {
-                await AtomicFile.WriteTextAsync(path, "cancelled content", createBackup: false, ct: cts.Token);
+                await AtomicFile.WriteTextAsync(path, "cancelled content", createBackup: false, ct: cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 threw = true;
             }
 
-            Assert(threw, "OperationCanceledException was not thrown");
-            Assert(!File.Exists(tempPath), "Temp file was not cleaned up on cancellation");
-            Assert(!File.Exists(path), "Target file should not exist on cancellation");
+            TestAssert.True(threw, "OperationCanceledException was not thrown");
+            TestAssert.False(File.Exists(tempPath), "Temp file was not cleaned up on cancellation");
+            TestAssert.False(File.Exists(path), "Target file should not exist on cancellation");
         }
         finally
         {
@@ -156,10 +196,5 @@ public static class AtomicFileTests
                 Directory.Delete(dir, recursive: true);
         }
         catch { }
-    }
-
-    private static void Assert(bool condition, string message)
-    {
-        if (!condition) throw new InvalidOperationException($"[Assertion Failed] {message}");
     }
 }

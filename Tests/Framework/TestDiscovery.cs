@@ -5,84 +5,136 @@ namespace LMP.Tests.Framework;
 
 /// <summary>
 /// Автоматическое обнаружение тестов через рефлексию.
-/// Кэширует результаты в <see cref="FrozenDictionary{TKey, TValue}"/> для O(1) lookup.
+/// Кэширует дескрипторы, отсортированные списки и группы один раз за время жизни процесса.
+/// Потокобезопасен, не производит повторных аллокаций при открытии UI.
 /// </summary>
 public static class TestDiscovery
 {
     private static FrozenDictionary<string, TestDescriptor>? _cache;
+    private static TestDescriptor[]? _orderedCache;
     private static FrozenSet<string>? _groupsCache;
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
 
     /// <summary>Все обнаруженные тесты по ID.</summary>
     public static FrozenDictionary<string, TestDescriptor> GetAll()
     {
-        if (_cache is not null) return _cache;
+        var cache = _cache;
+        if (cache is not null) return cache;
 
         lock (_lock)
         {
-            if (_cache is not null) return _cache;
-            _cache = Discover();
-            _groupsCache = null; // сбрасываем кэш групп
+            EnsureDiscoveredUnsafe();
+            return _cache!;
         }
-
-        return _cache;
     }
 
-    /// <summary>Тесты, отсортированные по категории → группе → порядку.</summary>
-    public static IReadOnlyList<TestDescriptor> GetAllOrdered() =>
-        GetAll().Values
-            .OrderBy(t => t.Category)
-            .ThenBy(t => t.Group, StringComparer.Ordinal)
-            .ThenBy(t => t.Order)
-            .ThenBy(t => t.DisplayName, StringComparer.Ordinal)
-            .ToList();
+    /// <summary>Тесты, отсортированные по категории → группе → порядку (кэшированный массив).</summary>
+    public static IReadOnlyList<TestDescriptor> GetAllOrdered()
+    {
+        var ordered = _orderedCache;
+        if (ordered is not null) return ordered;
+
+        lock (_lock)
+        {
+            EnsureDiscoveredUnsafe();
+            return _orderedCache!;
+        }
+    }
 
     /// <summary>Тесты, сгруппированные по категории.</summary>
-    public static IReadOnlyDictionary<TestCategory, IReadOnlyList<TestDescriptor>> GetGrouped() =>
-        GetAllOrdered()
-            .GroupBy(t => t.Category)
-            .ToDictionary(
-                g => g.Key,
-                g => (IReadOnlyList<TestDescriptor>)[.. g]);
+    public static IReadOnlyDictionary<TestCategory, IReadOnlyList<TestDescriptor>> GetGrouped()
+    {
+        var ordered = GetAllOrdered();
+        var dict = new Dictionary<TestCategory, List<TestDescriptor>>(6);
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            var desc = ordered[i];
+            if (!dict.TryGetValue(desc.Category, out var list))
+            {
+                list = [];
+                dict[desc.Category] = list;
+            }
+            list.Add(desc);
+        }
+
+        var result = new Dictionary<TestCategory, IReadOnlyList<TestDescriptor>>(dict.Count);
+        foreach (var (k, v) in dict)
+            result[k] = v;
+
+        return result;
+    }
 
     /// <summary>
-    /// Возвращает все уникальные тематические группы, обнаруженные в тестах.
-    /// Используется для построения UI-фильтров.
+    /// Возвращает все уникальные тематические группы тестов.
     /// </summary>
     public static FrozenSet<string> GetAllGroups()
     {
-        if (_groupsCache is not null) return _groupsCache;
+        var groups = _groupsCache;
+        if (groups is not null) return groups;
 
-        var groups = GetAll().Values
-            .Select(t => t.Group)
-            .Distinct(StringComparer.Ordinal)
-            .ToFrozenSet(StringComparer.Ordinal);
-
-        _groupsCache = groups;
-        return groups;
+        lock (_lock)
+        {
+            EnsureDiscoveredUnsafe();
+            return _groupsCache!;
+        }
     }
 
-    /// <summary>Сбрасывает кэш (для hot-reload).</summary>
+    /// <summary>Сбрасывает кэш тестов.</summary>
     public static void InvalidateCache()
     {
         lock (_lock)
         {
             _cache = null;
+            _orderedCache = null;
             _groupsCache = null;
         }
     }
 
-    // PRIVATE
+    private static void EnsureDiscoveredUnsafe()
+    {
+        if (_cache is not null && _orderedCache is not null && _groupsCache is not null)
+            return;
+
+        var discovered = Discover();
+        var ordered = new TestDescriptor[discovered.Count];
+        int idx = 0;
+        var groupSet = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var desc in discovered.Values)
+        {
+            ordered[idx++] = desc;
+            groupSet.Add(desc.Group);
+        }
+
+        Array.Sort(ordered, static (a, b) =>
+        {
+            int cmp = a.Category.CompareTo(b.Category);
+            if (cmp != 0) return cmp;
+
+            cmp = StringComparer.Ordinal.Compare(a.Group, b.Group);
+            if (cmp != 0) return cmp;
+
+            cmp = a.Order.CompareTo(b.Order);
+            if (cmp != 0) return cmp;
+
+            return StringComparer.Ordinal.Compare(a.DisplayName, b.DisplayName);
+        });
+
+        _orderedCache = ordered;
+        _groupsCache = groupSet.ToFrozenSet(StringComparer.Ordinal);
+        _cache = discovered;
+    }
 
     private static FrozenDictionary<string, TestDescriptor> Discover()
     {
         var assembly = Assembly.GetExecutingAssembly();
-        var result = new Dictionary<string, TestDescriptor>(64);
+        var result = new Dictionary<string, TestDescriptor>(64, StringComparer.Ordinal);
 
         foreach (var type in assembly.GetTypes())
         {
             if (!type.IsClass || !type.IsAbstract || !type.IsSealed) continue;
-            if (type.Namespace is null || !type.Namespace.StartsWith("LMP.Tests")) continue;
+            if (type.Namespace is null || !type.Namespace.StartsWith("LMP.Tests", StringComparison.Ordinal)) continue;
 
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
             {
@@ -91,24 +143,32 @@ public static class TestDiscovery
 
                 if (method.ReturnType != typeof(Task))
                 {
-                    Log.Warn($"[TestDiscovery] Skipping {type.Name}.{method.Name}: " +
-                             $"return type must be Task, got {method.ReturnType.Name}");
+                    Log.Warn($"[TestDiscovery] Skipping {type.Name}.{method.Name}: return type must be Task, got {method.ReturnType.Name}");
                     continue;
                 }
 
                 var parameters = method.GetParameters();
-                bool requiresServices = false;
+                TestParameterSignature signature;
 
                 switch (parameters.Length)
                 {
                     case 0:
+                        signature = TestParameterSignature.None;
                         break;
                     case 1 when parameters[0].ParameterType == typeof(IServiceProvider):
-                        requiresServices = true;
+                        signature = TestParameterSignature.ServicesOnly;
+                        break;
+                    case 1 when parameters[0].ParameterType == typeof(CancellationToken):
+                        signature = TestParameterSignature.TokenOnly;
+                        break;
+                    case 2 when parameters[0].ParameterType == typeof(IServiceProvider) && parameters[1].ParameterType == typeof(CancellationToken):
+                        signature = TestParameterSignature.ServicesAndToken;
+                        break;
+                    case 2 when parameters[0].ParameterType == typeof(CancellationToken) && parameters[1].ParameterType == typeof(IServiceProvider):
+                        signature = TestParameterSignature.TokenAndServices;
                         break;
                     default:
-                        Log.Warn($"[TestDiscovery] Skipping {type.Name}.{method.Name}: " +
-                                 $"unsupported parameters ({parameters.Length})");
+                        Log.Warn($"[TestDiscovery] Skipping {type.Name}.{method.Name}: unsupported parameters count ({parameters.Length})");
                         continue;
                 }
 
@@ -116,8 +176,8 @@ public static class TestDiscovery
                 var displayName = attr.DisplayName ?? FormatMethodName(method.Name);
                 var id = $"{className}.{method.Name}";
 
-                // Группа: явно заданная > производная от имени класса
-                var group = attr.Group ?? InferGroupFromClassName(className);
+                var rawGroup = attr.Group ?? InferGroupFromClassName(className);
+                var group = TestGroups.Normalize(rawGroup);
 
                 result[id] = new TestDescriptor
                 {
@@ -129,47 +189,38 @@ public static class TestDiscovery
                     Order = attr.Order,
                     RequiresNetwork = attr.RequiresNetwork,
                     TimeoutSeconds = attr.TimeoutSeconds,
-                    RequiresServices = requiresServices,
+                    Signature = signature,
                     Method = method,
                 };
             }
         }
 
         Log.Info($"[TestDiscovery] Found {result.Count} tests in {assembly.GetName().Name}");
-        return result.ToFrozenDictionary();
+        return result.ToFrozenDictionary(StringComparer.Ordinal);
     }
 
-    /// <summary>
-    /// Выводит группу из имени класса: "SigCipherTests" → "SigCipher",
-    /// "StreamPipelineTests" → "Pipeline", "NTokenTests" → "NToken".
-    /// </summary>
     private static string InferGroupFromClassName(string className)
     {
         var name = className.AsSpan();
 
-        // Убираем суффикс "Tests"
         if (name.EndsWith("Tests", StringComparison.Ordinal))
             name = name[..^5];
+        else if (name.EndsWith("Benchmarks", StringComparison.Ordinal))
+            name = name[..^10];
 
-        // Убираем суффикс "Solver" (SigCipherSolverTests → SigCipher... нет, лучше "Solver")
-        // Специальные маппинги для известных классов
-        var result = name.ToString();
-
-        return result switch
+        return name switch
         {
-            "SigCipherSolver" => TestGroups.Solver,
-            "SigCipher" => TestGroups.SigCipher,
-            "StreamPipeline" => TestGroups.Pipeline,
-            "NToken" => TestGroups.NToken,
-            "Cache" => TestGroups.Cache,
-            "Notification" => TestGroups.Notifications,
-            _ => result, // для неизвестных — как есть
+            "SigCipherSolver" or "SigCipher" or "NToken" or "PoToken" => TestGroups.Cipher,
+            "CdnDiagnostic" or "StreamFreshness" => TestGroups.Network,
+            "StreamPipeline" or "PlayerResponse" or "SearchResponse" or "PlaylistStreamingParser" or "StreamingMemoryBenchmark" => TestGroups.Youtube,
+            "Cache" or "AtomicFile" or "MemoryPack" => TestGroups.Storage,
+            "AudioHotPath" or "HotPathAllocation" or "PreScan" => TestGroups.Audio,
+            "PlaylistOrder" => TestGroups.Playlists,
+            "Notification" or "Update" => TestGroups.System,
+            _ => TestGroups.Normalize(name.ToString()),
         };
     }
 
-    /// <summary>
-    /// "TestManifestSerializationAsync" → "Manifest Serialization".
-    /// </summary>
     private static string FormatMethodName(string methodName)
     {
         var name = methodName.AsSpan();

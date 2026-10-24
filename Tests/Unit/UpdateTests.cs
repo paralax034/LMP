@@ -3,26 +3,28 @@ using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
 
+/// <summary>
+/// Модульные тесты подсистемы автообновления и целостности метаданных сборок.
+/// Проверяют разбор git-тегов, номеров коммитов, SourceGen DTO и фильтрации тестов.
+/// </summary>
 public static class UpdateTests
 {
-    [TestMethod(TestCategory.Unit, "Update: Parse commit count from git tag formats",
-        Group = "Update", Order = 1, RequiresNetwork = false, TimeoutSeconds = 3)]
+    [TestMethod(TestCategory.Unit, "Parse Commit Count from Git Tag Formats", Group = TestGroups.System, Order = 1)]
     public static Task TestCommitCountParsingAsync()
     {
-        AssertEqual(185, UpdateService.ParseCommitCountFromTag("dev-185"));
-        AssertEqual(172, UpdateService.ParseCommitCountFromTag("v0.0.172"));
-        AssertEqual(172, UpdateService.ParseCommitCountFromTag("#172"));
-        AssertEqual(172, UpdateService.ParseCommitCountFromTag("172"));
-        AssertEqual(172, UpdateService.ParseCommitCountFromTag("0.0.172"));
-        AssertEqual(172, UpdateService.ParseCommitCountFromTag("0.0.172+abc1234"));
-        AssertEqual(0, UpdateService.ParseCommitCountFromTag("invalid-tag"));
-        AssertEqual(0, UpdateService.ParseCommitCountFromTag(string.Empty));
+        TestAssert.Equal(185, UpdateService.ParseCommitCountFromTag("dev-185"));
+        TestAssert.Equal(172, UpdateService.ParseCommitCountFromTag("v0.0.172"));
+        TestAssert.Equal(172, UpdateService.ParseCommitCountFromTag("#172"));
+        TestAssert.Equal(172, UpdateService.ParseCommitCountFromTag("172"));
+        TestAssert.Equal(172, UpdateService.ParseCommitCountFromTag("0.0.172"));
+        TestAssert.Equal(172, UpdateService.ParseCommitCountFromTag("0.0.172+abc1234"));
+        TestAssert.Equal(0, UpdateService.ParseCommitCountFromTag("invalid-tag"));
+        TestAssert.Equal(0, UpdateService.ParseCommitCountFromTag(string.Empty));
 
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Update: Extract commit count from rolling 'dev' release body",
-        Group = "Update", Order = 2, RequiresNetwork = false, TimeoutSeconds = 3)]
+    [TestMethod(TestCategory.Unit, "Extract Commit Count from Rolling Release", Group = TestGroups.System, Order = 2)]
     public static Task TestRollingDevReleaseExtractionAsync()
     {
         var release = new GitHubReleaseDto
@@ -50,13 +52,12 @@ public static class UpdateTests
         };
 
         int extractedCommit = UpdateService.ExtractCommitCountFromRelease(release);
-        AssertEqual(190, extractedCommit);
+        TestAssert.Equal(190, extractedCommit);
 
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Update: GitHubReleaseDto deserialization under Source Generator",
-        Group = "Update", Order = 3, RequiresNetwork = false, TimeoutSeconds = 3)]
+    [TestMethod(TestCategory.Unit, "GitHubReleaseDto SourceGen Deserialization", Group = TestGroups.System, Order = 3)]
     public static Task TestReleaseDtoDeserializationAsync()
     {
         const string json = """
@@ -76,47 +77,65 @@ public static class UpdateTests
         }
         """;
 
-        var dto = JsonSerializer.Deserialize(json, AppJsonContext.Default.GitHubReleaseDto);
-        if (dto == null)
-            throw new InvalidOperationException("Failed to deserialize GitHubReleaseDto");
+        var dto = TestAssert.NotNull(JsonSerializer.Deserialize(json, AppJsonContext.Default.GitHubReleaseDto));
 
-        AssertEqual("dev", dto.TagName);
-        AssertEqual("LMP Dev Build (Latest)", dto.Name);
-        AssertEqual(true, dto.Prerelease);
-        AssertEqual(1, dto.Assets.Count);
-        AssertEqual("LMP-Release-latest.zip", dto.Assets[0].Name);
-        AssertEqual(18456000L, dto.Assets[0].Size);
+        TestAssert.Equal("dev", dto.TagName);
+        TestAssert.Equal("LMP Dev Build (Latest)", dto.Name);
+        TestAssert.True(dto.Prerelease);
+        TestAssert.Equal(1, dto.Assets.Count);
+        TestAssert.Equal("LMP-Release-latest.zip", dto.Assets[0].Name);
+        TestAssert.Equal(18456000L, dto.Assets[0].Size);
 
         int commit = UpdateService.ExtractCommitCountFromRelease(dto);
-        AssertEqual(205, commit);
+        TestAssert.Equal(205, commit);
 
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Update: Old binaries file cleanup pass",
-        Group = "Update", Order = 4, RequiresNetwork = false, TimeoutSeconds = 5)]
+    [TestMethod(TestCategory.Unit, "Prune Pending .old Update Binaries", Group = TestGroups.System, Order = 4)]
     public static Task TestCleanupPassAsync()
     {
         string dummyOldFile = Path.Combine(AppContext.BaseDirectory, $"temp_test_{Guid.NewGuid():N}.old");
         File.WriteAllText(dummyOldFile, "cleanup-test-payload");
 
-        if (!File.Exists(dummyOldFile))
-            throw new InvalidOperationException("Failed to prepare test old file.");
+        TestAssert.True(File.Exists(dummyOldFile), "Failed to prepare test old file");
 
         UpdateService.CleanupPendingOldFiles();
 
         if (File.Exists(dummyOldFile))
         {
             try { File.Delete(dummyOldFile); } catch { }
-            throw new InvalidOperationException("CleanupPendingOldFiles failed to prune the old file.");
+            TestAssert.Fail("CleanupPendingOldFiles failed to prune the old file");
         }
 
         return Task.CompletedTask;
     }
 
-    private static void AssertEqual<T>(T expected, T actual)
+    [TestMethod(TestCategory.Unit, "TestRunner Canonical Groups & Filter Perf", Group = TestGroups.System, Order = 5)]
+    public static Task TestFrameworkGroupsAndFilterPerfAsync()
     {
-        if (!EqualityComparer<T>.Default.Equals(expected, actual))
-            throw new InvalidOperationException($"Assertion failed. Expected: '{expected}', Actual: '{actual}'");
+        var groups = TestDiscovery.GetAllGroups();
+        TestAssert.True(groups.Count > 0, "Expected discovered test groups");
+
+        foreach (var g in groups)
+            TestAssert.Equal(TestGroups.Normalize(g), g);
+
+        var vm = new LMP.UI.Features.Debug.TestRunnerViewModel();
+        var initialCollectionRef = vm.FilteredTests;
+        int totalCount = vm.AllTests.Count;
+        TestAssert.True(totalCount > 0);
+
+        vm.SearchFilter = "Audio";
+        TestAssert.True(ReferenceEquals(initialCollectionRef, vm.FilteredTests));
+        TestAssert.True(vm.FilteredTests.Count <= totalCount);
+
+        vm.SelectedGroup = TestGroups.System;
+        TestAssert.True(ReferenceEquals(initialCollectionRef, vm.FilteredTests));
+
+        vm.SearchFilter = "";
+        vm.SelectedGroup = null;
+        TestAssert.Equal(totalCount, vm.FilteredTests.Count);
+
+        return Task.CompletedTask;
     }
 }

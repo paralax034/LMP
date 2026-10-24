@@ -7,113 +7,78 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Unit и integration тесты для подсистемы дешифрации подписей (SigCipher).
+/// Модульные и интеграционные тесты подсистемы расшифровки подписей (Signature Cipher).
 /// </summary>
 public static class SigCipherTests
 {
     private const string MockPlayerScript = "var sts = 20650; signatureTimestamp: 20650;";
     private const string ExpectedSts = "20650";
 
-    // 
-    // UNIT TESTS (no network)
-    // 
-
-    /// <summary>
-    /// Проверяет извлечение SignatureTimestamp (STS) из кода плеера.
-    /// </summary>
-    [TestMethod(TestCategory.Unit, "SigCipher: STS Extraction",
-        Group = TestGroups.SigCipher, Order = 10)]
+    [TestMethod(TestCategory.Unit, "Extract SignatureTimestamp (STS) from Player JS",
+        Group = TestGroups.Cipher, Order = 1)]
     public static Task TestStsExtractionAsync()
     {
         var sts = YoutubeAstSolver.ExtractSts(MockPlayerScript);
-        Assert(sts == ExpectedSts, $"Expected STS '{ExpectedSts}', got '{sts}'");
+        TestAssert.Equal(ExpectedSts, sts, "STS extraction mismatch");
         return Task.CompletedTask;
     }
 
-    // 
-    // INTEGRATION TESTS (network required)
-    // 
-
-    /// <summary>
-    /// Дешифрует реальную подпись через production pipeline:
-    /// DI → <see cref="SigCipherDecryptor"/> → <see cref="JsDecryptionService"/> → QuickJS.
-    /// </summary>
-    [TestMethod(TestCategory.Integration, "SigCipher: Live Decryption",
-        Group = TestGroups.SigCipher, Order = 20, RequiresNetwork = true, TimeoutSeconds = 60)]
+    [TestMethod(TestCategory.Integration, "Signature Cipher Live Decryption",
+        Group = TestGroups.Cipher, Order = 2, RequiresNetwork = true, TimeoutSeconds = 60)]
     public static async Task TestLiveDecryptionAsync(IServiceProvider services)
     {
         var decryptor = services.GetRequiredService<SigCipherDecryptor>();
         var testSig = TestConfig.Get().SigCipher.TestSignature;
 
         var sw = Stopwatch.StartNew();
-        var result = await decryptor.DecipherAsync(testSig);
+        var result = await decryptor.DecipherAsync(testSig).ConfigureAwait(false);
         sw.Stop();
 
-        Assert(!string.IsNullOrEmpty(result), "Decryption returned empty string");
-        Assert(result != testSig, "Decryption returned unchanged signature");
-        Assert(result.Length > 50, $"Result length suspicious: {result.Length}");
+        TestAssert.NotNullOrEmpty(result, "Decryption returned empty string");
+        TestAssert.False(string.Equals(result, testSig, StringComparison.Ordinal), "Decryption returned unchanged signature");
+        TestAssert.True(result.Length > 50, $"Result length suspicious: {result.Length}");
 
-        // Все символы результата должны быть подмножеством символов входной строки
-        var inputChars = testSig.ToHashSet();
-        foreach (char c in result)
-            Assert(inputChars.Contains(c), $"Result contains invalid character '{c}'");
+        var inputChars = new HashSet<char>(testSig);
+        for (int i = 0; i < result.Length; i++)
+            TestAssert.True(inputChars.Contains(result[i]), $"Result contains unexpected character '{result[i]}'");
 
         int removedCount = testSig.Length - result.Length;
-        Assert(removedCount is >= 0 and <= 10,
-            $"Signature length difference out of bounds: removed {removedCount}");
+        TestAssert.True(removedCount is >= 0 and <= 10, $"Removed chars count out of bounds: {removedCount}");
 
-        Log.Info($"[SigCipher] Decrypted in {sw.ElapsedMilliseconds}ms " +
-                 $"(removed {removedCount} chars)");
-
-        // Cache hit
+        // Проверка кэша
         sw.Restart();
-        var cached = await decryptor.DecipherAsync(testSig);
+        var cached = await decryptor.DecipherAsync(testSig).ConfigureAwait(false);
         sw.Stop();
 
-        Assert(cached == result, "Cache returned inconsistent result");
-        Assert(sw.ElapsedMilliseconds < 5, $"Cache hit too slow: {sw.ElapsedMilliseconds}ms");
+        TestAssert.Equal(result, cached, "Cache returned inconsistent result");
+        TestAssert.True(sw.ElapsedMilliseconds < 5, $"Cache hit too slow: {sw.ElapsedMilliseconds}ms");
 
-        Log.Info($"[SigCipher] Cache hit in {sw.ElapsedMilliseconds}ms");
+        Log.Info($"[SigCipher] Live decipher verified in {sw.ElapsedMilliseconds}ms (removed {removedCount} chars)");
     }
 
-    /// <summary>
-    /// Верифицирует, что <see cref="JsDecryptionService"/> корректно обрабатывает
-    /// одновременные вызовы n и sig из shared persistent context.
-    /// </summary>
-    [TestMethod(TestCategory.Integration, "SigCipher: Concurrent N+Sig calls",
-        Group = TestGroups.SigCipher, Order = 25, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestConcurrentNAndSigAsync(IServiceProvider services)
+    [TestMethod(TestCategory.Integration, "Concurrent N-Token & Signature Decryption",
+        Group = TestGroups.Cipher, Order = 3, RequiresNetwork = true, TimeoutSeconds = 60)]
+    public static async Task TestConcurrentNAndSigAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var jsService = services.GetRequiredService<JsDecryptionService>();
-        await jsService.EnsureInitializedAsync(CancellationToken.None);
+        await jsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
         var nToken = TestConfig.Get().NToken.TestToken;
         var sigToken = TestConfig.Get().SigCipher.TestSignature;
 
-        // Запускаем оба вызова "одновременно"
-        // SemaphoreSlim(1,1) внутри service сериализует их корректно
         var sw = Stopwatch.StartNew();
         var nTask = jsService.CallAsync("n", nToken).AsTask();
         var sigTask = jsService.CallAsync("sig", sigToken).AsTask();
 
-        await Task.WhenAll(nTask, sigTask);
+        await Task.WhenAll(nTask, sigTask).ConfigureAwait(false);
         sw.Stop();
 
         var nResult = nTask.Result;
         var sigResult = sigTask.Result;
 
-        // sig может вернуть null если контекст сериализует и sig отрабатывает нормально
-        // главное что нет исключений и один из них правильный
-        Assert(sigResult != sigToken || nResult != nToken,
-            "Both n and sig returned unchanged — QuickJS likely not initialized");
+        TestAssert.True(sigResult != sigToken || nResult != nToken,
+            "Both n and sig returned unchanged — QuickJS execution failed");
 
         Log.Info($"[SigCipher] Concurrent calls completed in {sw.ElapsedMilliseconds}ms");
-        Log.Info($"[SigCipher] n: '{nToken}' → '{nResult ?? "null"}'");
-        Log.Info($"[SigCipher] sig: '{sigToken[..20]}...' → '{sigResult?[..20] ?? "null"}...'");
-    }
-
-    private static void Assert(bool condition, string message)
-    {
-        if (!condition) throw new Exception(message);
     }
 }

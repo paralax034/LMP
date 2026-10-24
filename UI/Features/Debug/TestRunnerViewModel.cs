@@ -1,118 +1,154 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Text;
+using Avalonia.Collections;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using LMP.Tests.Framework;
+using LMP.UI.Helpers;
 
 namespace LMP.UI.Features.Debug;
 
 /// <summary>
-/// ViewModel для вкладки "Tests" в Debug-окне.
-/// <para>
-/// Возможности:
-/// <list type="bullet">
-///   <item>Автоматический discovery тестов через рефлексию</item>
-///   <item>Фильтрация по категории (Unit/Integration/Benchmark)</item>
-///   <item>Фильтрация по тематической группе (NToken/SigCipher/Pipeline/Cache/Solver)</item>
-///   <item>Полнотекстовый поиск по имени теста</item>
-///   <item>Запуск одного теста, группы, или всех</item>
-///   <item>Редактирование test-config.json без перекомпиляции</item>
-/// </list>
-/// </para>
+/// Статусный фильтр для быстрого отбора тестов по результату выполнения.
+/// </summary>
+public enum TestStateFilter : byte
+{
+    All = 0,
+    FailedOnly = 1,
+    PassedOnly = 2,
+    SkippedOnly = 3,
+    PendingOnly = 4
+}
+
+/// <summary>
+/// Структура отложенного обновления состояния теста для исключения блокировок UI-потока.
+/// </summary>
+internal readonly struct TestStateUpdate
+{
+    public readonly string TestId;
+    public readonly TestRunState State;
+    public readonly string Duration;
+    public readonly string? ErrorMessage;
+    public readonly bool IsStarting;
+
+    public TestStateUpdate(string testId, TestRunState state, string duration, string? errorMessage, bool isStarting)
+    {
+        TestId = testId;
+        State = state;
+        Duration = duration;
+        ErrorMessage = errorMessage;
+        IsStarting = isStarting;
+    }
+}
+
+/// <summary>
+/// ViewModel вкладки тестов с пакетным обновлением состояния UI, полным отсутствием
+/// фризов диспетчера и выводом результатов исключительно в централизованный системный лог.
 /// </summary>
 public sealed partial class TestRunnerViewModel : ViewModelBase
 {
     private readonly TestRunner _runner;
+    private readonly Dictionary<string, TestItemViewModel> _testById = new(64, StringComparer.Ordinal);
+    private readonly ConcurrentQueue<TestStateUpdate> _pendingUpdates = new();
+
     private CancellationTokenSource? _runCts;
+    private long _lastScrollTicks;
+    private int _uiUpdateScheduled;
+    private int _activeBatchTotal;
+    private int _activeBatchCompleted;
+    private bool _isBatchRunning;
+    private bool _isDiscovered;
 
-    // PROPERTIES
+    public event Action<int>? ScrollToIndexRequested;
 
-    /// <summary>Все обнаруженные тесты.</summary>
-    public ObservableCollection<TestItemViewModel> AllTests { get; } = [];
+    public List<TestItemViewModel> AllTests { get; } = new(64);
+    public AvaloniaList<TestItemViewModel> FilteredTests { get; } = new();
 
-    /// <summary>Отфильтрованные тесты для отображения.</summary>
     [ObservableProperty]
-    public partial ObservableCollection<TestItemViewModel> FilteredTests { get; set; } = [];
-
-    /// <summary>Выбранный фильтр категории (null = все).</summary>
-    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAllCategoriesSelected))]
+    [NotifyPropertyChangedFor(nameof(IsUnitCategorySelected))]
+    [NotifyPropertyChangedFor(nameof(IsIntegrationCategorySelected))]
+    [NotifyPropertyChangedFor(nameof(IsBenchmarkCategorySelected))]
+    [NotifyPropertyChangedFor(nameof(IsDiagnosticCategorySelected))]
+    [NotifyPropertyChangedFor(nameof(IsActionCategorySelected))]
     public partial TestCategory? SelectedCategory { get; set; }
 
-    /// <summary>Выбранный фильтр тематической группы (null = все).</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAllGroupsSelected))]
     public partial string? SelectedGroup { get; set; }
 
-    /// <summary>Текст поиска по имени теста.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsStateAllSelected))]
+    [NotifyPropertyChangedFor(nameof(IsStateFailedSelected))]
+    [NotifyPropertyChangedFor(nameof(IsStatePassedSelected))]
+    [NotifyPropertyChangedFor(nameof(IsStateSkippedSelected))]
+    [NotifyPropertyChangedFor(nameof(IsStatePendingSelected))]
+    public partial TestStateFilter StateFilter { get; set; } = TestStateFilter.All;
+
     [ObservableProperty]
     public partial string SearchFilter { get; set; } = "";
 
-    /// <summary>Идёт ли запуск тестов.</summary>
+    [ObservableProperty]
+    public partial bool ErrorsOnTop { get; set; } = true;
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunAllCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunUnitCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunIntegrationCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunBenchmarksCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunDiagnosticsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunActionsCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunFilteredCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunSingleCommand))]
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
     public partial bool IsRunning { get; set; }
 
-    /// <summary>Суммарная статистика.</summary>
-    [ObservableProperty]
-    public partial string Summary { get; set; } = "";
+    [ObservableProperty] public partial string Summary { get; set; } = "";
+    [ObservableProperty] public partial string ShowingCountText { get; set; } = "0 / 0";
+    [ObservableProperty] public partial int Progress { get; set; }
 
-    /// <summary>Лог выполнения.</summary>
-    [ObservableProperty]
-    public partial string LogOutput { get; set; } = "";
+    [ObservableProperty] public partial int FailedCount { get; set; }
+    [ObservableProperty] public partial int PassedCount { get; set; }
+    [ObservableProperty] public partial int SkippedCount { get; set; }
+    [ObservableProperty] public partial int PendingCount { get; set; }
 
-    /// <summary>Прогресс batch-запуска (0-100).</summary>
-    [ObservableProperty]
-    public partial int Progress { get; set; }
+    public bool IsAllGroupsSelected => SelectedGroup is null;
+    public bool IsAllCategoriesSelected => SelectedCategory is null;
+    public bool IsUnitCategorySelected => SelectedCategory == TestCategory.Unit;
+    public bool IsIntegrationCategorySelected => SelectedCategory == TestCategory.Integration;
+    public bool IsBenchmarkCategorySelected => SelectedCategory == TestCategory.Benchmark;
+    public bool IsDiagnosticCategorySelected => SelectedCategory == TestCategory.Diagnostic;
+    public bool IsActionCategorySelected => SelectedCategory == TestCategory.Action;
 
-    /// <summary>
-    /// Все доступные тематические группы для UI-кнопок фильтра.
-    /// Заполняется при discovery.
-    /// </summary>
+    public bool IsStateAllSelected => StateFilter == TestStateFilter.All;
+    public bool IsStateFailedSelected => StateFilter == TestStateFilter.FailedOnly;
+    public bool IsStatePassedSelected => StateFilter == TestStateFilter.PassedOnly;
+    public bool IsStateSkippedSelected => StateFilter == TestStateFilter.SkippedOnly;
+    public bool IsStatePendingSelected => StateFilter == TestStateFilter.PendingOnly;
+
     public ObservableCollection<GroupFilterItem> AvailableGroups { get; } = [];
 
     // COMMANDS
 
-    /// <summary>Запустить ВСЕ тесты.</summary>
     public IAsyncRelayCommand RunAllCommand { get; }
-
-    /// <summary>Запустить только Unit.</summary>
     public IAsyncRelayCommand RunUnitCommand { get; }
-
-    /// <summary>Запустить только Integration.</summary>
     public IAsyncRelayCommand RunIntegrationCommand { get; }
-
-    /// <summary>Запустить только Benchmarks.</summary>
     public IAsyncRelayCommand RunBenchmarksCommand { get; }
-
-    /// <summary>Запустить отфильтрованные тесты (по текущему фильтру группы/категории).</summary>
+    public IAsyncRelayCommand RunDiagnosticsCommand { get; }
+    public IAsyncRelayCommand RunActionsCommand { get; }
     public IAsyncRelayCommand RunFilteredCommand { get; }
-
-    /// <summary>Запустить один тест по клику.</summary>
     public IAsyncRelayCommand<TestItemViewModel> RunSingleCommand { get; }
-
-    /// <summary>Переключить фильтр группы (toggle).</summary>
+    public IRelayCommand<TestItemViewModel> SelectTestCommand { get; }
     public IRelayCommand<string?> ToggleGroupFilterCommand { get; }
-
-    /// <summary>Отменить текущий запуск.</summary>
+    public IRelayCommand<TestCategory?> ToggleCategoryFilterCommand { get; }
+    public IRelayCommand<TestStateFilter> SetStateFilterCommand { get; }
     public IRelayCommand CancelCommand { get; }
-
-    /// <summary>Сбросить все результаты.</summary>
     public IRelayCommand ResetCommand { get; }
-
-    /// <summary>Очистить лог.</summary>
-    public IRelayCommand ClearLogCommand { get; }
-
-    /// <summary>Открыть test-config.json в редакторе по умолчанию.</summary>
     public IRelayCommand OpenConfigCommand { get; }
-
-    /// <summary>Перезагрузить test-config.json из файла.</summary>
     public IRelayCommand ReloadConfigCommand { get; }
-
-    // CTOR
 
     public TestRunnerViewModel()
     {
@@ -120,317 +156,437 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         _runner.TestStarting += OnTestStarting;
         _runner.TestCompleted += OnTestCompleted;
 
-        RunAllCommand = new AsyncRelayCommand(
-            () => RunBatchByCategoryAsync(null),
-            () => !IsRunning);
-
-        RunUnitCommand = new AsyncRelayCommand(
-            () => RunBatchByCategoryAsync(TestCategory.Unit),
-            () => !IsRunning);
-
-        RunIntegrationCommand = new AsyncRelayCommand(
-            () => RunBatchByCategoryAsync(TestCategory.Integration),
-            () => !IsRunning);
-
-        RunBenchmarksCommand = new AsyncRelayCommand(
-            () => RunBatchByCategoryAsync(TestCategory.Benchmark),
-            () => !IsRunning);
-
-        RunFilteredCommand = new AsyncRelayCommand(
-            RunFilteredAsync,
-            () => !IsRunning);
-
-        RunSingleCommand = new AsyncRelayCommand<TestItemViewModel>(
-            RunSingleAsync,
-            _ => !IsRunning);
-
-        ToggleGroupFilterCommand = new RelayCommand<string?>(group =>
+        RunAllCommand = new AsyncRelayCommand(() => RunBatchByCategoryAsync(null), () => !IsRunning);
+        RunUnitCommand = new AsyncRelayCommand(() => RunBatchByCategoryAsync(TestCategory.Unit), () => !IsRunning);
+        RunIntegrationCommand = new AsyncRelayCommand(() => RunBatchByCategoryAsync(TestCategory.Integration), () => !IsRunning);
+        RunBenchmarksCommand = new AsyncRelayCommand(() => RunBatchByCategoryAsync(TestCategory.Benchmark), () => !IsRunning);
+        RunDiagnosticsCommand = new AsyncRelayCommand(() => RunBatchByCategoryAsync(TestCategory.Diagnostic), () => !IsRunning);
+        RunActionsCommand = new AsyncRelayCommand(() => RunBatchByCategoryAsync(TestCategory.Action), () => !IsRunning);
+        RunFilteredCommand = new AsyncRelayCommand(RunFilteredAsync, () => !IsRunning);
+        RunSingleCommand = new AsyncRelayCommand<TestItemViewModel>(RunSingleAsync, _ => !IsRunning);
+        SelectTestCommand = new RelayCommand<TestItemViewModel>(item =>
         {
-            // Toggle: если та же группа — сбрасываем, иначе ставим
-            SelectedGroup = SelectedGroup == group ? null : group;
+            if (item is not null && !IsRunning)
+                _ = RunSingleAsync(item);
         });
 
-        CancelCommand = new RelayCommand(
-            () => _runCts?.Cancel(),
-            () => IsRunning);
+        ToggleGroupFilterCommand = new RelayCommand<string?>(group => SelectedGroup = SelectedGroup == group ? null : group);
+        ToggleCategoryFilterCommand = new RelayCommand<TestCategory?>(cat => SelectedCategory = SelectedCategory == cat ? null : cat);
+        SetStateFilterCommand = new RelayCommand<TestStateFilter>(filter => StateFilter = StateFilter == filter ? TestStateFilter.All : filter);
 
+        CancelCommand = new RelayCommand(() => _runCts?.Cancel(), () => IsRunning);
         ResetCommand = new RelayCommand(ResetAll);
-        ClearLogCommand = new RelayCommand(() =>
-        {
-            _logBuilder.Clear();
-            LogOutput = "";
-        });
 
-        // ═══ CONFIG COMMANDS ═══
         OpenConfigCommand = new RelayCommand(() =>
         {
             TestConfig.OpenInEditor();
-            AppendLog($"Opened config: {TestConfig.GetConfigPath()}");
+            Log.Info($"[TestRunner] Opened config: {TestConfig.GetConfigPath()}");
         });
 
         ReloadConfigCommand = new RelayCommand(() =>
         {
             TestConfig.Reload();
-            AppendLog("Reloaded test-config.json from disk.");
+            Log.Info("[TestRunner] Reloaded test-config.json from disk.");
         });
 
-        DiscoverTests();
-        UpdateSummary();
+        EnsureDiscovered();
     }
 
     partial void OnSelectedCategoryChanged(TestCategory? value) => ApplyFilter();
     partial void OnSelectedGroupChanged(string? value) => ApplyFilter();
+    partial void OnStateFilterChanged(TestStateFilter value) => ApplyFilter();
     partial void OnSearchFilterChanged(string value) => ApplyFilter();
+    partial void OnErrorsOnTopChanged(bool value) => ApplyFilter();
 
-    // DISCOVERY
-
-    private void DiscoverTests()
+    public void EnsureDiscovered()
     {
+        if (_isDiscovered) return;
+        _isDiscovered = true;
+
         var ordered = TestDiscovery.GetAllOrdered();
+        var uniqueGroups = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var descriptor in ordered)
-            AllTests.Add(new TestItemViewModel(descriptor));
-
-        // Собираем уникальные группы для кнопок-фильтров
-        var groups = TestDiscovery.GetAllGroups();
-        foreach (var group in groups.OrderBy(g => g, StringComparer.Ordinal))
+        for (int i = 0; i < ordered.Count; i++)
         {
-            var count = ordered.Count(t => t.Group == group);
-            AvailableGroups.Add(new GroupFilterItem(group, count));
+            var descriptor = ordered[i];
+            var item = new TestItemViewModel(descriptor, i);
+            AllTests.Add(item);
+            _testById[descriptor.Id] = item;
+            uniqueGroups.Add(descriptor.Group);
         }
 
+        var sortedGroups = new List<string>(uniqueGroups);
+        sortedGroups.Sort(StringComparer.Ordinal);
+
+        for (int i = 0; i < sortedGroups.Count; i++)
+            AvailableGroups.Add(new GroupFilterItem(sortedGroups[i], 0));
+
         ApplyFilter();
-        AppendLog($"Discovered {AllTests.Count} tests in {groups.Count} groups");
-        AppendLog($"Config: {TestConfig.GetConfigPath()}");
+        UpdateSummary();
+        Log.Info($"[TestRunner] Discovered {AllTests.Count} tests across {sortedGroups.Count} groups.");
     }
 
-    // RUNNING
-
-    /// <summary>Запускает тесты по категории (null = все).</summary>
     private async Task RunBatchByCategoryAsync(TestCategory? category)
     {
-        var tests = category is not null
-            ? AllTests.Where(t => t.Descriptor.Category == category.Value).ToList()
-            : [.. AllTests];
+        var list = new List<TestItemViewModel>(AllTests.Count);
+        for (int i = 0; i < AllTests.Count; i++)
+        {
+            var t = AllTests[i];
+            if (category is null)
+            {
+                if (t.Descriptor.Category != TestCategory.Action)
+                    list.Add(t);
+            }
+            else if (t.Descriptor.Category == category.Value)
+            {
+                list.Add(t);
+            }
+        }
 
-        await RunBatchCoreAsync(tests, category?.ToString() ?? "All");
+        await RunBatchCoreAsync(list, category?.ToString() ?? "All Tests").ConfigureAwait(false);
     }
 
-    /// <summary>Запускает тесты по текущему фильтру (группа + категория + поиск).</summary>
     private async Task RunFilteredAsync()
     {
-        var tests = FilteredTests.ToList();
-        var label = BuildFilterLabel();
-        await RunBatchCoreAsync(tests, label);
+        var list = new List<TestItemViewModel>(FilteredTests.Count);
+        for (int i = 0; i < FilteredTests.Count; i++)
+            list.Add(FilteredTests[i]);
+
+        await RunBatchCoreAsync(list, BuildFilterLabel()).ConfigureAwait(false);
     }
 
-    /// <summary>Общая логика запуска batch.</summary>
     private async Task RunBatchCoreAsync(List<TestItemViewModel> tests, string label)
     {
         if (tests.Count == 0)
         {
-            AppendLog("No tests to run.");
+            Log.Info("[TestRunner] No items match current filter.");
             return;
         }
 
-        IsRunning = true;
+        SetIsRunningOnUI(true);
         Progress = 0;
+        _activeBatchTotal = tests.Count;
+        _activeBatchCompleted = 0;
+        _isBatchRunning = true;
         _runCts = new CancellationTokenSource();
 
-        AppendLog($"\n{new string('═', 60)}");
-        AppendLog($"  Running {tests.Count} tests [{label}]...");
-        AppendLog($"{new string('═', 60)}\n");
+        var header = $"\n── Running {tests.Count} items [{label}] ──";
+        Log.Info(header);
 
         try
         {
-            var descriptors = tests.Select(t => t.Descriptor).ToList();
-            int completed = 0;
+            var descriptors = new TestDescriptor[tests.Count];
+            for (int i = 0; i < tests.Count; i++)
+                descriptors[i] = tests[i].Descriptor;
 
-            void OnProgress(TestDescriptor _, TestResult __)
-            {
-                var pct = (int)(Interlocked.Increment(ref completed) * 100.0 / descriptors.Count);
-                Dispatcher.UIThread.Post(() => Progress = pct);
-            }
-
-            _runner.TestCompleted += OnProgress;
-            try
-            {
-                await Task.Run(() => _runner.RunBatchAsync(descriptors, _runCts.Token));
-            }
-            finally
-            {
-                _runner.TestCompleted -= OnProgress;
-            }
+            await _runner.RunBatchAsync(descriptors, _runCts.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            AppendLog($"Batch error: {ex.Message}");
+            Log.Error($"[TestRunner] Batch error: {ex.Message}");
         }
         finally
         {
-            IsRunning = false;
             _runCts?.Dispose();
             _runCts = null;
-            Progress = 100;
-            UpdateSummary();
 
-            AppendLog($"\n{new string('═', 60)}");
-            AppendLog($"  {Summary}");
-            AppendLog($"{new string('═', 60)}\n");
+            Dispatcher.UIThread.Post(() =>
+            {
+                ProcessPendingUpdatesOnUi();
+                IsRunning = false;
+                Progress = 100;
+                _isBatchRunning = false;
+                _activeBatchTotal = 0;
+                _activeBatchCompleted = 0;
+                UpdateSummary();
+                ApplyFilter();
+                var footer = $"── Finished: {Summary} ──";
+                Log.Info(footer);
+            });
         }
     }
 
-    /// <summary>Запускает один тест по клику.</summary>
     private async Task RunSingleAsync(TestItemViewModel? item)
     {
         if (item is null) return;
 
-        IsRunning = true;
+        SetIsRunningOnUI(true);
         _runCts = new CancellationTokenSource();
+        _isBatchRunning = false;
+        _activeBatchTotal = 1;
+        _activeBatchCompleted = 0;
 
-        AppendLog($"\n▶ Running: {item.DisplayName}...");
+        var header = $"\n▶ [{item.Category}] {item.DisplayName}";
+        Log.Info(header);
 
         try
         {
-            await Task.Run(() => _runner.RunAsync(item.Descriptor, _runCts.Token));
+            await _runner.RunAsync(item.Descriptor, _runCts.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            AppendLog($"Error: {ex.Message}");
+            Log.Error($"[TestRunner] Error: {ex.Message}");
         }
         finally
         {
-            IsRunning = false;
             _runCts?.Dispose();
             _runCts = null;
-            UpdateSummary();
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                ProcessPendingUpdatesOnUi();
+                IsRunning = false;
+                Progress = 100;
+                _activeBatchTotal = 0;
+                _activeBatchCompleted = 0;
+                UpdateSummary();
+                ApplyFilter();
+            });
         }
     }
 
-    // EVENT HANDLERS (background thread → UI thread)
+    private void SetIsRunningOnUI(bool value)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            IsRunning = value;
+        else
+            Dispatcher.UIThread.Post(() => IsRunning = value);
+    }
 
     private void OnTestStarting(TestDescriptor descriptor)
     {
-        Dispatcher.UIThread.Post(() =>
-        {
-            var item = AllTests.FirstOrDefault(t => t.Descriptor.Id == descriptor.Id);
-            if (item is not null)
-            {
-                item.State = TestRunState.Running;
-                item.Duration = "";
-                item.ErrorMessage = null;
-            }
-        });
+        _pendingUpdates.Enqueue(new TestStateUpdate(descriptor.Id, TestRunState.Running, "", null, isStarting: true));
+        ScheduleUiFlush();
     }
 
     private void OnTestCompleted(TestDescriptor descriptor, TestResult result)
     {
-        Dispatcher.UIThread.Post(() =>
+        Interlocked.Increment(ref _activeBatchCompleted);
+
+        var icon = result.State switch
         {
-            var item = AllTests.FirstOrDefault(t => t.Descriptor.Id == descriptor.Id);
-            if (item is not null)
-            {
-                item.State = result.State;
-                item.Duration = result.DurationFormatted;
-                item.ErrorMessage = result.ErrorMessage;
-            }
+            TestRunState.Passed => "✓",
+            TestRunState.Failed => "✗",
+            TestRunState.Skipped => "⊘",
+            _ => "?",
+        };
 
-            var icon = result.State switch
-            {
-                TestRunState.Passed => "✓",
-                TestRunState.Failed => "✗",
-                TestRunState.Skipped => "⊘",
-                _ => "?",
-            };
+        string line = result.ErrorMessage is not null
+            ? $"  {icon} [{descriptor.Group}] {descriptor.DisplayName} ({result.DurationFormatted}) — {result.ErrorMessage}"
+            : $"  {icon} [{descriptor.Group}] {descriptor.DisplayName} ({result.DurationFormatted})";
 
-            var line = $"  {icon} [{descriptor.Group}] {descriptor.DisplayName} ({result.DurationFormatted})";
-            if (result.ErrorMessage is not null)
-                line += $" — {result.ErrorMessage}";
+        if (result.State == TestRunState.Failed)
+            Log.Error(line);
+        else if (result.State == TestRunState.Skipped)
+            Log.Warn(line);
+        else
+            Log.Info(line);
 
-            AppendLog(line);
-        });
+        _pendingUpdates.Enqueue(new TestStateUpdate(descriptor.Id, result.State, result.DurationFormatted, result.ErrorMessage, isStarting: false));
+        ScheduleUiFlush();
     }
 
-    // FILTER
-
-    /// <summary>Применяет все три фильтра: категория + группа + текст.</summary>
-    private void ApplyFilter()
+    private void ScheduleUiFlush()
     {
-        var filtered = AllTests.AsEnumerable();
-
-        // Фильтр по категории
-        if (SelectedCategory is not null)
-            filtered = filtered.Where(t => t.Descriptor.Category == SelectedCategory.Value);
-
-        // Фильтр по тематической группе
-        if (SelectedGroup is not null)
-            filtered = filtered.Where(t => t.Descriptor.Group == SelectedGroup);
-
-        // Фильтр по тексту
-        if (!string.IsNullOrWhiteSpace(SearchFilter))
+        if (Interlocked.CompareExchange(ref _uiUpdateScheduled, 1, 0) == 0)
         {
-            var search = SearchFilter;
-            filtered = filtered.Where(t =>
-                t.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                t.Descriptor.ClassName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                t.Descriptor.Group.Contains(search, StringComparison.OrdinalIgnoreCase));
+            Dispatcher.UIThread.Post(ProcessPendingUpdatesOnUi, DispatcherPriority.Background);
+        }
+    }
+
+    private void ProcessPendingUpdatesOnUi()
+    {
+        Interlocked.Exchange(ref _uiUpdateScheduled, 0);
+
+        bool stateChanged = false;
+        long now = Stopwatch.GetTimestamp();
+
+        while (_pendingUpdates.TryDequeue(out var update))
+        {
+            if (_testById.TryGetValue(update.TestId, out var item))
+            {
+                item.State = update.State;
+                item.Duration = update.Duration;
+                item.ErrorMessage = update.ErrorMessage;
+                stateChanged = true;
+
+                // Автоскролл активен исключительно при пакетном прогоне, исключая смещение при ручном клике
+                if (update.IsStarting && _isBatchRunning)
+                {
+                    double elapsedMs = (now - _lastScrollTicks) * 1000.0 / Stopwatch.Frequency;
+                    if (elapsedMs > 150.0)
+                    {
+                        _lastScrollTicks = now;
+                        int index = FilteredTests.IndexOf(item);
+                        if (index >= 0)
+                            ScrollToIndexRequested?.Invoke(index);
+                    }
+                }
+            }
         }
 
-        FilteredTests = new ObservableCollection<TestItemViewModel>(filtered);
+        if (stateChanged)
+        {
+            int total = _activeBatchTotal;
+            if (total > 0)
+            {
+                int completed = Volatile.Read(ref _activeBatchCompleted);
+                Progress = Math.Clamp((int)(completed * 100.0 / total), 0, 100);
+            }
 
-        // Обновляем IsSelected у GroupFilterItems
-        foreach (var g in AvailableGroups)
-            g.IsSelected = g.Name == SelectedGroup;
+            UpdateSummary();
+        }
     }
 
-    /// <summary>Строит строку-описание текущего фильтра для лога.</summary>
+    private void ApplyFilter()
+    {
+        var category = SelectedCategory;
+        var group = SelectedGroup;
+        var state = StateFilter;
+        var search = SearchFilter.AsSpan().Trim();
+        bool hasSearch = !search.IsEmpty;
+
+        var matched = new List<TestItemViewModel>(AllTests.Count);
+
+        for (int i = 0; i < AllTests.Count; i++)
+        {
+            var t = AllTests[i];
+
+            if (category.HasValue && t.Category != category.Value)
+                continue;
+
+            if (group is not null && !string.Equals(t.Group, group, StringComparison.Ordinal))
+                continue;
+
+            if (state == TestStateFilter.FailedOnly && t.State != TestRunState.Failed) continue;
+            if (state == TestStateFilter.PassedOnly && t.State != TestRunState.Passed) continue;
+            if (state == TestStateFilter.SkippedOnly && t.State != TestRunState.Skipped) continue;
+            if (state == TestStateFilter.PendingOnly && t.State != TestRunState.NotRun) continue;
+
+            if (hasSearch)
+            {
+                if (!t.DisplayName.AsSpan().Contains(search, StringComparison.OrdinalIgnoreCase) &&
+                    !t.Descriptor.ClassName.AsSpan().Contains(search, StringComparison.OrdinalIgnoreCase) &&
+                    !t.Group.AsSpan().Contains(search, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+            }
+
+            matched.Add(t);
+        }
+
+        if (ErrorsOnTop)
+        {
+            matched.Sort(static (a, b) =>
+            {
+                int rankA = a.State == TestRunState.Failed ? 0 : (a.State == TestRunState.Running ? 1 : 2);
+                int rankB = b.State == TestRunState.Failed ? 0 : (b.State == TestRunState.Running ? 1 : 2);
+                int cmp = rankA.CompareTo(rankB);
+                if (cmp != 0) return cmp;
+
+                return a.OriginalIndex.CompareTo(b.OriginalIndex);
+            });
+        }
+
+        FilteredTests.Clear();
+        FilteredTests.AddRange(matched);
+
+        for (int i = 0; i < AvailableGroups.Count; i++)
+        {
+            var g = AvailableGroups[i];
+            int countInGroup = 0;
+
+            for (int j = 0; j < AllTests.Count; j++)
+            {
+                var t = AllTests[j];
+                if (category.HasValue && t.Category != category.Value) continue;
+                if (state == TestStateFilter.FailedOnly && t.State != TestRunState.Failed) continue;
+                if (state == TestStateFilter.PassedOnly && t.State != TestRunState.Passed) continue;
+                if (state == TestStateFilter.SkippedOnly && t.State != TestRunState.Skipped) continue;
+                if (state == TestStateFilter.PendingOnly && t.State != TestRunState.NotRun) continue;
+
+                if (hasSearch)
+                {
+                    if (!t.DisplayName.AsSpan().Contains(search, StringComparison.OrdinalIgnoreCase) &&
+                        !t.Descriptor.ClassName.AsSpan().Contains(search, StringComparison.OrdinalIgnoreCase) &&
+                        !t.Group.AsSpan().Contains(search, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+
+                if (string.Equals(t.Group, g.Name, StringComparison.Ordinal))
+                    countInGroup++;
+            }
+
+            g.Count = countInGroup;
+            g.IsSelected = string.Equals(g.Name, group, StringComparison.Ordinal);
+        }
+
+        ShowingCountText = $"{matched.Count} / {AllTests.Count}";
+    }
+
     private string BuildFilterLabel()
     {
-        var parts = new List<string>(3);
-        if (SelectedCategory is not null) parts.Add(SelectedCategory.Value.ToString());
-        if (SelectedGroup is not null) parts.Add(SelectedGroup);
-        if (!string.IsNullOrWhiteSpace(SearchFilter)) parts.Add($"\"{SearchFilter}\"");
-        return parts.Count > 0 ? string.Join(" + ", parts) : "All";
+        var sb = new StringBuilder(32);
+        if (SelectedCategory is not null) sb.Append(SelectedCategory.Value);
+        if (SelectedGroup is not null)
+        {
+            if (sb.Length > 0) sb.Append(" + ");
+            sb.Append(SelectedGroup);
+        }
+        if (StateFilter != TestStateFilter.All)
+        {
+            if (sb.Length > 0) sb.Append(" + ");
+            sb.Append(StateFilter);
+        }
+        return sb.Length > 0 ? sb.ToString() : "Filtered";
     }
-
-    // HELPERS
 
     private void ResetAll()
     {
-        foreach (var test in AllTests)
+        for (int i = 0; i < AllTests.Count; i++)
         {
+            var test = AllTests[i];
             test.State = TestRunState.NotRun;
             test.Duration = "";
             test.ErrorMessage = null;
         }
         Progress = 0;
         UpdateSummary();
+        ApplyFilter();
     }
 
     private void UpdateSummary()
     {
-        int passed = AllTests.Count(t => t.State == TestRunState.Passed);
-        int failed = AllTests.Count(t => t.State == TestRunState.Failed);
-        int skipped = AllTests.Count(t => t.State == TestRunState.Skipped);
-        int notRun = AllTests.Count(t => t.State == TestRunState.NotRun);
-        int running = AllTests.Count(t => t.State == TestRunState.Running);
+        int passed = 0, failed = 0, skipped = 0, notRun = 0, running = 0;
+
+        for (int i = 0; i < AllTests.Count; i++)
+        {
+            switch (AllTests[i].State)
+            {
+                case TestRunState.Passed: passed++; break;
+                case TestRunState.Failed: failed++; break;
+                case TestRunState.Skipped: skipped++; break;
+                case TestRunState.Running: running++; break;
+                default: notRun++; break;
+            }
+        }
+
+        FailedCount = failed;
+        PassedCount = passed;
+        SkippedCount = skipped;
+        PendingCount = notRun;
 
         var sb = new StringBuilder(64);
-        if (passed > 0) sb.Append($"{passed} passed");
-        if (failed > 0) { if (sb.Length > 0) sb.Append(", "); sb.Append($"{failed} failed"); }
-        if (skipped > 0) { if (sb.Length > 0) sb.Append(", "); sb.Append($"{skipped} skipped"); }
-        if (running > 0) { if (sb.Length > 0) sb.Append(", "); sb.Append($"{running} running"); }
-        if (notRun > 0) { if (sb.Length > 0) sb.Append(", "); sb.Append($"{notRun} pending"); }
+        if (passed > 0) sb.Append(passed).Append(" passed");
+        if (failed > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append(failed).Append(" failed"); }
+        if (skipped > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append(skipped).Append(" skipped"); }
+        if (running > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append(running).Append(" running"); }
+        if (notRun > 0) { if (sb.Length > 0) sb.Append(" · "); sb.Append(notRun).Append(" pending"); }
 
         Summary = sb.Length > 0 ? sb.ToString() : "No tests";
-    }
-
-    private readonly StringBuilder _logBuilder = new(4096);
-
-    private void AppendLog(string line)
-    {
-        _logBuilder.AppendLine(line);
-        LogOutput = _logBuilder.ToString();
     }
 
     protected override void Dispose(bool disposing)
@@ -446,31 +602,37 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     }
 }
 
-/// <summary>
-/// UI-модель одного теста в списке.
-/// </summary>
-public sealed partial class TestItemViewModel : ViewModelBase
+public sealed partial class TestItemViewModel : ObservableObject
 {
     public TestDescriptor Descriptor { get; }
+    public int OriginalIndex { get; }
 
     public string DisplayName => Descriptor.DisplayName;
     public TestCategory Category => Descriptor.Category;
     public string Group => Descriptor.Group;
     public bool RequiresNetwork => Descriptor.RequiresNetwork;
+    public bool IsAction => Descriptor.IsAction;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StateIcon))]
+    [NotifyPropertyChangedFor(nameof(IsPassed))]
+    [NotifyPropertyChangedFor(nameof(IsFailed))]
+    [NotifyPropertyChangedFor(nameof(IsRunning))]
+    [NotifyPropertyChangedFor(nameof(IsSkipped))]
     public partial TestRunState State { get; set; } = TestRunState.NotRun;
 
-    [ObservableProperty]
-    public partial string Duration { get; set; } = "";
+    [ObservableProperty] public partial string Duration { get; set; } = "";
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasError))] public partial string? ErrorMessage { get; set; }
 
-    [ObservableProperty]
-    public partial string? ErrorMessage { get; set; }
+    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+    public bool IsPassed => State == TestRunState.Passed;
+    public bool IsFailed => State == TestRunState.Failed;
+    public bool IsRunning => State == TestRunState.Running;
+    public bool IsSkipped => State == TestRunState.Skipped;
 
-    /// <summary>Иконка состояния.</summary>
     public string StateIcon => State switch
     {
-        TestRunState.NotRun => "○",
+        TestRunState.NotRun => IsAction ? "⚡" : "○",
         TestRunState.Running => "◉",
         TestRunState.Passed => "✓",
         TestRunState.Failed => "✗",
@@ -478,52 +640,34 @@ public sealed partial class TestItemViewModel : ViewModelBase
         _ => "?",
     };
 
-    /// <summary>Цвет состояния (hex).</summary>
-    public string StateColor => State switch
-    {
-        TestRunState.Passed => "#4CAF50",
-        TestRunState.Failed => "#F44336",
-        TestRunState.Running => "#2196F3",
-        TestRunState.Skipped => "#9E9E9E",
-        _ => "#757575",
-    };
-
-    /// <summary>Badge категории.</summary>
     public string CategoryBadge => Category switch
     {
         TestCategory.Unit => "UNIT",
         TestCategory.Integration => "INT",
         TestCategory.Benchmark => "BENCH",
+        TestCategory.E2E => "E2E",
+        TestCategory.Diagnostic => "DIAG",
+        TestCategory.Action => "ACT",
         _ => "?",
     };
 
-    public TestItemViewModel(TestDescriptor descriptor)
+    public TestItemViewModel(TestDescriptor descriptor, int originalIndex)
     {
         Descriptor = descriptor;
-    }
-
-    partial void OnStateChanged(TestRunState value)
-    {
-        OnPropertyChanged(nameof(StateIcon));
-        OnPropertyChanged(nameof(StateColor));
+        OriginalIndex = originalIndex;
     }
 }
 
-/// <summary>
-/// Элемент фильтра по тематической группе. Используется в UI как toggle-кнопка.
-/// </summary>
-public sealed partial class GroupFilterItem : ViewModelBase
+public sealed partial class GroupFilterItem : ObservableObject
 {
-    /// <summary>Имя группы: "NToken", "SigCipher" и т.д.</summary>
     public string Name { get; }
 
-    /// <summary>Количество тестов в группе.</summary>
-    public int Count { get; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Label))]
+    public partial int Count { get; set; }
 
-    /// <summary>Текст для кнопки: "NToken (5)".</summary>
     public string Label => $"{Name} ({Count})";
 
-    /// <summary>Выбрана ли эта группа в фильтре.</summary>
     [ObservableProperty]
     public partial bool IsSelected { get; set; }
 
