@@ -434,6 +434,12 @@ public static partial class HotPathAllocationTests
         refBmp.Dispose();
         TestAssert.True(refBmp.IsDisposed);
 
+        // Инвариант безопасности UI: после вытеснения из кэша (refBmp.Dispose) сам Bitmap,
+        // удерживаемый в Avalonia.Controls.Image.Source, обязан оставаться валидным при вызове bmp.Size в MeasureOverride!
+        var validSize = bmp.Size;
+        TestAssert.True(validSize.Width > 0 && validSize.Height > 0,
+            "Bitmap.Size must remain accessible for bound Image controls after cache eviction");
+
         bool preferWebOnVpn = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated: true, preferWebRemix: true)[0]
             == YoutubeClientNames.WebRemix;
         TestAssert.True(preferWebOnVpn, "WEB_REMIX must be prioritized when preferWebRemix is true");

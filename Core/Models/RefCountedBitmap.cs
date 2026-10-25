@@ -3,24 +3,21 @@ using Avalonia.Media.Imaging;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Обёртка над Bitmap с учётом нативной памяти для GC pressure tracking.
-/// 
-/// <para>Ранее содержала lock-free ref-counting (AddRef/Release),
-/// но ни один потребитель не использовал ref-count паттерн —
-/// кэш единолично владеет временем жизни bitmap.
-/// Упрощено до single-owner Dispose.</para>
+/// Обёртка над разделяемым <see cref="Avalonia.Media.Imaging.Bitmap"/> для учёта памяти в LRU-кэше.
 /// </summary>
 public sealed class RefCountedBitmap : IDisposable
 {
     private int _disposed;
+    private Bitmap? _bitmap;
 
-    public Bitmap Bitmap { get; }
+    public Bitmap Bitmap => _bitmap!;
     public long EstimatedBytes { get; }
     public DateTime CachedAt { get; }
 
     public RefCountedBitmap(Bitmap bitmap)
     {
-        Bitmap = bitmap ?? throw new ArgumentNullException(nameof(bitmap));
+        ArgumentNullException.ThrowIfNull(bitmap);
+        _bitmap = bitmap;
 
         long pixelCount = (long)bitmap.PixelSize.Width * bitmap.PixelSize.Height;
         EstimatedBytes = pixelCount * 4;
@@ -29,12 +26,16 @@ public sealed class RefCountedBitmap : IDisposable
 
     public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
+    /// <summary>
+    /// Отвязывает ссылку кэша от <see cref="Bitmap"/>, позволяя GC собрать его,
+    /// как только ни один визуальный контрол <c>Image.Source</c> больше не ссылается на него.
+    /// Не вызывает <c>Bitmap.Dispose()</c>, чтобы не разрушить активные привязки в визуальном дереве Avalonia.
+    /// </summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        try { Bitmap.Dispose(); }
-        catch (Exception ex) { Log.Warn($"[RefCountedBitmap] Dispose failed: {ex.Message}"); }
+        _bitmap = null;
     }
 }
