@@ -16,7 +16,7 @@
 
   <PropertyGroup Label="Package Versions">
     <!-- Entity Framework Core: 10.0.11 (патчи безопасности/багфиксы) -->
-    <MsExtVersion>10.0.12</MsExtVersion>
+    <MsExtVersion>10.0.13</MsExtVersion>
     <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
     <AvaloniaVersion>12.1.4</AvaloniaVersion>
     <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
@@ -59,7 +59,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Scripting">
-    <PackageReference Include="Acornima" Version="1.8.0" />
+    <PackageReference Include="Acornima" Version="1.9.0" />
   </ItemGroup>
 
   <ItemGroup Label="Diagnostics">
