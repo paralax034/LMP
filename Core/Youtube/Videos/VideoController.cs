@@ -192,8 +192,11 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
         request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
 
-        using var response = await Http.SendAsync(request, cancellationToken);
-        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var response = await Http.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -390,11 +393,15 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     #region Fallback & DASH Methods
 
     public async ValueTask<(PlayerResponse Response, string ClientName)> GetPlayerResponseWithFallbackAsync(
-       VideoId videoId,
-       CancellationToken cancellationToken,
-       bool isAuthenticated = false)
+        VideoId videoId,
+        CancellationToken cancellationToken,
+        bool isAuthenticated = false,
+        bool preferWebRemix = false)
     {
-        var clients = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated);
+        // Если активен VPN и есть авторизация (либо BotGuard уже прогрет до 2мс fast-mint),
+        // сразу идём через WEB_REMIX, чтобы не терять ~250-700 мс на гарантированный BotDetection от ANDROID_VR на датацентровом IP.
+        bool useWebPriority = preferWebRemix || (isAuthenticated && YoutubeClientUtils.IsVpnActive);
+        var clients = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated, useWebPriority);
         var errors = new List<string>();
         var allBotDetection = true;
         bool hasLoginRequired = false;

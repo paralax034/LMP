@@ -14,7 +14,16 @@ public sealed class PoTokenProvider : IDisposable
     /// <summary>
     /// Указывает, готов ли внутренний сервис BotGuard к мгновенному fast-mint без полного цикла инициализации.
     /// </summary>
-    public bool HasActiveContext => _botGuard.HasActiveContext;
+    public bool HasActiveContext
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return !_disposed && _botGuard.HasActiveContext;
+            }
+        }
+    }
 
     /// <param name="httpProvider">Фабрика HTTP-клиента для WAA/gstatic запросов. Не требует YouTube cookies.</param>
     public PoTokenProvider(Func<HttpClient> httpProvider)
@@ -24,20 +33,49 @@ public sealed class PoTokenProvider : IDisposable
     }
 
     /// <summary>
+    /// Прогревает контекст BotGuard и получает IntegrityToken (TTL 12 часов) в фоновом режиме,
+    /// чтобы первый трек в сессии сразу использовал быстрый mint (~2 мс) вместо холодного пайплайна (~900 мс).
+    /// </summary>
+    /// <param name="visitorData">Актуальный VisitorData сессии для первоначальной инициализации.</param>
+    /// <param name="ct">Токен отмены.</param>
+    public async Task WarmupAsync(string? visitorData, CancellationToken ct = default)
+    {
+        BotGuardService service;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            service = _botGuard;
+        }
+
+        if (service.HasActiveContext)
+            return;
+
+        string seedId = string.IsNullOrWhiteSpace(visitorData) ? "dQw4w9WgXcQ" : visitorData;
+        _ = await service.MintForVideoAsync(seedId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Content-bound PoToken для параметра <c>&amp;pot=</c> videoplayback URL.
-    /// Переиспользует кэшированный BotGuard-контекст — только шаг mint (~50ms).
+    /// Переиспользует кэшированный BotGuard-контекст — только шаг mint (~2ms).
     /// Полный pipeline (~1s) запускается лишь при истечении IntegrityToken TTL.
     /// </summary>
     /// <param name="videoId">ID видео YouTube — используется как content binding identifier.</param>
     /// <param name="ct">Токен отмены.</param>
     public async Task<string?> GetContentTokenAsync(string videoId, CancellationToken ct = default)
     {
+        BotGuardService service;
+        lock (_sync)
+        {
+            if (_disposed) return null;
+            service = _botGuard;
+        }
+
         Log.Debug($"[PoTokenProvider] Content-bound PoToken for {Truncate(videoId)}");
-        var token = await _botGuard.MintForVideoAsync(videoId, ct).ConfigureAwait(false);
+        var token = await service.MintForVideoAsync(videoId, ct).ConfigureAwait(false);
 
         if (token is not null && token.Length != 116 && token.Length != 188)
         {
-            Log.Warn($"[PoTokenProvider] Token must be 116 or 118 ({token.Length}ch) — " +
+            Log.Warn($"[PoTokenProvider] Token must be 116 or 188 ({token.Length}ch) — " +
                      "BotGuard environment likely failing checks, discarding");
             return null;
         }
@@ -53,6 +91,7 @@ public sealed class PoTokenProvider : IDisposable
     {
         lock (_sync)
         {
+            if (_disposed) return;
             _botGuard?.Dispose();
             _botGuard = new BotGuardService(_httpProvider());
         }

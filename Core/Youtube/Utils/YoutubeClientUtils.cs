@@ -28,18 +28,28 @@ public static class YoutubeClientUtils
 	private static Task<string>? _fetchTask;
 	private static CookieAuthService? _authService;
 	private static Func<HttpClient>? _httpClientProvider;
+	private static Func<bool>? _vpnActiveCheck;
 	private static readonly Lock _visitorDataLock = new();
 
 	private const string InvariantHlJson = "\"en\"";
 	private const string InvariantGlJson = "\"US\"";
 
 	/// <summary>
-	/// Инициализирует статический провайдер кук авторизации и HTTP-клиента для VisitorData.
+	/// Указывает, активен ли VPN/TUN-маршрут по данным сетевого менеджера.
 	/// </summary>
-	public static void Initialize(CookieAuthService authService, Func<HttpClient>? httpClientProvider = null)
+	public static bool IsVpnActive => _vpnActiveCheck?.Invoke() ?? false;
+
+	/// <summary>
+	/// Инициализирует статический провайдер кук авторизации, HTTP-клиента и детектора VPN для VisitorData и выбора клиента.
+	/// </summary>
+	public static void Initialize(
+		CookieAuthService authService,
+		Func<HttpClient>? httpClientProvider = null,
+		Func<bool>? vpnActiveCheck = null)
 	{
 		_authService = authService;
 		_httpClientProvider = httpClientProvider;
+		_vpnActiveCheck = vpnActiveCheck;
 	}
 
 	/// <summary>
@@ -194,6 +204,17 @@ public static class YoutubeClientUtils
 	/// <summary>
 	/// Stream fallback для авторизованных пользователей.
 	/// </summary>
+	/// <summary>
+	/// Stream fallback для авторизованных пользователей или при активном BotGuard + VPN,
+	/// где WEB_REMIX с fast-mint PoToken (2 мс) проходит с первой попытки без BotDetection-отлупа на ANDROID_VR.
+	/// </summary>
+	public static readonly string[] StreamFallbackClientsWebPriority =
+	[
+		YoutubeClientNames.WebRemix,
+		YoutubeClientNames.AndroidVr,
+		YoutubeClientNames.Web,
+	];
+
 	public static readonly string[] StreamFallbackClientsAuth =
 	[
 		YoutubeClientNames.AndroidVr,
@@ -202,12 +223,12 @@ public static class YoutubeClientUtils
 	];
 
 	/// <summary>
-	/// Возвращает список клиентов для получения stream URLs.
-	/// Порядок фиксирован и не зависит от профиля пользователя —
-	/// stream-запросы требуют клиентов, отдающих прямые URL без шифрования.
+	/// Возвращает список клиентов для получения stream URLs с учётом состояния прогрева BotGuard и VPN.
 	/// </summary>
-	public static string[] GetStreamFallbackClients(bool isAuthenticated)
+	public static string[] GetStreamFallbackClients(bool isAuthenticated, bool preferWebRemix = false)
 	{
+		if (preferWebRemix)
+			return StreamFallbackClientsWebPriority;
 		return isAuthenticated ? StreamFallbackClientsAuth : StreamFallbackClientsDefault;
 	}
 

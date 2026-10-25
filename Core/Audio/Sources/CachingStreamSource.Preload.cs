@@ -201,8 +201,13 @@ public sealed partial class CachingStreamSource
                         break;
                 }
 
-                // Opportunistic completion fill 
-                if (pending < adaptiveMaxDownloads && !_cacheEntry.IsComplete)
+                // Opportunistic completion fill: запускаем ТОЛЬКО когда весь хвост от текущей позиции
+                // до конца файла уже полностью скачан и нет активных загрузок (pending == 0),
+                // чтобы не создавать конкурирующие HTTP-запросы позади курсора при перемотках.
+                long bufferedToTail = GetBufferedBytesAheadIncludingInflight(currentOffset);
+                bool isTailFullyBuffered = currentOffset + bufferedToTail >= _contentLength;
+
+                if (pending == 0 && isTailFullyBuffered && !_cacheEntry.IsComplete)
                 {
                     long downloadedBytes = _cacheEntry.DownloadedBytes;
                     long totalSize = _cacheEntry.TotalSize;
@@ -214,7 +219,7 @@ public sealed partial class CachingStreamSource
 
                     if (shouldCompletionFill)
                     {
-                        await TryCompletionFillAsync(token, adaptiveMaxDownloads - pending)
+                        await TryCompletionFillAsync(token, maxRequests: 1)
                             .ConfigureAwait(false);
                     }
                 }

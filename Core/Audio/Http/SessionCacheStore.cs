@@ -140,8 +140,11 @@ internal static class SessionCacheStore
     private const int TtlBypassProbeMinutes = 10;
     private const double ProbeTtfbMultiplier = 4.0;
 
+    private const int SaveDebounceMs = 3000;
+
     private static readonly Lock _lock = new();
     private static readonly Lock _saveIoLock = new();
+    private static readonly Timer _saveDebounceTimer = new(static _ => Save(), null, Timeout.Infinite, Timeout.Infinite);
     private static SessionCacheEnvelope _data = new();
     private static bool _dirty;
 
@@ -348,7 +351,13 @@ internal static class SessionCacheStore
         }
 
         Log.Info($"[SessionCache] RecordManifest: track={trackId}, variants={variants.Count}, cdn={cdnHost}, expire={expireUtc:O}");
-        _ = Task.Run(Save);
+        try
+        {
+            _saveDebounceTimer.Change(SaveDebounceMs, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     // Probe

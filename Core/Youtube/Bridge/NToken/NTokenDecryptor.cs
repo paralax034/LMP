@@ -45,9 +45,11 @@ public sealed class NTokenDecryptor : BaseYoutubeDecryptor
             return cached;
         }
 
-        OnComplexDecryptionStarted?.Invoke(contextId);
-
-        await JsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
+        if (!JsService.IsInitialized)
+        {
+            OnComplexDecryptionStarted?.Invoke(contextId);
+            await JsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
+        }
 
         var result = await JsService.CallAsync("n", nToken, ct).ConfigureAwait(false);
 

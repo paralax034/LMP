@@ -162,29 +162,27 @@ public static class MemoryCleanupHelper
             long committedMb = gcInfo.TotalCommittedBytes / (1024 * 1024);
             long liveMb = GC.GetTotalMemory(false) / (1024 * 1024);
 
-            // Проверка давления памяти по реально закоммиченному объему кучи (Private: Commit)
-            if (!aggressive && pressureThreshold > 0)
+            // Проверка давления памяти: форсируем aggressive ТОЛЬКО когда звук НЕ воспроизводится,
+            // чтобы никогда не вызывать блокирующий STW GC и TrimWorkingSet во время работы WASAPI.
+            if (!aggressive && !isPlaying && pressureThreshold > 0)
             {
                 if (committedMb > pressureThreshold || liveMb > pressureThreshold)
                 {
-                    Log.Info($"[Memory] Pressure detected (Committed: {committedMb}MB, Live: {liveMb}MB > {pressureThreshold}MB), forcing aggressive");
+                    Log.Info($"[Memory] Pressure detected in idle state (Committed: {committedMb}MB, Live: {liveMb}MB > {pressureThreshold}MB), forcing aggressive");
                     aggressive = true;
                 }
             }
 
-            // Очистка кэшей приложения (передаем актуальный флаг aggressive для GPU-кэша Compositor)
-            CleanupAppCaches(aggressive);
+            // Очистка кэшей приложения (при активном воспроизведении не трогаем GPU-кэш через UI-поток)
+            CleanupAppCaches(aggressive && !isPlaying);
 
-            // Если во время воспроизведения закоммиченная куча раздута мертвыми сегментами Gen2/LOH
-            // (разница между Committed и Live превышает 24 МБ или Committed > 64 МБ),
-            // выполняем компактификацию управляемой кучи БЕЗ сброса Working Set в своп.
             bool hasHeapBloat = (committedMb - liveMb) >= 24 || committedMb > 64;
 
-            if (isPlaying && !aggressive)
+            if (isPlaying)
             {
-                if (hasHeapBloat)
+                if (hasHeapBloat || aggressive)
                 {
-                    MemoryHelpers.CompactManagedHeapNow();
+                    MemoryHelpers.CompactManagedHeapNow(nonBlockingForAudio: true);
                 }
                 else
                 {
@@ -194,7 +192,7 @@ public static class MemoryCleanupHelper
             }
             else if (aggressive)
             {
-                MemoryHelpers.CompactManagedHeapNow();
+                MemoryHelpers.CompactManagedHeapNow(nonBlockingForAudio: false);
                 MemoryHelpers.TrimWorkingSet();
 
                 var afterCommittedMb = GC.GetGCMemoryInfo().TotalCommittedBytes / (1024 * 1024);
@@ -204,7 +202,7 @@ public static class MemoryCleanupHelper
             {
                 if (hasHeapBloat)
                 {
-                    MemoryHelpers.CompactManagedHeapNow();
+                    MemoryHelpers.CompactManagedHeapNow(nonBlockingForAudio: false);
                 }
                 else
                 {
@@ -228,10 +226,11 @@ public static class MemoryCleanupHelper
     /// </summary>
     private static void CleanupAppCaches(bool aggressive = false)
     {
-        // ImageCache RAM
+        // ImageCache RAM & DominantColor cache
         try
         {
             AppEntry.Services.GetRequiredService<ImageCacheService>().ClearMemoryCache();
+            AppEntry.Services.GetService<DominantColorService>()?.ClearCache();
         }
         catch (Exception ex)
         {

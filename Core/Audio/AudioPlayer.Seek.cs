@@ -282,7 +282,6 @@ public sealed partial class AudioPlayer
                         Log.Debug($"[SeekTelemetry] Phase A interrupted, coalescing to {drained}ms");
                         continue;
                     }
-                    throw;
                 }
                 catch (OperationCanceledException)
                 {
@@ -294,10 +293,22 @@ public sealed partial class AudioPlayer
                     Interlocked.CompareExchange(ref _seekIterationInterruptCts, null, iterInterruptCts);
                 }
 
+                // Если CachingStreamSource.SeekAsync перехватил отмену iterCt и вернул false без исключения,
+                // проверяем наличие нового coalesced-запроса до валидации состояния!
+                long drainedAfterPhaseA = DrainPendingSeekMs();
+                if (drainedAfterPhaseA >= 0 && !seekCt.IsCancellationRequested)
+                {
+                    currentTargetMs = drainedAfterPhaseA;
+                    pipeline.Flush();
+                    pipeline.PrepareForSeek(currentTargetMs);
+                    Log.Debug($"[SeekTelemetry] Phase A coalesced (no-throw) to {drainedAfterPhaseA}ms");
+                    continue;
+                }
+
                 long phaseAMs = phaseSw.ElapsedMilliseconds;
                 phaseSw.Restart();
 
-                if (!ValidateSeekState(iterCt, pipeline, sessionAtStart))
+                if (!ValidateSeekState(seekCt, pipeline, sessionAtStart))
                 {
                     cmd.Completion?.TrySetCanceled();
                     _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(currentTargetMs));
@@ -316,7 +327,7 @@ public sealed partial class AudioPlayer
                     continue;
                 }
 
-                if (!ValidateSeekState(iterCt, pipeline, sessionAtStart))
+                if (!ValidateSeekState(seekCt, pipeline, sessionAtStart))
                 {
                     cmd.Completion?.TrySetCanceled();
                     _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(currentTargetMs));
@@ -336,7 +347,7 @@ public sealed partial class AudioPlayer
                 if (drainedBeforeWarmup >= 0)
                 {
                     currentTargetMs = drainedBeforeWarmup;
-                    await StopDecoderForReseekAsync(pipeline, iterCt).ConfigureAwait(false);
+                    await StopDecoderForReseekAsync(pipeline, seekCt).ConfigureAwait(false);
                     pipeline.PrepareForSeek(currentTargetMs);
                     Log.Debug($"[SeekTelemetry] Phase D interrupted, re-seeking to {drainedBeforeWarmup}ms");
                     continue;
@@ -359,13 +370,13 @@ public sealed partial class AudioPlayer
                     if (drainedFinal >= 0)
                     {
                         currentTargetMs = drainedFinal;
-                        await StopDecoderForReseekAsync(pipeline, iterCt).ConfigureAwait(false);
+                        await StopDecoderForReseekAsync(pipeline, seekCt).ConfigureAwait(false);
                         pipeline.PrepareForSeek(currentTargetMs);
                         Log.Debug($"[SeekTelemetry] Phase E interrupted, re-seeking to {drainedFinal}ms");
                         continue;
                     }
 
-                    if (!ValidateSeekState(iterCt, pipeline, sessionAtStart))
+                    if (!ValidateSeekState(seekCt, pipeline, sessionAtStart))
                     {
                         cmd.Completion?.TrySetCanceled();
                         _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(currentTargetMs));

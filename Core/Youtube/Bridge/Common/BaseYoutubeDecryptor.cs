@@ -31,6 +31,17 @@ public abstract class BaseYoutubeDecryptor : IYoutubeDecryptor, IDisposable
     public PlayerContextManager PlayerManager => JsService.PlayerManager;
 
     /// <summary>
+    /// Указывает, инициализирован ли внутренний нативный контекст QuickJS.
+    /// </summary>
+    public bool IsInitialized => JsService.IsInitialized;
+
+    /// <summary>
+    /// Гарантирует фоновую инициализацию нативного контекста QuickJS (из кэша байткода или через AST-препроцессинг).
+    /// </summary>
+    public ValueTask EnsureInitializedAsync(CancellationToken ct = default) =>
+        JsService.EnsureInitializedAsync(ct);
+
+    /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="BaseYoutubeDecryptor"/>.
     /// </summary>
     protected BaseYoutubeDecryptor(JsDecryptionService jsService, string cacheFilePath, int maxMemory, int maxDisk)

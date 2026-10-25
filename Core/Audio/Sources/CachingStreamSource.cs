@@ -318,10 +318,33 @@ public sealed partial class CachingStreamSource : IAudioSource
             if (!_initialized) return 0;
 
             long position = Volatile.Read(ref _currentReadOffset);
-            if (position < 0 || position >= _contentLength) return 0;
+            if (position < 0) return 0;
+            if (position >= _contentLength) return int.MaxValue;
 
             long bufferedAhead = GetBufferedBytesAheadIncludingInflight(position);
+            if (position + bufferedAhead >= _contentLength)
+                return int.MaxValue;
+
             return ConvertBufferedBytesToMs(bufferedAhead);
+        }
+    }
+
+    /// <summary>
+    /// Указывает, что все данные от текущей позиции чтения до самого конца файла (EOF) уже локально доступны в RAM или на диске.
+    /// </summary>
+    public bool IsTailLocallyBuffered
+    {
+        get
+        {
+            if (!_initialized) return false;
+            if (_cacheEntry?.IsComplete == true) return true;
+
+            long position = Volatile.Read(ref _currentReadOffset);
+            if (position < 0) return false;
+            if (position >= _contentLength) return true;
+
+            long localAhead = GetBufferedBytesAhead(position);
+            return position + localAhead >= _contentLength;
         }
     }
 

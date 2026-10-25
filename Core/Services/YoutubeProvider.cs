@@ -95,7 +95,10 @@ public partial class YoutubeProvider : IDisposable
         _poTokenProvider = new PoTokenProvider(() => _networkManager.AudioClient);
 
         // Связываем централизованный утилитный класс с куками сессии и сетевым менеджером
-        YoutubeClientUtils.Initialize(cookieAuth, () => _networkManager.ApiClient);
+        YoutubeClientUtils.Initialize(
+            cookieAuth,
+            () => _networkManager.ApiClient,
+            () => _networkManager.IsVpnActive);
 
         _nTokenDecryptor.OnComplexDecryptionStarted += HandleNTokenDecryptionStarted;
 
@@ -173,7 +176,28 @@ public partial class YoutubeProvider : IDisposable
             Log.Info("[YouTube] Initiating lazy background Visitor Data resolution...");
 
             // Получаем VisitorData, учитывая куки и защищая таймаутом
-            _ = await YoutubeClientUtils.EnsureVisitorDataAsync().ConfigureAwait(false);
+            var visitorData = await YoutubeClientUtils.EnsureVisitorDataAsync().ConfigureAwait(false);
+
+            // Запускаем неблокирующий фоновый прогрев BotGuard (IntegrityToken с TTL 12 часов) и STS плеера,
+            // чтобы первый нажатый пользователем трек сразу шёл по fast-mint (2 мс вместо ~900 мс).
+            var poProvider = _poTokenProvider;
+            if (poProvider != null && !_disposed)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var warmupTask = poProvider.WarmupAsync(visitorData);
+                        var jsInitTask = _sigCipherDecryptor.EnsureInitializedAsync().AsTask();
+                        await Task.WhenAll(warmupTask, jsInitTask).ConfigureAwait(false);
+                        Log.Info("[YouTube] Background BotGuard & QuickJS player context warmup completed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Debug($"[YouTube] Background BotGuard/PlayerContext warmup notice: {ex.Message}");
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {

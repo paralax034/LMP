@@ -55,7 +55,10 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     private readonly ConcurrentQueue<TestStateUpdate> _pendingUpdates = new();
 
     private CancellationTokenSource? _runCts;
+    private readonly Action _flushUiAction;
+    private readonly Timer _uiFlushTimer;
     private long _lastScrollTicks;
+    private long _lastUiFlushTicks;
     private int _uiUpdateScheduled;
     private int _activeBatchTotal;
     private int _activeBatchCompleted;
@@ -152,6 +155,13 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
 
     public TestRunnerViewModel()
     {
+        _flushUiAction = ProcessPendingUpdatesOnUi;
+        _uiFlushTimer = new Timer(static state =>
+        {
+            var self = (TestRunnerViewModel)state!;
+            Dispatcher.UIThread.Post(self._flushUiAction, DispatcherPriority.Background);
+        }, this, Timeout.Infinite, Timeout.Infinite);
+
         _runner = new TestRunner(AppEntry.Services);
         _runner.TestStarting += OnTestStarting;
         _runner.TestCompleted += OnTestCompleted;
@@ -388,7 +398,20 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
 
     private void ScheduleUiFlush()
     {
-        if (Interlocked.CompareExchange(ref _uiUpdateScheduled, 1, 0) == 0)
+        if (Interlocked.CompareExchange(ref _uiUpdateScheduled, 1, 0) != 0)
+            return;
+
+        long now = Stopwatch.GetTimestamp();
+        long last = Volatile.Read(ref _lastUiFlushTicks);
+        double elapsedMs = (now - last) * 1000.0 / Stopwatch.Frequency;
+
+        if (_isBatchRunning && elapsedMs < 33.0)
+        {
+            int delayMs = Math.Clamp(33 - (int)elapsedMs, 10, 33);
+            try { _uiFlushTimer.Change(delayMs, Timeout.Infinite); }
+            catch (ObjectDisposedException) { }
+        }
+        else
         {
             Dispatcher.UIThread.Post(ProcessPendingUpdatesOnUi, DispatcherPriority.Background);
         }
@@ -396,6 +419,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
 
     private void ProcessPendingUpdatesOnUi()
     {
+        Volatile.Write(ref _lastUiFlushTicks, Stopwatch.GetTimestamp());
         Interlocked.Exchange(ref _uiUpdateScheduled, 0);
 
         bool stateChanged = false;
@@ -593,6 +617,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     {
         if (disposing)
         {
+            _uiFlushTimer.Dispose();
             _runCts?.Cancel();
             _runCts?.Dispose();
             _runner.TestStarting -= OnTestStarting;

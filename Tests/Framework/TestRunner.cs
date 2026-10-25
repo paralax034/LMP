@@ -58,6 +58,7 @@ public sealed class TestRunner
             results.Add(result);
         }
 
+        MemoryHelpers.SchedulePostHeavyWorkCleanup(1500);
         return results;
     }
 

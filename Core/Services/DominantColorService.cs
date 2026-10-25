@@ -13,7 +13,8 @@ public sealed class DominantColorService
 {
     private readonly NetworkManager _networkManager;
     private readonly ImageCacheService _imageCache;
-    private readonly ConcurrentDictionary<string, Color> _cache = new();
+    private readonly ConcurrentDictionary<string, Color> _cache = new(StringComparer.Ordinal);
+    private const int MaxCacheEntries = 256;
 
     private const float MinLuminance = 0.1f;
     private const float MaxLuminance = 0.9f;
@@ -41,10 +42,13 @@ public sealed class DominantColorService
 
         try
         {
-            var color = await ExtractColorAsync(imageUrl, ct);
+            var color = await ExtractColorAsync(imageUrl, ct).ConfigureAwait(false);
 
             if (color.HasValue)
             {
+                if (_cache.Count >= MaxCacheEntries)
+                    _cache.Clear();
+
                 _cache[imageUrl] = color.Value;
                 Log.Debug($"[DominantColor] Extracted: R={color.Value.R} G={color.Value.G} B={color.Value.B} from {imageUrl[..Math.Min(60, imageUrl.Length)]}");
             }
@@ -63,29 +67,21 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Загружает изображение и извлекает доминантный цвет.
-    /// Поддерживает HTTP/HTTPS URL и локальные файлы.
+    /// Загружает изображение и извлекает доминантный цвет без промежуточного декодирования в Avalonia.Bitmap.
+    /// Использует единый FNV-1a дисковый кэш с <see cref="ImageCacheService"/>.
     /// </summary>
     private async Task<Color?> ExtractColorAsync(string imageUrl, CancellationToken ct)
     {
-        byte[]? imageData = null;
+        string? targetFilePath = null;
+        byte[]? fallbackData = null;
 
-        // ЛОКАЛЬНЫЙ ФАЙЛ
         if (IsLocalPath(imageUrl))
         {
             var localPath = ResolveLocalPath(imageUrl);
             if (localPath != null && File.Exists(localPath))
             {
-                try
-                {
-                    imageData = await File.ReadAllBytesAsync(localPath, ct);
-                    Log.Debug($"[DominantColor] Loaded from local file: {localPath[..Math.Min(60, localPath.Length)]}");
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[DominantColor] Failed to read local file: {ex.Message}");
-                    return null;
-                }
+                targetFilePath = localPath;
+                Log.Debug($"[DominantColor] Using local file: {localPath[..Math.Min(60, localPath.Length)]}");
             }
             else
             {
@@ -93,68 +89,74 @@ public sealed class DominantColorService
                 return null;
             }
         }
-        // HTTP/HTTPS URL
         else
         {
-            // Пробуем загрузить из disk-cache ImageCacheService
-            var diskKey = GetDiskCacheKey(imageUrl);
-            var diskPath = Path.Combine(G.Folder.ImageCache, diskKey);
+            // Используем единый FNV-1a путь дискового кэша ImageCacheService (0 лишних сетевых скачиваний и 0 аллокаций Avalonia.Bitmap)
+            var diskPath = ImageCacheService.GetDiskCachePath(imageUrl);
+
+            if (!File.Exists(diskPath))
+            {
+                await _imageCache.EnsureDiskFileAsync(imageUrl, ct).ConfigureAwait(false);
+            }
 
             if (File.Exists(diskPath))
             {
-                imageData = await File.ReadAllBytesAsync(diskPath, ct);
+                targetFilePath = diskPath;
             }
             else
             {
-                // Сначала попросим ImageCacheService загрузить (это создаст файл на диске)
-                var bitmap = await _imageCache.GetImageAsync(imageUrl, ImageQuality.Low, ct);
-
-                // Теперь файл должен быть на диске
-                if (File.Exists(diskPath))
+                try
                 {
-                    imageData = await File.ReadAllBytesAsync(diskPath, ct);
+                    fallbackData = await _networkManager.ImageClient.GetByteArrayAsync(imageUrl, ct).ConfigureAwait(false);
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Fallback: скачиваем сами
-                    try
-                    {
-                        imageData = await _networkManager.ImageClient.GetByteArrayAsync(imageUrl, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warn($"[DominantColor] HTTP download failed: {ex.Message}");
-                        return null;
-                    }
+                    Log.Warn($"[DominantColor] HTTP download failed: {ex.Message}");
+                    return null;
                 }
             }
         }
 
-        if (imageData == null || imageData.Length == 0)
+        if (targetFilePath == null && (fallbackData == null || fallbackData.Length == 0))
             return null;
 
         return await Task.Run(() =>
         {
-            using var skBitmap = SKBitmap.Decode(imageData);
-            if (skBitmap == null)
+            if (ct.IsCancellationRequested) return null;
+
+            using var codec = targetFilePath != null
+                ? SKCodec.Create(targetFilePath)
+                : SKCodec.Create(new SKMemoryStream(fallbackData!));
+
+            if (codec == null)
             {
-                Log.Debug("[DominantColor] SKBitmap.Decode returned null");
+                Log.Debug("[DominantColor] SKCodec.Create returned null");
                 return null;
             }
 
-            // SKFilterQuality.Low deprecated → SKSamplingOptions(SKFilterMode.Linear).
-            // Bilinear filtering достаточен для downscale до 50×50 thumbnail:
-            // точность пиксельного усреднения не критична, а Linear на порядок
-            // быстрее MipmapMode.Linear при таком масштабе сжатия.
-            using var resized = skBitmap.Resize(
-                new SKImageInfo(SampleSize, SampleSize),
-                new SKSamplingOptions(SKFilterMode.Linear));
+            // Аппаратный sub-sampling при декодировании JPEG/WebP сразу в минимальный размер (экономия нативного буфера)
+            var desiredScale = (float)SampleSize / Math.Max(1, Math.Max(codec.Info.Width, codec.Info.Height));
+            var scaledSize = codec.GetScaledDimensions(desiredScale);
+            var decodeInfo = new SKImageInfo(
+                Math.Max(1, scaledSize.Width),
+                Math.Max(1, scaledSize.Height),
+                SKColorType.Rgba8888,
+                SKAlphaType.Premul);
 
-            if (resized == null)
+            using var decodedBitmap = new SKBitmap(decodeInfo);
+            var result = codec.GetPixels(decodeInfo, decodedBitmap.GetPixels());
+            if (result is not SKCodecResult.Success and not SKCodecResult.IncompleteInput)
                 return null;
 
-            return (Color?)AnalyzePixels(resized);
-        }, ct);
+            if (decodedBitmap.Width <= SampleSize && decodedBitmap.Height <= SampleSize)
+                return (Color?)AnalyzePixels(decodedBitmap);
+
+            using var resized = decodedBitmap.Resize(
+                new SKImageInfo(SampleSize, SampleSize, SKColorType.Rgba8888, SKAlphaType.Premul),
+                new SKSamplingOptions(SKFilterMode.Linear));
+
+            return resized != null ? (Color?)AnalyzePixels(resized) : null;
+        }, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -194,25 +196,38 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Анализ пикселей: фильтрация → взвешивание по насыщенности → усреднение.
+    /// Анализ пикселей через прямой доступ к буферу (без аллокации массива SKColor[] в куче через bitmap.Pixels).
     /// </summary>
-    private static Color AnalyzePixels(SKBitmap bitmap)
+    private static unsafe Color AnalyzePixels(SKBitmap bitmap)
     {
-        var pixels = bitmap.Pixels;
-        if (pixels.Length == 0)
+        int width = bitmap.Width;
+        int height = bitmap.Height;
+        int count = width * height;
+        if (count <= 0)
+            return Colors.Gray;
+
+        nint pixelsPtr = bitmap.GetPixels();
+        if (pixelsPtr == 0)
             return Colors.Gray;
 
         double totalR = 0, totalG = 0, totalB = 0;
         double totalWeight = 0;
 
-        foreach (var pixel in pixels)
-        {
-            float r = pixel.Red / 255f;
-            float g = pixel.Green / 255f;
-            float b = pixel.Blue / 255f;
-            float a = pixel.Alpha / 255f;
+        byte* ptr = (byte*)pixelsPtr;
+        bool isBgra = bitmap.ColorType == SKColorType.Bgra8888;
 
-            if (a < 0.5f) continue;
+        for (int i = 0; i < count; i++)
+        {
+            byte c0 = ptr[i * 4];
+            byte c1 = ptr[i * 4 + 1];
+            byte c2 = ptr[i * 4 + 2];
+            byte aByte = ptr[i * 4 + 3];
+
+            if (aByte < 128) continue;
+
+            float r = (isBgra ? c2 : c0) / 255f;
+            float g = c1 / 255f;
+            float b = (isBgra ? c0 : c2) / 255f;
 
             RgbToHsl(r, g, b, out _, out float s, out float l);
 
@@ -264,16 +279,6 @@ public sealed class DominantColorService
             h = ((b - r) / delta + 2f) / 6f;
         else
             h = ((r - g) / delta + 4f) / 6f;
-    }
-
-    /// <summary>
-    /// Тот же алгоритм хеширования что в ImageCacheService.
-    /// </summary>
-    private static string GetDiskCacheKey(string url)
-    {
-        var bytes = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(url));
-        return Convert.ToHexString(bytes)[..32];
     }
 
     /// <summary>

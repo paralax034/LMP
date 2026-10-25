@@ -94,12 +94,18 @@ public sealed class StreamClient
             }
         }
 
-        // Запускаем одиночный упреждающий прогрев CDN-хоста ДО генерации PoToken и расшифровки sig/n:
-        // 1) При холодном старте BotGuard (~500–1100 мс) сокет успевает полностью прогреться к началу Range 0 (экономия ~480 мс).
-        // 2) При быстром fast-mint (~20 мс) прогретый сокет становится вторым горячим соединением в пуле к моменту
-        //    старта параллельных Range 4 и Range 12, избавляя Range 12 от холодного коннекта (экономия ~200 мс).
-        if (!string.IsNullOrEmpty(earlyCdnUrl)
-            && !string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal))
+        bool skipPoToken = string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal);
+
+        // Запускаем упреждающий прогрев CDN-хоста ТОЛЬКО если предстоит холодная инициализация BotGuard (~800 мс)
+        // или холодная компиляция QuickJS (~5-1000 мс). Когда оба контекста уже горячие (fast-mint = 2 мс),
+        // Range 0-65535 стартует через ~10 мс, и параллельный /generate_204 лишь создаёт дублирующий холодный сокет.
+        bool expectsColdCryptoDelay = !_sigCipherDecryptor.IsInitialized
+            || (!_nTokenDecryptor.IsInitialized)
+            || (_poTokenProvider != null && !skipPoToken && !_poTokenProvider.HasActiveContext);
+
+        if (expectsColdCryptoDelay
+            && !string.IsNullOrEmpty(earlyCdnUrl)
+            && !skipPoToken)
         {
             CdnConnectionPreWarmer.PreWarmHost(SharedHttpClient.Instance, earlyCdnUrl, cancellationToken);
         }
@@ -107,7 +113,6 @@ public sealed class StreamClient
         bool? isNTokenDecryptionRequired = null;
 
         string? pot = null;
-        bool skipPoToken = string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal);
 
         if (_poTokenProvider != null && !skipPoToken)
         {
@@ -128,6 +133,11 @@ public sealed class StreamClient
                 Log.Warn($"[StreamClient] PoToken fetch failed: {ex.Message} — proceeding without");
             }
         }
+
+        // Локальная мемоизация расшифрованного n-токена в пределах одного ответа PlayerResponse
+        // (все аудиопотоки одного ответа разделяют одинаковый входной параметр n).
+        string? lastRawNToken = null;
+        string? lastDecryptedNToken = null;
 
         for (int i = 0; i < rawList.Count; i++)
         {
@@ -220,8 +230,18 @@ public sealed class StreamClient
                 {
                     try
                     {
-                        var decryptedN = await _nTokenDecryptor.DecryptAsync(
-                            nToken, contextId: videoId.Value, ct: cancellationToken).ConfigureAwait(false);
+                        string decryptedN;
+                        if (lastDecryptedNToken != null && string.Equals(nToken, lastRawNToken, StringComparison.Ordinal))
+                        {
+                            decryptedN = lastDecryptedNToken;
+                        }
+                        else
+                        {
+                            decryptedN = await _nTokenDecryptor.DecryptAsync(
+                                nToken, contextId: videoId.Value, ct: cancellationToken).ConfigureAwait(false);
+                            lastRawNToken = nToken;
+                            lastDecryptedNToken = decryptedN;
+                        }
 
                         hasEncryptedNToken = string.Equals(decryptedN, nToken, StringComparison.Ordinal);
                         url = UrlEx.SetQueryParameter(url, "n", decryptedN);
@@ -337,8 +357,14 @@ public sealed class StreamClient
     {
         bool isAuth = _isAuthenticatedCheck?.Invoke() ?? false;
 
+        bool preferWebRemix = YoutubeClientUtils.IsVpnActive
+               && (_poTokenProvider?.HasActiveContext == true || isAuth);
+
         var (playerResponse, clientName) = await _controller.GetPlayerResponseWithFallbackAsync(
-            videoId, cancellationToken, isAuthenticated: isAuth).ConfigureAwait(false);
+            videoId,
+            cancellationToken,
+            isAuthenticated: isAuth,
+            preferWebRemix: preferWebRemix).ConfigureAwait(false);
 
         if (!playerResponse.IsPlayable)
         {

@@ -373,12 +373,18 @@ public sealed class ImageCacheService : IDisposable
     /// GC pressure вызовы вынесены ЗА пределы <c>_lruLock</c>:
     /// p/invoke в CLR runtime не должен блокировать параллельных читателей кэша.
     /// </summary>
+    /// <summary>
+    /// Добавляет bitmap в memory cache с LRU eviction.
+    /// Освобождение вытесненных нативных буферов и GC pressure вызовы вынесены ЗА пределы <c>_lruLock</c>:
+    /// p/invoke в CLR runtime и Skia не должен блокировать параллельных читателей кэша.
+    /// </summary>
     private void AddToMemoryCache(ulong key, Bitmap bitmap)
     {
         var entry = new RefCountedBitmap(bitmap);
         long estimatedBytes = entry.EstimatedBytes;
         bool added = false;
         long evictedBytes = 0;
+        List<RefCountedBitmap>? evictedEntries = null;
 
         // LRU eviction под локом
         lock (_lruLock)
@@ -387,7 +393,12 @@ public sealed class ImageCacheService : IDisposable
                     _currentMemoryCacheBytes + estimatedBytes > MaxMemoryBytes)
                 && _lruOrder.Last != null)
             {
-                evictedBytes += EvictLastUnsafe();
+                evictedBytes += EvictLastUnsafe(out var removed);
+                if (removed != null)
+                {
+                    evictedEntries ??= new List<RefCountedBitmap>(4);
+                    evictedEntries.Add(removed);
+                }
             }
 
             if (!_memoryCache.ContainsKey(key))
@@ -404,7 +415,13 @@ public sealed class ImageCacheService : IDisposable
             }
         }
 
-        // --- GC pressure вне лока ---
+        // --- Освобождение нативной памяти и GC pressure вне лока ---
+        if (evictedEntries != null)
+        {
+            for (int i = 0; i < evictedEntries.Count; i++)
+                evictedEntries[i].Dispose();
+        }
+
         if (evictedBytes > 0)
             GC.RemoveMemoryPressure(evictedBytes);
 
@@ -414,23 +431,24 @@ public sealed class ImageCacheService : IDisposable
 
     /// <summary>
     /// Вызывается с захваченным <c>_lruLock</c>.
-    /// Возвращает размер вытесненного bitmap для последующего
-    /// <see cref="GC.RemoveMemoryPressure"/> вне лока.
+    /// Возвращает размер вытесненного bitmap и сам объект для последующего
+    /// <see cref="RefCountedBitmap.Dispose"/> и <see cref="GC.RemoveMemoryPressure"/> вне лока.
     /// </summary>
-    private long EvictLastUnsafe()
+    private long EvictLastUnsafe(out RefCountedBitmap? removed)
     {
         var lastNode = _lruOrder.Last!;
         var key = lastNode.Value;
         _lruOrder.RemoveLast();
         _lruIndex.Remove(key);
 
-        if (_memoryCache.Remove(key, out var removed))
+        if (_memoryCache.Remove(key, out removed) && removed != null)
         {
             var bytes = removed.EstimatedBytes;
             Interlocked.Add(ref _currentMemoryCacheBytes, -bytes);
             return bytes;
         }
 
+        removed = null;
         return 0;
     }
 
@@ -452,12 +470,31 @@ public sealed class ImageCacheService : IDisposable
         var memInfo = GC.GetGCMemoryInfo();
         if (memInfo.MemoryLoadBytes > memInfo.HighMemoryLoadThresholdBytes * 0.85)
         {
+            List<RefCountedBitmap>? evictedEntries = null;
+            long evictedBytes = 0;
+
             lock (_lruLock)
             {
                 int toRemove = _memoryCache.Count / 2;
                 for (int i = 0; i < toRemove && _lruOrder.Last != null; i++)
-                    EvictLastUnsafe();
+                {
+                    evictedBytes += EvictLastUnsafe(out var removed);
+                    if (removed != null)
+                    {
+                        evictedEntries ??= new List<RefCountedBitmap>(toRemove);
+                        evictedEntries.Add(removed);
+                    }
+                }
             }
+
+            if (evictedEntries != null)
+            {
+                for (int i = 0; i < evictedEntries.Count; i++)
+                    evictedEntries[i].Dispose();
+            }
+
+            if (evictedBytes > 0)
+                GC.RemoveMemoryPressure(evictedBytes);
         }
 
         long limitBytes = (long)_library.Settings.Storage.ImageCacheLimitMb * 1024 * 1024;
@@ -507,22 +544,35 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Полностью очищает memory cache.
+    /// Полностью очищает memory cache и детерминированно освобождает все нативные буферы Skia.
     /// </summary>
     public void ClearMemoryCache()
     {
         long totalBytes;
+        RefCountedBitmap[]? toDispose = null;
 
         lock (_lruLock)
         {
             totalBytes = _currentMemoryCacheBytes;
+            if (_memoryCache.Count > 0)
+            {
+                toDispose = new RefCountedBitmap[_memoryCache.Count];
+                _memoryCache.Values.CopyTo(toDispose, 0);
+            }
+
             _memoryCache.Clear();
             _lruOrder.Clear();
             _lruIndex.Clear();
             Volatile.Write(ref _currentMemoryCacheBytes, 0);
         }
 
-        // Вне лока
+        // Детерминированное освобождение нативной памяти Skia вне лока
+        if (toDispose != null)
+        {
+            for (int i = 0; i < toDispose.Length; i++)
+                toDispose[i].Dispose();
+        }
+
         if (totalBytes > 0)
             GC.RemoveMemoryPressure(totalBytes);
     }
@@ -550,6 +600,22 @@ public sealed class ImageCacheService : IDisposable
         }
         catch { }
     }
+
+    /// <summary>
+    /// Возвращает полный путь к файлу в дисковом кэше для указанного URL (единый FNV-1a 64-bit ключ).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static string GetDiskCachePath(ReadOnlySpan<char> url)
+    {
+        var diskHash = ComputeDiskKeyHash(url);
+        return Path.Combine(G.Folder.ImageCache, diskHash.ToString("X16"));
+    }
+
+    /// <summary>
+    /// Гарантирует скачивание файла обложки на диск без декодирования растра в RAM.
+    /// </summary>
+    public Task EnsureDiskFileAsync(string url, CancellationToken ct = default)
+        => EnsureDiskCachedAsync(url, ct);
 
     #region Cache Key Hashing (FNV-1a 64-bit → ulong)
 

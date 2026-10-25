@@ -699,7 +699,7 @@ public sealed partial class CachingStreamSource
         }
         finally
         {
-            if (gotSlot)
+            if (gotSlot && !_disposed)
             {
                 try { _downloadSlots.Release(); }
                 catch (ObjectDisposedException) { }

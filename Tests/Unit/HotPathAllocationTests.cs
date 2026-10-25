@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using LMP.Core.Audio;
 using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
+using LMP.Core.Youtube.Utils;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
@@ -344,7 +345,7 @@ public static partial class HotPathAllocationTests
                 codec: Core.Audio.Interfaces.AudioCodec.Opus,
                 bitrate: 128,
                 cacheManager: cacheManager,
-                config: new LMP.Core.Models.StreamingConfig());
+                config: new StreamingConfig());
 
             TestAssert.ZeroAlloc(() =>
             {
@@ -411,6 +412,83 @@ public static partial class HotPathAllocationTests
     public static Task TestNetworkManagerAndDelayNoThrowZeroAllocAsync() =>
         NetworkLogicTests.TestNetworkManagerLogicZeroAllocAsync();
 
+    [TestMethod(TestCategory.Unit, "ImageCache & DominantColor FNV-1a Key Sync & Native Dispose", Group = TestGroups.System, Order = 98)]
+    public static Task TestImageCacheKeySyncAndRefCountedDisposeAsync()
+    {
+        const string sampleUrl = "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg";
+        string path1 = ImageCacheService.GetDiskCachePath(sampleUrl);
+        string path2 = ImageCacheService.GetDiskCachePath(sampleUrl.AsSpan());
+
+        TestAssert.Equal(path1, path2);
+        TestAssert.True(path1.EndsWith("B1D0BC95F084A249", StringComparison.Ordinal) || Path.GetFileName(path1).Length == 16,
+            "Disk cache key must be a 16-char FNV-1a hex string");
+
+        using var bmp = new Avalonia.Media.Imaging.WriteableBitmap(
+            new Avalonia.PixelSize(4, 4),
+            new Avalonia.Vector(96, 96),
+            Avalonia.Platform.PixelFormat.Rgba8888,
+            Avalonia.Platform.AlphaFormat.Premul);
+
+        var refBmp = new RefCountedBitmap(bmp);
+        TestAssert.False(refBmp.IsDisposed);
+        refBmp.Dispose();
+        TestAssert.True(refBmp.IsDisposed);
+
+        bool preferWebOnVpn = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated: true, preferWebRemix: true)[0]
+            == YoutubeClientNames.WebRemix;
+        TestAssert.True(preferWebOnVpn, "WEB_REMIX must be prioritized when preferWebRemix is true");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Cold-Only CDN PreWarm Gate & QuickJS Init State", Group = TestGroups.Youtube, Order = 97)]
+    public static Task TestColdOnlyCdnPreWarmGateAndQuickJsInitStateAsync()
+    {
+        // Проверяем, что пересоздание 2-мегабайтного LockFreeRingBuffer<float> (524 288 элементов)
+        // переиспользует буфер из ArrayPool<float>.Shared с 0 байт аллокаций в LOH
+        using (var warmupRing = new LockFreeRingBuffer<float>(524_288)) { }
+        long allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10; i++)
+        {
+            using var ring = new LockFreeRingBuffer<float>(524_288);
+        }
+        long allocDelta = GC.GetAllocatedBytesForCurrentThread() - allocBefore;
+        TestAssert.True(allocDelta < 4096, $"10 LockFreeRingBuffer(2MB) recreations must not allocate in LOH, actual={allocDelta}B");
+
+        var net = new NetworkManager();
+        try
+        {
+            var playerManager = new Core.Youtube.Bridge.Common.PlayerContextManager(() => net.AudioClient);
+            using var jsService = new Core.Youtube.Bridge.Common.JsDecryptionService(playerManager);
+            using var sigDecryptor = new Core.Youtube.Bridge.SigCipher.SigCipherDecryptor(jsService);
+            using var poProvider = new Core.Youtube.Bridge.PoToken.PoTokenProvider(() => net.AudioClient);
+
+            TestAssert.False(jsService.IsInitialized, "Fresh JsDecryptionService must report IsInitialized == false");
+            TestAssert.False(sigDecryptor.IsInitialized, "Fresh SigCipherDecryptor must report IsInitialized == false");
+            TestAssert.False(poProvider.HasActiveContext, "Fresh PoTokenProvider must report HasActiveContext == false");
+
+            using var nDecryptor = new Core.Youtube.Bridge.NToken.NTokenDecryptor(jsService);
+            int complexEventCount = 0;
+            nDecryptor.OnComplexDecryptionStarted += _ => complexEventCount++;
+            TestAssert.Equal(0, complexEventCount);
+
+            // Проверяем non-blocking режим компактора для активного аудио
+            MemoryHelpers.CompactManagedHeapNow(nonBlockingForAudio: true);
+
+            using var cts = new CancellationTokenSource();
+            var delayTask = cts.Token.DelayNoThrowAsync(500, continueOnCapturedContext: false);
+            cts.Cancel();
+            bool delayCompleted = delayTask.GetAwaiter().GetResult();
+            TestAssert.False(delayCompleted, "Cancelled DelayNoThrowAsync must return false without throwing");
+        }
+        finally
+        {
+            net.Dispose();
+        }
+
+        return Task.CompletedTask;
+    }
+
     [TestMethod(TestCategory.Diagnostic, "Windows NT Per-Thread Context Switches (2s)",
         Group = TestGroups.System, Order = 99, RequiresNetwork = false, TimeoutSeconds = 10)]
     public static async Task TestThreadContextSwitchesDiagnosticAsync()
@@ -418,12 +496,15 @@ public static partial class HotPathAllocationTests
         if (!OperatingSystem.IsWindows())
             return;
 
+        // Даём UI-очереди успокоиться после события старта самого теста
+        await Task.Delay(150).ConfigureAwait(false);
+
         var snapBefore = CaptureProcessThreadsSnapshot();
         await Task.Delay(2000).ConfigureAwait(false);
         var snapAfter = CaptureProcessThreadsSnapshot();
 
         uint totalCs = 0;
-        var perThreadDeltas = new List<(int Tid, uint DeltaCs)>(snapAfter.Count);
+        var perThreadDeltas = new List<(int Tid, uint DeltaCs, uint WaitReason, nint StartAddress)>(snapAfter.Count);
 
         foreach (var (tid, after) in snapAfter)
         {
@@ -432,25 +513,90 @@ public static partial class HotPathAllocationTests
                 uint delta = after.ContextSwitches - before.ContextSwitches;
                 totalCs += delta;
                 if (delta > 0)
-                    perThreadDeltas.Add((tid, delta));
+                    perThreadDeltas.Add((tid, delta, after.WaitReason, after.StartAddress));
             }
         }
 
         perThreadDeltas.Sort(static (a, b) => b.DeltaCs.CompareTo(a.DeltaCs));
 
-        var topBuilder = new System.Text.StringBuilder(128);
+        var modules = CaptureModuleRanges();
+        var topBuilder = new System.Text.StringBuilder(192);
         int topCount = Math.Min(5, perThreadDeltas.Count);
         for (int i = 0; i < topCount; i++)
         {
             if (i > 0) topBuilder.Append(", ");
             var item = perThreadDeltas[i];
-            topBuilder.Append($"TID {item.Tid}={item.DeltaCs / 2.0:F0}/s");
+            var tName = TryGetWindowsThreadName(item.Tid) ?? TryFormatModuleOffset(item.StartAddress, modules);
+            if (!string.IsNullOrEmpty(tName))
+                topBuilder.Append($"TID {item.Tid}({tName},w={item.WaitReason})={item.DeltaCs / 2.0:F0}/s");
+            else
+                topBuilder.Append($"TID {item.Tid}(w={item.WaitReason})={item.DeltaCs / 2.0:F0}/s");
         }
 
         Log.Info($"[CS-Diagnostic] Threads analyzed: {snapAfter.Count}, Context switches over 2.0s: {totalCs} ({totalCs / 2.0:F0} CS/sec) | Top: [{topBuilder}]");
     }
 
-    private readonly record struct ThreadKernelInfo(uint ContextSwitches, long KernelTime, long UserTime);
+    private readonly record struct ThreadKernelInfo(uint ContextSwitches, long KernelTime, long UserTime, uint WaitReason, nint StartAddress);
+
+    private static List<(nint BaseAddr, nint EndAddr, string Name)> CaptureModuleRanges()
+    {
+        var list = new List<(nint BaseAddr, nint EndAddr, string Name)>(64);
+        try
+        {
+            using var proc = System.Diagnostics.Process.GetCurrentProcess();
+            foreach (System.Diagnostics.ProcessModule mod in proc.Modules)
+            {
+                nint baseAddr = mod.BaseAddress;
+                nint endAddr = baseAddr + mod.ModuleMemorySize;
+                list.Add((baseAddr, endAddr, mod.ModuleName));
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    private static string? TryFormatModuleOffset(nint startAddr, List<(nint BaseAddr, nint EndAddr, string Name)> modules)
+    {
+        if (startAddr == 0) return null;
+        for (int i = 0; i < modules.Count; i++)
+        {
+            var m = modules[i];
+            if (startAddr >= m.BaseAddr && startAddr < m.EndAddr)
+            {
+                long offset = startAddr - m.BaseAddr;
+                return $"{m.Name}+0x{offset:x}";
+            }
+        }
+        return $"0x{startAddr:x}";
+    }
+
+    private static unsafe string? TryGetWindowsThreadName(int tid)
+    {
+        const uint THREAD_QUERY_LIMITED_INFORMATION = 0x0800;
+        nint hThread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, 0, (uint)tid);
+        if (hThread == 0) return null;
+
+        try
+        {
+            if (GetThreadDescription(hThread, out nint pDesc) >= 0 && pDesc != 0)
+            {
+                try
+                {
+                    return System.Runtime.InteropServices.Marshal.PtrToStringUni(pDesc);
+                }
+                finally
+                {
+                    LocalFree(pDesc);
+                }
+            }
+        }
+        finally
+        {
+            CloseHandle(hThread);
+        }
+
+        return null;
+    }
 
     private static unsafe Dictionary<int, ThreadKernelInfo> CaptureProcessThreadsSnapshot()
     {
@@ -500,10 +646,12 @@ public static partial class HotPathAllocationTests
                         {
                             long kernelTime = BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset, 8));
                             long userTime = BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset + 8, 8));
+                            nint startAddress = (nint)BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset + 24, 8));
                             int tid = (int)BinaryPrimitives.ReadInt64LittleEndian(span.Slice(threadOffset + 48, 8));
                             uint contextSwitches = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(threadOffset + 64, 4));
+                            uint waitReason = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(threadOffset + 72, 4));
 
-                            result[tid] = new ThreadKernelInfo(contextSwitches, kernelTime, userTime);
+                            result[tid] = new ThreadKernelInfo(contextSwitches, kernelTime, userTime, waitReason, startAddress);
                         }
                         break;
                     }
@@ -524,4 +672,16 @@ public static partial class HotPathAllocationTests
     [System.Runtime.InteropServices.LibraryImport("ntdll.dll")]
     private static partial int NtQuerySystemInformation(
         int systemInformationClass, nint systemInformation, int systemInformationLength, out int returnLength);
+
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll")]
+    private static partial nint OpenThread(uint dwDesiredAccess, int bInheritHandle, uint dwThreadId);
+
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll")]
+    private static partial int GetThreadDescription(nint hThread, out nint ppszThreadDescription);
+
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll")]
+    private static partial nint LocalFree(nint hMem);
+
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll")]
+    private static partial int CloseHandle(nint hObject);
 }

@@ -42,6 +42,11 @@ public sealed class JsDecryptionService : IDisposable
     /// <summary>Менеджер контекста плеера. Используется для Invalidate при 403-recovery.</summary>
     public PlayerContextManager PlayerManager => _playerManager;
 
+    /// <summary>
+    /// Указывает, инициализирован ли нативный контекст QuickJS и готов ли он к мгновенным вызовам (~0.1 мс).
+    /// </summary>
+    public bool IsInitialized => _initialized && _handle != IntPtr.Zero && !_disposed;
+
     /// <param name="playerManager">
     /// Менеджер контекста плеера — источник препроцессированного скрипта.
     /// </param>

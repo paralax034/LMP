@@ -184,6 +184,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 
         IAudioSource? source = null;
         IAudioDecoder? decoder = null;
+        LockFreeRingBuffer<float>? pcmBuffer = null;
         float[]? decodeBuffer = null;
 
         try
@@ -237,7 +238,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 
             int rawSize = decoder.SampleRate * decoder.Channels * BufferSizeSeconds;
             int bufferSize = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(rawSize, 16));
-            var pcmBuffer = new LockFreeRingBuffer<float>(bufferSize);
+            pcmBuffer = new LockFreeRingBuffer<float>(bufferSize);
 
             decodeBuffer = ArrayPool<float>.Shared.Rent(DecoderBufferFrames * decoder.Channels);
 
@@ -264,22 +265,28 @@ public sealed class AudioPipeline : IAsyncDisposable
 
             return pipeline;
         }
-        catch (OperationCanceledException) { CleanupOnError(source, decoder, decodeBuffer, lifetimeCts); throw; }
-        catch (AudioSourceException) { CleanupOnError(source, decoder, decodeBuffer, lifetimeCts); throw; }
-        catch (CdnUnavailableException) { CleanupOnError(source, decoder, decodeBuffer, lifetimeCts); throw; }
+        catch (OperationCanceledException) { CleanupOnError(source, decoder, pcmBuffer, decodeBuffer, lifetimeCts); throw; }
+        catch (AudioSourceException) { CleanupOnError(source, decoder, pcmBuffer, decodeBuffer, lifetimeCts); throw; }
+        catch (CdnUnavailableException) { CleanupOnError(source, decoder, pcmBuffer, decodeBuffer, lifetimeCts); throw; }
         catch (Exception ex)
         {
-            CleanupOnError(source, decoder, decodeBuffer, lifetimeCts);
+            CleanupOnError(source, decoder, pcmBuffer, decodeBuffer, lifetimeCts);
             if (CancellationHelper.IsCancellationOrTokenCancelled(ex, ct))
                 throw new OperationCanceledException("Pipeline creation cancelled", ex, ct);
             throw new AudioSourceException("Failed to initialize audio source", ex);
         }
     }
 
-    private static void CleanupOnError(IAudioSource? s, IAudioDecoder? d, float[]? buf, CancellationTokenSource cts)
+    private static void CleanupOnError(
+        IAudioSource? s,
+        IAudioDecoder? d,
+        LockFreeRingBuffer<float>? pcm,
+        float[]? buf,
+        CancellationTokenSource cts)
     {
         try { d?.Dispose(); } catch { }
         try { s?.Dispose(); } catch { }
+        pcm?.Dispose();
         if (buf != null) ArrayPool<float>.Shared.Return(buf);
         try { cts.Dispose(); } catch { }
     }
@@ -568,6 +575,11 @@ CancellationToken ct)
                             isRecoverable: true,
                             trackId: _streamInfo.TrackId);
                     }
+
+                    // Если достигнут конец файла (EOF), немедленно снимаем ожидание WaitForBufferAsync,
+                    // даже если оставшийся хвост трека короче стандартного порога прогрева (например, < 80 мс).
+                    Volatile.Write(ref _warmupThreshold, 0);
+                    Interlocked.Exchange(ref _warmupTcs, null)?.TrySetResult();
 
                     await DrainBufferAsync(ct).ConfigureAwait(false);
                     if (!ct.IsCancellationRequested) onTrackEnded?.Invoke();
@@ -1110,6 +1122,7 @@ CancellationToken ct)
 
         _decoder.Dispose();
         await _source.DisposeAsync().ConfigureAwait(false);
+        _pcmBuffer.Dispose();
         ArrayPool<float>.Shared.Return(_decodeBuffer);
 
         try { _decoderCts?.Dispose(); } catch (ObjectDisposedException) { }

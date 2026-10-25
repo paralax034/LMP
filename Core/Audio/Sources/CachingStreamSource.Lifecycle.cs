@@ -156,14 +156,6 @@ public sealed partial class CachingStreamSource
         {
         }
 
-        try
-        {
-            _downloadSlots.Dispose();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
         _suspendGate.Dispose();
         _playbackGate.Dispose();
 

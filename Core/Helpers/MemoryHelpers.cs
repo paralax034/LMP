@@ -53,22 +53,38 @@ public static partial class MemoryHelpers
     /// виртуальных страниц (<c>Private: Commit</c>) после парсинга AST или инициализации нативных мостов.
     /// Не сбрасывает Working Set в pagefile, поэтому безопасна при активном аудио-воспроизведении.
     /// </summary>
-    public static void CompactManagedHeapNow()
+    public static void CompactManagedHeapNow(bool nonBlockingForAudio = false)
     {
         try
         {
             long beforeCommitted = GC.GetGCMemoryInfo().TotalCommittedBytes;
 
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
+            if (nonBlockingForAudio)
+            {
+                // Во время активного аудио-воспроизведения используем фоновый (concurrent) GC Gen 2
+                // без Stop-The-World компактификации LOH и без блокировки потока WASAPI (пауза < 1 мс вместо 220 мс).
+                GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: false);
+                var bgInfo = GC.GetGCMemoryInfo();
+                Log.Info(
+                    $"[Memory] Non-blocking background Gen2 GC triggered (playback active): " +
+                    $"Committed {beforeCommitted / (1024 * 1024)} MB -> {bgInfo.TotalCommittedBytes / (1024 * 1024)} MB");
+                return;
+            }
+
+            // В простое (без воспроизведения): одиночный проход с компактификацией LOH
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
 
-            long afterCommitted = GC.GetGCMemoryInfo().TotalCommittedBytes;
+            var gcInfo = GC.GetGCMemoryInfo();
+            long afterCommitted = gcInfo.TotalCommittedBytes;
+            long liveBytes = GC.GetTotalMemory(false);
             long savedMb = (beforeCommitted - afterCommitted) / (1024 * 1024);
 
-            Log.Info($"[Memory] Post-heavy LOH/Gen2 compaction complete: {beforeCommitted / (1024 * 1024)} MB -> {afterCommitted / (1024 * 1024)} MB (reclaimed {savedMb} MB)");
+            Log.Info(
+                $"[Memory] Post-heavy LOH/Gen2 compaction complete: " +
+                $"Committed {beforeCommitted / (1024 * 1024)} MB -> {afterCommitted / (1024 * 1024)} MB " +
+                $"(reclaimed {savedMb} MB) | Live Objects: {liveBytes / (1024 * 1024)} MB, " +
+                $"HeapSize: {gcInfo.HeapSizeBytes / (1024 * 1024)} MB");
         }
         catch (Exception ex)
         {

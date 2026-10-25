@@ -620,7 +620,12 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             return int.MaxValue;
 
         if (pipeline.Source is Sources.CachingStreamSource cs)
+        {
+            if (cs.IsTailLocallyBuffered)
+                return int.MaxValue;
+
             return cs.BufferedAheadMs;
+        }
 
         return 0;
     }
@@ -871,6 +876,15 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         string? trackId = null,
         string? logContext = null)
     {
+        // Если весь хвост трека до EOF уже локально скачан и в кольцевом буфере есть декодированные сэмплы,
+        // немедленно возобновляем воспроизведение, даже если остаток трека у самого конца короче PcmThresholdSamples.
+        if (!pcmReady
+            && pipeline.BufferedSamples > 0
+            && GetSourceBufferedAheadMs(pipeline) == int.MaxValue)
+        {
+            pcmReady = true;
+        }
+
         if (pcmReady && sourceReady)
         {
             ResumePlaybackSequence(pipeline, startTimers, configurePipeline, trackId);
