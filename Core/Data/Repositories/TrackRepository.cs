@@ -23,7 +23,7 @@ public sealed partial class TrackRepository : ITrackRepository
         t.Id, t.Title, t.Author, t.ChannelId, t.Url, t.DurationTicks, t.ThumbnailUrl,
         t.IsOfficialArtist, t.IsMusic, t.IsDisliked, t.IsDownloaded, t.LocalPath,
         t.PreferredContainer, t.PreferredBitrate, t.RadioSeedId, t.IntegratedLufs,
-        t.IntegratedLufsSource, t.CreatedAt, t.UpdatedAt
+        t.IntegratedLufsSource, t.EqualizerPresetId, t.CreatedAt, t.UpdatedAt
         """;
 
     /// <summary>
@@ -584,6 +584,29 @@ public sealed partial class TrackRepository : ITrackRepository
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task SetEqualizerPresetAsync(
+        string id,
+        string? presetId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE Tracks
+            SET EqualizerPresetId = @presetId,
+                UpdatedAt = @updatedAt
+            WHERE Id = @id;
+            """;
+
+        AddParameter(cmd, "@presetId", string.IsNullOrEmpty(presetId) ? DBNull.Value : presetId);
+        AddParameter(cmd, "@updatedAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+        AddParameter(cmd, "@id", id);
+
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     #endregion
 
     #region History
@@ -813,6 +836,7 @@ public sealed partial class TrackRepository : ITrackRepository
         var radioSeedId = reader.IsDBNull(14) ? null : reader.GetString(14);
         float integratedLufs = reader.IsDBNull(15) ? float.NaN : Convert.ToSingle(reader.GetValue(15), CultureInfo.InvariantCulture);
         var integratedLufsSource = reader.GetInt32(16);
+        var equalizerPresetId = reader.IsDBNull(17) ? null : reader.GetString(17);
 
         return new TrackInfo
         {
@@ -833,6 +857,7 @@ public sealed partial class TrackRepository : ITrackRepository
             RadioSeedId = radioSeedId,
             IntegratedLufs = integratedLufs,
             IntegratedLufsSource = (LoudnessSource)integratedLufsSource,
+            EqualizerPresetId = equalizerPresetId,
             IsLiked = isLiked
         };
     }
@@ -929,13 +954,13 @@ public sealed partial class TrackRepository : ITrackRepository
             Id, Title, Author, ChannelId, Url, DurationTicks, ThumbnailUrl,
             IsOfficialArtist, IsMusic, IsDisliked, IsDownloaded, LocalPath,
             PreferredContainer, PreferredBitrate, RadioSeedId, IntegratedLufs,
-            IntegratedLufsSource, CreatedAt, UpdatedAt
+            IntegratedLufsSource, EqualizerPresetId, CreatedAt, UpdatedAt
         )
         VALUES (
             @id, @title, @author, @channelId, @url, @durationTicks, @thumbnailUrl,
             @isOfficialArtist, @isMusic, @isDisliked, @isDownloaded, @localPath,
             @preferredContainer, @preferredBitrate, @radioSeedId, @integratedLufs,
-            @integratedLufsSource, @createdAt, @updatedAt
+            @integratedLufsSource, @equalizerPresetId, @createdAt, @updatedAt
         )
         ON CONFLICT(Id) DO UPDATE SET
             Title = excluded.Title,
@@ -954,6 +979,7 @@ public sealed partial class TrackRepository : ITrackRepository
             RadioSeedId = excluded.RadioSeedId,
             IntegratedLufs = CASE WHEN excluded.IntegratedLufs IS NOT NULL THEN excluded.IntegratedLufs ELSE Tracks.IntegratedLufs END,
             IntegratedLufsSource = CASE WHEN excluded.IntegratedLufs IS NOT NULL THEN excluded.IntegratedLufsSource ELSE Tracks.IntegratedLufsSource END,
+            EqualizerPresetId = CASE WHEN excluded.EqualizerPresetId IS NOT NULL THEN excluded.EqualizerPresetId ELSE Tracks.EqualizerPresetId END,
             UpdatedAt = excluded.UpdatedAt;
         """;
 
@@ -985,6 +1011,7 @@ public sealed partial class TrackRepository : ITrackRepository
             : track.IntegratedLufs;
         AddParameter(cmd, "@integratedLufs", lufsVal);
         AddParameter(cmd, "@integratedLufsSource", (int)track.IntegratedLufsSource);
+        AddParameter(cmd, "@equalizerPresetId", (object?)track.EqualizerPresetId ?? DBNull.Value);
         AddParameter(cmd, "@createdAt", nowStr);
         AddParameter(cmd, "@updatedAt", nowStr);
     }

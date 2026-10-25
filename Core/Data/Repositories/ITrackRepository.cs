@@ -187,9 +187,20 @@ public interface ITrackRepository
     /// <param name="source">Источник значения <c>IntegratedLufs</c>.</param>
     /// <param name="ct">Токен отмены.</param>
     Task SaveNormalizationMetadataAsync(
+            string id,
+            float integratedLufs,
+            int source,
+            CancellationToken ct = default);
+
+    /// <summary>
+    /// Сохраняет или сбрасывает индивидуальный пресет эквалайзера для указанного трека.
+    /// </summary>
+    /// <param name="id">Идентификатор трека.</param>
+    /// <param name="presetId">Идентификатор пресета эквалайзера или <c>null</c> для сброса.</param>
+    /// <param name="ct">Токен отмены.</param>
+    Task SetEqualizerPresetAsync(
         string id,
-        float integratedLufs,
-        int source,
+        string? presetId,
         CancellationToken ct = default);
 
     #endregion

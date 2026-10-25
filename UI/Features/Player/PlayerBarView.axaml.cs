@@ -80,6 +80,10 @@ public partial class PlayerBarView : UserControl
     private TimeSpan _glideStartTime;
     private bool _isGliding;
 
+    private DispatcherTimer? _presetsHoverCloseTimer;
+    private bool _isPointerInPresetsTrigger;
+    private bool _isPointerInPresetsPopup;
+
     #endregion
 
     #region Initialization
@@ -120,7 +124,123 @@ public partial class PlayerBarView : UserControl
             _formatFlyout.Closed += (_, _) => FormatButton.Classes.Remove("popup-open");
         }
 
+        EqCurveControl.BandsChanged += bands => _currentViewModel?.ApplyCustomEqualizerBandsFromUi(bands);
+
         KeyDown += OnKeyDown;
+    }
+
+    private void OnEqualizerFlyoutOpened(object? sender, EventArgs e)
+    {
+        EqualizerButton.Classes.Add("active");
+        _currentViewModel?.SyncEqualizerStateFromSettings();
+    }
+
+    private void OnEqualizerFlyoutClosed(object? sender, EventArgs e)
+    {
+        EqualizerButton.Classes.Remove("active");
+        EqPresetsPopup.IsOpen = false;
+    }
+
+    private void OnEqHeaderButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Control button)
+        {
+            ToolTip.SetIsOpen(button, false);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (button.IsPointerOver)
+                    ToolTip.SetIsOpen(button, true);
+            }, DispatcherPriority.Input);
+        }
+    }
+
+    private void OnRenamePresetTextBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not Control { DataContext: EqualizerPresetChipItem chip }) return;
+
+        if (e.Key == Key.Enter)
+        {
+            _currentViewModel?.CommitRenamePresetCommand.Execute(chip);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            chip.IsRenaming = false;
+            e.Handled = true;
+        }
+    }
+
+    private void OnRenamePresetTextBoxLostFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: EqualizerPresetChipItem { IsRenaming: true } chip })
+        {
+            _currentViewModel?.CommitRenamePresetCommand.Execute(chip);
+        }
+    }
+
+    private void OnPresetsTriggerPointerEntered(object? sender, PointerEventArgs e)
+    {
+        _isPointerInPresetsTrigger = true;
+        _presetsHoverCloseTimer?.Stop();
+        ToolTip.SetIsOpen(EqPresetsButton, false);
+        EqPresetsPopup.IsOpen = true;
+    }
+
+    private void OnPresetsTriggerPointerExited(object? sender, PointerEventArgs e)
+    {
+        _isPointerInPresetsTrigger = false;
+        SchedulePresetsPopupClose();
+    }
+
+    private void OnPresetsPopupPointerEntered(object? sender, PointerEventArgs e)
+    {
+        _isPointerInPresetsPopup = true;
+        _presetsHoverCloseTimer?.Stop();
+    }
+
+    private void OnPresetsPopupPointerExited(object? sender, PointerEventArgs e)
+    {
+        _isPointerInPresetsPopup = false;
+        SchedulePresetsPopupClose();
+    }
+
+    private void SchedulePresetsPopupClose()
+    {
+        _presetsHoverCloseTimer ??= new DispatcherTimer(
+                TimeSpan.FromMilliseconds(220),
+                DispatcherPriority.Normal,
+                (_, _) =>
+                {
+                    _presetsHoverCloseTimer?.Stop();
+                    if (!_isPointerInPresetsTrigger && !_isPointerInPresetsPopup)
+                    {
+                        EqPresetsPopup.IsOpen = false;
+                    }
+                });
+        _presetsHoverCloseTimer.Stop();
+        _presetsHoverCloseTimer.Start();
+    }
+
+    private void OnNewPresetTextBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            _currentViewModel?.SaveInlineEqualizerPresetCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void OnPresetItemPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton == MouseButton.Right
+            && sender is Control { DataContext: EqualizerPresetChipItem chip }
+            && !chip.IsBuiltIn)
+        {
+            _isPointerInPresetsPopup = true;
+            _presetsHoverCloseTimer?.Stop();
+            _currentViewModel?.DeleteEqualizerPresetCommand.Execute(chip);
+            e.Handled = true;
+        }
     }
 
     #endregion
@@ -158,6 +278,8 @@ public partial class PlayerBarView : UserControl
 
         _seekHintTimer?.Stop();
         _seekHintTimer = null;
+        _presetsHoverCloseTimer?.Stop();
+        _presetsHoverCloseTimer = null;
     }
 
     private void OnWindowActivated(object? sender, EventArgs e)
@@ -564,6 +686,7 @@ public partial class PlayerBarView : UserControl
 
     private void CloseAllPopups()
     {
+        EqPresetsPopup.IsOpen = false;
         SeekTooltip.Opacity = 0;
         SeekRangeSpan.Opacity = 0;
         SeekHint.Opacity = 0;

@@ -288,6 +288,22 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         CancellationToken ct = default) =>
         _tracks.SaveNormalizationMetadataAsync(trackId, integratedLufs, source, ct);
 
+    /// <summary>
+    /// Устанавливает или сбрасывает индивидуальный пресет эквалайзера для трека в L1-кэше и БД SQLite.
+    /// </summary>
+    public async Task SetTrackEqualizerPresetAsync(
+        TrackInfo track,
+        string? presetId,
+        CancellationToken ct = default)
+    {
+        var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
+        canonical.EqualizerPresetId = string.IsNullOrWhiteSpace(presetId) ? null : presetId;
+
+        await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+        await _tracks.SetEqualizerPresetAsync(canonical.Id, canonical.EqualizerPresetId, ct).ConfigureAwait(false);
+        OnTrackUpdated?.Invoke(canonical);
+    }
+
     #endregion
 
     #region Лайки

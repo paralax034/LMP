@@ -209,19 +209,17 @@
     <Style Selector="Button.icon-btn:disabled PathIcon">
         <Setter Property="Background" Value="Transparent" />
     </Style>
-    <Style Selector="Button.icon-btn PathIcon">
+    <Style Selector="Button.icon-btn:not(.active) PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
     </Style>
-    <Style Selector="Button.icon-btn:pointerover PathIcon">
+    <Style Selector="Button.icon-btn:not(.active):pointerover PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.icon-btn.active PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.icon-btn.active:pointerover PathIcon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
     <!-- HEADER ICON BUTTON (Без рамок, чистая анимация цвета иконки на AccentBrush) -->

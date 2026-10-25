@@ -167,11 +167,11 @@ public sealed class TruePeakLimiter
                 : 1.0f;
 
             envGain = desiredEnv < envGain
-                ? attackCoef * envGain + (1f - attackCoef) * desiredEnv
-                : releaseCoef * envGain + (1f - releaseCoef) * desiredEnv;
+                  ? attackCoef * envGain + (1f - attackCoef) * desiredEnv
+                  : releaseCoef * envGain + (1f - releaseCoef) * desiredEnv;
 
-            Unsafe.Add(ref samplesRef, i) = ampL * envGain;
-            Unsafe.Add(ref samplesRef, i + 1) = ampR * envGain;
+            Unsafe.Add(ref samplesRef, i) = Math.Clamp(ampL * envGain, -Ceiling, Ceiling);
+            Unsafe.Add(ref samplesRef, i + 1) = Math.Clamp(ampR * envGain, -Ceiling, Ceiling);
         }
 
         for (; i < length; i++)
@@ -188,7 +188,7 @@ public sealed class TruePeakLimiter
                 ? attackCoef * envGain + (1f - attackCoef) * desiredEnv
                 : releaseCoef * envGain + (1f - releaseCoef) * desiredEnv;
 
-            Unsafe.Add(ref samplesRef, i) = amplified * envGain;
+            Unsafe.Add(ref samplesRef, i) = Math.Clamp(amplified * envGain, -Ceiling, Ceiling);
         }
 
         _envelopeGain = envGain;

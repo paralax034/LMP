@@ -69,6 +69,38 @@ public static class AudioHotPathBenchmarks
         });
         Log.Info($"[Benchmark] {r2.Name,-35} | {r2.MeanNs,8:F1} ns/op | {r2.OpsPerSec,10:F0} ops/s");
 
+        var eq = new EqualizerProcessor(SampleRate, Channels);
+        float[] eqBuffer = CreateSineBuffer(BufferSamples);
+
+        var r3 = RunBenchmark("EqualizerProcessor (Bypass)", () => eq.Process(eqBuffer.AsSpan()));
+        Log.Info($"[Benchmark] {r3.Name,-35} | {r3.MeanNs,8:F1} ns/op | {r3.OpsPerSec,10:F0} ops/s");
+
+        eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(EqualizerPresets.AnimeId), preampDb: 0f, autoPreamp: true);
+        eq.SnapToTarget();
+
+        var r4 = RunBenchmark("EqualizerProcessor (10-Band IIR)", () =>
+        {
+            writeData.AsSpan().CopyTo(eqBuffer.AsSpan());
+            eq.Process(eqBuffer.AsSpan());
+        }, iterations: 5_000);
+        Log.Info($"[Benchmark] {r4.Name,-35} | {r4.MeanNs,8:F1} ns/op | {r4.OpsPerSec,10:F0} ops/s");
+
+        var spectrum = new AudioSpectrumAnalyzer(SampleRate, Channels);
+        var r5 = RunBenchmark("AudioSpectrumAnalyzer (10-Band)", () =>
+        {
+            spectrum.ProcessBlock(writeData.AsSpan(), Channels);
+        }, iterations: 5_000);
+        Log.Info($"[Benchmark] {r5.Name,-35} | {r5.MeanNs,8:F1} ns/op | {r5.OpsPerSec,10:F0} ops/s");
+
+        var limiter = new Core.Audio.Normalization.TruePeakLimiter(SampleRate);
+        var crossfader = new Core.Audio.Normalization.GainCrossfader(1.2f);
+        var r6 = RunBenchmark("TruePeakLimiter (Stereo-Linked)", () =>
+        {
+            writeData.AsSpan().CopyTo(eqBuffer.AsSpan());
+            limiter.Process(eqBuffer.AsSpan(), ref crossfader);
+        }, iterations: 5_000);
+        Log.Info($"[Benchmark] {r6.Name,-35} | {r6.MeanNs,8:F1} ns/op | {r6.OpsPerSec,10:F0} ops/s");
+
         return Task.CompletedTask;
     }
 

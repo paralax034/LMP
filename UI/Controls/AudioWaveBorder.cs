@@ -629,6 +629,9 @@ public sealed class AudioWaveBorder : Decorator
         p.IsActive = true;
         p.Kind = kind;
 
+        int domBand = Math.Clamp(AudioVisualizerBuffer.DominantBandIndex, 0, 9);
+        double bandRatio = domBand / 9.0;
+
         switch (kind)
         {
             case PacketKind.KickBullet:
@@ -644,9 +647,9 @@ public sealed class AudioWaveBorder : Decorator
 
             case PacketKind.BassSwell:
                 p.Amplitude = Math.Clamp(rawAmp * NextRandom(0.90, 1.10), 1.4, 3.6);
-                p.Width = NextRandom(0.32, 0.42);
+                p.Width = NextRandom(0.30, 0.42) * (1.05 - 0.15 * bandRatio);
                 p.Velocity = baseVelocity * NextRandom(0.84, 0.94);
-                p.Frequency = NextRandom(2.8, 4.4);
+                p.Frequency = (2.4 + domBand * 0.55) * NextRandom(0.92, 1.08);
                 p.PhaseOffset = NextRandom(-Math.PI, Math.PI);
                 p.HarmonicRatio = NextRandom(0.15, 0.30);
                 p.HarmonicPhase = NextRandom(0.0, Math.Tau);
@@ -655,9 +658,9 @@ public sealed class AudioWaveBorder : Decorator
 
             case PacketKind.MidRipple:
                 p.Amplitude = Math.Clamp(rawAmp * NextRandom(0.88, 1.12), 1.0, 2.9);
-                p.Width = NextRandom(0.20, 0.28);
+                p.Width = NextRandom(0.18, 0.28);
                 p.Velocity = baseVelocity * NextRandom(1.00, 1.12);
-                p.Frequency = NextRandom(5.2, 7.8);
+                p.Frequency = (4.2 + domBand * 0.75) * NextRandom(0.92, 1.08);
                 p.PhaseOffset = NextRandom(-Math.PI, Math.PI);
                 p.HarmonicRatio = NextRandom(0.10, 0.25);
                 p.HarmonicPhase = NextRandom(0.0, Math.Tau);
@@ -668,7 +671,7 @@ public sealed class AudioWaveBorder : Decorator
                 p.Amplitude = Math.Clamp(rawAmp * NextRandom(0.85, 1.15), 0.8, 2.4);
                 p.Width = NextRandom(0.12, 0.18);
                 p.Velocity = baseVelocity * NextRandom(1.15, 1.28);
-                p.Frequency = NextRandom(8.5, 12.0);
+                p.Frequency = (7.5 + domBand * 0.65) * NextRandom(0.92, 1.08);
                 p.PhaseOffset = NextRandom(-Math.PI, Math.PI);
                 p.HarmonicRatio = NextRandom(0.05, 0.20);
                 p.HarmonicPhase = NextRandom(0.0, Math.Tau);

@@ -11,7 +11,7 @@ public static class DatabaseExtensions
     /// <summary>
     /// Текущая версия схемы базы данных.
     /// </summary>
-    public const int CurrentDbVersion = 4;
+    public const int CurrentDbVersion = 5;
 
     /// <summary>
     /// Идемпотентно создает все необходимые таблицы и индексы базы данных в режиме Native AOT.
@@ -97,6 +97,7 @@ public static class DatabaseExtensions
                     "RadioSeedId" TEXT NULL,
                     "IntegratedLufs" REAL NULL,
                     "IntegratedLufsSource" INTEGER NOT NULL DEFAULT 0,
+                    "EqualizerPresetId" TEXT NULL,
                     "CreatedAt" TEXT NOT NULL,
                     "UpdatedAt" TEXT NOT NULL
                 );
@@ -229,6 +230,7 @@ public static class DatabaseExtensions
 
         await AddColumnIfNotExistsAsync(context, "Tracks", "IntegratedLufs", "REAL", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Tracks", "IntegratedLufsSource", "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
+        await AddColumnIfNotExistsAsync(context, "Tracks", "EqualizerPresetId", "TEXT", ct).ConfigureAwait(false);
 
         bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try

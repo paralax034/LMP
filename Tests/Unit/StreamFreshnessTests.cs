@@ -70,7 +70,7 @@ public static class StreamFreshnessTests
             codec: AudioCodec.Opus,
             bitrate: 160,
             cacheManager: tempCache.Manager,
-            config: new LMP.Core.Models.StreamingConfig(),
+            config: new StreamingConfig(),
             urlRefresher: MockRefresher);
 
         await source.EnsureStreamFreshnessAsync(CancellationToken.None).ConfigureAwait(false);
@@ -98,7 +98,7 @@ public static class StreamFreshnessTests
             codec: AudioCodec.Opus,
             bitrate: 160,
             cacheManager: tempCache.Manager,
-            config: new LMP.Core.Models.StreamingConfig(),
+            config: new StreamingConfig(),
             urlRefresher: _ =>
             {
                 Interlocked.Increment(ref refreshCalls);

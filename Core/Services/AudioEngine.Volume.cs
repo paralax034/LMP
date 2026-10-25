@@ -92,8 +92,6 @@ public sealed partial class AudioEngine
     {
         var settings = _library.Settings;
         float gain = ComputeGain(_volumePercent, Math.Max(settings.MaxVolumeLimit, 100), settings.Audio);
-        float targetGainDb = Math.Clamp(settings.TargetGainDb, -20f, 20f);
-        gain *= MathF.Pow(10f, targetGainDb / 20f);
         return Math.Clamp(gain, 0f, MaxGain);
     }
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LMP.Core.Audio.Cache;
+using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Http;
 using LMP.Core.Data;
 using LMP.Core.Youtube.Bridge.Common;
@@ -61,6 +62,9 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(PlaybackFailureBehavior))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(float[]))]
+[JsonSerializable(typeof(EqualizerPreset))]
+[JsonSerializable(typeof(List<EqualizerPreset>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSourceGenerationOptions(
     WriteIndented = false,

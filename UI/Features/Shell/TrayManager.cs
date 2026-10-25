@@ -863,11 +863,9 @@ internal sealed partial class TrayManager : IDisposable
         short wheelDelta = (short)(mouseData >> 16);
         int volumeDelta = wheelDelta > 0 ? VolumeStep : -VolumeStep;
 
-        // Единый центр управления: изменяет звук мгновенно и запускает дебаунс-сохранение в БД
-        int newVolume = _playerControl.AdjustVolume(volumeDelta);
-
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            int newVolume = _playerControl.AdjustVolume(volumeDelta);
             _onVolumeChanged?.Invoke(newVolume);
         });
 

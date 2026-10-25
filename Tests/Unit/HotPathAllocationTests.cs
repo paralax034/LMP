@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using LMP.Core.Audio;
 using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
+using LMP.Core.Audio.Normalization;
 using LMP.Core.Youtube.Utils;
 using LMP.Tests.Framework;
 
@@ -127,17 +128,21 @@ public static partial class HotPathAllocationTests
     public static Task TestAudioCallbackSimulationZeroAllocAsync()
     {
         var ring = new LockFreeRingBuffer<float>(BufferSamples * 8);
-        var analyzer = new Core.Audio.Normalization.EbuR128Analyzer();
-        analyzer.Configure(new Core.Audio.Normalization.NormalizationConfig(
+        var analyzer = new EbuR128Analyzer();
+        analyzer.Configure(new NormalizationConfig(
             Enabled: true,
             TargetLufs: -14f,
             MaxGain: 3.0f,
-            Mode: Core.Audio.Normalization.NormalizationMode.Bidirectional));
+            Mode: NormalizationMode.Bidirectional));
         analyzer.LockResolvedGain(1.25f);
 
-        var limiter = new Core.Audio.Normalization.TruePeakLimiter(SampleRate);
-        var analyzer3Band = new Audio3BandAnalyzer(SampleRate, Channels);
-        var crossfader = new Core.Audio.Normalization.GainCrossfader(1.0f);
+        var equalizer = new EqualizerProcessor(SampleRate, Channels);
+        equalizer.Configure(enabled: true, EqualizerPresets.GetPresetBands(EqualizerPresets.BassBoostId), preampDb: 0f, autoPreamp: false);
+        equalizer.SnapToTarget();
+
+        var limiter = new TruePeakLimiter(SampleRate);
+        var spectrumAnalyzer = new AudioSpectrumAnalyzer(SampleRate, Channels);
+        var crossfader = new GainCrossfader(1.0f);
         var processor = new GainProcessor();
         processor.SetVolumeGain(0.8f);
 
@@ -155,6 +160,8 @@ public static partial class HotPathAllocationTests
                 var samples = dst.AsSpan(0, read);
                 int mode = branchSelector++ % 3;
 
+                equalizer.Process(samples);
+
                 if (mode == 0)
                 {
                     analyzer.LockResolvedGain(1.25f);
@@ -168,7 +175,9 @@ public static partial class HotPathAllocationTests
                 float normGain = analyzer.IsEnabled ? analyzer.ProcessSamples() : 1.0f;
                 crossfader.SetTarget(normGain, SampleRate, Channels);
 
-                bool canBypassLimiter = normGain <= 1.0f && (mode != 0 || limiter.EnvelopeGain >= 0.999f);
+                bool canBypassLimiter = normGain <= 1.0f
+                                     && !equalizer.HasPositiveBoost
+                                     && (mode != 0 || limiter.EnvelopeGain >= 0.999f);
                 if (canBypassLimiter)
                 {
                     if (crossfader.IsActive)
@@ -181,7 +190,7 @@ public static partial class HotPathAllocationTests
                     limiter.Process(samples, ref crossfader);
                 }
 
-                analyzer3Band.ProcessBlock(samples, Channels);
+                spectrumAnalyzer.ProcessBlock(samples, Channels);
                 processor.Process(samples);
             }
         }, WarmupIterations, MeasureIterations);
@@ -495,51 +504,84 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Diagnostic, "Windows NT Per-Thread Context Switches (2s)",
-        Group = TestGroups.System, Order = 99, RequiresNetwork = false, TimeoutSeconds = 10)]
+    [TestMethod(TestCategory.Diagnostic, "Windows NT Per-Thread Context Switches (20s Live Window)",
+         Group = TestGroups.System, Order = 99, RequiresNetwork = false, TimeoutSeconds = 30)]
     public static async Task TestThreadContextSwitchesDiagnosticAsync()
     {
         if (!OperatingSystem.IsWindows())
             return;
 
+        const double windowSec = 20.0;
+
         // Даём UI-очереди успокоиться после события старта самого теста
         await Task.Delay(150).ConfigureAwait(false);
+        Log.Info($"[CS-Diagnostic] Measuring kernel context switches and CPU time for {windowSec:F0}s (you can play/seek/equalize tracks now)...");
 
         var snapBefore = CaptureProcessThreadsSnapshot();
-        await Task.Delay(2000).ConfigureAwait(false);
+        long startTs = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await Task.Delay(TimeSpan.FromSeconds(windowSec)).ConfigureAwait(false);
+
+        double actualSec = Math.Max(0.1, System.Diagnostics.Stopwatch.GetElapsedTime(startTs).TotalSeconds);
         var snapAfter = CaptureProcessThreadsSnapshot();
 
-        uint totalCs = 0;
-        var perThreadDeltas = new List<(int Tid, uint DeltaCs, uint WaitReason, nint StartAddress)>(snapAfter.Count);
+        ulong totalCs = 0;
+        double totalCpuMs = 0;
+        int newlySpawnedThreads = 0;
+        var perThreadDeltas = new List<(int Tid, uint DeltaCs, double CpuMs, uint WaitReason, nint StartAddress, bool IsNew)>(snapAfter.Count);
 
         foreach (var (tid, after) in snapAfter)
         {
+            uint deltaCs;
+            long deltaTime100Ns;
+            bool isNew;
+
             if (snapBefore.TryGetValue(tid, out var before))
             {
-                uint delta = after.ContextSwitches - before.ContextSwitches;
-                totalCs += delta;
-                if (delta > 0)
-                    perThreadDeltas.Add((tid, delta, after.WaitReason, after.StartAddress));
+                deltaCs = after.ContextSwitches >= before.ContextSwitches
+                    ? after.ContextSwitches - before.ContextSwitches
+                    : after.ContextSwitches;
+                deltaTime100Ns = Math.Max(0L, (after.KernelTime - before.KernelTime) + (after.UserTime - before.UserTime));
+                isNew = false;
             }
+            else
+            {
+                // Учитываем потоки, созданные во время 20-секундного окна (например, декодер трека или ThreadPool)
+                deltaCs = after.ContextSwitches;
+                deltaTime100Ns = Math.Max(0L, after.KernelTime + after.UserTime);
+                isNew = true;
+                newlySpawnedThreads++;
+            }
+
+            double cpuMs = deltaTime100Ns / 10_000.0;
+            totalCs += deltaCs;
+            totalCpuMs += cpuMs;
+
+            if (deltaCs > 0 || cpuMs > 0.1)
+                perThreadDeltas.Add((tid, deltaCs, cpuMs, after.WaitReason, after.StartAddress, isNew));
         }
 
         perThreadDeltas.Sort(static (a, b) => b.DeltaCs.CompareTo(a.DeltaCs));
 
         var modules = CaptureModuleRanges();
-        var topBuilder = new System.Text.StringBuilder(192);
-        int topCount = Math.Min(5, perThreadDeltas.Count);
+        var topBuilder = new System.Text.StringBuilder(320);
+        int topCount = Math.Min(6, perThreadDeltas.Count);
         for (int i = 0; i < topCount; i++)
         {
             if (i > 0) topBuilder.Append(", ");
-            var item = perThreadDeltas[i];
-            var tName = TryGetWindowsThreadName(item.Tid) ?? TryFormatModuleOffset(item.StartAddress, modules);
+            var (Tid, DeltaCs, CpuMs, WaitReason, StartAddress, IsNew) = perThreadDeltas[i];
+            var tName = TryGetWindowsThreadName(Tid) ?? TryFormatModuleOffset(StartAddress, modules);
+            string newTag = IsNew ? "+" : "";
             if (!string.IsNullOrEmpty(tName))
-                topBuilder.Append($"TID {item.Tid}({tName},w={item.WaitReason})={item.DeltaCs / 2.0:F0}/s");
+                topBuilder.Append($"{newTag}TID {Tid}({tName},w={WaitReason})={DeltaCs / actualSec:F0} CS/s ({CpuMs:F0}ms CPU)");
             else
-                topBuilder.Append($"TID {item.Tid}(w={item.WaitReason})={item.DeltaCs / 2.0:F0}/s");
+                topBuilder.Append($"{newTag}TID {Tid}(w={WaitReason})={DeltaCs / actualSec:F0} CS/s ({CpuMs:F0}ms CPU)");
         }
 
-        Log.Info($"[CS-Diagnostic] Threads analyzed: {snapAfter.Count}, Context switches over 2.0s: {totalCs} ({totalCs / 2.0:F0} CS/sec) | Top: [{topBuilder}]");
+        Log.Info(
+            $"[CS-Diagnostic] Threads: {snapAfter.Count} (+{newlySpawnedThreads} new) | " +
+            $"Window: {actualSec:F1}s | Total CS: {totalCs:N0} ({totalCs / actualSec:F0} CS/s) | " +
+            $"Total CPU: {totalCpuMs:F0}ms ({totalCpuMs / (actualSec * 10.0):F2}% of 1 core) | Top: [{topBuilder}]");
     }
 
     private readonly record struct ThreadKernelInfo(uint ContextSwitches, long KernelTime, long UserTime, uint WaitReason, nint StartAddress);

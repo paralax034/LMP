@@ -160,7 +160,7 @@ public static class StreamingMemoryBenchmarkTests
     rented[0] = 0xAA;
     rented[chunkSize - 1] = 0x55;
 
-    var block = new LMP.Core.Audio.Sources.CachingStreamSource.RamRangeBlock(0, rented, chunkSize);
+    var block = new Core.Audio.Sources.CachingStreamSource.RamRangeBlock(0, rented, chunkSize);
 
     // 1. Захватываем вторую ссылку для имитации фоновой записи на диск
     bool retained = block.TryRetainForDiskWrite(chunkSize, out var diskMemory);

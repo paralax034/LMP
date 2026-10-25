@@ -120,7 +120,7 @@ public static class UpdateTests
         foreach (var g in groups)
             TestAssert.Equal(TestGroups.Normalize(g), g);
 
-        var vm = new LMP.UI.Features.Debug.TestRunnerViewModel();
+        var vm = new UI.Features.Debug.TestRunnerViewModel();
         var initialCollectionRef = vm.FilteredTests;
         int totalCount = vm.AllTests.Count;
         TestAssert.True(totalCount > 0);

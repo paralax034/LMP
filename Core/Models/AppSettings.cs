@@ -271,6 +271,42 @@ public sealed class AudioSettings
     /// Пропускать треки, требующие сложной расшифровки n-токена.
     /// </summary>
     public bool SkipNTokenTracks { get; set; } = false;
+
+    /// <summary>
+    /// Включён ли встроенный параметрический/графический эквалайзер.
+    /// </summary>
+    public bool EqualizerEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Принудительно применять глобальный профиль эквалайзера ко всем трекам,
+    /// игнорируя индивидуальные профили <see cref="TrackInfo.EqualizerPresetId"/>.
+    /// </summary>
+    public bool ForceGlobalEqualizer { get; set; } = false;
+
+    /// <summary>
+    /// Ручное предусиление эквалайзера в дБ (-12..+12).
+    /// </summary>
+    public float EqualizerPreampDb { get; set; } = 0f;
+
+    /// <summary>
+    /// Использовать упрощённый 5-полосный режим настройки в UI вместо 10-полосного.
+    /// </summary>
+    public bool UseSimple5BandMode { get; set; } = true;
+
+    /// <summary>
+    /// Идентификатор активного глобального пресета эквалайзера.
+    /// </summary>
+    public string GlobalEqualizerPresetId { get; set; } = Audio.Helpers.EqualizerPresets.FlatId;
+
+    /// <summary>
+    /// Значения 10 ISO-полос для пользовательского режима <c>custom</c> (в дБ).
+    /// </summary>
+    public float[] CustomEqualizerBands { get; set; } = new float[Audio.Helpers.EqualizerProcessor.BandCount];
+
+    /// <summary>
+    /// Список сохранённых пользователем кастомных пресетов эквалайзера.
+    /// </summary>
+    public List<LMP.Core.Audio.Helpers.EqualizerPreset> UserEqualizerPresets { get; set; } = [];
 }
 
 /// <summary>
@@ -363,7 +399,6 @@ public sealed class AppSettings
     public bool ShuffleEnabled { get; set; }
     public RepeatMode RepeatMode { get; set; } = RepeatMode.None;
     public int MaxVolumeLimit { get; set; } = 100;
-    public float TargetGainDb { get; set; } = 0f;
     public AudioQualityPreference QualityPreference { get; set; } = AudioQualityPreference.BestAvailable;
     public bool RememberTrackFormat { get; set; } = true;
 

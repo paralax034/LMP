@@ -215,7 +215,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     }
 
     private async Task HandleCdnUnavailableAsync(
-        LMP.Core.Exceptions.CdnUnavailableException exception,
+        CdnUnavailableException exception,
         bool isDuplicate)
     {
         Log.Warn($"[Orchestrator] CDN unavailable (all failover attempts exhausted): " +

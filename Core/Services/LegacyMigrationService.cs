@@ -122,7 +122,6 @@ public sealed class LegacyMigrationService
         ShuffleEnabled = d.ShuffleEnabled,
         RepeatMode = d.RepeatMode,
         MaxVolumeLimit = d.MaxVolumeLimit,
-        TargetGainDb = d.TargetGainDb,
         QualityPreference = d.QualityPreference,
         RememberTrackFormat = d.RememberTrackFormat,
         InternetProfile = d.InternetProfile,

@@ -106,7 +106,7 @@ public static class MemoryPackTests
     public static async Task TestSettingsRepositoryBinaryBlobAndLegacyMigrationAsync(IServiceProvider services)
     {
         var settingsRepo = services.GetRequiredService<ISettingsRepository>();
-        var connectionFactory = services.GetRequiredService<LMP.Core.Data.ISqliteConnectionFactory>();
+        var connectionFactory = services.GetRequiredService<Core.Data.ISqliteConnectionFactory>();
         const string testKey = "MigrationTest_AppSettings";
 
         var legacyJson = JsonSerializer.Serialize(new AppSettings

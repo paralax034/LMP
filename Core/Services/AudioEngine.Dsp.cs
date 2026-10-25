@@ -95,6 +95,7 @@ public sealed partial class AudioEngine
             }
         }
 
+        ApplyEqualizerToPipelineCore(pipeline, trackId, snapImmediately: true);
         pipeline.SnapCrossfaderToGain();
     }
 
@@ -222,7 +223,7 @@ public sealed partial class AudioEngine
 
     #endregion
 
-    #region Dynamic Gain Application
+    #region Dynamic Gain & Equalizer Application
 
     /// <summary>
     /// Обновляет gain нормализации в running pipeline при получении более точного LUFS.
@@ -253,7 +254,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Пробрасывает актуальные настройки нормализации в активный pipeline.
+    /// Пробрасывает актуальные настройки нормализации и эквалайзера в активный pipeline.
     /// </summary>
     private void ApplyNormalizationToPipeline()
     {
@@ -294,6 +295,44 @@ public sealed partial class AudioEngine
 
         if (normConfig.Enabled && !float.IsNaN(resolvedGain))
             pipeline.Analyzer.LockResolvedGain(resolvedGain);
+
+        ApplyEqualizerToPipelineCore(pipeline, track?.Id, snapImmediately: false);
+    }
+
+    /// <summary>
+    /// Применяет текущую конфигурацию эквалайзера (с учётом тумблера ForceGlobal и пресета трека) к активному конвейеру.
+    /// </summary>
+    public void UpdateEqualizerSettings()
+    {
+        var pipeline = _player.GetActivePipeline();
+        if (pipeline == null) return;
+
+        ApplyEqualizerToPipelineCore(pipeline, CurrentTrack?.Id, snapImmediately: false);
+    }
+
+    private void ApplyEqualizerToPipelineCore(AudioPipeline pipeline, string? trackId, bool snapImmediately)
+    {
+        var audioSettings = _library.Settings.Audio;
+        TrackInfo? track = null;
+
+        if (!string.IsNullOrEmpty(trackId))
+        {
+            track = _trackRegistry.TryGet(trackId)
+                 ?? _library.GetTrack(trackId)
+                 ?? (CurrentTrack?.Id == trackId ? CurrentTrack : null);
+        }
+
+        Span<float> bands = stackalloc float[LMP.Core.Audio.Helpers.EqualizerProcessor.BandCount];
+        LMP.Core.Audio.Helpers.EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
+
+        pipeline.Equalizer.Configure(
+            audioSettings.EqualizerEnabled,
+            bands,
+            audioSettings.EqualizerPreampDb,
+            autoPreamp: false);
+
+        if (snapImmediately)
+            pipeline.Equalizer.SnapToTarget();
     }
 
     #endregion

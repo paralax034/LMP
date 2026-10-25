@@ -376,6 +376,293 @@
                         Background="{DynamicResource BgHighlightBrush}" />
                     <controls:VolumeControl Volume="{Binding Volume}"
                         MaxVolume="{Binding MaxVolume}" />
+                    <Button x:Name="EqualizerButton" Width="38" Height="38" Classes="playback-btn"
+                        CornerRadius="19"
+                        ToolTip.Tip="{Binding L[Eq_Title]}" ToolTip.Placement="Top"
+                        ToolTip.VerticalOffset="-6">
+                        <PathIcon Width="18" Height="18" Data="{StaticResource Icon.Equalizer}" />
+                        <Button.Flyout>
+                            <Flyout Placement="Top" VerticalOffset="-24"
+                                Opened="OnEqualizerFlyoutOpened"
+                                Closed="OnEqualizerFlyoutClosed">
+                                <StackPanel Width="364" Margin="4,4,4,0" Spacing="4">
+                                    <!-- Единая строка: Питание | Режимы трека | Пресеты, 5/10,
+                                    Сброс -->
+                                    <Grid ColumnDefinitions="Auto, Auto, *, Auto, Auto, Auto"
+                                        VerticalAlignment="Center">
+                                        <!-- Блок 1: Питание -->
+                                        <ToggleSwitch Grid.Column="0"
+                                            IsChecked="{Binding IsEqualizerEnabled}"
+                                            ToolTip.Tip="{Binding L[Eq_Title]}"
+                                            ToolTip.Placement="Top"
+                                            ToolTip.VerticalOffset="-6"
+                                            VerticalAlignment="Center" Margin="0,0,4,0" />
+
+                                        <!-- Блок 2: Режимы привязки (Нота vs Глобус) -->
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                            Spacing="4" VerticalAlignment="Center">
+                                            <Border Width="1" Height="16"
+                                                Background="{DynamicResource BgHighlightBrush}"
+                                                Margin="2,0" />
+
+                                            <!-- Для текущего трека (Нота) -->
+                                            <Button Width="28" Height="28" CornerRadius="6"
+                                                Classes="icon-btn"
+                                                IsEnabled="{Binding HasTrack}"
+                                                Command="{Binding ToggleTrackEqualizerModeCommand}"
+                                                Click="OnEqHeaderButtonClicked"
+                                                ToolTip.Tip="{Binding TrackEqualizerTooltip}"
+                                                ToolTip.Placement="Top"
+                                                ToolTip.VerticalOffset="-6"
+                                                ToolTip.ShowDelay="50">
+                                                <Panel>
+                                                    <PathIcon Width="14" Height="14"
+                                                        Foreground="{DynamicResource TextSecondaryBrush}"
+                                                        Data="{StaticResource Icon.MusicNote}"
+                                                        IsVisible="{Binding !IsTrackModeHighlighted}" />
+                                                    <PathIcon Width="14" Height="14"
+                                                        Foreground="{DynamicResource AccentBrush}"
+                                                        Data="{StaticResource Icon.MusicNote}"
+                                                        IsVisible="{Binding IsTrackModeHighlighted}" />
+                                                </Panel>
+                                            </Button>
+
+                                            <!-- Единый для всех (Глобус) -->
+                                            <Button Width="28" Height="28" CornerRadius="6"
+                                                Classes="icon-btn"
+                                                Command="{Binding ToggleForceGlobalEqualizerCommand}"
+                                                Click="OnEqHeaderButtonClicked"
+                                                ToolTip.Tip="{Binding ForceGlobalEqualizerTooltip}"
+                                                ToolTip.Placement="Top"
+                                                ToolTip.VerticalOffset="-6"
+                                                ToolTip.ShowDelay="50">
+                                                <Panel>
+                                                    <PathIcon Width="14" Height="14"
+                                                        Foreground="{DynamicResource TextSecondaryBrush}"
+                                                        Data="{StaticResource Icon.Web}"
+                                                        IsVisible="{Binding !ForceGlobalEqualizer}" />
+                                                    <PathIcon Width="14" Height="14"
+                                                        Foreground="{DynamicResource AccentBrush}"
+                                                        Data="{StaticResource Icon.Web}"
+                                                        IsVisible="{Binding ForceGlobalEqualizer}" />
+                                                </Panel>
+                                            </Button>
+                                        </StackPanel>
+
+                                        <!-- Блок 3: Выпадающее меню пресетов (только по наведению) -->
+                                        <Panel Grid.Column="3" Margin="0,0,4,0"
+                                            PointerEntered="OnPresetsTriggerPointerEntered"
+                                            PointerExited="OnPresetsTriggerPointerExited">
+                                            <Button x:Name="EqPresetsButton" Padding="9,4"
+                                                CornerRadius="6" VerticalAlignment="Center"
+                                                ToolTip.Tip="{Binding L[Eq_Presets_Tooltip]}"
+                                                ToolTip.Placement="Top"
+                                                ToolTip.VerticalOffset="-6">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock FontSize="11" FontWeight="SemiBold"
+                                                        Text="{Binding ActiveEqualizerPresetTitle}"
+                                                        MaxWidth="105"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        VerticalAlignment="Center" />
+                                                    <PathIcon Width="10" Height="10"
+                                                        Data="{StaticResource Icon.ChevronUp}"
+                                                        Foreground="{DynamicResource TextMutedBrush}"
+                                                        VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+
+                                            <Popup x:Name="EqPresetsPopup"
+                                                Placement="TopEdgeAlignedRight"
+                                                PlacementTarget="{Binding #EqPresetsButton}"
+                                                VerticalOffset="0"
+                                                IsLightDismissEnabled="False">
+                                                <Border x:Name="EqPresetsPopupRoot"
+                                                    Padding="0,0,0,6" Background="Transparent"
+                                                    PointerEntered="OnPresetsPopupPointerEntered"
+                                                    PointerExited="OnPresetsPopupPointerExited">
+                                                    <Border Width="230" Padding="4"
+                                                        Background="{DynamicResource BgPrimaryBrush}"
+                                                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                                                        BorderThickness="1" CornerRadius="8"
+                                                        BoxShadow="{StaticResource CardShadow}">
+                                                        <StackPanel Spacing="2">
+                                                            <ScrollViewer MaxHeight="210"
+                                                                HorizontalScrollBarVisibility="Disabled">
+                                                                <ItemsControl
+                                                                    ItemsSource="{Binding EqualizerPresetsList}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate
+                                                                            x:DataType="vm:EqualizerPresetChipItem">
+                                                                            <Panel>
+                                                                                <!-- Обычная строка
+                                                                                пресета (в стиле
+                                                                                подменю плейлистов) -->
+                                                                                <Button
+                                                                                    HorizontalAlignment="Stretch"
+                                                                                    HorizontalContentAlignment="Stretch"
+                                                                                    Padding="10,7"
+                                                                                    Margin="0,1"
+                                                                                    Classes="format-item-btn"
+                                                                                    Classes.active="{Binding IsSelected}"
+                                                                                    IsVisible="{Binding !IsRenaming}"
+                                                                                    ToolTip.Tip="{Binding RightClickHint}"
+                                                                                    ToolTip.Placement="Top"
+                                                                                    ToolTip.VerticalOffset="-4"
+                                                                                    PointerReleased="OnPresetItemPointerReleased"
+                                                                                    Command="{Binding $parent[UserControl].((vm:PlayerBarViewModel)DataContext).SelectEqualizerPresetCommand}"
+                                                                                    CommandParameter="{Binding}">
+                                                                                    <Grid
+                                                                                        ColumnDefinitions="22,*">
+                                                                                        <PathIcon
+                                                                                            Grid.Column="0"
+                                                                                            Width="14"
+                                                                                            Height="14"
+                                                                                            Data="{StaticResource Icon.Check}"
+                                                                                            Foreground="{DynamicResource AccentBrush}"
+                                                                                            IsVisible="{Binding IsSelected}"
+                                                                                            HorizontalAlignment="Left"
+                                                                                            VerticalAlignment="Center" />
+                                                                                        <TextBlock
+                                                                                            Grid.Column="1"
+                                                                                            FontSize="12"
+                                                                                            Text="{Binding Title}"
+                                                                                            TextTrimming="CharacterEllipsis"
+                                                                                            VerticalAlignment="Center" />
+                                                                                    </Grid>
+                                                                                </Button>
+
+                                                                                <!-- Режим
+                                                                                переименования
+                                                                                активного пресета
+                                                                                прямо в списке -->
+                                                                                <Grid
+                                                                                    ColumnDefinitions="*,Auto"
+                                                                                    ColumnSpacing="4"
+                                                                                    Margin="0,1"
+                                                                                    IsVisible="{Binding IsRenaming}">
+                                                                                    <TextBox
+                                                                                        Grid.Column="0"
+                                                                                        Text="{Binding EditTitle}"
+                                                                                        FontSize="12"
+                                                                                        Padding="8,5"
+                                                                                        KeyDown="OnRenamePresetTextBoxKeyDown"
+                                                                                        LostFocus="OnRenamePresetTextBoxLostFocus" />
+                                                                                    <Button
+                                                                                        Grid.Column="1"
+                                                                                        Width="28"
+                                                                                        Height="28"
+                                                                                        Classes="icon-btn active"
+                                                                                        Command="{Binding $parent[UserControl].((vm:PlayerBarViewModel)DataContext).CommitRenamePresetCommand}"
+                                                                                        CommandParameter="{Binding}">
+                                                                                        <PathIcon
+                                                                                            Width="12"
+                                                                                            Height="12"
+                                                                                            Data="{StaticResource Icon.Check}" />
+                                                                                    </Button>
+                                                                                </Grid>
+                                                                            </Panel>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </ScrollViewer>
+
+                                                            <Separator Classes="menu-separator"
+                                                                Margin="6,3" />
+
+                                                            <!-- Строка создания нового пресета
+                                                            внизу меню -->
+                                                            <Border Padding="8,4"
+                                                                CornerRadius="6"
+                                                                BorderBrush="{DynamicResource BgHighlightTransparentBrush}"
+                                                                BorderThickness="1">
+                                                                <Grid ColumnDefinitions="22,*,Auto"
+                                                                    VerticalAlignment="Center">
+                                                                    <PathIcon Grid.Column="0"
+                                                                        Width="14" Height="14"
+                                                                        Data="{StaticResource Icon.Plus}"
+                                                                        Foreground="{DynamicResource AccentBrush}"
+                                                                        HorizontalAlignment="Left"
+                                                                        VerticalAlignment="Center" />
+                                                                    <TextBox
+                                                                        x:Name="NewPresetTextBox"
+                                                                        Grid.Column="1"
+                                                                        Classes="flat-search-box"
+                                                                        Text="{Binding NewPresetNameInput}"
+                                                                        PlaceholderText="{Binding L[Eq_SavePreset_Watermark]}"
+                                                                        FontSize="12"
+                                                                        KeyDown="OnNewPresetTextBoxKeyDown" />
+                                                                    <Button Grid.Column="2"
+                                                                        Width="24" Height="24"
+                                                                        Classes="icon-btn active"
+                                                                        IsVisible="{Binding NewPresetNameInput, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                                        Command="{Binding SaveInlineEqualizerPresetCommand}"
+                                                                        ToolTip.Tip="{Binding L[Eq_SavePreset]}"
+                                                                        ToolTip.Placement="Top"
+                                                                        ToolTip.VerticalOffset="-6">
+                                                                        <PathIcon Width="12"
+                                                                            Height="12"
+                                                                            Data="{StaticResource Icon.Check}" />
+                                                                    </Button>
+                                                                </Grid>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </Border>
+                                            </Popup>
+                                        </Panel>
+
+                                        <!-- Блок 4: Квадратная кнопка 5 / 10 -->
+                                        <Button Grid.Column="4" Width="28" Height="28" Padding="0"
+                                            Margin="0,0,4,0" CornerRadius="6"
+                                            Classes="icon-btn active"
+                                            Command="{Binding ToggleEqualizerModeCommand}"
+                                            Click="OnEqHeaderButtonClicked"
+                                            ToolTip.Tip="{Binding L[Eq_Mode_Tooltip]}"
+                                            ToolTip.Placement="Top"
+                                            ToolTip.VerticalOffset="-6"
+                                            ToolTip.ShowDelay="50">
+                                            <TextBlock FontSize="11" FontWeight="Bold"
+                                                Foreground="{DynamicResource AccentBrush}"
+                                                Text="{Binding BandModeBadgeText}"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center" />
+                                        </Button>
+
+                                        <!-- Блок 5: Кнопка сброса (акцентная ТОЛЬКО когда
+                                        CanResetEqualizer == true) -->
+                                        <Button Grid.Column="5" Width="28" Height="28"
+                                            Classes="icon-btn"
+                                            Command="{Binding ResetEqualizerCommand}"
+                                            Click="OnEqHeaderButtonClicked"
+                                            ToolTip.Tip="{Binding L[Common_Reset]}"
+                                            ToolTip.Placement="Top"
+                                            ToolTip.VerticalOffset="-6"
+                                            ToolTip.ShowDelay="50">
+                                            <Panel>
+                                                <PathIcon Width="14" Height="14"
+                                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                                    Data="{StaticResource Icon.Refresh}"
+                                                    IsVisible="{Binding !CanResetEqualizer}" />
+                                                <PathIcon Width="14" Height="14"
+                                                    Foreground="{DynamicResource AccentBrush}"
+                                                    Data="{StaticResource Icon.Refresh}"
+                                                    IsVisible="{Binding CanResetEqualizer}" />
+                                            </Panel>
+                                        </Button>
+                                    </Grid>
+
+                                    <!-- Волна занимает всё пространство снизу с увеличенной высотой -->
+                                    <controls:EqualizerCurveControl
+                                        x:Name="EqCurveControl"
+                                        Height="185"
+                                        Margin="-4,0,-4,-2"
+                                        BandGains="{Binding EqualizerBandGains}"
+                                        IsSimple5BandMode="{Binding IsSimple5BandMode}"
+                                        IsEqEnabled="{Binding IsEqualizerEnabled}" />
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
                     <Border Width="1" Height="28" Margin="6,0"
                         Background="{DynamicResource BgHighlightBrush}" />
                     <Panel>

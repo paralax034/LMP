@@ -61,8 +61,9 @@ public sealed class AudioPipeline : IAsyncDisposable
     private readonly AudioStreamInfo _streamInfo;
     private readonly CancellationTokenSource _lifetimeCts;
     private readonly EbuR128Analyzer _analyzer;
+    private readonly EqualizerProcessor _equalizer;
     private readonly TruePeakLimiter? _truePeakLimiter;
-    private readonly Audio3BandAnalyzer _analyzer3Band;
+    private readonly AudioSpectrumAnalyzer _analyzer3Band;
     private GainCrossfader _gainCrossfader;
 
     private CancellationTokenSource? _decoderCts;
@@ -130,6 +131,9 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// <summary>EBU R128 анализатор нормализации.</summary>
     public EbuR128Analyzer Analyzer => _analyzer;
 
+    /// <summary>Процессор 10-полосного эквалайзера.</summary>
+    public EqualizerProcessor Equalizer => _equalizer;
+
 #if DEBUG
     /// <summary>Количество перезапусков decoder loop.</summary>
     public int DecoderRestartCount => Volatile.Read(ref _decoderRestartCount);
@@ -158,8 +162,9 @@ public sealed class AudioPipeline : IAsyncDisposable
 
         _seekCrossfadeTail = new float[SeekCrossfadeFrames * decoder.Channels];
         _analyzer = new EbuR128Analyzer();
+        _equalizer = new EqualizerProcessor(decoder.SampleRate, decoder.Channels);
         _truePeakLimiter = new TruePeakLimiter(decoder.SampleRate);
-        _analyzer3Band = new Audio3BandAnalyzer(decoder.SampleRate, decoder.Channels);
+        _analyzer3Band = new AudioSpectrumAnalyzer(decoder.SampleRate, decoder.Channels);
         _gainCrossfader = new GainCrossfader(1.0f);
     }
 
@@ -843,6 +848,7 @@ CancellationToken ct)
         ArmDecoderWarmupAfterSeek(targetMs);
 
         _analyzer.PrepareForSeek();
+        _equalizer.Reset();
         _truePeakLimiter?.Reset();
         _analyzer3Band.Reset();
 
@@ -974,13 +980,20 @@ CancellationToken ct)
         {
             var samples = buffer[..read];
 
+            // 1. Применяем 10-полосный эквалайзер ДО лимитера и анализатора спектра
+            _equalizer.Process(samples);
+
             float normGain = _analyzer.IsEnabled
                 ? _analyzer.ProcessSamples()
                 : 1.0f;
 
             _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, _decoder.Channels);
 
-            bool canBypassLimiter = normGain <= 1.0f && _truePeakLimiter!.EnvelopeGain >= 0.999f;
+            // Если эквалайзер имеет положительный буст полос, лимитер не байпасится,
+            // защищая тракт WASAPI от клиппинга выше -0.13 dBFS (0.985f).
+            bool canBypassLimiter = normGain <= 1.0f
+                                 && !_equalizer.HasPositiveBoost
+                                 && _truePeakLimiter!.EnvelopeGain >= 0.999f;
 
             if (canBypassLimiter)
             {

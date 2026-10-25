@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
+using LMP.Core.Audio.Helpers;
 using LMP.Core.Youtube.Exceptions;
 
 namespace LMP.UI.Features.Player;
@@ -254,6 +255,53 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #endregion
 
+    #region Properties - Equalizer
+
+    [ObservableProperty] public partial bool IsEqualizerEnabled { get; set; }
+    [ObservableProperty] public partial bool IsSimple5BandMode { get; set; } = true;
+    [ObservableProperty] public partial bool ForceGlobalEqualizer { get; set; }
+    [ObservableProperty] public partial bool IsEditingTrackEqualizer { get; set; }
+    [ObservableProperty] public partial float[] EqualizerBandGains { get; private set; } = new float[10];
+    [ObservableProperty] public partial string ActiveEqualizerPresetId { get; private set; } = EqualizerPresets.FlatId;
+    [ObservableProperty] public partial string ActiveEqualizerPresetTitle { get; private set; } = "";
+    [ObservableProperty] public partial string NewPresetNameInput { get; set; } = "";
+    [ObservableProperty] public partial bool ShowPresetRightClickHint { get; private set; }
+
+    public ObservableCollection<EqualizerPresetChipItem> EqualizerPresetsList { get; } = [];
+
+    public bool HasTrackEqualizerAssigned =>
+        CurrentTrack != null && !string.IsNullOrEmpty(CurrentTrack.EqualizerPresetId);
+
+    [ObservableProperty] public partial bool IsTrackModeHighlighted { get; private set; }
+    [ObservableProperty] public partial bool CanResetEqualizer { get; private set; }
+
+    public string BandModeBadgeText => IsSimple5BandMode ? "5" : "10";
+
+    public string TrackEqualizerTooltip
+    {
+        get
+        {
+            string? trackPresetId = CurrentTrack?.EqualizerPresetId;
+            if (!string.IsNullOrEmpty(trackPresetId))
+            {
+                string presetTitle = ResolvePresetDisplayTitle(trackPresetId);
+                return ForceGlobalEqualizer
+                    ? string.Format(SL["Eq_Track_SavedButGlobal_Tip"], presetTitle)
+                    : string.Format(SL["Eq_Track_AssignedWithPreset_Tip"], presetTitle);
+            }
+
+            return IsTrackModeHighlighted
+                ? SL["Eq_Track_Assigned_Tip"]
+                : SL["Eq_Track_NotAssigned_Tip"];
+        }
+    }
+
+    public string ForceGlobalEqualizerTooltip => ForceGlobalEqualizer
+        ? SL["Eq_ForceGlobal_Active_Tip"]
+        : SL["Eq_ForceGlobal_Inactive_Tip"];
+
+    #endregion
+
     #region Properties - Tooltips
 
     public string ShuffleTooltip => AutoShuffleEnabled
@@ -318,6 +366,15 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     public IAsyncRelayCommand LoadFormatsCommand { get; private set; } = null!;
     public IAsyncRelayCommand ForceLoadFormatsCommand { get; private set; } = null!;
     public IAsyncRelayCommand<StreamOption> SwitchFormatCommand { get; private set; } = null!;
+    public IRelayCommand ResetEqualizerCommand { get; private set; } = null!;
+    public IRelayCommand ToggleEqualizerModeCommand { get; private set; } = null!;
+    public IRelayCommand ToggleTrackEqualizerModeCommand { get; private set; } = null!;
+    public IRelayCommand ToggleForceGlobalEqualizerCommand { get; private set; } = null!;
+    public IRelayCommand<EqualizerPresetChipItem> SelectEqualizerPresetCommand { get; private set; } = null!;
+    public IRelayCommand<EqualizerPresetChipItem> CommitRenamePresetCommand { get; private set; } = null!;
+    public IRelayCommand<EqualizerPresetChipItem> DeleteEqualizerPresetCommand { get; private set; } = null!;
+    public IRelayCommand SaveInlineEqualizerPresetCommand { get; private set; } = null!;
+    public IAsyncRelayCommand ClearTrackEqualizerCommand { get; private set; } = null!;
 
     #endregion
 
@@ -399,6 +456,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         RaiseVolumePropertiesChanged();
         UpdateQueueState();
+        SyncEqualizerStateFromSettings();
 
         Log.Info(
             $"[PlayerBar] Initialized: Vol={Volume}, MaxVol={MaxVolume}, AutoShuffle={AutoShuffleEnabled}, Repeat={RepeatMode}");
@@ -529,6 +587,71 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         });
 
         CopyLinkCommand = new RelayCommand(() => { });
+
+        ResetEqualizerCommand = new RelayCommand(() =>
+        {
+            if (!CanResetEqualizer) return;
+            ApplyEqualizerPresetSelection(EqualizerPresets.FlatId);
+        });
+
+        ToggleEqualizerModeCommand = new RelayCommand(() =>
+        {
+            IsSimple5BandMode = !IsSimple5BandMode;
+        });
+
+        ToggleTrackEqualizerModeCommand = new RelayCommand(async () =>
+        {
+            if (!HasTrack || CurrentTrack == null) return;
+
+            if (!IsEditingTrackEqualizer)
+            {
+                ForceGlobalEqualizer = false;
+                IsEditingTrackEqualizer = true;
+            }
+            else
+            {
+                IsEditingTrackEqualizer = false;
+                if (HasTrackEqualizerAssigned)
+                    await _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
+            }
+
+            SyncEqualizerStateFromSettings();
+            _audio.UpdateEqualizerSettings();
+        });
+
+        ToggleForceGlobalEqualizerCommand = new RelayCommand(() =>
+        {
+            bool nextGlobal = !ForceGlobalEqualizer;
+            if (nextGlobal)
+                IsEditingTrackEqualizer = false;
+
+            ForceGlobalEqualizer = nextGlobal;
+        });
+
+        SelectEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(item =>
+        {
+            if (item == null) return;
+            if (item.IsSelected && !item.IsBuiltIn)
+            {
+                BeginRenamePreset(item);
+                return;
+            }
+            CancelAllPresetRenames();
+            ApplyEqualizerPresetSelection(item.Id);
+        });
+
+        CommitRenamePresetCommand = new RelayCommand<EqualizerPresetChipItem>(CommitRenamePreset);
+        DeleteEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(DeleteCustomEqualizerPreset);
+        SaveInlineEqualizerPresetCommand = new RelayCommand(SaveInlineEqualizerPreset);
+
+        ClearTrackEqualizerCommand = new AsyncRelayCommand(async () =>
+        {
+            if (CurrentTrack == null) return;
+            await _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
+            IsEditingTrackEqualizer = false;
+            SyncEqualizerStateFromSettings();
+            _audio.UpdateEqualizerSettings();
+        });
     }
 
     private void SubscribeEvents()
@@ -978,6 +1101,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(DurationTooltip));
         UpdateQueueState();
         RefreshCommandStates();
+
+        IsEditingTrackEqualizer = !_library.Settings.Audio.ForceGlobalEqualizer && HasTrackEqualizerAssigned;
+        SyncEqualizerStateFromSettings();
     }
 
     private void RefreshCommandStates()
@@ -1658,6 +1784,311 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #endregion
 
+    #region Equalizer Management
+
+    private bool _isSyncingEq;
+    private DispatcherTimer? _eqSaveDebounceTimer;
+
+    public void SyncEqualizerStateFromSettings()
+    {
+        _isSyncingEq = true;
+        try
+        {
+            var audioSettings = _library.Settings.Audio;
+            IsEqualizerEnabled = audioSettings.EqualizerEnabled;
+            IsSimple5BandMode = audioSettings.UseSimple5BandMode;
+            ForceGlobalEqualizer = audioSettings.ForceGlobalEqualizer;
+
+            if (ForceGlobalEqualizer || !HasTrack)
+            {
+                IsEditingTrackEqualizer = false;
+            }
+            else if (HasTrackEqualizerAssigned)
+            {
+                IsEditingTrackEqualizer = true;
+            }
+
+            int expectedCount = EqualizerPresets.BuiltInIds.Length + audioSettings.UserEqualizerPresets.Count;
+            if (EqualizerPresetsList.Count != expectedCount)
+                RebuildEqualizerPresetsList();
+
+            var bands = new float[EqualizerProcessor.BandCount];
+            string resolvedPreset = EqualizerPresets.ResolveEffectiveBands(
+                audioSettings, CurrentTrack, bands);
+
+            ActiveEqualizerPresetId = resolvedPreset;
+            EqualizerBandGains = bands;
+            UpdateActiveEqualizerChipSelection(resolvedPreset);
+            RefreshEqualizerButtonFlags(bands);
+            OnPropertyChanged(nameof(BandModeBadgeText));
+        }
+        finally
+        {
+            _isSyncingEq = false;
+        }
+    }
+
+    private void RefreshEqualizerButtonFlags(ReadOnlySpan<float> bands)
+    {
+        IsTrackModeHighlighted = HasTrack && !ForceGlobalEqualizer && (IsEditingTrackEqualizer || HasTrackEqualizerAssigned);
+
+        bool hasNonZeroBand = false;
+        for (int i = 0; i < bands.Length; i++)
+        {
+            if (MathF.Abs(bands[i]) > 0.05f)
+            {
+                hasNonZeroBand = true;
+                break;
+            }
+        }
+        CanResetEqualizer = hasNonZeroBand;
+
+        OnPropertyChanged(nameof(HasTrackEqualizerAssigned));
+        OnPropertyChanged(nameof(TrackEqualizerTooltip));
+        OnPropertyChanged(nameof(ForceGlobalEqualizerTooltip));
+    }
+
+    private string ResolvePresetDisplayTitle(string presetId)
+    {
+        for (int i = 0; i < EqualizerPresetsList.Count; i++)
+        {
+            if (string.Equals(EqualizerPresetsList[i].Id, presetId, StringComparison.Ordinal))
+                return EqualizerPresetsList[i].Title;
+        }
+        string key = EqualizerPresets.GetLocalizationKey(presetId);
+        return SL[key];
+    }
+
+    private void RebuildEqualizerPresetsList()
+    {
+        EqualizerPresetsList.Clear();
+        var builtIn = EqualizerPresets.BuiltInIds;
+        for (int i = 0; i < builtIn.Length; i++)
+        {
+            string id = builtIn[i];
+            string key = EqualizerPresets.GetLocalizationKey(id);
+            EqualizerPresetsList.Add(new EqualizerPresetChipItem(id, SL[key], isBuiltIn: true));
+        }
+
+        var userPresets = _library.Settings.Audio.UserEqualizerPresets;
+        for (int i = 0; i < userPresets.Count; i++)
+        {
+            var up = userPresets[i];
+            EqualizerPresetsList.Add(new EqualizerPresetChipItem(up.Id, up.Name, isBuiltIn: false));
+        }
+    }
+
+    private void UpdateActiveEqualizerChipSelection(string presetId)
+    {
+        string globalId = _library.Settings.Audio.GlobalEqualizerPresetId;
+        string? trackId = CurrentTrack?.EqualizerPresetId;
+
+        string activeTitle = SL["Eq_Preset_Custom"];
+        for (int i = 0; i < EqualizerPresetsList.Count; i++)
+        {
+            var item = EqualizerPresetsList[i];
+            bool match = string.Equals(item.Id, presetId, StringComparison.Ordinal);
+            item.IsSelected = match;
+            item.IsGlobalPreset = string.Equals(item.Id, globalId, StringComparison.Ordinal);
+            item.IsTrackPreset = !string.IsNullOrEmpty(trackId) && string.Equals(item.Id, trackId, StringComparison.Ordinal);
+
+            if (match)
+                activeTitle = item.Title;
+        }
+        ActiveEqualizerPresetTitle = activeTitle;
+    }
+
+    private void SaveInlineEqualizerPreset()
+    {
+        string name = NewPresetNameInput.Trim();
+        if (string.IsNullOrEmpty(name)) return;
+
+        string id = "user_" + Guid.NewGuid().ToString("N")[..8];
+        var bandsCopy = new float[EqualizerProcessor.BandCount];
+        for (int i = 0; i < EqualizerBandGains.Length && i < bandsCopy.Length; i++)
+            bandsCopy[i] = EqualizerBandGains[i];
+
+        _library.UpdateSettings(s =>
+        {
+            s.Audio.UserEqualizerPresets.Add(new EqualizerPreset
+            {
+                Id = id,
+                Name = name,
+                IsBuiltIn = false,
+                Bands = bandsCopy
+            });
+            s.Audio.GlobalEqualizerPresetId = id;
+            s.Audio.EqualizerEnabled = true;
+        });
+
+        NewPresetNameInput = "";
+        ShowPresetRightClickHint = true;
+        EqualizerPresetsList.Add(new EqualizerPresetChipItem(id, name, isBuiltIn: false));
+        SyncEqualizerStateFromSettings();
+        _audio.UpdateEqualizerSettings();
+    }
+
+    private void DeleteCustomEqualizerPreset(EqualizerPresetChipItem? item)
+    {
+        if (item == null || item.IsBuiltIn) return;
+
+        _eqSaveDebounceTimer?.Stop();
+        _library.UpdateSettings(s =>
+        {
+            s.Audio.UserEqualizerPresets.RemoveAll(p => string.Equals(p.Id, item.Id, StringComparison.Ordinal));
+            if (string.Equals(s.Audio.GlobalEqualizerPresetId, item.Id, StringComparison.Ordinal))
+                s.Audio.GlobalEqualizerPresetId = EqualizerPresets.FlatId;
+        });
+
+        if (CurrentTrack != null && string.Equals(CurrentTrack.EqualizerPresetId, item.Id, StringComparison.Ordinal))
+        {
+            _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
+            IsEditingTrackEqualizer = false;
+        }
+
+        EqualizerPresetsList.Remove(item);
+        SyncEqualizerStateFromSettings();
+        _audio.UpdateEqualizerSettings();
+    }
+
+    private void BeginRenamePreset(EqualizerPresetChipItem item)
+    {
+        for (int i = 0; i < EqualizerPresetsList.Count; i++)
+            EqualizerPresetsList[i].IsRenaming = ReferenceEquals(EqualizerPresetsList[i], item);
+
+        item.EditTitle = item.Title;
+    }
+
+    private void CancelAllPresetRenames()
+    {
+        for (int i = 0; i < EqualizerPresetsList.Count; i++)
+            EqualizerPresetsList[i].IsRenaming = false;
+    }
+
+    private void CommitRenamePreset(EqualizerPresetChipItem? item)
+    {
+        if (item == null || item.IsBuiltIn) return;
+        item.IsRenaming = false;
+
+        string newName = item.EditTitle.Trim();
+        if (string.IsNullOrEmpty(newName) || string.Equals(newName, item.Title, StringComparison.Ordinal))
+            return;
+
+        item.Title = newName;
+        _library.UpdateSettings(s =>
+        {
+            for (int i = 0; i < s.Audio.UserEqualizerPresets.Count; i++)
+            {
+                if (string.Equals(s.Audio.UserEqualizerPresets[i].Id, item.Id, StringComparison.Ordinal))
+                {
+                    s.Audio.UserEqualizerPresets[i].Name = newName;
+                    break;
+                }
+            }
+        });
+
+        if (item.IsSelected)
+            ActiveEqualizerPresetTitle = newName;
+    }
+
+    partial void OnIsEqualizerEnabledChanged(bool value)
+    {
+        if (_isSyncingEq) return;
+        _eqSaveDebounceTimer?.Stop();
+        _library.UpdateSettings(s => s.Audio.EqualizerEnabled = value);
+        _audio.UpdateEqualizerSettings();
+    }
+
+    partial void OnIsSimple5BandModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(BandModeBadgeText));
+        if (_isSyncingEq) return;
+        _library.UpdateSettings(s => s.Audio.UseSimple5BandMode = value);
+    }
+
+    partial void OnIsEditingTrackEqualizerChanged(bool value)
+    {
+        RefreshEqualizerButtonFlags(EqualizerBandGains);
+    }
+
+    partial void OnForceGlobalEqualizerChanged(bool value)
+    {
+        if (_isSyncingEq)
+        {
+            RefreshEqualizerButtonFlags(EqualizerBandGains);
+            return;
+        }
+        _eqSaveDebounceTimer?.Stop();
+        _library.UpdateSettings(s => s.Audio.ForceGlobalEqualizer = value);
+        SyncEqualizerStateFromSettings();
+        _audio.UpdateEqualizerSettings();
+    }
+
+    public void ApplyCustomEqualizerBandsFromUi(float[] newBands10)
+    {
+        if (_isSyncingEq || newBands10.Length < EqualizerProcessor.BandCount) return;
+
+        // 1. Мгновенно обновляем состояние в памяти и аудио-движок (0 мс задержки)
+        var audioSettings = _library.Settings.Audio;
+        audioSettings.EqualizerEnabled = true;
+        audioSettings.CustomEqualizerBands = newBands10;
+        if (!IsEditingTrackEqualizer || CurrentTrack == null)
+            audioSettings.GlobalEqualizerPresetId = EqualizerPresets.CustomId;
+        else
+            CurrentTrack.EqualizerPresetId = EqualizerPresets.CustomId;
+
+        IsEqualizerEnabled = true;
+        ActiveEqualizerPresetId = EqualizerPresets.CustomId;
+        EqualizerBandGains = newBands10;
+        UpdateActiveEqualizerChipSelection(EqualizerPresets.CustomId);
+        RefreshEqualizerButtonFlags(newBands10);
+        _audio.UpdateEqualizerSettings();
+
+        // 2. Откладываем физическую запись JSON в SQLite на 350 мс после отпускания ползунка
+        _eqSaveDebounceTimer?.Stop();
+        _eqSaveDebounceTimer ??= new DispatcherTimer(
+            TimeSpan.FromMilliseconds(350),
+            DispatcherPriority.Background,
+            (_, _) =>
+            {
+                _eqSaveDebounceTimer?.Stop();
+                _library.UpdateSettings(s =>
+                {
+                    s.Audio.EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
+                    s.Audio.CustomEqualizerBands = _library.Settings.Audio.CustomEqualizerBands;
+                    s.Audio.GlobalEqualizerPresetId = _library.Settings.Audio.GlobalEqualizerPresetId;
+                });
+                if (IsEditingTrackEqualizer && CurrentTrack != null)
+                    _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, CurrentTrack.EqualizerPresetId);
+            });
+        _eqSaveDebounceTimer.Start();
+    }
+
+    private void ApplyEqualizerPresetSelection(string presetId)
+    {
+        _eqSaveDebounceTimer?.Stop();
+
+        if (IsEditingTrackEqualizer && CurrentTrack != null && !ForceGlobalEqualizer)
+        {
+            _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, presetId);
+        }
+        else
+        {
+            _library.UpdateSettings(s => s.Audio.GlobalEqualizerPresetId = presetId);
+        }
+
+        if (!IsEqualizerEnabled && !string.Equals(presetId, EqualizerPresets.FlatId, StringComparison.Ordinal))
+        {
+            IsEqualizerEnabled = true;
+            _library.UpdateSettings(s => s.Audio.EqualizerEnabled = true);
+        }
+
+        SyncEqualizerStateFromSettings();
+        _audio.UpdateEqualizerSettings();
+    }
+
+    #endregion
+
     #region Language
 
     private void OnLanguageChanged(object? sender, string newLang)
@@ -1676,6 +2107,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsRepeatNone));
         OnPropertyChanged(nameof(IsRepeatOne));
         OnPropertyChanged(nameof(IsRepeatAll));
+        SyncEqualizerStateFromSettings();
     }
 
     #endregion
@@ -1745,6 +2177,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _shuffleAnimationTimer?.Stop();
             _shuffleAnimationTimer = null;
 
+            _eqSaveDebounceTimer?.Stop();
+            _eqSaveDebounceTimer = null;
+
             CancelFormatsLoading();
             UnsubscribeHeavy();
 
@@ -1770,4 +2205,35 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     #endregion
+}
+
+public sealed partial class EqualizerPresetChipItem : ObservableObject
+{
+    public string Id { get; }
+    public bool IsBuiltIn { get; }
+
+    [ObservableProperty] public partial string Title { get; set; }
+    [ObservableProperty] public partial string EditTitle { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRename))]
+    public partial bool IsSelected { get; set; }
+
+    [ObservableProperty] public partial bool IsGlobalPreset { get; set; }
+    [ObservableProperty] public partial bool IsTrackPreset { get; set; }
+    [ObservableProperty] public partial bool IsRenaming { get; set; }
+
+    public bool CanRename => IsSelected && !IsBuiltIn;
+
+    public string? RightClickHint => IsBuiltIn
+        ? null
+        : LocalizationService.Instance["Eq_Preset_RightClickDelete"];
+
+    public EqualizerPresetChipItem(string id, string title, bool isBuiltIn)
+    {
+        Id = id;
+        Title = title;
+        EditTitle = title;
+        IsBuiltIn = isBuiltIn;
+    }
 }

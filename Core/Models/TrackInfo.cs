@@ -165,6 +165,12 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     /// </summary>
     [ObservableProperty] public partial int PreferredBitrate { get; set; }
 
+    /// <summary>
+    /// Индивидуальный пресет эквалайзера, закреплённый за этим треком.
+    /// <c>null</c> = использовать глобальный профиль эквалайзера.
+    /// </summary>
+    [ObservableProperty] public partial string? EqualizerPresetId { get; set; }
+
     public string? RadioSeedId { get; set; }
 
     #endregion
@@ -316,6 +322,9 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
 
         if (fresh.HasIntegratedLufs)
             SetIntegratedLufs(fresh.IntegratedLufs, fresh.IntegratedLufsSource);
+
+        if (!string.IsNullOrEmpty(fresh.EqualizerPresetId) && fresh.EqualizerPresetId != EqualizerPresetId)
+            EqualizerPresetId = fresh.EqualizerPresetId;
 
         if (fresh.TransientFormat is { } transientFormat
             && transientFormat != AudioFormat.Unknown
