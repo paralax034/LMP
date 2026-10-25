@@ -89,21 +89,17 @@ public static class AudioSourceFactory
     /// Создаёт экземпляр аудиоисточника на основе дескриптора потока.
     /// </summary>
     /// <param name="descriptor">Дескриптор разрешенного потока.</param>
-    /// <param name="httpClient">HTTP-клиент для загрузки сетевых сегментов.</param>
     /// <param name="urlAcquirer">Callback первичного получения URL продолжения.</param>
     /// <param name="urlRefresher">Callback обнуления и повторного получения URL при 403.</param>
     /// <param name="config">Конфигурация параметров стриминга.</param>
-    /// <param name="ct">Токен отмены операции.</param>
     /// <returns>Инициализированный экземпляр аудиоисточника.</returns>
     /// <exception cref="InvalidOperationException">Выбрасывается, если глобальный кэш не был инициализирован.</exception>
     /// <exception cref="ArgumentException">Выбрасывается при отсутствии URL и локального кэша.</exception>
     public static Task<IAudioSource> CreateAsync(
         ResolvedStreamDescriptor descriptor,
-        HttpClient httpClient,
         Func<CancellationToken, Task<string?>>? urlAcquirer = null,
         Func<CancellationToken, Task<string?>>? urlRefresher = null,
-        StreamingConfig? config = null,
-        CancellationToken ct = default)
+        StreamingConfig? config = null)
     {
         if (_globalCacheManager == null)
         {
@@ -222,9 +218,6 @@ public static class AudioSourceFactory
 
             throw new ArgumentException("No URL provided and no cache available", nameof(descriptor));
         }
-
-        // CDN Connection Pre-Warming
-        CdnConnectionPreWarmer.PreWarmHost(httpClient, url, ct);
 
         // Format and codec come from descriptor — no HTTP detect needed
         if (format == AudioFormat.Unknown)
@@ -358,8 +351,6 @@ public static class AudioSourceFactory
 
             throw new ArgumentException("No URL provided and no cache available", nameof(url));
         }
-
-        CdnConnectionPreWarmer.PreWarmHost(httpClient, url, ct);
 
         var format = await DetectFormatAsync(url, httpClient, ct).ConfigureAwait(false);
         if (format == AudioFormat.Unknown)

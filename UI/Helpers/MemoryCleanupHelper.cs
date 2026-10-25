@@ -158,45 +158,59 @@ public static class MemoryCleanupHelper
             }
             catch { }
 
-            // Проверка давления памяти
+            var gcInfo = GC.GetGCMemoryInfo();
+            long committedMb = gcInfo.TotalCommittedBytes / (1024 * 1024);
+            long liveMb = GC.GetTotalMemory(false) / (1024 * 1024);
+
+            // Проверка давления памяти по реально закоммиченному объему кучи (Private: Commit)
             if (!aggressive && pressureThreshold > 0)
             {
-                var workingSetMb = GC.GetTotalMemory(false) / 1024 / 1024;
-                if (workingSetMb > pressureThreshold)
+                if (committedMb > pressureThreshold || liveMb > pressureThreshold)
                 {
-                    Log.Info($"[Memory] Pressure detected ({workingSetMb}MB > {pressureThreshold}MB), forcing aggressive");
+                    Log.Info($"[Memory] Pressure detected (Committed: {committedMb}MB, Live: {liveMb}MB > {pressureThreshold}MB), forcing aggressive");
                     aggressive = true;
                 }
             }
 
-            // Очистка кэшей приложения
-            CleanupAppCaches();
+            // Очистка кэшей приложения (передаем актуальный флаг aggressive для GPU-кэша Compositor)
+            CleanupAppCaches(aggressive);
 
-            // GC в зависимости от режима
+            // Если во время воспроизведения закоммиченная куча раздута мертвыми сегментами Gen2/LOH
+            // (разница между Committed и Live превышает 24 МБ или Committed > 64 МБ),
+            // выполняем компактификацию управляемой кучи БЕЗ сброса Working Set в своп.
+            bool hasHeapBloat = (committedMb - liveMb) >= 24 || committedMb > 64;
+
             if (isPlaying && !aggressive)
             {
-                // Soft: воспроизведение идёт, не блокируем
-                GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
-                Log.Info("[Memory] Soft cleanup (playback active)");
+                if (hasHeapBloat)
+                {
+                    MemoryHelpers.CompactManagedHeapNow();
+                }
+                else
+                {
+                    GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+                    Log.Info("[Memory] Soft cleanup (playback active)");
+                }
             }
             else if (aggressive)
             {
-                // Aggressive: полная очистка с компактификацией LOH
-                System.Runtime.GCSettings.LargeObjectHeapCompactionMode =
-                    System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                GC.WaitForPendingFinalizers();
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                MemoryHelpers.CompactManagedHeapNow();
                 MemoryHelpers.TrimWorkingSet();
 
-                var afterMb = GC.GetTotalMemory(false) / 1024 / 1024;
-                Log.Info($"[Memory] Aggressive cleanup done: {afterMb}MB remaining");
+                var afterCommittedMb = GC.GetGCMemoryInfo().TotalCommittedBytes / (1024 * 1024);
+                Log.Info($"[Memory] Aggressive cleanup done: {afterCommittedMb}MB committed remaining");
             }
             else
             {
-                // Normal: фоновая Gen2
-                GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
-                Log.Info("[Memory] Normal cleanup done");
+                if (hasHeapBloat)
+                {
+                    MemoryHelpers.CompactManagedHeapNow();
+                }
+                else
+                {
+                    GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+                    Log.Info("[Memory] Normal cleanup done");
+                }
             }
 
             await Task.CompletedTask;

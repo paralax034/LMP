@@ -26,7 +26,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     /// </summary>
     private static volatile int _androidVrSessionBotDetections;
     private static DateTime _androidVrLastBotDetection = DateTime.MinValue;
-    private const int AndroidVrCooldownSeconds = 300; // 5 минут
+    private const int AndroidVrCooldownSeconds = 7200; // 2 часа (сбрасывается досрочно при смене IP/VPN или аккаунта)
 
     public static readonly TimeSpan CooldownDuration = TimeSpan.FromMinutes(2);
 

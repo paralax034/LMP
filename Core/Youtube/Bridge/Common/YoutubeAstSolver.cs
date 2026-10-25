@@ -379,9 +379,11 @@ public static partial class YoutubeAstSolver
 
         var (nSolvers, sigSolvers) = GetSolutions(shakenStatements, baseJs);
 
-        var sb = new StringBuilder(512 * 1024);
+        // 32 КБ (64 КБ в байтах) гарантированно размещается в SOH (< 85 000 байт),
+        // исключая прямую аллокацию 1 МБ буфера в LOH при сборке 15 КБ скрипта.
+        var sb = new StringBuilder(32 * 1024);
 
-        sb.AppendLine($"globalThis.__sts = {sts};");
+        sb.Append("globalThis.__sts = ").Append(sts).AppendLine(";");
         sb.AppendLine(SetupScript);
 
         for (int i = 0; i < iifeIndex; i++)

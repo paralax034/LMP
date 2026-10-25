@@ -42,11 +42,16 @@ public sealed partial class CachingStreamSource
         int minimalBytes;
         try
         {
-            ResetDownloadEpoch();
-
             minimalBytes = GetMinimalSeekStartBytes(targetBytePos);
             if (minimalBytes <= 0)
                 return true;
+
+            // Если TryPrefetchChunkForSeekAsync уже запустил скачивание именно этого диапазона,
+            // не сбрасываем эпоху, чтобы EnsureRangeAsync бесшовно подхватил in-flight запрос по dedup.
+            if (!TryGetOverlappingActiveDownload(targetBytePos, minimalBytes, out _))
+            {
+                ResetDownloadEpoch();
+            }
 
             try
             {

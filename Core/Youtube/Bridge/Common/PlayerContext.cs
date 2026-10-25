@@ -137,18 +137,17 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Освобождает гигантскую строку оригинального скрипта плеера (<see cref="BaseJs"/>) из оперативной памяти.
+    /// Освобождает гигантскую строку оригинального скрипта плеера (<see cref="BaseJs"/>)
+    /// и промежуточный препроцессированный скрипт (<see cref="PreprocessedJs"/>) из оперативной памяти.
+    /// Вызывать строго после инициализации нативного контекста QuickJS.
     /// </summary>
-    /// <remarks>
-    /// <b>Важно:</b> Вызывать строго ПОСЛЕ того, как контекст нативного моста QuickJS был успешно инициализирован.
-    /// Оптимизированный код (<see cref="PreprocessedJs"/>) сохраняется, так как он может потребоваться для отладки или реинициализации.
-    /// </remarks>
     public void ReleaseRawScripts()
     {
         lock (_prepLock)
         {
             BaseJs = string.Empty;
-            Log.Debug($"[PlayerContext] Discarded raw base.js from memory for player version: {Version}. Preprocessed script retained.");
+            PreprocessedJs = null;
+            Log.Debug($"[PlayerContext] Discarded raw base.js and preprocessed script from memory for player version: {Version}.");
         }
     }
 

@@ -11,6 +11,11 @@ public sealed class PoTokenProvider : IDisposable
     private BotGuardService _botGuard;
     private bool _disposed;
 
+    /// <summary>
+    /// Указывает, готов ли внутренний сервис BotGuard к мгновенному fast-mint без полного цикла инициализации.
+    /// </summary>
+    public bool HasActiveContext => _botGuard.HasActiveContext;
+
     /// <param name="httpProvider">Фабрика HTTP-клиента для WAA/gstatic запросов. Не требует YouTube cookies.</param>
     public PoTokenProvider(Func<HttpClient> httpProvider)
     {

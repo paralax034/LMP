@@ -120,25 +120,25 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
         // "SAPISIDHASH " (12) + tsLen + "_" (1) + sha1_hex (40)
         int totalHeaderLen = 12 + tsLen + 1 + 40;
+        Span<char> headerChars = stackalloc char[totalHeaderLen];
 
-        return string.Create(totalHeaderLen, (timestampChars[..tsLen].ToString(), hash.ToArray()), static (span, state) =>
+        "SAPISIDHASH ".AsSpan().CopyTo(headerChars);
+        int idx = 12;
+
+        activeTimestamp.CopyTo(headerChars[idx..]);
+        idx += tsLen;
+
+        headerChars[idx++] = '_';
+
+        ReadOnlySpan<byte> hexDigits = "0123456789abcdef"u8;
+        for (int i = 0; i < hash.Length; i++)
         {
-            "SAPISIDHASH ".AsSpan().CopyTo(span);
-            int idx = 12;
+            byte b = hash[i];
+            headerChars[idx++] = (char)hexDigits[b >> 4];
+            headerChars[idx++] = (char)hexDigits[b & 0xF];
+        }
 
-            state.Item1.AsSpan().CopyTo(span[idx..]);
-            idx += state.Item1.Length;
-
-            span[idx++] = '_';
-
-            var hexDigits = "0123456789abcdef"u8;
-            for (int i = 0; i < state.Item2.Length; i++)
-            {
-                byte b = state.Item2[i];
-                span[idx++] = (char)hexDigits[b >> 4];
-                span[idx++] = (char)hexDigits[b & 0xF];
-            }
-        });
+        return new string(headerChars);
     }
 
     /// <summary>

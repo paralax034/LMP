@@ -118,8 +118,9 @@ public partial class YoutubeProvider : IDisposable
     {
         if (_disposed) return;
 
-        // VisitorData привязан к сессии — при смене клиента он невалиден.
+        // VisitorData и кулдаун BotDetection привязаны к сетевому маршруту/сессии — сбрасываем при пересборке.
         _poTokenProvider?.Invalidate();
+        VideoController.ResetBotDetectionState();
 
         var baseHttpClient = _networkManager.ApiClient;
         var youtubeHandler = new YoutubeHttpHandler(baseHttpClient, AuthService, disposeClient: false);
@@ -535,7 +536,7 @@ public partial class YoutubeProvider : IDisposable
 
         if (!forceRefresh && _manifestRamCache.TryGetValue(track.Id, out var ramManifest))
         {
-            var d = SelectFromManifest(ramManifest, track.Id, requested.Format, requested.BitrateKbps);
+            var d = SelectFromManifest(ramManifest, track.Id, requested.Format, requested.BitrateKbps, StreamSource.ProviderMemoryCache);
             if (d != null)
             {
                 Log.Info($"[YouTube] RefreshStreamAsync RAM MANIFEST -> {d}");
@@ -554,7 +555,7 @@ public partial class YoutubeProvider : IDisposable
                 var diskManifest = ReconstructManifest(diskEntry);
                 _manifestRamCache[track.Id] = diskManifest;
 
-                var d = SelectFromManifest(diskManifest, track.Id, requested.Format, requested.BitrateKbps);
+                var d = SelectFromManifest(diskManifest, track.Id, requested.Format, requested.BitrateKbps, StreamSource.SessionCache);
                 if (d != null)
                 {
                     Log.Info($"[YouTube] RefreshStreamAsync DISK MANIFEST ({diskEntry.Variants.Count} variants) -> {d}");
@@ -1577,19 +1578,21 @@ public partial class YoutubeProvider : IDisposable
         StreamManifest manifest,
         string trackId,
         AudioFormat? targetFormat,
-        int targetBitrate)
+        int targetBitrate,
+        StreamSource origin = StreamSource.YouTubeApi)
     {
         var streams = manifest.GetAudioOnlyStreams();
         var selected = SelectBestStream(streams, targetFormat, targetBitrate);
         if (selected == null) return null;
 
-        return CreateDescriptorFromStream(trackId, selected, manifest.IntegratedLufs);
+        return CreateDescriptorFromStream(trackId, selected, manifest.IntegratedLufs, origin);
     }
 
     private ResolvedStreamDescriptor CreateDescriptorFromStream(
          string trackId,
          AudioOnlyStreamInfo stream,
-         float perceptualLufs)
+         float perceptualLufs,
+         StreamSource origin = StreamSource.YouTubeApi)
     {
         var url = stream.Url;
         var format = YoutubeIdHelper.MapContainerToFormat(stream.Container.Name);
@@ -1618,7 +1621,7 @@ public partial class YoutubeProvider : IDisposable
             IntegratedLufs = perceptualLufs,
             LanguageCode = stream.AudioLanguage?.Code,
             IsDefaultLanguage = stream.IsAudioLanguageDefault ?? false,
-            Origin = StreamSource.YouTubeApi
+            Origin = origin
         };
     }
 
@@ -1756,7 +1759,7 @@ public partial class YoutubeProvider : IDisposable
         string trackId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId : $"yt_{videoId}";
         if (_manifestRamCache.TryGetValue(trackId, out var manifest))
         {
-            return SelectFromManifest(manifest, trackId, format, bitrate);
+            return SelectFromManifest(manifest, trackId, format, bitrate, StreamSource.ProviderMemoryCache);
         }
         return null;
     }

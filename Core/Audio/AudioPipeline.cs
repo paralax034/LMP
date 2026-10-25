@@ -189,12 +189,10 @@ public sealed class AudioPipeline : IAsyncDisposable
         try
         {
             source = await AudioSourceFactory.CreateAsync(
-                descriptor,
-                Http.SharedHttpClient.Instance,
-                urlAcquirer,
-                urlRefresher,
-                options.StreamingConfig,
-                lifetimeCts.Token).ConfigureAwait(false);
+                 descriptor,
+                 urlAcquirer,
+                 urlRefresher,
+                 options.StreamingConfig).ConfigureAwait(false);
 
             bool initialized;
             try

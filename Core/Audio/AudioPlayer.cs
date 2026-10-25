@@ -682,6 +682,16 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         float previousGain = _activePipeline?.GetLockedNormalizationGain() ?? 1.0f;
 
+        // Немедленно останавливаем сетевую подкачку предыдущего трека до создания нового конвейера,
+        // чтобы освободить полосу пропускания и сокеты для быстрого старта нового трека.
+        var previousPipeline = Interlocked.Exchange(ref _activePipeline, null);
+        if (previousPipeline != null)
+        {
+            StopTimers();
+            previousPipeline.Source.CancelPendingOperations();
+            TrackAndFirePipelineDispose(previousPipeline);
+        }
+
         try
         {
             ct.ThrowIfCancellationRequested();

@@ -861,6 +861,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     public void SetPlaybackActive(bool active)
     {
         if (_disposed) return;
+        if (_playbackGate.IsSet == active) return;
 
         if (active) _playbackGate.Set();
         else _playbackGate.Reset();

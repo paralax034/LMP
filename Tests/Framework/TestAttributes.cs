@@ -168,6 +168,17 @@ public static class TestAssert
             ThrowFailure(message ?? $"Equal assertion failed for '{expr}': expected '{expected}', got '{actual}'");
     }
 
+    /// <summary>Проверяет, что ссылка равна null.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Null<T>(
+        T? value,
+        string? message = null,
+        [CallerArgumentExpression(nameof(value))] string? expr = null) where T : class
+    {
+        if (value is not null)
+            ThrowFailure(message ?? $"Expected '{expr}' to be null, but got '{value}'");
+    }
+
     /// <summary>Проверяет, что ссылка не равна null.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T NotNull<T>(

@@ -76,8 +76,10 @@ public sealed class StreamClient
     {
         var rawList = streamDatas as IReadOnlyList<IStreamData> ?? streamDatas.ToList();
 
-        // Проверяем, есть ли хотя бы один чистый аудиопоток с доступным URL или подписью
+        // Проверяем, есть ли хотя бы один чистый аудиопоток с доступным URL или подписью,
+        // и сразу запускаем опережающий TCP+TLS прогрев CDN-хоста ДО генерации PoToken и расшифровки sig/n.
         bool hasPureAudioStreams = false;
+        string? earlyCdnUrl = null;
         for (int i = 0; i < rawList.Count; i++)
         {
             var s = rawList[i];
@@ -85,8 +87,21 @@ public sealed class StreamClient
                 && (!string.IsNullOrEmpty(s.Url) || !string.IsNullOrEmpty(s.Signature)))
             {
                 hasPureAudioStreams = true;
-                break;
+                if (earlyCdnUrl is null && !string.IsNullOrEmpty(s.Url))
+                {
+                    earlyCdnUrl = s.Url;
+                }
             }
+        }
+
+        // Запускаем одиночный упреждающий прогрев CDN-хоста ДО генерации PoToken и расшифровки sig/n:
+        // 1) При холодном старте BotGuard (~500–1100 мс) сокет успевает полностью прогреться к началу Range 0 (экономия ~480 мс).
+        // 2) При быстром fast-mint (~20 мс) прогретый сокет становится вторым горячим соединением в пуле к моменту
+        //    старта параллельных Range 4 и Range 12, избавляя Range 12 от холодного коннекта (экономия ~200 мс).
+        if (!string.IsNullOrEmpty(earlyCdnUrl)
+            && !string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal))
+        {
+            CdnConnectionPreWarmer.PreWarmHost(SharedHttpClient.Instance, earlyCdnUrl, cancellationToken);
         }
 
         bool? isNTokenDecryptionRequired = null;

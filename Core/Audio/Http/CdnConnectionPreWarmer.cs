@@ -42,23 +42,32 @@ internal static class CdnConnectionPreWarmer
             return;
 
         CdnHostStatsStore.RecordHit(host);
+        TrackRecentWarmHost(host);
+    }
 
+    private static void TrackRecentWarmHost(string host)
+    {
         lock (_lock)
         {
-            var node = _recentHosts.First;
-            while (node != null)
-            {
-                var next = node.Next;
-                if (string.Equals(node.Value.Host, host, StringComparison.OrdinalIgnoreCase))
-                    _recentHosts.Remove(node);
-                node = next;
-            }
-
-            _recentHosts.AddFirst((host, DateTime.UtcNow));
-
-            while (_recentHosts.Count > MaxTrackedHosts)
-                _recentHosts.RemoveLast();
+            TrackRecentWarmHostMustHoldLock(host, DateTime.UtcNow);
         }
+    }
+
+    private static void TrackRecentWarmHostMustHoldLock(string host, DateTime nowUtc)
+    {
+        var node = _recentHosts.First;
+        while (node != null)
+        {
+            var next = node.Next;
+            if (string.Equals(node.Value.Host, host, StringComparison.OrdinalIgnoreCase))
+                _recentHosts.Remove(node);
+            node = next;
+        }
+
+        _recentHosts.AddFirst((host, nowUtc));
+
+        while (_recentHosts.Count > MaxTrackedHosts)
+            _recentHosts.RemoveLast();
     }
 
     /// <summary>
@@ -110,17 +119,23 @@ internal static class CdnConnectionPreWarmer
         if (!TryExtractHost(url, out var host))
             return;
 
+        var now = DateTime.UtcNow;
+
         lock (_lock)
         {
             foreach (var (trackedHost, warmTime) in _recentHosts)
             {
                 if (string.Equals(trackedHost, host, StringComparison.OrdinalIgnoreCase)
-                    && DateTime.UtcNow - warmTime < WarmCooldown)
+                    && now - warmTime < WarmCooldown)
                 {
-                    Log.Debug($"[CdnPreWarmer] Host {TruncateHost(host)}... still warm, skipping");
+                    Log.Debug($"[CdnPreWarmer] Host {TruncateHost(host)}... still warm or in-flight, skipping");
                     return;
                 }
             }
+
+            // Регистрируем хост немедленно ДО старта сетевого запроса (in-flight dedup),
+            // чтобы параллельные вызовы в ту же миллисекунду не открывали дублирующие TCP+TLS соединения.
+            TrackRecentWarmHostMustHoldLock(host, now);
         }
 
         _ = WarmHostCoreAsync(httpClient, host, ct);
@@ -152,12 +167,12 @@ internal static class CdnConnectionPreWarmer
             sw.Stop();
 
             _consecutiveTimeouts.TryRemove(host, out _);
+            TrackRecentWarmHost(host);
 
             CdnHostStatsStore.RecordTtfb(host, sw.ElapsedMilliseconds);
             CdnHostStatsStore.FlushIfNeeded();
 
-            Log.Debug($"[CdnPreWarmer] {TruncateHost(host)}... warm in {sw.ElapsedMilliseconds}ms " +
-                      $"(HTTP {(int)response.StatusCode})");
+            Log.Debug($"[CdnPreWarmer] {TruncateHost(host)}... warm in {sw.ElapsedMilliseconds}ms (HTTP {(int)response.StatusCode})");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (OperationCanceledException)
@@ -169,14 +184,11 @@ internal static class CdnConnectionPreWarmer
 
             int count = _consecutiveTimeouts.AddOrUpdate(host, 1, (_, c) => c + 1);
 
-            Log.Debug($"[CdnPreWarmer] {TruncateHost(host)}... timed out ({sw.ElapsedMilliseconds}ms) " +
-                      $"[consecutive timeouts: {count}/{TunnelDeadTimeoutThreshold}]");
+            Log.Debug($"[CdnPreWarmer] {TruncateHost(host)}... timed out ({sw.ElapsedMilliseconds}ms) [consecutive timeouts: {count}/{TunnelDeadTimeoutThreshold}]");
 
             if (count >= TunnelDeadTimeoutThreshold)
             {
-                Log.Warn($"[CdnPreWarmer] {TruncateHost(host)}... " +
-                         $"{TunnelDeadTimeoutThreshold} consecutive timeouts — tunnel likely dead, " +
-                         "firing OnTunnelDeadDetected");
+                Log.Warn($"[CdnPreWarmer] {TruncateHost(host)}... {TunnelDeadTimeoutThreshold} consecutive timeouts — tunnel likely dead, firing OnTunnelDeadDetected");
 
                 AudioSourceFactory.CdnBlacklist.MarkBlocked(host);
                 _consecutiveTimeouts.TryRemove(host, out _);

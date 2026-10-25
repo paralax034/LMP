@@ -241,6 +241,32 @@ public sealed class JsDecryptionService : IDisposable
         }
 
         // 2. Slow path: Сбой байткода. Лениво читаем JS с диска (или компилируем) и создаем заново
+        bool performedHeavyAstParse = false;
+        if (newHandle == IntPtr.Zero)
+        {
+            performedHeavyAstParse = true;
+
+            // Метод GetOrPrepareScript вызовется и лениво считает preprocessed.js только сейчас!
+            var script = await Task.Run(
+                () => context.GetOrPrepareScript(
+                    () => YoutubeAstSolver.PreprocessPlayer(context.BaseJs)),
+                ct).ConfigureAwait(false);
+
+            var (handle, bytecode) = await Task.Run(() => QuickJsNative.CreateContextWithBytecode(script), ct).ConfigureAwait(false);
+            newHandle = handle;
+
+            if (bytecode is { Length: > 0 })
+            {
+                _ = SaveBytecodeCacheAsync(bytecodePath, bytecode);
+            }
+        }
+
+        if (performedHeavyAstParse)
+        {
+            context.ReleaseRawScripts();
+            MemoryHelpers.SchedulePostHeavyWorkCleanup();
+        }
+
         if (newHandle == IntPtr.Zero)
         {
             // Метод GetOrPrepareScript вызовется и лениво считает preprocessed.js только сейчас!
@@ -308,6 +334,19 @@ public sealed class JsDecryptionService : IDisposable
             Log.Info($"[JsDecryptionService] Player version changed: " +
                      $"{_currentPlayerVersion} → {context.Version}. Reinitializing...");
             await ReinitializeAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task SaveBytecodeCacheAsync(string bytecodePath, byte[] bytecode)
+    {
+        try
+        {
+            await File.WriteAllBytesAsync(bytecodePath, bytecode, CancellationToken.None).ConfigureAwait(false);
+            Log.Info($"[JsDecryptionService] Bytecode cached: {bytecode.Length / 1024}KB");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[JsDecryptionService] Bytecode save failed: {ex.Message}");
         }
     }
 

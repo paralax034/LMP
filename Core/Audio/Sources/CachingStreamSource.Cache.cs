@@ -10,10 +10,16 @@ public sealed partial class CachingStreamSource
     /// Иммутабельный блок данных в RAM-кэше, арендованный из <see cref="MemoryPool{T}"/>.
     /// Владеет <see cref="IMemoryOwner{T}"/> и освобождает его ровно один раз через <see cref="Dispose"/>.
     /// </summary>
+    /// <summary>
+    /// Иммутабельный блок данных в RAM-кэше со счётчиком ссылок, арендованный из единого <see cref="ArrayPool{T}.Shared"/>.
+    /// Позволяет одновременно читать данные из RAM-кэша и асинхронно сбрасывать их на диск
+    /// без выделения второго буфера (<c>diskCopy</c>) и без лишнего копирования памяти.
+    /// </summary>
     internal sealed class RamRangeBlock : IDisposable
     {
-        private IMemoryOwner<byte>? _owner;
-        private int _disposed;
+        private byte[]? _buffer;
+        private int _refCount = 1;
+        private int _ramCacheDisposed;
 
         /// <summary>Абсолютное смещение начала блока в контенте.</summary>
         public long StartOffset { get; }
@@ -21,32 +27,80 @@ public sealed partial class CachingStreamSource
         /// <summary>Абсолютное смещение байта, следующего за последним байтом блока.</summary>
         public long EndOffsetExclusive => StartOffset + Length;
 
-        /// <summary>Фактическая длина данных блока в байтах.</summary>
+        /// <summary>Фактическая длина данных блока в байтах (для RAM-кэша).</summary>
         public int Length { get; }
 
         /// <summary>Слайс арендованной памяти, содержащий ровно <see cref="Length"/> байт.</summary>
         public Memory<byte> Memory { get; }
 
         /// <summary>
-        /// Создаёт блок из арендованного <see cref="IMemoryOwner{T}"/>.
+        /// Создаёт блок из массива, арендованного в <see cref="ArrayPool{T}.Shared"/>.
         /// </summary>
         /// <param name="startOffset">Абсолютное смещение блока в контенте.</param>
-        /// <param name="owner">Владелец арендованной памяти.</param>
-        /// <param name="actualLength">Количество реально записанных байт.</param>
-        public RamRangeBlock(long startOffset, IMemoryOwner<byte> owner, int actualLength)
+        /// <param name="rentedBuffer">Арендованный буфер из <see cref="ArrayPool{T}.Shared"/>.</param>
+        /// <param name="actualLength">Количество байт, доступных для чтения в RAM-кэше.</param>
+        public RamRangeBlock(long startOffset, byte[] rentedBuffer, int actualLength)
         {
             StartOffset = startOffset;
-            _owner = owner;
+            _buffer = rentedBuffer;
             Length = actualLength;
-            Memory = owner.Memory[..actualLength];
+            Memory = rentedBuffer.AsMemory(0, actualLength);
+        }
+
+        /// <summary>
+        /// Увеличивает счётчик ссылок для фоновой записи на диск и возвращает срез полного скачанного диапазона.
+        /// </summary>
+        /// <param name="fullDownloadedLength">Полная длина скачанных данных для записи на диск.</param>
+        /// <param name="diskMemory">Срез памяти для записи на диск.</param>
+        /// <returns><c>true</c>, если буфер успешно удержан; иначе <c>false</c>.</returns>
+        public bool TryRetainForDiskWrite(int fullDownloadedLength, out ReadOnlyMemory<byte> diskMemory)
+        {
+            while (true)
+            {
+                int current = Volatile.Read(ref _refCount);
+                if (current <= 0)
+                {
+                    diskMemory = default;
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(ref _refCount, current + 1, current) == current)
+                {
+                    var buf = Volatile.Read(ref _buffer);
+                    if (buf is null)
+                    {
+                        ReleaseReference();
+                        diskMemory = default;
+                        return false;
+                    }
+
+                    diskMemory = buf.AsMemory(0, fullDownloadedLength);
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Освобождает одну ссылку на буфер (вызывается по завершении фоновой записи на диск).
+        /// При достижении нуля возвращает массив в <see cref="ArrayPool{T}.Shared"/>.
+        /// </summary>
+        public void ReleaseReference()
+        {
+            if (Interlocked.Decrement(ref _refCount) == 0)
+            {
+                var buf = Interlocked.Exchange(ref _buffer, null);
+                if (buf is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(buf);
+                }
+            }
         }
 
         /// <inheritdoc/>
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            _owner?.Dispose();
-            _owner = null;
+            if (Interlocked.Exchange(ref _ramCacheDisposed, 1) != 0) return;
+            ReleaseReference();
         }
     }
 

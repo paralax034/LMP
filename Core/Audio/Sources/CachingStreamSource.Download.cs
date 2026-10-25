@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Net.Sockets;
 using LMP.Core.Exceptions;
 
 namespace LMP.Core.Audio.Sources;
@@ -311,7 +312,17 @@ public sealed partial class CachingStreamSource
         if (!diskResult.HasValue) return 0;
 
         var (owner, length) = diskResult.Value;
-        var block = new RamRangeBlock(loadStart, owner, length);
+        byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            owner.Memory.Span[..length].CopyTo(rentedBuffer.AsSpan(0, length));
+        }
+        finally
+        {
+            owner.Dispose();
+        }
+
+        var block = new RamRangeBlock(loadStart, rentedBuffer, length);
         int copied = CopyFromBlock(block.Memory.Span, (int)(position - loadStart), target);
 
         if (!_ramCache.TryAdd(block)) block.Dispose();
@@ -805,24 +816,24 @@ public sealed partial class CachingStreamSource
                     .ReadAsStreamAsync(ct)
                     .ConfigureAwait(false);
 
-                IMemoryOwner<byte> memoryOwner = MemoryPool<byte>.Shared.Rent(plan.Length);
+                byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(plan.Length);
                 int actualLength;
                 var bodySw = System.Diagnostics.Stopwatch.StartNew();
 
                 try
                 {
                     actualLength = await ReadStreamFullyAsync(
-                        contentStream, memoryOwner.Memory[..plan.Length], ct)
+                        contentStream, rentedBuffer.AsMemory(0, plan.Length), ct)
                         .ConfigureAwait(false);
                 }
                 catch (ObjectDisposedException)
                 {
-                    memoryOwner.Dispose();
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
                     return RangeDownloadResult.Cancelled;
                 }
                 catch (OperationCanceledException)
                 {
-                    memoryOwner.Dispose();
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
                     return RangeDownloadResult.Cancelled;
                 }
                 catch (Exception ex) when (
@@ -831,7 +842,7 @@ public sealed partial class CachingStreamSource
                                     || ex is System.Net.Sockets.SocketException)
                 {
                     _lastDownloadException = ex;
-                    memoryOwner.Dispose();
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
 
                     // Если отмена инициирована извне (переключение трека) — мгновенный выход без ретраев
                     if (ct.IsCancellationRequested || _disposed || (_lifetimeCts?.IsCancellationRequested == true))
@@ -843,7 +854,7 @@ public sealed partial class CachingStreamSource
                 catch (Exception ex)
                 {
                     _lastDownloadException = ex;
-                    memoryOwner.Dispose();
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
                     Log.Warn($"[CachingSource] Range {plan.Start}-{end} read error: {ex.Message}");
                     return RangeDownloadResult.NetworkError;
                 }
@@ -861,13 +872,13 @@ public sealed partial class CachingStreamSource
 
                 if (ct.IsCancellationRequested || _disposed || (_lifetimeCts?.IsCancellationRequested == true))
                 {
-                    memoryOwner.Dispose();
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
                     return RangeDownloadResult.Cancelled;
                 }
 
                 if (actualLength == 0)
                 {
-                    memoryOwner.Dispose();
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
                     Log.Warn($"[CachingSource] Range {plan.Start}-{end}: empty response");
                     return RangeDownloadResult.NetworkError;
                 }
@@ -890,38 +901,32 @@ public sealed partial class CachingStreamSource
                     bool isNearEof = isCleanServerEof || (plan.Start + actualLength >= _contentLength);
                     if (!isNearEof)
                     {
-                        memoryOwner.Dispose();
+                        ArrayPool<byte>.Shared.Return(rentedBuffer);
                         Log.Warn($"[CachingSource] Range {plan.Start}-{end} incomplete: {actualLength}/{plan.Length}");
                         return RangeDownloadResult.NetworkError;
                     }
                 }
 
-                // disk copy создаётся всегда: overlap-case иначе превращается в
-                // "скачал и выбросил" с бесконечным повтором того же диапазона.
-                byte[] diskCopy = ArrayPool<byte>.Shared.Rent(actualLength);
-                memoryOwner.Memory.Span[..actualLength].CopyTo(diskCopy.AsSpan(0, actualLength));
-
                 int ramCommitLength = ComputeRamCommitLength(plan.Start, actualLength);
-                bool committedToRam = false;
+                var block = new RamRangeBlock(plan.Start, rentedBuffer, Math.Max(0, ramCommitLength));
 
-                if (ramCommitLength > 0)
+                // Захватываем вторую ссылку на этот же буфер для асинхронной записи на диск (Zero-Copy: без второго Rent и без Span.CopyTo!)
+                if (block.TryRetainForDiskWrite(actualLength, out var diskMemory))
                 {
-                    var block = new RamRangeBlock(plan.Start, memoryOwner, ramCommitLength);
-                    if (_ramCache.TryAdd(block))
-                    {
-                        committedToRam = true;
-                    }
-                    else
-                    {
-                        block.Dispose();
-                    }
+                    _ = WriteToDiskTrackedAsync(plan.Start, block, diskMemory);
+                }
+
+                bool committedToRam = false;
+                if (ramCommitLength > 0 && _ramCache.TryAdd(block))
+                {
+                    committedToRam = true;
                 }
                 else
                 {
-                    memoryOwner.Dispose();
+                    // Если блок не вошел в RAM-кэш, снимаем ссылку RAM-кэша;
+                    // буфер вернется в ArrayPool автоматически, когда завершится WriteToDiskTrackedAsync.
+                    block.Dispose();
                 }
-
-                _ = WriteToDiskTrackedAsync(plan.Start, diskCopy, actualLength);
 
                 if (!committedToRam)
                 {
@@ -952,7 +957,7 @@ public sealed partial class CachingStreamSource
     /// <param name="ct">Токен отмены операции.</param>
     /// <returns>Фактическое количество успешно вычитанных байт.</returns>
     private static async ValueTask<int> ReadStreamFullyAsync(
-        Stream stream, Memory<byte> buffer, CancellationToken ct)
+         Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
         int totalRead = 0;
         while (totalRead < buffer.Length)
@@ -970,7 +975,10 @@ public sealed partial class CachingStreamSource
             {
                 break;
             }
-            catch (IOException ex) when (ex.InnerException is ObjectDisposedException)
+            catch (Exception ex) when (
+                ct.IsCancellationRequested ||
+                ex is IOException { InnerException: ObjectDisposedException } ||
+                ex is SocketException { SocketErrorCode: SocketError.OperationAborted or SocketError.Interrupted })
             {
                 break;
             }
@@ -985,22 +993,22 @@ public sealed partial class CachingStreamSource
     /// Записывает скачанные данные на диск с отслеживанием pending-count
     /// для безопасного освобождения lease при dispose source.
     /// </summary>
-    private async Task WriteToDiskTrackedAsync(long offset, byte[] rentedCopy, int length)
+    private async Task WriteToDiskTrackedAsync(long offset, RamRangeBlock block, ReadOnlyMemory<byte> diskMemory)
     {
         Interlocked.Increment(ref _pendingDiskWrites);
         try
         {
             await _cacheManager.WriteRangeAsync(
-                _cacheKey, offset, rentedCopy.AsMemory(0, length), CancellationToken.None)
+                _cacheKey, offset, diskMemory, CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (IOException ex)
         {
-            Log.Warn($"[CachingSource] Disk write range {offset}-{offset + length - 1}: {ex.Message}");
+            Log.Warn($"[CachingSource] Disk write range {offset}-{offset + diskMemory.Length - 1}: {ex.Message}");
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(rentedCopy);
+            block.ReleaseReference();
             Interlocked.Decrement(ref _pendingDiskWrites);
         }
     }

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Text;
 using LMP.Core.Youtube.Exceptions;
@@ -30,6 +31,14 @@ public sealed class BotGuardService : IDisposable
     /// Таймаут ожидания завершения Promise в event loop.
     /// </summary>
     private const int PumpTimeoutMs = 10_000;
+
+    private static readonly SearchValues<char> InvalidFileNameChars =
+        SearchValues.Create(Path.GetInvalidFileNameChars());
+
+    /// <summary>
+    /// Указывает, инициализирован ли нативный контекст и актуален ли IntegrityToken для быстрого mint (~2 мс).
+    /// </summary>
+    public bool HasActiveContext => _handle != IntPtr.Zero && DateTimeOffset.UtcNow < _contextExpiresAt;
 
     /// <summary>
     /// Инициализирует новый экземпляр класса <see cref="BotGuardService"/>.
@@ -132,10 +141,6 @@ public sealed class BotGuardService : IDisposable
             {
                 if (_handle != IntPtr.Zero && DateTimeOffset.UtcNow < _contextExpiresAt)
                 {
-#if DEBUG
-                    BeginTraceCapture("fast-mint");
-#endif
-
                     var setId = Common.QuickJsNative.Eval(
                         _handle,
                         $"globalThis._bg_mintIdentifier = '{EscapeJsString(videoId)}';");
@@ -151,9 +156,6 @@ public sealed class BotGuardService : IDisposable
 
                         if (token is not null)
                         {
-#if DEBUG
-                            SaveSuccessFastMintArtifacts(videoId, CollectTraceData(), _cachedBgHash);
-#endif
                             Log.Debug($"[BotGuardService] Fast-mint OK ({token.Length}ch) for {Truncate(videoId, 11)}");
                             return token;
                         }
@@ -260,8 +262,6 @@ public sealed class BotGuardService : IDisposable
         {
 #if DEBUG
             SaveSuccessPipelineArtifacts(challenge, identifier, snapshot, CollectTraceData());
-#else
-            SaveSuccessPipelineArtifacts(challenge, identifier, snapshot, null);
 #endif
         }
 
@@ -345,6 +345,15 @@ public sealed class BotGuardService : IDisposable
             ResetContext();
             return null;
         }
+
+#if DEBUG
+        Common.QuickJsNative.TraceEnable(_handle, false);
+#endif
+
+        // Освобождаем ~1.2 МБ исходного кода bg.js из LOH: активный _handle жив до _contextExpiresAt,
+        // а все последующие MintForVideoAsync работают внутри созданного контекста QuickJS.
+        _cachedBgScript = null;
+        MemoryHelpers.SchedulePostHeavyWorkCleanup();
 
         Log.Info($"[BotGuardService] PoToken minted OK. Length={poToken.Length}, TTL={integrityData.EstimatedTtlSecs}s");
         return poToken;
@@ -593,23 +602,20 @@ public sealed class BotGuardService : IDisposable
         return Common.QuickJsNative.Eval(_handle, code);
     }
 
+    [Conditional("DEBUG")]
     private void CapturePipelineFailure(
-        BotGuardChallenge challenge,
-        string? snapshot,
-        string reason)
+         BotGuardChallenge challenge,
+         string? snapshot,
+         string reason)
     {
+#if DEBUG
         var bgStateJson = DumpBgStateJson();
         var lastError = _handle != IntPtr.Zero
             ? Common.QuickJsNative.GetLastError(_handle)
             : "NULL handle";
 
-#if DEBUG
         var consoleOutput = GetConsoleSnapshot(clear: false);
         var traceData = CollectTraceData();
-#else
-        string? consoleOutput = null;
-        string? traceData = null;
-#endif
 
         SaveFailProgram(
             challenge,
@@ -619,22 +625,20 @@ public sealed class BotGuardService : IDisposable
             consoleOutput,
             traceData,
             reason);
+#endif
     }
 
+    [Conditional("DEBUG")]
     private void CaptureFastMintFailure(string videoId, string reason)
     {
+#if DEBUG
         var bgStateJson = DumpBgStateJson();
         var lastError = _handle != IntPtr.Zero
             ? Common.QuickJsNative.GetLastError(_handle)
             : "NULL handle";
 
-#if DEBUG
         var consoleOutput = GetConsoleSnapshot(clear: false);
         var traceData = CollectTraceData();
-#else
-        string? consoleOutput = null;
-        string? traceData = null;
-#endif
 
         SaveFastMintFailure(
             videoId,
@@ -644,6 +648,7 @@ public sealed class BotGuardService : IDisposable
             traceData,
             reason,
             _cachedBgHash);
+#endif
     }
 
     private static void SaveSuccessPipelineArtifacts(
@@ -1000,15 +1005,16 @@ public sealed class BotGuardService : IDisposable
         if (string.IsNullOrWhiteSpace(value))
             return "null";
 
-        var sb = new StringBuilder(value.Length);
-        foreach (char c in value)
+        int len = Math.Min(value.Length, maxLen);
+        Span<char> buffer = len <= 128 ? stackalloc char[len] : new char[len];
+
+        for (int i = 0; i < len; i++)
         {
-            sb.Append(Path.GetInvalidFileNameChars().Contains(c) ? '_' : c);
-            if (sb.Length >= maxLen)
-                break;
+            char c = value[i];
+            buffer[i] = InvalidFileNameChars.Contains(c) ? '_' : c;
         }
 
-        return sb.Length == 0 ? "empty" : sb.ToString();
+        return buffer.Length == 0 ? "empty" : new string(buffer);
     }
 
     /// <summary>
