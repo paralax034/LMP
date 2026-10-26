@@ -158,7 +158,8 @@
         <Setter Property="Opacity" Value="1" />
     </Style>
 
-    <!-- ФОРМАТЫ СТРИМА: Стабильная геометрия без scale и без изменения толщины границ -->
+    <!-- ФОРМАТЫ СТРИМА И ПРЕСЕТЫ EQ: Собственный легковесный ControlTemplate без каскадных
+    переопределений -->
     <Style Selector="Button.format-item-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -174,19 +175,24 @@
                 <BrushTransition Property="Foreground" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
-    </Style>
-
-    <!-- Таргетирование только именованного контейнера PART_ContentPresenter -->
-    <Style Selector="Button.format-item-btn /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="Button.format-item-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style
-        Selector="Button.format-item-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Template">
+            <ControlTemplate TargetType="Button">
+                <Border Name="PART_Border"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{TemplateBinding CornerRadius}"
+                    Padding="{TemplateBinding Padding}">
+                    <ContentPresenter Name="PART_ContentPresenter"
+                        Background="Transparent"
+                        Foreground="{TemplateBinding Foreground}"
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </Border>
+            </ControlTemplate>
+        </Setter>
     </Style>
 
     <Style Selector="Button.format-item-btn:pointerover">

@@ -5,6 +5,8 @@ using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Normalization;
 using LMP.Core.Youtube.Utils;
 using LMP.Tests.Framework;
+using LMP.UI.Features.Shell;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.Tests.Unit;
 
@@ -500,6 +502,139 @@ public static partial class HotPathAllocationTests
         {
             net.Dispose();
         }
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Diagnostic, "Memory Anatomy & Live Heap Breakdown",
+             Group = TestGroups.System, Order = 98, RequiresNetwork = false, TimeoutSeconds = 30)]
+    public static Task TestMemoryAnatomyDiagnosticAsync()
+    {
+        using var proc = System.Diagnostics.Process.GetCurrentProcess();
+        long wsBeforeMb = proc.WorkingSet64 / (1024 * 1024);
+        long privBeforeMb = proc.PrivateMemorySize64 / (1024 * 1024);
+
+        var gcBefore = GC.GetGCMemoryInfo();
+        long liveBeforeMb = GC.GetTotalMemory(false) / (1024 * 1024);
+        long committedBeforeMb = gcBefore.TotalCommittedBytes / (1024 * 1024);
+
+        var genSizes = new System.Text.StringBuilder(128);
+        for (int g = 0; g < gcBefore.GenerationInfo.Length; g++)
+        {
+            string genName = g switch
+            {
+                0 => "Gen0",
+                1 => "Gen1",
+                2 => "Gen2",
+                3 => "LOH",
+                4 => "POH",
+                _ => $"G{g}"
+            };
+            long sizeKb = gcBefore.GenerationInfo[g].SizeAfterBytes / 1024;
+            if (g > 0) genSizes.Append(", ");
+            genSizes.Append($"{genName}={sizeKb:N0}KB");
+        }
+
+        var services = AppEntry.Services;
+        var imgStats = services.GetService<ImageCacheService>()?.GetStats() ?? (0, 0, 0, 0);
+        var audioStats = AudioSourceFactory.GlobalCache?.GetStats() ?? default;
+        var registry = services.GetService<TrackRegistry>();
+        int pinnedTracks = 0;
+        if (registry != null)
+        {
+            foreach (var _ in registry.GetPinnedTracks())
+                pinnedTracks++;
+        }
+
+        var mainVm = services.GetService<MainWindowViewModel>();
+        int prewarmedCount = mainVm?.PrewarmedPages.Count ?? 0;
+
+        int repeaterCount = 0;
+        int totalRealizedContainers = 0;
+        var repeaterDetails = new System.Text.StringBuilder(128);
+
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } win })
+            {
+                foreach (var rep in Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(win).OfType<Avalonia.Controls.ItemsRepeater>())
+                {
+                    repeaterCount++;
+                    int childCount = rep.Children.Count;
+                    totalRealizedContainers += childCount;
+                    var parentPage = Avalonia.VisualTree.VisualExtensions.FindAncestorOfType<Avalonia.Controls.UserControl>(rep);
+                    repeaterDetails.Append($"{parentPage?.GetType().Name ?? rep.Name}:{childCount} ");
+                }
+            }
+        });
+
+        int activeRealizedContainers = 0;
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } win })
+            {
+                foreach (var rep in Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(win).OfType<Avalonia.Controls.ItemsRepeater>())
+                {
+                    foreach (var child in rep.Children)
+                    {
+                        if (child.Bounds.X > -5000 && child.Bounds.Y > -5000)
+                            activeRealizedContainers++;
+                    }
+                }
+            }
+        });
+
+        Log.Info(
+            $"[MemAnatomy] Repeaters ({repeaterCount}) Total Children: {totalRealizedContainers} (Active On-Screen/Buffer: {activeRealizedContainers}) -> [{repeaterDetails}]");
+
+        Log.Info(
+            $"[MemAnatomy] BEFORE GC -> WorkingSet: {wsBeforeMb} MB | PrivateBytes (Native+Managed): {privBeforeMb} MB | " +
+            $"Managed Committed: {committedBeforeMb} MB | Managed Live: {liveBeforeMb} MB | Generations: [{genSizes}]");
+
+        Log.Info(
+            $"[MemAnatomy] Caches -> ImageCache RAM: {imgStats.MemoryItems} items (~{imgStats.MemoryMb} MB) | " +
+            $"AudioCache Index: {audioStats.TotalEntries} entries | TrackRegistry Pinned: {pinnedTracks} tracks | " +
+            $"Shell PrewarmedPages: {prewarmedCount}");
+
+        // Проверяем эффект очистки кэша контуров Skia и принудительного GC
+        SkiaSharp.SKGraphics.PurgeAllCaches();
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+        proc.Refresh();
+        var gcAfter = GC.GetGCMemoryInfo();
+        long wsAfterMb = proc.WorkingSet64 / (1024 * 1024);
+        long privAfterMb = proc.PrivateMemorySize64 / (1024 * 1024);
+        long liveAfterMb = GC.GetTotalMemory(false) / (1024 * 1024);
+        long committedAfterMb = gcAfter.TotalCommittedBytes / (1024 * 1024);
+
+        var genSizesAfter = new System.Text.StringBuilder(128);
+        for (int g = 0; g < gcAfter.GenerationInfo.Length; g++)
+        {
+            string genName = g switch
+            {
+                0 => "Gen0",
+                1 => "Gen1",
+                2 => "Gen2",
+                3 => "LOH",
+                4 => "POH",
+                _ => $"G{g}"
+            };
+            long sizeKb = gcAfter.GenerationInfo[g].SizeAfterBytes / 1024;
+            if (g > 0) genSizesAfter.Append(", ");
+            genSizesAfter.Append($"{genName}={sizeKb:N0}KB");
+        }
+
+        long nativePrivateMb = Math.Max(0, privAfterMb - committedAfterMb);
+
+        Log.Info(
+            $"[MemAnatomy] AFTER GC+SkiaPurge -> WorkingSet: {wsAfterMb} MB | PrivateBytes: {privAfterMb} MB " +
+            $"(Managed Committed: {committedAfterMb} MB, Unmanaged/Native: ~{nativePrivateMb} MB) | " +
+            $"Managed Live: {liveAfterMb} MB | Generations: [{genSizesAfter}]");
 
         return Task.CompletedTask;
     }

@@ -1251,7 +1251,6 @@ public partial class TrackListControl : UserControl
         if (sender is MenuFlyout { Target: Control t } && t.DataContext is TrackItemViewModel vm)
         {
             vm.IsMenuOpen = false;
-            vm.ClearPlaylistSubmenu();
         }
     }
 

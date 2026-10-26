@@ -26,7 +26,7 @@ namespace Avalonia.Controls
         /// Defines the <see cref="HorizontalCacheLength"/> property.
         /// </summary>
         public static readonly StyledProperty<double> HorizontalCacheLengthProperty =
-            AvaloniaProperty.Register<ItemsRepeater, double>(nameof(HorizontalCacheLength), 2.0);
+             AvaloniaProperty.Register<ItemsRepeater, double>(nameof(HorizontalCacheLength), 0.0);
 
         /// <summary>
         /// Defines the <see cref="ItemTemplate"/> property.
@@ -53,13 +53,13 @@ namespace Avalonia.Controls
         /// Defines the <see cref="VerticalCacheLength"/> property.
         /// </summary>
         public static readonly StyledProperty<double> VerticalCacheLengthProperty =
-            AvaloniaProperty.Register<ItemsRepeater, double>(nameof(VerticalCacheLength), 2.0);
+            AvaloniaProperty.Register<ItemsRepeater, double>(nameof(VerticalCacheLength), 0.8);
 
         private static readonly StyledProperty<VirtualizationInfo?> VirtualizationInfoProperty =
             AvaloniaProperty.RegisterAttached<ItemsRepeater, Control, VirtualizationInfo?>("VirtualizationInfo");
 
-        internal static readonly Rect InvalidRect = new Rect(-1, -1, -1, -1);
-        internal static readonly Point ClearedElementsArrangePosition = new Point(-10000.0, -10000.0);
+        internal static readonly Rect InvalidRect = new(-1, -1, -1, -1);
+        internal static readonly Point ClearedElementsArrangePosition = new(-10000.0, -10000.0);
 
         private readonly ViewManager _viewManager;
         private readonly ViewportManager _viewportManager;

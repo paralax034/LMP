@@ -480,23 +480,18 @@
     <Style Selector="MenuItem">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Padding" Value="10,8" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <ControlTemplate TargetType="MenuItem">
                 <Panel>
                     <Border Name="PART_LayoutRoot"
-                        Background="Transparent"
-                        BorderBrush="{DynamicResource AccentTransparentBrush}"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
                         BorderThickness="1"
                         CornerRadius="6"
                         Padding="{TemplateBinding Padding}">
-                        <Border.Transitions>
-                            <Transitions>
-                                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                            </Transitions>
-                        </Border.Transitions>
 
                         <Grid ColumnDefinitions="24, *, Auto, Auto">
                             <ContentPresenter Name="PART_IconPresenter"
@@ -511,15 +506,6 @@
                                 VerticalAlignment="Center"
                                 HorizontalAlignment="Left"
                                 RecognizesAccessKey="True" />
-
-                            <TextBlock Name="PART_InputGestureText"
-                                Grid.Column="2"
-                                Text="{TemplateBinding InputGesture}"
-                                Margin="16,0,0,0"
-                                VerticalAlignment="Center"
-                                Foreground="{DynamicResource TextMutedBrush}"
-                                FontSize="12"
-                                IsVisible="{TemplateBinding InputGesture, Converter={x:Static ObjectConverters.IsNotNull}}" />
 
                             <TextBlock Name="PART_BadgeText"
                                 Grid.Column="2"
@@ -537,18 +523,12 @@
                                 Margin="8,0,0,0"
                                 VerticalAlignment="Center"
                                 Foreground="{DynamicResource TextMutedBrush}"
-                                IsVisible="False">
-                                <PathIcon.Transitions>
-                                    <Transitions>
-                                        <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-                                    </Transitions>
-                                </PathIcon.Transitions>
-                            </PathIcon>
+                                IsVisible="False" />
                         </Grid>
                     </Border>
 
                     <Popup Name="PART_Popup"
-                        WindowManagerAddShadowHint="True"
+                        WindowManagerAddShadowHint="False"
                         Placement="RightEdgeAlignedTop"
                         HorizontalOffset="-4"
                         VerticalOffset="-4"
@@ -562,8 +542,7 @@
                             BoxShadow="{StaticResource CardShadow}">
                             <ScrollViewer MaxHeight="400" HorizontalScrollBarVisibility="Disabled">
                                 <ItemsPresenter Name="PART_ItemsPresenter"
-                                    ItemsPanel="{TemplateBinding ItemsPanel}"
-                                    Grid.IsSharedSizeScope="True" />
+                                    ItemsPanel="{TemplateBinding ItemsPanel}" />
                             </ScrollViewer>
                         </Border>
                     </Popup>
@@ -572,67 +551,92 @@
         </Setter>
     </Style>
 
+    <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                <BrushTransition Property="Background" Duration="0:0:0.15" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <!-- Листовые пункты меню (без подменю) используют плоский легковесный шаблон БЕЗ вложенного
+    Popup/ScrollViewer -->
+    <Style Selector="MenuItem:empty">
+        <Setter Property="Template">
+            <ControlTemplate TargetType="MenuItem">
+                <Border Name="PART_LayoutRoot"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="{TemplateBinding Padding}">
+                    <Grid ColumnDefinitions="24, *, Auto">
+                        <ContentPresenter Name="PART_IconPresenter"
+                            Content="{TemplateBinding Icon}"
+                            Width="16" Height="16"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center" />
+
+                        <ContentPresenter Name="PART_HeaderPresenter"
+                            Grid.Column="1"
+                            Content="{TemplateBinding Header}"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Left"
+                            RecognizesAccessKey="True" />
+
+                        <TextBlock Name="PART_BadgeText"
+                            Grid.Column="2"
+                            Text="{TemplateBinding Tag}"
+                            Margin="16,0,0,0"
+                            VerticalAlignment="Center"
+                            Foreground="{DynamicResource TextMutedBrush}"
+                            FontSize="12"
+                            IsVisible="{TemplateBinding Tag, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </Grid>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+
     <Style Selector="MenuItem:not(:empty) /template/ PathIcon#PART_ChevronPath">
         <Setter Property="IsVisible" Value="True" />
     </Style>
 
-    <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
+    <Style Selector="MenuItem:pointerover">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style Selector="MenuItem:open /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
+    <Style Selector="MenuItem:open">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style Selector="MenuItem:pressed /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
+    <Style Selector="MenuItem:pressed">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-    </Style>
-
-    <Style Selector="MenuItem:pointerover PathIcon#PART_ChevronPath">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="MenuItem:open PathIcon#PART_ChevronPath">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
     <Style Selector="MenuItem:disabled">
         <Setter Property="Opacity" Value="0.5" />
     </Style>
 
-    <!-- Иконки пунктов контекстного меню в покое — нейтральный вторичный цвет -->
-    <Style Selector="MenuItem PathIcon:not(#PART_ChevronPath)">
+    <Style Selector="MenuItem > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
         <Setter Property="Width" Value="16" />
         <Setter Property="Height" Value="16" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
     </Style>
 
-    <!-- Иконка пункта контекстного меню при наведении — плавное акцентное свечение -->
-    <Style Selector="MenuItem:pointerover:not(.danger) PathIcon:not(#PART_ChevronPath)">
+    <Style Selector="MenuItem:pointerover > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
     <Style Selector="MenuItem.danger">
         <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
     </Style>
-    <Style Selector="MenuItem.danger PathIcon">
+    <Style Selector="MenuItem.danger > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource SystemErrorBrush}" />
     </Style>
-    <Style Selector="MenuItem.danger /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorTransparentBrush}" />
-    </Style>
-    <Style Selector="MenuItem.danger:pointerover /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
+    <Style Selector="MenuItem.danger:pointerover">
         <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorBrush}" />
     </Style>
-    <Style Selector="MenuItem.danger:pressed /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
+    <Style Selector="MenuItem.danger:pressed">
         <Setter Property="BorderBrush" Value="{DynamicResource SystemErrorBrush}" />
     </Style>
 

@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Controls;
@@ -30,9 +31,9 @@ public sealed class AudioWaveBorder : Decorator
     private const double MinSpatialSpacing = 0.28;
 
     private const int MaxActivePackets = 16;
-    private const double SampleStepPx = 8.0;
-    private const int MinRailSamples = 32;
-    private const int MaxRailSamples = 144;
+    private const double SampleStepPx = 14.0;
+    private const int MinRailSamples = 24;
+    private const int MaxRailSamples = 72;
     private const double MinFrameIntervalSeconds = 0.0155; // ~60 FPS cap
     private const double MaxFrameDeltaSeconds = 0.050;
     private const double DisplacementZeroEpsilon = 1e-5;
@@ -426,7 +427,18 @@ public sealed class AudioWaveBorder : Decorator
         if (ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
             return false;
 
-        return IsActive && IsPlaying;
+        if (!IsActive || !IsPlaying)
+            return false;
+
+        Visual? current = this;
+        while (current != null)
+        {
+            if (current.Opacity <= 0.001)
+                return false;
+            current = current.GetVisualParent();
+        }
+
+        return true;
     }
 
     private void EvaluateAnimationState()
@@ -593,7 +605,20 @@ public sealed class AudioWaveBorder : Decorator
             if (needsRedraw)
                 InvalidateVisual();
 
-            _attachedTopLevel.RequestAnimationFrame(_frameCallback);
+            if (anyRemaining || !EffectiveUseWave || AudioVisualizerBuffer.HasRecentActivity)
+            {
+                _attachedTopLevel.RequestAnimationFrame(_frameCallback);
+            }
+            else
+            {
+                // Во время тишины/буферизации не крутим 60 FPS RequestAnimationFrame вхолостую
+                _isFrameLoopActive = false;
+                DispatcherTimer.RunOnce(() =>
+                {
+                    if (IsActive && ShouldAnimate())
+                        EvaluateAnimationState();
+                }, TimeSpan.FromMilliseconds(180));
+            }
         }
         else
         {

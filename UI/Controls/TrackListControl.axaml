@@ -143,8 +143,9 @@
 
         <!-- ITEMS REPEATER -->
         <Panel>
-            <ir:ItemsRepeater x:Name="MainRepeater"
+          <ir:ItemsRepeater x:Name="MainRepeater"
                               ItemsSource="{Binding #Root.Items}"
+                              HorizontalCacheLength="0"
                               TextOptions.BaselinePixelAlignment="Unaligned"
                               TextOptions.TextHintingMode="None">
 
@@ -191,6 +192,7 @@
                                                     Background="{DynamicResource BgOverlayBrush}"
                                                     IsHitTestVisible="False">
                                                 <PathIcon Width="24" Height="24"
+                                                          Classes="cover-play-icon"
                                                           Classes.playing="{Binding IsPlaying}"
                                                           Foreground="{DynamicResource TextPrimaryBrush}"
                                                           HorizontalAlignment="Center"
@@ -209,6 +211,8 @@
                                         <TextBlock
                                             Text="{Binding Title}"
                                             Classes="track-title"
+                                            Classes.is-active="{Binding IsActive}"
+                                            Classes.is-selected="{Binding IsSelected}"
                                             TextWrapping="NoWrap"
                                             TextTrimming="CharacterEllipsis"
                                             MaxLines="1"
@@ -263,18 +267,21 @@
                                     <!-- COL 3: ЛАЙК -->
                                     <Button Grid.Column="3"
                                             Classes="like-btn"
-                                            Classes.is-liked="{Binding IsLiked}"
                                             Width="28" Height="28"
                                             VerticalAlignment="Center"
                                             Margin="6,0"
                                             Command="{Binding ToggleLikeCommand}"
                                             ToolTip.Tip="{Binding L[Track_ToggleLike]}">
-                                        <PathIcon Width="16" Height="16" IsHitTestVisible="False" />
+                                        <PathIcon Classes="like-icon"
+                                                  Classes.is-liked="{Binding IsLiked}"
+                                                  Width="16" Height="16"
+                                                  IsHitTestVisible="False" />
                                     </Button>
 
                                     <!-- COL 4: ВРЕМЯ И ОПЦИИ -->
                                     <TextBlock Grid.Column="4"
                                                Classes="duration-text"
+                                               Classes.menu-open="{Binding IsMenuOpen}"
                                                Width="46"
                                                HorizontalAlignment="Right"
                                                VerticalAlignment="Center"
@@ -295,6 +302,7 @@
                                             Click="OnMoreButtonClicked"
                                             ToolTip.Tip="{Binding L[Track_MoreOptions]}">
                                         <PathIcon Width="20" Height="20"
+                                                  Foreground="{Binding $parent[Button].Foreground}"
                                                   Data="{StaticResource Icon.DotsHorizontal}" />
                                     </Button>
 

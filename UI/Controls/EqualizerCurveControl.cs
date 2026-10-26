@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
+using Avalonia.VisualTree;
 using LMP.Core.Audio.Helpers;
 
 namespace LMP.UI.Controls;
@@ -188,9 +189,25 @@ public sealed class EqualizerCurveControl : Control
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsActuallyVisibleOnScreen()
+    {
+        if (!IsEffectivelyVisible) return false;
+
+        Visual? current = this;
+        while (current != null)
+        {
+            if (current.Opacity <= 0.001)
+                return false;
+            current = current.GetVisualParent();
+        }
+
+        return true;
+    }
+
     private void EnsureAnimationLoop()
     {
-        if (_isRafActive || !IsEffectivelyVisible) return;
+        if (_isRafActive || !IsActuallyVisibleOnScreen()) return;
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel == null) return;
 
@@ -201,7 +218,7 @@ public sealed class EqualizerCurveControl : Control
 
     private void OnAnimationFrame(TimeSpan ts)
     {
-        if (!_isRafActive || !IsEffectivelyVisible || ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
+        if (!_isRafActive || !IsActuallyVisibleOnScreen() || ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
         {
             _isRafActive = false;
             return;
@@ -224,9 +241,10 @@ public sealed class EqualizerCurveControl : Control
                 _displayIso10[i] += diff * alpha;
                 needsRedraw = true;
             }
-            else
+            else if (_displayIso10[i] != _targetIso10[i])
             {
                 _displayIso10[i] = _targetIso10[i];
+                needsRedraw = true;
             }
         }
 
@@ -242,11 +260,11 @@ public sealed class EqualizerCurveControl : Control
             float next = cur + (raw - cur) * k;
             if (next < 0.002f) next = 0f;
 
-            if (MathF.Abs(next - cur) > 0.001f)
+            if (MathF.Abs(next - cur) > 0.0005f)
                 needsRedraw = true;
 
             _spectrum10[i] = next;
-            if (next > 0.003f || raw > 0.003f)
+            if (next > 0f || raw > 0.002f)
                 hasAudioEnergy = true;
         }
 
@@ -257,11 +275,25 @@ public sealed class EqualizerCurveControl : Control
         }
 
         if (needsRedraw)
+        {
             InvalidateVisual();
-
-        // Поддерживаем лёгкий цикл опроса, пока график открыт и видим на экране,
-        // чтобы при старте/повторе трека или перемотке волна мгновенно оживала.
-        TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+        }
+        else if (AudioVisualizerBuffer.HasRecentActivity)
+        {
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+        }
+        else
+        {
+            // Когда музыка на паузе и интерполяция кривой завершена, засыпаем на лёгком 250мс таймере
+            // вместо 60 FPS RequestAnimationFrame, чтобы не будить композитор DWM в простое.
+            _isRafActive = false;
+            Avalonia.Threading.DispatcherTimer.RunOnce(() =>
+            {
+                if (IsActuallyVisibleOnScreen())
+                    EnsureAnimationLoop();
+            }, TimeSpan.FromMilliseconds(250));
+        }
     }
 
     #region Pointer Interaction (Full-Height Column Hit-Testing)
@@ -460,6 +492,9 @@ public sealed class EqualizerCurveControl : Control
 
     public override void Render(DrawingContext context)
     {
+        if (!_isRafActive && IsActuallyVisibleOnScreen())
+            EnsureAnimationLoop();
+
         double w = Bounds.Width;
         double h = Bounds.Height;
         if (w < 40 || h < 40) return;

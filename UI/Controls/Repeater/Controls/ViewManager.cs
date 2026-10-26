@@ -114,8 +114,14 @@ namespace Avalonia.Controls
             var virtInfo = ItemsRepeater.GetVirtualizationInfo(element);
             virtInfo.MoveOwnershipToElementFactory();
 
-            // DataContext намеренно НЕ сбрасывается в null: при извлечении из пула
-            // новый контекст запишется поверх старого за 1 шаг без лишней инвалидации привязок.
+            // Задаём явно null (а НЕ ClearValue!), чтобы контейнер в ItemsRepeater.Children
+            // не унаследовал DataContext родительской страницы (HomeViewModel / TestRunnerViewModel)
+            // и одновременно отпустил ссылку на вытесненный TrackItemViewModel.
+            if (virtInfo.MustClearDataContext)
+            {
+                element.SetCurrentValue(Control.DataContextProperty, null);
+                virtInfo.MustClearDataContext = false;
+            }
 
             if (_owner.ItemTemplateShim != null)
             {

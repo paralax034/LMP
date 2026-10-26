@@ -94,8 +94,8 @@
       },
       "Acornima": {
         "type": "Transitive",
-        "resolved": "1.9.0",
-        "contentHash": "Suyd9mLxmuveJTnV+/xHRlGE1IkcpGTryprpmghMOrVUgbH4/NgFBOByGVRBbZ9E8QGR94ccEO9RktOr6MvfXQ=="
+        "resolved": "1.9.1",
+        "contentHash": "8dzVWz1AMyCaHq1DRU+qjNGd6jZyc4BgUBhl0qqdG0y+C02f2JASQaobF+O6A9vrW2QZL5Kx2q6V/KP3Q2LU+A=="
       },
       "Avalonia.Angle.Windows.Natives": {
         "type": "Transitive",
@@ -247,18 +247,18 @@
       },
       "Microsoft.Data.Sqlite": {
         "type": "Transitive",
-        "resolved": "10.0.13",
-        "contentHash": "w37nz3WFmDtRfXxWEwIXX2OgqDRiwhD1JGbFwfpFCF8GkCrV/yO6Y2JF5058J2RGoI2sCcdn02wrk0yEcekWcw==",
+        "resolved": "10.0.14",
+        "contentHash": "muyroan6rKrf0omZL8UF7Kw5uOGp/yBg1L/XWvkFN3WhKaNtK2IWqRZw93nIwVqjhTVDO0l4CEGhHIh+mb+sKg==",
         "dependencies": {
-          "Microsoft.Data.Sqlite.Core": "10.0.13",
+          "Microsoft.Data.Sqlite.Core": "10.0.14",
           "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
       "Microsoft.Data.Sqlite.Core": {
         "type": "Transitive",
-        "resolved": "10.0.13",
-        "contentHash": "Gge8XsSCOwcbkbdmt2UDAe6kIv9Q0vA6yb3wsTStjjexaMFLTWfc/1gH4kbhJ+zWiXRTRA4lG2sOQNVfir204w==",
+        "resolved": "10.0.14",
+        "contentHash": "1p9rO3Q2X/L/9YrYog3vaDzi8u+WZfJCOkDYoHqmofqYP0DLPLPyZcS2Rnh/79JXAodgbs1AgsaNwLpIvC3Xew==",
         "dependencies": {
           "SQLitePCLRaw.core": "2.1.13"
         }
@@ -270,8 +270,8 @@
       },
       "Microsoft.Extensions.DependencyInjection": {
         "type": "Transitive",
-        "resolved": "10.0.13",
-        "contentHash": "4tnWU9vrU/A8NwYe9Z6wvieZ0EBb/uM82LAT+edNhdepOBWREZ7M7mzb941EIDPJaeOFdbVrDd5+7s9e89U6bQ=="
+        "resolved": "10.0.14",
+        "contentHash": "2LzcuVjemeXR+WdY9wGIr8iGb7fYsDAit+IScxXX2XJnX0b++mWcE/WO6fEGIqhdMfSQM2ZS5JGMHYZix7YXZg=="
       },
       "SkiaSharp": {
         "type": "Transitive",
@@ -416,16 +416,16 @@
       "lmp.core": {
         "type": "Project",
         "dependencies": {
-          "Acornima": "[1.9.0, )",
+          "Acornima": "[1.9.1, )",
           "AsyncImageLoader.Avalonia": "[3.8.0, )",
           "Avalonia": "[12.1.4, )",
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Concentus": "[2.2.2, )",
           "LMP.Decoders.AAC": "[1.0.0, )",
           "MemoryPack": "[1.21.4, )",
-          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "Microsoft.Data.Sqlite": "[10.0.14, )",
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
-          "Microsoft.Extensions.DependencyInjection": "[10.0.13, )",
+          "Microsoft.Extensions.DependencyInjection": "[10.0.14, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
           "SkiaSharp": "[4.153.1, )",
           "System.Security.Cryptography.ProtectedData": "[10.0.11, )"

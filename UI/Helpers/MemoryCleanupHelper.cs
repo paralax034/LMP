@@ -173,8 +173,9 @@ public static class MemoryCleanupHelper
                 }
             }
 
-            // Очистка кэшей приложения (при активном воспроизведении не трогаем GPU-кэш через UI-поток)
-            CleanupAppCaches(aggressive && !isPlaying);
+            // При активном воспроизведении не выбрасываем живые обложки из ImageCacheService,
+            // но всегда чистим мёртвые ссылки TrackRegistry и кэш контуров Skia (SKPath).
+            CleanupAppCaches(aggressive && !isPlaying, clearImages: !isPlaying || aggressive);
 
             bool hasHeapBloat = (committedMb - liveMb) >= 24 || committedMb > 64;
 
@@ -224,17 +225,20 @@ public static class MemoryCleanupHelper
     /// При aggressive=true также пытается очистить GPU texture cache
     /// через Avalonia Compositor (только из UI потока).
     /// </summary>
-    private static void CleanupAppCaches(bool aggressive = false)
+    private static void CleanupAppCaches(bool aggressive = false, bool clearImages = true)
     {
         // ImageCache RAM & DominantColor cache
-        try
+        if (clearImages)
         {
-            AppEntry.Services.GetRequiredService<ImageCacheService>().ClearMemoryCache();
-            AppEntry.Services.GetService<DominantColorService>()?.ClearCache();
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[Memory] ImageCache cleanup error: {ex.Message}");
+            try
+            {
+                AppEntry.Services.GetRequiredService<ImageCacheService>().ClearMemoryCache();
+                AppEntry.Services.GetService<DominantColorService>()?.ClearCache();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[Memory] ImageCache cleanup error: {ex.Message}");
+            }
         }
 
         // TrackRegistry dead references

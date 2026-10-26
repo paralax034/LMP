@@ -8,7 +8,7 @@
         <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
 
         <!-- Microsoft Extensions (совпадает с TFM): 10.0.12 -->
-        <MsExtVersion>10.0.13</MsExtVersion>
+        <MsExtVersion>10.0.14</MsExtVersion>
 
         <!-- AsyncImageLoader: 3.8.0 — поддержка Avalonia 12 -->
         <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>

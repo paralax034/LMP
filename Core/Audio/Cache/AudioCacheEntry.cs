@@ -369,13 +369,19 @@ public sealed partial class AudioCacheEntry
         Volatile.Write(ref _downloadedBytes, 0);
 
         if (DownloadedRangesData is not { Count: > 0 })
+        {
+            DownloadedRangesData = null;
             return;
+        }
 
         for (int i = 0; i < DownloadedRangesData.Count; i++)
         {
             var range = DownloadedRangesData[i];
             MarkRangeDownloaded(range.Start, range.EndExclusive - range.Start);
         }
+
+        // Освобождаем DTO-список десериализации, чтобы не дублировать диапазоны в Gen 2
+        DownloadedRangesData = null;
     }
 
     private bool NormalizeRange(long offset, long length, out long start, out long endExclusive)

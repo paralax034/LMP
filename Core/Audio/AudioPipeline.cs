@@ -848,7 +848,6 @@ CancellationToken ct)
         ArmDecoderWarmupAfterSeek(targetMs);
 
         _analyzer.PrepareForSeek();
-        _equalizer.Reset();
         _truePeakLimiter?.Reset();
         _analyzer3Band.Reset();
 

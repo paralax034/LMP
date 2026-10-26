@@ -15,11 +15,12 @@ namespace Avalonia.Controls
         private readonly ItemsRepeater _owner;
         private bool _ensuredScroller;
         private IScrollAnchorProvider? _scroller;
+        private ScrollViewer? _scrollViewer;
         private Control? _makeAnchorElement;
         private Rect _visibleWindow;
         private Rect _layoutExtent;
-        private double _maximumHorizontalCacheLength = 2.0;
-        private double _maximumVerticalCacheLength = 2.0;
+        private double _maximumHorizontalCacheLength = 0.0;
+        private double _maximumVerticalCacheLength = 0.6;
         private bool _isBringIntoViewInProgress;
         // For non-virtualizing layouts, we do not need to keep
         // updating viewports and invalidating measure often. So when
@@ -70,7 +71,7 @@ namespace Avalonia.Controls
             }
         }
 
-        public bool HasScroller => _scroller != null;
+        public bool HasScroller => _scroller != null || _scrollViewer != null;
 
         public Control? MadeAnchor => _makeAnchorElement;
 
@@ -104,6 +105,15 @@ namespace Avalonia.Controls
         {
             var visibleWindow = _visibleWindow;
 
+            if (visibleWindow.Width <= 0 && visibleWindow.Height <= 0 && _scrollViewer != null)
+            {
+                var vp = _scrollViewer.Viewport;
+                var bounds = _scrollViewer.Bounds;
+                double w = vp.Width > 0 ? vp.Width : (bounds.Width > 0 ? bounds.Width : 800.0);
+                double h = vp.Height > 0 ? vp.Height : (bounds.Height > 0 ? bounds.Height : 600.0);
+                visibleWindow = new Rect(0, Math.Max(0, _scrollViewer.Offset.Y), w, h);
+            }
+
             if (_makeAnchorElement != null)
             {
                 visibleWindow = visibleWindow.WithX(0).WithY(0);
@@ -117,14 +127,12 @@ namespace Avalonia.Controls
             var visibleWindow = GetLayoutVisibleWindow();
             if (HasScroller && !_managingViewportDisabled)
             {
-                // Compute buffer immediately on the fly so initial layout pass pre-realizes
-                // the full buffer before user even starts scrolling (eliminates 1st-4th scroll tick latency).
                 double horizBuffer = _maximumHorizontalCacheLength * visibleWindow.Width / 2.0;
                 double vertBuffer = _maximumVerticalCacheLength * visibleWindow.Height / 2.0;
 
                 return new Rect(
                     visibleWindow.X - horizBuffer,
-                    visibleWindow.Y - vertBuffer,
+                    Math.Max(0.0, visibleWindow.Y - vertBuffer),
                     visibleWindow.Width + horizBuffer * 2.0,
                     visibleWindow.Height + vertBuffer * 2.0);
             }
@@ -309,6 +317,7 @@ namespace Avalonia.Controls
                 _scroller = null;
             }
 
+            _scrollViewer = null;
             _owner.EffectiveViewportChanged -= OnEffectiveViewportChanged;
             _effectiveViewportChangedSubscribed = false;
             _ensuredScroller = false;
@@ -335,6 +344,11 @@ namespace Avalonia.Controls
                 var parent = _owner.GetVisualParent();
                 while (parent != null)
                 {
+                    if (_scrollViewer == null && parent is ScrollViewer sv)
+                    {
+                        _scrollViewer = sv;
+                    }
+
                     if (parent is IScrollAnchorProvider scroller)
                     {
                         _scroller = scroller;

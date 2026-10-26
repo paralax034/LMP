@@ -1,5 +1,5 @@
 ﻿using Avalonia.Controls;
-using Avalonia.Interactivity;
+using Avalonia.Input;
 
 namespace LMP.UI.Features.Library;
 
@@ -13,20 +13,37 @@ public partial class LibraryView : UserControl
     /// <summary>
     /// Сохраняет акцентную обводку карточки плейлиста при открытии контекстного меню.
     /// </summary>
-    private void OnPlaylistContextMenuOpened(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// Открывает общее контекстное меню для карточки плейлиста.
+    /// </summary>
+    private void OnCardContextRequested(object? sender, ContextRequestedEventArgs e)
     {
-        if (sender is ContextMenu { DataContext: PlaylistCardViewModel vm })
+        if (sender is not Control cardControl) return;
+
+        if (Resources.TryGetValue("SharedPlaylistCardFlyout", out var res) && res is MenuFlyout flyout)
+        {
+            flyout.ShowAt(cardControl, showAtPointer: true);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Сохраняет акцентную обводку карточки плейлиста при открытии общего контекстного меню.
+    /// </summary>
+    private void OnPlaylistFlyoutOpened(object? sender, EventArgs e)
+    {
+        if (sender is MenuFlyout { Target.DataContext: PlaylistCardViewModel vm })
         {
             vm.IsMenuOpen = true;
         }
     }
 
     /// <summary>
-    /// Снимает акцентную обводку после закрытия контекстного меню.
+    /// Снимает акцентную обводку после закрытия общего контекстного меню.
     /// </summary>
-    private void OnPlaylistContextMenuClosed(object? sender, RoutedEventArgs e)
+    private void OnPlaylistFlyoutClosed(object? sender, EventArgs e)
     {
-        if (sender is ContextMenu { DataContext: PlaylistCardViewModel vm })
+        if (sender is MenuFlyout { Target.DataContext: PlaylistCardViewModel vm })
         {
             vm.IsMenuOpen = false;
         }

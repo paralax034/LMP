@@ -64,18 +64,18 @@
         <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
 
-    <!-- TITLE FONT STYLING -->
-    <Style Selector="Border.track-row TextBlock.track-title">
+    <!-- TITLE FONT STYLING (Плоские селекторы без каскадных потомков) -->
+    <Style Selector="TextBlock.track-title">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="FontWeight" Value="Normal" />
     </Style>
 
-    <Style Selector="Border.track-row.is-active TextBlock.track-title">
+    <Style Selector="TextBlock.track-title.is-active">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
-    <Style Selector="Border.track-row.is-active.is-selected TextBlock.track-title">
+    <Style Selector="TextBlock.track-title.is-active.is-selected">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
@@ -102,36 +102,25 @@
         </Setter>
     </Style>
 
-    <!-- Переключение геометрии иконки Play/Pause -->
-    <Style Selector="Button.cover-btn PathIcon">
+    <!-- Переключение геометрии иконки Play/Pause (плоский селектор) -->
+    <Style Selector="PathIcon.cover-play-icon">
         <Setter Property="Data" Value="{StaticResource Icon.Play}" />
     </Style>
-    <Style Selector="Button.cover-btn PathIcon.playing">
+    <Style Selector="PathIcon.cover-play-icon.playing">
         <Setter Property="Data" Value="{StaticResource Icon.Pause}" />
     </Style>
 
-    <Style Selector="Button.cover-btn Border.cover-overlay">
+    <Style Selector="Border.cover-overlay">
         <Setter Property="Opacity" Value="0" />
         <Setter Property="IsHitTestVisible" Value="False" />
-    </Style>
-    <Style Selector="Button.cover-btn:pointerover Border.cover-overlay">
-        <Setter Property="Opacity" Value="1" />
-        <Setter Property="IsHitTestVisible" Value="True" />
         <Setter Property="Transitions">
             <Transitions>
                 <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
     </Style>
-
-    <Style Selector="Button.cover-btn Border.cover-overlay PathIcon">
-        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                    Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
+    <Style Selector="Button.cover-btn:pointerover Border.cover-overlay">
+        <Setter Property="Opacity" Value="1" />
     </Style>
 
     <!-- КНОПКА ЛАЙКА -->
@@ -142,38 +131,18 @@
         <Setter Property="CornerRadius" Value="14" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                    Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.like-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.like-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.like-btn /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.like-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.like-btn.is-liked">
-        <Setter Property="Transitions">
-            <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.15"
-                    Easing="BackEaseOut" />
-            </Transitions>
+        <Setter Property="Template">
+            <ControlTemplate TargetType="Button">
+                <ContentPresenter Name="PART_ContentPresenter"
+                    Background="Transparent"
+                    Content="{TemplateBinding Content}"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center" />
+            </ControlTemplate>
         </Setter>
     </Style>
 
-    <Style Selector="Button.like-btn > PathIcon">
+    <Style Selector="PathIcon.like-icon">
         <Setter Property="Data" Value="{StaticResource Icon.HeartOutline}" />
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Transitions">
@@ -182,15 +151,12 @@
             </Transitions>
         </Setter>
     </Style>
-    <Style Selector="Button.like-btn:pointerover > PathIcon">
+    <Style Selector="Button.like-btn:pointerover PathIcon.like-icon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style Selector="Button.like-btn.is-liked > PathIcon">
+    <Style Selector="PathIcon.like-icon.is-liked">
         <Setter Property="Data" Value="{StaticResource Icon.Heart}" />
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="Button.like-btn.is-liked:pointerover > PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
     <!-- КНОПКА ТРЕХ ТОЧЕК -->
@@ -203,10 +169,22 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Opacity" Value="0" />
         <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Transitions">
             <Transitions>
                 <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
+                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
             </Transitions>
+        </Setter>
+        <Setter Property="Template">
+            <ControlTemplate TargetType="Button">
+                <ContentPresenter Name="PART_ContentPresenter"
+                    Background="Transparent"
+                    Foreground="{TemplateBinding Foreground}"
+                    Content="{TemplateBinding Content}"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center" />
+            </ControlTemplate>
         </Setter>
     </Style>
     <Style Selector="Border.track-row:pointerover Button.more-btn">
@@ -214,43 +192,12 @@
         <Setter Property="IsHitTestVisible" Value="True" />
     </Style>
     <Style Selector="Button.more-btn:pointerover">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.more-btn:pressed">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.more-btn /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.more-btn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-
-    <Style Selector="Button.more-btn > PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Foreground" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Button.more-btn:pointerover > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
-
     <Style Selector="Button.more-btn.active">
         <Setter Property="Opacity" Value="1" />
         <Setter Property="IsHitTestVisible" Value="True" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-    </Style>
-    <Style Selector="Button.more-btn.active > PathIcon">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style Selector="Button.more-btn.active:pointerover > PathIcon">
-        <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
     <Style Selector="TextBlock.duration-text">
@@ -265,7 +212,7 @@
     <Style Selector="Border.track-row:pointerover TextBlock.duration-text">
         <Setter Property="Opacity" Value="0" />
     </Style>
-    <Style Selector="Border.track-row.menu-open TextBlock.duration-text">
+    <Style Selector="TextBlock.duration-text.menu-open">
         <Setter Property="Opacity" Value="0" />
     </Style>
 

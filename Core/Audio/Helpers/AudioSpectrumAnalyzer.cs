@@ -95,8 +95,8 @@ public sealed class AudioSpectrumAnalyzer
                 if (peak > overallMaxPeak)
                     overallMaxPeak = peak;
 
-                double center = (left + right) * 0.5;
-                double highMix = center + (left - right) * 0.35;
+                float center = (left + right) * 0.5f;
+                float highMix = center + (left - right) * 0.35f;
 
                 AccumulateBands(center, highMix, ref sumSq);
                 processedFrames++;
@@ -111,8 +111,7 @@ public sealed class AudioSpectrumAnalyzer
                 if (abs > overallMaxPeak)
                     overallMaxPeak = abs;
 
-                double x = mono;
-                AccumulateBands(x, x, ref sumSq);
+                AccumulateBands(mono, mono, ref sumSq);
                 processedFrames++;
             }
         }
@@ -162,19 +161,28 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AccumulateBands(double centerInput, double highInput, ref FloatArray10 sumSq)
+    private void AccumulateBands(float centerInput, float highInput, ref FloatArray10 sumSq)
     {
+        ref BiquadCoefficientsF cRef = ref _bandCoeffs[0];
+        ref BiquadState sRef = ref _bandStates[0];
+        ref float sumRef = ref sumSq[0];
+
+        double xCenter = centerInput;
+        double xHigh = highInput;
+
         for (int b = 0; b < BandCount; b++)
         {
-            double x = b >= 7 ? highInput : centerInput;
-            ref readonly var c = ref _bandCoeffs[b];
-            ref var s = ref _bandStates[b];
+            double x = b >= 7 ? xHigh : xCenter;
+            ref readonly var c = ref Unsafe.Add(ref cRef, b);
+            ref var s = ref Unsafe.Add(ref sRef, b);
 
-            double y = c.B0 * x + s.Z1;
-            s.Z1 = c.B1 * x - c.A1 * y + s.Z2;
+            double y = Math.FusedMultiplyAdd(c.B0, x, s.Z1);
+            s.Z1 = Math.FusedMultiplyAdd(c.B1, x, s.Z2) - c.A1 * y;
             s.Z2 = c.B2 * x - c.A2 * y;
 
-            sumSq[b] += (float)(y * y);
+            float yf = (float)y;
+            ref float dst = ref Unsafe.Add(ref sumRef, b);
+            dst = MathF.FusedMultiplyAdd(yf, yf, dst);
         }
     }
 
