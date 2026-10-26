@@ -21,8 +21,8 @@ public sealed partial class OpusDecoder : IAudioDecoder
 
     private IntPtr _nativeDecoder;
     private readonly IOpusDecoder? _managedDecoder;
-    private readonly short[] _shortBuffer;
     private int _lastPacketSamples;
+    private float _headerGainLinear = 1.0f;
     private bool _disposed;
 
     /// <summary>
@@ -46,13 +46,27 @@ public sealed partial class OpusDecoder : IAudioDecoder
         return false;
     }
 
-    public OpusDecoder(int sampleRate = 48000, int channels = 2)
+    public OpusDecoder(int sampleRate = 48000, int channels = 2, ReadOnlySpan<byte> codecPrivate = default)
     {
         SampleRate = sampleRate;
         Channels = channels;
         MaxFrameSize = sampleRate * MaxFrameDurationMs / 1000;
         _lastPacketSamples = Math.Clamp(sampleRate * DefaultFrameDurationMs / 1000, 120, MaxFrameSize);
-        _shortBuffer = new short[MaxFrameSize * channels];
+
+        // RFC 7845 §5.1: заголовок OpusHead (19+ байт) содержит Output Gain (signed 16-bit LE Q7.8 dB на смещении 16)
+        if (codecPrivate.Length >= 18
+            && codecPrivate[0] == (byte)'O'
+            && codecPrivate[1] == (byte)'p'
+            && codecPrivate[2] == (byte)'u'
+            && codecPrivate[3] == (byte)'s')
+        {
+            short gainQ78 = System.Buffers.Binary.BinaryPrimitives.ReadInt16LittleEndian(codecPrivate.Slice(16, 2));
+            if (gainQ78 != 0)
+            {
+                float gainDb = gainQ78 / 256.0f;
+                _headerGainLinear = MathF.Pow(10.0f, gainDb / 20.0f);
+            }
+        }
 
         if (IsNativeSupported)
         {
@@ -61,17 +75,17 @@ public sealed partial class OpusDecoder : IAudioDecoder
             {
                 _nativeDecoder = IntPtr.Zero;
                 _managedDecoder = OpusCodecFactory.CreateDecoder(sampleRate, channels);
-                Log.Debug($"[OpusDecoder] Created (Managed Concentus fallback): {sampleRate}Hz, {channels}ch");
+                Log.Debug($"[OpusDecoder] Created (Managed Concentus fallback float32): {sampleRate}Hz, {channels}ch");
             }
             else
             {
-                Log.Debug($"[OpusDecoder] Created (Native libopus Zero-Alloc): {sampleRate}Hz, {channels}ch");
+                Log.Debug($"[OpusDecoder] Created (Native libopus Float32 Zero-Alloc): {sampleRate}Hz, {channels}ch");
             }
         }
         else
         {
             _managedDecoder = OpusCodecFactory.CreateDecoder(sampleRate, channels);
-            Log.Debug($"[OpusDecoder] Created (Managed Concentus): {sampleRate}Hz, {channels}ch");
+            Log.Debug($"[OpusDecoder] Created (Managed Concentus float32): {sampleRate}Hz, {channels}ch");
         }
     }
 
@@ -100,45 +114,53 @@ public sealed partial class OpusDecoder : IAudioDecoder
         if (encodedData.IsEmpty)
             return DecodePLC(outputBuffer);
 
+        int maxFrames = Math.Min(MaxFrameSize, outputBuffer.Length / Channels);
+        if (maxFrames <= 0)
+            return 0;
+
         if (_nativeDecoder != IntPtr.Zero)
         {
-            Span<short> shortSpan = _shortBuffer.AsSpan(0, MaxFrameSize * Channels);
             int samples;
-
             fixed (byte* inPtr = &MemoryMarshal.GetReference(encodedData))
-            fixed (short* outPtr = &MemoryMarshal.GetReference(shortSpan))
+            fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
             {
-                samples = NativeOpus.opus_decode(
+                // Нативный декод напрямую в IEEE 754 float32 (без 16-битного квантования и без hard-clipping'а пиков > 1.0f!)
+                samples = NativeOpus.opus_decode_float(
                     _nativeDecoder,
                     inPtr,
                     encodedData.Length,
                     outPtr,
-                    MaxFrameSize,
+                    maxFrames,
                     0);
             }
 
             if (samples < 0)
             {
-                Log.Warn($"[OpusDecoder] Native decode error code: {samples}");
+                Log.Warn($"[OpusDecoder] Native float decode error code: {samples}");
                 throw new AudioDecoderException($"OPUS native decode failed with error code: {samples}");
             }
 
             if (samples > 0)
+            {
                 _lastPacketSamples = samples;
+                if (MathF.Abs(_headerGainLinear - 1.0f) > 1e-4f)
+                    Helpers.SpanMathHelper.MultiplyByConstant(outputBuffer[..(samples * Channels)], _headerGainLinear);
+            }
 
-            ConvertShortToFloat(shortSpan[..(samples * Channels)], outputBuffer);
             return samples;
         }
 
         try
         {
-            Span<short> shortSpan = _shortBuffer.AsSpan(0, MaxFrameSize * Channels);
-            int samples = _managedDecoder!.Decode(encodedData, shortSpan, MaxFrameSize);
+            int samples = _managedDecoder!.Decode(encodedData, outputBuffer, maxFrames, false);
 
             if (samples > 0)
+            {
                 _lastPacketSamples = samples;
+                if (MathF.Abs(_headerGainLinear - 1.0f) > 1e-4f)
+                    Helpers.SpanMathHelper.MultiplyByConstant(outputBuffer[..(samples * Channels)], _headerGainLinear);
+            }
 
-            ConvertShortToFloat(shortSpan[..(samples * Channels)], outputBuffer);
             return samples;
         }
         catch (Exception ex)
@@ -180,18 +202,16 @@ public sealed partial class OpusDecoder : IAudioDecoder
 
     private unsafe int DecodePLC(Span<float> outputBuffer)
     {
-        int expectedSamples = Math.Clamp(_lastPacketSamples, 120, MaxFrameSize);
+        int expectedSamples = Math.Clamp(_lastPacketSamples, 120, Math.Min(MaxFrameSize, outputBuffer.Length / Channels));
+        if (expectedSamples <= 0)
+            return 0;
 
-        // В нативном libopus вызов opus_decode с null-указателем пакета выполняет PLC за 0 аллокаций
-        // ровно на размер последнего декодированного фрейма (expectedSamples).
         if (_nativeDecoder != IntPtr.Zero)
         {
-            Span<short> shortSpan = _shortBuffer.AsSpan(0, expectedSamples * Channels);
-
             int samples;
-            fixed (short* outPtr = &MemoryMarshal.GetReference(shortSpan))
+            fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
             {
-                samples = NativeOpus.opus_decode(
+                samples = NativeOpus.opus_decode_float(
                     _nativeDecoder,
                     null,
                     0,
@@ -202,12 +222,12 @@ public sealed partial class OpusDecoder : IAudioDecoder
 
             if (samples > 0)
             {
-                ConvertShortToFloat(shortSpan[..(samples * Channels)], outputBuffer);
+                if (MathF.Abs(_headerGainLinear - 1.0f) > 1e-4f)
+                    Helpers.SpanMathHelper.MultiplyByConstant(outputBuffer[..(samples * Channels)], _headerGainLinear);
                 return samples;
             }
         }
 
-        // Fallback: нулевой кадр тишины на длительность последнего пакета без аллокаций в куче.
         int totalSamples = expectedSamples * Channels;
         outputBuffer[..Math.Min(totalSamples, outputBuffer.Length)].Clear();
         return expectedSamples;
@@ -215,7 +235,6 @@ public sealed partial class OpusDecoder : IAudioDecoder
 
     /// <summary>
     /// SIMD-оптимизированная конвертация short[] → float[].
-    /// На hot path (~50 вызовов/сек × 960 samples = ~48000 операций/сек).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void ConvertShortToFloat(ReadOnlySpan<short> src, Span<float> dst)
@@ -299,11 +318,11 @@ public sealed partial class OpusDecoder : IAudioDecoder
 
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-        internal static unsafe partial int opus_decode(
+        internal static unsafe partial int opus_decode_float(
             IntPtr st,
             byte* data,
             int len,
-            short* pcm,
+            float* pcm,
             int frame_size,
             int decode_fec);
     }

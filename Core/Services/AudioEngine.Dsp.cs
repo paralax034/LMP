@@ -329,7 +329,7 @@ public sealed partial class AudioEngine
             audioSettings.EqualizerEnabled,
             bands,
             audioSettings.EqualizerPreampDb,
-            autoPreamp: false);
+            autoPreamp: true);
 
         if (snapImmediately)
             pipeline.Equalizer.SnapToTarget();

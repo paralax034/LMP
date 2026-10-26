@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Sources;
@@ -42,7 +43,7 @@ public sealed partial class AudioPlayer
     /// <summary>Pipeline, связанный с текущим seek.</summary>
     private AudioPipeline? _backgroundSeekPipeline;
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
     private int _seekRestartCount;
     private int _decoderRestartCount;
 #endif
@@ -103,7 +104,7 @@ public sealed partial class AudioPlayer
         var cts = Interlocked.Exchange(ref _activeSeekCts, null);
         if (cts == null) return;
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
         int restartCount = Interlocked.Increment(ref _seekRestartCount);
         if (restartCount % 5 == 0)
             Log.Warn($"[AudioPlayer] Seek restart storm: {restartCount} cancellations on current track");
@@ -126,10 +127,10 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>Сбрасывает seek observability counters.</summary>
-    [System.Diagnostics.Conditional("DEBUG")]
+    [Conditional("AUDIO_SPLICE_AUDIT")]
     internal void ResetPerTrackCounters()
     {
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
         Volatile.Write(ref _seekRestartCount, 0);
         Volatile.Write(ref _decoderRestartCount, 0);
 #endif
@@ -184,8 +185,8 @@ public sealed partial class AudioPlayer
                 return;
             }
 
-            // Вызываем напрямую pipeline.Flush() без предварительного pipeline.Stop():
-            // Flush() закрывает гейт бэкенда и спасает 512 фреймов живого продолжения волны из _pcmBuffer для кроссфейда!
+            // Вызываем Flush() РОВНО ОДИН РАЗ после остановки декодера:
+            // это гарантирует отсутствие двойного захвата хвоста и гонок с декодером.
             pipeline.Flush();
             pipeline.PrepareForSeek(posMs);
 

@@ -35,6 +35,9 @@ public sealed class GainProcessor
     /// предотвращающий щелчки системного лимитера Windows на громкости 95–100%.
     /// </summary>
     private const float SafeCeiling = 0.985f;
+    private const float SoftKneeThreshold = 0.90f;
+    private const float SoftKneeHeadroom = SafeCeiling - SoftKneeThreshold; // 0.085f
+    private const float InvSoftKneeHeadroom = 1.0f / SoftKneeHeadroom;
 
     #endregion
 
@@ -47,6 +50,24 @@ public sealed class GainProcessor
     private int _rampFramesRemaining;
 
     #endregion
+
+    /// <summary>
+    /// Мягко ограничивает пики, превышающие <see cref="SoftKneeThreshold"/> (0.90f),
+    /// с сохранением непрерывности первой производной (C1) и асимптотой <see cref="SafeCeiling"/> (0.985f).
+    /// Сигнал в диапазоне [-0.90, +0.90] проходит со 100% побитовой линейностью.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float SoftClipSample(float x)
+    {
+        float abs = MathF.Abs(x);
+        if (abs <= SoftKneeThreshold)
+            return x;
+
+        float u = (abs - SoftKneeThreshold) * InvSoftKneeHeadroom;
+        float u2 = u * u;
+        float compressed = SoftKneeThreshold + SoftKneeHeadroom * ((u + u2) / (1.0f + u + u2));
+        return MathF.CopySign(compressed, x);
+    }
 
     /// <summary>
     /// Задаёт целевой volume gain. Потокобезопасно через volatile-запись.
@@ -112,20 +133,20 @@ public sealed class GainProcessor
 
                 float s0 = Unsafe.Add(ref floatsRef, i) * current;
                 float s1 = Unsafe.Add(ref floatsRef, i + 1) * current;
-                Unsafe.Add(ref floatsRef, i) = Math.Clamp(s0, -SafeCeiling, SafeCeiling);
-                Unsafe.Add(ref floatsRef, i + 1) = Math.Clamp(s1, -SafeCeiling, SafeCeiling);
+                Unsafe.Add(ref floatsRef, i) = SoftClipSample(s0);
+                Unsafe.Add(ref floatsRef, i + 1) = SoftClipSample(s1);
             }
 
             for (; i < length; i++)
             {
                 float sample = Unsafe.Add(ref floatsRef, i) * current;
-                Unsafe.Add(ref floatsRef, i) = Math.Clamp(sample, -SafeCeiling, SafeCeiling);
+                Unsafe.Add(ref floatsRef, i) = SoftClipSample(sample);
             }
 
             _currentGain = current;
             _rampFramesRemaining = remaining;
         }
-        else
+        else if (_currentGain <= 1.0f)
         {
             float g = _currentGain;
             int i = 0;
@@ -149,6 +170,15 @@ public sealed class GainProcessor
             {
                 float sample = Unsafe.Add(ref floatsRef, i) * g;
                 Unsafe.Add(ref floatsRef, i) = Math.Clamp(sample, -SafeCeiling, SafeCeiling);
+            }
+        }
+        else
+        {
+            float g = _currentGain;
+            for (int i = 0; i < length; i++)
+            {
+                float sample = Unsafe.Add(ref floatsRef, i) * g;
+                Unsafe.Add(ref floatsRef, i) = SoftClipSample(sample);
             }
         }
     }

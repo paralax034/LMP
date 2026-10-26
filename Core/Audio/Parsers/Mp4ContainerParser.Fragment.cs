@@ -1,4 +1,5 @@
 using LMP.Core.Audio.Interfaces;
+using LMP.Core.Exceptions;
 
 namespace LMP.Core.Audio.Parsers;
 
@@ -399,7 +400,15 @@ public sealed partial class Mp4ContainerParser
             long boxStart = _reader.Position;
             var header = await _reader.ReadBoxHeaderAsync(ct).ConfigureAwait(false);
             if (header.IsEmpty)
+            {
+                if (boxStart + 4096 < _reader.Length)
+                {
+                    throw new ParserCorruptionException(
+                        boxStart,
+                        $"Zeroed/corrupted fMP4 box header at byte {boxStart} of {_reader.Length}");
+                }
                 return false;
+            }
 
             long boxEnd = boxStart + header.Size;
 

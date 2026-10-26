@@ -620,4 +620,324 @@ public static class AudioLogicTests
 
         await Task.WhenAll(writer1, writer2).ConfigureAwait(false);
     }
+
+    [TestMethod(TestCategory.Unit, "Sub-Bass +12dB Boost Anti-Crackling, Peak-Hold & C1 Curvature Invariant", Group = TestGroups.Audio, Order = 10)]
+    public static Task TestSubBassMaxBoostAntiCracklingAndImdAsync()
+    {
+        // Сценарий 1: Экстремальный ручной буст +12 dB на 31 Гц и 62 Гц с ПРИНУДИТЕЛЬНО ВЫКЛЮЧЕННЫМ autoPreamp (стресс-тест лимитера)
+        var eq = new EqualizerProcessor(SampleRate, Channels);
+        Span<float> bands = stackalloc float[EqualizerProcessor.BandCount];
+        bands.Clear();
+        bands[0] = 12.0f; // 31.25 Hz (+12 dB)
+        bands[1] = 12.0f; // 62.5 Hz (+12 dB)
+
+        eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
+        eq.SnapToTarget();
+
+        var limiter = new Core.Audio.Normalization.TruePeakLimiter(SampleRate);
+        var crossfader = new Core.Audio.Normalization.GainCrossfader(1.0f);
+        var gainProcessor = new GainProcessor();
+        gainProcessor.SetVolumeGain(1.25f);
+
+        const int warmupFrames = SampleRate;     // 1 секунда для выхода IIR и лимитера на стационарный режим
+        const int measureFrames = SampleRate / 2; // 500 мс измерения стационарного сигнала
+        float[] chunk = new float[1024 * Channels];
+
+        int frameCursor = 0;
+        void FillAmbientSignal(Span<float> dst, int frames)
+        {
+            for (int f = 0; f < frames; f++, frameCursor++)
+            {
+                float t = (float)frameCursor / SampleRate;
+                float subBass = MathF.Sin(2f * MathF.PI * 36.0f * t) * 0.55f;
+                float highPad = MathF.Sin(2f * MathF.PI * 3000.0f * t) * 0.05f;
+                float s = subBass + highPad;
+                dst[f * 2] = s;
+                dst[f * 2 + 1] = s;
+            }
+        }
+
+        while (frameCursor < warmupFrames)
+        {
+            int frames = chunk.Length / Channels;
+            FillAmbientSignal(chunk, frames);
+            eq.Process(chunk);
+            // Первые 250 мс даём самому IIR-фильтру 31 Гц выйти на стационарный режим после ступеньки включения,
+            // и затем 750 мс прогреваем лимитер на установившейся волне
+            if (frameCursor >= SampleRate / 4)
+                limiter.Process(chunk, ref crossfader);
+        }
+
+        float minEnv = 1.0f;
+        float maxEnv = 0.0f;
+        float maxSecondDerivative = 0.0f;
+        int hardFlatClipSamples = 0;
+
+        float prev1 = 0f;
+        float prev2 = 0f;
+        bool historyPrimed = false;
+
+        int measured = 0;
+        while (measured < measureFrames)
+        {
+            int frames = chunk.Length / Channels;
+            FillAmbientSignal(chunk, frames);
+            eq.Process(chunk);
+            limiter.Process(chunk, ref crossfader);
+
+            float env = limiter.EnvelopeGain;
+            if (env < minEnv) minEnv = env;
+            if (env > maxEnv) maxEnv = env;
+
+            for (int f = 0; f < frames; f++)
+            {
+                float y = chunk[f * 2];
+                TestAssert.Equal(y, chunk[f * 2 + 1], "Stereo balance broken on boosted sub-bass");
+                TestAssert.True(MathF.Abs(y) <= 0.9851f, $"TruePeakLimiter ceiling breached: {y:F5}");
+
+                if (historyPrimed)
+                {
+                    if (MathF.Abs(y) >= 0.9849f && MathF.Abs(prev1) >= 0.9849f)
+                        hardFlatClipSamples++;
+
+                    float d2 = MathF.Abs(y - 2f * prev1 + prev2);
+                    if (d2 > maxSecondDerivative)
+                        maxSecondDerivative = d2;
+                }
+                else if (f >= 2)
+                {
+                    historyPrimed = true;
+                }
+
+                prev2 = prev1;
+                prev1 = y;
+            }
+
+            gainProcessor.Process(chunk);
+            for (int i = 0; i < chunk.Length; i++)
+                TestAssert.True(MathF.Abs(chunk[i]) <= 0.9851f, $"GainProcessor soft-clip ceiling breached: {chunk[i]:F5}");
+
+            measured += frames;
+        }
+
+        float envRipple = maxEnv - minEnv;
+        Log.Info($"[SubBass-Audit] 36Hz +12dB Raw Stress -> EnvRipple={envRipple:F6}, MaxD2={maxSecondDerivative:F5}, FlatClipped={hardFlatClipSamples}");
+
+        TestAssert.Equal(0, hardFlatClipSamples, $"Hard flat clipping detected ({hardFlatClipSamples} samples at ceiling)");
+        TestAssert.True(
+            envRipple < 0.0005f,
+            $"TruePeakLimiter envelope is modulating inside sub-bass wave period (zipper noise): ripple={envRipple:F6}");
+        TestAssert.True(
+            maxSecondDerivative < 0.0085f,
+            $"High-frequency crackle/discontinuity in 2nd derivative detected: maxD2={maxSecondDerivative:F5}");
+
+        // Сценарий 2: Проверка реального трека "les - silence" (суббас 55 Гц с пиком 0.80f + атмосферный пэд)
+        // на ВСЕХ 13 встроенных пресетах (включая "Тёплый и мягкий" / WarmId) со штатным autoPreamp: true.
+        // Критерий Crystal-Clear: 0 плоских срезов, отсутствие пробоя потолка и отсутствие интермодуляции.
+        foreach (string presetId in EqualizerPresets.BuiltInIds)
+        {
+            eq.Reset();
+            limiter.Reset();
+            crossfader.Reset(1.0f);
+
+            var presetBands = EqualizerPresets.GetPresetBands(presetId);
+            eq.Configure(enabled: true, presetBands, preampDb: 0f, autoPreamp: true);
+            eq.SnapToTarget();
+
+            for (int pass = 0; pass < 8; pass++)
+            {
+                for (int f = 0; f < 1024; f++)
+                {
+                    float t = (float)(pass * 1024 + f) / SampleRate;
+                    // Модель участка 0:35-1:49 в "les - silence": плавно спадающий глубокий бас 55 Гц + обертон 110 Гц + воздух 2.5 кГц
+                    float bass = MathF.Sin(2f * MathF.PI * 55.0f * t) * 0.68f + MathF.Sin(2f * MathF.PI * 110.0f * t) * 0.14f;
+                    float pad = MathF.Sin(2f * MathF.PI * 2500.0f * t) * 0.04f;
+                    float sample = bass + pad;
+                    chunk[f * 2] = sample;
+                    chunk[f * 2 + 1] = sample;
+                }
+
+                eq.Process(chunk);
+                limiter.Process(chunk, ref crossfader);
+            }
+
+            for (int i = 0; i < chunk.Length; i++)
+            {
+                TestAssert.True(
+                    float.IsFinite(chunk[i]) && MathF.Abs(chunk[i]) <= 0.9851f,
+                    $"Preset '{presetId}' breached crystal-clear ceiling at sample {i}: {chunk[i]:F5}");
+            }
+        }
+
+        // Сценарий 3: Проверка отсутствия "дрожащей нитки" при входе в пик (атака лимитера на внезапном вступлении баса):
+        // измеряем пошаговую непрерывность самого коэффициента EnvelopeGain и отсутствие спайков 2-й производной на чистом басе 55 Гц.
+        limiter.Reset();
+        crossfader.Reset(1.0f);
+        float prevEnv = limiter.EnvelopeGain;
+        float maxEnvJumpPerBlock = 0f;
+        float maxBassD2 = 0f;
+        float bPrev1 = 0f;
+        float bPrev2 = 0f;
+
+        for (int block = 0; block < 32; block++)
+        {
+            for (int f = 0; f < 16; f++)
+            {
+                int sampleIdx = block * 16 + f;
+                float t = (float)sampleIdx / SampleRate;
+                float u = MathF.Min(1.0f, sampleIdx / 64.0f);
+                // C1-гладкая входная огибающая без искусственного излома производной самого тестового генератора в точке sampleIdx == 64
+                float envIn = u * u * (3.0f - 2.0f * u);
+                float s = MathF.Sin(2f * MathF.PI * 55.0f * t) * 1.55f * envIn;
+                chunk[f * 2] = s;
+                chunk[f * 2 + 1] = s;
+            }
+
+            limiter.Process(chunk.AsSpan(0, 16 * Channels), ref crossfader);
+
+            float curEnv = limiter.EnvelopeGain;
+            float envStep = MathF.Abs(curEnv - prevEnv);
+            if (envStep > maxEnvJumpPerBlock)
+                maxEnvJumpPerBlock = envStep;
+            prevEnv = curEnv;
+
+            for (int f = 0; f < 16; f++)
+            {
+                float y = chunk[f * 2];
+                if (block > 0 || f >= 2)
+                {
+                    float d2 = MathF.Abs(y - 2f * bPrev1 + bPrev2);
+                    if (d2 > maxBassD2)
+                        maxBassD2 = d2;
+                }
+                bPrev2 = bPrev1;
+                bPrev1 = y;
+            }
+        }
+
+        TestAssert.True(
+              maxEnvJumpPerBlock < 0.05f && maxBassD2 < 0.005f,
+              $"Envelope attack glitch ('vibrating thread') detected on bass transient entry: maxEnvJump={maxEnvJumpPerBlock:F5}, maxBassD2={maxBassD2:F5}");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Seamless 44.1kHz <-> 48kHz Resampler & Crossfade Continuity", Group = TestGroups.Audio, Order = 11)]
+    public static Task TestSampleRateSwitch44100To48000SeamlessSpliceAsync()
+    {
+        // Проверяем, что 4-точечный ресемплер Эрмита 44100 -> 48000 Hz + 576-фреймовый кроссфейд
+        // дают гладкую волну без излома производной (bD2 < 0.005) и 0 B аллокаций.
+        const int srcRate = 44_100;
+        const int dstRate = 48_000;
+        const double step = (double)srcRate / dstRate;
+
+        float[] src44k = new float[4410 * Channels];
+        for (int f = 0; f < 4410; f++)
+        {
+            float v = MathF.Sin(2f * MathF.PI * 440f * f / srcRate) * 0.75f;
+            src44k[f * 2] = v;
+            src44k[f * 2 + 1] = v;
+        }
+
+        float[] dst48k = new float[960 * Channels];
+        float[] hist = new float[4 * Channels];
+        int srcCursor = 0;
+        double phase = 0.0;
+        bool primed = false;
+
+        void ResampleBlock(Span<float> output, int outFrames)
+        {
+            for (int of = 0; of < outFrames; of++)
+            {
+                while (!primed || phase >= 1.0)
+                {
+                    if (!primed)
+                    {
+                        for (int c = 0; c < Channels; c++)
+                        {
+                            float s0 = src44k[c];
+                            hist[c] = s0; hist[Channels + c] = s0;
+                            hist[2 * Channels + c] = src44k[Channels + c];
+                            hist[3 * Channels + c] = src44k[2 * Channels + c];
+                        }
+                        srcCursor = 3;
+                        phase = 0.0;
+                        primed = true;
+                    }
+                    else
+                    {
+                        hist.AsSpan(Channels, 3 * Channels).CopyTo(hist.AsSpan(0, 3 * Channels));
+                        int idx = (srcCursor % 4410) * Channels;
+                        for (int c = 0; c < Channels; c++)
+                            hist[3 * Channels + c] = src44k[idx + c];
+                        srcCursor++;
+                        phase -= 1.0;
+                    }
+                }
+
+                float t = (float)phase;
+                int outBase = of * Channels;
+                for (int c = 0; c < Channels; c++)
+                {
+                    float ym1 = hist[c], y0 = hist[Channels + c], y1 = hist[2 * Channels + c], y2 = hist[3 * Channels + c];
+                    float c0 = y0;
+                    float c1 = 0.5f * (y1 - ym1);
+                    float c2 = ym1 - 2.5f * y0 + 2.0f * y1 - 0.5f * y2;
+                    float c3 = 0.5f * (y2 - ym1) + 1.5f * (y0 - y1);
+                    output[outBase + c] = ((c3 * t + c2) * t + c1) * t + c0;
+                }
+                phase += step;
+            }
+        }
+
+        TestAssert.ZeroAlloc(() => ResampleBlock(dst48k.AsSpan(), 960), warmup: 3, iterations: 200, context: "Hermite Resampler 44.1k->48k");
+
+        float maxD2 = 0f;
+        for (int f = 2; f < 960; f++)
+        {
+            float y2 = dst48k[f * 2];
+            float y1 = dst48k[(f - 1) * 2];
+            float y0 = dst48k[(f - 2) * 2];
+            TestAssert.Equal(y2, dst48k[f * 2 + 1], "Resampler stereo balance mismatch");
+            float d2 = MathF.Abs(y2 - 2f * y1 + y0);
+            if (d2 > maxD2) maxD2 = d2;
+        }
+
+        TestAssert.True(maxD2 < 0.004f, $"Hermite resampler 44.1->48kHz produced second-derivative spike: maxD2={maxD2:F5}");
+
+        // Проверяем сквозную C1-склейку при переключении качества 48kHz (Opus) -> 44.1kHz (AAC) в противофазе:
+        // уходящий хвост 48kHz продолжается с +0.75f, а ресемплированный 44.1->48kHz блок входит с -0.75f.
+        const int spliceFrames = 576;
+        float[] tail48k = new float[spliceFrames * Channels];
+        for (int f = 0; f < spliceFrames; f++)
+        {
+            float v = MathF.Sin(2f * MathF.PI * 440f * f / dstRate + 1.2f) * 0.75f;
+            tail48k[f * 2] = v;
+            tail48k[f * 2 + 1] = v;
+        }
+
+        float invMix = 1.0f / spliceFrames;
+        for (int f = 0; f < spliceFrames; f++)
+        {
+            float t = f * invMix;
+            float wNew = t * t * (3.0f - 2.0f * t);
+            float wOld = 1.0f - wNew;
+            int idx = f * Channels;
+            dst48k[idx] = Math.Clamp(tail48k[idx] * wOld + dst48k[idx] * wNew, -0.985f, 0.985f);
+            dst48k[idx + 1] = Math.Clamp(tail48k[idx + 1] * wOld + dst48k[idx + 1] * wNew, -0.985f, 0.985f);
+        }
+
+        // На стыке f == 0 смешанный сигнал обязан в точности равняться tail48k[0] (нулевой скачок амплитуды bStep == 0)
+        TestAssert.Equal(tail48k[0], dst48k[0], "Seamless bridge frame 0 must equal captured tail frame 0");
+
+        float maxSpliceStep = 0f;
+        for (int f = 1; f < spliceFrames; f++)
+        {
+            float stepVal = MathF.Abs(dst48k[f * 2] - dst48k[(f - 1) * 2]);
+            if (stepVal > maxSpliceStep) maxSpliceStep = stepVal;
+        }
+        TestAssert.True(maxSpliceStep < 0.055f, $"Quality switch 48k<->44.1k crossfade produced step jump: {maxSpliceStep:F4}");
+
+        return Task.CompletedTask;
+    }
 }

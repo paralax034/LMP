@@ -119,6 +119,34 @@ public static class ManualTests
         await Unit.StreamFreshnessTests.TestProactiveStreamFreshnessOnResumeAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Запускает изолированно только группу тестов и бенчмарков аудио-тракта (<see cref="TestGroups.Audio"/>).
+    /// </summary>
+    public static async Task RunAudioSuiteAsync(CancellationToken ct = default)
+    {
+        var all = TestDiscovery.GetAllOrdered();
+        var audioTests = new List<TestDescriptor>(32);
+
+        for (int i = 0; i < all.Count; i++)
+        {
+            var t = all[i];
+            if (t.Category != TestCategory.Action && string.Equals(t.Group, TestGroups.Audio, StringComparison.Ordinal))
+                audioTests.Add(t);
+        }
+
+        var runner = new TestRunner(AppEntry.Services);
+        var results = await runner.RunBatchAsync(audioTests, ct).ConfigureAwait(false);
+
+        int passed = 0, failed = 0;
+        for (int i = 0; i < results.Count; i++)
+        {
+            if (results[i].State == TestRunState.Passed) passed++;
+            else if (results[i].State == TestRunState.Failed) failed++;
+        }
+
+        Log.Info($"[AudioSuite] Completed {audioTests.Count} audio tests: {passed} passed, {failed} failed.");
+    }
+
     public static Task TestAudioAllocationsAsync() => TestAllHotPathZeroAllocAsync();
 
     public static async Task TestAllHotPathZeroAllocAsync()

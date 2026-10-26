@@ -11,7 +11,10 @@
     <!-- Опционально, но полезно чтобы реально “давило” -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
-    <!-- Отключаем генерацию и поиск сателлитных сборок ресурсов: локализация работает через JSON -->
+   <!-- Отключаем генерацию и поиск сателлитных сборок ресурсов: локализация работает через JSON -->
     <SatelliteResourceLanguages>none</SatelliteResourceLanguages>
+
+    <!-- Низкоуровневый покадровый осциллограф склейки аудио включается ТОЛЬКО при явной сборке с -p:AudioDiag=true -->
+    <DefineConstants Condition="'$(AudioDiag)' == 'true'">$(DefineConstants);AUDIO_SPLICE_AUDIT</DefineConstants>
   </PropertyGroup>
 </Project>

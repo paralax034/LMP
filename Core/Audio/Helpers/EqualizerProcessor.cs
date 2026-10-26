@@ -315,7 +315,7 @@ public sealed class EqualizerProcessor
     /// <param name="enabled">Включён ли эквалайзер.</param>
     /// <param name="bandGainsDb">Массив из 10 значений усиления в дБ.</param>
     /// <param name="preampDb">Ручное предусиление в дБ.</param>
-    /// <param name="autoPreamp">Автоматическая компенсация пикового усиления для защиты от перегруза.</param>
+    /// <param name="autoPreamp">Автоматическая компенсация пикового усиления АЧХ для предотвращения перегруза на суббасе.</param>
     public void Configure(
         bool enabled,
         ReadOnlySpan<float> bandGainsDb,
@@ -323,12 +323,13 @@ public sealed class EqualizerProcessor
         bool autoPreamp = true)
     {
         BandCoefficientArray nextCoeffs = default;
+        Span<BiquadCoefficients> exactCoeffs = stackalloc BiquadCoefficients[BandCount];
         bool allFlat = true;
         float maxBoostDb = 0f;
+        var freqs = BandFrequenciesHz;
 
         if (enabled && bandGainsDb.Length >= BandCount)
         {
-            var freqs = BandFrequenciesHz;
             for (int i = 0; i < BandCount; i++)
             {
                 float db = Math.Clamp(bandGainsDb[i], MinGainDb, MaxGainDb);
@@ -344,20 +345,27 @@ public sealed class EqualizerProcessor
                     _ => BiquadFilterMath.ComputePeakingEq(_sampleRate, freqs[i], db, 1.4142135623730951)
                 };
 
+                exactCoeffs[i] = c;
                 nextCoeffs[i] = BiquadCoefficientsF.FromDouble(in c);
             }
         }
         else
         {
             for (int i = 0; i < BandCount; i++)
+            {
+                exactCoeffs[i] = BiquadCoefficients.Identity;
                 nextCoeffs[i] = BiquadCoefficientsF.Identity;
+            }
         }
 
         float effectivePreampDb = enabled ? Math.Clamp(preampDb, -12f, 12f) : 0f;
-        if (enabled && autoPreamp && maxBoostDb > 3.0f)
+        if (enabled && autoPreamp && !allFlat)
         {
-            // Мягкая автоматическая компенсация избыточного буста (оставляет запас для TruePeakLimiter)
-            effectivePreampDb -= (maxBoostDb - 3.0f) * 0.45f;
+            float peakResponseDb = ComputePeakResponseDb(exactCoeffs, _sampleRate);
+            if (peakResponseDb > 1.5f)
+            {
+                effectivePreampDb -= (peakResponseDb - 1.5f) * 0.75f;
+            }
         }
 
         float linearPreamp = enabled ? MathF.Pow(10f, effectivePreampDb / 20f) : 1.0f;
@@ -375,7 +383,6 @@ public sealed class EqualizerProcessor
                 return;
             }
 
-            // Запись под SeqLock (нечётная версия -> барьер -> мутация -> чётная версия с Release)
             long seq = Volatile.Read(ref _publishedVersion);
             Volatile.Write(ref _publishedVersion, seq + 1);
             Interlocked.MemoryBarrier();
@@ -390,6 +397,30 @@ public sealed class EqualizerProcessor
 
             Volatile.Write(ref _publishedVersion, seq + 2);
         }
+    }
+
+    private static float ComputePeakResponseDb(ReadOnlySpan<BiquadCoefficients> coeffs, int sampleRate)
+    {
+        ReadOnlySpan<double> probeFreqs =
+        [
+            20.0, 25.0, 31.25, 40.0, 50.0, 62.5, 80.0, 100.0, 125.0, 160.0,
+            200.0, 250.0, 315.0, 400.0, 500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0,
+            2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0, 12500.0, 16000.0
+        ];
+
+        double maxMagSq = 1.0;
+        for (int p = 0; p < probeFreqs.Length; p++)
+        {
+            double f = probeFreqs[p];
+            double magSq = 1.0;
+            for (int b = 0; b < BandCount; b++)
+                magSq *= coeffs[b].ComputeMagnitudeSquared(f, sampleRate);
+
+            if (magSq > maxMagSq)
+                maxMagSq = magSq;
+        }
+
+        return (float)(10.0 * Math.Log10(maxMagSq));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -477,65 +508,123 @@ public sealed class EqualizerProcessor
     {
         int frameIdx = 0;
 
+        // Если фильтр переходит в байпас (выключение EQ), коэффициенты _startCoeffs остаются неизменными,
+        // а мы просто плавно кроссфейдим между выходом фильтра и чистым (dry) сигналом без движения полюсов ("капли в лужу")!
+        bool rampingToBypass = _targetBypass && _rampFramesRemaining > 0;
+        bool rampingFromBypass = !_targetBypass && _rampFramesRemaining > 0 && AreAllIdentity(in _startCoeffs);
+
         while (frameIdx < totalFrames)
         {
             int blockFrames = Math.Min(SubBlockFrames, totalFrames - frameIdx);
+            float wetMix = 1.0f;
 
             if (_rampFramesRemaining > 0)
             {
                 _rampFramesRemaining = Math.Max(0, _rampFramesRemaining - blockFrames);
                 float t = 1.0f - (float)_rampFramesRemaining / RampTotalFrames;
+                float smoothT = t * t * (3.0f - 2.0f * t);
 
-                _currentPreampGain = _startPreampGain + (_targetPreampGain - _startPreampGain) * t;
-                for (int b = 0; b < BandCount; b++)
+                if (rampingToBypass)
                 {
-                    _currentCoeffs[b] = BiquadCoefficientsF.Lerp(in _startCoeffs[b], in _targetCoeffs[b], t);
+                    wetMix = 1.0f - smoothT;
+                    _currentPreampGain = _startPreampGain;
+                    _currentCoeffs = _startCoeffs;
+                }
+                else if (rampingFromBypass)
+                {
+                    wetMix = smoothT;
+                    _currentPreampGain = _targetPreampGain;
+                    _currentCoeffs = _targetCoeffs;
+                }
+                else
+                {
+                    _currentPreampGain = _startPreampGain + (_targetPreampGain - _startPreampGain) * smoothT;
+                    for (int b = 0; b < BandCount; b++)
+                    {
+                        // Если одна из полос включается из Identity или выключается в Identity,
+                        // не интерполируем её полюса A1/A2 через ноль (именно это создаёт звук "капли в лужу"!),
+                        // а интерполируем только числитель или используем целевой полюс!
+                        if (_startCoeffs[b].A1 == 0f && _targetCoeffs[b].A1 != 0f)
+                        {
+                            _currentCoeffs[b] = _targetCoeffs[b];
+                        }
+                        else if (_targetCoeffs[b].A1 == 0f && _startCoeffs[b].A1 != 0f)
+                        {
+                            _currentCoeffs[b] = _startCoeffs[b];
+                        }
+                        else
+                        {
+                            _currentCoeffs[b] = BiquadCoefficientsF.Lerp(in _startCoeffs[b], in _targetCoeffs[b], smoothT);
+                        }
+                    }
                 }
             }
+            else
+            {
+                _currentPreampGain = _targetPreampGain;
+                _currentCoeffs = _targetCoeffs;
+            }
 
-            float preamp = _currentPreampGain;
+            double preamp = _currentPreampGain;
             int endFrame = frameIdx + blockFrames;
 
             for (; frameIdx < endFrame; frameIdx++)
             {
                 int sampleOffset = frameIdx * 2;
-                float left = Unsafe.Add(ref bufRef, sampleOffset) * preamp;
-                float right = Unsafe.Add(ref bufRef, sampleOffset + 1) * preamp;
+                float dryL = Unsafe.Add(ref bufRef, sampleOffset);
+                float dryR = Unsafe.Add(ref bufRef, sampleOffset + 1);
 
-                _states[0].ProcessStereo(ref left, ref right, in _currentCoeffs[0]);
-                _states[1].ProcessStereo(ref left, ref right, in _currentCoeffs[1]);
-                _states[2].ProcessStereo(ref left, ref right, in _currentCoeffs[2]);
-                _states[3].ProcessStereo(ref left, ref right, in _currentCoeffs[3]);
-                _states[4].ProcessStereo(ref left, ref right, in _currentCoeffs[4]);
-                _states[5].ProcessStereo(ref left, ref right, in _currentCoeffs[5]);
-                _states[6].ProcessStereo(ref left, ref right, in _currentCoeffs[6]);
-                _states[7].ProcessStereo(ref left, ref right, in _currentCoeffs[7]);
-                _states[8].ProcessStereo(ref left, ref right, in _currentCoeffs[8]);
-                _states[9].ProcessStereo(ref left, ref right, in _currentCoeffs[9]);
+                double left = dryL * preamp;
+                double right = dryR * preamp;
 
-                Unsafe.Add(ref bufRef, sampleOffset) = left;
-                Unsafe.Add(ref bufRef, sampleOffset + 1) = right;
+                _states[0].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[0]);
+                _states[1].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[1]);
+                _states[2].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[2]);
+                _states[3].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[3]);
+                _states[4].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[4]);
+                _states[5].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[5]);
+                _states[6].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[6]);
+                _states[7].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[7]);
+                _states[8].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[8]);
+                _states[9].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[9]);
+
+                float wetL = (float)left;
+                float wetR = (float)right;
+
+                Unsafe.Add(ref bufRef, sampleOffset) = dryL + (wetL - dryL) * wetMix;
+                Unsafe.Add(ref bufRef, sampleOffset + 1) = dryR + (wetR - dryR) * wetMix;
             }
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool AreAllIdentity(in BandCoefficientArray coeffs)
+    {
+        for (int i = 0; i < BandCount; i++)
+        {
+            if (coeffs[i].A1 != 0f || MathF.Abs(coeffs[i].B0 - 1f) > 1e-4f)
+                return false;
+        }
+        return true;
     }
 
     private void ProcessGenericChannelsInternal(ref float bufRef, int totalFrames, int channels)
     {
         _currentCoeffs = _targetCoeffs;
         _currentPreampGain = _targetPreampGain;
-        float preamp = _currentPreampGain;
+        double preamp = _currentPreampGain;
 
         if (channels == 1)
         {
             for (int f = 0; f < totalFrames; f++)
             {
-                float mono = Unsafe.Add(ref bufRef, f) * preamp;
-                float dummy = 0f;
+                double mono = Unsafe.Add(ref bufRef, f) * preamp;
+                double dummy = 0.0;
 
                 for (int b = 0; b < BandCount; b++)
-                    _states[b].ProcessStereo(ref mono, ref dummy, in _currentCoeffs[b]);
+                    _states[b].ProcessStereoDouble(ref mono, ref dummy, in _currentCoeffs[b]);
 
-                Unsafe.Add(ref bufRef, f) = mono;
+                Unsafe.Add(ref bufRef, f) = (float)mono;
             }
         }
         else
@@ -543,17 +632,18 @@ public sealed class EqualizerProcessor
             for (int f = 0; f < totalFrames; f++)
             {
                 int idx = f * channels;
-                float left = Unsafe.Add(ref bufRef, idx) * preamp;
-                float right = Unsafe.Add(ref bufRef, idx + 1) * preamp;
+                double left = Unsafe.Add(ref bufRef, idx) * preamp;
+                double right = Unsafe.Add(ref bufRef, idx + 1) * preamp;
 
                 for (int b = 0; b < BandCount; b++)
-                    _states[b].ProcessStereo(ref left, ref right, in _currentCoeffs[b]);
+                    _states[b].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[b]);
 
-                Unsafe.Add(ref bufRef, idx) = left;
-                Unsafe.Add(ref bufRef, idx + 1) = right;
+                Unsafe.Add(ref bufRef, idx) = (float)left;
+                Unsafe.Add(ref bufRef, idx + 1) = (float)right;
 
+                float preampF = (float)preamp;
                 for (int ch = 2; ch < channels; ch++)
-                    Unsafe.Add(ref bufRef, idx + ch) *= preamp;
+                    Unsafe.Add(ref bufRef, idx + ch) *= preampF;
             }
         }
 

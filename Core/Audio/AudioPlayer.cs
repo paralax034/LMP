@@ -556,12 +556,11 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     {
         if (pipeline.Source.IsFullyBuffered || pipeline.Source is Sources.LocalFileSource)
         {
-            // Даже для локального файла/полного кэша при Seek декодеру нужно прокрутить фреймы
-            // от ближайшего ключевого кадра (WebM CuePoint раз в 10 сек) до целевой точки (5–25 мс).
-            // Ожидание 60 мс реальных декодированных PCM-сэмплов перед открытием гейта WASAPI
-            // полностью исключает сухое чтение и чередование звука с нулями ("пузырчатую плёнку")!
-            int localPcmSamples = pipeline.SampleRate * pipeline.Channels * 60 / 1000;
-            return new PlaybackWarmupPlan(Math.Max(localPcmSamples, pipeline.Channels * 2), 0, 250);
+            // Для локального файла/полного кэша ждём минимум 120 мс декодированных PCM-сэмплов (с запасом до 500 мс таймаута),
+            // чтобы при Seek в конец 10-секундного кластера WebM декодер успел пройти 160 мс пре-ролла И набрать
+            // минимум два полных 60-мс горизонта WASAPI до открытия гейта (исключает отложенный underrun через 15 мс после Seek!).
+            int localPcmSamples = pipeline.SampleRate * pipeline.Channels * 120 / 1000;
+            return new PlaybackWarmupPlan(Math.Max(localPcmSamples, pipeline.Channels * 2), 0, 500);
         }
 
         double avgPingMs = pipeline.Source is Sources.CachingStreamSource cs
@@ -687,12 +686,14 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         float previousGain = _activePipeline?.GetLockedNormalizationGain() ?? 1.0f;
 
-        // Немедленно останавливаем сетевую подкачку предыдущего трека до создания нового конвейера,
-        // чтобы освободить полосу пропускания и сокеты для быстрого старта нового трека.
+        // Перед остановкой предыдущего трека вызываем _sharedBackend.Flush(), пока старый _pcmBuffer ещё полон!
+        // Это позволяет WinAudioBackend синхронно забрать 10 мс живого продолжения старого трека
+        // для абсолютно бесшовного wave-to-wave кроссфейда на новый трек без единого щелчка.
         var previousPipeline = Interlocked.Exchange(ref _activePipeline, null);
         if (previousPipeline != null)
         {
             StopTimers();
+            _sharedBackend.Flush();
             previousPipeline.Source.CancelPendingOperations();
             TrackAndFirePipelineDispose(previousPipeline);
         }

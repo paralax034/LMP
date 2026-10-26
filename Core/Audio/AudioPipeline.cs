@@ -37,13 +37,6 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// <summary>Минимум секунд аудио для адекватного EBU R128 pre-scan (±1-2 LU).</summary>
     private const float MinPreScanSeconds = 10f;
 
-    /// <summary>
-    /// Длина живого wave-to-wave кроссфейда при Seek в стерео-фреймах (960 фреймов = 20 мс при 48 кГц).
-    /// Сохраняет реальное продолжение старой звуковой волны из кольцевого буфера перед его очисткой,
-    /// обеспечивая 100% непрерывность всех производных сигнала на стыке DMA-буфера без провала громкости.
-    /// </summary>
-    private const int SeekCrossfadeFrames = 960;
-
     #endregion
 
     #region Fields
@@ -53,11 +46,6 @@ public sealed class AudioPipeline : IAsyncDisposable
     private readonly IPlaybackBackend _backend;
     private readonly LockFreeRingBuffer<float> _pcmBuffer;
     private readonly float[] _decodeBuffer;
-    private readonly float[] _seekCrossfadeTail;
-    private int _seekCrossfadeRemainingFrames;
-    private int _seekCrossfadeTotalFrames;
-    private float _lastOutputSampleL;
-    private float _lastOutputSampleR;
     private readonly AudioStreamInfo _streamInfo;
     private readonly CancellationTokenSource _lifetimeCts;
     private readonly EbuR128Analyzer _analyzer;
@@ -84,7 +72,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 
     private Task? _deviceEventTask;
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
     private int _decoderRestartCount;
 #endif
 
@@ -134,7 +122,7 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// <summary>Процессор 10-полосного эквалайзера.</summary>
     public EqualizerProcessor Equalizer => _equalizer;
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
     /// <summary>Количество перезапусков decoder loop.</summary>
     public int DecoderRestartCount => Volatile.Read(ref _decoderRestartCount);
 #endif
@@ -160,7 +148,6 @@ public sealed class AudioPipeline : IAsyncDisposable
         _streamInfo = streamInfo;
         _lifetimeCts = lifetimeCts;
 
-        _seekCrossfadeTail = new float[SeekCrossfadeFrames * decoder.Channels];
         _analyzer = new EbuR128Analyzer();
         _equalizer = new EqualizerProcessor(decoder.SampleRate, decoder.Channels);
         _truePeakLimiter = new TruePeakLimiter(decoder.SampleRate);
@@ -303,7 +290,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 
         return source.Codec switch
         {
-            AudioCodec.Opus => new OpusDecoder(rate, ch),
+            AudioCodec.Opus => new OpusDecoder(rate, ch, source.DecoderConfig),
             AudioCodec.Aac => CreateAacDecoder(source, rate, ch),
             _ => throw new NotSupportedException($"Codec {source.Codec} not supported")
         };
@@ -410,14 +397,14 @@ public sealed class AudioPipeline : IAsyncDisposable
         _decoderCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         var token = _decoderCts.Token;
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
         int restartCount = Interlocked.Increment(ref _decoderRestartCount);
 #endif
 
         _decoderTask = Task.Run(
             () => DecoderLoopAsync(urlRefresher, options, onTrackEnded, onError, token));
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
         const int ShortTrackIdLength = 8;
 
         var trackIdShort = _streamInfo.TrackId?.Length > ShortTrackIdLength
@@ -601,7 +588,7 @@ CancellationToken ct)
                     long seekTarget = Volatile.Read(ref _seekTargetMs);
                     if (seekTarget >= 0)
                     {
-                        const long DecoderPreRollMs = 100;
+                        const long DecoderPreRollMs = 120;
                         long frameTs = frame.Value.TimestampMs;
 
                         if (frameTs < seekTarget)
@@ -609,22 +596,33 @@ CancellationToken ct)
                             if (frameTs + DecoderPreRollMs >= seekTarget)
                             {
                                 _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                                // Уменьшаем счётчик обязательного прогрева декодера только тогда, когда реально декодировали фрейм пре-ролла!
+                                int remSkip = Volatile.Read(ref _skipFramesCounter);
+                                if (remSkip > 0)
+                                    Interlocked.Decrement(ref _skipFramesCounter);
                             }
                             continue;
                         }
 
                         Volatile.Write(ref _seekTargetMs, -1L);
-                        Volatile.Write(ref _skipFramesCounter, 0);
+                        // НЕ обнуляем _skipFramesCounter здесь! Если target попал в самое начало кластера (например, 80001ms),
+                        // декодер обязан пропустить оставшиеся 1-2 warmup-фрейма после FlushState(), чтобы не выдать мусорный переходный пик в уши!
                     }
-                    else
+
+                    int skipCount = Volatile.Read(ref _skipFramesCounter);
+                    if (skipCount > 0)
                     {
-                        int skipCount = Volatile.Read(ref _skipFramesCounter);
-                        if (skipCount > 0)
+                        int warmupDecoded = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                        if (warmupDecoded > 0 && _pcmBuffer.IsEmpty)
                         {
-                            _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
-                            Interlocked.Decrement(ref _skipFramesCounter);
-                            continue;
+                            var warmupSpan = _decodeBuffer.AsSpan(0, warmupDecoded * _decoder.Channels);
+                            _equalizer.Process(warmupSpan);
+                            float normGain = _analyzer.IsEnabled ? _analyzer.ProcessSamples() : 1.0f;
+                            _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, _decoder.Channels);
+                            _truePeakLimiter!.Process(warmupSpan, ref _gainCrossfader);
                         }
+                        Interlocked.Decrement(ref _skipFramesCounter);
+                        continue;
                     }
 
                     int samplesDecoded = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
@@ -760,68 +758,10 @@ CancellationToken ct)
     {
         if (_disposed) return;
 
+        // ВАЖНО: сначала вызываем _backend.Flush(), пока в _pcmBuffer ещё лежат декодированные сэмплы!
+        // WinAudioBackend.Flush() синхронно заберёт 480 фреймов (10 мс) живого продолжения старой волны
+        // через AudioCallback для настоящего wave-to-wave кроссфейда, и только после этого мы очищаем _pcmBuffer!
         _backend.Flush();
-
-        int channels = _decoder.Channels;
-        int maxTailFloats = _seekCrossfadeTail.Length;
-
-        if (_seekCrossfadeRemainingFrames > 0)
-        {
-            int consumedFrames = _seekCrossfadeTotalFrames - _seekCrossfadeRemainingFrames;
-            if (consumedFrames > 0)
-            {
-                int remFloats = _seekCrossfadeRemainingFrames * channels;
-                _seekCrossfadeTail.AsSpan(consumedFrames * channels, remFloats)
-                    .CopyTo(_seekCrossfadeTail.AsSpan(0, remFloats));
-                _seekCrossfadeTotalFrames = _seekCrossfadeRemainingFrames;
-            }
-        }
-        else
-        {
-            int readFloats = _pcmBuffer.Read(_seekCrossfadeTail.AsSpan(0, maxTailFloats));
-            int readFrames = channels > 0 ? readFloats / channels : 0;
-
-            if (readFrames > 0)
-            {
-                float currentNormGain = _gainCrossfader.CurrentGain;
-                if (MathF.Abs(currentNormGain - 1.0f) > 0.0001f)
-                {
-                    SpanMathHelper.MultiplyByConstant(_seekCrossfadeTail.AsSpan(0, readFrames * channels), currentNormGain);
-                }
-            }
-
-            float anchorL = readFrames > 0
-                ? _seekCrossfadeTail[(readFrames - 1) * channels]
-                : _lastOutputSampleL;
-            float anchorR = readFrames > 0 && channels >= 2
-                ? _seekCrossfadeTail[(readFrames - 1) * channels + 1]
-                : _lastOutputSampleR;
-
-            if (readFrames < SeekCrossfadeFrames && (MathF.Abs(anchorL) > 0.0005f || MathF.Abs(anchorR) > 0.0005f))
-            {
-                int missingFrames = SeekCrossfadeFrames - readFrames;
-                float invMissing = 1.0f / missingFrames;
-
-                for (int f = 0; f < missingFrames; f++)
-                {
-                    float t = (f + 1) * invMissing;
-                    float w = 1.0f - (t * t * (3.0f - 2.0f * t));
-                    int baseIdx = (readFrames + f) * channels;
-                    _seekCrossfadeTail[baseIdx] = anchorL * w;
-                    if (channels >= 2)
-                        _seekCrossfadeTail[baseIdx + 1] = anchorR * w;
-                }
-
-                _seekCrossfadeTotalFrames = SeekCrossfadeFrames;
-                _seekCrossfadeRemainingFrames = SeekCrossfadeFrames;
-            }
-            else if (readFrames > 0)
-            {
-                _seekCrossfadeTotalFrames = readFrames;
-                _seekCrossfadeRemainingFrames = readFrames;
-            }
-        }
-
         _pcmBuffer.Clear();
 
         Volatile.Write(ref _warmupThreshold, 0);
@@ -848,8 +788,12 @@ CancellationToken ct)
         ArmDecoderWarmupAfterSeek(targetMs);
 
         _analyzer.PrepareForSeek();
-        _truePeakLimiter?.Reset();
+        _equalizer.Reset();
         _analyzer3Band.Reset();
+
+#if AUDIO_SPLICE_AUDIT
+        _dbgCallbackTickAfterSeek = 0;
+#endif
 
         float normGain = _analyzer.IsEnabled ? _analyzer.GetLockedGain() : 1.0f;
         _gainCrossfader.Reset(normGain);
@@ -963,6 +907,13 @@ CancellationToken ct)
 
     #region Audio Callback
 
+#if AUDIO_SPLICE_AUDIT
+    private float _dbgPrevRawL, _dbgPrevRawR;
+    private float _dbgPrevEqL, _dbgPrevEqR;
+    private float _dbgPrevLimL, _dbgPrevLimR;
+    private int _dbgCallbackTickAfterSeek;
+#endif
+
     private int AudioCallback(Span<float> buffer)
     {
         if (_disposed)
@@ -975,84 +926,105 @@ CancellationToken ct)
         int read = _pcmBuffer.Read(buffer);
         if (read < buffer.Length) buffer[read..].Clear();
 
+        int channels = _decoder.Channels;
         if (read > 0)
         {
             var samples = buffer[..read];
 
+#if AUDIO_SPLICE_AUDIT
+            int frames = read / channels;
+            float maxRawStep = 0f, maxRawD2 = 0f;
+            int rawStepFrame = -1;
+            if (channels >= 2 && frames >= 2)
+            {
+                float pL = _dbgPrevRawL, pR = _dbgPrevRawR;
+                float ppL = pL;
+                for (int f = 0; f < frames; f++)
+                {
+                    float cL = samples[f * channels];
+                    float cR = samples[f * channels + 1];
+                    float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
+                    float d2 = MathF.Abs(cL - 2f * pL + ppL);
+                    if (st > maxRawStep) { maxRawStep = st; rawStepFrame = f; }
+                    if (d2 > maxRawD2) maxRawD2 = d2;
+                    ppL = pL; pL = cL; pR = cR;
+                }
+                _dbgPrevRawL = pL; _dbgPrevRawR = pR;
+            }
+#endif
+
             // 1. Применяем 10-полосный эквалайзер ДО лимитера и анализатора спектра
             _equalizer.Process(samples);
+
+#if AUDIO_SPLICE_AUDIT
+            float maxEqStep = 0f, maxEqD2 = 0f;
+            int eqStepFrame = -1;
+            if (channels >= 2 && frames >= 2)
+            {
+                float pL = _dbgPrevEqL, pR = _dbgPrevEqR;
+                float ppL = pL;
+                for (int f = 0; f < frames; f++)
+                {
+                    float cL = samples[f * channels];
+                    float cR = samples[f * channels + 1];
+                    float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
+                    float d2 = MathF.Abs(cL - 2f * pL + ppL);
+                    if (st > maxEqStep) { maxEqStep = st; eqStepFrame = f; }
+                    if (d2 > maxEqD2) maxEqD2 = d2;
+                    ppL = pL; pL = cL; pR = cR;
+                }
+                _dbgPrevEqL = pL; _dbgPrevEqR = pR;
+            }
+#endif
 
             float normGain = _analyzer.IsEnabled
                 ? _analyzer.ProcessSamples()
                 : 1.0f;
 
-            _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, _decoder.Channels);
+            _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, channels);
 
-            // Если эквалайзер имеет положительный буст полос, лимитер не байпасится,
-            // защищая тракт WASAPI от клиппинга выше -0.13 dBFS (0.985f).
-            bool canBypassLimiter = normGain <= 1.0f
-                                 && !_equalizer.HasPositiveBoost
-                                 && _truePeakLimiter!.EnvelopeGain >= 0.999f;
+            // 2. Всегда пропускаем сигнал через TruePeakLimiter (0 B аллокаций)
+            _truePeakLimiter!.Process(samples, ref _gainCrossfader);
 
-            if (canBypassLimiter)
+#if AUDIO_SPLICE_AUDIT
+            float maxLimStep = 0f, maxLimD2 = 0f;
+            int limStepFrame = -1;
+            if (channels >= 2 && frames >= 2)
             {
-                if (_gainCrossfader.IsActive)
-                    SpanMathHelper.MultiplyByCrossfade(samples, ref _gainCrossfader);
-                else if (MathF.Abs(normGain - 1.0f) > 0.0001f)
-                    SpanMathHelper.MultiplyByConstant(samples, normGain);
-            }
-            else
-            {
-                _truePeakLimiter!.Process(samples, ref _gainCrossfader);
-            }
-
-            if (_seekCrossfadeRemainingFrames > 0)
-            {
-                int channels = _decoder.Channels;
-                int framesInBuffer = read / channels;
-                int cfFrames = Math.Min(_seekCrossfadeRemainingFrames, framesInBuffer);
-
-                if (cfFrames > 0)
+                float pL = _dbgPrevLimL, pR = _dbgPrevLimR;
+                float ppL = pL;
+                for (int f = 0; f < frames; f++)
                 {
-                    int totalCf = _seekCrossfadeTotalFrames;
-                    int startOffsetFrames = totalCf - _seekCrossfadeRemainingFrames;
-                    float invTotal = 1.0f / totalCf;
+                    float cL = samples[f * channels];
+                    float cR = samples[f * channels + 1];
+                    float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
+                    float d2 = MathF.Abs(cL - 2f * pL + ppL);
+                    if (st > maxLimStep) { maxLimStep = st; limStepFrame = f; }
+                    if (d2 > maxLimD2) maxLimD2 = d2;
+                    ppL = pL; pL = cL; pR = cR;
+                }
+                _dbgPrevLimL = pL; _dbgPrevLimR = pR;
 
-                    Span<float> tailSpan = _seekCrossfadeTail.AsSpan(startOffsetFrames * channels, cfFrames * channels);
-
-                    for (int f = 0; f < cfFrames; f++)
-                    {
-                        float t = (startOffsetFrames + f + 1) * invTotal;
-                        float newWeight = t * t * (3.0f - 2.0f * t);
-                        float oldWeight = 1.0f - newWeight;
-
-                        int baseIdx = f * channels;
-                        for (int ch = 0; ch < channels; ch++)
-                        {
-                            samples[baseIdx + ch] = tailSpan[baseIdx + ch] * oldWeight + samples[baseIdx + ch] * newWeight;
-                        }
-                    }
-
-                    _seekCrossfadeRemainingFrames -= cfFrames;
+                int cbTick = ++_dbgCallbackTickAfterSeek;
+                if (cbTick <= 3 || maxLimStep > 0.08f || maxLimD2 > 0.05f)
+                {
+                    Log.Debug(
+                        $"[Pipeline-Audit] tick#{cbTick} frames={frames} ringRem={_pcmBuffer.Count / channels}f | " +
+                        $"RAW(step={maxRawStep:F4}@{rawStepFrame}, d2={maxRawD2:F4}) -> " +
+                        $"EQ(step={maxEqStep:F4}@{eqStepFrame}, d2={maxEqD2:F4}) -> " +
+                        $"LIM(step={maxLimStep:F4}@{limStepFrame}, d2={maxLimD2:F4}, env={_truePeakLimiter.EnvelopeGain:F3}, norm={_gainCrossfader.CurrentGain:F3})");
                 }
             }
+#endif
 
-            if (samples.Length >= 2)
-            {
-                _lastOutputSampleL = samples[^2];
-                _lastOutputSampleR = samples[^1];
-            }
-
-            _analyzer3Band.ProcessBlock(samples, _decoder.Channels);
+            _analyzer3Band.ProcessBlock(samples, channels);
         }
         else
         {
-            _lastOutputSampleL = 0f;
-            _lastOutputSampleR = 0f;
             _analyzer3Band.Reset();
         }
 
-        return read / _decoder.Channels;
+        return read / channels;
     }
 
     #endregion
@@ -1140,7 +1112,7 @@ CancellationToken ct)
         try { _decoderCts?.Dispose(); } catch (ObjectDisposedException) { }
         try { _lifetimeCts.Dispose(); } catch (ObjectDisposedException) { }
 
-#if DEBUG
+#if AUDIO_SPLICE_AUDIT
         Log.Debug($"[AudioPipeline] Disposed (decoder restarts: {_decoderRestartCount})");
 #else
         Log.Info("[AudioPipeline] Disposed");

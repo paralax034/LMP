@@ -13,6 +13,18 @@ public readonly record struct BiquadCoefficients(double B0, double B1, double B2
     public static BiquadCoefficients Identity => new(1.0, 0.0, 0.0, 0.0, 0.0);
 
     /// <summary>
+    /// Линейно интерполирует коэффициенты двойной точности между двумя состояниями фильтра.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static BiquadCoefficients Lerp(in BiquadCoefficients a, in BiquadCoefficients b, double t) =>
+        new(
+            a.B0 + (b.B0 - a.B0) * t,
+            a.B1 + (b.B1 - a.B1) * t,
+            a.B2 + (b.B2 - a.B2) * t,
+            a.A1 + (b.A1 - a.A1) * t,
+            a.A2 + (b.A2 - a.A2) * t);
+
+    /// <summary>
     /// Вычисляет квадрат модуля передаточной функции <c>|H(e^(jw))|²</c> на заданной частоте.
     /// Используется для построения логарифмической кривой АЧХ в UI без аллокаций.
     /// </summary>
@@ -116,6 +128,34 @@ public struct StereoBiquadStateF
     public double Z1R;
     public double Z2L;
     public double Z2R;
+
+    /// <summary>
+    /// Обрабатывает пару стерео-сэмплов (L, R) в двойной точности без промежуточного усечения мантиссы между каскадами.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void ProcessStereoDouble(ref double left, ref double right, in BiquadCoefficientsF c)
+    {
+        double inL = left;
+        double inR = right;
+
+        double b0 = c.B0;
+        double b1 = c.B1;
+        double b2 = c.B2;
+        double a1 = c.A1;
+        double a2 = c.A2;
+
+        double outL = Math.FusedMultiplyAdd(b0, inL, Z1L);
+        double outR = Math.FusedMultiplyAdd(b0, inR, Z1R);
+
+        Z1L = Math.FusedMultiplyAdd(b1, inL, Z2L) - a1 * outL;
+        Z1R = Math.FusedMultiplyAdd(b1, inR, Z2R) - a1 * outR;
+
+        Z2L = b2 * inL - a2 * outL;
+        Z2R = b2 * inR - a2 * outR;
+
+        left = outL;
+        right = outR;
+    }
 
     /// <summary>
     /// Обрабатывает пару стерео-сэмплов (L, R) за один такт с идентичными коэффициентами полосы.

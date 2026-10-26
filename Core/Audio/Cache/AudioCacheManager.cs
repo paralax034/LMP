@@ -27,14 +27,13 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// Известные стандартные комбинации форматов и битрейтов YouTube для восстановления файлов-сирот.
     /// </summary>
     private static readonly (AudioFormat Format, int Bitrate, AudioCodec Codec)[] KnownFormatProfiles =
-    [
-        (AudioFormat.WebM, 160, AudioCodec.Opus),
+     [
+         (AudioFormat.WebM, 160, AudioCodec.Opus),
         (AudioFormat.WebM, 70, AudioCodec.Opus),
         (AudioFormat.WebM, 50, AudioCodec.Opus),
-        (AudioFormat.Mp4, 140, AudioCodec.Aac),
         (AudioFormat.Mp4, 128, AudioCodec.Aac),
         (AudioFormat.Ogg, 160, AudioCodec.Opus)
-    ];
+     ];
 
     /// <summary>
     /// Обёртка индекса кэша с версионированием схемы.
@@ -146,11 +145,10 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <param name="trackDurations">Опциональный словарь длительностей треков для sanity check.</param>
     /// <returns><c>true</c>, если была восстановлена хотя бы одна валидная запись.</returns>
     public bool RecoverOrphansForTracks(
-        IEnumerable<string> trackIds,
-        IReadOnlyDictionary<string, TimeSpan>? trackDurations = null)
+         IEnumerable<string> trackIds,
+         IReadOnlyDictionary<string, TimeSpan>? trackDurations = null)
     {
-        const long MinimumFragmentThresholdBytes = 128 * 1024; // 128 KB
-        const long FallbackCompleteMinBytes = 350 * 1024;      // 350 KB (~22s audio)
+        const long FallbackCompleteMinBytes = 350 * 1024; // 350 KB (~22s audio)
         bool anyRecovered = false;
 
         foreach (var rawTrackId in trackIds)
@@ -171,8 +169,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             {
                 string cacheKey = AudioSourceFactory.BuildCacheKey(trackId, format, bitrate);
 
-                // Если запись уже есть в памяти и валидна — пропускаем
-                if (_entries.TryGetValue(cacheKey, out var existing) && existing.IsComplete)
+                // КРИТИЧНО: если запись УЖЕ известна в индексе (даже как IsComplete == false, т.е. partial-кэш с дырами от Seek),
+                // это НЕ файл-сирота! Никогда не повышаем partial-запись до IsComplete по fi.Length (в NTFS fi.Length равен максимальному смещению записи!).
+                if (_entries.ContainsKey(cacheKey))
                     continue;
 
                 string filePath = GetCachePath(cacheKey);
@@ -194,15 +193,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                         minExpectedBytes = FallbackCompleteMinBytes;
                     }
 
-                    // Если файл меньше порога полноценного трека — это недокачанный фрагмент
-                    if (fi.Length < minExpectedBytes)
+                    // Если файл меньше порога полноценного трека или содержит нескачанные нулевые дыры посередине —
+                    // удаляем такой бесхозный фрагмент без индексной карты диапазонов.
+                    if (fi.Length < minExpectedBytes || !VerifyOrphanFileNoZeroHoles(filePath, fi.Length))
                     {
-                        if (fi.Length < MinimumFragmentThresholdBytes)
-                        {
-                            // Огрызки меньше 128 КБ без метаданных непригодны для воспроизведения
-                            try { fi.Delete(); } catch { }
-                            Log.Warn($"[AudioCache] Corrupt orphan fragment deleted: {cacheKey} ({fi.Length / 1024}KB < {minExpectedBytes / 1024}KB)");
-                        }
+                        try { fi.Delete(); } catch { }
+                        Log.Warn($"[AudioCache] Incomplete/sparse orphan file deleted: {cacheKey} ({fi.Length / 1024}KB)");
                         continue;
                     }
 
@@ -247,6 +243,36 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
 
         return anyRecovered;
+    }
+
+    /// <summary>
+    /// Проверяет, что файл-сирота без индексной записи не содержит нескачанных нулевых дыр (от random-access Seek записи)
+    /// в начале, на 25%, 50%, 75% и в конце файла.
+    /// </summary>
+    private static bool VerifyOrphanFileNoZeroHoles(string filePath, long fileLength)
+    {
+        const int ProbeSize = 4096;
+        if (fileLength < ProbeSize * 2) return false;
+
+        Span<byte> probe = stackalloc byte[ProbeSize];
+        ReadOnlySpan<double> checkpoints = [0.0, 0.25, 0.50, 0.75];
+
+        try
+        {
+            using var handle = File.OpenHandle(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            for (int i = 0; i < checkpoints.Length; i++)
+            {
+                long offset = Math.Clamp((long)(fileLength * checkpoints[i]), 0, fileLength - ProbeSize);
+                int read = RandomAccess.Read(handle, probe, offset);
+                if (read < ProbeSize || !probe[..read].ContainsAnyExcept((byte)0))
+                    return false;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public bool IsFullyCached(string cacheKey) =>
@@ -1033,6 +1059,20 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 }
             }
 
+            // Проверяем физическое отсутствие 4KB нулевых дыр ТОЛЬКО для старых записей-сирот
+            // (у которых пуст OriginalUrl или DownloadedBytes < TotalSize), не замедляя старт для обычных треков!
+            if ((string.IsNullOrEmpty(entry.OriginalUrl) || entry.DownloadedBytes < entry.TotalSize)
+                && !VerifyOrphanFileNoZeroHoles(filePath, actualLength))
+            {
+                Log.Warn($"[AudioCache] Sparse zero-hole detected in orphan/incomplete cache file: {entry.CacheKey} — invalidating corrupt entry");
+                InvalidateCompleteEntry(entry);
+
+                try { File.Delete(filePath); }
+                catch (Exception ex) { Log.Warn($"[AudioCache] Failed to delete sparse cache file: {ex.Message}"); }
+
+                return false;
+            }
+
             // Файл физически валиден — self-heal range-state при необходимости
             if (entry.DownloadedBytes < entry.TotalSize && entry.TotalSize > 0)
             {
@@ -1073,16 +1113,17 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Инвалидирует диапазон байт для лучшего доступного кэша указанного трека.
+    /// Инвалидирует диапазон байт во всех закэшированных профилях указанного трека.
     /// </summary>
     public void InvalidateRangeByTrackId(string trackId, long offset, int length)
     {
         if (string.IsNullOrEmpty(trackId) || length <= 0) return;
 
-        var entry = FindBestCache(trackId);
-        if (entry == null) return;
-
-        InvalidateRange(entry.CacheKey, offset, length);
+        var keys = CollectAllCacheKeysForTrack(trackId);
+        for (int i = 0; i < keys.Count; i++)
+        {
+            InvalidateRange(keys[i], offset, length);
+        }
     }
 
     #endregion
