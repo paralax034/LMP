@@ -10,11 +10,11 @@
             "args": ["--avalonia-log-level=Warning"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
-            "justMyCode": true,
+            "justMyCode": false,
             "suppressJITOptimizations": true,
             "logging": {
                 "moduleLoad": false,
-                "exceptions": true,
+                "exceptions": false,
                 "programOutput": true
             },
             "symbolOptions": {
@@ -32,11 +32,11 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
-            "justMyCode": true,
+            "justMyCode": false,
             "suppressJITOptimizations": true,
             "logging": {
                 "moduleLoad": false,
-                "exceptions": true,
+                "exceptions": false,
                 "programOutput": true
             },
             "symbolOptions": {

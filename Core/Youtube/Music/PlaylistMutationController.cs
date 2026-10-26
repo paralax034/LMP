@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using LMP.Core.Youtube.Exceptions;
-using LMP.Core.Helpers.Extensions;
 
 namespace LMP.Core.Youtube.Music;
 

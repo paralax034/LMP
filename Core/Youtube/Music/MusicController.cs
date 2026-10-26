@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using LMP.Core.Youtube.Utils;
-using LMP.Core.Helpers.Extensions;
 using LMP.Core.Youtube.Exceptions;
 
 namespace LMP.Core.Youtube.Music;

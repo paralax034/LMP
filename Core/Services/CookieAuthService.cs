@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using LMP.Core.Youtube;
-using LMP.Core.Helpers.Extensions;
 using System.Text.RegularExpressions;
 using LMP.Core.Youtube.Utils;
 

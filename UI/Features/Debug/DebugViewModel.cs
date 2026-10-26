@@ -67,7 +67,6 @@ public sealed partial class DebugViewModel : ViewModelBase
     private CancellationTokenSource? _audioTestCts;
     private AudioPlayer? _testPlayer;
     private AudioCacheManager? _testCacheManager;
-    private UIHangWatchdog? _uiWatchdog;
 
     public IAsyncRelayCommand GetLikedVideosCommand { get; }
     public IAsyncRelayCommand GetLikedMusicCommand { get; }
@@ -120,30 +119,19 @@ public sealed partial class DebugViewModel : ViewModelBase
         ShowCacheStatsCommand = new RelayCommand(ExecuteShowCacheStats);
         ClearAudioCacheCommand = new AsyncRelayCommand(ExecuteClearAudioCache);
         TestLocalFileCommand = new AsyncRelayCommand(ExecuteTestLocalFile);
-        IsWatchdogEnabled = UIHangWatchdog.IsEnabled;
-        WatchdogStatusText = IsWatchdogEnabled ? "Watchdog: ON" : "Watchdog: OFF";
+        IsWatchdogEnabled = ProcessFlightRecorder.IsEnabled;
+        WatchdogStatusText = IsWatchdogEnabled ? "Telemetry: ON" : "Telemetry: OFF";
 
         ToggleWatchdogCommand = new RelayCommand(() =>
         {
             var newState = !IsWatchdogEnabled;
-            UIHangWatchdog.SetEnabled(newState);
-
-            if (newState)
-            {
-                _uiWatchdog?.Dispose();
-                _uiWatchdog = new UIHangWatchdog();
-                _uiWatchdog.Start();
-                AppendLog("[Watchdog] UI Hang Watchdog ENABLED (500ms threshold)");
-            }
-            else
-            {
-                _uiWatchdog?.Dispose();
-                _uiWatchdog = null;
-                AppendLog("[Watchdog] UI Hang Watchdog DISABLED");
-            }
+            ProcessFlightRecorder.SetEnabled(newState, G.Folder.Logs);
+            AppendLog(newState
+                ? $"[Telemetry] Flight Recorder ENABLED → {G.Folder.Logs}"
+                : "[Telemetry] Flight Recorder DISABLED");
 
             IsWatchdogEnabled = newState;
-            WatchdogStatusText = newState ? "Watchdog: ON" : "Watchdog: OFF";
+            WatchdogStatusText = newState ? "Telemetry: ON" : "Telemetry: OFF";
         });
     }
 
@@ -711,8 +699,6 @@ public sealed partial class DebugViewModel : ViewModelBase
             _audioTestCts?.Dispose();
             _testPlayer?.Dispose();
             _testCacheManager?.Dispose();
-            _uiWatchdog?.Dispose();
-            _uiWatchdog = null;
             _testRunner?.Dispose();
         }
 

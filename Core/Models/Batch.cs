@@ -1,6 +1,4 @@
-﻿using LMP.Core.Helpers.Extensions;
-
-namespace LMP.Core.Models;
+﻿namespace LMP.Core.Models;
 
 /// <summary>
 /// Generic collection of items returned by a single request.

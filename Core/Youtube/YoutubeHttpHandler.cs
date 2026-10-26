@@ -57,8 +57,29 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     /// <summary>Инвариантный заголовок языка для предотвращения локализации ответов API.</summary>
     public const string InvariantAcceptLanguage = "en-US,en;q=0.9";
 
-    /// <summary>Максимально время ожидания ответа от сервера</summary>
-    private static readonly TimeSpan PerAttemptTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>Количество попыток отправки обычного API-запроса (Search, Browse, Playlists).</summary>
+    private const int DefaultMaxAttempts = 3;
+
+    /// <summary>Количество попыток отправки запроса плеера (/player) на один клиент перед переключением на fallback-клиент.</summary>
+    private const int PlayerMaxAttempts = 2;
+
+    /// <summary>Базовый шаг линейного ожидания (мс) между повторными попытками при сетевом сбое.</summary>
+    private const int RetryBackoffBaseMs = 1_000;
+
+    /// <summary>Пауза (мс) перед повтором запроса после обновления сессионных кук при HTTP 401.</summary>
+    private const int UnauthorizedCookieRetryDelayMs = 200;
+
+    /// <summary>Базовая пауза (мс) при получении HTTP 429 Too Many Requests.</summary>
+    private const int RateLimitBaseDelayMs = 2_000;
+
+    /// <summary>Шаг увеличения паузы (мс) при повторном HTTP 429.</summary>
+    private const int RateLimitStepDelayMs = 1_000;
+
+    /// <summary>Максимальное время ожидания ответа от сервера для обычных запросов InnerTube API.</summary>
+    private static readonly TimeSpan DefaultAttemptTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Ускоренный таймаут ожидания ответа для запросов плеера (/player), имеющих клиентский fallback.</summary>
+    private static readonly TimeSpan PlayerAttemptTimeout = TimeSpan.FromSeconds(7);
 
     /// <summary>Ключ параметров для передачи Visitor Data в запросе.</summary>
     public static readonly HttpRequestOptionsKey<string> VisitorDataKey = new("VisitorData");
@@ -253,13 +274,17 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     }
 
     /// <inheritdoc/>
+    [System.Diagnostics.DebuggerHidden]
     protected override async Task<HttpResponseMessage> SendAsync(
        HttpRequestMessage request,
        CancellationToken cancellationToken)
     {
         Exception? lastException = null;
+        bool isPlayerReq = request.Options.TryGetValue(IsPlayerContext, out var p) && p;
+        int maxAttempts = isPlayerReq ? PlayerMaxAttempts : DefaultMaxAttempts;
+        TimeSpan attemptTimeout = isPlayerReq ? PlayerAttemptTimeout : DefaultAttemptTimeout;
 
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < maxAttempts; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -267,7 +292,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
             var processedRequest = HandleRequest(requestClone);
 
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCts.CancelAfter(PerAttemptTimeout);
+            attemptCts.CancelAfter(attemptTimeout);
 
             try
             {
@@ -283,7 +308,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
                     if (cookiesUpdated)
                     {
-                        await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(UnauthorizedCookieRetryDelayMs, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
 
@@ -293,7 +318,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
                 if ((int)response.StatusCode == 429)
                 {
                     Log.Warn("[YouTube] 429 Too Many Requests. Waiting...");
-                    await Task.Delay(2000 + (i * 1000), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(RateLimitBaseDelayMs + (i * RateLimitStepDelayMs), cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -306,12 +331,12 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
                 lastException = ex;
 
-                if (i < 2)
+                if (i < maxAttempts - 1)
                 {
                     Log.Warn($"[YouTube] Network error: {ex.Message}. Retrying {i + 1}...");
                     try
                     {
-                        await Task.Delay(1000 * (i + 1), cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(RetryBackoffBaseMs * (i + 1), cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) { throw; }
                     continue;

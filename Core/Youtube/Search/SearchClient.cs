@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using LMP.Core.Helpers.Extensions;
 using static LMP.Core.Youtube.Bridge.SearchResponse;
 
 namespace LMP.Core.Youtube.Search;

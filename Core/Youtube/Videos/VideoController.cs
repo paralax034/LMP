@@ -26,8 +26,26 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     /// </summary>
     private static volatile int _androidVrSessionBotDetections;
     private static DateTime _androidVrLastBotDetection = DateTime.MinValue;
-    private const int AndroidVrCooldownSeconds = 7200; // 2 часа (сбрасывается досрочно при смене IP/VPN или аккаунта)
 
+    /// <summary>Длительность карантина клиента ANDROID_VR после BotDetection (2 часа, сбрасывается при смене сети/аккаунта).</summary>
+    private const int AndroidVrCooldownSeconds = 7_200;
+
+    /// <summary>Порог последовательных ошибок BotDetection для активации глобального кулдауна.</summary>
+    private const int BotDetectionCooldownThreshold = 3;
+
+    /// <summary>Максимальное число попыток загрузки HTML-страницы просмотра видео.</summary>
+    private const int WatchPageMaxRetries = 5;
+
+    /// <summary>Задержка троттлинга после 1-го сбоя BotDetection.</summary>
+    private static readonly TimeSpan ThrottleDelayLevel1 = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>Задержка троттлинга после 2-го сбоя BotDetection.</summary>
+    private static readonly TimeSpan ThrottleDelayLevel2 = TimeSpan.FromMilliseconds(600);
+
+    /// <summary>Максимальная задержка троттлинга при множественных сбоях BotDetection.</summary>
+    private static readonly TimeSpan ThrottleDelayMax = TimeSpan.FromSeconds(1);
+
+    /// <summary>Длительность глобального карантина после серии BotDetection.</summary>
     public static readonly TimeSpan CooldownDuration = TimeSpan.FromMinutes(2);
 
     public static bool IsInCooldown
@@ -36,7 +54,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         {
             lock (_stateLock)
             {
-                if (_consecutiveFailures < 3) return false;
+                if (_consecutiveFailures < BotDetectionCooldownThreshold) return false;
                 var elapsed = DateTime.UtcNow - _lastBotDetection;
                 return elapsed < CooldownDuration;
             }
@@ -47,7 +65,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     {
         lock (_stateLock)
         {
-            if (_consecutiveFailures < 3) return TimeSpan.Zero;
+            if (_consecutiveFailures < BotDetectionCooldownThreshold) return TimeSpan.Zero;
 
             var elapsed = DateTime.UtcNow - _lastBotDetection;
             var remaining = CooldownDuration - elapsed;
@@ -90,9 +108,9 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         return failures switch
         {
             0 => TimeSpan.Zero,
-            1 => TimeSpan.FromMilliseconds(300),
-            2 => TimeSpan.FromMilliseconds(600),
-            _ => TimeSpan.FromSeconds(1)
+            1 => ThrottleDelayLevel1,
+            2 => ThrottleDelayLevel2,
+            _ => ThrottleDelayMax
         };
     }
 
@@ -122,7 +140,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             }
 
             return watchPage;
-        }, maxRetries: 5, cancellationToken).ConfigureAwait(false);
+        }, maxRetries: WatchPageMaxRetries, cancellationToken).ConfigureAwait(false);
     }
 
     #region GetPlayerResponse
@@ -177,15 +195,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
                               YoutubeClientNames.Tv or
                               YoutubeClientNames.AndroidTestSuite;
 
-        if (isMobileClient)
-        {
-            request.Options.Set(YoutubeHttpHandler.IsMobileClient, true);
-            request.Options.Set(YoutubeHttpHandler.IsPlayerContext, true);
-        }
-        else
-        {
-            request.Options.Set(YoutubeHttpHandler.IsMobileClient, false);
-        }
+        request.Options.Set(YoutubeHttpHandler.IsPlayerContext, true);
+        request.Options.Set(YoutubeHttpHandler.IsMobileClient, isMobileClient);
 
         string jsonBody = YoutubeClientUtils.GeneratePlayerContextForClient(
             clientName, videoId.Value, visitorData, signatureTimestamp);

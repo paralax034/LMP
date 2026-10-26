@@ -62,10 +62,6 @@
     <PackageReference Include="Acornima" Version="1.9.1" />
   </ItemGroup>
 
-  <ItemGroup Label="Diagnostics">
-    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.750501" />
-  </ItemGroup>
-
   <ItemGroup Label="Data &amp; Security">
     <!-- Синхронизировано до $(EfCoreVersion) для работы с базами SQLite браузеров -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="$(MsExtVersion)" />

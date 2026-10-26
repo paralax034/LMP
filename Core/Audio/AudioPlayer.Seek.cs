@@ -279,13 +279,13 @@ public sealed partial class AudioPlayer
                         currentTargetMs = drained;
                         pipeline.Flush();
                         pipeline.PrepareForSeek(currentTargetMs);
-                        Log.Debug($"[SeekTelemetry] Phase A interrupted, coalescing to {drained}ms");
+                        Log.Debug($"[Seek] Phase A interrupted, coalescing to {drained}ms");
                         continue;
                     }
                 }
                 catch (OperationCanceledException)
                 {
-                    Log.Debug($"[SeekTelemetry] Phase A cancelled after {phaseSw.ElapsedMilliseconds}ms");
+                    Log.Debug($"[Seek] Phase A cancelled after {phaseSw.ElapsedMilliseconds}ms");
                     throw;
                 }
                 finally
@@ -301,7 +301,7 @@ public sealed partial class AudioPlayer
                     currentTargetMs = drainedAfterPhaseA;
                     pipeline.Flush();
                     pipeline.PrepareForSeek(currentTargetMs);
-                    Log.Debug($"[SeekTelemetry] Phase A coalesced (no-throw) to {drainedAfterPhaseA}ms");
+                    Log.Debug($"[Seek] Phase A coalesced (no-throw) to {drainedAfterPhaseA}ms");
                     continue;
                 }
 
@@ -323,7 +323,7 @@ public sealed partial class AudioPlayer
                     currentTargetMs = drainedAfterSeek;
                     pipeline.Flush();
                     pipeline.PrepareForSeek(currentTargetMs);
-                    Log.Debug($"[SeekTelemetry] Phase B: Coalesced to {drainedAfterSeek}ms");
+                    Log.Debug($"[Seek] Phase B: Coalesced to {drainedAfterSeek}ms");
                     continue;
                 }
 
@@ -349,7 +349,7 @@ public sealed partial class AudioPlayer
                     currentTargetMs = drainedBeforeWarmup;
                     await StopDecoderForReseekAsync(pipeline, seekCt).ConfigureAwait(false);
                     pipeline.PrepareForSeek(currentTargetMs);
-                    Log.Debug($"[SeekTelemetry] Phase D interrupted, re-seeking to {drainedBeforeWarmup}ms");
+                    Log.Debug($"[Seek] Phase D interrupted, re-seeking to {drainedBeforeWarmup}ms");
                     continue;
                 }
 
@@ -372,7 +372,7 @@ public sealed partial class AudioPlayer
                         currentTargetMs = drainedFinal;
                         await StopDecoderForReseekAsync(pipeline, seekCt).ConfigureAwait(false);
                         pipeline.PrepareForSeek(currentTargetMs);
-                        Log.Debug($"[SeekTelemetry] Phase E interrupted, re-seeking to {drainedFinal}ms");
+                        Log.Debug($"[Seek] Phase E interrupted, re-seeking to {drainedFinal}ms");
                         continue;
                     }
 
@@ -395,7 +395,7 @@ public sealed partial class AudioPlayer
                     SetState(PlayerState.Paused);
                 }
 
-                Log.Info($"[SeekTelemetry] Seek to {currentTargetMs}ms COMPLETED. " +
+                Log.Info($"[Seek] Seek to {currentTargetMs}ms COMPLETED. " +
                          $"Total: {totalSw.ElapsedMilliseconds}ms | " +
                          $"A: {phaseAMs}ms | D: {phaseDMs}ms | E: {phaseEMs}ms");
 
@@ -405,20 +405,20 @@ public sealed partial class AudioPlayer
                 return;
             }
 
-            Log.Warn($"[SeekTelemetry] Seek coalescing loop exhausted ({SeekLoopMaxIterations} iterations)");
+            Log.Warn($"[Seek] Seek coalescing loop exhausted ({SeekLoopMaxIterations} iterations)");
             cmd.Completion?.TrySetResult(false);
             _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
         }
         catch (OperationCanceledException)
         {
-            Log.Debug($"[SeekTelemetry] Seek to {initialPosMs}ms cancelled. " +
+            Log.Debug($"[Seek] Seek to {initialPosMs}ms cancelled. " +
                       $"Elapsed: {totalSw.ElapsedMilliseconds}ms");
             cmd.Completion?.TrySetCanceled();
             _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
         }
         catch (Exception ex)
         {
-            Log.Error($"[SeekTelemetry] Seek to {initialPosMs}ms failed: {ex.Message}", ex);
+            Log.Error($"[Seek] Seek to {initialPosMs}ms failed: {ex.Message}", ex);
             cmd.Completion?.TrySetException(ex);
             SetState(wasPlaying ? PlayerState.Playing : PlayerState.Paused);
             _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
@@ -513,7 +513,7 @@ public sealed partial class AudioPlayer
                             ThresholdReached: true,
                             BufferedSamples: ringBufferSamples)))
                     {
-                        Log.Debug("[SeekTelemetry] Deferred resume command dropped: channel unavailable");
+                        Log.Debug("[Seek] Deferred resume command dropped: channel unavailable");
                     }
 
                     return;
@@ -523,7 +523,7 @@ public sealed partial class AudioPlayer
 
                 if (elapsedMs >= nextProgressLogMs)
                 {
-                    Log.Warn($"[SeekTelemetry] Deferred warmup still waiting " +
+                    Log.Warn($"[Seek] Deferred warmup still waiting " +
                              $"(ring={pipeline.BufferedSamples}/{seekThreshold}, " +
                              $"ahead={GetSourceBufferedAheadMs(pipeline)}ms/{sourceAheadMs}ms, " +
                              $"elapsed={elapsedMs}ms)");
@@ -534,7 +534,7 @@ public sealed partial class AudioPlayer
                 if (!escalationFired && elapsedMs >= DeferredWarmupEscalationMs)
                 {
                     escalationFired = true;
-                    Log.Warn($"[SeekTelemetry] Deferred warmup exceeded {DeferredWarmupEscalationMs / 1000}s — " +
+                    Log.Warn($"[Seek] Deferred warmup exceeded {DeferredWarmupEscalationMs / 1000}s — " +
                              "network likely unavailable, escalating");
 
                     _options.OnStarvationDetected?.Invoke();
@@ -542,7 +542,7 @@ public sealed partial class AudioPlayer
 
                 if (elapsedMs >= DeferredWarmupHardCapMs)
                 {
-                    Log.Error($"[SeekTelemetry] Deferred warmup hard timeout ({DeferredWarmupHardCapMs / 1000}s)");
+                    Log.Error($"[Seek] Deferred warmup hard timeout ({DeferredWarmupHardCapMs / 1000}s)");
                     _commandChannel.Writer.TryWrite(new StopCommand(sessionId));
                     return;
                 }
@@ -555,7 +555,7 @@ public sealed partial class AudioPlayer
         }
         catch (Exception ex)
         {
-            Log.Warn($"[SeekTelemetry] Deferred seek waiter error: {ex.Message}");
+            Log.Warn($"[Seek] Deferred seek waiter error: {ex.Message}");
         }
         finally
         {
@@ -576,7 +576,7 @@ public sealed partial class AudioPlayer
             || _session.IsStale(cmd.SessionId)
             || cmd.SeekGeneration != currentSeekGeneration)
         {
-            Log.Debug($"[SeekTelemetry] Deferred resume dropped: " +
+            Log.Debug($"[Seek] Deferred resume dropped: " +
                       $"disposed={_disposed}, pipelineMatch={_activePipeline == cmd.Pipeline}, " +
                       $"stale={_session.IsStale(sessionId: cmd.SessionId)}, " +
                       $"generationMatch={cmd.SeekGeneration == currentSeekGeneration}, " +
@@ -586,19 +586,19 @@ public sealed partial class AudioPlayer
 
         if (CurrentPlaybackIntent != PlaybackIntent.Play)
         {
-            Log.Debug($"[SeekTelemetry] Deferred resume ignored due to intent={CurrentPlaybackIntent}");
+            Log.Debug($"[Seek] Deferred resume ignored due to intent={CurrentPlaybackIntent}");
             return Task.CompletedTask;
         }
 
         if (_state is PlayerState.Idle or PlayerState.Disposed or PlayerState.Error)
         {
-            Log.Debug($"[SeekTelemetry] Deferred resume ignored in terminal state={_state}");
+            Log.Debug($"[Seek] Deferred resume ignored in terminal state={_state}");
             return Task.CompletedTask;
         }
 
         if (!cmd.ThresholdReached)
         {
-            Log.Warn("[SeekTelemetry] Deferred resume ignored because adaptive readiness threshold was not reached.");
+            Log.Warn("[Seek] Deferred resume ignored because adaptive readiness threshold was not reached.");
             return Task.CompletedTask;
         }
 
@@ -609,7 +609,7 @@ public sealed partial class AudioPlayer
             return Task.CompletedTask;
         }
 
-        Log.Debug($"[SeekTelemetry] Deferred warmup complete (ring={cmd.BufferedSamples}). Resuming playback.");
+        Log.Debug($"[Seek] Deferred warmup complete (ring={cmd.BufferedSamples}). Resuming playback.");
 
         ResumePlaybackSequence(
             cmd.Pipeline,
@@ -617,7 +617,7 @@ public sealed partial class AudioPlayer
             configurePipeline: false,
             trackId: _currentTrackId);
 
-        Log.Info("[SeekTelemetry] Deferred seek buffer ready. Playback resumed automatically.");
+        Log.Info("[Seek] Deferred seek buffer ready. Playback resumed automatically.");
         return Task.CompletedTask;
     }
 

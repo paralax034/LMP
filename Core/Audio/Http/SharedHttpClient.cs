@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
@@ -52,9 +53,10 @@ public static class SharedHttpClient
     /// При DNS-блокировке YouTube-доменов автоматически переключается на DoH
     /// (<see cref="DohResolver"/>).
     /// </summary>
+    [DebuggerHidden]
     internal static async ValueTask<Stream> ConnectWithKeepAliveAsync(
-           SocketsHttpConnectionContext ctx,
-           CancellationToken ct)
+               SocketsHttpConnectionContext ctx,
+               CancellationToken ct)
     {
         IPAddress[] addresses;
 
@@ -90,7 +92,7 @@ public static class SharedHttpClient
             ex.SocketErrorCode is SocketError.HostNotFound or SocketError.NoData &&
             DohResolver.IsFallbackDomain(ctx.DnsEndPoint.Host))
         {
-            Log.Warn($"[SharedHttpClient] DNS blocked for {ctx.DnsEndPoint.Host}, trying DoH fallback...");
+            Log.Warn($"[SharedHttp] DNS blocked for {ctx.DnsEndPoint.Host}, trying DoH fallback...");
 
             var dohResult = await DohResolver.ResolveAsync(ctx.DnsEndPoint.Host, ct)
                 .ConfigureAwait(false);
@@ -111,7 +113,7 @@ public static class SharedHttpClient
         var initialRange = ctx.InitialRequestMessage.Headers.Range?.ToString() ?? "-";
 
         Log.Debug(
-            $"[SharedHttpClient] Connect#{connectionId} opening: " +
+            $"[SharedHttp] #{connectionId} opening: " +
             $"endpoint={ctx.DnsEndPoint.Host}:{ctx.DnsEndPoint.Port}, " +
             $"initial={initialUri?.Host ?? "(none)"}{initialUri?.AbsolutePath ?? string.Empty}, " +
             $"range={initialRange}, " +
@@ -131,7 +133,7 @@ public static class SharedHttpClient
                 .ConfigureAwait(false);
 
             Log.Debug(
-                $"[SharedHttpClient] Connect#{connectionId} connected: " +
+                $"[SharedHttp] #{connectionId} connected: " +
                 $"local={socket.LocalEndPoint}, remote={socket.RemoteEndPoint}");
 
             return new NetworkStream(socket, ownsSocket: true);
@@ -147,6 +149,7 @@ public static class SharedHttpClient
     /// Резолвит DNS с фильтрацией до IPv4 для WinDivert-совместимости.
     /// Выделен из ConnectCallback для переиспользования в DoH fallback path.
     /// </summary>
+    [DebuggerHidden]
     private static async Task<IPAddress[]> ResolveWithIpv4PreferenceAsync(
         string host,
         AddressFamily requestedFamily,

@@ -105,13 +105,28 @@ public sealed class AppEntry
         Console.InputEncoding = System.Text.Encoding.UTF8;
 
 #if DEBUG
+        bool enableTelemetry = true;
+#else
+        bool enableTelemetry = false;
+#endif
+
         // Низкоаллокационный, быстрый парсинг аргументов командной строки без LINQ
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
             if (string.IsNullOrEmpty(arg)) continue;
 
-            if (string.Equals(arg, "--no-avalonia-logs", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(arg, "--telemetry", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "--flight-recorder", StringComparison.OrdinalIgnoreCase))
+            {
+                enableTelemetry = true;
+            }
+            else if (string.Equals(arg, "--no-telemetry", StringComparison.OrdinalIgnoreCase))
+            {
+                enableTelemetry = false;
+            }
+#if DEBUG
+            else if (string.Equals(arg, "--no-avalonia-logs", StringComparison.OrdinalIgnoreCase))
             {
                 _disableAvaloniaLogging = true;
             }
@@ -131,8 +146,8 @@ public sealed class AppEntry
                 else if (levelStr.Equals("Fatal".AsSpan(), StringComparison.OrdinalIgnoreCase))
                     _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Fatal;
             }
-        }
 #endif
+        }
 
         SetupGlobalExceptionHandlers();
 
@@ -142,6 +157,11 @@ public sealed class AppEntry
 
             Log.Initialize();
             Log.Info($"{G.AppId} starting...");
+
+            if (enableTelemetry)
+            {
+                ProcessFlightRecorder.SetEnabled(true, G.Folder.Logs);
+            }
 
             BootstrapSettings.Initialize();
 
@@ -165,6 +185,7 @@ public sealed class AppEntry
         }
         finally
         {
+            ProcessFlightRecorder.ShutdownGlobal();
             Log.Shutdown();
         }
     }

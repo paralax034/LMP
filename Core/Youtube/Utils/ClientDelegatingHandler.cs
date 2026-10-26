@@ -1,12 +1,11 @@
-﻿using LMP.Core.Helpers.Extensions;
-
-namespace LMP.Core.Youtube.Utils;
+﻿namespace LMP.Core.Youtube.Utils;
 
 // Like DelegatingHandler, but wraps an HttpClient instead of an HttpMessageHandler.
 // Used to extend an externally provided HttpClient with additional behavior.
 public abstract class ClientDelegatingHandler(HttpClient http, bool disposeClient = false)
     : HttpMessageHandler
 {
+    [System.Diagnostics.DebuggerHidden]
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken

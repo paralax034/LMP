@@ -742,10 +742,13 @@ public sealed partial class CachingStreamSource
         HttpResponseMessage response;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
+        using var sendTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        sendTimeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+
         try
         {
             response = await CurrentHttpClient
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, sendTimeoutCts.Token)
                 .ConfigureAwait(false);
             sw.Stop();
             if (response.IsSuccessStatusCode) SaveLatency(sw.Elapsed.TotalMilliseconds);

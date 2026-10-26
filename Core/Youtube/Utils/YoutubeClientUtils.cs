@@ -1,5 +1,4 @@
 using LMP.Core.Audio.Http;
-using LMP.Core.Helpers.Extensions;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
@@ -24,7 +23,20 @@ public static class YoutubeClientUtils
 	public static YoutubeClientProfile CurrentProfile { get; set; } = YoutubeClientProfile.AndroidVR;
 
 	private const string DefaultVisitorData = "CgtsZG1ySnZiQUkSbyiMjuGSBg%3D%3D";
+
+	/// <summary>
+	/// Время подавления повторных запросов к <c>sw.js_data</c> после сетевого сбоя (мс),
+	/// в течение которого используется резервный <see cref="DefaultVisitorData"/>.
+	/// </summary>
+	private const long VisitorDataFailureCooldownMs = 60_000;
+
+	/// <summary>
+	/// Максимальное время ожидания ответа от <c>sw.js_data</c> при разрешении VisitorData.
+	/// </summary>
+	private static readonly TimeSpan SwDataFetchTimeout = TimeSpan.FromSeconds(5);
+
 	private static string _visitorData = DefaultVisitorData;
+	private static long _lastFailedFetchTick;
 	private static Task<string>? _fetchTask;
 	private static CookieAuthService? _authService;
 	private static Func<HttpClient>? _httpClientProvider;
@@ -62,7 +74,11 @@ public static class YoutubeClientUtils
 		set
 		{
 			if (string.IsNullOrWhiteSpace(value)) return;
-			lock (_visitorDataLock) _visitorData = value;
+			lock (_visitorDataLock)
+			{
+				_visitorData = value;
+				_lastFailedFetchTick = 0;
+			}
 		}
 	}
 
@@ -85,12 +101,18 @@ public static class YoutubeClientUtils
 			if (!forceRefresh && !string.Equals(_visitorData, DefaultVisitorData, StringComparison.Ordinal))
 				return Task.FromResult(_visitorData);
 
+			// Если недавно уже была ошибка сети при получении sw.js_data — мгновенно отдаём DefaultVisitorData,
+			// не блокируя каждый запрос /player на лишние 5-10 секунд таймаута.
+			long now = Environment.TickCount64;
+			if (!forceRefresh && _lastFailedFetchTick != 0 && (now - _lastFailedFetchTick) < VisitorDataFailureCooldownMs)
+				return Task.FromResult(_visitorData);
+
 			// Переиспользуем активный незавершённый таск — deduplication параллельных вызовов
 			if (!forceRefresh && _fetchTask is { IsCompleted: false } activeTask)
 				return ct.CanBeCanceled ? activeTask.WaitAsync(ct) : activeTask;
 
 			// Завершённый (в т.ч. faulted/cancelled) таск заменяем новым
-			_fetchTask = FetchVisitorDataInternalAsync(ct);
+			_fetchTask = FetchVisitorDataInternalAsync(CancellationToken.None);
 			return ct.CanBeCanceled ? _fetchTask.WaitAsync(ct) : _fetchTask;
 		}
 	}
@@ -117,7 +139,7 @@ public static class YoutubeClientUtils
 			}
 
 			using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-			cts.CancelAfter(TimeSpan.FromSeconds(10));
+			cts.CancelAfter(SwDataFetchTimeout);
 
 			var client = _httpClientProvider?.Invoke() ?? SharedHttpClient.Instance;
 
@@ -162,11 +184,16 @@ public static class YoutubeClientUtils
 			lock (_visitorDataLock)
 			{
 				_visitorData = visitorData;
+				_lastFailedFetchTick = 0;
 			}
 			return visitorData;
 		}
 
-		return _visitorData;
+		lock (_visitorDataLock)
+		{
+			_lastFailedFetchTick = Environment.TickCount64;
+			return _visitorData;
+		}
 	}
 
 	// User-Agents

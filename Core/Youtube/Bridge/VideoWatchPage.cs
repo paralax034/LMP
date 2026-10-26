@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using LMP.Core.Helpers.Extensions;
 using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Bridge;
