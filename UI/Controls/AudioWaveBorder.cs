@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
@@ -115,6 +116,7 @@ public sealed class AudioWaveBorder : Decorator
 
     private readonly Action<TimeSpan> _frameCallback;
     private readonly Action _globalConfigChangedHandler;
+    private readonly Action _activePageChangedHandler;
     private readonly Action<SuspendLevel> _suspendLevelChangedHandler;
 
     private readonly WavePacket[] _packets = new WavePacket[MaxActivePackets];
@@ -251,6 +253,7 @@ public sealed class AudioWaveBorder : Decorator
     {
         _frameCallback = OnAnimationFrame;
         _globalConfigChangedHandler = OnGlobalConfigChanged;
+        _activePageChangedHandler = OnActivePageChanged;
         _suspendLevelChangedHandler = OnSuspendLevelChanged;
 
         _rngState = (ulong)Stopwatch.GetTimestamp() ^ 0x9E3779B97F4A7C15UL;
@@ -282,6 +285,12 @@ public sealed class AudioWaveBorder : Decorator
         InvalidateVisual();
     }
 
+    private void OnActivePageChanged()
+    {
+        if (!IsActive) return;
+        EvaluateAnimationState();
+    }
+
     private void OnSuspendLevelChanged(SuspendLevel level)
     {
         if (Dispatcher.UIThread.CheckAccess())
@@ -310,6 +319,7 @@ public sealed class AudioWaveBorder : Decorator
         EnsureGlobalConfigLoaded();
 
         GlobalConfigChanged += _globalConfigChangedHandler;
+        PersistentPageHost.ActivePageChanged += _activePageChangedHandler;
         ViewModelBase.SuspendLevelChanged += _suspendLevelChangedHandler;
         _attachedTopLevel = TopLevel.GetTopLevel(this);
 
@@ -322,6 +332,7 @@ public sealed class AudioWaveBorder : Decorator
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         GlobalConfigChanged -= _globalConfigChangedHandler;
+        PersistentPageHost.ActivePageChanged -= _activePageChangedHandler;
         ViewModelBase.SuspendLevelChanged -= _suspendLevelChangedHandler;
 
         _isFrameLoopActive = false;
@@ -433,9 +444,18 @@ public sealed class AudioWaveBorder : Decorator
         Visual? current = this;
         while (current != null)
         {
-            if (current.Opacity <= 0.001)
+            Visual? parent = current.GetVisualParent();
+            if (parent is PersistentPageHost)
+            {
+                if (current is InputElement page && !page.IsHitTestVisible)
+                    return false;
+            }
+            else if (current.Opacity <= 0.001)
+            {
                 return false;
-            current = current.GetVisualParent();
+            }
+
+            current = parent;
         }
 
         return true;

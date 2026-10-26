@@ -8,6 +8,9 @@
         "editor.defaultFormatter": "vscode.json-language-features"
     },
     "files.exclude": {
+        ".run": true,
+        ".vs": true,
+        ".idea": true,
         "**/bin/": true,
         "**/obj/": true,
         "publish/": true,
@@ -19,6 +22,9 @@
         "**/Thumbs.db": true
     },
     "files.watcherExclude": {
+        ".run": true,
+        ".vs": true,
+        ".idea": true,
         "**/.git/objects/**": true,
         "**/.git/subtree-cache/**": true,
         "**/node_modules/*/**": true,
@@ -34,7 +40,9 @@
         "**/*.code-search": true,
         "**/bin": true,
         "**/obj": true,
-        "**/.vs": true
+        ".vs": true,
+        ".idea": true,
+        ".run": true
     },
     "[bat]": {
         "files.encoding": "utf8bom"

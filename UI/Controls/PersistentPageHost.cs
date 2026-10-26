@@ -24,6 +24,11 @@ public sealed class PersistentPageHost : Panel
         }
     ];
 
+    /// <summary>
+    /// Возникает синхронно при смене активной страницы в хосте.
+    /// </summary>
+    public static event Action? ActivePageChanged;
+
     private readonly Dictionary<object, Control> _pageCache = new(8);
     private Control? _activeView;
 
@@ -119,6 +124,7 @@ public sealed class PersistentPageHost : Panel
                 nextView.Opacity = 1.0;
                 nextView.IsHitTestVisible = true;
                 nextView.ZIndex = 1;
+                ActivePageChanged?.Invoke();
                 return;
             }
 
@@ -135,6 +141,8 @@ public sealed class PersistentPageHost : Panel
                 previousView.IsHitTestVisible = false;
                 previousView.Opacity = 0.0;
             }
+
+            ActivePageChanged?.Invoke();
         }
         catch (Exception ex)
         {

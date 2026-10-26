@@ -17,10 +17,23 @@ public sealed class AudioSpectrumAnalyzer
         private BiquadCoefficientsF _element0;
     }
 
+    private struct BiquadStateF
+    {
+        public float Z1;
+        public float Z2;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Reset()
+        {
+            Z1 = 0f;
+            Z2 = 0f;
+        }
+    }
+
     [InlineArray(BandCount)]
     private struct StateArray10
     {
-        private BiquadState _element0;
+        private BiquadStateF _element0;
     }
 
     [InlineArray(BandCount)]
@@ -164,25 +177,21 @@ public sealed class AudioSpectrumAnalyzer
     private void AccumulateBands(float centerInput, float highInput, ref FloatArray10 sumSq)
     {
         ref BiquadCoefficientsF cRef = ref _bandCoeffs[0];
-        ref BiquadState sRef = ref _bandStates[0];
+        ref BiquadStateF sRef = ref _bandStates[0];
         ref float sumRef = ref sumSq[0];
-
-        double xCenter = centerInput;
-        double xHigh = highInput;
 
         for (int b = 0; b < BandCount; b++)
         {
-            double x = b >= 7 ? xHigh : xCenter;
+            float x = b >= 7 ? highInput : centerInput;
             ref readonly var c = ref Unsafe.Add(ref cRef, b);
             ref var s = ref Unsafe.Add(ref sRef, b);
 
-            double y = Math.FusedMultiplyAdd(c.B0, x, s.Z1);
-            s.Z1 = Math.FusedMultiplyAdd(c.B1, x, s.Z2) - c.A1 * y;
+            float y = MathF.FusedMultiplyAdd(c.B0, x, s.Z1);
+            s.Z1 = MathF.FusedMultiplyAdd(c.B1, x, s.Z2) - c.A1 * y;
             s.Z2 = c.B2 * x - c.A2 * y;
 
-            float yf = (float)y;
             ref float dst = ref Unsafe.Add(ref sumRef, b);
-            dst = MathF.FusedMultiplyAdd(yf, yf, dst);
+            dst = MathF.FusedMultiplyAdd(y, y, dst);
         }
     }
 
