@@ -126,7 +126,7 @@ public sealed class DominantColorService
 
             using var codec = targetFilePath != null
                 ? SKCodec.Create(targetFilePath)
-                : SKCodec.Create(new SKMemoryStream(fallbackData!));
+                : SKCodec.Create(new SKMemoryStream(fallbackData));
 
             if (codec == null)
             {

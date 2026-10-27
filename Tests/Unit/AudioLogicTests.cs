@@ -1148,9 +1148,197 @@ public static class AudioLogicTests
             maxD2DisableToBypass < 0.015f,
             $"Tick ('тцык') when disabling EQ to bypass: maxD2={maxD2DisableToBypass:F5}");
         TestAssert.True(
-            maxD2SubBassSweep < 0.015f,
-            $"Sub-bass +12..-12dB sweep wobble detected: maxD2={maxD2SubBassSweep:F5}");
+             maxD2SubBassSweep < 0.015f,
+             $"Sub-bass +12..-12dB sweep wobble detected: maxD2={maxD2SubBassSweep:F5}");
 
         return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Diagnostic, "Track Waveform Forensics (yt_YOiXB3qfEOE 2:39 / 3:12 / 3:21)", Group = TestGroups.Audio, Order = 99, TimeoutSeconds = 60)]
+    public static async Task DiagnoseCachedTrackWaveformForensicsAsync()
+    {
+        const string targetTrackId = "yt_YOiXB3qfEOE";
+        var cached = Core.Audio.AudioSourceFactory.FindAnyCachedTrack(targetTrackId);
+        if (cached == null)
+        {
+            TestAssert.Skip($"Track '{targetTrackId}' is not in full disk cache. Play it once first.");
+            return;
+        }
+
+        string filePath = cached.Value.Path;
+        var entry = cached.Value.Entry;
+        Log.Info($"[Forensics] Analyzing cached file: {filePath} (format={entry.Format}, codec={entry.Codec}, br={entry.Bitrate}kbps, size={entry.TotalSize}B)");
+
+        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using Core.Audio.Interfaces.IContainerParser parser = entry.Format == Core.Audio.AudioFormat.Mp4
+            ? new Core.Audio.Parsers.Mp4ContainerParser(fs)
+            : new Core.Audio.Parsers.WebMContainerParser(fs);
+
+        TestAssert.True(await parser.ParseHeadersAsync(), "Failed to parse container headers");
+
+        int rate = parser.SampleRate > 0 ? parser.SampleRate : SampleRate;
+        int ch = parser.Channels > 0 ? parser.Channels : Channels;
+
+        using Core.Audio.Interfaces.IAudioDecoder decoder = entry.Codec == Core.Audio.Interfaces.AudioCodec.Aac
+            ? CreateForensicAacDecoder(parser, rate, ch)
+            : new Core.Audio.Decoders.OpusDecoder(rate, ch, parser.DecoderConfig);
+
+        const float normBoost = 2.4294f; // Точный гейн из лога для -21.71 LUFS -> -14 LUFS
+        var normLimiter = new Core.Audio.Normalization.TruePeakLimiter(rate);
+        var normCrossfader = new Core.Audio.Normalization.GainCrossfader(normBoost);
+
+        var eq = new EqualizerProcessor(rate, ch);
+        Span<float> eqBands = stackalloc float[EqualizerProcessor.BandCount];
+        eqBands.Clear();
+        eqBands[4] = 12.0f; // 500 Hz +12 dB
+        eqBands[5] = 12.0f; // 1000 Hz +12 dB
+        eq.Configure(enabled: true, eqBands, preampDb: 0f, autoPreamp: true);
+        eq.SnapToTarget();
+
+        var eqLimiter = new Core.Audio.Normalization.TruePeakLimiter(rate);
+        var eqCrossfader = new Core.Audio.Normalization.GainCrossfader(1.0f);
+
+        float[] rawBuf = new float[8192 * ch];
+        float[] normBuf = new float[8192 * ch];
+        float[] eqBuf = new float[8192 * ch];
+
+        long totalFramesDecoded = 0;
+        int currentSecond = 0;
+
+        float secRawPeakL = 0f, secRawPeakR = 0f;
+        float secRawMaxD1L = 0f, secRawMaxD1R = 0f;
+        float secRawMaxD2L = 0f, secRawMaxD2R = 0f;
+        int secRawPlateauL = 0;
+
+        float secNormPeakL = 0f, secNormMinEnv = 1.0f, secNormMaxD2L = 0f;
+        int secNormFlatClipL = 0;
+
+        float secEqPeakL = 0f, secEqMinEnv = 1.0f, secEqMaxD2L = 0f;
+        int secEqFlatClipL = 0;
+
+        float prev1L = 0f, prev2L = 0f;
+        float prev1R = 0f, prev2R = 0f;
+        float normPrev1L = 0f, normPrev2L = 0f;
+        float eqPrev1L = 0f, eqPrev2L = 0f;
+
+        float globalRawPeakL = 0f, globalRawPeakR = 0f;
+        int totalNormFlatClips = 0, totalEqFlatClips = 0;
+        float globalNormMaxD2L = 0f, globalEqMaxD2L = 0f;
+
+        while (true)
+        {
+            var frame = await parser.ReadNextFrameAsync();
+            if (frame == null) break;
+
+            int decoded = decoder.Decode(frame.Value.Data.Span, rawBuf);
+            if (decoded <= 0) continue;
+
+            int samplesCount = decoded * ch;
+            rawBuf.AsSpan(0, samplesCount).CopyTo(normBuf.AsSpan(0, samplesCount));
+            rawBuf.AsSpan(0, samplesCount).CopyTo(eqBuf.AsSpan(0, samplesCount));
+
+            normLimiter.Process(normBuf.AsSpan(0, samplesCount), ref normCrossfader);
+            eq.Process(eqBuf.AsSpan(0, samplesCount));
+            eqLimiter.Process(eqBuf.AsSpan(0, samplesCount), ref eqCrossfader);
+
+            if (normLimiter.EnvelopeGain < secNormMinEnv) secNormMinEnv = normLimiter.EnvelopeGain;
+            if (eqLimiter.EnvelopeGain < secEqMinEnv) secEqMinEnv = eqLimiter.EnvelopeGain;
+
+            for (int f = 0; f < decoded; f++)
+            {
+                int idx = f * ch;
+                float rL = rawBuf[idx];
+                float rR = ch >= 2 ? rawBuf[idx + 1] : rL;
+
+                float absL = MathF.Abs(rL);
+                float absR = MathF.Abs(rR);
+                if (absL > secRawPeakL) secRawPeakL = absL;
+                if (absR > secRawPeakR) secRawPeakR = absR;
+                if (absL > globalRawPeakL) globalRawPeakL = absL;
+                if (absR > globalRawPeakR) globalRawPeakR = absR;
+
+                float d1L = MathF.Abs(rL - prev1L);
+                float d1R = MathF.Abs(rR - prev1R);
+                float d2L = MathF.Abs(rL - 2f * prev1L + prev2L);
+                float d2R = MathF.Abs(rR - 2f * prev1R + prev2R);
+
+                if (d1L > secRawMaxD1L) secRawMaxD1L = d1L;
+                if (d1R > secRawMaxD1R) secRawMaxD1R = d1R;
+                if (d2L > secRawMaxD2L) secRawMaxD2L = d2L;
+                if (d2R > secRawMaxD2R) secRawMaxD2R = d2R;
+
+                if (absL > 0.25f && MathF.Abs(rL - prev1L) < 0.0002f && d2L > 0.015f)
+                    secRawPlateauL++;
+
+                prev2L = prev1L; prev1L = rL;
+                prev2R = prev1R; prev1R = rR;
+
+                float nSampleL = normBuf[idx];
+                float nAbsL = MathF.Abs(nSampleL);
+                float nD2L = MathF.Abs(nSampleL - 2f * normPrev1L + normPrev2L);
+                if (nAbsL > secNormPeakL) secNormPeakL = nAbsL;
+                if (nD2L > secNormMaxD2L) secNormMaxD2L = nD2L;
+                if (nD2L > globalNormMaxD2L) globalNormMaxD2L = nD2L;
+                if (nAbsL >= 0.9849f) { secNormFlatClipL++; totalNormFlatClips++; }
+                normPrev2L = normPrev1L; normPrev1L = nSampleL;
+
+                float eSampleL = eqBuf[idx];
+                float eAbsL = MathF.Abs(eSampleL);
+                float eD2L = MathF.Abs(eSampleL - 2f * eqPrev1L + eqPrev2L);
+                if (eAbsL > secEqPeakL) secEqPeakL = eAbsL;
+                if (eD2L > secEqMaxD2L) secEqMaxD2L = eD2L;
+                if (eD2L > globalEqMaxD2L) globalEqMaxD2L = eD2L;
+                if (eAbsL >= 0.9849f) { secEqFlatClipL++; totalEqFlatClips++; }
+                eqPrev2L = eqPrev1L; eqPrev1L = eSampleL;
+
+                totalFramesDecoded++;
+                int sec = (int)(totalFramesDecoded / rate);
+                if (sec > currentSecond)
+                {
+                    bool isWindowOfInterest = (currentSecond >= 155 && currentSecond <= 165)   // 02:35..02:45
+                                           || (currentSecond >= 188 && currentSecond <= 207)   // 03:08..03:27
+                                           || currentSecond is 214 or 220 or 233
+                                           || secNormFlatClipL > 0
+                                           || secEqFlatClipL > 0;
+
+                    if (isWindowOfInterest)
+                    {
+                        int mm = currentSecond / 60;
+                        int ss = currentSecond % 60;
+                        Log.Info(
+                            $"[Forensics {mm:D2}:{ss:D2} ({currentSecond}s)] " +
+                            $"RAW(Peak L={secRawPeakL:F4} R={secRawPeakR:F4} | D2 L={secRawMaxD2L:F4}) || " +
+                            $"NORM_2.43x(PeakL={secNormPeakL:F4}, MinEnv={secNormMinEnv:F3}, OutD2L={secNormMaxD2L:F4}, FlatClip={secNormFlatClipL}) || " +
+                            $"EQ_+12dB(PeakL={secEqPeakL:F4}, MinEnv={secEqMinEnv:F3}, OutD2L={secEqMaxD2L:F4}, FlatClip={secEqFlatClipL})");
+                    }
+
+                    currentSecond = sec;
+                    secRawPeakL = 0f; secRawPeakR = 0f;
+                    secRawMaxD1L = 0f; secRawMaxD1R = 0f;
+                    secRawMaxD2L = 0f; secRawMaxD2R = 0f;
+                    secRawPlateauL = 0;
+                    secNormPeakL = 0f; secNormMinEnv = 1.0f; secNormMaxD2L = 0f; secNormFlatClipL = 0;
+                    secEqPeakL = 0f; secEqMinEnv = 1.0f; secEqMaxD2L = 0f; secEqFlatClipL = 0;
+                }
+            }
+        }
+
+        Log.Info(
+            $"[Forensics-Summary] Total decoded: {totalFramesDecoded / rate}s | " +
+            $"Global RAW Peak: L={globalRawPeakL:F4}, R={globalRawPeakR:F4} | " +
+            $"NORM(TotalFlatClips={totalNormFlatClips}, MaxOutD2L={globalNormMaxD2L:F4}) | " +
+            $"EQ(TotalFlatClips={totalEqFlatClips}, MaxOutD2L={globalEqMaxD2L:F4})");
+
+        TestAssert.Equal(0, totalNormFlatClips, $"TruePeakLimiter produced {totalNormFlatClips} hard-clipped samples on 2.43x normalized track");
+        TestAssert.Equal(0, totalEqFlatClips, $"TruePeakLimiter produced {totalEqFlatClips} hard-clipped samples on +12dB EQ track");
+    }
+
+    private static Core.Audio.Decoders.AacDecoder CreateForensicAacDecoder(
+        Core.Audio.Interfaces.IContainerParser parser, int rate, int ch)
+    {
+        var dec = new Core.Audio.Decoders.AacDecoder(rate, ch);
+        if (parser.DecoderConfig != null)
+            dec.Initialize(parser.DecoderConfig);
+        return dec;
     }
 }

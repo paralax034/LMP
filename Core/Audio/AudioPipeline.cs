@@ -50,7 +50,7 @@ public sealed class AudioPipeline : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts;
     private readonly EbuR128Analyzer _analyzer;
     private readonly EqualizerProcessor _equalizer;
-    private readonly TruePeakLimiter? _truePeakLimiter;
+    private readonly TruePeakLimiter _truePeakLimiter;
     private readonly AudioSpectrumAnalyzer _analyzer3Band;
     private GainCrossfader _gainCrossfader;
 
@@ -619,7 +619,7 @@ CancellationToken ct)
                             _equalizer.Process(warmupSpan);
                             float normGain = _analyzer.IsEnabled ? _analyzer.ProcessSamples() : 1.0f;
                             _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, _decoder.Channels);
-                            _truePeakLimiter!.Process(warmupSpan, ref _gainCrossfader);
+                            _truePeakLimiter.Process(warmupSpan, ref _gainCrossfader);
                         }
                         Interlocked.Decrement(ref _skipFramesCounter);
                         continue;
@@ -789,6 +789,7 @@ CancellationToken ct)
 
         _analyzer.PrepareForSeek();
         _equalizer.Reset();
+        _truePeakLimiter.Reset();
         _analyzer3Band.Reset();
 
 #if AUDIO_SPLICE_AUDIT
@@ -984,7 +985,7 @@ CancellationToken ct)
             _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, channels);
 
             // 2. Всегда пропускаем сигнал через TruePeakLimiter (0 B аллокаций)
-            _truePeakLimiter!.Process(samples, ref _gainCrossfader);
+            _truePeakLimiter.Process(samples, ref _gainCrossfader);
 
 #if AUDIO_SPLICE_AUDIT
             float maxLimStep = 0f, maxLimD2 = 0f;

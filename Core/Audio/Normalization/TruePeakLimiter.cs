@@ -3,43 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace LMP.Core.Audio.Normalization;
 
-/// <summary>
-/// True Peak Limiter с Attack/Release envelope и сохранением состояния между chunk'ами.
-///
-/// <para><b>Проблема предыдущей реализации (chunk-level stateless limiter):</b>
-/// Статический метод без межчанкового состояния вычислял peak по всему chunk (~50ms)
-/// и применял единый safeGain. Один transient в chunk'е давил весь 50ms блок →
-/// следующий chunk без transient'а получал полный gain → «пампинг» каждые 50ms.</para>
-///
-/// <para><b>Алгоритм (envelope follower):</b></para>
-/// <list type="number">
-///   <item>Для каждого сэмпла: вычислить амплитуду после применения gain.</item>
-///   <item>Определить желаемый envelope gain:
-///     <c>targetEnv = ceiling / max(|amplified|, ε)</c>, clamp [0, 1].</item>
-///   <item>Сгладить через attack/release:
-///     <list type="bullet">
-///       <item>Attack (снижение gain): короткий (~5ms) — быстрая защита от клиппинга.</item>
-///       <item>Release (возврат gain): длинный (~150ms) — плавный выход без pumping.</item>
-///     </list>
-///   </item>
-///   <item>Применить: <c>output = amplified × envelopeGain</c>.</item>
-/// </list>
-///
-/// <para><b>Почему envelope follower лучше chunk-level scan:</b></para>
-/// <para>Envelope несёт состояние между chunk'ами: если в конце chunk N был transient,
-/// release на начале chunk N+1 начинается НЕ с 1.0, а с того уровня куда дошёл attack.
-/// Это устраняет pumping — громкость изменяется непрерывно, а не ступенчато.</para>
-///
-/// <para><b>SIMD-оптимизация:</b> Envelope follower имеет data dependency (каждый сэмпл
-/// зависит от предыдущего), поэтому SIMD-векторизация loop'а невозможна.
-/// Оптимизация достигается через <see cref="MethodImplOptions.AggressiveInlining"/>
-/// и bounds elision через <see cref="Unsafe.Add{T}(ref T, int)"/>.</para>
-///
-/// <para><b>Zero-alloc. Нет аллокаций на hot path.</b></para>
-///
-/// <para><b>Single writer:</b> вызывается исключительно из fill thread в
-/// <c>AudioCallback</c>. Нет конкуренции по состоянию.</para>
-/// </summary>
 public sealed class TruePeakLimiter
 {
     #region Constants
@@ -51,7 +14,7 @@ public sealed class TruePeakLimiter
     private const float Ceiling = 0.985f;
 
     /// <summary>
-    /// Порог начала мягкого асимптотического скругления пиков (0.90f) на первых миллисекундах атаки.
+    /// Порог начала мягкого асимптотического скругления пиков (0.88f) на первых миллисекундах атаки.
     /// Гарантирует 0 плоских срезов (FlatClipped == 0) и отсутствие пробоя Ceiling (0.985f) без скачков огибающей.
     /// </summary>
     private const float KneeStart = 0.88f;
@@ -65,9 +28,6 @@ public sealed class TruePeakLimiter
 
     /// <summary>Release time в миллисекундах (плавный возврат после завершения басовой партии).</summary>
     private const float ReleaseMs = 400f;
-
-    /// <summary>Epsilon для защиты от деления на ноль.</summary>
-    private const float Epsilon = 1e-7f;
 
     #endregion
 
@@ -109,25 +69,19 @@ public sealed class TruePeakLimiter
     }
 
     /// <summary>
-    /// Гладкий C2-непрерывный асимптотический сатуратор для защиты верхушек в первые 4 мс атаки огибающей.
-    /// В точке <see cref="KneeStart"/> имеет <c>f'(0) = 1</c> и <c>f''(0) = 0</c>, что полностью исключает
-    /// скачок второй производной (микро-треск на тихих ambient-треках с высоким усилением и на входе в саб-бас).
+    /// Гладкий C2-непрерывный асимптотический сатуратор для положительной амплитуды пика.
+    /// В точке <see cref="KneeStart"/> имеет <c>f'(0) = 1</c> и <c>f''(0) = 0</c>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float SoftCeiling(float x)
+    private static float SoftCeilingPositive(float abs)
     {
-        float abs = MathF.Abs(x);
-        if (abs <= KneeStart)
-            return x;
-
         float u = (abs - KneeStart) * InvKneeSpan;
         float u2 = u * u;
-        float curved = KneeStart + KneeSpan * ((u + u2) / (1.0f + u + u2));
-        return MathF.CopySign(curved, x);
+        return KneeStart + KneeSpan * ((u + u2) / (1.0f + u + u2));
     }
 
     /// <summary>
-    /// Обрабатывает interleaved PCM буфер in-place.
+    /// Обрабатывает interleaved PCM буфер in-place (Zero-Latency, 100% сохранение стерео-баланса L/R и фазы при Seek).
     /// </summary>
     /// <param name="samples">Interleaved PCM сэмплы (in-place обработка).</param>
     /// <param name="crossfader">Ссылка на crossfader для per-sample gain interpolation.</param>
@@ -157,7 +111,7 @@ public sealed class TruePeakLimiter
 
             float absPeak = MathF.Max(MathF.Abs(inL), MathF.Abs(inR));
             float neededGain = absPeak > KneeStart
-                ? (KneeStart * 0.995f) / (absPeak + Epsilon)
+                ? KneeStart / absPeak
                 : 1.0f;
 
             if (neededGain <= targetEnv)
@@ -167,9 +121,6 @@ public sealed class TruePeakLimiter
             }
             else if (neededGain <= targetEnv * 1.06f && neededGain < 1.0f)
             {
-                // Любая полуволна баса в пределах 6% от текущего пика перезаряжает удержание 30 мс
-                // (полупериод 36 Гц = 13.9 мс < 30 мс -> holdRem НИКОГДА не истекает во время звучания баса,
-                // поэтому targetEnv стоит абсолютно неподвижно: EnvRipple == 0.000000!)
                 holdRem = holdMax;
             }
             else if (holdRem > 0)
@@ -181,13 +132,22 @@ public sealed class TruePeakLimiter
                 targetEnv = releaseCoef * targetEnv + (1f - releaseCoef) * 1.0f;
             }
 
-            // Когда targetEnv уже вышел на полку удержания, envGain сходится к нему и замирает в 0 ripple
             envGain = targetEnv < envGain
                 ? attackCoef * envGain + (1f - attackCoef) * targetEnv
                 : releaseCoef * envGain + (1f - releaseCoef) * targetEnv;
 
-            Unsafe.Add(ref samplesRef, i) = SoftCeiling(inL * envGain);
-            Unsafe.Add(ref samplesRef, i + 1) = SoftCeiling(inR * envGain);
+            float outL = inL * envGain;
+            float outR = inR * envGain;
+            float outPeak = MathF.Max(MathF.Abs(outL), MathF.Abs(outR));
+            if (outPeak > KneeStart)
+            {
+                float softScale = SoftCeilingPositive(outPeak) / outPeak;
+                outL *= softScale;
+                outR *= softScale;
+            }
+
+            Unsafe.Add(ref samplesRef, i) = outL;
+            Unsafe.Add(ref samplesRef, i + 1) = outR;
         }
 
         for (; i < length; i++)
@@ -197,7 +157,7 @@ public sealed class TruePeakLimiter
             float absAmp = MathF.Abs(amplified);
 
             float neededGain = absAmp > KneeStart
-                ? (KneeStart * 0.995f) / (absAmp + Epsilon)
+                ? KneeStart / absAmp
                 : 1.0f;
 
             if (neededGain < targetEnv)
@@ -218,7 +178,12 @@ public sealed class TruePeakLimiter
                 ? attackCoef * envGain + (1f - attackCoef) * targetEnv
                 : releaseCoef * envGain + (1f - releaseCoef) * targetEnv;
 
-            Unsafe.Add(ref samplesRef, i) = SoftCeiling(amplified * envGain);
+            float outM = amplified * envGain;
+            float outAbs = MathF.Abs(outM);
+            if (outAbs > KneeStart)
+                outM = MathF.CopySign(SoftCeilingPositive(outAbs), outM);
+
+            Unsafe.Add(ref samplesRef, i) = outM;
         }
 
         _envelopeGain = envGain;
