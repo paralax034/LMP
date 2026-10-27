@@ -25,6 +25,7 @@ public sealed class EqualizerCurveControl : Control
     private const double LerpSpeed = 18.0;
     private const double SpectrumLerpUp = 28.0;
     private const double SpectrumLerpDown = 10.0;
+    private const double MinFrameIntervalSeconds = 0.0155; // ~60 FPS cap
 
     private static readonly string[] Labels10Band = ["31", "62", "125", "250", "500", "1к", "2к", "4к", "8к", "16к"];
     private static readonly string[] Hints10BandKeys =
@@ -78,6 +79,9 @@ public sealed class EqualizerCurveControl : Control
     private readonly float[] _displayIso10 = new float[EqualizerProcessor.BandCount];
     private readonly float[] _spectrum10 = new float[EqualizerProcessor.BandCount];
     private readonly float[] _macro5Working = new float[5];
+    private readonly float[] _emitBufferA = new float[EqualizerProcessor.BandCount];
+    private readonly float[] _emitBufferB = new float[EqualizerProcessor.BandCount];
+    private bool _emitBufferToggle;
 
     private readonly Point[] _wave10Points = new Point[EqualizerProcessor.BandCount];
     private readonly Point[] _lastRenderedWavePoints = new Point[EqualizerProcessor.BandCount];
@@ -85,16 +89,16 @@ public sealed class EqualizerCurveControl : Control
     private StreamGeometry? _cachedLineGeometry;
     private double _lastRenderedZeroY = double.NaN;
 
+    private const int DbStepCount = 49; // [-12.0 .. +12.0] с шагом 0.5 dB
     private readonly FormattedText?[] _cachedNormalLabels = new FormattedText?[EqualizerProcessor.BandCount];
     private readonly FormattedText?[] _cachedHotLabels = new FormattedText?[EqualizerProcessor.BandCount];
+    private readonly FormattedText?[] _cachedHintSubLabels = new FormattedText?[EqualizerProcessor.BandCount];
+    private readonly FormattedText?[] _cachedDbValueLabels = new FormattedText?[DbStepCount];
     private bool _labelsDirty = true;
     private string _lastLanguageCode = "";
-    private int _lastTipCol = -1;
-    private float _lastTipDb = float.NaN;
-    private bool _lastTipMode5;
-    private FormattedText? _cachedTipText;
 
     private readonly Action<TimeSpan> _rafCallback;
+    private Avalonia.Threading.DispatcherTimer? _idlePollTimer;
 
     private int _hoveredColumnIndex = -1;
     private bool _isDraggingWave;
@@ -117,7 +121,6 @@ public sealed class EqualizerCurveControl : Control
     static EqualizerCurveControl()
     {
         AffectsRender<EqualizerCurveControl>(
-            BandGainsProperty,
             IsSimple5BandModeProperty,
             IsEqEnabledProperty);
     }
@@ -142,6 +145,7 @@ public sealed class EqualizerCurveControl : Control
         _isRafActive = false;
         _isDraggingWave = false;
         _hoveredColumnIndex = -1;
+        _idlePollTimer?.Stop();
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -153,19 +157,27 @@ public sealed class EqualizerCurveControl : Control
         {
             SyncTargetFromProperty(snapImmediately: false);
             EnsureAnimationLoop();
+            InvalidateVisual();
         }
         else if (change.Property == IsSimple5BandModeProperty || change.Property == IsEqEnabledProperty)
         {
             _hoveredColumnIndex = -1;
             _labelsDirty = true;
-            _cachedTipText = null;
             EnsureAnimationLoop();
             InvalidateVisual();
         }
-        else if (change.Property == IsVisibleProperty && IsVisible)
+        else if (change.Property == IsVisibleProperty)
         {
-            SyncTargetFromProperty(snapImmediately: true);
-            EnsureAnimationLoop();
+            if (IsVisible)
+            {
+                SyncTargetFromProperty(snapImmediately: true);
+                EnsureAnimationLoop();
+            }
+            else
+            {
+                _isRafActive = false;
+                _idlePollTimer?.Stop();
+            }
         }
     }
 
@@ -197,9 +209,12 @@ public sealed class EqualizerCurveControl : Control
         Visual? current = this;
         while (current != null)
         {
+            Visual? parent = current.GetVisualParent();
+            if (parent is PersistentPageHost && current is InputElement page && !page.IsHitTestVisible)
+                return false;
             if (current.Opacity <= 0.001)
                 return false;
-            current = current.GetVisualParent();
+            current = parent;
         }
 
         return true;
@@ -211,6 +226,7 @@ public sealed class EqualizerCurveControl : Control
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel == null) return;
 
+        _idlePollTimer?.Stop();
         _isRafActive = true;
         _lastFrameTs = Stopwatch.GetTimestamp();
         topLevel.RequestAnimationFrame(_rafCallback);
@@ -225,7 +241,14 @@ public sealed class EqualizerCurveControl : Control
         }
 
         long now = Stopwatch.GetTimestamp();
-        double dt = Math.Clamp(Stopwatch.GetElapsedTime(_lastFrameTs, now).TotalSeconds, 0.001, 0.050);
+        double rawDt = Stopwatch.GetElapsedTime(_lastFrameTs, now).TotalSeconds;
+        if (rawDt < MinFrameIntervalSeconds)
+        {
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+            return;
+        }
+
+        double dt = Math.Clamp(rawDt, 0.001, 0.050);
         _lastFrameTs = now;
 
         bool needsRedraw = false;
@@ -285,14 +308,17 @@ public sealed class EqualizerCurveControl : Control
         }
         else
         {
-            // Когда музыка на паузе и интерполяция кривой завершена, засыпаем на лёгком 250мс таймере
-            // вместо 60 FPS RequestAnimationFrame, чтобы не будить композитор DWM в простое.
             _isRafActive = false;
-            Avalonia.Threading.DispatcherTimer.RunOnce(() =>
-            {
-                if (IsActuallyVisibleOnScreen())
-                    EnsureAnimationLoop();
-            }, TimeSpan.FromMilliseconds(250));
+            _idlePollTimer ??= new Avalonia.Threading.DispatcherTimer(
+                TimeSpan.FromMilliseconds(250),
+                Avalonia.Threading.DispatcherPriority.Background,
+                (_, _) =>
+                {
+                    _idlePollTimer?.Stop();
+                    if (IsActuallyVisibleOnScreen())
+                        EnsureAnimationLoop();
+                });
+            _idlePollTimer.Start();
         }
     }
 
@@ -443,11 +469,13 @@ public sealed class EqualizerCurveControl : Control
         }
 
         EnsureAnimationLoop();
-        InvalidateVisual();
+        if (!_isRafActive)
+            InvalidateVisual();
 
-        var copy = new float[EqualizerProcessor.BandCount];
-        _targetIso10.AsSpan().CopyTo(copy);
-        BandsChanged?.Invoke(copy);
+        _emitBufferToggle = !_emitBufferToggle;
+        var emitBuffer = _emitBufferToggle ? _emitBufferA : _emitBufferB;
+        _targetIso10.AsSpan().CopyTo(emitBuffer);
+        BandsChanged?.Invoke(emitBuffer);
     }
 
     private int FindClosestControlColumn(Point pos)
@@ -592,28 +620,18 @@ public sealed class EqualizerCurveControl : Control
             double colX = GetControlColumnX(idx, controlCount, plotW);
             float db = GetControlColumnGain(idx, useDisplay: false);
 
-            if (_cachedTipText == null || _lastTipCol != idx || MathF.Abs(_lastTipDb - db) > 0.01f || _lastTipMode5 != IsSimple5BandMode)
+            int dbIdx = Math.Clamp((int)MathF.Round((db + 12.0f) * 2.0f), 0, DbStepCount - 1);
+            var dbFt = _cachedDbValueLabels[dbIdx];
+            var subFt = _cachedHintSubLabels[idx];
+
+            if (dbFt != null && subFt != null)
             {
-                _lastTipCol = idx;
-                _lastTipDb = db;
-                _lastTipMode5 = IsSimple5BandMode;
-
-                string dbStr = db > 0.05f ? $"+{db:0.0} dB" : $"{db:0.0} dB";
-                string hintSub = IsSimple5BandMode
-                    ? Hints5BandFreqs[idx]
-                    : LocalizationService.Instance[Hints10BandKeys[idx]];
-
-                _cachedTipText = new FormattedText(
-                    $"{dbStr} • {hintSub}",
-                    CultureInfo.CurrentUICulture,
-                    FlowDirection.LeftToRight,
-                    Typeface.Default,
-                    10.5,
-                    _activeLabelBrush);
+                const double gap = 6.0;
+                double totalW = dbFt.Width + gap + subFt.Width;
+                double tipX = Math.Clamp(colX - totalW * 0.5, 4.0, Math.Max(4.0, w - totalW - 4.0));
+                context.DrawText(dbFt, new Point(tipX, 2.0));
+                context.DrawText(subFt, new Point(tipX + dbFt.Width + gap, 2.0));
             }
-
-            double tipX = Math.Clamp(colX - _cachedTipText.Width * 0.5, 4.0, Math.Max(4.0, w - _cachedTipText.Width - 4.0));
-            context.DrawText(_cachedTipText, new Point(tipX, 2.0));
         }
     }
 
@@ -621,14 +639,14 @@ public sealed class EqualizerCurveControl : Control
     {
         bool pointsChanged = _cachedFillGeometry == null
                           || _cachedLineGeometry == null
-                          || Math.Abs(_lastRenderedZeroY - zeroY) > 0.25;
+                          || Math.Abs(_lastRenderedZeroY - zeroY) > 0.35;
 
         if (!pointsChanged)
         {
             for (int i = 0; i < EqualizerProcessor.BandCount; i++)
             {
-                if (Math.Abs(_wave10Points[i].X - _lastRenderedWavePoints[i].X) > 0.25 ||
-                    Math.Abs(_wave10Points[i].Y - _lastRenderedWavePoints[i].Y) > 0.25)
+                if (Math.Abs(_wave10Points[i].X - _lastRenderedWavePoints[i].X) > 0.35 ||
+                    Math.Abs(_wave10Points[i].Y - _lastRenderedWavePoints[i].Y) > 0.35)
                 {
                     pointsChanged = true;
                     break;
@@ -672,8 +690,18 @@ public sealed class EqualizerCurveControl : Control
 
         _lastLanguageCode = lang;
         _labelsDirty = false;
-        _cachedTipText = null;
         var typeface = Typeface.Default;
+
+        if (_cachedDbValueLabels[0] == null)
+        {
+            for (int s = 0; s < DbStepCount; s++)
+            {
+                float dbVal = -12.0f + s * 0.5f;
+                string dbStr = dbVal > 0.05f ? $"+{dbVal:0.0} dB •" : $"{dbVal:0.0} dB •";
+                _cachedDbValueLabels[s] = new FormattedText(
+                    dbStr, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, 10.5, _activeLabelBrush);
+            }
+        }
 
         for (int i = 0; i < controlCount; i++)
         {
@@ -682,6 +710,10 @@ public sealed class EqualizerCurveControl : Control
                 text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, 10.5, _labelBrush);
             _cachedHotLabels[i] = new FormattedText(
                 text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, 10.5, _activeLabelBrush);
+
+            string hintSub = IsSimple5BandMode ? Hints5BandFreqs[i] : l10n[Hints10BandKeys[i]];
+            _cachedHintSubLabels[i] = new FormattedText(
+                hintSub, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, 10.5, _activeLabelBrush);
         }
     }
 
@@ -777,8 +809,8 @@ public sealed class EqualizerCurveControl : Control
 
         _labelBrush = new ImmutableSolidColorBrush(textMuted);
         _activeLabelBrush = new ImmutableSolidColorBrush(accent);
+        Array.Clear(_cachedDbValueLabels);
         _labelsDirty = true;
-        _cachedTipText = null;
     }
 
     #endregion

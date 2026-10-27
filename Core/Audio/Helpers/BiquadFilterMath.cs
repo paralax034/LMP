@@ -258,10 +258,7 @@ public static class BiquadFilterMath
     /// <summary>Параметрический колоколообразный фильтр (Peaking EQ).</summary>
     public static BiquadCoefficients ComputePeakingEq(int sampleRate, double freqHz, double gainDb, double q = 1.4142135623730951)
     {
-        if (Math.Abs(gainDb) < 0.001)
-            return BiquadCoefficients.Identity;
-
-        double a = Math.Pow(10.0, gainDb / 40.0);
+        double a = Math.Abs(gainDb) < 0.001 ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
         double w0 = 2.0 * Math.PI * ClampFreq(freqHz, sampleRate) / sampleRate;
         (double sinW0, double cosW0) = Math.SinCos(w0);
         double alpha = sinW0 / (2.0 * q);
@@ -280,10 +277,7 @@ public static class BiquadFilterMath
     /// <summary>Низкочастотный шельфовый фильтр (Low-Shelf).</summary>
     public static BiquadCoefficients ComputeLowShelf(int sampleRate, double freqHz, double gainDb, double q = 0.7071067811865475)
     {
-        if (Math.Abs(gainDb) < 0.001)
-            return BiquadCoefficients.Identity;
-
-        double a = Math.Pow(10.0, gainDb / 40.0);
+        double a = Math.Abs(gainDb) < 0.001 ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
         double w0 = 2.0 * Math.PI * ClampFreq(freqHz, sampleRate) / sampleRate;
         (double sinW0, double cosW0) = Math.SinCos(w0);
         double alpha = sinW0 / (2.0 * q);
@@ -303,10 +297,7 @@ public static class BiquadFilterMath
     /// <summary>Высокочастотный шельфовый фильтр (High-Shelf).</summary>
     public static BiquadCoefficients ComputeHighShelf(int sampleRate, double freqHz, double gainDb, double q = 0.7071067811865475)
     {
-        if (Math.Abs(gainDb) < 0.001)
-            return BiquadCoefficients.Identity;
-
-        double a = Math.Pow(10.0, gainDb / 40.0);
+        double a = Math.Abs(gainDb) < 0.001 ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
         double w0 = 2.0 * Math.PI * ClampFreq(freqHz, sampleRate) / sampleRate;
         (double sinW0, double cosW0) = Math.SinCos(w0);
         double alpha = sinW0 / (2.0 * q);

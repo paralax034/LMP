@@ -342,7 +342,6 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         CdnConnectionPreWarmer.OnTunnelDeadDetected += HandleCdnTunnelDead;
         Audio.Sources.CachingStreamSource.OnNetworkStalled += HandleSourceNetworkStalled;
         Audio.Sources.CachingStreamSource.OnNetworkRecovered += HandleSourceNetworkRecovered;
-        InitializeFromSettings();
 
         _commandQueue = Channel.CreateBounded<IEngineCommand>(
             new BoundedChannelOptions(CommandQueueCapacity)

@@ -2028,7 +2028,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         if (_isSyncingEq || newBands10.Length < EqualizerProcessor.BandCount) return;
 
-        // 1. Мгновенно обновляем состояние в памяти и аудио-движок (0 мс задержки)
+        // 1. Мгновенно обновляем состояние в памяти и аудио-движок (0 мс задержки, ровно 1 вызов без дубля из OnIsEqualizerEnabledChanged)
         var audioSettings = _library.Settings.Audio;
         audioSettings.EqualizerEnabled = true;
         audioSettings.CustomEqualizerBands = newBands10;
@@ -2037,21 +2037,57 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         else
             CurrentTrack.EqualizerPresetId = EqualizerPresets.CustomId;
 
-        IsEqualizerEnabled = true;
-        ActiveEqualizerPresetId = EqualizerPresets.CustomId;
-        EqualizerBandGains = newBands10;
-        UpdateActiveEqualizerChipSelection(EqualizerPresets.CustomId);
-        RefreshEqualizerButtonFlags(newBands10);
+        bool presetChanged = !string.Equals(ActiveEqualizerPresetId, EqualizerPresets.CustomId, StringComparison.Ordinal);
+
+        _isSyncingEq = true;
+        try
+        {
+            IsEqualizerEnabled = true;
+            if (presetChanged)
+            {
+                ActiveEqualizerPresetId = EqualizerPresets.CustomId;
+                UpdateActiveEqualizerChipSelection(EqualizerPresets.CustomId);
+                RefreshEqualizerButtonFlags(newBands10);
+            }
+            else
+            {
+                bool hasNonZeroBand = false;
+                for (int i = 0; i < newBands10.Length; i++)
+                {
+                    if (MathF.Abs(newBands10[i]) > 0.05f)
+                    {
+                        hasNonZeroBand = true;
+                        break;
+                    }
+                }
+                CanResetEqualizer = hasNonZeroBand;
+            }
+        }
+        finally
+        {
+            _isSyncingEq = false;
+        }
+
         _audio.UpdateEqualizerSettings();
 
-        // 2. Откладываем физическую запись JSON в SQLite на 350 мс после отпускания ползунка
+        // 2. Откладываем физическую запись JSON в SQLite и обновление массива биндинга на 350 мс после отпускания ползунка
         _eqSaveDebounceTimer?.Stop();
         _eqSaveDebounceTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(350),
             DispatcherPriority.Background,
-            (_, _) =>
+          (_, _) =>
             {
                 _eqSaveDebounceTimer?.Stop();
+                _isSyncingEq = true;
+                try
+                {
+                    EqualizerBandGains = _library.Settings.Audio.CustomEqualizerBands;
+                }
+                finally
+                {
+                    _isSyncingEq = false;
+                }
+
                 _library.UpdateSettings(s =>
                 {
                     s.Audio.EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
@@ -2067,20 +2103,22 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private void ApplyEqualizerPresetSelection(string presetId)
     {
         _eqSaveDebounceTimer?.Stop();
+        bool enableEq = !IsEqualizerEnabled && !string.Equals(presetId, EqualizerPresets.FlatId, StringComparison.Ordinal);
 
         if (IsEditingTrackEqualizer && CurrentTrack != null && !ForceGlobalEqualizer)
         {
+            if (enableEq)
+                _library.UpdateSettings(s => s.Audio.EqualizerEnabled = true);
             _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, presetId);
         }
         else
         {
-            _library.UpdateSettings(s => s.Audio.GlobalEqualizerPresetId = presetId);
-        }
-
-        if (!IsEqualizerEnabled && !string.Equals(presetId, EqualizerPresets.FlatId, StringComparison.Ordinal))
-        {
-            IsEqualizerEnabled = true;
-            _library.UpdateSettings(s => s.Audio.EqualizerEnabled = true);
+            _library.UpdateSettings(s =>
+            {
+                s.Audio.GlobalEqualizerPresetId = presetId;
+                if (enableEq)
+                    s.Audio.EqualizerEnabled = true;
+            });
         }
 
         SyncEqualizerStateFromSettings();

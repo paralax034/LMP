@@ -310,6 +310,9 @@ public sealed partial class AudioEngine
         ApplyEqualizerToPipelineCore(pipeline, CurrentTrack?.Id, snapImmediately: false);
     }
 
+    private string? _lastLoggedEqPresetId;
+    private bool _lastLoggedEqEnabled;
+
     private void ApplyEqualizerToPipelineCore(AudioPipeline pipeline, string? trackId, bool snapImmediately)
     {
         var audioSettings = _library.Settings.Audio;
@@ -323,16 +326,33 @@ public sealed partial class AudioEngine
         }
 
         Span<float> bands = stackalloc float[LMP.Core.Audio.Helpers.EqualizerProcessor.BandCount];
-        LMP.Core.Audio.Helpers.EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
+        string effectivePresetId = LMP.Core.Audio.Helpers.EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
 
         pipeline.Equalizer.Configure(
-            audioSettings.EqualizerEnabled,
-            bands,
-            audioSettings.EqualizerPreampDb,
-            autoPreamp: true);
+             audioSettings.EqualizerEnabled,
+             bands,
+             audioSettings.EqualizerPreampDb,
+             autoPreamp: true);
 
         if (snapImmediately)
+        {
             pipeline.Equalizer.SnapToTarget();
+            _lastLoggedEqPresetId = effectivePresetId;
+            _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
+            Log.Debug(
+                $"[AudioEngine] Equalizer initial config for '{trackId}': enabled={audioSettings.EqualizerEnabled}, " +
+                $"preset='{effectivePresetId}', preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB");
+        }
+        else if (_lastLoggedEqEnabled != audioSettings.EqualizerEnabled
+              || !string.Equals(_lastLoggedEqPresetId, effectivePresetId, StringComparison.Ordinal))
+        {
+            _lastLoggedEqPresetId = effectivePresetId;
+            _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
+            Log.Info(
+                $"[AudioEngine] Equalizer updated: enabled={audioSettings.EqualizerEnabled}, " +
+                $"preset='{effectivePresetId}' (forceGlobal={audioSettings.ForceGlobalEqualizer}, " +
+                $"trackPreset='{track?.EqualizerPresetId ?? "none"}', preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB)");
+        }
     }
 
     #endregion

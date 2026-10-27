@@ -219,41 +219,110 @@ public static class EqualizerPresets
 /// <summary>
 /// Высокопроизводительный 10-полосный параметрический/графический эквалайзер реального времени.
 /// </summary>
-/// <remarks>
-/// <para><b>Архитектурные инварианты:</b></para>
-/// <list type="bullet">
-///   <item><b>Zero-Alloc Hot Path:</b> <see cref="Process"/> не выделяет ни одного байта в куче.</item>
-///   <item><b>Lock-Free SeqLock:</b> передача коэффициентов из UI-потока в поток WASAPI осуществляется через атомарный чётный/нечётный счётчик поколений и фиксированный массив <see cref="InlineArrayAttribute"/>.</item>
-///   <item><b>Sub-Block Parameter Smoothing:</b> плавная линейная интерполяция коэффициентов и предусиления на горизонте 960 стерео-фреймов (20 мс) с шагом 16 фреймов исключает цифровые щелчки (zipper noise).</item>
-///   <item><b>Zero-CPU Bypass:</b> при выключенном эквалайзере или нулевом усилении всех полос после завершения рампы цикл фильтрации полностью пропускается.</item>
-/// </list>
-/// </remarks>
 public sealed class EqualizerProcessor
 {
     public const int BandCount = 10;
     public const float MinGainDb = -12.0f;
     public const float MaxGainDb = 12.0f;
 
-    /// <summary>Длительность плавного перехода коэффициентов в стерео-фреймах (960 фреймов = 20 мс при 48 кГц).</summary>
-    private const int RampTotalFrames = 960;
+    /// <summary>Длительность активного окна сглаживания в стерео-фреймах (1440 фреймов = 30 мс при 48 кГц).</summary>
+    private const int RampTotalFrames = 1440;
 
-    /// <summary>Размер подблока обновления интерполированных коэффициентов (16 фреймов = 0.33 мс).</summary>
-    private const int SubBlockFrames = 16;
+    /// <summary>
+    /// Коэффициент посэмплового однополюсного фильтра нижних частот (Per-Sample 1-Pole Low-Pass Smoother):
+    /// alpha = 0.0042f (постоянная времени tau ~ 5 мс, за 1440 сэмплов сходится на 99.8%, 0 ступенек квантования на ВЧ!).
+    /// </summary>
+    private const float SampleSmoothAlpha = 0.0042f;
 
     /// <summary>Стандартные центральные частоты 10 ISO-октавных полос (Гц).</summary>
     public static ReadOnlySpan<float> BandFrequenciesHz =>
         [31.25f, 62.5f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f];
 
-    [InlineArray(BandCount)]
-    private struct BandCoefficientArray
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SvfCoefficientsF
     {
-        private BiquadCoefficientsF _element0;
+        public float A1;
+        public float A2;
+        public float A3;
+        public float M0;
+        public float M1;
+        public float M2;
+
+        /// <summary>
+        /// Посэмпловый шаг однополюсного НЧ-фильтра сглаживания коэффициентов (1-pole LPF без ВЧ-ступенек подблоков).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SmoothStepTowards(in SvfCoefficientsF target, float alpha)
+        {
+            A1 += (target.A1 - A1) * alpha;
+            A2 += (target.A2 - A2) * alpha;
+            A3 += (target.A3 - A3) * alpha;
+            M0 += (target.M0 - M0) * alpha;
+            M1 += (target.M1 - M1) * alpha;
+            M2 += (target.M2 - M2) * alpha;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct StereoSvfState
+    {
+        public double Ic1EqL;
+        public double Ic1EqR;
+        public double Ic2EqL;
+        public double Ic2EqR;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ProcessStereoDouble(ref double left, ref double right, in SvfCoefficientsF c)
+        {
+            double inL = left;
+            double inR = right;
+
+            double a1 = c.A1;
+            double a2 = c.A2;
+            double a3 = c.A3;
+
+            double v3L = inL - Ic2EqL;
+            double v3R = inR - Ic2EqR;
+
+            double v1L = Math.FusedMultiplyAdd(a1, Ic1EqL, a2 * v3L);
+            double v1R = Math.FusedMultiplyAdd(a1, Ic1EqR, a2 * v3R);
+
+            double v2L = Ic2EqL + Math.FusedMultiplyAdd(a2, Ic1EqL, a3 * v3L);
+            double v2R = Ic2EqR + Math.FusedMultiplyAdd(a2, Ic1EqR, a3 * v3R);
+
+            Ic1EqL = 2.0 * v1L - Ic1EqL;
+            Ic1EqR = 2.0 * v1R - Ic1EqR;
+            Ic2EqL = 2.0 * v2L - Ic2EqL;
+            Ic2EqR = 2.0 * v2R - Ic2EqR;
+
+            double m0 = c.M0;
+            double m1 = c.M1;
+            double m2 = c.M2;
+
+            left = Math.FusedMultiplyAdd(m0, inL, Math.FusedMultiplyAdd(m1, v1L, m2 * v2L));
+            right = Math.FusedMultiplyAdd(m0, inR, Math.FusedMultiplyAdd(m1, v1R, m2 * v2R));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Reset()
+        {
+            Ic1EqL = 0.0;
+            Ic1EqR = 0.0;
+            Ic2EqL = 0.0;
+            Ic2EqR = 0.0;
+        }
     }
 
     [InlineArray(BandCount)]
-    private struct BandStateArray
+    private struct BandSvfCoeffArray
     {
-        private StereoBiquadStateF _element0;
+        private SvfCoefficientsF _element0;
+    }
+
+    [InlineArray(BandCount)]
+    private struct BandSvfStateArray
+    {
+        private StereoSvfState _element0;
     }
 
     private readonly int _sampleRate;
@@ -262,19 +331,18 @@ public sealed class EqualizerProcessor
 
     // Поля SeqLock для lock-free публикации из UI-потока в AudioCallback
     private long _publishedVersion;
-    private BandCoefficientArray _publishedCoeffs;
+    private BandSvfCoeffArray _publishedCoeffs;
     private float _publishedPreampGain = 1.0f;
     private bool _publishedBypass = true;
     private bool _publishedHasPositiveBoost;
 
     // Локальное состояние потока AudioCallback (single writer / single reader)
     private long _localVersion;
-    private BandCoefficientArray _startCoeffs;
-    private BandCoefficientArray _currentCoeffs;
-    private BandCoefficientArray _targetCoeffs;
-    private BandStateArray _states;
+    private BandSvfCoeffArray _unityCoeffs;
+    private BandSvfCoeffArray _currentCoeffs;
+    private BandSvfCoeffArray _targetCoeffs;
+    private BandSvfStateArray _states;
 
-    private float _startPreampGain = 1.0f;
     private float _currentPreampGain = 1.0f;
     private float _targetPreampGain = 1.0f;
 
@@ -289,40 +357,88 @@ public sealed class EqualizerProcessor
         _sampleRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
         _channels = Math.Max(1, channels);
 
+        var freqs = BandFrequenciesHz;
         for (int i = 0; i < BandCount; i++)
         {
-            _publishedCoeffs[i] = BiquadCoefficientsF.Identity;
-            _startCoeffs[i] = BiquadCoefficientsF.Identity;
-            _currentCoeffs[i] = BiquadCoefficientsF.Identity;
-            _targetCoeffs[i] = BiquadCoefficientsF.Identity;
+            SvfCoefficientsF cf = ComputeSvfBandCoefficients(_sampleRate, freqs[i], i, 0f);
+            _unityCoeffs[i] = cf;
+            _publishedCoeffs[i] = cf;
+            _currentCoeffs[i] = cf;
+            _targetCoeffs[i] = cf;
         }
     }
 
-    /// <summary>
-    /// Указывает, находится ли эквалайзер в состоянии полного байпаса (0% нагрузки на CPU).
-    /// </summary>
-    public bool IsBypassed => _isBypassed;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static BiquadCoefficients ComputeBandCoefficients(int sampleRate, float freqHz, int bandIndex, float gainDb) =>
+        bandIndex switch
+        {
+            0 => BiquadFilterMath.ComputeLowShelf(sampleRate, freqHz, gainDb, 0.7071067811865475),
+            BandCount - 1 => BiquadFilterMath.ComputeHighShelf(sampleRate, freqHz, gainDb, 0.7071067811865475),
+            _ => BiquadFilterMath.ComputePeakingEq(sampleRate, freqHz, gainDb, 1.4142135623730951)
+        };
 
     /// <summary>
-    /// Указывает, имеет ли хотя бы одна полоса положительное усиление (&gt; 0.05 dB),
-    /// требующее обязательного участия <see cref="Normalization.TruePeakLimiter"/>.
+    /// Вычисляет коэффициенты Cytomic SVF с фиксированной центральной частотой g.
+    /// При 0 dB гарантирует M0 = 1, M1 = 0, M2 = 0 (выход равен входу независимо от состояния интеграторов).
     /// </summary>
+    private static SvfCoefficientsF ComputeSvfBandCoefficients(int sampleRate, float freqHz, int bandIndex, float gainDb)
+    {
+        double clampedFreq = Math.Clamp((double)freqHz, 10.0, Math.Max(20.0, sampleRate * 0.47));
+        double g = Math.Tan(Math.PI * clampedFreq / sampleRate);
+        double a = Math.Abs(gainDb) < 0.001f ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
+
+        double k, m0, m1, m2;
+
+        if (bandIndex == 0)
+        {
+            const double q = 0.7071067811865475;
+            k = 1.0 / q;
+            m0 = 1.0;
+            m1 = k * (a - 1.0);
+            m2 = a * a - 1.0;
+        }
+        else if (bandIndex == BandCount - 1)
+        {
+            const double q = 0.7071067811865475;
+            k = 1.0 / q;
+            m0 = a * a;
+            m1 = k * (1.0 - a) * a;
+            m2 = 1.0 - a * a;
+        }
+        else
+        {
+            const double q = 1.4142135623730951;
+            k = 1.0 / (q * a);
+            m0 = 1.0;
+            m1 = k * (a * a - 1.0);
+            m2 = 0.0;
+        }
+
+        double a1 = 1.0 / (1.0 + g * (g + k));
+        double a2 = g * a1;
+        double a3 = g * a2;
+
+        return new SvfCoefficientsF
+        {
+            A1 = (float)a1,
+            A2 = (float)a2,
+            A3 = (float)a3,
+            M0 = (float)m0,
+            M1 = (float)m1,
+            M2 = (float)m2
+        };
+    }
+
+    public bool IsBypassed => _isBypassed;
     public bool HasPositiveBoost => _hasPositiveBoost;
 
-    /// <summary>
-    /// Потокобезопасно обновляет целевые параметры эквалайзера из UI/Command потока.
-    /// </summary>
-    /// <param name="enabled">Включён ли эквалайзер.</param>
-    /// <param name="bandGainsDb">Массив из 10 значений усиления в дБ.</param>
-    /// <param name="preampDb">Ручное предусиление в дБ.</param>
-    /// <param name="autoPreamp">Автоматическая компенсация пикового усиления АЧХ для предотвращения перегруза на суббасе.</param>
     public void Configure(
         bool enabled,
         ReadOnlySpan<float> bandGainsDb,
         float preampDb = 0f,
         bool autoPreamp = true)
     {
-        BandCoefficientArray nextCoeffs = default;
+        BandSvfCoeffArray nextCoeffs = default;
         Span<BiquadCoefficients> exactCoeffs = stackalloc BiquadCoefficients[BandCount];
         bool allFlat = true;
         float maxBoostDb = 0f;
@@ -338,33 +454,22 @@ public sealed class EqualizerProcessor
                 if (db > maxBoostDb)
                     maxBoostDb = db;
 
-                BiquadCoefficients c = i switch
-                {
-                    0 => BiquadFilterMath.ComputeLowShelf(_sampleRate, freqs[0], db, 0.7071067811865475),
-                    BandCount - 1 => BiquadFilterMath.ComputeHighShelf(_sampleRate, freqs[BandCount - 1], db, 0.7071067811865475),
-                    _ => BiquadFilterMath.ComputePeakingEq(_sampleRate, freqs[i], db, 1.4142135623730951)
-                };
-
-                exactCoeffs[i] = c;
-                nextCoeffs[i] = BiquadCoefficientsF.FromDouble(in c);
+                exactCoeffs[i] = ComputeBandCoefficients(_sampleRate, freqs[i], i, db);
+                nextCoeffs[i] = ComputeSvfBandCoefficients(_sampleRate, freqs[i], i, db);
             }
         }
         else
         {
-            for (int i = 0; i < BandCount; i++)
-            {
-                exactCoeffs[i] = BiquadCoefficients.Identity;
-                nextCoeffs[i] = BiquadCoefficientsF.Identity;
-            }
+            nextCoeffs = _unityCoeffs;
         }
 
         float effectivePreampDb = enabled ? Math.Clamp(preampDb, -12f, 12f) : 0f;
         if (enabled && autoPreamp && !allFlat)
         {
             float peakResponseDb = ComputePeakResponseDb(exactCoeffs, _sampleRate);
-            if (peakResponseDb > 1.5f)
+            if (peakResponseDb > 6.0f)
             {
-                effectivePreampDb -= (peakResponseDb - 1.5f) * 0.75f;
+                effectivePreampDb -= (peakResponseDb - 6.0f) * 0.45f;
             }
         }
 
@@ -424,15 +529,16 @@ public sealed class EqualizerProcessor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool AreCoefficientsEqual(in BandCoefficientArray a, in BandCoefficientArray b)
+    private static bool AreCoefficientsEqual(in BandSvfCoeffArray a, in BandSvfCoeffArray b)
     {
         for (int i = 0; i < BandCount; i++)
         {
-            if (MathF.Abs(a[i].B0 - b[i].B0) > 1e-6f ||
-                MathF.Abs(a[i].B1 - b[i].B1) > 1e-6f ||
-                MathF.Abs(a[i].B2 - b[i].B2) > 1e-6f ||
-                MathF.Abs(a[i].A1 - b[i].A1) > 1e-6f ||
-                MathF.Abs(a[i].A2 - b[i].A2) > 1e-6f)
+            if (!(MathF.Abs(a[i].A1 - b[i].A1) <= 1e-6f) ||
+                !(MathF.Abs(a[i].A2 - b[i].A2) <= 1e-6f) ||
+                !(MathF.Abs(a[i].A3 - b[i].A3) <= 1e-6f) ||
+                !(MathF.Abs(a[i].M0 - b[i].M0) <= 1e-6f) ||
+                !(MathF.Abs(a[i].M1 - b[i].M1) <= 1e-6f) ||
+                !(MathF.Abs(a[i].M2 - b[i].M2) <= 1e-6f))
             {
                 return false;
             }
@@ -440,34 +546,22 @@ public sealed class EqualizerProcessor
         return true;
     }
 
-    /// <summary>
-    /// Мгновенно фиксирует текущие коэффициенты на целевых значениях без 20-мс рампы (вызывается перед стартом трека).
-    /// </summary>
     public void SnapToTarget()
     {
         SyncPublishedParameters();
         _currentCoeffs = _targetCoeffs;
-        _startCoeffs = _targetCoeffs;
         _currentPreampGain = _targetPreampGain;
-        _startPreampGain = _targetPreampGain;
         _rampFramesRemaining = 0;
         _isBypassed = _targetBypass;
         _hasPositiveBoost = _targetHasPositiveBoost;
     }
 
-    /// <summary>
-    /// Сбрасывает регистры задержки всех полос (при Seek или остановке).
-    /// </summary>
     public void Reset()
     {
         for (int i = 0; i < BandCount; i++)
             _states[i].Reset();
     }
 
-    /// <summary>
-    /// Обрабатывает interleaved PCM буфер in-place (0 B аллокаций).
-    /// Вызывается исключительно из потока воспроизведения (<c>AudioCallback</c>).
-    /// </summary>
     public void Process(Span<float> samples)
     {
         if (samples.IsEmpty) return;
@@ -504,120 +598,71 @@ public sealed class EqualizerProcessor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessStereoInternal(ref float bufRef, int totalFrames)
+    private void StepSmootherOneFrame()
     {
-        int frameIdx = 0;
+        if (_rampFramesRemaining <= 0)
+            return;
 
-        // Если фильтр переходит в байпас (выключение EQ), коэффициенты _startCoeffs остаются неизменными,
-        // а мы просто плавно кроссфейдим между выходом фильтра и чистым (dry) сигналом без движения полюсов ("капли в лужу")!
-        bool rampingToBypass = _targetBypass && _rampFramesRemaining > 0;
-        bool rampingFromBypass = !_targetBypass && _rampFramesRemaining > 0 && AreAllIdentity(in _startCoeffs);
-
-        while (frameIdx < totalFrames)
+        _rampFramesRemaining--;
+        if (_rampFramesRemaining == 0)
         {
-            int blockFrames = Math.Min(SubBlockFrames, totalFrames - frameIdx);
-            float wetMix = 1.0f;
-
-            if (_rampFramesRemaining > 0)
-            {
-                _rampFramesRemaining = Math.Max(0, _rampFramesRemaining - blockFrames);
-                float t = 1.0f - (float)_rampFramesRemaining / RampTotalFrames;
-                float smoothT = t * t * (3.0f - 2.0f * t);
-
-                if (rampingToBypass)
-                {
-                    wetMix = 1.0f - smoothT;
-                    _currentPreampGain = _startPreampGain;
-                    _currentCoeffs = _startCoeffs;
-                }
-                else if (rampingFromBypass)
-                {
-                    wetMix = smoothT;
-                    _currentPreampGain = _targetPreampGain;
-                    _currentCoeffs = _targetCoeffs;
-                }
-                else
-                {
-                    _currentPreampGain = _startPreampGain + (_targetPreampGain - _startPreampGain) * smoothT;
-                    for (int b = 0; b < BandCount; b++)
-                    {
-                        // Если одна из полос включается из Identity или выключается в Identity,
-                        // не интерполируем её полюса A1/A2 через ноль (именно это создаёт звук "капли в лужу"!),
-                        // а интерполируем только числитель или используем целевой полюс!
-                        if (_startCoeffs[b].A1 == 0f && _targetCoeffs[b].A1 != 0f)
-                        {
-                            _currentCoeffs[b] = _targetCoeffs[b];
-                        }
-                        else if (_targetCoeffs[b].A1 == 0f && _startCoeffs[b].A1 != 0f)
-                        {
-                            _currentCoeffs[b] = _startCoeffs[b];
-                        }
-                        else
-                        {
-                            _currentCoeffs[b] = BiquadCoefficientsF.Lerp(in _startCoeffs[b], in _targetCoeffs[b], smoothT);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                _currentPreampGain = _targetPreampGain;
-                _currentCoeffs = _targetCoeffs;
-            }
-
-            double preamp = _currentPreampGain;
-            int endFrame = frameIdx + blockFrames;
-
-            for (; frameIdx < endFrame; frameIdx++)
-            {
-                int sampleOffset = frameIdx * 2;
-                float dryL = Unsafe.Add(ref bufRef, sampleOffset);
-                float dryR = Unsafe.Add(ref bufRef, sampleOffset + 1);
-
-                double left = dryL * preamp;
-                double right = dryR * preamp;
-
-                _states[0].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[0]);
-                _states[1].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[1]);
-                _states[2].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[2]);
-                _states[3].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[3]);
-                _states[4].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[4]);
-                _states[5].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[5]);
-                _states[6].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[6]);
-                _states[7].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[7]);
-                _states[8].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[8]);
-                _states[9].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[9]);
-
-                float wetL = (float)left;
-                float wetR = (float)right;
-
-                Unsafe.Add(ref bufRef, sampleOffset) = dryL + (wetL - dryL) * wetMix;
-                Unsafe.Add(ref bufRef, sampleOffset + 1) = dryR + (wetR - dryR) * wetMix;
-            }
+            _currentPreampGain = _targetPreampGain;
+            _currentCoeffs = _targetCoeffs;
+        }
+        else
+        {
+            // Посэмпловое однополюсное сглаживание (Per-Sample 1-Pole LPF, 48 кГц):
+            // 0 ступенек подблоков, 0 ВЧ-алиасинга при кручении НЧ!
+            _currentPreampGain += (_targetPreampGain - _currentPreampGain) * SampleSmoothAlpha;
+            _currentCoeffs[0].SmoothStepTowards(in _targetCoeffs[0], SampleSmoothAlpha);
+            _currentCoeffs[1].SmoothStepTowards(in _targetCoeffs[1], SampleSmoothAlpha);
+            _currentCoeffs[2].SmoothStepTowards(in _targetCoeffs[2], SampleSmoothAlpha);
+            _currentCoeffs[3].SmoothStepTowards(in _targetCoeffs[3], SampleSmoothAlpha);
+            _currentCoeffs[4].SmoothStepTowards(in _targetCoeffs[4], SampleSmoothAlpha);
+            _currentCoeffs[5].SmoothStepTowards(in _targetCoeffs[5], SampleSmoothAlpha);
+            _currentCoeffs[6].SmoothStepTowards(in _targetCoeffs[6], SampleSmoothAlpha);
+            _currentCoeffs[7].SmoothStepTowards(in _targetCoeffs[7], SampleSmoothAlpha);
+            _currentCoeffs[8].SmoothStepTowards(in _targetCoeffs[8], SampleSmoothAlpha);
+            _currentCoeffs[9].SmoothStepTowards(in _targetCoeffs[9], SampleSmoothAlpha);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool AreAllIdentity(in BandCoefficientArray coeffs)
+    private void ProcessStereoInternal(ref float bufRef, int totalFrames)
     {
-        for (int i = 0; i < BandCount; i++)
+        for (int frameIdx = 0; frameIdx < totalFrames; frameIdx++)
         {
-            if (coeffs[i].A1 != 0f || MathF.Abs(coeffs[i].B0 - 1f) > 1e-4f)
-                return false;
+            StepSmootherOneFrame();
+
+            int sampleOffset = frameIdx * 2;
+            double preamp = _currentPreampGain;
+            double left = Unsafe.Add(ref bufRef, sampleOffset) * preamp;
+            double right = Unsafe.Add(ref bufRef, sampleOffset + 1) * preamp;
+
+            _states[0].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[0]);
+            _states[1].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[1]);
+            _states[2].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[2]);
+            _states[3].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[3]);
+            _states[4].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[4]);
+            _states[5].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[5]);
+            _states[6].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[6]);
+            _states[7].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[7]);
+            _states[8].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[8]);
+            _states[9].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[9]);
+
+            Unsafe.Add(ref bufRef, sampleOffset) = (float)left;
+            Unsafe.Add(ref bufRef, sampleOffset + 1) = (float)right;
         }
-        return true;
     }
 
     private void ProcessGenericChannelsInternal(ref float bufRef, int totalFrames, int channels)
     {
-        _currentCoeffs = _targetCoeffs;
-        _currentPreampGain = _targetPreampGain;
-        double preamp = _currentPreampGain;
-
         if (channels == 1)
         {
             for (int f = 0; f < totalFrames; f++)
             {
+                StepSmootherOneFrame();
+                double preamp = _currentPreampGain;
                 double mono = Unsafe.Add(ref bufRef, f) * preamp;
                 double dummy = 0.0;
 
@@ -631,6 +676,8 @@ public sealed class EqualizerProcessor
         {
             for (int f = 0; f < totalFrames; f++)
             {
+                StepSmootherOneFrame();
+                double preamp = _currentPreampGain;
                 int idx = f * channels;
                 double left = Unsafe.Add(ref bufRef, idx) * preamp;
                 double right = Unsafe.Add(ref bufRef, idx + 1) * preamp;
@@ -646,8 +693,6 @@ public sealed class EqualizerProcessor
                     Unsafe.Add(ref bufRef, idx + ch) *= preampF;
             }
         }
-
-        _rampFramesRemaining = 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -656,7 +701,7 @@ public sealed class EqualizerProcessor
         if (Volatile.Read(ref _publishedVersion) == _localVersion)
             return;
 
-        BandCoefficientArray snapshotCoeffs;
+        BandSvfCoeffArray snapshotCoeffs;
         float snapshotPreamp;
         bool snapshotBypass;
         bool snapshotBoost;
@@ -684,24 +729,23 @@ public sealed class EqualizerProcessor
             }
         }
 
-        _startCoeffs = _currentCoeffs;
+        if (_isBypassed && !snapshotBypass)
+        {
+            Reset();
+            _currentCoeffs = _unityCoeffs;
+            _currentPreampGain = 1.0f;
+            _isBypassed = false;
+        }
+
         _targetCoeffs = snapshotCoeffs;
-        _startPreampGain = _currentPreampGain;
         _targetPreampGain = snapshotPreamp;
         _targetBypass = snapshotBypass;
         _targetHasPositiveBoost = snapshotBoost;
         _hasPositiveBoost = _hasPositiveBoost || snapshotBoost;
 
-        if (!snapshotBypass)
-            _isBypassed = false;
-
         _rampFramesRemaining = RampTotalFrames;
     }
 
-    /// <summary>
-    /// Вычисляет суммарную амплитудно-частотную характеристику (в дБ) на заданной частоте
-    /// для построения гладкой кривой АЧХ в интерфейсе.
-    /// </summary>
     public static float EvaluateFrequencyResponseDb(
         ReadOnlySpan<float> bandGainsDb,
         float freqHz,
@@ -718,13 +762,7 @@ public sealed class EqualizerProcessor
             float db = Math.Clamp(bandGainsDb[i], MinGainDb, MaxGainDb);
             if (MathF.Abs(db) < 0.02f) continue;
 
-            BiquadCoefficients c = i switch
-            {
-                0 => BiquadFilterMath.ComputeLowShelf(sampleRate, freqs[0], db, 0.7071067811865475),
-                BandCount - 1 => BiquadFilterMath.ComputeHighShelf(sampleRate, freqs[BandCount - 1], db, 0.7071067811865475),
-                _ => BiquadFilterMath.ComputePeakingEq(sampleRate, freqs[i], db, 1.4142135623730951)
-            };
-
+            BiquadCoefficients c = ComputeBandCoefficients(sampleRate, freqs[i], i, db);
             totalMagSq *= c.ComputeMagnitudeSquared(freqHz, sampleRate);
         }
 

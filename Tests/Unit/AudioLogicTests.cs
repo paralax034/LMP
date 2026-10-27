@@ -537,22 +537,22 @@ public static class AudioLogicTests
         TestAssert.True(eq.HasPositiveBoost, "HasPositiveBoost must be true when +12 dB boost is active");
 
         eq.Configure(enabled: false, boostBands, preampDb: 0f, autoPreamp: false);
-        float[] halfRampChunk = new float[480 * Channels]; // 480 фреймов из 960
+        float[] halfRampChunk = new float[720 * Channels]; // 720 фреймов из 1440
         Array.Fill(halfRampChunk, 0.5f);
 
         eq.Process(halfRampChunk.AsSpan());
-        TestAssert.False(eq.IsBypassed, "EQ must not bypass mid-ramp (480/960 frames)");
+        TestAssert.False(eq.IsBypassed, "EQ must not bypass mid-ramp (720/1440 frames)");
         TestAssert.True(
             eq.HasPositiveBoost,
             "HasPositiveBoost prematurely dropped to false while ramp is still boosting signal");
 
-        // Повторный идентичный Configure не должен сбрасывать счётчик рампы обратно на 960 фреймов
+        // Повторный идентичный Configure не должен сбрасывать счётчик рампы обратно на 1440 фреймов
         eq.Configure(enabled: false, boostBands, preampDb: 0f, autoPreamp: false);
-        eq.Process(halfRampChunk.AsSpan()); // Добиваем оставшиеся 480 фреймов
-        TestAssert.True(eq.IsBypassed, "Idempotent Configure call reset the ramp instead of completing at 960 frames");
+        eq.Process(halfRampChunk.AsSpan()); // Добиваем оставшиеся 720 фреймов
+        TestAssert.True(eq.IsBypassed, "Idempotent Configure call reset the ramp instead of completing at 1440 frames");
         TestAssert.False(eq.HasPositiveBoost, "HasPositiveBoost must clear to false once ramp to bypass completes");
-
-        // 2. Инвариант многоканальности (channels = 4): правый/тыловые каналы не должны затираться левым каналом
+        // 2. Инвариант многоканальности (channels = 4) и моно (channels = 1):
+        // правый/тыловые каналы не должны затираться левым каналом, а рампа сглаживания должна работать без ступеньки
         var quadEq = new EqualizerProcessor(SampleRate, channels: 4);
         quadEq.Configure(enabled: true, boostBands, preampDb: 0f, autoPreamp: false);
         quadEq.SnapToTarget();
@@ -562,6 +562,26 @@ public static class AudioLogicTests
         TestAssert.True(
             quadSamples[0] > 0f && quadSamples[1] < 0f && quadSamples[2] > 0f && quadSamples[3] < 0f,
             $"Multichannel polarity clobbered by channel 0: [{quadSamples[0]:F3}, {quadSamples[1]:F3}, {quadSamples[2]:F3}, {quadSamples[3]:F3}]");
+
+        var monoEq = new EqualizerProcessor(SampleRate, channels: 1);
+        monoEq.Configure(enabled: false, boostBands, preampDb: 0f, autoPreamp: false);
+        monoEq.SnapToTarget();
+        monoEq.Configure(enabled: true, boostBands, preampDb: 0f, autoPreamp: false);
+
+        float[] monoHalfRamp = new float[720];
+        for (int i = 0; i < monoHalfRamp.Length; i++)
+            monoHalfRamp[i] = MathF.Sin(2f * MathF.PI * 55f * i / SampleRate) * 0.4f;
+
+        monoEq.Process(monoHalfRamp.AsSpan());
+        TestAssert.False(monoEq.IsBypassed, "Mono EQ must smooth coefficients over 1440 frames instead of snapping immediately");
+
+        float maxMonoD2 = 0f;
+        for (int i = 2; i < monoHalfRamp.Length; i++)
+        {
+            float d2 = MathF.Abs(monoHalfRamp[i] - 2f * monoHalfRamp[i - 1] + monoHalfRamp[i - 2]);
+            if (d2 > maxMonoD2) maxMonoD2 = d2;
+        }
+        TestAssert.True(maxMonoD2 < 0.015f, $"Mono EQ ramp produced discontinuity: maxD2={maxMonoD2:F5}");
 
         // 3. Инвариант 5-полосного маппинга: точное совпадение в узлах интерполяции кривой (0.0, 2.25, 4.5, 6.75, 9.0)
         ReadOnlySpan<float> macro5 = [6.0f, -4.5f, 3.5f, -8.0f, 9.5f];
@@ -937,6 +957,199 @@ public static class AudioLogicTests
             if (stepVal > maxSpliceStep) maxSpliceStep = stepVal;
         }
         TestAssert.True(maxSpliceStep < 0.055f, $"Quality switch 48k<->44.1k crossfade produced step jump: {maxSpliceStep:F4}");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Equalizer Preset Switch: No Laser Pole-Sweep & No End-of-Ramp Snap Step", Group = TestGroups.Audio, Order = 12)]
+    public static Task TestEqualizerPresetSwitchNoLaserSweepOrSnapStepAsync()
+    {
+        var eq = new EqualizerProcessor(SampleRate, Channels);
+
+        int frameCursor = 0;
+        // Точная модель ambient-трека "les - silence": глубокий непрерывный суббас 55 Гц + 110 Гц + тёплый пэд 440/2500 Гц
+        void FillAmbientWave(Span<float> dst, int frames)
+        {
+            for (int f = 0; f < frames; f++, frameCursor++)
+            {
+                float t = (float)frameCursor / SampleRate;
+                float s = MathF.Sin(2f * MathF.PI * 55f * t + 0.7f) * 0.55f
+                        + MathF.Sin(2f * MathF.PI * 110f * t + 1.2f) * 0.15f
+                        + MathF.Sin(2f * MathF.PI * 440f * t + 0.4f) * 0.08f
+                        + MathF.Sin(2f * MathF.PI * 2500f * t + 1.9f) * 0.04f;
+                dst[f * 2] = s;
+                dst[f * 2 + 1] = s;
+            }
+        }
+
+        float[] warmup = new float[2048 * Channels];
+        float[] block = new float[64 * Channels];
+
+        // Проверяемые проблемные пресеты: Глубокий бас, LoFi и уют, Ночной без резкости, Аниме и вокал
+        string[] criticalPresets =
+        [
+            EqualizerPresets.BassBoostId,
+            EqualizerPresets.LoFiId,
+            EqualizerPresets.NightId,
+            EqualizerPresets.AnimeId,
+            EqualizerPresets.WarmId,
+            EqualizerPresets.VocalId
+        ];
+
+        float maxD2EnableFromBypass = 0f;
+        float maxD2PresetToPreset = 0f;
+        float maxD2DisableToBypass = 0f;
+
+        // 1. Включение каждого пресета из холодного Bypass прямо на пике басовой волны и его выключение обратно в Bypass ("тцык"-детектор)
+        foreach (string presetId in criticalPresets)
+        {
+            eq.Configure(enabled: false, EqualizerPresets.GetPresetBands(presetId));
+            eq.SnapToTarget();
+
+            FillAmbientWave(warmup, 512);
+            eq.Process(warmup.AsSpan(0, 512 * Channels));
+
+            float prev1 = warmup[512 * Channels - 2];
+            float prev2 = warmup[512 * Channels - 4];
+
+            // Включаем пресет из Bypass и прогоняем через все 2400 фреймов рампы + 400 фреймов после
+            eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(presetId), preampDb: 0f, autoPreamp: true);
+            for (int b = 0; b < 45; b++)
+            {
+                FillAmbientWave(block, 64);
+                eq.Process(block);
+                for (int f = 0; f < 64; f++)
+                {
+                    float y = block[f * 2];
+                    float d2 = MathF.Abs(y - 2f * prev1 + prev2);
+                    if (d2 > maxD2EnableFromBypass)
+                        maxD2EnableFromBypass = d2;
+                    prev2 = prev1;
+                    prev1 = y;
+                }
+            }
+
+            // Выключаем пресет обратно в Bypass и проверяем отсутствие "тцыка" на протяжении всей рампы и в момент закрытия в Bypass
+            eq.Configure(enabled: false, EqualizerPresets.GetPresetBands(presetId), preampDb: 0f, autoPreamp: true);
+            for (int b = 0; b < 45; b++)
+            {
+                FillAmbientWave(block, 64);
+                eq.Process(block);
+                for (int f = 0; f < 64; f++)
+                {
+                    float y = block[f * 2];
+                    float d2 = MathF.Abs(y - 2f * prev1 + prev2);
+                    if (d2 > maxD2DisableToBypass)
+                        maxD2DisableToBypass = d2;
+                    prev2 = prev1;
+                    prev1 = y;
+                }
+            }
+
+            TestAssert.True(eq.IsBypassed, $"EQ did not enter bypass after disabling '{presetId}'");
+        }
+
+        // 2. Прямое переключение между пресетами (DeepBass -> Anime -> LoFi -> Night -> Vocal) без выключения
+        eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(EqualizerPresets.BassBoostId), preampDb: 0f, autoPreamp: true);
+        eq.SnapToTarget();
+        FillAmbientWave(warmup, 2048);
+        eq.Process(warmup);
+
+        float p1 = warmup[^2];
+        float p2 = warmup[^4];
+
+        foreach (string presetId in criticalPresets)
+        {
+            eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(presetId), preampDb: 0f, autoPreamp: true);
+            for (int b = 0; b < 45; b++)
+            {
+                FillAmbientWave(block, 64);
+                eq.Process(block);
+                for (int f = 0; f < 64; f++)
+                {
+                    float y = block[f * 2];
+                    float d2 = MathF.Abs(y - 2f * p1 + p2);
+                    if (d2 > maxD2PresetToPreset)
+                        maxD2PresetToPreset = d2;
+                    p2 = p1;
+                    p1 = y;
+                }
+            }
+        }
+
+        // 3. Экстремальный стресс-тест вращения НЧ полос (31, 62, 125 Гц) от +12 dB до -12 dB и выключения в Bypass
+        Span<float> customSweep = stackalloc float[EqualizerProcessor.BandCount];
+        customSweep.Clear();
+        float maxD2SubBassSweep = 0f;
+
+        for (float db = 12.0f; db >= -12.0f; db -= 1.0f)
+        {
+            customSweep[0] = db;
+            customSweep[1] = db;
+            customSweep[2] = db;
+            eq.Configure(enabled: true, customSweep, preampDb: 2.0f, autoPreamp: true);
+
+            for (int b = 0; b < 4; b++)
+            {
+                FillAmbientWave(block, 64);
+                eq.Process(block);
+                for (int f = 0; f < 64; f++)
+                {
+                    float y = block[f * 2];
+                    float d2 = MathF.Abs(y - 2f * p1 + p2);
+                    if (d2 > maxD2SubBassSweep)
+                        maxD2SubBassSweep = d2;
+                    p2 = p1;
+                    p1 = y;
+                }
+            }
+        }
+
+        // Выключаем EQ прямо с экстремальных +12 dB НЧ в Bypass
+        customSweep[0] = 12.0f;
+        customSweep[1] = 12.0f;
+        customSweep[2] = 12.0f;
+        eq.Configure(enabled: true, customSweep, preampDb: 2.0f, autoPreamp: true);
+        eq.SnapToTarget();
+        FillAmbientWave(warmup, 2048);
+        eq.Process(warmup);
+        p1 = warmup[^2];
+        p2 = warmup[^4];
+
+        eq.Configure(enabled: false, customSweep, preampDb: 2.0f, autoPreamp: true);
+        for (int b = 0; b < 30; b++)
+        {
+            FillAmbientWave(block, 64);
+            eq.Process(block);
+            for (int f = 0; f < 64; f++)
+            {
+                float y = block[f * 2];
+                float d2 = MathF.Abs(y - 2f * p1 + p2);
+                if (d2 > maxD2DisableToBypass)
+                    maxD2DisableToBypass = d2;
+                p2 = p1;
+                p1 = y;
+            }
+        }
+
+        Log.Info(
+            $"[EQ-SweepAudit] EnableFromBypass MaxD2={maxD2EnableFromBypass:F5} | " +
+            $"PresetSwitch MaxD2={maxD2PresetToPreset:F5} | " +
+            $"DisableToBypass MaxD2={maxD2DisableToBypass:F5} | " +
+            $"SubBassSweep(+12..-12dB) MaxD2={maxD2SubBassSweep:F5}");
+
+        TestAssert.True(
+            maxD2EnableFromBypass < 0.015f,
+            $"Click/wobble when enabling EQ from bypass: maxD2={maxD2EnableFromBypass:F5}");
+        TestAssert.True(
+            maxD2PresetToPreset < 0.015f,
+            $"Frequency wobble ('люфт') when switching presets: maxD2={maxD2PresetToPreset:F5}");
+        TestAssert.True(
+            maxD2DisableToBypass < 0.015f,
+            $"Tick ('тцык') when disabling EQ to bypass: maxD2={maxD2DisableToBypass:F5}");
+        TestAssert.True(
+            maxD2SubBassSweep < 0.015f,
+            $"Sub-bass +12..-12dB sweep wobble detected: maxD2={maxD2SubBassSweep:F5}");
 
         return Task.CompletedTask;
     }

@@ -306,17 +306,27 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         if (_isLoading) return;
 
         var audio = _library.Settings.Audio;
+        bool presetChanged = !string.Equals(audio.GlobalEqualizerPresetId, EqualizerPresets.CustomId, StringComparison.Ordinal);
         audio.EqualizerEnabled = true;
         audio.CustomEqualizerBands = bands10;
         audio.GlobalEqualizerPresetId = EqualizerPresets.CustomId;
 
-        if (_audio.CurrentTrack is { EqualizerPresetId.Length: > 0 } currentTrack && !ForceGlobalEqualizer)
+        if (presetChanged && _audio.CurrentTrack is { EqualizerPresetId.Length: > 0 } currentTrack && !ForceGlobalEqualizer)
             _ = _library.SetTrackEqualizerPresetAsync(currentTrack, EqualizerPresets.CustomId);
 
-        EqualizerEnabled = true;
-        EqualizerBandGains = bands10;
-        UpdateSelectedChip(EqualizerPresets.CustomId);
-        RefreshCanReset(bands10);
+        _isLoading = true;
+        try
+        {
+            EqualizerEnabled = true;
+            if (presetChanged)
+                UpdateSelectedChip(EqualizerPresets.CustomId);
+            RefreshCanReset(bands10);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+
         _audio.UpdateEqualizerSettings();
 
         _eqBandsDebounceTimer?.Stop();
@@ -326,6 +336,16 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
             (_, _) =>
             {
                 _eqBandsDebounceTimer?.Stop();
+                _isLoading = true;
+                try
+                {
+                    EqualizerBandGains = _library.Settings.Audio.CustomEqualizerBands;
+                }
+                finally
+                {
+                    _isLoading = false;
+                }
+
                 _library.UpdateSettings(s =>
                 {
                     s.Audio.EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
@@ -354,8 +374,17 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
             _ = _library.SetTrackEqualizerPresetAsync(currentTrack, nextTrackPreset);
         }
 
-        EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
-        SyncEqualizerBandsFromSettings();
+        _isLoading = true;
+        try
+        {
+            EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
+            SyncEqualizerBandsFromSettings();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+
         _audio.UpdateEqualizerSettings();
     }
 

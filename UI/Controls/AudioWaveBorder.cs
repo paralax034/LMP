@@ -138,6 +138,7 @@ public sealed class AudioWaveBorder : Decorator
     private long _lastFrameTimestamp;
     private bool _isFrameLoopActive;
     private TopLevel? _attachedTopLevel;
+    private DispatcherTimer? _idleWakeTimer;
 
     private IBrush? _lastResolvedBrush;
     private IPen? _cachedPen;
@@ -336,6 +337,7 @@ public sealed class AudioWaveBorder : Decorator
         ViewModelBase.SuspendLevelChanged -= _suspendLevelChangedHandler;
 
         _isFrameLoopActive = false;
+        _idleWakeTimer?.Stop();
         _attachedTopLevel = null;
         ClearAllPackets();
 
@@ -633,11 +635,16 @@ public sealed class AudioWaveBorder : Decorator
             {
                 // Во время тишины/буферизации не крутим 60 FPS RequestAnimationFrame вхолостую
                 _isFrameLoopActive = false;
-                DispatcherTimer.RunOnce(() =>
-                {
-                    if (IsActive && ShouldAnimate())
-                        EvaluateAnimationState();
-                }, TimeSpan.FromMilliseconds(180));
+                _idleWakeTimer ??= new DispatcherTimer(
+                    TimeSpan.FromMilliseconds(180),
+                    DispatcherPriority.Background,
+                    (_, _) =>
+                    {
+                        _idleWakeTimer?.Stop();
+                        if (IsActive && ShouldAnimate())
+                            EvaluateAnimationState();
+                    });
+                _idleWakeTimer.Start();
             }
         }
         else
