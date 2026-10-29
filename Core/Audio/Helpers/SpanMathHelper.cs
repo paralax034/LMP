@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using LMP.Core.Audio.Normalization;
 
 namespace LMP.Core.Audio.Helpers;
 
@@ -45,32 +44,5 @@ internal static class SpanMathHelper
 
         for (; i < len; i++)
             Unsafe.Add(ref ptr, i) *= gain;
-    }
-
-    /// <summary>
-    /// Умножает каждый стерео-фрейм <paramref name="samples"/> на плавно меняющийся коэффициент
-    /// от <paramref name="crossfader"/> in-place с сохранением стерео-баланса L/R.
-    /// </summary>
-    /// <remarks>
-    /// Оба канала одного стерео-фрейма получают строго идентичный коэффициент усиления.
-    /// Bounds elision через <see cref="Unsafe.Add{T}(ref T, int)"/>.
-    /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void MultiplyByCrossfade(Span<float> samples, ref GainCrossfader crossfader)
-    {
-        ref float ptr = ref MemoryMarshal.GetReference(samples);
-        int len = samples.Length;
-        int i = 0;
-        int pairLimit = len & ~1;
-
-        for (; i < pairLimit; i += 2)
-        {
-            float g = crossfader.AdvanceFrame(2);
-            Unsafe.Add(ref ptr, i) *= g;
-            Unsafe.Add(ref ptr, i + 1) *= g;
-        }
-
-        for (; i < len; i++)
-            Unsafe.Add(ref ptr, i) *= crossfader.AdvanceFrame(1);
     }
 }
