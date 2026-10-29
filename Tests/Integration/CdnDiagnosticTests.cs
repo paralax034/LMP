@@ -173,7 +173,7 @@ public static class CdnDiagnosticTests
 
         var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
         var audioStream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
-        var host = new Uri(audioStream.Url).Host;
+        var host = MediaPathProbe.ExtractHost(audioStream.Url);
 
         Log.Info($"  CDN host: {host}");
 
@@ -221,7 +221,7 @@ public static class CdnDiagnosticTests
 
         var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
         var stream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
-        var host = new Uri(stream.Url).Host;
+        var host = MediaPathProbe.ExtractHost(stream.Url);
 
         var addresses = await Dns.GetHostAddressesAsync(host, AddressFamily.InterNetwork, ct).ConfigureAwait(false);
         TestAssert.True(addresses.Length > 0, $"DNS resolution failed for {host}");
@@ -264,7 +264,7 @@ public static class CdnDiagnosticTests
                 var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoIds[i]), ct).ConfigureAwait(false);
                 foreach (var stream in manifest.GetAudioOnlyStreams())
                 {
-                    var host = new Uri(stream.Url).Host;
+                    var host = MediaPathProbe.ExtractHost(stream.Url);
                     hostToUrl.TryAdd(host, stream.Url);
                 }
             }
@@ -328,7 +328,7 @@ public static class CdnDiagnosticTests
 
         foreach (var stream in manifest.GetAudioOnlyStreams())
         {
-            var host = new Uri(stream.Url).Host;
+            var host = MediaPathProbe.ExtractHost(stream.Url);
             var ip = MediaPathProbe.ResolveToIp(host);
             var result = await MediaPathProbe.ProbeHostAsync(stream.Url, timeoutMs: 4000).ConfigureAwait(false);
 
@@ -401,11 +401,6 @@ public static class CdnDiagnosticTests
         var targetHost = KnownCdnEndpoints[0].Host;
         await RunPathTestAsync($"https://{targetHost}/generate_204", "Direct 204 Ping", $"https://{targetHost}/", null, ct).ConfigureAwait(false);
     }
-
-    [TestMethod(TestCategory.Unit, "CdnBlacklist TTL & URL Filtering Logic",
-        Group = TestGroups.Storage, Order = 10, RequiresNetwork = false, TimeoutSeconds = 5)]
-    public static Task TestBlacklistLogicAsync(IServiceProvider _) =>
-        CacheTests.TestCdnBlacklistLogicAsync();
 
     private static async Task RunPathTestAsync(
         string url, string label, string referenceUrl, (long Start, long End)? range, CancellationToken ct)

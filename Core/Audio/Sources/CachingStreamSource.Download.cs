@@ -44,41 +44,29 @@ public sealed partial class CachingStreamSource
     private void SaveLatency(double latencyMs)
     {
         double currentAverage;
+        bool isBootstrap;
         lock (_latencyLock)
         {
             _latency2 = _latency1;
             _latency1 = _latency0;
             _latency0 = latencyMs;
             currentAverage = GetAverageLatencyInternal();
+            isBootstrap = _bandwidthSampleCount <= _config.BandwidthBootstrapSampleCount;
         }
-        Log.Debug($"[CachingSource] Latency: {latencyMs:F1}ms (Average Trend: {currentAverage:F1}ms)");
+
+        if (isBootstrap)
+            Log.Debug($"[CachingSource] Latency: {latencyMs:F1}ms (Average Trend: {currentAverage:F1}ms)");
     }
 
     /// <summary>
     /// Сохраняет замер пропускной способности через взвешенное скользящее среднее (EMA).
-    /// <para>
-    /// Алгоритм работает в двух фазах:
-    /// </para>
-    /// <list type="bullet">
-    ///   <item>
-    ///     <b>Bootstrap-фаза</b> (первые <see cref="StreamingConfig.BandwidthBootstrapSampleCount"/>
-    ///     замеров): применяется фиксированный повышенный вес
-    ///     (<see cref="StreamingConfig.BandwidthBootstrapWeight"/>).
-    ///     Обеспечивает быструю сходимость EMA на startup и после seek,
-    ///     когда предыдущая оценка отсутствует или устарела.
-    ///   </item>
-    ///   <item>
-    ///     <b>Steady-state фаза</b>: вес пропорционален объёму переданных данных —
-    ///     от 5% для мелких блоков (TCP slow-start, кэши ОС) до 50% для крупных (≥ 256 KB).
-    ///     Сглаживает случайные всплески скорости от коротких чанков.
-    ///   </item>
-    /// </list>
     /// </summary>
     /// <param name="speedBytesPerSec">Измеренная скорость в байт/сек.</param>
     /// <param name="bytesTransferred">Объём переданных данных, определяющий вес замера.</param>
     private void SaveBandwidth(double speedBytesPerSec, int bytesTransferred)
     {
         double currentSpeed;
+        int sampleCount;
         lock (_latencyLock)
         {
             if (_estimatedBandwidthBytesPerSec <= 0)
@@ -90,32 +78,25 @@ public sealed partial class CachingStreamSource
             {
                 _bandwidthSampleCount++;
 
-                double weight;
-                if (_bandwidthSampleCount <= _config.BandwidthBootstrapSampleCount)
-                {
-                    weight = _config.BandwidthBootstrapWeight;
-                }
-                else
-                {
-                    // Крупные блоки (≥ 256 KB) несут больше информации о реальной скорости.
-                    weight = Math.Clamp(
-                        bytesTransferred / (double)(256 * 1024),
-                        min: 0.05,
-                        max: 0.50);
-                }
+                double weight = _bandwidthSampleCount <= _config.BandwidthBootstrapSampleCount
+                    ? _config.BandwidthBootstrapWeight
+                    : Math.Clamp(bytesTransferred / (double)(256 * 1024), min: 0.05, max: 0.50);
 
                 _estimatedBandwidthBytesPerSec =
                     (weight * speedBytesPerSec) + ((1.0 - weight) * _estimatedBandwidthBytesPerSec);
             }
 
             currentSpeed = _estimatedBandwidthBytesPerSec;
+            sampleCount = _bandwidthSampleCount;
         }
 
-        double speedMbps = currentSpeed * 8.0 / 1_000_000.0;
-        Log.Debug(
-            $"[CachingSource] Throughput: {speedMbps:F2} Mbps ({currentSpeed / 1024.0:F1} KB/s, " +
-            $"sample={_bandwidthSampleCount}, " +
-            $"phase={(_bandwidthSampleCount <= _config.BandwidthBootstrapSampleCount ? "bootstrap" : "steady")})");
+        if (sampleCount <= _config.BandwidthBootstrapSampleCount)
+        {
+            double speedMbps = currentSpeed * 8.0 / 1_000_000.0;
+            Log.Debug(
+                $"[CachingSource] Throughput: {speedMbps:F2} Mbps ({currentSpeed / 1024.0:F1} KB/s, " +
+                $"sample={sampleCount}, phase=bootstrap)");
+        }
     }
 
     // --- ReadAtAsync ---

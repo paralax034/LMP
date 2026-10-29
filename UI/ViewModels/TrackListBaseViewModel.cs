@@ -292,7 +292,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         var list = new List<string>(TotalCount);
         for (int i = 0; i < TotalCount; i++)
         {
-            var track = _items.GetTrackAt(i);
+            var track = _items.GetMasterTrackAt(i);
             if (track != null) list.Add(track.Id);
         }
 

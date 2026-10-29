@@ -51,8 +51,7 @@ internal static class MediaPathProbe
         int timeoutMs = DefaultTimeoutMs,
         CancellationToken ct = default)
     {
-        var uri = new Uri(mediaUrl);
-        string host = uri.Host;
+        string host = ExtractHost(mediaUrl);
 
         var healthTask = Probe204Async(host, mediaUrl, timeoutMs, ct);
         var mediaTask = ProbeMediaRangeAsync(mediaUrl, timeoutMs, ct);

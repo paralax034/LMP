@@ -20,7 +20,7 @@
     <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
     <AvaloniaVersion>12.1.4</AvaloniaVersion>
     <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
-    <SkiaSharpVersion>4.153.1</SkiaSharpVersion>
+    <SkiaSharpVersion>4.154.0</SkiaSharpVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

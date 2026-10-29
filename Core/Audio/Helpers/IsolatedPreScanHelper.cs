@@ -262,8 +262,8 @@ internal static class IsolatedPreScanHelper
 
         float integratedLufs = EbuR128Analyzer.ComputeIntegratedLufsFromBlocks(
             blockPowers, blockCount);
-        float rawGain = EbuR128Analyzer.ComputeIntegratedGainFromBlocks(
-            blockPowers, blockCount, targetLufs, maxGain);
+        float rawGain = EbuR128Analyzer.ComputeGainFromLufs(
+            integratedLufs, targetLufs, maxGain);
 
         return (integratedLufs, rawGain);
     }

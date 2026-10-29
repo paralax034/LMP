@@ -480,24 +480,11 @@ public sealed class TrackRegistry
     /// </summary>
     private void HandleEntryEvicted(string trackId)
     {
-        if (string.IsNullOrEmpty(trackId)) return;
-
-        if (_pinned.TryGetValue(trackId, out var pinned) && pinned.IsCached && !pinned.IsDownloaded)
+        if (TryGet(trackId) is { IsCached: true, IsDownloaded: false } track
+            && AudioSourceFactory.GlobalCache.FindBestCacheByTrackId(trackId) == null)
         {
-            if (AudioSourceFactory.GlobalCache.FindBestCacheByTrackId(trackId) == null)
-            {
-                pinned.ClearCacheStatus();
-                Log.Debug($"[TrackRegistry] Evicted cache status reset for pinned track {trackId}");
-            }
-        }
-
-        if (_cache.TryGetValue(trackId, out var weak) && weak.TryGetTarget(out var cached) && cached.IsCached && !cached.IsDownloaded)
-        {
-            if (AudioSourceFactory.GlobalCache.FindBestCacheByTrackId(trackId) == null)
-            {
-                cached.ClearCacheStatus();
-                Log.Debug($"[TrackRegistry] Evicted cache status reset for cached track {trackId}");
-            }
+            track.ClearCacheStatus();
+            Log.Debug($"[TrackRegistry] Evicted cache status reset for track {trackId}");
         }
     }
 
@@ -537,27 +524,13 @@ public sealed class TrackRegistry
     /// </summary>
     private void HandleFormatCached(string trackId, AudioFormat format, int bitrate, bool isDownloaded)
     {
-        if (string.IsNullOrEmpty(trackId)) return;
+        if (TryGet(trackId) is not { } track) return;
 
-        if (_pinned.TryGetValue(trackId, out var pinned))
-        {
-            if (isDownloaded)
-                pinned.MarkAsDownloaded(pinned.LocalPath ?? "", format, bitrate);
-            else
-                pinned.MarkAsCached(format, bitrate);
+        if (isDownloaded)
+            track.MarkAsDownloaded(track.LocalPath ?? "", format, bitrate);
+        else
+            track.MarkAsCached(format, bitrate);
 
-            Log.Debug($"[TrackRegistry] Marked pinned track {trackId} as cached ({format}/{bitrate}kbps)");
-            return;
-        }
-
-        if (_cache.TryGetValue(trackId, out var weakRef) && weakRef.TryGetTarget(out var cached))
-        {
-            if (isDownloaded)
-                cached.MarkAsDownloaded(cached.LocalPath ?? "", format, bitrate);
-            else
-                cached.MarkAsCached(format, bitrate);
-
-            Log.Debug($"[TrackRegistry] Marked cached track {trackId} as cached ({format}/{bitrate}kbps)");
-        }
+        Log.Debug($"[TrackRegistry] Marked track {trackId} as cached ({format}/{bitrate}kbps)");
     }
 }

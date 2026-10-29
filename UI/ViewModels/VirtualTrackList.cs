@@ -573,19 +573,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
     public int IndexOf(TrackItemViewModel item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        int masterIndex = _index.FindIndexById(item.Id);
-        if (masterIndex < 0) return -1;
-
-        if (_filteredCount == _index.Count)
-            return masterIndex;
-
-        for (int i = 0; i < _filteredCount; i++)
-        {
-            if (_filteredIndices[i] == masterIndex)
-                return i;
-        }
-
-        return -1;
+        return IndexOfTrackId(item.Id);
     }
 
     public bool Contains(TrackItemViewModel item) => IndexOf(item) >= 0;

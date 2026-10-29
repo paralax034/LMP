@@ -114,17 +114,11 @@ public sealed class JsDecryptionService : IDisposable
         {
             var result = QuickJsNative.CallFunction(_handle, functionName, argument);
 
-            if (result != null)
-            {
-                Log.Debug(
-                    $"[JsDecryptionService] {functionName}({Truncate(argument)}) → " +
-                    $"{Truncate(result)}");
-            }
-            else
+            if (result == null)
             {
                 var nativeError = QuickJsNative.GetLastError(_handle);
                 Log.Warn(
-                    $"[JsDecryptionService] {functionName}({Truncate(argument)}) → null. " +
+                    $"[JsDecryptionService] {functionName}({argument.Truncate()}) → null. " +
                     $"Native last error: {nativeError ?? "(none)"}");
             }
 
@@ -271,30 +265,6 @@ public sealed class JsDecryptionService : IDisposable
         }
 
         if (newHandle == IntPtr.Zero)
-        {
-            // Метод GetOrPrepareScript вызовется и лениво считает preprocessed.js только сейчас!
-            var script = await Task.Run(
-                () => context.GetOrPrepareScript(
-                    () => YoutubeAstSolver.PreprocessPlayer(context.BaseJs)),
-                ct).ConfigureAwait(false);
-
-            var (handle, bytecode) = await Task.Run(() => QuickJsNative.CreateContextWithBytecode(script), ct).ConfigureAwait(false);
-            newHandle = handle;
-
-            if (bytecode is { Length: > 0 })
-            {
-                _ = File.WriteAllBytesAsync(bytecodePath, bytecode, CancellationToken.None)
-                    .ContinueWith(t =>
-                    {
-                        if (t.IsCompletedSuccessfully)
-                            Log.Info($"[JsDecryptionService] Bytecode cached: {bytecode.Length / 1024}KB");
-                        else
-                            Log.Warn($"[JsDecryptionService] Bytecode save failed: {t.Exception?.Message}");
-                    }, TaskContinuationOptions.ExecuteSynchronously);
-            }
-        }
-
-        if (newHandle == IntPtr.Zero)
             throw new InvalidOperationException(
                 $"[JsDecryptionService] Failed to create QuickJS context for player {context.Version}");
 
@@ -353,10 +323,7 @@ public sealed class JsDecryptionService : IDisposable
         }
     }
 
-    private static string Truncate(string s, int len = 20) =>
-        s.Length <= len ? s : string.Concat(s.AsSpan(0, len), "...");
-
-    //  Dispose 
+    //  Dispose
 
     /// <inheritdoc/>
     public void Dispose()

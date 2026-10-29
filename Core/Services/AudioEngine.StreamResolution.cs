@@ -317,7 +317,9 @@ public sealed partial class AudioEngine
             new KeyValuePair<string, Task<ContinuationUrlResult?>>(trackId, task));
     }
 
-    private async ValueTask<string?> RefreshUrlCallbackAsync(string trackId, CancellationToken ct)
+    private async ValueTask<TrackInfo?> TryResolveActiveTrackForCallbackAsync(
+        string trackId,
+        CancellationToken ct)
     {
         if (IsSealedFailedTrack(trackId)) return null;
 
@@ -325,7 +327,13 @@ public sealed partial class AudioEngine
                     ?? _trackRegistry.TryGet(trackId)
                     ?? await _library.GetTrackAsync(trackId, ct).ConfigureAwait(false);
 
-        if (track == null || IsSealedFailedTrack(trackId)) return null;
+        return (track == null || IsSealedFailedTrack(trackId)) ? null : track;
+    }
+
+    private async ValueTask<string?> RefreshUrlCallbackAsync(string trackId, CancellationToken ct)
+    {
+        var track = await TryResolveActiveTrackForCallbackAsync(trackId, ct).ConfigureAwait(false);
+        if (track == null) return null;
 
         var sessionToken = GetSessionToken();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, sessionToken);
@@ -371,15 +379,8 @@ public sealed partial class AudioEngine
 
     private async ValueTask<string?> AcquireUrlCallbackAsync(string trackId, CancellationToken ct)
     {
-        if (IsSealedFailedTrack(trackId))
-            return null;
-
-        var track = (CurrentTrack?.Id == trackId ? CurrentTrack : null)
-                    ?? _trackRegistry.TryGet(trackId)
-                    ?? await _library.GetTrackAsync(trackId, ct).ConfigureAwait(false);
-
-        if (track == null || IsSealedFailedTrack(trackId))
-            return null;
+        var track = await TryResolveActiveTrackForCallbackAsync(trackId, ct).ConfigureAwait(false);
+        if (track == null) return null;
 
         try
         {

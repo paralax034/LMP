@@ -172,7 +172,7 @@
     </ItemGroup>
 
     <ItemGroup Label="Linux Interop">
-        <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.1"/>
+        <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2"/>
     </ItemGroup>
 
     <ItemGroup>

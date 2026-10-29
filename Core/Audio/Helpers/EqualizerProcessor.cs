@@ -745,27 +745,4 @@ public sealed class EqualizerProcessor
 
         _rampFramesRemaining = RampTotalFrames;
     }
-
-    public static float EvaluateFrequencyResponseDb(
-        ReadOnlySpan<float> bandGainsDb,
-        float freqHz,
-        int sampleRate = AudioConstants.DefaultSampleRate)
-    {
-        if (bandGainsDb.Length < BandCount)
-            return 0f;
-
-        var freqs = BandFrequenciesHz;
-        double totalMagSq = 1.0;
-
-        for (int i = 0; i < BandCount; i++)
-        {
-            float db = Math.Clamp(bandGainsDb[i], MinGainDb, MaxGainDb);
-            if (MathF.Abs(db) < 0.02f) continue;
-
-            BiquadCoefficients c = ComputeBandCoefficients(sampleRate, freqs[i], i, db);
-            totalMagSq *= c.ComputeMagnitudeSquared(freqHz, sampleRate);
-        }
-
-        return (float)(10.0 * Math.Log10(Math.Max(totalMagSq, 1e-12)));
-    }
 }

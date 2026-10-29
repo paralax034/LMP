@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using LMP.Core.Audio;
 using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Normalization;
@@ -129,7 +128,7 @@ public static partial class HotPathAllocationTests
     [TestMethod(TestCategory.Unit, "Full AudioCallback DSP Chain (0 Alloc)", Group = TestGroups.Audio, Order = 7)]
     public static Task TestAudioCallbackSimulationZeroAllocAsync()
     {
-        var ring = new LockFreeRingBuffer<float>(BufferSamples * 8);
+        using var ring = new LockFreeRingBuffer<float>(BufferSamples * 8);
         var analyzer = new EbuR128Analyzer();
         analyzer.Configure(new NormalizationConfig(
             Enabled: true,
@@ -139,7 +138,7 @@ public static partial class HotPathAllocationTests
         analyzer.LockResolvedGain(1.25f);
 
         var equalizer = new EqualizerProcessor(SampleRate, Channels);
-        equalizer.Configure(enabled: true, EqualizerPresets.GetPresetBands(EqualizerPresets.BassBoostId), preampDb: 0f, autoPreamp: false);
+        equalizer.Configure(enabled: true, EqualizerPresets.GetPresetBands(EqualizerPresets.BassBoostId), preampDb: 0f, autoPreamp: true);
         equalizer.SnapToTarget();
 
         var limiter = new TruePeakLimiter(SampleRate);
@@ -177,21 +176,7 @@ public static partial class HotPathAllocationTests
                 float normGain = analyzer.IsEnabled ? analyzer.ProcessSamples() : 1.0f;
                 crossfader.SetTarget(normGain, SampleRate, Channels);
 
-                bool canBypassLimiter = normGain <= 1.0f
-                                     && !equalizer.HasPositiveBoost
-                                     && (mode != 0 || limiter.EnvelopeGain >= 0.999f);
-                if (canBypassLimiter)
-                {
-                    if (crossfader.IsActive)
-                        SpanMathHelper.MultiplyByCrossfade(samples, ref crossfader);
-                    else if (MathF.Abs(normGain - 1.0f) > 0.0001f)
-                        SpanMathHelper.MultiplyByConstant(samples, normGain);
-                }
-                else
-                {
-                    limiter.Process(samples, ref crossfader);
-                }
-
+                limiter.Process(samples, ref crossfader);
                 spectrumAnalyzer.ProcessBlock(samples, Channels);
                 processor.Process(samples);
             }

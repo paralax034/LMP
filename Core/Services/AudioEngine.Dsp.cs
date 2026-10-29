@@ -48,23 +48,7 @@ public sealed partial class AudioEngine
             var registryTrack = _trackRegistry.TryGet(trackId) ?? _library.GetTrack(trackId);
             var currentTrack = CurrentTrack;
             var track = registryTrack ?? (currentTrack?.Id == trackId ? currentTrack : null);
-            var cacheEntry = FindNormalizationCacheEntry(trackId);
-
-            if (track != null && cacheEntry != null)
-                TrackNormalizationHydrator.HydrateNormalization(track, cacheEntry);
-
-            float resolvedGain = track != null
-                ? NormalizationGainResolver.Resolve(track, normConfig)
-                : float.NaN;
-
-            if (float.IsNaN(resolvedGain)
-                && cacheEntry?.IntegratedLufs is float cacheIntegratedLufs
-                && float.IsFinite(cacheIntegratedLufs))
-            {
-                resolvedGain = NormalizationGainResolver.ComputeGainFromIntegratedLufs(
-                    cacheIntegratedLufs,
-                    normConfig);
-            }
+            float resolvedGain = ResolveTrackNormalizationGain(track, trackId, normConfig, out var cacheEntry);
 
 #if DEBUG
             if (track != null)
@@ -97,6 +81,35 @@ public sealed partial class AudioEngine
 
         ApplyEqualizerToPipelineCore(pipeline, trackId, snapImmediately: true);
         pipeline.SnapCrossfaderToGain();
+    }
+
+    private static float ResolveTrackNormalizationGain(
+        TrackInfo? track,
+        string? trackId,
+        in NormalizationConfig normConfig,
+        out AudioCacheEntry? cacheEntry)
+    {
+        cacheEntry = !string.IsNullOrEmpty(trackId) ? FindNormalizationCacheEntry(trackId) : null;
+        if (track != null && cacheEntry != null)
+            TrackNormalizationHydrator.HydrateNormalization(track, cacheEntry);
+
+        if (!normConfig.Enabled)
+            return float.NaN;
+
+        float resolvedGain = track != null
+            ? NormalizationGainResolver.Resolve(track, normConfig)
+            : float.NaN;
+
+        if (float.IsNaN(resolvedGain)
+            && cacheEntry?.IntegratedLufs is float cacheIntegratedLufs
+            && float.IsFinite(cacheIntegratedLufs))
+        {
+            resolvedGain = NormalizationGainResolver.ComputeGainFromIntegratedLufs(
+                cacheIntegratedLufs,
+                normConfig);
+        }
+
+        return resolvedGain;
     }
 
     #endregion
@@ -133,6 +146,33 @@ public sealed partial class AudioEngine
         NotifyPersistenceNeeded();
     }
 
+    private void DrainPendingNormalizationWrites(
+        Dictionary<string, (float IntegratedLufs, LoudnessSource Source)> target)
+    {
+        target.Clear();
+        while (_pendingNormalizationWrites.TryDequeue(out var pending))
+            target[pending.TrackId] = (pending.IntegratedLufs, pending.Source);
+    }
+
+    private Task PersistNormalizationEntryAsync(
+        string trackId,
+        (float IntegratedLufs, LoudnessSource Source) data,
+        CancellationToken ct)
+    {
+        var track = _trackRegistry.TryGet(trackId) ?? _library.GetTrack(trackId);
+        if (track != null)
+        {
+            track.SetIntegratedLufs(data.IntegratedLufs, data.Source);
+            return _library.AddOrUpdateTrackAsync(track, ct);
+        }
+
+        return _library.SaveTrackNormalizationMetadataAsync(
+            trackId,
+            data.IntegratedLufs,
+            (int)data.Source,
+            ct);
+    }
+
     /// <summary>
     /// Асинхронно сохраняет отложенные записи integrated loudness в БД.
     /// </summary>
@@ -141,8 +181,7 @@ public sealed partial class AudioEngine
         if (_pendingNormalizationWrites.IsEmpty) return;
 
         var localBatch = new Dictionary<string, (float IntegratedLufs, LoudnessSource Source)>(StringComparer.Ordinal);
-        while (_pendingNormalizationWrites.TryDequeue(out var pending))
-            localBatch[pending.TrackId] = (pending.IntegratedLufs, pending.Source);
+        DrainPendingNormalizationWrites(localBatch);
 
         if (localBatch.Count == 0) return;
 
@@ -150,20 +189,7 @@ public sealed partial class AudioEngine
         {
             try
             {
-                var track = _trackRegistry.TryGet(trackId) ?? _library.GetTrack(trackId);
-                if (track != null)
-                {
-                    track.SetIntegratedLufs(data.IntegratedLufs, data.Source);
-                    await _library.AddOrUpdateTrackAsync(track, ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    await _library.SaveTrackNormalizationMetadataAsync(
-                        trackId,
-                        data.IntegratedLufs,
-                        (int)data.Source,
-                        ct).ConfigureAwait(false);
-                }
+                await PersistNormalizationEntryAsync(trackId, data, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -181,36 +207,17 @@ public sealed partial class AudioEngine
 
         lock (_normalizationBatch)
         {
-            _normalizationBatch.Clear();
-            while (_pendingNormalizationWrites.TryDequeue(out var pending))
-                _normalizationBatch[pending.TrackId] = (pending.IntegratedLufs, pending.Source);
-
+            DrainPendingNormalizationWrites(_normalizationBatch);
             if (_normalizationBatch.Count == 0) return;
 
             foreach (var (trackId, data) in _normalizationBatch)
             {
                 try
                 {
-                    var track = _trackRegistry.TryGet(trackId) ?? _library.GetTrack(trackId);
-                    if (track != null)
-                    {
-                        track.SetIntegratedLufs(data.IntegratedLufs, data.Source);
-                        _library.AddOrUpdateTrackAsync(track, CancellationToken.None)
-                            .ConfigureAwait(false)
-                            .GetAwaiter()
-                            .GetResult();
-                    }
-                    else
-                    {
-                        _library.SaveTrackNormalizationMetadataAsync(
-                                trackId,
-                                data.IntegratedLufs,
-                                (int)data.Source,
-                                CancellationToken.None)
-                            .ConfigureAwait(false)
-                            .GetAwaiter()
-                            .GetResult();
-                    }
+                    PersistNormalizationEntryAsync(trackId, data, CancellationToken.None)
+                        .ConfigureAwait(false)
+                        .GetAwaiter()
+                        .GetResult();
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -269,27 +276,7 @@ public sealed partial class AudioEngine
             audioSettings.NormalizationMode);
 
         var track = CurrentTrack;
-        AudioCacheEntry? cacheEntry = null;
-
-        if (track != null)
-        {
-            cacheEntry = FindNormalizationCacheEntry(track.Id);
-            if (cacheEntry != null)
-                TrackNormalizationHydrator.HydrateNormalization(track, cacheEntry);
-        }
-
-        float resolvedGain = normConfig.Enabled
-            ? NormalizationGainResolver.Resolve(track, normConfig)
-            : float.NaN;
-
-        if (float.IsNaN(resolvedGain)
-            && cacheEntry?.IntegratedLufs is float cacheIntegratedLufs
-            && float.IsFinite(cacheIntegratedLufs))
-        {
-            resolvedGain = NormalizationGainResolver.ComputeGainFromIntegratedLufs(
-                cacheIntegratedLufs,
-                normConfig);
-        }
+        float resolvedGain = ResolveTrackNormalizationGain(track, track?.Id, normConfig, out _);
 
         pipeline.Analyzer.Configure(normConfig);
 

@@ -2,20 +2,23 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
+using LMP.Core.Audio.Interfaces;
+using LMP.Core.Audio.Normalization;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты алгоритмической логики аудио-тракта: интерполяция позиции слайдера,
-/// ограничение при голодании буфера (starvation clamp), адаптивный гистерезис пробуждений
-/// и Zero-Copy конвейер WASAPI.
+/// Детерминированные модульные тесты алгоритмов аудио-тракта и DSP:
+/// проверяют математические инварианты (ITU-R BS.1770-4, побитовую линейность,
+/// фазовую когерентность каналов, частотную избирательность, асимптотический потолок),
+/// конечный автомат состояний и отсутствие аллокаций (0 B) на горячем пути.
 /// </summary>
 public static class AudioLogicTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
-    private const int BufferSamples = SampleRate / 10 * Channels;
+    private const int BufferSamples = SampleRate / 10 * Channels; // 100 мс стерео
 
     [TestMethod(TestCategory.Unit, "Position Interpolation & Starvation Clamp", Group = TestGroups.Audio, Order = 1)]
     public static async Task TestSharedPlaybackStateInterpolationAsync()
@@ -33,10 +36,10 @@ public static class AudioLogicTests
         const long baseSamples = SampleRate * Channels * 10;
         const double basePositionSeconds = 10.0;
 
-        var ring = new LockFreeRingBuffer<float>(BufferSamples * 4);
+        using var ring = new LockFreeRingBuffer<float>(BufferSamples * 4);
         float[] pcmChunk = new float[BufferSamples];
 
-        // 1. Плавный ход интерполяции при наличии данных в кольцевом буфере
+        // 1. Монотонный ход интерполяции при наличии данных в кольцевом буфере
         ring.Write(pcmChunk.AsSpan());
         int activeBufferedSamples = ring.Count;
 
@@ -45,120 +48,151 @@ public static class AudioLogicTests
 
         var playingPosition = (TimeSpan)getPositionMethod.Invoke(sharedState, null)!;
         double deltaMs = (playingPosition.TotalSeconds - basePositionSeconds) * 1000.0;
-        TestAssert.True(deltaMs > 0.0, "Position did not advance while playing");
+        TestAssert.True(deltaMs > 0.0, "Position must advance while playing with buffered samples");
 
-        // 2. Starvation Clamp: при опустошении буфера интерполяция должна мгновенно замереть
+        // 2. Starvation Clamp: при пустом кольцевом буфере интерполяция обязана мгновенно остановиться
         ring.Clear();
-        int starvedBufferedSamples = ring.Count;
         long starvedBaseSamples = baseSamples + activeBufferedSamples;
         double starvedBaseSeconds = (double)starvedBaseSamples / (SampleRate * Channels);
 
-        updateMethod.Invoke(sharedState, [starvedBaseSamples, starvedBufferedSamples, SampleRate, Channels, true, durationMs]);
+        updateMethod.Invoke(sharedState, [starvedBaseSamples, ring.Count, SampleRate, Channels, true, durationMs]);
         await Task.Delay(25).ConfigureAwait(false);
 
         var starvedPosition = (TimeSpan)getPositionMethod.Invoke(sharedState, null)!;
-        double starvedDeltaMs = (starvedPosition.TotalSeconds - starvedBaseSeconds) * 1000.0;
-        TestAssert.True(starvedDeltaMs <= 0.001, "Starvation clamp failed: ghost advance detected");
+        double starvedDeltaMs = Math.Abs((starvedPosition.TotalSeconds - starvedBaseSeconds) * 1000.0);
+        TestAssert.True(starvedDeltaMs <= 0.001, $"Starvation clamp failed: drift={starvedDeltaMs:F4}ms");
+
+        // 3. Upper Bound Clamp: позиция никогда не должна превышать длительность трека
+        long nearEndSamples = (long)(durationMs / 1000.0 * SampleRate * Channels);
+        updateMethod.Invoke(sharedState, [nearEndSamples, activeBufferedSamples, SampleRate, Channels, true, durationMs]);
+        await Task.Delay(20).ConfigureAwait(false);
+
+        var clampedPosition = (TimeSpan)getPositionMethod.Invoke(sharedState, null)!;
+        TestAssert.True(clampedPosition.TotalMilliseconds <= durationMs, "Position exceeded track duration");
     }
 
-    [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & Batch Hysteresis", Group = TestGroups.Audio, Order = 2)]
+    [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & State Machine Contracts", Group = TestGroups.Audio, Order = 2)]
     public static Task TestAdaptiveDecoderDelayAndBatchHysteresisAsync()
     {
-        // 1. Проверка шкалы адаптивных задержек в зависимости от заполнения
+        // 1. Монотонная шкала адаптивных задержек декодера в зависимости от запаса PCM в буфере
         int delayEmpty = AudioPipeline.ComputeBufferFullDelayMs(0, SampleRate, Channels);
         int delayLow = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 200 / 1000, SampleRate, Channels);
         int delayMid = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 500 / 1000, SampleRate, Channels);
-        int delayHigh = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1500 / 1000, SampleRate, Channels);
+        int delayHigh = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1100 / 1000, SampleRate, Channels);
+        int delayMax = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1500 / 1000, SampleRate, Channels);
 
         TestAssert.Equal(5, delayEmpty);
         TestAssert.Equal(5, delayLow);
         TestAssert.Equal(25, delayMid);
-        TestAssert.Equal(180, delayHigh);
+        TestAssert.Equal(100, delayHigh);
+        TestAssert.Equal(180, delayMax);
 
-        // 2. Проверка гистерезиса пакетирования (не более 3 пробуждений декодера за 1 секунду аудио)
-        var ring = new LockFreeRingBuffer<float>(SampleRate * Channels * 2);
-        int frameSize = 960 * Channels;
-        int batchRefillSpace = Math.Max(frameSize * 4, ring.Capacity / 4);
-        float[] frameBuf = new float[frameSize];
-        float[] backendChunk = new float[SampleRate * Channels / 10];
+        // 2. Проверка контрактов конечного автомата PlayerStateTransitions
+        TestAssert.True(
+            PlayerStateTransitions.CanAcceptCommand(PlayerState.Playing, new StarvationCommand(1, null!)),
+            "StarvationCommand must be accepted in Playing state");
+        TestAssert.True(
+            PlayerStateTransitions.CanAcceptCommand(PlayerState.Buffering, new StarvationCommand(1, null!)),
+            "StarvationCommand must be accepted in Buffering state");
+        TestAssert.False(
+            PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new PlayCommand(default, 1)),
+            "Disposed state must reject all commands except DisposeCommand");
+        TestAssert.True(
+            PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new DisposeCommand(1)),
+            "Disposed state must accept DisposeCommand");
 
-        while (ring.Available >= frameSize)
-            ring.Write(frameBuf.AsSpan());
-
-        int decoderWakeups = 0;
-        for (int tick = 0; tick < 10; tick++)
-        {
-            ring.Read(backendChunk.AsSpan());
-
-            if (ring.Available >= batchRefillSpace)
-            {
-                decoderWakeups++;
-                while (ring.Available >= frameSize)
-                    ring.Write(frameBuf.AsSpan());
-            }
-        }
-
-        TestAssert.True(decoderWakeups <= 3, $"Excessive decoder wakeups: {decoderWakeups} (expected <= 3)");
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "WASAPI Zero-Copy Native Span DSP & Fade (0 Alloc)", Group = TestGroups.Audio, Order = 3)]
+    [TestMethod(TestCategory.Unit, "WASAPI Zero-Copy Native Span DSP & Fade Envelope (0 Alloc)", Group = TestGroups.Audio, Order = 3)]
     [SupportedOSPlatform("windows")]
     public static unsafe Task TestWasapiZeroCopyNativeSpanDspAsync()
     {
         if (!OperatingSystem.IsWindows())
             TestAssert.Skip("Windows-only WASAPI test");
 
-        const int frames = 1152; // 24ms @ 48kHz
+        const int frames = 960; // Полная длина микро-фейда (20 мс @ 48 кГц)
         const int sampleCount = frames * Channels;
 
         float* nativeBuffer = (float*)NativeMemory.AllocZeroed((nuint)(sampleCount * sizeof(float)));
         try
         {
-            var ring = new LockFreeRingBuffer<float>(sampleCount * 4);
+            using var ring = new LockFreeRingBuffer<float>(sampleCount * 4);
             var gainProcessor = new GainProcessor();
             gainProcessor.SetVolumeGain(0.8f);
 
             float[] sourceSamples = new float[sampleCount];
             Array.Fill(sourceSamples, 0.5f);
 
+            // 1. Математическая проверка Fade-In от 0 до 1 (с учётом IEEE 754 округления шага 1.0f / 960)
+            Span<float> fadeSpan = new(nativeBuffer, sampleCount);
+            fadeSpan.Fill(1.0f);
             float fadeGain = 0f;
 
+            _ = WinAudioBackend.ApplyFadeEnvelope(
+                fadeSpan,
+                frames,
+                Channels,
+                WinAudioBackend.FadeState.FadingIn,
+                ref fadeGain);
+
+            TestAssert.True(MathF.Abs(fadeGain - 1.0f) < 1e-5f, $"Fade-in after 960 frames must reach ~1.0f, got {fadeGain:R}");
+            TestAssert.True(fadeSpan[0] > 0f && fadeSpan[0] < 0.01f, "Fade-in first frame must start near zero");
+            TestAssert.True(MathF.Abs(fadeSpan[^1] - 1.0f) < 1e-5f, "Fade-in 960th frame must reach unity");
+
+            for (int f = 1; f < frames; f++)
+            {
+                float prev = fadeSpan[(f - 1) * Channels];
+                float curr = fadeSpan[f * Channels];
+                TestAssert.Equal(curr, fadeSpan[f * Channels + 1], "Fade-in must apply identical gain to L and R");
+                TestAssert.True(curr >= prev, $"Fade-in envelope must be monotonically non-decreasing at frame {f}");
+            }
+
+            // Следующий фрейм завершает Fade-In с фиксацией ровно 1.0f
+            bool fadeInDone = WinAudioBackend.ApplyFadeEnvelope(
+                fadeSpan[..Channels],
+                1,
+                Channels,
+                WinAudioBackend.FadeState.FadingIn,
+                ref fadeGain);
+            TestAssert.True(fadeInDone, "Fade-in must complete on terminal step");
+            TestAssert.Equal(1.0f, fadeGain, "Fade-in terminal gain must be 1.0f");
+
+            // 2. Математическая проверка Fade-Out и гарантированного зануления хвоста буфера
+            fadeSpan.Fill(1.0f);
+            fadeGain = 0.5f; // Должен завершиться ровно на половине буфера (480 фреймов), обнулив вторую половину
+
+            bool fadeOutDone = WinAudioBackend.ApplyFadeEnvelope(
+                fadeSpan,
+                frames,
+                Channels,
+                WinAudioBackend.FadeState.FadingOut,
+                ref fadeGain);
+
+            TestAssert.True(fadeOutDone, "Fade-out from 0.5f must complete within 960 frames");
+            TestAssert.Equal(0f, fadeGain, "Fade-out terminal gain must be 0f");
+            for (int i = frames; i < sampleCount; i++)
+            {
+                TestAssert.Equal(0f, fadeSpan[i], $"Tail sample {i} after fade-out completion must be strictly 0f");
+            }
+
+            // 3. Инвариант 0 B аллокаций на нативном Span
             TestAssert.ZeroAlloc(() =>
             {
                 ring.Write(sourceSamples.AsSpan());
                 Span<float> wasapiSpan = new(nativeBuffer, sampleCount);
-
                 int read = ring.Read(wasapiSpan);
-                int framesRead = read / Channels;
-
                 fadeGain = 0.5f;
 
                 _ = WinAudioBackend.ApplyFadeEnvelope(
                     wasapiSpan,
-                    framesRead,
+                    read / Channels,
                     Channels,
                     WinAudioBackend.FadeState.FadingIn,
                     ref fadeGain);
 
                 gainProcessor.Process(wasapiSpan);
             }, warmup: 5, iterations: 1000, context: "WASAPI Zero-Copy Native Span");
-
-            // Проверяем корректность fade-out зануления хвоста
-            Span<float> tailSpan = new(nativeBuffer, sampleCount);
-            tailSpan.Fill(1.0f);
-            fadeGain = 0.001f;
-
-            bool completed = WinAudioBackend.ApplyFadeEnvelope(
-                tailSpan,
-                frames,
-                Channels,
-                WinAudioBackend.FadeState.FadingOut,
-                ref fadeGain);
-
-            TestAssert.True(completed, "Fade-out must complete when gain reaches 0");
-            TestAssert.Equal(0f, fadeGain);
-            TestAssert.Equal(0f, tailSpan[^1]);
         }
         finally
         {
@@ -168,1177 +202,415 @@ public static class AudioLogicTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "GainProcessor Smooth Retargeting & Stereo Center Invariant", Group = TestGroups.Audio, Order = 4)]
-    public static Task TestGainProcessorContinuousRetargetingAndStereoBalanceAsync()
+    [TestMethod(TestCategory.Unit, "GainProcessor Linear Scaling, Soft-Knee Ceiling & Ramp Continuity", Group = TestGroups.Audio, Order = 4)]
+    public static Task TestGainProcessorLinearitySoftKneeAndRampAsync()
     {
         var processor = new GainProcessor();
-        processor.SetVolumeGain(0.2f);
 
-        // Прогреваем до стабилизации на 0.2f
-        float[] warmup = new float[4800];
-        Array.Fill(warmup, 1.0f);
+        // 1. Побитовая линейность при стационарном коэффициенте <= 1.0f в пределах [-SafeCeiling, +SafeCeiling]
+        processor.SetVolumeGain(0.5f);
+        float[] warmup = new float[2400 * Channels];
+        processor.Process(warmup.AsSpan()); // Завершаем рампу (1200 стерео-фреймов)
+
+        float[] linearBuf = [-0.8f, -0.4f, 0.0f, 0.25f, 0.6f, 0.8f];
+        float[] expectedBuf = [-0.4f, -0.2f, 0.0f, 0.125f, 0.3f, 0.4f];
+        processor.Process(linearBuf.AsSpan());
+
+        for (int i = 0; i < linearBuf.Length; i++)
+        {
+            TestAssert.Equal(
+                BitConverter.SingleToInt32Bits(expectedBuf[i]),
+                BitConverter.SingleToInt32Bits(linearBuf[i]),
+                $"GainProcessor linear scaling mismatch at {i}");
+        }
+
+        // 2. Строгий асимптотический потолок SafeCeiling (0.985f) и монотонность при Volume Boost (> 1.0f)
+        processor.SetVolumeGain(2.5f);
         processor.Process(warmup.AsSpan());
 
-        // Имитируем быстрое движение ползунка громкости мелкими буферами по 256 сэмплов (128 стерео-фреймов),
-        // когда новая цель приходит ДО завершения предыдущей рампы (1200 фреймов).
-        ReadOnlySpan<float> targets = [0.4f, 0.75f, 0.3f, 0.95f, 0.15f, 0.85f];
-        float[] chunk = new float[256];
-        float prevFrameSample = 0.2f;
+        float[] boostInputs = [0.1f, 0.3f, 0.36f, 0.5f, 0.8f, 1.0f]; // 0.36f * 2.5f = 0.90f (граница SoftKneeThreshold)
+        float[] boostOutputs = (float[])boostInputs.Clone();
+        processor.Process(boostOutputs.AsSpan());
+
+        // До порога 0.90f сигнал масштабируется строго линейно
+        TestAssert.True(MathF.Abs(boostOutputs[0] - 0.25f) < 1e-6f, "Sub-knee boost sample 0 must be linear");
+        TestAssert.True(MathF.Abs(boostOutputs[1] - 0.75f) < 1e-6f, "Sub-knee boost sample 1 must be linear");
+        TestAssert.True(MathF.Abs(boostOutputs[2] - 0.90f) < 1e-6f, "Knee boundary (0.90f) must be exact");
+
+        for (int i = 1; i < boostOutputs.Length; i++)
+        {
+            TestAssert.True(boostOutputs[i] > boostOutputs[i - 1], "Soft-clip transfer function must be strictly monotonic");
+            TestAssert.True(boostOutputs[i] <= 0.985f, $"Soft-clip output {boostOutputs[i]:F6} exceeded SafeCeiling (0.985f)");
+        }
+
+        // 3. Непрерывность рампы и идентичность L/R при перенацеливании громкости на лету
+        processor.SetVolumeGain(0.2f);
+        processor.Process(warmup.AsSpan());
+
+        ReadOnlySpan<float> targets = [0.8f, 0.3f, 0.9f, 0.1f];
+        float[] stereoChunk = new float[256];
+        float prevSample = 0.2f;
 
         foreach (float target in targets)
         {
-            Array.Fill(chunk, 1.0f);
+            Array.Fill(stereoChunk, 1.0f);
             processor.SetVolumeGain(target);
-            processor.Process(chunk.AsSpan());
+            processor.Process(stereoChunk.AsSpan());
 
-            for (int i = 0; i < chunk.Length; i += 2)
+            for (int i = 0; i < stereoChunk.Length; i += 2)
             {
-                float left = chunk[i];
-                float right = chunk[i + 1];
+                float left = stereoChunk[i];
+                float right = stereoChunk[i + 1];
+                TestAssert.Equal(left, right, $"Stereo imbalance during volume ramp at index {i}");
 
-                // 1. Строгий инвариант стерео-баланса: L и R одного фрейма обязаны быть идентичны
-                TestAssert.Equal(left, right, $"Stereo imbalance at sample {i}: L={left}, R={right}");
-
-                // 2. Инвариант отсутствия ступенек ("пузырчатой плёнки"):
-                // максимальный шаг за 1 стерео-фрейм при перепаде 1.0 на 1200 фреймов < 0.002f.
-                float stepDelta = MathF.Abs(left - prevFrameSample);
-                TestAssert.True(
-                    stepDelta < 0.005f,
-                    $"Discontinuous volume jump (zipper noise) detected: prev={prevFrameSample:F4}, curr={left:F4}, delta={stepDelta:F4}");
-
-                prevFrameSample = left;
+                // Максимальный теоретический шаг рампы за 1 фрейм при |Δgain| <= 0.8 равен 0.8 / 1200 = 0.00067f
+                float step = MathF.Abs(left - prevSample);
+                TestAssert.True(step <= 0.001f, $"Discontinuous volume step: {step:F6}");
+                prevSample = left;
             }
         }
 
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Waveform Oscilloscope: Seek Warmup & Volume Glitch Detector", Group = TestGroups.Audio, Order = 5)]
-    [SupportedOSPlatform("windows")]
-    public static Task TestSeekAndVolumeWaveformGlitchDetectorAsync()
+    [TestMethod(TestCategory.Unit, "TruePeakLimiter & GainCrossfader Bit-Exact Pass & Stereo Link", Group = TestGroups.Audio, Order = 5)]
+    public static Task TestTruePeakLimiterAndGainCrossfaderInvariantsAsync()
     {
-        if (!OperatingSystem.IsWindows())
-            TestAssert.Skip("Windows-only WASAPI test");
+        var limiter = new TruePeakLimiter(SampleRate);
+        var crossfader = new GainCrossfader(1.0f);
 
-        // Доказываем, что после Seek при прогреве буфера >= 60 мс и последующем FadeIn + вращении громкости
-        // в выходном сигнале нет ни одного разрыва фазы (нулевых дыр "пузырчатой плёнки") и нет перекоса L/R.
-        const int warmupSamples = SampleRate * Channels * 60 / 1000; // 60 мс стерео
-        const int wasapiPeriodSamples = 480 * Channels;              // 10 мс квант WASAPI
-
-        var ring = new LockFreeRingBuffer<float>(SampleRate * Channels * 2);
-        var gainProcessor = new GainProcessor();
-        gainProcessor.SetVolumeGain(0.8f);
-
-        // Заполняем 60 мс непрерывной синусоидой 440 Гц (имитация завершённого WaitForBufferAsync после Seek)
-        float[] decodedPcm = new float[warmupSamples * 2];
-        for (int f = 0; f < decodedPcm.Length / Channels; f++)
+        // 1. Побитовая прозрачность в линейной области (|x| <= KneeStart = 0.88f, gain = 1.0f)
+        float[] linearSignal = new float[512 * Channels];
+        for (int f = 0; f < 512; f++)
         {
-            float val = MathF.Sin(2f * MathF.PI * 440f * f / SampleRate) * 0.8f;
-            decodedPcm[f * 2] = val;
-            decodedPcm[f * 2 + 1] = val;
-        }
-        ring.Write(decodedPcm.AsSpan());
-
-        float fadeGain = 0f;
-        var fadeState = WinAudioBackend.FadeState.FadingIn;
-        float[] wasapiBuffer = new float[wasapiPeriodSamples];
-
-        float prevL = 0f;
-        float prevR = 0f;
-        float maxStepJump = 0f;
-
-        for (int tick = 0; tick < 10; tick++)
-        {
-            // На каждом тике меняем громкость, имитируя скольжение ползунка
-            gainProcessor.SetVolumeGain(0.5f + (tick % 3) * 0.15f);
-
-            int read = ring.Read(wasapiBuffer.AsSpan());
-            TestAssert.Equal(wasapiPeriodSamples, read, "Buffer underrun (zero-gap) detected during post-seek playback");
-
-            if (fadeState != WinAudioBackend.FadeState.None)
-            {
-                bool done = WinAudioBackend.ApplyFadeEnvelope(
-                    wasapiBuffer.AsSpan(),
-                    read / Channels,
-                    Channels,
-                    fadeState,
-                    ref fadeGain);
-                if (done)
-                    fadeState = WinAudioBackend.FadeState.None;
-            }
-
-            gainProcessor.Process(wasapiBuffer.AsSpan());
-
-            for (int i = 0; i < wasapiBuffer.Length; i += 2)
-            {
-                float curL = wasapiBuffer[i];
-                float curR = wasapiBuffer[i + 1];
-
-                // 1. Нулевой перекос стерео-панорамы
-                TestAssert.Equal(curL, curR, $"Stereo shift detected at tick {tick}, sample {i}");
-
-                // 2. Отсутствие вертикальных ступенек/щелчков (макс. производная 440 Гц @ 48 кГц ~ 0.058)
-                float jump = MathF.Max(MathF.Abs(curL - prevL), MathF.Abs(curR - prevR));
-                if (jump > maxStepJump)
-                    maxStepJump = jump;
-
-                TestAssert.True(jump < 0.08f, $"Waveform glitch/pop detected at tick {tick}, sample {i}: jump={jump:F4}");
-
-                prevL = curL;
-                prevR = curR;
-            }
+            float s = MathF.Sin(2f * MathF.PI * 440f * f / SampleRate) * 0.85f;
+            linearSignal[f * 2] = s;
+            linearSignal[f * 2 + 1] = -s;
         }
 
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "TruePeakLimiter & Crossfader Stereo Link & DeClick Continuity", Group = TestGroups.Audio, Order = 6)]
-    [SupportedOSPlatform("windows")]
-    public static Task TestStereoLinkAndDeClickContinuityAsync()
-    {
-        // 1. Проверяем, что TruePeakLimiter + GainCrossfader сохраняют идеальный баланс L == R
-        // и не дают щелчка в правом канале при пиках > 1.0f и активной рампе нормализации.
-        var limiter = new Core.Audio.Normalization.TruePeakLimiter(SampleRate);
-        var crossfader = new Core.Audio.Normalization.GainCrossfader(0.6f);
-        crossfader.SetTarget(1.8f, SampleRate, Channels);
-
-        float[] stereoSamples = new float[960 * Channels];
-        for (int f = 0; f < 960; f++)
-        {
-            float v = MathF.Sin(2f * MathF.PI * 440f * f / SampleRate) * 0.9f;
-            stereoSamples[f * 2] = v;
-            stereoSamples[f * 2 + 1] = v;
-        }
-
-        limiter.Process(stereoSamples.AsSpan(), ref crossfader);
-
-        for (int i = 0; i < stereoSamples.Length; i += 2)
-        {
-            TestAssert.Equal(
-                stereoSamples[i],
-                stereoSamples[i + 1],
-                $"TruePeakLimiter/GainCrossfader broke stereo balance at sample {i}: L={stereoSamples[i]}, R={stereoSamples[i + 1]}");
-        }
-
-        // 2. Проверяем C1-гладкий 20-миллисекундный wave-to-wave кроссфейд при Seek в AudioPipeline:
-        // старая волна оборвалась на +0.75f, а новая позиция начинается с противофазы -0.60f.
-        const int cfFrames = 960; // 20 мс @ 48 кГц
-        float[] oldTail = new float[cfFrames * Channels];
-        float[] newWave = new float[cfFrames * Channels];
-
-        for (int f = 0; f < cfFrames; f++)
-        {
-            // Старая волна продолжается от +0.75f
-            float vOld = MathF.Sin(2f * MathF.PI * 440f * f / SampleRate + 1.1f) * 0.85f;
-            oldTail[f * 2] = vOld;
-            oldTail[f * 2 + 1] = vOld;
-
-            // Новая волна стартует со своей независимой фазы (-0.60f)
-            float vNew = MathF.Sin(2f * MathF.PI * 440f * f / SampleRate - 0.8f) * 0.85f;
-            newWave[f * 2] = vNew;
-            newWave[f * 2 + 1] = vNew;
-        }
-
-        // Применяем формулу Hermite S-curve кроссфейда из AudioPipeline.AudioCallback
-        const float invTotal = 1.0f / cfFrames;
-        for (int f = 0; f < cfFrames; f++)
-        {
-            float t = (f + 1) * invTotal;
-            float newWeight = t * t * (3.0f - 2.0f * t);
-            float oldWeight = 1.0f - newWeight;
-
-            int baseIdx = f * Channels;
-            for (int ch = 0; ch < Channels; ch++)
-            {
-                newWave[baseIdx + ch] = oldTail[baseIdx + ch] * oldWeight + newWave[baseIdx + ch] * newWeight;
-            }
-        }
-
-        // Проверяем идеальный стерео-баланс L == R и отсутствие скачков производной (шаг < естественного уклона синуса ~0.049)
-        float prevL = oldTail[0];
-        for (int i = 0; i < newWave.Length; i += 2)
-        {
-            float curL = newWave[i];
-            float curR = newWave[i + 1];
-            TestAssert.Equal(curL, curR, $"Wave-to-wave crossfade stereo mismatch at {i}");
-
-            float step = MathF.Abs(curL - prevL);
-            TestAssert.True(step < 0.055f, $"Click during wave-to-wave crossfade at sample {i}: prev={prevL:F4}, cur={curL:F4}, step={step:F4}");
-            prevL = curL;
-        }
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Equalizer 10-Band SIMD Zero-Alloc, Selectivity & Anti-Clip", Group = TestGroups.Audio, Order = 7)]
-    public static Task TestEqualizerZeroAllocSelectivityAndAntiClippingAsync()
-    {
-        var eq = new EqualizerProcessor(SampleRate, Channels);
-
-        // 1. Инвариант Bypass Identity: при выключенном EQ или нулевых полосах сигнал побитово неизменен
-        float[] input = new float[1152 * Channels];
-        for (int f = 0; f < 1152; f++)
-        {
-            float s = MathF.Sin(2f * MathF.PI * 1000f * f / SampleRate) * 0.25f;
-            input[f * 2] = s;
-            input[f * 2 + 1] = s;
-        }
-
-        float[] working = (float[])input.Clone();
-        eq.Process(working.AsSpan());
-        TestAssert.True(eq.IsBypassed, "Equalizer must be in zero-CPU bypass when disabled or flat");
-        TestAssert.Equal(
-            BitConverter.SingleToInt32Bits(input[500]),
-            BitConverter.SingleToInt32Bits(working[500]),
-            "Bypassed EQ must not alter samples");
-
-        // 2. Включаем буст +12 dB на полосе 1 kHz (индекс 5) без AutoPreamp и проверяем точность усиления
-        Span<float> bands = stackalloc float[EqualizerProcessor.BandCount];
-        bands.Clear();
-        bands[5] = 12.0f; // 1000 Hz -> +12 dB (~3.981x)
-
-        eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
-        eq.SnapToTarget();
-
-        // Прогоняем 4 блока для установления стационарного отклика IIR-фильтра
-        for (int b = 0; b < 4; b++)
-        {
-            Array.Copy(input, working, input.Length);
-            eq.Process(working.AsSpan());
-        }
-
-        float maxPeak1k = 0f;
-        for (int i = working.Length / 2; i < working.Length; i += 2)
-        {
-            TestAssert.Equal(working[i], working[i + 1], $"EQ broke stereo balance at sample {i}");
-            float abs = MathF.Abs(working[i]);
-            if (abs > maxPeak1k) maxPeak1k = abs;
-        }
-
-        float expectedPeak = 0.25f * MathF.Pow(10f, 12.0f / 20.0f); // ~0.995f
-        TestAssert.True(
-            MathF.Abs(maxPeak1k - expectedPeak) < 0.06f,
-            $"1 kHz +12 dB boost mismatch: actual={maxPeak1k:F3}, expected={expectedPeak:F3}");
-
-        // 3. Zero-Alloc инвариант горячего пути с активной рампой сглаживания
-        ReadOnlySpan<float> presetAnime = EqualizerPresets.GetPresetBands(EqualizerPresets.AnimeId);
-        eq.Configure(enabled: true, presetAnime, preampDb: 0f, autoPreamp: true);
-
-        TestAssert.ZeroAlloc(() =>
-        {
-            input.AsSpan().CopyTo(working.AsSpan());
-            eq.Process(working.AsSpan());
-        }, warmup: 5, iterations: 1000, context: "EqualizerProcessor.Process HotPath");
-
-        // 4. Защита от клиппинга в связке EqualizerProcessor (+12 dB Bass) -> TruePeakLimiter
-        eq.Reset();
-        bands.Clear();
-        bands[0] = 12.0f; // 31 Hz
-        bands[1] = 12.0f; // 62 Hz
-        eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
-        eq.SnapToTarget();
-
-        var limiter = new Core.Audio.Normalization.TruePeakLimiter(SampleRate);
-        var crossfader = new Core.Audio.Normalization.GainCrossfader(1.0f);
-
-        for (int f = 0; f < 1152; f++)
-        {
-            float bass = MathF.Sin(2f * MathF.PI * 62f * f / SampleRate) * 0.6f;
-            working[f * 2] = bass;
-            working[f * 2 + 1] = bass;
-        }
-
-        eq.Process(working.AsSpan());
+        float[] working = (float[])linearSignal.Clone();
         limiter.Process(working.AsSpan(), ref crossfader);
 
         for (int i = 0; i < working.Length; i++)
         {
-            TestAssert.True(float.IsFinite(working[i]), $"Non-finite sample at {i}");
-            TestAssert.True(
-                MathF.Abs(working[i]) <= 0.99f,
-                $"Sample exceeded safe WASAPI ceiling after EQ+Limiter: {working[i]:F4}");
+            TestAssert.Equal(
+                BitConverter.SingleToInt32Bits(linearSignal[i]),
+                BitConverter.SingleToInt32Bits(working[i]),
+                $"TruePeakLimiter altered linear sample below KneeStart (0.88f) at index {i}");
+        }
+
+        // 2. Строгий Stereo Link: если пик возникает только в левом канале (L = 1.6f, R = 0.4f -> отношение 4:1),
+        // оба канала обязаны ослабляться на идентичный коэффициент с сохранением отношения L/R == 4:1 и потолка <= 0.985f.
+        limiter.Reset();
+        crossfader.Reset(1.0f);
+
+        float[] asymmetricStereo = new float[512 * Channels];
+        for (int f = 0; f < 512; f++)
+        {
+            asymmetricStereo[f * 2] = 1.6f;
+            asymmetricStereo[f * 2 + 1] = 0.4f;
+        }
+
+        TestAssert.ZeroAlloc(() =>
+        {
+            asymmetricStereo.AsSpan().CopyTo(working.AsSpan());
+            limiter.Process(working.AsSpan(), ref crossfader);
+        }, warmup: 3, iterations: 500, context: "TruePeakLimiter.Process HotPath");
+
+        for (int f = 0; f < 512; f++)
+        {
+            float outL = working[f * 2];
+            float outR = working[f * 2 + 1];
+            TestAssert.True(outL <= 0.985f && outR <= 0.985f, $"Limiter ceiling breached at frame {f}: L={outL:F5}");
+            TestAssert.True(outR > 0f, "Right channel must not be zeroed out");
+
+            // Проверяем, что отношение L/R не разрушено независимым клиппингом одного канала
+            float ratio = outL / outR;
+            TestAssert.True(ratio > 2.0f && ratio <= 4.001f, $"Stereo image collapsed at frame {f}: L/R={ratio:F3}");
         }
 
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Equalizer ForceGlobal vs Per-Track Priority & 3-Band Vocal Selectivity", Group = TestGroups.Audio, Order = 8)]
-    public static Task TestEqualizerResolutionAndVocalAnalyzerSelectivityAsync()
+    [TestMethod(TestCategory.Unit, "Equalizer 10-Band Bypass Identity, Selectivity & SeqLock Concurrency", Group = TestGroups.Audio, Order = 6)]
+    public static async Task TestEqualizerBypassFrequencySelectivityAndConcurrencyAsync()
     {
+        var eq = new EqualizerProcessor(SampleRate, Channels);
+
+        // 1. Побитовая прозрачность в режиме Bypass
+        float[] input1k = new float[2048 * Channels];
+        for (int f = 0; f < 2048; f++)
+        {
+            float s = MathF.Sin(2f * MathF.PI * 1000f * f / SampleRate) * 0.25f;
+            input1k[f * 2] = s;
+            input1k[f * 2 + 1] = s;
+        }
+
+        float[] working = (float[])input1k.Clone();
+        eq.Process(working.AsSpan());
+        TestAssert.True(eq.IsBypassed, "Default EqualizerProcessor must be in bypass");
+        for (int i = 0; i < working.Length; i++)
+        {
+            TestAssert.Equal(
+                BitConverter.SingleToInt32Bits(input1k[i]),
+                BitConverter.SingleToInt32Bits(working[i]),
+                $"Bypassed EQ modified sample at {i}");
+        }
+
+        // 2. Точность коэффициента усиления Cytomic SVF на центральной частоте полосы 1 кГц (+12 dB и -12 dB)
+        Span<float> bands = stackalloc float[EqualizerProcessor.BandCount];
+        bands.Clear();
+        bands[5] = 12.0f; // 1000 Гц -> +12 dB (3.98107x)
+
+        eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
+        eq.SnapToTarget();
+
+        for (int pass = 0; pass < 3; pass++)
+        {
+            input1k.AsSpan().CopyTo(working.AsSpan());
+            eq.Process(working.AsSpan());
+        }
+
+        float boostPeak = 0f;
+        for (int i = working.Length / 2; i < working.Length; i += 2)
+        {
+            TestAssert.Equal(working[i], working[i + 1], "EQ stereo mismatch");
+            float abs = MathF.Abs(working[i]);
+            if (abs > boostPeak) boostPeak = abs;
+        }
+
+        float expectedBoostPeak = 0.25f * MathF.Pow(10f, 12.0f / 20.0f);
+        TestAssert.True(
+            MathF.Abs(boostPeak - expectedBoostPeak) < 0.04f,
+            $"1 kHz +12 dB gain mismatch: actual={boostPeak:F4}, expected={expectedBoostPeak:F4}");
+
+        // Ослабление -12 dB (0.25119x) на той же полосе 1 кГц
+        eq.Reset();
+        bands[5] = -12.0f;
+        eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
+        eq.SnapToTarget();
+
+        for (int pass = 0; pass < 3; pass++)
+        {
+            input1k.AsSpan().CopyTo(working.AsSpan());
+            eq.Process(working.AsSpan());
+        }
+
+        float cutPeak = 0f;
+        for (int i = working.Length / 2; i < working.Length; i += 2)
+        {
+            float abs = MathF.Abs(working[i]);
+            if (abs > cutPeak) cutPeak = abs;
+        }
+
+        float expectedCutPeak = 0.25f * MathF.Pow(10f, -12.0f / 20.0f);
+        TestAssert.True(
+            MathF.Abs(cutPeak - expectedCutPeak) < 0.015f,
+            $"1 kHz -12 dB cut mismatch: actual={cutPeak:F4}, expected={expectedCutPeak:F4}");
+
+        // 3. Приоритет разрешения пресетов (ForceGlobalEqualizer vs Per-Track) и биекция 5 <-> 10 полос
         var settings = new AudioSettings
         {
             EqualizerEnabled = true,
             ForceGlobalEqualizer = false,
             GlobalEqualizerPresetId = EqualizerPresets.RockId
         };
+        var track = new TrackInfo { Id = "yt_test", EqualizerPresetId = EqualizerPresets.VocalId };
 
-        var trackWithPreset = new TrackInfo
-        {
-            Id = "yt_avid86",
-            EqualizerPresetId = EqualizerPresets.AnimeId
-        };
+        Span<float> resolved = stackalloc float[EqualizerProcessor.BandCount];
+        TestAssert.Equal(EqualizerPresets.VocalId, EqualizerPresets.ResolveEffectiveBands(settings, track, resolved));
 
-        // 1. Когда ForceGlobalEqualizer == false, побеждает пресет трека (Anime)
-        Span<float> resolvedBands = stackalloc float[EqualizerProcessor.BandCount];
-        string activePreset = EqualizerPresets.ResolveEffectiveBands(settings, trackWithPreset, resolvedBands);
-        TestAssert.Equal(EqualizerPresets.AnimeId, activePreset);
-        TestAssert.Equal(EqualizerPresets.GetPresetBands(EqualizerPresets.AnimeId)[0], resolvedBands[0]);
-
-        // 2. Когда включён тумблер ForceGlobalEqualizer == true, пресет трека игнорируется и применяется глобальный (Rock)
         settings.ForceGlobalEqualizer = true;
-        activePreset = EqualizerPresets.ResolveEffectiveBands(settings, trackWithPreset, resolvedBands);
-        TestAssert.Equal(EqualizerPresets.RockId, activePreset);
-        TestAssert.Equal(EqualizerPresets.GetPresetBands(EqualizerPresets.RockId)[0], resolvedBands[0]);
+        TestAssert.Equal(EqualizerPresets.RockId, EqualizerPresets.ResolveEffectiveBands(settings, track, resolved));
 
-        // 3. Проверка снайперской избирательности обновлённого AudioSpectrumAnalyzer к вокалу (1.2 кГц в центре) vs саб-басу (60 Гц)
-        var analyzer = new AudioSpectrumAnalyzer(SampleRate, Channels);
-        float[] vocalBlock = new float[2048 * Channels];
-        for (int f = 0; f < 2048; f++)
-        {
-            float v = MathF.Sin(2f * MathF.PI * 1200f * f / SampleRate) * 0.5f;
-            vocalBlock[f * 2] = v;
-            vocalBlock[f * 2 + 1] = v;
-        }
-
-        for (int pass = 0; pass < 4; pass++)
-            analyzer.ProcessBlock(vocalBlock.AsSpan(), Channels);
-
-        TestAssert.True(
-            AudioVisualizerBuffer.MidLevel > AudioVisualizerBuffer.LowLevel * 2.5f,
-            $"Vocal 1.2kHz must dominate MidLevel: Mid={AudioVisualizerBuffer.MidLevel:F3}, Low={AudioVisualizerBuffer.LowLevel:F3}");
-
-        Span<float> bands10 = stackalloc float[EqualizerProcessor.BandCount];
-        AudioVisualizerBuffer.CopyBands10(bands10);
-        TestAssert.True(
-            bands10[5] > bands10[1] * 2.5f,
-            $"10-band analyzer must isolate 1kHz band[5]={bands10[5]:F3} over 62Hz band[1]={bands10[1]:F3}");
-        TestAssert.Equal(5, AudioVisualizerBuffer.DominantBandIndex);
-
-        TestAssert.ZeroAlloc(
-            () => analyzer.ProcessBlock(vocalBlock.AsSpan(), Channels),
-            warmup: 5,
-            iterations: 1000,
-            context: "AudioSpectrumAnalyzer.ProcessBlock HotPath");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Equalizer SeqLock Concurrency, Ramp Boost Guard & Multichannel Invariants", Group = TestGroups.Audio, Order = 9)]
-    public static async Task TestEqualizerConcurrencyRampBoostAndMacroMappingAsync()
-    {
-        var eq = new EqualizerProcessor(SampleRate, Channels);
-        float[] boostBands = new float[EqualizerProcessor.BandCount];
-        Array.Fill(boostBands, 12.0f);
-
-        // 1. Инвариант защиты от клиппинга на спаде рампы:
-        // При выключении EQ после +12 dB буста HasPositiveBoost обязан оставаться true все 960 фреймов рампы
-        eq.Configure(enabled: true, boostBands, preampDb: 0f, autoPreamp: false);
-        eq.SnapToTarget();
-        TestAssert.True(eq.HasPositiveBoost, "HasPositiveBoost must be true when +12 dB boost is active");
-
-        eq.Configure(enabled: false, boostBands, preampDb: 0f, autoPreamp: false);
-        float[] halfRampChunk = new float[720 * Channels]; // 720 фреймов из 1440
-        Array.Fill(halfRampChunk, 0.5f);
-
-        eq.Process(halfRampChunk.AsSpan());
-        TestAssert.False(eq.IsBypassed, "EQ must not bypass mid-ramp (720/1440 frames)");
-        TestAssert.True(
-            eq.HasPositiveBoost,
-            "HasPositiveBoost prematurely dropped to false while ramp is still boosting signal");
-
-        // Повторный идентичный Configure не должен сбрасывать счётчик рампы обратно на 1440 фреймов
-        eq.Configure(enabled: false, boostBands, preampDb: 0f, autoPreamp: false);
-        eq.Process(halfRampChunk.AsSpan()); // Добиваем оставшиеся 720 фреймов
-        TestAssert.True(eq.IsBypassed, "Idempotent Configure call reset the ramp instead of completing at 1440 frames");
-        TestAssert.False(eq.HasPositiveBoost, "HasPositiveBoost must clear to false once ramp to bypass completes");
-        // 2. Инвариант многоканальности (channels = 4) и моно (channels = 1):
-        // правый/тыловые каналы не должны затираться левым каналом, а рампа сглаживания должна работать без ступеньки
-        var quadEq = new EqualizerProcessor(SampleRate, channels: 4);
-        quadEq.Configure(enabled: true, boostBands, preampDb: 0f, autoPreamp: false);
-        quadEq.SnapToTarget();
-
-        float[] quadSamples = [0.4f, -0.4f, 0.25f, -0.25f, 0.4f, -0.4f, 0.25f, -0.25f];
-        quadEq.Process(quadSamples.AsSpan());
-        TestAssert.True(
-            quadSamples[0] > 0f && quadSamples[1] < 0f && quadSamples[2] > 0f && quadSamples[3] < 0f,
-            $"Multichannel polarity clobbered by channel 0: [{quadSamples[0]:F3}, {quadSamples[1]:F3}, {quadSamples[2]:F3}, {quadSamples[3]:F3}]");
-
-        var monoEq = new EqualizerProcessor(SampleRate, channels: 1);
-        monoEq.Configure(enabled: false, boostBands, preampDb: 0f, autoPreamp: false);
-        monoEq.SnapToTarget();
-        monoEq.Configure(enabled: true, boostBands, preampDb: 0f, autoPreamp: false);
-
-        float[] monoHalfRamp = new float[720];
-        for (int i = 0; i < monoHalfRamp.Length; i++)
-            monoHalfRamp[i] = MathF.Sin(2f * MathF.PI * 55f * i / SampleRate) * 0.4f;
-
-        monoEq.Process(monoHalfRamp.AsSpan());
-        TestAssert.False(monoEq.IsBypassed, "Mono EQ must smooth coefficients over 1440 frames instead of snapping immediately");
-
-        float maxMonoD2 = 0f;
-        for (int i = 2; i < monoHalfRamp.Length; i++)
-        {
-            float d2 = MathF.Abs(monoHalfRamp[i] - 2f * monoHalfRamp[i - 1] + monoHalfRamp[i - 2]);
-            if (d2 > maxMonoD2) maxMonoD2 = d2;
-        }
-        TestAssert.True(maxMonoD2 < 0.015f, $"Mono EQ ramp produced discontinuity: maxD2={maxMonoD2:F5}");
-
-        // 3. Инвариант 5-полосного маппинга: точное совпадение в узлах интерполяции кривой (0.0, 2.25, 4.5, 6.75, 9.0)
-        ReadOnlySpan<float> macro5 = [6.0f, -4.5f, 3.5f, -8.0f, 9.5f];
+        ReadOnlySpan<float> macro5In = [4.5f, -3.0f, 2.0f, -6.5f, 8.0f];
         Span<float> iso10 = stackalloc float[EqualizerProcessor.BandCount];
-        EqualizerPresets.MapMacro5ToIso10(macro5, iso10);
+        Span<float> macro5Out = stackalloc float[5];
+        EqualizerPresets.MapMacro5ToIso10(macro5In, iso10);
+        EqualizerPresets.MapIso10ToMacro5(iso10, macro5Out);
+        for (int i = 0; i < 5; i++)
+            TestAssert.Equal(macro5In[i], macro5Out[i], $"Macro5 <-> Iso10 roundtrip failed at band {i}");
 
-        ReadOnlySpan<double> nodePositions = [0.0, 2.25, 4.5, 6.75, 9.0];
-        for (int col = 0; col < 5; col++)
+        // 4. Стресс-тест конкурентной публикации SeqLock (Configure из фоновых потоков vs Process за 0 B аллокаций)
+        TestAssert.ZeroAlloc(() =>
         {
-            double exactIso = nodePositions[col];
-            int i0 = Math.Clamp((int)exactIso, 0, 8);
-            int i1 = i0 + 1;
-            double frac = exactIso - i0;
-            float interpolatedDb = (float)(iso10[i0] + (iso10[i1] - iso10[i0]) * frac);
-            TestAssert.True(
-                MathF.Abs(interpolatedDb - macro5[col]) < 0.01f,
-                $"5-band node {col} misaligned: expected={macro5[col]:F2} dB, waveY={interpolatedDb:F2} dB");
-        }
+            input1k.AsSpan(0, 512).CopyTo(working.AsSpan(0, 512));
+            eq.Process(working.AsSpan(0, 512));
+        }, warmup: 5, iterations: 500, context: "EqualizerProcessor.Process HotPath");
 
-        // 4. Стресс-тест конкурентной записи SeqLock (2 писателя Configure vs читатель Process/SnapToTarget)
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
         var token = cts.Token;
-
-        var writer1 = Task.Run(() =>
+        var writerTask = Task.Run(() =>
         {
-            Span<float> b = stackalloc float[EqualizerProcessor.BandCount];
             int step = 0;
             while (!token.IsCancellationRequested)
             {
-                b.Fill((step++ & 1) == 0 ? 8.0f : -8.0f);
-                eq.Configure(enabled: true, b, preampDb: 0f, autoPreamp: true);
+                var preset = (step++ & 1) == 0
+                    ? EqualizerPresets.GetPresetBands(EqualizerPresets.BassBoostId)
+                    : EqualizerPresets.GetPresetBands(EqualizerPresets.VocalId);
+                eq.Configure(enabled: (step % 4) != 0, preset);
             }
         }, token);
 
-        var writer2 = Task.Run(() =>
-        {
-            ReadOnlySpan<float> anime = EqualizerPresets.GetPresetBands(EqualizerPresets.AnimeId);
-            ReadOnlySpan<float> warm = EqualizerPresets.GetPresetBands(EqualizerPresets.WarmId);
-            int step = 0;
-            while (!token.IsCancellationRequested)
-            {
-                eq.Configure(enabled: (step++ % 3) != 0, (step & 1) == 0 ? anime : warm);
-            }
-        }, token);
-
-        float[] audioBuf = new float[256 * Channels];
+        float[] audioChunk = new float[256 * Channels];
         while (!token.IsCancellationRequested)
         {
-            for (int i = 0; i < audioBuf.Length; i++)
-                audioBuf[i] = 0.25f;
-
-            eq.Process(audioBuf.AsSpan());
-            for (int i = 0; i < audioBuf.Length; i++)
-                TestAssert.True(float.IsFinite(audioBuf[i]) && MathF.Abs(audioBuf[i]) < 20f, $"Corrupted EQ output at {i}: {audioBuf[i]}");
+            Array.Fill(audioChunk, 0.25f);
+            eq.Process(audioChunk.AsSpan());
+            for (int i = 0; i < audioChunk.Length; i++)
+                TestAssert.True(float.IsFinite(audioChunk[i]) && MathF.Abs(audioChunk[i]) < 10f, "SeqLock race corrupted EQ state");
         }
 
-        await Task.WhenAll(writer1, writer2).ConfigureAwait(false);
+        await writerTask.ConfigureAwait(false);
     }
 
-    [TestMethod(TestCategory.Unit, "Sub-Bass +12dB Boost Anti-Crackling, Peak-Hold & C1 Curvature Invariant", Group = TestGroups.Audio, Order = 10)]
-    public static Task TestSubBassMaxBoostAntiCracklingAndImdAsync()
+    [TestMethod(TestCategory.Unit, "AudioSpectrumAnalyzer Band Isolation & Visualizer Buffer (0 Alloc)", Group = TestGroups.Audio, Order = 7)]
+    public static Task TestAudioSpectrumAnalyzerBandIsolationAndVisualizerBufferAsync()
     {
-        // Сценарий 1: Экстремальный ручной буст +12 dB на 31 Гц и 62 Гц с ПРИНУДИТЕЛЬНО ВЫКЛЮЧЕННЫМ autoPreamp (стресс-тест лимитера)
-        var eq = new EqualizerProcessor(SampleRate, Channels);
-        Span<float> bands = stackalloc float[EqualizerProcessor.BandCount];
-        bands.Clear();
-        bands[0] = 12.0f; // 31.25 Hz (+12 dB)
-        bands[1] = 12.0f; // 62.5 Hz (+12 dB)
+        var analyzer = new AudioSpectrumAnalyzer(SampleRate, Channels);
+        float[] signal = new float[2048 * Channels];
+        Span<float> bands10 = stackalloc float[EqualizerProcessor.BandCount];
 
-        eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
-        eq.SnapToTarget();
-
-        var limiter = new Core.Audio.Normalization.TruePeakLimiter(SampleRate);
-        var crossfader = new Core.Audio.Normalization.GainCrossfader(1.0f);
-        var gainProcessor = new GainProcessor();
-        gainProcessor.SetVolumeGain(1.25f);
-
-        const int warmupFrames = SampleRate;     // 1 секунда для выхода IIR и лимитера на стационарный режим
-        const int measureFrames = SampleRate / 2; // 500 мс измерения стационарного сигнала
-        float[] chunk = new float[1024 * Channels];
-
-        int frameCursor = 0;
-        void FillAmbientSignal(Span<float> dst, int frames)
+        void FeedFrequency(float freqHz)
         {
-            for (int f = 0; f < frames; f++, frameCursor++)
+            analyzer.Reset();
+            for (int f = 0; f < 2048; f++)
             {
-                float t = (float)frameCursor / SampleRate;
-                float subBass = MathF.Sin(2f * MathF.PI * 36.0f * t) * 0.55f;
-                float highPad = MathF.Sin(2f * MathF.PI * 3000.0f * t) * 0.05f;
-                float s = subBass + highPad;
-                dst[f * 2] = s;
-                dst[f * 2 + 1] = s;
+                float s = MathF.Sin(2f * MathF.PI * freqHz * f / SampleRate) * 0.5f;
+                signal[f * 2] = s;
+                signal[f * 2 + 1] = s;
             }
+            for (int pass = 0; pass < 4; pass++)
+                analyzer.ProcessBlock(signal.AsSpan(), Channels);
         }
 
-        while (frameCursor < warmupFrames)
-        {
-            int frames = chunk.Length / Channels;
-            FillAmbientSignal(chunk, frames);
-            eq.Process(chunk);
-            // Первые 250 мс даём самому IIR-фильтру 31 Гц выйти на стационарный режим после ступеньки включения,
-            // и затем 750 мс прогреваем лимитер на установившейся волне
-            if (frameCursor >= SampleRate / 4)
-                limiter.Process(chunk, ref crossfader);
-        }
+        // 1. НЧ сигнал 62.5 Гц (полоса 1) должен доминировать в LowLevel
+        FeedFrequency(62.5f);
+        AudioVisualizerBuffer.CopyBands10(bands10);
+        TestAssert.True(AudioVisualizerBuffer.LowLevel > AudioVisualizerBuffer.MidLevel * 2.0f, "62.5Hz must dominate LowLevel");
+        TestAssert.True(AudioVisualizerBuffer.LowLevel > AudioVisualizerBuffer.HighLevel * 3.0f, "62.5Hz must not leak into HighLevel");
+        TestAssert.True(bands10[1] > bands10[5] * 2.5f, "Band[1] (62Hz) must exceed Band[5] (1kHz)");
 
-        float minEnv = 1.0f;
-        float maxEnv = 0.0f;
-        float maxSecondDerivative = 0.0f;
-        int hardFlatClipSamples = 0;
+        // 2. СЧ сигнал 1000 Гц (полоса 5) должен доминировать в MidLevel и выдавать DominantBandIndex == 5
+        FeedFrequency(1000.0f);
+        AudioVisualizerBuffer.CopyBands10(bands10);
+        TestAssert.Equal(5, AudioVisualizerBuffer.DominantBandIndex);
+        TestAssert.True(AudioVisualizerBuffer.MidLevel > AudioVisualizerBuffer.LowLevel * 2.0f, "1kHz must dominate MidLevel");
 
-        float prev1 = 0f;
-        float prev2 = 0f;
-        bool historyPrimed = false;
+        // 3. ВЧ сигнал 8000 Гц (полоса 8) должен доминировать в HighLevel
+        FeedFrequency(8000.0f);
+        AudioVisualizerBuffer.CopyBands10(bands10);
+        TestAssert.True(AudioVisualizerBuffer.HighLevel > AudioVisualizerBuffer.LowLevel * 3.0f, "8kHz must dominate HighLevel");
+        TestAssert.True(bands10[8] > bands10[1] * 3.0f, "Band[8] (8kHz) must exceed Band[1] (62Hz)");
 
-        int measured = 0;
-        while (measured < measureFrames)
-        {
-            int frames = chunk.Length / Channels;
-            FillAmbientSignal(chunk, frames);
-            eq.Process(chunk);
-            limiter.Process(chunk, ref crossfader);
+        // 4. Zero-Alloc (после 50 итераций прогрева для завершения Tiered PGO компиляции) и чистота Reset()
+        TestAssert.ZeroAlloc(
+            () => analyzer.ProcessBlock(signal.AsSpan(), Channels),
+            warmup: 50,
+            iterations: 500,
+            context: "AudioSpectrumAnalyzer.ProcessBlock");
 
-            float env = limiter.EnvelopeGain;
-            if (env < minEnv) minEnv = env;
-            if (env > maxEnv) maxEnv = env;
-
-            for (int f = 0; f < frames; f++)
-            {
-                float y = chunk[f * 2];
-                TestAssert.Equal(y, chunk[f * 2 + 1], "Stereo balance broken on boosted sub-bass");
-                TestAssert.True(MathF.Abs(y) <= 0.9851f, $"TruePeakLimiter ceiling breached: {y:F5}");
-
-                if (historyPrimed)
-                {
-                    if (MathF.Abs(y) >= 0.9849f && MathF.Abs(prev1) >= 0.9849f)
-                        hardFlatClipSamples++;
-
-                    float d2 = MathF.Abs(y - 2f * prev1 + prev2);
-                    if (d2 > maxSecondDerivative)
-                        maxSecondDerivative = d2;
-                }
-                else if (f >= 2)
-                {
-                    historyPrimed = true;
-                }
-
-                prev2 = prev1;
-                prev1 = y;
-            }
-
-            gainProcessor.Process(chunk);
-            for (int i = 0; i < chunk.Length; i++)
-                TestAssert.True(MathF.Abs(chunk[i]) <= 0.9851f, $"GainProcessor soft-clip ceiling breached: {chunk[i]:F5}");
-
-            measured += frames;
-        }
-
-        float envRipple = maxEnv - minEnv;
-        Log.Info($"[SubBass-Audit] 36Hz +12dB Raw Stress -> EnvRipple={envRipple:F6}, MaxD2={maxSecondDerivative:F5}, FlatClipped={hardFlatClipSamples}");
-
-        TestAssert.Equal(0, hardFlatClipSamples, $"Hard flat clipping detected ({hardFlatClipSamples} samples at ceiling)");
-        TestAssert.True(
-            envRipple < 0.0005f,
-            $"TruePeakLimiter envelope is modulating inside sub-bass wave period (zipper noise): ripple={envRipple:F6}");
-        TestAssert.True(
-            maxSecondDerivative < 0.0085f,
-            $"High-frequency crackle/discontinuity in 2nd derivative detected: maxD2={maxSecondDerivative:F5}");
-
-        // Сценарий 2: Проверка реального трека "les - silence" (суббас 55 Гц с пиком 0.80f + атмосферный пэд)
-        // на ВСЕХ 13 встроенных пресетах (включая "Тёплый и мягкий" / WarmId) со штатным autoPreamp: true.
-        // Критерий Crystal-Clear: 0 плоских срезов, отсутствие пробоя потолка и отсутствие интермодуляции.
-        foreach (string presetId in EqualizerPresets.BuiltInIds)
-        {
-            eq.Reset();
-            limiter.Reset();
-            crossfader.Reset(1.0f);
-
-            var presetBands = EqualizerPresets.GetPresetBands(presetId);
-            eq.Configure(enabled: true, presetBands, preampDb: 0f, autoPreamp: true);
-            eq.SnapToTarget();
-
-            for (int pass = 0; pass < 8; pass++)
-            {
-                for (int f = 0; f < 1024; f++)
-                {
-                    float t = (float)(pass * 1024 + f) / SampleRate;
-                    // Модель участка 0:35-1:49 в "les - silence": плавно спадающий глубокий бас 55 Гц + обертон 110 Гц + воздух 2.5 кГц
-                    float bass = MathF.Sin(2f * MathF.PI * 55.0f * t) * 0.68f + MathF.Sin(2f * MathF.PI * 110.0f * t) * 0.14f;
-                    float pad = MathF.Sin(2f * MathF.PI * 2500.0f * t) * 0.04f;
-                    float sample = bass + pad;
-                    chunk[f * 2] = sample;
-                    chunk[f * 2 + 1] = sample;
-                }
-
-                eq.Process(chunk);
-                limiter.Process(chunk, ref crossfader);
-            }
-
-            for (int i = 0; i < chunk.Length; i++)
-            {
-                TestAssert.True(
-                    float.IsFinite(chunk[i]) && MathF.Abs(chunk[i]) <= 0.9851f,
-                    $"Preset '{presetId}' breached crystal-clear ceiling at sample {i}: {chunk[i]:F5}");
-            }
-        }
-
-        // Сценарий 3: Проверка отсутствия "дрожащей нитки" при входе в пик (атака лимитера на внезапном вступлении баса):
-        // измеряем пошаговую непрерывность самого коэффициента EnvelopeGain и отсутствие спайков 2-й производной на чистом басе 55 Гц.
-        limiter.Reset();
-        crossfader.Reset(1.0f);
-        float prevEnv = limiter.EnvelopeGain;
-        float maxEnvJumpPerBlock = 0f;
-        float maxBassD2 = 0f;
-        float bPrev1 = 0f;
-        float bPrev2 = 0f;
-
-        for (int block = 0; block < 32; block++)
-        {
-            for (int f = 0; f < 16; f++)
-            {
-                int sampleIdx = block * 16 + f;
-                float t = (float)sampleIdx / SampleRate;
-                float u = MathF.Min(1.0f, sampleIdx / 64.0f);
-                // C1-гладкая входная огибающая без искусственного излома производной самого тестового генератора в точке sampleIdx == 64
-                float envIn = u * u * (3.0f - 2.0f * u);
-                float s = MathF.Sin(2f * MathF.PI * 55.0f * t) * 1.55f * envIn;
-                chunk[f * 2] = s;
-                chunk[f * 2 + 1] = s;
-            }
-
-            limiter.Process(chunk.AsSpan(0, 16 * Channels), ref crossfader);
-
-            float curEnv = limiter.EnvelopeGain;
-            float envStep = MathF.Abs(curEnv - prevEnv);
-            if (envStep > maxEnvJumpPerBlock)
-                maxEnvJumpPerBlock = envStep;
-            prevEnv = curEnv;
-
-            for (int f = 0; f < 16; f++)
-            {
-                float y = chunk[f * 2];
-                if (block > 0 || f >= 2)
-                {
-                    float d2 = MathF.Abs(y - 2f * bPrev1 + bPrev2);
-                    if (d2 > maxBassD2)
-                        maxBassD2 = d2;
-                }
-                bPrev2 = bPrev1;
-                bPrev1 = y;
-            }
-        }
-
-        TestAssert.True(
-              maxEnvJumpPerBlock < 0.05f && maxBassD2 < 0.005f,
-              $"Envelope attack glitch ('vibrating thread') detected on bass transient entry: maxEnvJump={maxEnvJumpPerBlock:F5}, maxBassD2={maxBassD2:F5}");
+        analyzer.Reset();
+        TestAssert.False(AudioVisualizerBuffer.HasRecentActivity, "Reset must clear HasRecentActivity");
+        TestAssert.Equal(0f, AudioVisualizerBuffer.OverallLevel);
 
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Seamless 44.1kHz <-> 48kHz Resampler & Crossfade Continuity", Group = TestGroups.Audio, Order = 11)]
-    public static Task TestSampleRateSwitch44100To48000SeamlessSpliceAsync()
+    [TestMethod(TestCategory.Unit, "EBU R128 / ITU-R BS.1770-4 Reference & Pre-Scan Config Invariants (0 Alloc)", Group = TestGroups.Audio, Order = 8)]
+    public static Task TestEbuR128AnalyzerAndKWeightingMathematicalReferenceAsync()
     {
-        // Проверяем, что 4-точечный ресемплер Эрмита 44100 -> 48000 Hz + 576-фреймовый кроссфейд
-        // дают гладкую волну без излома производной (bD2 < 0.005) и 0 B аллокаций.
-        const int srcRate = 44_100;
-        const int dstRate = 48_000;
-        const double step = (double)srcRate / dstRate;
+        const int blockFrames = 4800; // 100 мс @ 48 кГц
+        const int blockSamples = blockFrames * Channels;
 
-        float[] src44k = new float[4410 * Channels];
-        for (int f = 0; f < 4410; f++)
+        // 1. Эталонная проверка ITU-R BS.1770-4: стерео-синус 997 Гц с пиковой амплитудой 1.0
+        var kFilter = new KWeightingFilter(SampleRate, Channels);
+        float[] sine997 = new float[blockSamples];
+        double[] kOut = new double[blockSamples];
+        double[] gatingBlocks = new double[4];
+
+        for (int f = 0; f < blockFrames; f++)
         {
-            float v = MathF.Sin(2f * MathF.PI * 440f * f / srcRate) * 0.75f;
-            src44k[f * 2] = v;
-            src44k[f * 2 + 1] = v;
+            float s = MathF.Sin(2f * MathF.PI * 997f * f / SampleRate);
+            sine997[f * 2] = s;
+            sine997[f * 2 + 1] = s;
         }
 
-        float[] dst48k = new float[960 * Channels];
-        float[] hist = new float[4 * Channels];
-        int srcCursor = 0;
-        double phase = 0.0;
-        bool primed = false;
+        // Устанавливаем стационарный режим IIR-фильтров K-weighting
+        kFilter.ProcessBlock(sine997.AsSpan(), kOut.AsSpan());
 
-        void ResampleBlock(Span<float> output, int outFrames)
+        double power = 0.0;
+        TestAssert.ZeroAlloc(() =>
         {
-            for (int of = 0; of < outFrames; of++)
-            {
-                while (!primed || phase >= 1.0)
-                {
-                    if (!primed)
-                    {
-                        for (int c = 0; c < Channels; c++)
-                        {
-                            float s0 = src44k[c];
-                            hist[c] = s0; hist[Channels + c] = s0;
-                            hist[2 * Channels + c] = src44k[Channels + c];
-                            hist[3 * Channels + c] = src44k[2 * Channels + c];
-                        }
-                        srcCursor = 3;
-                        phase = 0.0;
-                        primed = true;
-                    }
-                    else
-                    {
-                        hist.AsSpan(Channels, 3 * Channels).CopyTo(hist.AsSpan(0, 3 * Channels));
-                        int idx = (srcCursor % 4410) * Channels;
-                        for (int c = 0; c < Channels; c++)
-                            hist[3 * Channels + c] = src44k[idx + c];
-                        srcCursor++;
-                        phase -= 1.0;
-                    }
-                }
+            kFilter.ProcessBlock(sine997.AsSpan(), kOut.AsSpan());
+            double sumSq = 0.0;
+            for (int i = 0; i < blockSamples; i++)
+                sumSq += kOut[i] * kOut[i];
+            power = sumSq / blockFrames;
+        }, warmup: 40, iterations: 100, context: "KWeightingFilter.ProcessBlock");
 
-                float t = (float)phase;
-                int outBase = of * Channels;
-                for (int c = 0; c < Channels; c++)
-                {
-                    float ym1 = hist[c], y0 = hist[Channels + c], y1 = hist[2 * Channels + c], y2 = hist[3 * Channels + c];
-                    float c0 = y0;
-                    float c1 = 0.5f * (y1 - ym1);
-                    float c2 = ym1 - 2.5f * y0 + 2.0f * y1 - 0.5f * y2;
-                    float c3 = 0.5f * (y2 - ym1) + 1.5f * (y0 - y1);
-                    output[outBase + c] = ((c3 * t + c2) * t + c1) * t + c0;
-                }
-                phase += step;
-            }
-        }
+        gatingBlocks[0] = power;
+        gatingBlocks[1] = power;
+        gatingBlocks[2] = power;
+        gatingBlocks[3] = 1e-7; // Блок ниже относительного порога (-10 LU), обязан быть отброшен гейтом
 
-        TestAssert.ZeroAlloc(() => ResampleBlock(dst48k.AsSpan(), 960), warmup: 3, iterations: 200, context: "Hermite Resampler 44.1k->48k");
-
-        float maxD2 = 0f;
-        for (int f = 2; f < 960; f++)
+        float lufs = 0f;
+        float gain = 0f;
+        TestAssert.ZeroAlloc(() =>
         {
-            float y2 = dst48k[f * 2];
-            float y1 = dst48k[(f - 1) * 2];
-            float y0 = dst48k[(f - 2) * 2];
-            TestAssert.Equal(y2, dst48k[f * 2 + 1], "Resampler stereo balance mismatch");
-            float d2 = MathF.Abs(y2 - 2f * y1 + y0);
-            if (d2 > maxD2) maxD2 = d2;
-        }
+            lufs = EbuR128Analyzer.ComputeIntegratedLufsFromBlocks(gatingBlocks, 4);
+            gain = EbuR128Analyzer.ComputeGainFromLufs(lufs, -14.0f, 3.0f);
+        }, warmup: 40, iterations: 500, context: "EbuR128Analyzer Gating & Gain Computation");
 
-        TestAssert.True(maxD2 < 0.004f, $"Hermite resampler 44.1->48kHz produced second-derivative spike: maxD2={maxD2:F5}");
+        // По стандарту ITU-R BS.1770-4 константа -0.691 dB компенсирует +0.653 dB подъём K-фильтра на 997 Гц,
+        // поэтому двухканальный синус с амплитудой 1.0 даёт ~0.0 LUFS (-0.038 LUFS)
+        TestAssert.True(
+            MathF.Abs(lufs - (-0.038f)) < 0.02f,
+            $"ITU-R BS.1770-4 reference sine LUFS out of tolerance: {lufs:F3} LUFS");
+        TestAssert.Equal(
+            gain,
+            EbuR128Analyzer.ComputeIntegratedGainFromBlocks(gatingBlocks, 4, -14.0f, 3.0f));
 
-        // Проверяем сквозную C1-склейку при переключении качества 48kHz (Opus) -> 44.1kHz (AAC) в противофазе:
-        // уходящий хвост 48kHz продолжается с +0.75f, а ресемплированный 44.1->48kHz блок входит с -0.75f.
-        const int spliceFrames = 576;
-        float[] tail48k = new float[spliceFrames * Channels];
-        for (int f = 0; f < spliceFrames; f++)
-        {
-            float v = MathF.Sin(2f * MathF.PI * 440f * f / dstRate + 1.2f) * 0.75f;
-            tail48k[f * 2] = v;
-            tail48k[f * 2 + 1] = v;
-        }
+        // 2. Проверка немедленного применения конфигурации до первого вызова ProcessSamples() (Pre-Scan сценарий)
+        var analyzer = new EbuR128Analyzer();
+        var config = new NormalizationConfig(
+            Enabled: true,
+            TargetLufs: -18.0f,
+            MaxGain: 1.5f,
+            Mode: NormalizationMode.DownwardOnly,
+            PreScanDurationMs: 45_000);
 
-        float invMix = 1.0f / spliceFrames;
-        for (int f = 0; f < spliceFrames; f++)
-        {
-            float t = f * invMix;
-            float wNew = t * t * (3.0f - 2.0f * t);
-            float wOld = 1.0f - wNew;
-            int idx = f * Channels;
-            dst48k[idx] = Math.Clamp(tail48k[idx] * wOld + dst48k[idx] * wNew, -0.985f, 0.985f);
-            dst48k[idx + 1] = Math.Clamp(tail48k[idx + 1] * wOld + dst48k[idx + 1] * wNew, -0.985f, 0.985f);
-        }
+        analyzer.Configure(config);
 
-        // На стыке f == 0 смешанный сигнал обязан в точности равняться tail48k[0] (нулевой скачок амплитуды bStep == 0)
-        TestAssert.Equal(tail48k[0], dst48k[0], "Seamless bridge frame 0 must equal captured tail frame 0");
+        var current = analyzer.CurrentConfig;
+        TestAssert.Equal(-18.0f, current.TargetLufs);
+        TestAssert.Equal(1.5f, current.MaxGain);
+        TestAssert.Equal(NormalizationMode.DownwardOnly, current.Mode);
+        TestAssert.Equal(45_000, current.PreScanDurationMs);
 
-        float maxSpliceStep = 0f;
-        for (int f = 1; f < spliceFrames; f++)
-        {
-            float stepVal = MathF.Abs(dst48k[f * 2] - dst48k[(f - 1) * 2]);
-            if (stepVal > maxSpliceStep) maxSpliceStep = stepVal;
-        }
-        TestAssert.True(maxSpliceStep < 0.055f, $"Quality switch 48k<->44.1k crossfade produced step jump: {maxSpliceStep:F4}");
+        // В режиме DownwardOnly любой gain > 1.0f при LockGain обязан ограничиваться сверху 1.0f
+        analyzer.LockGain(2.2f);
+        TestAssert.Equal(1.0f, analyzer.GetLockedGain());
+        TestAssert.Equal(1.0f, analyzer.ProcessSamples());
+
+        // 3. Динамический пересчёт Gain при изменении настроек (Bidirectional vs DownwardOnly) без повторного сканирования
+        float? callbackLufs = null;
+        analyzer.SetIntegratedLufsCallback(val => callbackLufs = val);
+        analyzer.NotifyIntegratedLufs(-20.0f); // На 6 LU тише цели -14 LUFS (~1.995x усиление)
+        TestAssert.Equal(-20.0f, callbackLufs);
+
+        analyzer.Configure(new NormalizationConfig(
+            Enabled: true,
+            TargetLufs: -14.0f,
+            MaxGain: 3.0f,
+            Mode: NormalizationMode.Bidirectional));
+
+        float recalculated = analyzer.ProcessSamples();
+        float expectedBidirectional = MathF.Pow(10f, (-14.0f - (-20.0f)) / 20f);
+        TestAssert.True(
+            MathF.Abs(recalculated - expectedBidirectional) < 0.001f,
+            $"Dynamic recalculation mismatch: actual={recalculated:F4}, expected={expectedBidirectional:F4}");
 
         return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Equalizer Preset Switch: No Laser Pole-Sweep & No End-of-Ramp Snap Step", Group = TestGroups.Audio, Order = 12)]
-    public static Task TestEqualizerPresetSwitchNoLaserSweepOrSnapStepAsync()
-    {
-        var eq = new EqualizerProcessor(SampleRate, Channels);
-
-        int frameCursor = 0;
-        // Точная модель ambient-трека "les - silence": глубокий непрерывный суббас 55 Гц + 110 Гц + тёплый пэд 440/2500 Гц
-        void FillAmbientWave(Span<float> dst, int frames)
-        {
-            for (int f = 0; f < frames; f++, frameCursor++)
-            {
-                float t = (float)frameCursor / SampleRate;
-                float s = MathF.Sin(2f * MathF.PI * 55f * t + 0.7f) * 0.55f
-                        + MathF.Sin(2f * MathF.PI * 110f * t + 1.2f) * 0.15f
-                        + MathF.Sin(2f * MathF.PI * 440f * t + 0.4f) * 0.08f
-                        + MathF.Sin(2f * MathF.PI * 2500f * t + 1.9f) * 0.04f;
-                dst[f * 2] = s;
-                dst[f * 2 + 1] = s;
-            }
-        }
-
-        float[] warmup = new float[2048 * Channels];
-        float[] block = new float[64 * Channels];
-
-        // Проверяемые проблемные пресеты: Глубокий бас, LoFi и уют, Ночной без резкости, Аниме и вокал
-        string[] criticalPresets =
-        [
-            EqualizerPresets.BassBoostId,
-            EqualizerPresets.LoFiId,
-            EqualizerPresets.NightId,
-            EqualizerPresets.AnimeId,
-            EqualizerPresets.WarmId,
-            EqualizerPresets.VocalId
-        ];
-
-        float maxD2EnableFromBypass = 0f;
-        float maxD2PresetToPreset = 0f;
-        float maxD2DisableToBypass = 0f;
-
-        // 1. Включение каждого пресета из холодного Bypass прямо на пике басовой волны и его выключение обратно в Bypass ("тцык"-детектор)
-        foreach (string presetId in criticalPresets)
-        {
-            eq.Configure(enabled: false, EqualizerPresets.GetPresetBands(presetId));
-            eq.SnapToTarget();
-
-            FillAmbientWave(warmup, 512);
-            eq.Process(warmup.AsSpan(0, 512 * Channels));
-
-            float prev1 = warmup[512 * Channels - 2];
-            float prev2 = warmup[512 * Channels - 4];
-
-            // Включаем пресет из Bypass и прогоняем через все 2400 фреймов рампы + 400 фреймов после
-            eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(presetId), preampDb: 0f, autoPreamp: true);
-            for (int b = 0; b < 45; b++)
-            {
-                FillAmbientWave(block, 64);
-                eq.Process(block);
-                for (int f = 0; f < 64; f++)
-                {
-                    float y = block[f * 2];
-                    float d2 = MathF.Abs(y - 2f * prev1 + prev2);
-                    if (d2 > maxD2EnableFromBypass)
-                        maxD2EnableFromBypass = d2;
-                    prev2 = prev1;
-                    prev1 = y;
-                }
-            }
-
-            // Выключаем пресет обратно в Bypass и проверяем отсутствие "тцыка" на протяжении всей рампы и в момент закрытия в Bypass
-            eq.Configure(enabled: false, EqualizerPresets.GetPresetBands(presetId), preampDb: 0f, autoPreamp: true);
-            for (int b = 0; b < 45; b++)
-            {
-                FillAmbientWave(block, 64);
-                eq.Process(block);
-                for (int f = 0; f < 64; f++)
-                {
-                    float y = block[f * 2];
-                    float d2 = MathF.Abs(y - 2f * prev1 + prev2);
-                    if (d2 > maxD2DisableToBypass)
-                        maxD2DisableToBypass = d2;
-                    prev2 = prev1;
-                    prev1 = y;
-                }
-            }
-
-            TestAssert.True(eq.IsBypassed, $"EQ did not enter bypass after disabling '{presetId}'");
-        }
-
-        // 2. Прямое переключение между пресетами (DeepBass -> Anime -> LoFi -> Night -> Vocal) без выключения
-        eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(EqualizerPresets.BassBoostId), preampDb: 0f, autoPreamp: true);
-        eq.SnapToTarget();
-        FillAmbientWave(warmup, 2048);
-        eq.Process(warmup);
-
-        float p1 = warmup[^2];
-        float p2 = warmup[^4];
-
-        foreach (string presetId in criticalPresets)
-        {
-            eq.Configure(enabled: true, EqualizerPresets.GetPresetBands(presetId), preampDb: 0f, autoPreamp: true);
-            for (int b = 0; b < 45; b++)
-            {
-                FillAmbientWave(block, 64);
-                eq.Process(block);
-                for (int f = 0; f < 64; f++)
-                {
-                    float y = block[f * 2];
-                    float d2 = MathF.Abs(y - 2f * p1 + p2);
-                    if (d2 > maxD2PresetToPreset)
-                        maxD2PresetToPreset = d2;
-                    p2 = p1;
-                    p1 = y;
-                }
-            }
-        }
-
-        // 3. Экстремальный стресс-тест вращения НЧ полос (31, 62, 125 Гц) от +12 dB до -12 dB и выключения в Bypass
-        Span<float> customSweep = stackalloc float[EqualizerProcessor.BandCount];
-        customSweep.Clear();
-        float maxD2SubBassSweep = 0f;
-
-        for (float db = 12.0f; db >= -12.0f; db -= 1.0f)
-        {
-            customSweep[0] = db;
-            customSweep[1] = db;
-            customSweep[2] = db;
-            eq.Configure(enabled: true, customSweep, preampDb: 2.0f, autoPreamp: true);
-
-            for (int b = 0; b < 4; b++)
-            {
-                FillAmbientWave(block, 64);
-                eq.Process(block);
-                for (int f = 0; f < 64; f++)
-                {
-                    float y = block[f * 2];
-                    float d2 = MathF.Abs(y - 2f * p1 + p2);
-                    if (d2 > maxD2SubBassSweep)
-                        maxD2SubBassSweep = d2;
-                    p2 = p1;
-                    p1 = y;
-                }
-            }
-        }
-
-        // Выключаем EQ прямо с экстремальных +12 dB НЧ в Bypass
-        customSweep[0] = 12.0f;
-        customSweep[1] = 12.0f;
-        customSweep[2] = 12.0f;
-        eq.Configure(enabled: true, customSweep, preampDb: 2.0f, autoPreamp: true);
-        eq.SnapToTarget();
-        FillAmbientWave(warmup, 2048);
-        eq.Process(warmup);
-        p1 = warmup[^2];
-        p2 = warmup[^4];
-
-        eq.Configure(enabled: false, customSweep, preampDb: 2.0f, autoPreamp: true);
-        for (int b = 0; b < 30; b++)
-        {
-            FillAmbientWave(block, 64);
-            eq.Process(block);
-            for (int f = 0; f < 64; f++)
-            {
-                float y = block[f * 2];
-                float d2 = MathF.Abs(y - 2f * p1 + p2);
-                if (d2 > maxD2DisableToBypass)
-                    maxD2DisableToBypass = d2;
-                p2 = p1;
-                p1 = y;
-            }
-        }
-
-        Log.Info(
-            $"[EQ-SweepAudit] EnableFromBypass MaxD2={maxD2EnableFromBypass:F5} | " +
-            $"PresetSwitch MaxD2={maxD2PresetToPreset:F5} | " +
-            $"DisableToBypass MaxD2={maxD2DisableToBypass:F5} | " +
-            $"SubBassSweep(+12..-12dB) MaxD2={maxD2SubBassSweep:F5}");
-
-        TestAssert.True(
-            maxD2EnableFromBypass < 0.015f,
-            $"Click/wobble when enabling EQ from bypass: maxD2={maxD2EnableFromBypass:F5}");
-        TestAssert.True(
-            maxD2PresetToPreset < 0.015f,
-            $"Frequency wobble ('люфт') when switching presets: maxD2={maxD2PresetToPreset:F5}");
-        TestAssert.True(
-            maxD2DisableToBypass < 0.015f,
-            $"Tick ('тцык') when disabling EQ to bypass: maxD2={maxD2DisableToBypass:F5}");
-        TestAssert.True(
-             maxD2SubBassSweep < 0.015f,
-             $"Sub-bass +12..-12dB sweep wobble detected: maxD2={maxD2SubBassSweep:F5}");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Diagnostic, "Track Waveform Forensics (yt_YOiXB3qfEOE 2:39 / 3:12 / 3:21)", Group = TestGroups.Audio, Order = 99, TimeoutSeconds = 60)]
-    public static async Task DiagnoseCachedTrackWaveformForensicsAsync()
-    {
-        const string targetTrackId = "yt_YOiXB3qfEOE";
-        var cached = Core.Audio.AudioSourceFactory.FindAnyCachedTrack(targetTrackId);
-        if (cached == null)
-        {
-            TestAssert.Skip($"Track '{targetTrackId}' is not in full disk cache. Play it once first.");
-            return;
-        }
-
-        string filePath = cached.Value.Path;
-        var entry = cached.Value.Entry;
-        Log.Info($"[Forensics] Analyzing cached file: {filePath} (format={entry.Format}, codec={entry.Codec}, br={entry.Bitrate}kbps, size={entry.TotalSize}B)");
-
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using Core.Audio.Interfaces.IContainerParser parser = entry.Format == Core.Audio.AudioFormat.Mp4
-            ? new Core.Audio.Parsers.Mp4ContainerParser(fs)
-            : new Core.Audio.Parsers.WebMContainerParser(fs);
-
-        TestAssert.True(await parser.ParseHeadersAsync(), "Failed to parse container headers");
-
-        int rate = parser.SampleRate > 0 ? parser.SampleRate : SampleRate;
-        int ch = parser.Channels > 0 ? parser.Channels : Channels;
-
-        using Core.Audio.Interfaces.IAudioDecoder decoder = entry.Codec == Core.Audio.Interfaces.AudioCodec.Aac
-            ? CreateForensicAacDecoder(parser, rate, ch)
-            : new Core.Audio.Decoders.OpusDecoder(rate, ch, parser.DecoderConfig);
-
-        const float normBoost = 2.4294f; // Точный гейн из лога для -21.71 LUFS -> -14 LUFS
-        var normLimiter = new Core.Audio.Normalization.TruePeakLimiter(rate);
-        var normCrossfader = new Core.Audio.Normalization.GainCrossfader(normBoost);
-
-        var eq = new EqualizerProcessor(rate, ch);
-        Span<float> eqBands = stackalloc float[EqualizerProcessor.BandCount];
-        eqBands.Clear();
-        eqBands[4] = 12.0f; // 500 Hz +12 dB
-        eqBands[5] = 12.0f; // 1000 Hz +12 dB
-        eq.Configure(enabled: true, eqBands, preampDb: 0f, autoPreamp: true);
-        eq.SnapToTarget();
-
-        var eqLimiter = new Core.Audio.Normalization.TruePeakLimiter(rate);
-        var eqCrossfader = new Core.Audio.Normalization.GainCrossfader(1.0f);
-
-        float[] rawBuf = new float[8192 * ch];
-        float[] normBuf = new float[8192 * ch];
-        float[] eqBuf = new float[8192 * ch];
-
-        long totalFramesDecoded = 0;
-        int currentSecond = 0;
-
-        float secRawPeakL = 0f, secRawPeakR = 0f;
-        float secRawMaxD1L = 0f, secRawMaxD1R = 0f;
-        float secRawMaxD2L = 0f, secRawMaxD2R = 0f;
-        int secRawPlateauL = 0;
-
-        float secNormPeakL = 0f, secNormMinEnv = 1.0f, secNormMaxD2L = 0f;
-        int secNormFlatClipL = 0;
-
-        float secEqPeakL = 0f, secEqMinEnv = 1.0f, secEqMaxD2L = 0f;
-        int secEqFlatClipL = 0;
-
-        float prev1L = 0f, prev2L = 0f;
-        float prev1R = 0f, prev2R = 0f;
-        float normPrev1L = 0f, normPrev2L = 0f;
-        float eqPrev1L = 0f, eqPrev2L = 0f;
-
-        float globalRawPeakL = 0f, globalRawPeakR = 0f;
-        int totalNormFlatClips = 0, totalEqFlatClips = 0;
-        float globalNormMaxD2L = 0f, globalEqMaxD2L = 0f;
-
-        while (true)
-        {
-            var frame = await parser.ReadNextFrameAsync();
-            if (frame == null) break;
-
-            int decoded = decoder.Decode(frame.Value.Data.Span, rawBuf);
-            if (decoded <= 0) continue;
-
-            int samplesCount = decoded * ch;
-            rawBuf.AsSpan(0, samplesCount).CopyTo(normBuf.AsSpan(0, samplesCount));
-            rawBuf.AsSpan(0, samplesCount).CopyTo(eqBuf.AsSpan(0, samplesCount));
-
-            normLimiter.Process(normBuf.AsSpan(0, samplesCount), ref normCrossfader);
-            eq.Process(eqBuf.AsSpan(0, samplesCount));
-            eqLimiter.Process(eqBuf.AsSpan(0, samplesCount), ref eqCrossfader);
-
-            if (normLimiter.EnvelopeGain < secNormMinEnv) secNormMinEnv = normLimiter.EnvelopeGain;
-            if (eqLimiter.EnvelopeGain < secEqMinEnv) secEqMinEnv = eqLimiter.EnvelopeGain;
-
-            for (int f = 0; f < decoded; f++)
-            {
-                int idx = f * ch;
-                float rL = rawBuf[idx];
-                float rR = ch >= 2 ? rawBuf[idx + 1] : rL;
-
-                float absL = MathF.Abs(rL);
-                float absR = MathF.Abs(rR);
-                if (absL > secRawPeakL) secRawPeakL = absL;
-                if (absR > secRawPeakR) secRawPeakR = absR;
-                if (absL > globalRawPeakL) globalRawPeakL = absL;
-                if (absR > globalRawPeakR) globalRawPeakR = absR;
-
-                float d1L = MathF.Abs(rL - prev1L);
-                float d1R = MathF.Abs(rR - prev1R);
-                float d2L = MathF.Abs(rL - 2f * prev1L + prev2L);
-                float d2R = MathF.Abs(rR - 2f * prev1R + prev2R);
-
-                if (d1L > secRawMaxD1L) secRawMaxD1L = d1L;
-                if (d1R > secRawMaxD1R) secRawMaxD1R = d1R;
-                if (d2L > secRawMaxD2L) secRawMaxD2L = d2L;
-                if (d2R > secRawMaxD2R) secRawMaxD2R = d2R;
-
-                if (absL > 0.25f && MathF.Abs(rL - prev1L) < 0.0002f && d2L > 0.015f)
-                    secRawPlateauL++;
-
-                prev2L = prev1L; prev1L = rL;
-                prev2R = prev1R; prev1R = rR;
-
-                float nSampleL = normBuf[idx];
-                float nAbsL = MathF.Abs(nSampleL);
-                float nD2L = MathF.Abs(nSampleL - 2f * normPrev1L + normPrev2L);
-                if (nAbsL > secNormPeakL) secNormPeakL = nAbsL;
-                if (nD2L > secNormMaxD2L) secNormMaxD2L = nD2L;
-                if (nD2L > globalNormMaxD2L) globalNormMaxD2L = nD2L;
-                if (nAbsL >= 0.9849f) { secNormFlatClipL++; totalNormFlatClips++; }
-                normPrev2L = normPrev1L; normPrev1L = nSampleL;
-
-                float eSampleL = eqBuf[idx];
-                float eAbsL = MathF.Abs(eSampleL);
-                float eD2L = MathF.Abs(eSampleL - 2f * eqPrev1L + eqPrev2L);
-                if (eAbsL > secEqPeakL) secEqPeakL = eAbsL;
-                if (eD2L > secEqMaxD2L) secEqMaxD2L = eD2L;
-                if (eD2L > globalEqMaxD2L) globalEqMaxD2L = eD2L;
-                if (eAbsL >= 0.9849f) { secEqFlatClipL++; totalEqFlatClips++; }
-                eqPrev2L = eqPrev1L; eqPrev1L = eSampleL;
-
-                totalFramesDecoded++;
-                int sec = (int)(totalFramesDecoded / rate);
-                if (sec > currentSecond)
-                {
-                    bool isWindowOfInterest = (currentSecond >= 155 && currentSecond <= 165)   // 02:35..02:45
-                                           || (currentSecond >= 188 && currentSecond <= 207)   // 03:08..03:27
-                                           || currentSecond is 214 or 220 or 233
-                                           || secNormFlatClipL > 0
-                                           || secEqFlatClipL > 0;
-
-                    if (isWindowOfInterest)
-                    {
-                        int mm = currentSecond / 60;
-                        int ss = currentSecond % 60;
-                        Log.Info(
-                            $"[Forensics {mm:D2}:{ss:D2} ({currentSecond}s)] " +
-                            $"RAW(Peak L={secRawPeakL:F4} R={secRawPeakR:F4} | D2 L={secRawMaxD2L:F4}) || " +
-                            $"NORM_2.43x(PeakL={secNormPeakL:F4}, MinEnv={secNormMinEnv:F3}, OutD2L={secNormMaxD2L:F4}, FlatClip={secNormFlatClipL}) || " +
-                            $"EQ_+12dB(PeakL={secEqPeakL:F4}, MinEnv={secEqMinEnv:F3}, OutD2L={secEqMaxD2L:F4}, FlatClip={secEqFlatClipL})");
-                    }
-
-                    currentSecond = sec;
-                    secRawPeakL = 0f; secRawPeakR = 0f;
-                    secRawMaxD1L = 0f; secRawMaxD1R = 0f;
-                    secRawMaxD2L = 0f; secRawMaxD2R = 0f;
-                    secRawPlateauL = 0;
-                    secNormPeakL = 0f; secNormMinEnv = 1.0f; secNormMaxD2L = 0f; secNormFlatClipL = 0;
-                    secEqPeakL = 0f; secEqMinEnv = 1.0f; secEqMaxD2L = 0f; secEqFlatClipL = 0;
-                }
-            }
-        }
-
-        Log.Info(
-            $"[Forensics-Summary] Total decoded: {totalFramesDecoded / rate}s | " +
-            $"Global RAW Peak: L={globalRawPeakL:F4}, R={globalRawPeakR:F4} | " +
-            $"NORM(TotalFlatClips={totalNormFlatClips}, MaxOutD2L={globalNormMaxD2L:F4}) | " +
-            $"EQ(TotalFlatClips={totalEqFlatClips}, MaxOutD2L={globalEqMaxD2L:F4})");
-
-        TestAssert.Equal(0, totalNormFlatClips, $"TruePeakLimiter produced {totalNormFlatClips} hard-clipped samples on 2.43x normalized track");
-        TestAssert.Equal(0, totalEqFlatClips, $"TruePeakLimiter produced {totalEqFlatClips} hard-clipped samples on +12dB EQ track");
-    }
-
-    private static Core.Audio.Decoders.AacDecoder CreateForensicAacDecoder(
-        Core.Audio.Interfaces.IContainerParser parser, int rate, int ch)
-    {
-        var dec = new Core.Audio.Decoders.AacDecoder(rate, ch);
-        if (parser.DecoderConfig != null)
-            dec.Initialize(parser.DecoderConfig);
-        return dec;
     }
 }

@@ -188,20 +188,23 @@ public static class Program
 
     private static (string FilePath, int LineNumber, string LineText) LocateTypeDeclaration(string cleanTypeName, SourceFile[] sources)
     {
-        string[] patterns = [$"class {cleanTypeName}", $"struct {cleanTypeName}", $"record {cleanTypeName}", $"enum {cleanTypeName}", $"interface {cleanTypeName}"];
+        string[] keywords = ["class ", "struct ", "record ", "enum ", "interface "];
 
         for (int s = 0; s < sources.Length; s++)
         {
             var src = sources[s];
-            if (!src.FilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || !src.Content.Contains(cleanTypeName, StringComparison.Ordinal))
+            if (!src.FilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || CountOccurrences(src.Content, cleanTypeName) == 0)
                 continue;
 
             for (int l = 0; l < src.Lines.Length; l++)
             {
                 string line = src.Lines[l];
-                for (int p = 0; p < patterns.Length; p++)
+                if (CountOccurrences(line, cleanTypeName) == 0)
+                    continue;
+
+                for (int p = 0; p < keywords.Length; p++)
                 {
-                    if (line.Contains(patterns[p], StringComparison.Ordinal))
+                    if (line.Contains(keywords[p], StringComparison.Ordinal))
                         return (src.FilePath, l + 1, line.Trim());
                 }
             }
@@ -223,7 +226,7 @@ public static class Program
             for (int l = 0; l < lines.Length; l++)
             {
                 string line = lines[l];
-                if (line.Contains(memberName, StringComparison.Ordinal) &&
+                if (CountOccurrences(line, memberName) > 0 &&
                     (line.Contains("public", StringComparison.Ordinal) ||
                      line.Contains("private", StringComparison.Ordinal) ||
                      line.Contains("internal", StringComparison.Ordinal) ||

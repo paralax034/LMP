@@ -170,39 +170,21 @@ public static class AudioSourceFactory
                     ? resolvedCacheKey
                     : (startupEntry?.CacheKey ?? BuildCacheKey(trackId, format, bitrateKbps));
 
-                Log.Info($"[AudioSourceFactory] Source decision: CachingStreamSource, track={trackId}, reason=partial-cache-bootstrap, cacheKey={partialCacheKey}");
-                return Task.FromResult<IAudioSource>(new CachingStreamSource(
+                return Task.FromResult<IAudioSource>(CreatePartialCacheSource(
                     partialCacheKey,
                     trackId,
-                    url: string.Empty,
-                    contentLength: effectiveLength,
-                    format: format != AudioFormat.Unknown ? format : (startupEntry?.Format ?? AudioFormat.WebM),
-                    codec: codec != AudioCodec.Unknown ? codec : (startupEntry?.Codec ?? AudioCodec.Opus),
-                    bitrate: bitrateKbps > 0 ? bitrateKbps : (startupEntry?.Bitrate ?? 128),
-                    cacheManager: cacheManager,
-                    config: config,
-                    urlAcquirer: urlAcquirer,
-                    urlRefresher: urlRefresher));
+                    effectiveLength,
+                    format != AudioFormat.Unknown ? format : (startupEntry?.Format ?? AudioFormat.WebM),
+                    codec != AudioCodec.Unknown ? codec : (startupEntry?.Codec ?? AudioCodec.Opus),
+                    bitrateKbps > 0 ? bitrateKbps : (startupEntry?.Bitrate ?? 128),
+                    cacheManager,
+                    config,
+                    urlAcquirer,
+                    urlRefresher));
             }
 
-            if (!string.IsNullOrEmpty(resolvedCacheKey))
-            {
-                if (cacheManager.IsFullyCached(resolvedCacheKey))
-                {
-                    var exactEntry = cacheManager.GetCacheInfo(resolvedCacheKey);
-                    string exactPath = cacheManager.GetCachePath(resolvedCacheKey);
-                    if (exactEntry != null && File.Exists(exactPath))
-                    {
-                        Log.Info($"[AudioSourceFactory] Source decision: LocalFileSource, track={trackId}, reason=full-cache");
-                        return Task.FromResult<IAudioSource>(new LocalFileSource(
-                            exactPath,
-                            exactEntry.TotalSize,
-                            trackId,
-                            cacheManager,
-                            resolvedCacheKey));
-                    }
-                }
-            }
+            if (TryCreateFullCacheSource(cacheManager, resolvedCacheKey, trackId) is { } exactSource)
+                return Task.FromResult<IAudioSource>(exactSource);
 
             var cached = FindAnyCachedTrack(trackId);
             if (cached != null)
@@ -220,19 +202,17 @@ public static class AudioSourceFactory
             var fallbackStartupEntry = cacheManager.FindBestStartupCache(trackId, defaultBootstrapBytes);
             if (fallbackStartupEntry != null)
             {
-                Log.Info($"[AudioSourceFactory] Source decision: CachingStreamSource, track={trackId}, reason=partial-cache-bootstrap, cacheKey={fallbackStartupEntry.CacheKey}");
-                return Task.FromResult<IAudioSource>(new CachingStreamSource(
+                return Task.FromResult<IAudioSource>(CreatePartialCacheSource(
                     fallbackStartupEntry.CacheKey,
                     trackId,
-                    url: string.Empty,
-                    contentLength: fallbackStartupEntry.TotalSize,
-                    format: fallbackStartupEntry.Format,
-                    codec: fallbackStartupEntry.Codec,
-                    bitrate: fallbackStartupEntry.Bitrate > 0 ? fallbackStartupEntry.Bitrate : bitrateKbps,
-                    cacheManager: cacheManager,
-                    config: config,
-                    urlAcquirer: urlAcquirer,
-                    urlRefresher: urlRefresher));
+                    fallbackStartupEntry.TotalSize,
+                    fallbackStartupEntry.Format,
+                    fallbackStartupEntry.Codec,
+                    fallbackStartupEntry.Bitrate > 0 ? fallbackStartupEntry.Bitrate : bitrateKbps,
+                    cacheManager,
+                    config,
+                    urlAcquirer,
+                    urlRefresher));
             }
 
             throw new ArgumentException("No URL provided and no cache available", nameof(descriptor));
@@ -260,20 +240,10 @@ public static class AudioSourceFactory
             ? resolvedCacheKey
             : BuildCacheKey(trackId, format, bitrateKbps);
 
-        if (descriptor.Origin != StreamSource.DiskCachePartial && cacheManager.IsFullyCached(finalCacheKey))
+        if (descriptor.Origin != StreamSource.DiskCachePartial
+            && TryCreateFullCacheSource(cacheManager, finalCacheKey, trackId) is { } fullCacheSource)
         {
-            var cachePath = cacheManager.GetCachePath(finalCacheKey);
-            if (File.Exists(cachePath))
-            {
-                var exactEntry = cacheManager.GetCacheInfo(finalCacheKey);
-                Log.Info($"[AudioSourceFactory] Source decision: LocalFileSource, track={trackId}, reason=full-cache");
-                return Task.FromResult<IAudioSource>(new LocalFileSource(
-                    cachePath,
-                    exactEntry?.TotalSize ?? 0,
-                    trackId,
-                    cacheManager,
-                    finalCacheKey));
-            }
+            return Task.FromResult<IAudioSource>(fullCacheSource);
         }
 
         Log.Info($"[AudioSourceFactory] Source decision: CachingStreamSource, track={trackId}, reason=live-stream, cacheKey={finalCacheKey}, hasLiveUrl={descriptor.HasLiveUrl}");
@@ -575,25 +545,60 @@ public static class AudioSourceFactory
         return (contentLength, codec, bitrate);
     }
 
-    private static long ExtractContentLengthFromUrl(string url)
+    private static LocalFileSource? TryCreateFullCacheSource(
+        AudioCacheManager cacheManager,
+        string cacheKey,
+        string trackId)
     {
-        try
-        {
-            var query = System.Web.HttpUtility.ParseQueryString(new Uri(url).Query);
-            return long.TryParse(query["clen"], out var clen) ? clen : 0;
-        }
-        catch { return 0; }
+        if (string.IsNullOrEmpty(cacheKey) || !cacheManager.IsFullyCached(cacheKey))
+            return null;
+
+        string cachePath = cacheManager.GetCachePath(cacheKey);
+        if (!File.Exists(cachePath))
+            return null;
+
+        var exactEntry = cacheManager.GetCacheInfo(cacheKey);
+        Log.Info($"[AudioSourceFactory] Source decision: LocalFileSource, track={trackId}, reason=full-cache");
+        return new LocalFileSource(
+            cachePath,
+            exactEntry?.TotalSize ?? 0,
+            trackId,
+            cacheManager,
+            cacheKey);
     }
 
-    private static int ExtractBitrateFromUrl(string url)
+    private static CachingStreamSource CreatePartialCacheSource(
+        string cacheKey,
+        string trackId,
+        long contentLength,
+        AudioFormat format,
+        AudioCodec codec,
+        int bitrate,
+        AudioCacheManager cacheManager,
+        StreamingConfig config,
+        Func<CancellationToken, Task<string?>>? urlAcquirer,
+        Func<CancellationToken, Task<string?>>? urlRefresher)
     {
-        try
-        {
-            var query = System.Web.HttpUtility.ParseQueryString(new Uri(url).Query);
-            return int.TryParse(query["bitrate"], out var br) ? br / 1000 : 0;
-        }
-        catch { return 0; }
+        Log.Info($"[AudioSourceFactory] Source decision: CachingStreamSource, track={trackId}, reason=partial-cache-bootstrap, cacheKey={cacheKey}");
+        return new CachingStreamSource(
+            cacheKey,
+            trackId,
+            url: string.Empty,
+            contentLength: contentLength,
+            format: format,
+            codec: codec,
+            bitrate: bitrate,
+            cacheManager: cacheManager,
+            config: config,
+            urlAcquirer: urlAcquirer,
+            urlRefresher: urlRefresher);
     }
+
+    private static long ExtractContentLengthFromUrl(string url) =>
+        long.TryParse(UrlEx.TryGetQueryParameterValue(url, "clen"), out var clen) ? clen : 0;
+
+    private static int ExtractBitrateFromUrl(string url) =>
+        int.TryParse(UrlEx.TryGetQueryParameterValue(url, "bitrate"), out var br) ? br / 1000 : 0;
 
     #endregion
 }

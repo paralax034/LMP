@@ -110,7 +110,7 @@ public static class PlayerStateTransitions
 
             SeekCommand => state is PlayerState.Playing or PlayerState.Paused or PlayerState.Buffering,
 
-            StarvationCommand => state is PlayerState.Playing,
+            StarvationCommand => state is PlayerState.Playing or PlayerState.Buffering,
 
             DeferredResumeCommand => state is PlayerState.Buffering or PlayerState.Seeking or PlayerState.Paused or PlayerState.Playing,
 

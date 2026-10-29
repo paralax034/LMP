@@ -4,10 +4,7 @@ using System.Diagnostics;
 using System.Text;
 using Avalonia.Collections;
 using Avalonia.Threading;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using LMP.Tests.Framework;
-using LMP.UI.Helpers;
 
 namespace LMP.UI.Features.Debug;
 

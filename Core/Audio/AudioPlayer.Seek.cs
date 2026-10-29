@@ -45,7 +45,6 @@ public sealed partial class AudioPlayer
 
 #if AUDIO_SPLICE_AUDIT
     private int _seekRestartCount;
-    private int _decoderRestartCount;
 #endif
 
     #endregion
@@ -132,7 +131,6 @@ public sealed partial class AudioPlayer
     {
 #if AUDIO_SPLICE_AUDIT
         Volatile.Write(ref _seekRestartCount, 0);
-        Volatile.Write(ref _decoderRestartCount, 0);
 #endif
     }
 

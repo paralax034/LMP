@@ -863,6 +863,7 @@ CancellationToken ct)
                 _analyzer.NotifyIntegratedLufs(integratedLufs);
 
             _analyzer.LockGain(rawGain);
+            SnapCrossfaderToGain();
 
             Log.Debug($"[AudioPipeline] Pre-scan complete: lufs={integratedLufs:F2}, " +
                       $"gain={rawGain:F4}x, limit={scanMaxSeconds:F1}s, " +

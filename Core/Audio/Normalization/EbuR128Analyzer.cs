@@ -98,8 +98,9 @@ public sealed class EbuR128Analyzer
     /// <summary>Зафиксирован ли gain.</summary>
     public bool IsGainLocked => !float.IsNaN(_lockedGain);
 
-    /// <summary>Текущая конфигурация (snapshot).</summary>
-    public NormalizationConfig CurrentConfig => new(_enabled, _targetLufs, _maxGain, _mode);
+    /// <summary>Текущая конфигурация (snapshot с учётом ожидающих применения настроек).</summary>
+    public NormalizationConfig CurrentConfig =>
+        _pendingConfig?.Value ?? new(_enabled, _targetLufs, _maxGain, _mode);
 
     #endregion
 
@@ -166,7 +167,7 @@ public sealed class EbuR128Analyzer
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ApplyPendingConfig()
     {
-        var snapshot = _pendingConfig;
+        var snapshot = Interlocked.Exchange(ref _pendingConfig, null);
         if (snapshot == null) return;
 
         var cfg = snapshot.Value;
@@ -203,35 +204,25 @@ public sealed class EbuR128Analyzer
         if (!_enabled) return;
         if (gain <= 0f || !float.IsFinite(gain)) return;
 
-        var pendingSnapshot = _pendingConfig;
-        var effectiveMode = pendingSnapshot?.Value.Mode ?? _mode;
-        var effectiveMaxGain = pendingSnapshot != null
-            ? Math.Max(1f, pendingSnapshot.Value.MaxGain)
-            : _maxGain;
-
-        if (effectiveMode == NormalizationMode.DownwardOnly)
-            gain = MathF.Min(gain, 1.0f);
-
-        gain = Math.Clamp(gain, MinNormalizationGain, effectiveMaxGain);
-
-        _pendingNormReset = 0;
-        _lockedGain = gain;
+        LockGain(gain);
 
 #if DEBUG
-        if (MathF.Abs(gain - _lastLoggedCacheGain) > 0.0005f || effectiveMode != _lastLoggedCacheMode)
+        if (MathF.Abs(_lockedGain - _lastLoggedCacheGain) > 0.0005f || _mode != _lastLoggedCacheMode)
         {
-            _lastLoggedCacheGain = gain;
-            _lastLoggedCacheMode = effectiveMode;
-            Log.Debug($"[EbuR128] Gain from cache: {gain:F3}x (mode={effectiveMode}, analysis skipped)");
+            _lastLoggedCacheGain = _lockedGain;
+            _lastLoggedCacheMode = _mode;
+            Log.Debug($"[EbuR128] Gain from cache: {_lockedGain:F3}x (mode={_mode}, analysis skipped)");
         }
 #endif
     }
 
     /// <summary>
-    /// Фиксирует gain из EBU R128 pre-scan.
+    /// Фиксирует gain из EBU R128 pre-scan или метаданных с гарантированным применением актуальной конфигурации.
     /// </summary>
     public void LockGain(float gain)
     {
+        ApplyPendingConfig();
+
         if (_mode == NormalizationMode.DownwardOnly)
             gain = MathF.Min(gain, 1.0f);
 
@@ -288,13 +279,10 @@ public sealed class EbuR128Analyzer
         if (!float.IsFinite(_lastIntegratedLufs))
             return;
 
-        float gainDb = _targetLufs - _lastIntegratedLufs;
-        float gain = MathF.Pow(10f, gainDb / 20f);
-
+        float gain = ComputeGainFromLufs(_lastIntegratedLufs, _targetLufs, _maxGain);
         if (_mode == NormalizationMode.DownwardOnly)
             gain = MathF.Min(gain, 1.0f);
 
-        gain = Math.Clamp(gain, MinNormalizationGain, _maxGain);
         _lockedGain = gain;
 
         Log.Debug($"[EbuR128] Recalculated from LUFS={_lastIntegratedLufs:F2}: " +
@@ -359,45 +347,27 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Вычисляет raw linear gain из gating block powers.
+    /// Преобразует измеренный уровень громкости LUFS в линейный коэффициент усиления с ограничением по диапазону.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float ComputeGainFromLufs(float integratedLufs, float targetLufs, float maxGain)
+    {
+        if (!float.IsFinite(integratedLufs))
+            return 1.0f;
+
+        float gainDb = targetLufs - integratedLufs;
+        float gain = MathF.Pow(10f, gainDb / 20f);
+        return Math.Clamp(gain, MinNormalizationGain, Math.Max(1f, maxGain));
+    }
+
+    /// <summary>
+    /// Вычисляет raw linear gain из gating block powers без дублирования логики гейтинга.
     /// </summary>
     internal static float ComputeIntegratedGainFromBlocks(
         double[] blockPowers, int blockCount, float targetLufs, float maxGain)
     {
-        if (blockCount == 0)
-            return 1.0f;
-
-        double sumPower = 0.0;
-        for (int i = 0; i < blockCount; i++)
-            sumPower += blockPowers[i];
-
-        double meanPower = sumPower / blockCount;
-        double integratedLufs = LufsOffset + 10.0 * Math.Log10(Math.Max(meanPower, 1e-20));
-
-        double relThreshold = integratedLufs + RelativeGateOffsetLu;
-        double relPowerThreshold = Math.Pow(10.0, (relThreshold - LufsOffset) / 10.0);
-
-        double gatedSum = 0.0;
-        int gatedCount = 0;
-        for (int i = 0; i < blockCount; i++)
-        {
-            if (blockPowers[i] >= relPowerThreshold)
-            {
-                gatedSum += blockPowers[i];
-                gatedCount++;
-            }
-        }
-
-        if (gatedCount > 0)
-        {
-            meanPower = gatedSum / gatedCount;
-            integratedLufs = LufsOffset + 10.0 * Math.Log10(Math.Max(meanPower, 1e-20));
-        }
-
-        float gainDb = (float)(targetLufs - integratedLufs);
-        float gain = MathF.Pow(10f, gainDb / 20f);
-
-        return Math.Clamp(gain, MinNormalizationGain, maxGain);
+        float integratedLufs = ComputeIntegratedLufsFromBlocks(blockPowers, blockCount);
+        return ComputeGainFromLufs(integratedLufs, targetLufs, maxGain);
     }
 
     #endregion

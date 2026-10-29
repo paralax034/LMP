@@ -50,7 +50,6 @@ public static class AtomicFile
         EnsureDirectoryExists(targetPath);
 
         var tempPath = string.Concat(targetPath, ".tmp");
-        var backupPath = string.Concat(targetPath, ".bak");
 
         try
         {
@@ -66,19 +65,7 @@ public static class AtomicFile
                 fs.Flush(flushToDisk: true);
             }
 
-            if (createBackup && File.Exists(targetPath))
-            {
-                try
-                {
-                    File.Copy(targetPath, backupPath, overwrite: true);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[AtomicFile] Failed to create backup copy for '{targetPath}': {ex.Message}");
-                }
-            }
-
-            File.Move(tempPath, targetPath, overwrite: true);
+            CommitTempFile(tempPath, targetPath, createBackup);
         }
         catch
         {
@@ -99,53 +86,12 @@ public static class AtomicFile
     /// </remarks>
     public static byte[]? ReadBytesWithFallback(
         string targetPath,
-        out bool recoveredFromBackup)
-    {
-        recoveredFromBackup = false;
-        if (string.IsNullOrWhiteSpace(targetPath)) return null;
-
-        var backupPath = string.Concat(targetPath, ".bak");
-
-        // 1. Попытка чтения основного файла
-        if (File.Exists(targetPath))
-        {
-            try
-            {
-                var fi = new FileInfo(targetPath);
-                if (fi.Length > 0)
-                {
-                    return File.ReadAllBytes(targetPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"[AtomicFile] Primary binary file read failed for '{targetPath}': {ex.Message}");
-            }
-        }
-
-        // 2. Fallback на резервную копию
-        if (File.Exists(backupPath))
-        {
-            try
-            {
-                var fi = new FileInfo(backupPath);
-                if (fi.Length > 0)
-                {
-                    var backupBytes = File.ReadAllBytes(backupPath);
-                    recoveredFromBackup = true;
-                    TryAutoHeal(backupPath, targetPath);
-                    Log.Warn($"[AtomicFile] ⚠️ Successfully recovered binary '{targetPath}' from backup (.bak)");
-                    return backupBytes;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[AtomicFile] Backup binary file read failed for '{backupPath}': {ex.Message}");
-            }
-        }
-
-        return null;
-    }
+        out bool recoveredFromBackup) =>
+        ReadWithFallbackCore(
+            targetPath,
+            static path => File.ReadAllBytes(path),
+            static bytes => bytes.Length > 0,
+            out recoveredFromBackup);
 
     #endregion
 
@@ -192,7 +138,6 @@ public static class AtomicFile
         EnsureDirectoryExists(targetPath);
 
         var tempPath = string.Concat(targetPath, ".tmp");
-        var backupPath = string.Concat(targetPath, ".bak");
 
         try
         {
@@ -209,19 +154,7 @@ public static class AtomicFile
                 fs.Flush(flushToDisk: true);
             }
 
-            if (createBackup && File.Exists(targetPath))
-            {
-                try
-                {
-                    File.Copy(targetPath, backupPath, overwrite: true);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[AtomicFile] Failed to create backup copy for '{targetPath}': {ex.Message}");
-                }
-            }
-
-            File.Move(tempPath, targetPath, overwrite: true);
+            CommitTempFile(tempPath, targetPath, createBackup);
         }
         catch
         {
@@ -239,57 +172,14 @@ public static class AtomicFile
     /// <remarks>
     /// Обеспечивает аппаратную защиту от повреждения данных (Torn Write Protection) для бинарных MemoryPack-структур.
     /// </remarks>
-    public static async Task<(byte[]? Content, bool RecoveredFromBackup)> ReadBytesWithFallbackAsync(
+    public static Task<(byte[]? Content, bool RecoveredFromBackup)> ReadBytesWithFallbackAsync(
         string targetPath,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(targetPath))
-            return (null, false);
-
-        var backupPath = string.Concat(targetPath, ".bak");
-
-        // 1. Попытка чтения основного файла
-        if (File.Exists(targetPath))
-        {
-            try
-            {
-                var fi = new FileInfo(targetPath);
-                if (fi.Length > 0)
-                {
-                    var bytes = await File.ReadAllBytesAsync(targetPath, ct).ConfigureAwait(false);
-                    return (bytes, false);
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception ex)
-            {
-                Log.Warn($"[AtomicFile] Primary binary file read failed for '{targetPath}': {ex.Message}");
-            }
-        }
-
-        // 2. Fallback на резервную копию
-        if (File.Exists(backupPath))
-        {
-            try
-            {
-                var fi = new FileInfo(backupPath);
-                if (fi.Length > 0)
-                {
-                    var backupBytes = await File.ReadAllBytesAsync(backupPath, ct).ConfigureAwait(false);
-                    TryAutoHeal(backupPath, targetPath);
-                    Log.Warn($"[AtomicFile] ⚠️ Successfully recovered binary '{targetPath}' from backup (.bak)");
-                    return (backupBytes, true);
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception ex)
-            {
-                Log.Error($"[AtomicFile] Backup binary file read failed for '{backupPath}': {ex.Message}");
-            }
-        }
-
-        return (null, false);
-    }
+        CancellationToken ct = default) =>
+        ReadWithFallbackCoreAsync(
+            targetPath,
+            static (path, token) => File.ReadAllBytesAsync(path, token),
+            static bytes => bytes.Length > 0,
+            ct);
 
     #endregion
 
@@ -308,56 +198,12 @@ public static class AtomicFile
         out bool recoveredFromBackup,
         Encoding? encoding = null)
     {
-        recoveredFromBackup = false;
-        if (string.IsNullOrWhiteSpace(targetPath)) return null;
-
         var enc = encoding ?? Utf8NoBom;
-        var backupPath = string.Concat(targetPath, ".bak");
-
-        // 1. Попытка чтения основного файла
-        if (File.Exists(targetPath))
-        {
-            try
-            {
-                var fi = new FileInfo(targetPath);
-                if (fi.Length > 0)
-                {
-                    var text = File.ReadAllText(targetPath, enc);
-                    if (!string.IsNullOrWhiteSpace(text))
-                        return text;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"[AtomicFile] Primary file read failed for '{targetPath}': {ex.Message}");
-            }
-        }
-
-        // 2. Fallback на резервную копию
-        if (File.Exists(backupPath))
-        {
-            try
-            {
-                var fi = new FileInfo(backupPath);
-                if (fi.Length > 0)
-                {
-                    var backupText = File.ReadAllText(backupPath, enc);
-                    if (!string.IsNullOrWhiteSpace(backupText))
-                    {
-                        recoveredFromBackup = true;
-                        TryAutoHeal(backupPath, targetPath);
-                        Log.Warn($"[AtomicFile] ⚠️ Successfully recovered '{targetPath}' from backup (.bak)");
-                        return backupText;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[AtomicFile] Backup file read failed for '{backupPath}': {ex.Message}");
-            }
-        }
-
-        return null;
+        return ReadWithFallbackCore(
+            targetPath,
+            path => File.ReadAllText(path, enc),
+            static text => !string.IsNullOrWhiteSpace(text),
+            out recoveredFromBackup);
     }
 
     #endregion
@@ -371,29 +217,103 @@ public static class AtomicFile
     /// <param name="encoding">Кодировка текста.</param>
     /// <param name="ct">Токен отмены.</param>
     /// <returns>Кортеж из прочитанного содержимого и флага восстановления из бэкапа.</returns>
-    public static async Task<(string? Content, bool RecoveredFromBackup)> ReadTextWithFallbackAsync(
+    public static Task<(string? Content, bool RecoveredFromBackup)> ReadTextWithFallbackAsync(
         string targetPath,
         Encoding? encoding = null,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(targetPath))
-            return (null, false);
-
         var enc = encoding ?? Utf8NoBom;
-        var backupPath = string.Concat(targetPath, ".bak");
+        return ReadWithFallbackCoreAsync(
+            targetPath,
+            (path, token) => File.ReadAllTextAsync(path, enc, token),
+            static text => !string.IsNullOrWhiteSpace(text),
+            ct);
+    }
 
-        // 1. Попытка чтения основного файла
-        if (File.Exists(targetPath))
+    #endregion
+
+    #region Helpers
+
+    private static void CommitTempFile(string tempPath, string targetPath, bool createBackup)
+    {
+        if (createBackup && File.Exists(targetPath))
+        {
+            var backupPath = string.Concat(targetPath, ".bak");
+            try
+            {
+                File.Copy(targetPath, backupPath, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[AtomicFile] Failed to create backup copy for '{targetPath}': {ex.Message}");
+            }
+        }
+
+        File.Move(tempPath, targetPath, overwrite: true);
+    }
+
+    private static T? ReadWithFallbackCore<T>(
+        string targetPath,
+        Func<string, T> reader,
+        Func<T, bool> validator,
+        out bool recoveredFromBackup) where T : class
+    {
+        recoveredFromBackup = false;
+        if (string.IsNullOrWhiteSpace(targetPath)) return null;
+
+        if (HasNonEmptyFile(targetPath))
         {
             try
             {
-                var fi = new FileInfo(targetPath);
-                if (fi.Length > 0)
+                var content = reader(targetPath);
+                if (validator(content))
+                    return content;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[AtomicFile] Primary file read failed for '{targetPath}': {ex.Message}");
+            }
+        }
+
+        var backupPath = string.Concat(targetPath, ".bak");
+        if (HasNonEmptyFile(backupPath))
+        {
+            try
+            {
+                var backupContent = reader(backupPath);
+                if (validator(backupContent))
                 {
-                    var text = await File.ReadAllTextAsync(targetPath, enc, ct).ConfigureAwait(false);
-                    if (!string.IsNullOrWhiteSpace(text))
-                        return (text, false);
+                    recoveredFromBackup = true;
+                    TryAutoHeal(backupPath, targetPath);
+                    Log.Warn($"[AtomicFile] ⚠️ Successfully recovered '{targetPath}' from backup (.bak)");
+                    return backupContent;
                 }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[AtomicFile] Backup file read failed for '{backupPath}': {ex.Message}");
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<(T? Content, bool RecoveredFromBackup)> ReadWithFallbackCoreAsync<T>(
+        string targetPath,
+        Func<string, CancellationToken, Task<T>> readerAsync,
+        Func<T, bool> validator,
+        CancellationToken ct) where T : class
+    {
+        if (string.IsNullOrWhiteSpace(targetPath))
+            return (null, false);
+
+        if (HasNonEmptyFile(targetPath))
+        {
+            try
+            {
+                var content = await readerAsync(targetPath, ct).ConfigureAwait(false);
+                if (validator(content))
+                    return (content, false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
@@ -402,21 +322,17 @@ public static class AtomicFile
             }
         }
 
-        // 2. Fallback на резервную копию
-        if (File.Exists(backupPath))
+        var backupPath = string.Concat(targetPath, ".bak");
+        if (HasNonEmptyFile(backupPath))
         {
             try
             {
-                var fi = new FileInfo(backupPath);
-                if (fi.Length > 0)
+                var backupContent = await readerAsync(backupPath, ct).ConfigureAwait(false);
+                if (validator(backupContent))
                 {
-                    var backupText = await File.ReadAllTextAsync(backupPath, enc, ct).ConfigureAwait(false);
-                    if (!string.IsNullOrWhiteSpace(backupText))
-                    {
-                        TryAutoHeal(backupPath, targetPath);
-                        Log.Warn($"[AtomicFile] ⚠️ Successfully recovered '{targetPath}' from backup (.bak)");
-                        return (backupText, true);
-                    }
+                    TryAutoHeal(backupPath, targetPath);
+                    Log.Warn($"[AtomicFile] ⚠️ Successfully recovered '{targetPath}' from backup (.bak)");
+                    return (backupContent, true);
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -429,9 +345,8 @@ public static class AtomicFile
         return (null, false);
     }
 
-    #endregion
-
-    #region Helpers
+    private static bool HasNonEmptyFile(string path) =>
+        File.Exists(path) && new FileInfo(path).Length > 0;
 
     private static void EnsureDirectoryExists(string filePath)
     {

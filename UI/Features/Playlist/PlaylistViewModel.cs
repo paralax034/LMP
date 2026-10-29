@@ -585,13 +585,9 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             IsShuffleActive = false;
             var allTracks = GetPlaylistTracksSnapshot();
 
-            if (!allTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
+            if (_items.IndexOfTrackId(track.Id) < 0)
             {
-                var visibleTracks = GetPlaylistTracksSnapshot();
-                if (visibleTracks.Any(t => string.Equals(t.Id, track.Id, StringComparison.Ordinal)))
-                    allTracks = visibleTracks;
-                else
-                    allTracks = [track, .. allTracks];
+                allTracks = [track, .. allTracks];
             }
 
             await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: null);

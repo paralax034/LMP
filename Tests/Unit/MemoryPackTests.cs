@@ -3,7 +3,6 @@ using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Http;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Data.Repositories;
-using LMP.Core.Models;
 using LMP.Tests.Framework;
 using MemoryPack;
 using Microsoft.Extensions.DependencyInjection;

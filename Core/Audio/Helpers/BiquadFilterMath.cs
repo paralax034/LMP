@@ -12,17 +12,6 @@ public readonly record struct BiquadCoefficients(double B0, double B1, double B2
     /// <summary>Единичный фильтр (полный пропуск сигнала без изменений).</summary>
     public static BiquadCoefficients Identity => new(1.0, 0.0, 0.0, 0.0, 0.0);
 
-    /// <summary>
-    /// Линейно интерполирует коэффициенты двойной точности между двумя состояниями фильтра.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static BiquadCoefficients Lerp(in BiquadCoefficients a, in BiquadCoefficients b, double t) =>
-        new(
-            a.B0 + (b.B0 - a.B0) * t,
-            a.B1 + (b.B1 - a.B1) * t,
-            a.B2 + (b.B2 - a.B2) * t,
-            a.A1 + (b.A1 - a.A1) * t,
-            a.A2 + (b.A2 - a.A2) * t);
 
     /// <summary>
     /// Вычисляет квадрат модуля передаточной функции <c>|H(e^(jw))|²</c> на заданной частоте.
@@ -72,23 +61,9 @@ public struct BiquadCoefficientsF
         A2 = a2;
     }
 
-    public static BiquadCoefficientsF Identity => new(1f, 0f, 0f, 0f, 0f);
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static BiquadCoefficientsF FromDouble(in BiquadCoefficients c) =>
         new((float)c.B0, (float)c.B1, (float)c.B2, (float)c.A1, (float)c.A2);
-
-    /// <summary>
-    /// Линейно интерполирует коэффициенты между двумя устойчивыми состояниями фильтра.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static BiquadCoefficientsF Lerp(in BiquadCoefficientsF a, in BiquadCoefficientsF b, float t) =>
-        new(
-            a.B0 + (b.B0 - a.B0) * t,
-            a.B1 + (b.B1 - a.B1) * t,
-            a.B2 + (b.B2 - a.B2) * t,
-            a.A1 + (b.A1 - a.A1) * t,
-            a.A2 + (b.A2 - a.A2) * t);
 }
 
 /// <summary>
@@ -114,84 +89,6 @@ public struct BiquadState
     {
         Z1 = 0;
         Z2 = 0;
-    }
-}
-
-/// <summary>
-/// Спаренное стерео-состояние биквадратного IIR-фильтра с внутренней двойной точностью аккумуляторов задержки.
-/// Исключает смещение полюсов за единичную окружность на суб-низких частотах (31–62 Гц @ 48 кГц) и денормализованные числа.
-/// </summary>
-[StructLayout(LayoutKind.Sequential)]
-public struct StereoBiquadStateF
-{
-    public double Z1L;
-    public double Z1R;
-    public double Z2L;
-    public double Z2R;
-
-    /// <summary>
-    /// Обрабатывает пару стерео-сэмплов (L, R) в двойной точности без промежуточного усечения мантиссы между каскадами.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void ProcessStereoDouble(ref double left, ref double right, in BiquadCoefficientsF c)
-    {
-        double inL = left;
-        double inR = right;
-
-        double b0 = c.B0;
-        double b1 = c.B1;
-        double b2 = c.B2;
-        double a1 = c.A1;
-        double a2 = c.A2;
-
-        double outL = Math.FusedMultiplyAdd(b0, inL, Z1L);
-        double outR = Math.FusedMultiplyAdd(b0, inR, Z1R);
-
-        Z1L = Math.FusedMultiplyAdd(b1, inL, Z2L) - a1 * outL;
-        Z1R = Math.FusedMultiplyAdd(b1, inR, Z2R) - a1 * outR;
-
-        Z2L = b2 * inL - a2 * outL;
-        Z2R = b2 * inR - a2 * outR;
-
-        left = outL;
-        right = outR;
-    }
-
-    /// <summary>
-    /// Обрабатывает пару стерео-сэмплов (L, R) за один такт с идентичными коэффициентами полосы.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void ProcessStereo(ref float left, ref float right, in BiquadCoefficientsF c)
-    {
-        double inL = left;
-        double inR = right;
-
-        double b0 = c.B0;
-        double b1 = c.B1;
-        double b2 = c.B2;
-        double a1 = c.A1;
-        double a2 = c.A2;
-
-        double outL = Math.FusedMultiplyAdd(b0, inL, Z1L);
-        double outR = Math.FusedMultiplyAdd(b0, inR, Z1R);
-
-        Z1L = Math.FusedMultiplyAdd(b1, inL, Z2L) - a1 * outL;
-        Z1R = Math.FusedMultiplyAdd(b1, inR, Z2R) - a1 * outR;
-
-        Z2L = b2 * inL - a2 * outL;
-        Z2R = b2 * inR - a2 * outR;
-
-        left = (float)outL;
-        right = (float)outR;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Reset()
-    {
-        Z1L = 0.0;
-        Z1R = 0.0;
-        Z2L = 0.0;
-        Z2R = 0.0;
     }
 }
 
@@ -344,15 +241,6 @@ public sealed class KWeightingFilter
         _highPass = BiquadFilterMath.ComputeHighPass(sampleRate, HighPassFreqHz, HighPassQ);
         _shelfState = new BiquadState[channels];
         _highPassState = new BiquadState[channels];
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public double ProcessSample(int channel, float input)
-    {
-        double x = input;
-        x = _shelfState[channel].Process(x, in _shelf);
-        x = _highPassState[channel].Process(x, in _highPass);
-        return x;
     }
 
     public void ProcessBlock(ReadOnlySpan<float> input, Span<double> output)
