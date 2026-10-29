@@ -13,7 +13,16 @@ namespace LMP.Core.Audio.Http;
 public static class SharedHttpClient
 {
     private static NetworkManager? _networkManager;
+    private static Func<NetworkManager>? _lazyNetworkFactory;
     private static long _connectionSequence;
+
+    /// <summary>
+    /// Регистрирует фабрику отложенного разрешения <see cref="NetworkManager"/> из DI-контейнера.
+    /// </summary>
+    public static void RegisterLazyFactory(Func<NetworkManager> factory)
+    {
+        _lazyNetworkFactory = factory;
+    }
 
     /// <summary>
     /// Инициализирует статический фасад ссылкой на централизованный NetworkManager.
@@ -23,9 +32,9 @@ public static class SharedHttpClient
         _networkManager = networkManager;
     }
 
-    /// <summary>Текущий активный экземпляр клиента.</summary>
+    /// <summary>Текущий активный экземпляр клиента (разрешает <see cref="NetworkManager"/> лениво при первом вызове).</summary>
     public static HttpClient Instance =>
-        _networkManager?.AudioClient ?? FallbackClient;
+        (_networkManager ??= _lazyNetworkFactory?.Invoke())?.AudioClient ?? FallbackClient;
 
     private static readonly HttpClient FallbackClient = new(new SocketsHttpHandler
     {

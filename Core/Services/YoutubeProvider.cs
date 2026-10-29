@@ -164,8 +164,23 @@ public partial class YoutubeProvider : IDisposable
     {
         lock (_initLock)
         {
+            IsReady = true;
             _initTask ??= InitializeInternalAsync();
             return _initTask;
+        }
+    }
+
+    /// <summary>
+    /// Гарантирует запуск фоновой инициализации (VisitorData / BotGuard / QuickJS) по требованию,
+    /// если приложение было запущено в быстром режиме без стартового прогрева.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EnsureInitializedOnDemand()
+    {
+        if (_disposed) return;
+        if (!IsReady || _initTask is null)
+        {
+            _ = InitializeAsync();
         }
     }
 
@@ -211,10 +226,13 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Возвращает сконфигурированный экземпляр клиента YouTubeClient.
+    /// Возвращает сконфигурированный экземпляр клиента YouTubeClient, инициируя отложенный прогрев при необходимости.
     /// </summary>
-    public YoutubeClient GetClient() =>
-        _youtube ?? throw new InvalidOperationException("YouTube client not initialized");
+    public YoutubeClient GetClient()
+    {
+        EnsureInitializedOnDemand();
+        return _youtube ?? throw new InvalidOperationException("YouTube client not initialized");
+    }
 
     #endregion
 
@@ -519,6 +537,8 @@ public partial class YoutubeProvider : IDisposable
         bool forceRefresh = false,
         CancellationToken ct = default)
     {
+        EnsureInitializedOnDemand();
+
         var rawVideoId = track.GetRawIdSpan().ToString();
         if (string.IsNullOrEmpty(rawVideoId)) return null;
 
@@ -639,7 +659,8 @@ public partial class YoutubeProvider : IDisposable
         CancellationToken ct = default,
         bool forceRefresh = false)
     {
-        if (!IsReady || string.IsNullOrWhiteSpace(videoId)) return [];
+        if (string.IsNullOrWhiteSpace(videoId)) return [];
+        EnsureInitializedOnDemand();
 
         string trackId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId : $"yt_{videoId}";
         string rawId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId[3..] : videoId;
@@ -900,7 +921,8 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public async Task<TrackInfo?> GetTrackByUrlAsync(string url)
     {
-        if (!IsReady || string.IsNullOrWhiteSpace(url)) return null;
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        EnsureInitializedOnDemand();
         try
         {
             var videoId = VideoId.TryParse(url) ?? VideoId.Parse(ExtractVideoId(url) ?? "");
@@ -923,8 +945,10 @@ public partial class YoutubeProvider : IDisposable
      SearchFilter filter = SearchFilter.MusicSong,
      [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (!IsReady || string.IsNullOrWhiteSpace(query))
+        if (string.IsNullOrWhiteSpace(query))
             yield break;
+
+        EnsureInitializedOnDemand();
 
         try
         {
@@ -1285,8 +1309,10 @@ public partial class YoutubeProvider : IDisposable
         SearchFilter filter = SearchFilter.MusicSong,
         CancellationToken ct = default)
     {
-        if (!IsReady || string.IsNullOrWhiteSpace(query))
+        if (string.IsNullOrWhiteSpace(query))
             return ([], null!);
+
+        EnsureInitializedOnDemand();
 
         var sw = Stopwatch.StartNew();
         var session = CreateSearchSession(query, maxResults, filter);
@@ -1404,7 +1430,7 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public async Task<(string Name, List<TrackInfo> Tracks)?> GetPlaylistAsync(string url)
     {
-        if (!IsReady) return null;
+        EnsureInitializedOnDemand();
 
         try
         {

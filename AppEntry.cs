@@ -44,6 +44,25 @@ public sealed class AppEntry
     public static bool WasMigratedFromLegacy { get; private set; }
 
     /// <summary>
+    /// Флаг быстрого запуска (<c>--fast</c>): пропускает Splash, прогрев YouTube/PoToken/CDN и предзагрузку неактивных страниц.
+    /// Все тяжёлые сервисы инициализируются строго по требованию.
+    /// </summary>
+    public static bool IsFastStartup { get; private set; }
+
+    /// <summary>
+    /// Аргументы командной строки текущего процесса.
+    /// </summary>
+    public static string[] CommandLineArgs { get; private set; } = [];
+
+#if DEBUG
+    /// <summary>
+    /// Флаг запуска непосредственно в окно <see cref="LMP.UI.Features.Debug.DebugWindow"/> (<c>--test-ui</c> / <c>--debug-ui</c>)
+    /// без инициализации главного окна плеера.
+    /// </summary>
+    public static bool IsTestUiMode { get; private set; }
+#endif
+
+    /// <summary>
     /// Главный метод запуска приложения.
     /// </summary>
     /// <param name="args">Аргументы командной строки.</param>
@@ -96,16 +115,58 @@ public sealed class AppEntry
         UpdateService.DebugSimulatedCommitCount = LMP.Tests.Framework.TestConfig.Get().General.SimulateOldCommitCount;
 #endif
 
-        // 2. Защита от параллельного запуска: удерживает мьютекс на всё время жизни процесса
-        using var instanceGuard = SingleInstanceGuard.TryAcquire();
-        if (instanceGuard is null)
+        CommandLineArgs = args;
+
+        bool isHeadlessTest = false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (string.Equals(arg, "--fast", StringComparison.OrdinalIgnoreCase))
+            {
+                IsFastStartup = true;
+            }
+#if DEBUG
+            else if (string.Equals(arg, "--test-ui", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "--debug-ui", StringComparison.OrdinalIgnoreCase))
+            {
+                IsTestUiMode = true;
+                IsFastStartup = true;
+            }
+#endif
+        }
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (string.Equals(arg, "--headless", StringComparison.OrdinalIgnoreCase)
+#if DEBUG
+                || (!IsTestUiMode && LMP.Tests.ManualTests.IsTestCliArgument(arg))
+#endif
+               )
+            {
+                isHeadlessTest = true;
+                break;
+            }
+        }
+
+        // 2. Защита от параллельного запуска: удерживает мьютекс на всё время жизни процесса (в headless тестах и --test-ui не блокирует основной экземпляр)
+        bool bypassSingleInstance = isHeadlessTest
+#if DEBUG
+            || IsTestUiMode
+#endif
+            ;
+        using var instanceGuard = bypassSingleInstance ? null : SingleInstanceGuard.TryAcquire();
+        if (!bypassSingleInstance && instanceGuard is null)
+        {
+            Console.WriteLine("[AppEntry] Another instance of LMP is already running. Exiting headless probe.");
             return;
+        }
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding = System.Text.Encoding.UTF8;
 
 #if DEBUG
-        bool enableTelemetry = true;
+        bool enableTelemetry = !isHeadlessTest && !IsFastStartup;
 #else
         bool enableTelemetry = false;
 #endif
@@ -169,19 +230,38 @@ public sealed class AppEntry
             ConfigureServices(services);
             Services = services.BuildServiceProvider();
 
+            AudioSourceFactory.RegisterLazyFactory(() => Services.GetRequiredService<AudioCacheManager>());
+            LMP.Core.Audio.Http.SharedHttpClient.RegisterLazyFactory(() => Services.GetRequiredService<NetworkManager>());
+
             LifecycleRegistry.Instance = Services.GetRequiredService<LifecycleRegistry>();
             LifecycleRegistry.ActiveUiPageResolver = () =>
                 Services.GetService<MainWindowViewModel>()?.CurrentPage;
 
+#if DEBUG
+            if (!IsTestUiMode && LMP.Tests.ManualTests.HasTestCliArguments(args))
+            {
+                MigrateDatabaseSync(fastMode: true);
+                Environment.ExitCode = LMP.Tests.ManualTests.RunCliAsync(args).GetAwaiter().GetResult();
+                return;
+            }
+#endif
+
             // Безопасная инициализация и автоматическая миграция БД
-            MigrateDatabaseSync();
+            MigrateDatabaseSync(fastMode: IsFastStartup);
 
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
         {
             Log.Fatal($"Global crash: {ex.Message}\n{ex.StackTrace}");
-            OsNotificationHelper.ShowFatalError("LMP Fatal Startup Error", ex.Message, ex.ToString());
+            if (!isHeadlessTest)
+            {
+                OsNotificationHelper.ShowFatalError("LMP Fatal Startup Error", ex.Message, ex.ToString());
+            }
+            else
+            {
+                Console.Error.WriteLine($"[LMP Fatal Error] {ex.Message}\n{ex.StackTrace}");
+            }
         }
         finally
         {
@@ -235,7 +315,7 @@ public sealed class AppEntry
         return builder;
     }
 
-    private static void MigrateDatabaseSync()
+    private static void MigrateDatabaseSync(bool fastMode = false)
     {
         var dbPath = G.FilePath.Database;
 
@@ -245,16 +325,19 @@ public sealed class AppEntry
             return;
         }
 
-        // Страховочный бэкап базы данных перед проверкой и обновлением схемы
-        try
+        if (!fastMode)
         {
-            var bakPath = dbPath + ".bak";
-            File.Copy(dbPath, bakPath, overwrite: true);
-            Log.Info($"[DB] Safety backup created: {bakPath}");
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[DB] Failed to create safety database backup: {ex.Message}");
+            // Страховочный бэкап базы данных перед проверкой и обновлением схемы
+            try
+            {
+                var bakPath = dbPath + ".bak";
+                File.Copy(dbPath, bakPath, overwrite: true);
+                Log.Info($"[DB] Safety backup created: {bakPath}");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[DB] Failed to create safety database backup: {ex.Message}");
+            }
         }
 
         int dbVersion = 0;
@@ -284,7 +367,7 @@ public sealed class AppEntry
 
                 Log.Info($"[DB] Schema upgrade complete (Version: {DatabaseExtensions.CurrentDbVersion})");
             }
-            else
+            else if (!fastMode)
             {
                 connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
                 connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
@@ -516,8 +599,13 @@ public sealed class AppEntry
         services.AddSingleton<ISettingsRepository, SettingsRepository>();
         services.AddSingleton<INotificationRepository, NotificationRepository>();
 
-        // 1. Централизованный сетевой менеджер (Singleton)
-        services.AddSingleton<NetworkManager>();
+        // 1. Централизованный сетевой менеджер (Singleton, автоматически инициализирует SharedHttpClient при первом разрешении)
+        services.AddSingleton(_ =>
+        {
+            var net = new NetworkManager();
+            LMP.Core.Audio.Http.SharedHttpClient.Initialize(net);
+            return net;
+        });
 
         services.AddSingleton(sp =>
         {
@@ -584,7 +672,18 @@ public sealed class AppEntry
         services.AddSingleton<SearchCacheService>();
         services.AddSingleton<ImageCacheService>();
 
-        services.AddSingleton<AudioCacheManager>();
+        services.AddSingleton(sp =>
+        {
+            var lib = sp.GetService<LibraryService>();
+            long limitMb = lib is { IsInitialized: true } && lib.Settings.Storage.AudioCacheLimitMb > 0
+                ? lib.Settings.Storage.AudioCacheLimitMb
+                : 2048;
+
+            var cache = new AudioCacheManager(maxCacheSizeMb: limitMb);
+            AudioSourceFactory.InitializeGlobalCache(cache);
+            _ = cache.EnforceLimitsAsync();
+            return cache;
+        });
         services.AddSingleton<AudioEngine>();
         services.AddSingleton<DownloadService>();
 

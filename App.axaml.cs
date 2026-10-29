@@ -39,12 +39,27 @@ public partial class App : Application
             LocalizationService.Instance.UpdateApplicationResources();
             Log.Info($"Localization: {bootstrap.LanguageCode}");
 
-            // Splash Screen
-            _splash = new SplashWindow();
-            desktop.MainWindow = _splash;
-            _splash.Show();
+#if DEBUG
+            if (AppEntry.IsTestUiMode)
+            {
+                Log.Info("[Startup] Launching directly into DebugWindow (--test-ui mode, zero background warmup).");
+                var debugWindow = new UI.Features.Debug.DebugWindow(AppEntry.CommandLineArgs);
+                desktop.MainWindow = debugWindow;
+                debugWindow.Show();
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
+#endif
 
-            // Даём UI-потоку отрисовать splash
+            if (!AppEntry.IsFastStartup)
+            {
+                // Splash Screen
+                _splash = new SplashWindow();
+                desktop.MainWindow = _splash;
+                _splash.Show();
+            }
+
+            // Даём UI-потоку отрисовать splash (или сразу запускаем инициализацию в --fast режиме)
             Dispatcher.UIThread.Post(() => { _ = InitializeAppAsync(desktop); }, DispatcherPriority.Background);
         }
 
@@ -77,8 +92,13 @@ public partial class App : Application
 
         try
         {
-            // Отдаем приоритет UI, чтобы Splash мгновенно отрисовался
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            bool isFast = AppEntry.IsFastStartup;
+
+            if (!isFast)
+            {
+                // Отдаем приоритет UI, чтобы Splash мгновенно отрисовался
+                await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            }
 
             _splash?.SetProgress(5);
             _splash?.UpdateStatus(L["Splash_Initializing"]);
@@ -88,30 +108,43 @@ public partial class App : Application
             await auth.InitializeAsync().ConfigureAwait(false);
             _splash?.SetProgress(10);
 
-            // Привязываем статический SharedHttpClient к синглтону NetworkManager
-            var networkManager = AppEntry.Services.GetRequiredService<NetworkManager>();
-            SharedHttpClient.Initialize(networkManager);
+            AudioCacheManager? audioCacheManager = null;
 
-            // Audio Cache
-            _splash?.UpdateStatus(L["Splash_InitAudioCache"]);
-            var audioCacheTask = Task.Run(() =>
-                AppEntry.Services.GetRequiredService<AudioCacheManager>());
-
-            var statsLoadTask = Task.Run(() =>
+            if (!isFast)
             {
-                CdnHostStatsStore.Load();
-                SessionCacheStore.Load();
-            });
+                // Привязываем статический SharedHttpClient к синглтону NetworkManager
+                var networkManager = AppEntry.Services.GetRequiredService<NetworkManager>();
+                SharedHttpClient.Initialize(networkManager);
 
-            await Task.WhenAll(audioCacheTask, statsLoadTask).ConfigureAwait(false);
+                // Audio Cache
+                _splash?.UpdateStatus(L["Splash_InitAudioCache"]);
+                var audioCacheTask = Task.Run(() =>
+                    AppEntry.Services.GetRequiredService<AudioCacheManager>());
 
-            var audioCacheManager = audioCacheTask.Result;
-            AudioSourceFactory.InitializeGlobalCache(audioCacheManager);
+                var statsLoadTask = Task.Run(() =>
+                {
+                    CdnHostStatsStore.Load();
+                    SessionCacheStore.Load();
+                });
 
-            // Fire-and-forget: прогрев top CDN-кластеров пока UI продолжает инициализацию
-            _ = CdnHostStatsStore.PreWarmTopClustersAsync(
-                networkManager.AudioClient,
-                _appLifetimeCts.Token);
+                await Task.WhenAll(audioCacheTask, statsLoadTask).ConfigureAwait(false);
+
+                audioCacheManager = audioCacheTask.Result;
+                AudioSourceFactory.InitializeGlobalCache(audioCacheManager);
+
+                // Fire-and-forget: прогрев top CDN-кластеров пока UI продолжает инициализацию
+                _ = CdnHostStatsStore.PreWarmTopClustersAsync(
+                    networkManager.AudioClient,
+                    _appLifetimeCts.Token);
+            }
+            else
+            {
+                _ = Task.Run(() =>
+                {
+                    CdnHostStatsStore.Load();
+                    SessionCacheStore.Load();
+                });
+            }
 
             _splash?.SetProgress(20);
 
@@ -183,8 +216,7 @@ public partial class App : Application
 
             // Image Cache
             _splash?.UpdateStatus(L["Splash_PreparingImages"]);
-            var imageCache = await Task.Run(() =>
-                AppEntry.Services.GetRequiredService<ImageCacheService>());
+            var imageCache = AppEntry.Services.GetRequiredService<ImageCacheService>();
 
             var oldLoader = ImageLoader.AsyncImageLoader;
             ImageLoader.AsyncImageLoader = new CachedImageLoader(imageCache);
@@ -193,28 +225,35 @@ public partial class App : Application
 
             _splash?.SetProgress(70);
 
-            // YouTube Provider
-            _splash?.UpdateStatus(L["Splash_ConnectingYouTube"]);
-            var youtube = AppEntry.Services.GetRequiredService<YoutubeProvider>();
-
-            _ = Task.Run(async () =>
+            if (!isFast)
             {
-                try
-                {
-                    await youtube.InitializeAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[YouTube] Background init failed: {ex.Message}");
-                }
-            });
+                // YouTube Provider (в --fast режиме инициализируется лениво только при первом реальном запросе)
+                _splash?.UpdateStatus(L["Splash_ConnectingYouTube"]);
+                var youtube = AppEntry.Services.GetRequiredService<YoutubeProvider>();
 
-            _splash?.SetProgress(80);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await youtube.InitializeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"[YouTube] Background init failed: {ex.Message}");
+                    }
+                });
 
-            // Create Main Window
-            _splash?.UpdateStatus(L["Splash_BuildingInterface"]);
-            await Task.Delay(200); // No overload
-            _splash?.SetProgress(85);
+                _splash?.SetProgress(80);
+
+                // Create Main Window
+                _splash?.UpdateStatus(L["Splash_BuildingInterface"]);
+                await Task.Delay(200); // No overload
+                _splash?.SetProgress(85);
+            }
+            else
+            {
+                Log.Info("[Startup] Fast mode active: YouTube/PoToken warmup and page prewarm deferred until needed.");
+            }
 
             MainWindow? mainWindow = null;
             MainWindowViewModel? mainWindowVM = null;
@@ -222,7 +261,10 @@ public partial class App : Application
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 mainWindowVM = AppEntry.Services.GetRequiredService<MainWindowViewModel>();
-                mainWindowVM.InitializeShellPages();
+                if (!isFast)
+                {
+                    mainWindowVM.InitializeShellPages();
+                }
                 mainWindow = new MainWindow { DataContext = mainWindowVM };
             });
             _splash?.SetProgress(96);
@@ -278,7 +320,7 @@ public partial class App : Application
                     durationMs: 7000,
                     messageArgs: [G.Build.DisplayVersion]);
             }
-            else if (library.Settings.Updates.AutoCheckUpdates)
+            else if (!isFast && library.Settings.Updates.AutoCheckUpdates)
             {
                 var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
 
@@ -383,9 +425,12 @@ public partial class App : Application
                         // МЯГКО высвобождаем аудиодвижок и кэш.
                         // Делаем это ДО отмены токена, чтобы потоки завершились штатно, без выброса IOException
                         await audioEngine.DisposeAsync().ConfigureAwait(false);
-                        await audioCacheManager.DisposeAsync().ConfigureAwait(false);
+                        var cacheToDispose = audioCacheManager ?? AudioSourceFactory.GlobalCache;
+                        if (cacheToDispose != null)
+                        {
+                            await cacheToDispose.DisposeAsync().ConfigureAwait(false);
+                        }
                         await library.DisposeAsync().ConfigureAwait(false);
-
                         LocalAuthServer.DisposeIfCreated();
                         MemoryCleanupHelper.Dispose();
 

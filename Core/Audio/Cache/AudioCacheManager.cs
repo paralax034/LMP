@@ -49,10 +49,11 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     private readonly string _cacheDirectory;
-    private readonly long _maxCacheSize;
+    private long _maxCacheSize;
     private readonly ConcurrentDictionary<string, AudioCacheEntry> _entries = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _trackIndex = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _saveLock = new(1, 1);
+    private readonly SemaphoreSlim _evictLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CacheFileHandle> _fileHandles = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _timerCts = new();
@@ -62,6 +63,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
     public event Action<string, AudioFormat, int, bool>? OnFormatCached;
     public event Action? OnCacheCleared;
+    public event Action<string>? OnEntryEvicted;
 
     public AudioCacheManager(string? cacheDirectory = null, long maxCacheSizeMb = 2048)
     {
@@ -78,6 +80,17 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     public bool IsTrackFullyCached(string trackId) => FindBestCache(trackId) != null;
 
     public AudioCacheEntry? FindBestCacheByTrackId(string trackId) => FindBestCache(trackId);
+
+    /// <summary>
+    /// Динамически обновляет лимит дискового аудиокэша в мегабайтах и инициирует проверку квоты.
+    /// </summary>
+    /// <param name="limitMb">Новый лимит в мегабайтах.</param>
+    public void UpdateMaxCacheSizeMb(int limitMb)
+    {
+        if (limitMb <= 0) return;
+        Volatile.Write(ref _maxCacheSize, (long)limitMb * 1024 * 1024);
+        _ = EnforceLimitsAsync();
+    }
 
     /// <summary>
     /// Гидрирует статус кэширования для переданного списка треков.
@@ -151,6 +164,23 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         const long FallbackCompleteMinBytes = 350 * 1024; // 350 KB (~22s audio)
         bool anyRecovered = false;
 
+        HashSet<string> filesOnDisk;
+        try
+        {
+            if (!Directory.Exists(_cacheDirectory))
+                return false;
+
+            var paths = Directory.GetFiles(_cacheDirectory, "*" + CacheFileExtension);
+            if (paths.Length == 0)
+                return false;
+
+            filesOnDisk = new HashSet<string>(paths, StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+
         foreach (var rawTrackId in trackIds)
         {
             if (string.IsNullOrEmpty(rawTrackId)) continue;
@@ -175,12 +205,18 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                     continue;
 
                 string filePath = GetCachePath(cacheKey);
-                if (!File.Exists(filePath))
+                if (!filesOnDisk.Contains(filePath))
                     continue;
 
                 try
                 {
                     var fi = new FileInfo(filePath);
+                    if (!fi.Exists)
+                        continue;
+
+                    long fileLength = fi.Length;
+                    DateTime creationUtc = fi.CreationTimeUtc;
+                    DateTime lastWriteUtc = fi.LastWriteTimeUtc;
                     long minExpectedBytes;
 
                     if (duration > TimeSpan.FromSeconds(5))
@@ -195,10 +231,11 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
                     // Если файл меньше порога полноценного трека или содержит нескачанные нулевые дыры посередине —
                     // удаляем такой бесхозный фрагмент без индексной карты диапазонов.
-                    if (fi.Length < minExpectedBytes || !VerifyOrphanFileNoZeroHoles(filePath, fi.Length))
+                    if (fileLength < minExpectedBytes || !VerifyOrphanFileNoZeroHoles(filePath, fileLength))
                     {
+                        filesOnDisk.Remove(filePath);
                         try { fi.Delete(); } catch { }
-                        Log.Warn($"[AudioCache] Incomplete/sparse orphan file deleted: {cacheKey} ({fi.Length / 1024}KB)");
+                        Log.Warn($"[AudioCache] Incomplete/sparse orphan file deleted: {cacheKey} ({fileLength / 1024}KB)");
                         continue;
                     }
 
@@ -207,25 +244,25 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                         CacheKey = cacheKey,
                         TrackId = trackId,
                         OriginalUrl = string.Empty,
-                        TotalSize = fi.Length,
+                        TotalSize = fileLength,
                         Format = format,
                         Codec = codec,
                         Bitrate = bitrate,
                         DurationMs = (long)duration.TotalMilliseconds,
                         AlignmentBytes = ChunkSize,
-                        CreatedAt = fi.CreationTimeUtc,
+                        CreatedAt = creationUtc,
                         LastAccessedAt = DateTime.UtcNow,
-                        CompletedAt = fi.LastWriteTimeUtc,
+                        CompletedAt = lastWriteUtc,
                         IsComplete = true,
-                        ActualFileSize = fi.Length
+                        ActualFileSize = fileLength
                     });
 
-                    entry.TotalSize = fi.Length;
-                    entry.ActualFileSize = fi.Length;
+                    entry.TotalSize = fileLength;
+                    entry.ActualFileSize = fileLength;
                     entry.IsComplete = true;
                     if (duration > TimeSpan.Zero)
                         entry.DurationMs = (long)duration.TotalMilliseconds;
-                    entry.CompletedAt = fi.LastWriteTimeUtc;
+                    entry.CompletedAt = lastWriteUtc;
                     entry.LastAccessedAt = DateTime.UtcNow;
                     entry.MarkFullyDownloaded();
 
@@ -233,7 +270,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                     MarkDirty();
                     anyRecovered = true;
 
-                    Log.Info($"[AudioCache] Orphaned cache file verified and recovered: {cacheKey} ({fi.Length / 1024} KB)");
+                    Log.Info($"[AudioCache] Orphaned cache file verified and recovered: {cacheKey} ({fileLength / 1024} KB)");
                 }
                 catch (Exception ex)
                 {
@@ -550,18 +587,29 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         return entry;
     }
 
-    public void RemoveCache(string cacheKey)
+    public void RemoveCache(string cacheKey) => RemoveCacheCore(cacheKey, saveIndex: true);
+
+    private void RemoveCacheCore(string cacheKey, bool saveIndex)
     {
         if (!_entries.TryRemove(cacheKey, out var entry)) return;
 
         RemoveFromTrackIndex(entry.TrackId, cacheKey);
-        ForceCloseHandle(cacheKey);
+        DisposeHandle(cacheKey);
+
+        if (_fileLocks.TryGetValue(cacheKey, out var fileLock) && fileLock.CurrentCount == 1)
+        {
+            if (_fileLocks.TryRemove(cacheKey, out var removedLock))
+            {
+                try { removedLock.Dispose(); } catch { }
+            }
+        }
 
         var filePath = GetCachePath(cacheKey);
         try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
 
         MarkDirty();
-        _ = SaveIndexAsync();
+        if (saveIndex)
+            _ = SaveIndexAsync();
     }
 
     private void InvalidateCompleteEntry(AudioCacheEntry entry)
@@ -599,6 +647,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
         var fileHandle = GetFileHandle(cacheKey);
         fileHandle.BeginIo();
+        bool completedNow = false;
 
         try
         {
@@ -618,8 +667,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 entry.IsComplete = true;
                 entry.CompletedAt = DateTime.UtcNow;
                 entry.ActualFileSize = Math.Max(entry.ActualFileSize, entry.TotalSize);
+                completedNow = true;
                 Log.Info($"[AudioCache] Track fully cached: {cacheKey}");
-                RaiseFormatCached(entry);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -628,6 +677,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         {
             fileHandle.EndIo();
             fileLock.Release();
+        }
+
+        if (completedNow)
+        {
+            RaiseFormatCached(entry);
+            _ = EnforceLimitsAsync();
         }
     }
 
@@ -780,15 +835,16 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             CompleteEntries = completeCount,
             PartialEntries = partialCount,
             TotalSizeBytes = totalSize,
-            MaxSizeBytes = _maxCacheSize
+            MaxSizeBytes = Volatile.Read(ref _maxCacheSize)
         };
     }
 
-    public static (int FileCount, int SizeMb) GetDownloadsStats()
+    public static (int FileCount, int SizeMb) GetDownloadsStats(string? directoryPath = null)
     {
         try
         {
-            var dir = new DirectoryInfo(G.Folder.Downloads);
+            var targetDir = string.IsNullOrEmpty(directoryPath) ? G.Folder.Downloads : directoryPath;
+            var dir = new DirectoryInfo(targetDir);
             if (!dir.Exists) return (0, 0);
 
             var files = dir.GetFiles("*.*", SearchOption.TopDirectoryOnly);
@@ -832,7 +888,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         string trackId,
         Func<string, Task<TrackInfo?>> getTrackFunc,
         Func<TrackInfo, Task> updateTrackFunc,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? targetDirectory = null)
     {
         var entry = FindBestCache(trackId);
         if (entry == null)
@@ -841,14 +898,15 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             return false;
         }
 
-        return await PromoteCacheToDownloadsAsync(entry, getTrackFunc, updateTrackFunc, ct).ConfigureAwait(false);
+        return await PromoteCacheToDownloadsAsync(entry, getTrackFunc, updateTrackFunc, ct, targetDirectory).ConfigureAwait(false);
     }
 
     private async Task<bool> PromoteCacheToDownloadsAsync(
         AudioCacheEntry entry,
         Func<string, Task<TrackInfo?>> getTrackFunc,
         Func<TrackInfo, Task> updateTrackFunc,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? targetDirectory = null)
     {
         if (!await _saveLock.WaitAsync(1000, ct).ConfigureAwait(false))
             return false;
@@ -890,7 +948,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             };
 
             string safeName = SanitizeFileName($"{track.Author} - {track.Title}.{ext}");
-            string destPath = Path.Combine(G.Folder.Downloads, safeName);
+            string targetFolder = string.IsNullOrEmpty(targetDirectory) ? G.Folder.Downloads : targetDirectory;
+            string destPath = Path.Combine(targetFolder, safeName);
 
             if (File.Exists(destPath))
             {
@@ -903,7 +962,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 }
 
                 var baseName = Path.GetFileNameWithoutExtension(safeName);
-                destPath = Path.Combine(G.Folder.Downloads, $"{baseName}_{entry.Bitrate}kbps.{ext}");
+                destPath = Path.Combine(targetFolder, $"{baseName}_{entry.Bitrate}kbps.{ext}");
             }
 
             Log.Info($"[AudioCache] Exporting to Downloads: {Path.GetFileName(destPath)}");
@@ -936,6 +995,98 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
     #region Clear & Maintenance
 
+    /// <summary>
+    /// Выполняет вытеснение файлов кэша по алгоритму LRU до достижения допустимого лимита диска.
+    /// Не удаляет файлы с активными Lease или in-flight операциями ввода-вывода.
+    /// </summary>
+    /// <param name="targetLimitBytes">Опциональный целевой размер кэша. Если не указан, берется <see cref="_maxCacheSize"/>.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>Количество вытесненных записей кэша.</returns>
+    public async Task<int> EnforceLimitsAsync(long? targetLimitBytes = null, CancellationToken ct = default)
+    {
+        if (_disposed) return 0;
+
+        long limit = targetLimitBytes ?? Volatile.Read(ref _maxCacheSize);
+        if (limit <= 0) return 0;
+
+        await _evictLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            limit = targetLimitBytes ?? Volatile.Read(ref _maxCacheSize);
+            if (limit <= 0) return 0;
+
+            var entriesSnapshot = _entries.Values.ToList();
+            long currentTotalSize = 0;
+
+            for (int i = 0; i < entriesSnapshot.Count; i++)
+            {
+                var entry = entriesSnapshot[i];
+                UpdateFileSizeCache(entry);
+                currentTotalSize += entry.ActualFileSize;
+            }
+
+            if (currentTotalSize <= limit)
+                return 0;
+
+            // Приоритет вытеснения:
+            // 1. Неполные (IsComplete == false) записи, упорядоченные по времени последнего доступа (старые первыми).
+            // 2. Полные записи, упорядоченные по времени последнего доступа (LRU).
+            var candidates = entriesSnapshot
+                .OrderBy(e => e.IsComplete ? 1 : 0)
+                .ThenBy(e => e.LastAccessedAt)
+                .ToList();
+
+            int evictedCount = 0;
+
+            for (int i = 0; i < candidates.Count && currentTotalSize > limit; i++)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                var candidate = candidates[i];
+                var key = candidate.CacheKey;
+
+                if (_fileHandles.TryGetValue(key, out var handle))
+                {
+                    if (handle.LeaseCount > 0 || handle.ActiveIoCount > 0)
+                    {
+                        Log.Debug($"[AudioCache] Skipping eviction of leased/in-use cache key: {key}");
+                        continue;
+                    }
+                }
+
+                long size = candidate.ActualFileSize;
+                string trackId = candidate.TrackId;
+
+                RemoveCacheCore(key, saveIndex: false);
+
+                currentTotalSize -= size;
+                evictedCount++;
+
+                try
+                {
+                    OnEntryEvicted?.Invoke(trackId);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"[AudioCache] OnEntryEvicted handler error: {ex.Message}");
+                }
+
+                Log.Info($"[AudioCache] Evicted LRU cache entry: {key} ({size / 1024} KB), remaining ~{currentTotalSize / 1024 / 1024} MB");
+            }
+
+            if (evictedCount > 0)
+            {
+                await SaveIndexAsync().ConfigureAwait(false);
+            }
+
+            return evictedCount;
+        }
+        finally
+        {
+            _evictLock.Release();
+        }
+    }
+
     public async Task ClearAllAsync(CancellationToken ct = default)
     {
         if (!await _saveLock.WaitAsync(5000, ct).ConfigureAwait(false))
@@ -964,16 +1115,17 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         catch (Exception ex) { Log.Warn($"[AudioCache] OnCacheCleared handler error: {ex.Message}"); }
     }
 
-    public static async Task ClearDownloadsAsync(CancellationToken ct = default)
+    public static async Task ClearDownloadsAsync(string? directoryPath = null, CancellationToken ct = default)
     {
         await Task.Run(() =>
         {
             try
             {
-                var dir = new DirectoryInfo(G.Folder.Downloads);
+                var targetDir = string.IsNullOrEmpty(directoryPath) ? G.Folder.Downloads : directoryPath;
+                var dir = new DirectoryInfo(targetDir);
                 if (!dir.Exists) return;
 
-                Log.Info("[AudioCache] Clearing downloads folder...");
+                Log.Info($"[AudioCache] Clearing downloads folder: {targetDir}");
                 DeleteFilesInDirectory(dir, "AudioCache");
                 Log.Info("[AudioCache] Downloads cleared");
             }
@@ -1618,6 +1770,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
 
         _timerCts.Dispose();
+        _evictLock.Dispose();
         _saveLock.Dispose();
     }
 
@@ -1640,6 +1793,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
 
         _timerCts.Dispose();
+        _evictLock.Dispose();
         _saveLock.Dispose();
     }
 

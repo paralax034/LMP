@@ -13,7 +13,8 @@ namespace LMP.Core.Audio;
 /// </summary>
 public static class AudioSourceFactory
 {
-    private static AudioCacheManager _globalCacheManager = null!;
+    private static AudioCacheManager? _globalCacheManager;
+    private static Func<AudioCacheManager>? _lazyCacheFactory;
     private static volatile StreamingConfig _currentConfig = StreamingProfiles.Medium;
 
     /// <summary>
@@ -28,6 +29,14 @@ public static class AudioSourceFactory
     internal static ProxySettings? CurrentProxySettings { get; set; }
 
     /// <summary>
+    /// Регистрирует фабрику отложенной инициализации глобального кэш-менеджера из DI-контейнера.
+    /// </summary>
+    public static void RegisterLazyFactory(Func<AudioCacheManager> factory)
+    {
+        _lazyCacheFactory = factory;
+    }
+
+    /// <summary>
     /// Инициализирует глобальный кэш-менеджер.
     /// </summary>
     public static void InitializeGlobalCache(AudioCacheManager cacheManager)
@@ -36,8 +45,16 @@ public static class AudioSourceFactory
         Log.Info("[AudioSourceFactory] Global cache initialized");
     }
 
-    /// <summary>Глобальный кэш-менеджер.</summary>
-    public static AudioCacheManager GlobalCache => _globalCacheManager;
+    /// <summary>
+    /// Глобальный кэш-менеджер (создаётся лениво при первом обращении, если не был инициализирован явно).
+    /// </summary>
+    public static AudioCacheManager GlobalCache =>
+        _globalCacheManager ??= _lazyCacheFactory?.Invoke() ?? new AudioCacheManager();
+
+    /// <summary>
+    /// Возвращает уже инициализированный экземпляр глобального кэш-менеджера или <c>null</c>, не вызывая его ленивого создания.
+    /// </summary>
+    public static AudioCacheManager? TryGetInitializedGlobalCache() => _globalCacheManager;
 
     /// <summary>
     /// Обновляет конфигурацию стриминга.
@@ -74,12 +91,13 @@ public static class AudioSourceFactory
     /// </summary>
     public static (string Path, AudioCacheEntry Entry)? FindAnyCachedTrack(string trackId)
     {
-        if (_globalCacheManager == null) return null;
+        var cache = GlobalCache;
+        if (cache == null) return null;
 
-        var entry = _globalCacheManager.FindBestCache(trackId);
+        var entry = cache.FindBestCache(trackId);
         if (entry == null) return null;
 
-        var path = _globalCacheManager.GetCachePath(entry.CacheKey);
+        var path = cache.GetCachePath(entry.CacheKey);
         if (!File.Exists(path)) return null;
 
         return (path, entry);
@@ -101,7 +119,8 @@ public static class AudioSourceFactory
         Func<CancellationToken, Task<string?>>? urlRefresher = null,
         StreamingConfig? config = null)
     {
-        if (_globalCacheManager == null)
+        var cacheManager = GlobalCache;
+        if (cacheManager == null)
         {
             throw new InvalidOperationException(
                 "AudioSourceFactory.InitializeGlobalCache() must be called before creating sources");
@@ -140,8 +159,8 @@ public static class AudioSourceFactory
             if (descriptor.Origin == StreamSource.DiskCachePartial)
             {
                 int bootstrapBytes = Math.Min(config.InitialPrebufferBytes, int.MaxValue);
-                var startupEntry = _globalCacheManager.FindBestStartupCache(trackId, bootstrapBytes)
-                                ?? (!string.IsNullOrEmpty(resolvedCacheKey) ? _globalCacheManager.GetCacheInfo(resolvedCacheKey) : null);
+                var startupEntry = cacheManager.FindBestStartupCache(trackId, bootstrapBytes)
+                                ?? (!string.IsNullOrEmpty(resolvedCacheKey) ? cacheManager.GetCacheInfo(resolvedCacheKey) : null);
 
                 long effectiveLength = contentLength > 0
                     ? contentLength
@@ -160,7 +179,7 @@ public static class AudioSourceFactory
                     format: format != AudioFormat.Unknown ? format : (startupEntry?.Format ?? AudioFormat.WebM),
                     codec: codec != AudioCodec.Unknown ? codec : (startupEntry?.Codec ?? AudioCodec.Opus),
                     bitrate: bitrateKbps > 0 ? bitrateKbps : (startupEntry?.Bitrate ?? 128),
-                    cacheManager: _globalCacheManager,
+                    cacheManager: cacheManager,
                     config: config,
                     urlAcquirer: urlAcquirer,
                     urlRefresher: urlRefresher));
@@ -168,10 +187,10 @@ public static class AudioSourceFactory
 
             if (!string.IsNullOrEmpty(resolvedCacheKey))
             {
-                if (_globalCacheManager.IsFullyCached(resolvedCacheKey))
+                if (cacheManager.IsFullyCached(resolvedCacheKey))
                 {
-                    var exactEntry = _globalCacheManager.GetCacheInfo(resolvedCacheKey);
-                    string exactPath = _globalCacheManager.GetCachePath(resolvedCacheKey);
+                    var exactEntry = cacheManager.GetCacheInfo(resolvedCacheKey);
+                    string exactPath = cacheManager.GetCachePath(resolvedCacheKey);
                     if (exactEntry != null && File.Exists(exactPath))
                     {
                         Log.Info($"[AudioSourceFactory] Source decision: LocalFileSource, track={trackId}, reason=full-cache");
@@ -179,7 +198,7 @@ public static class AudioSourceFactory
                             exactPath,
                             exactEntry.TotalSize,
                             trackId,
-                            _globalCacheManager,
+                            cacheManager,
                             resolvedCacheKey));
                     }
                 }
@@ -193,12 +212,12 @@ public static class AudioSourceFactory
                     cached.Value.Path,
                     cached.Value.Entry.TotalSize,
                     trackId,
-                    _globalCacheManager,
+                    cacheManager,
                     cached.Value.Entry.CacheKey));
             }
 
             int defaultBootstrapBytes = Math.Min(config.InitialPrebufferBytes, int.MaxValue);
-            var fallbackStartupEntry = _globalCacheManager.FindBestStartupCache(trackId, defaultBootstrapBytes);
+            var fallbackStartupEntry = cacheManager.FindBestStartupCache(trackId, defaultBootstrapBytes);
             if (fallbackStartupEntry != null)
             {
                 Log.Info($"[AudioSourceFactory] Source decision: CachingStreamSource, track={trackId}, reason=partial-cache-bootstrap, cacheKey={fallbackStartupEntry.CacheKey}");
@@ -210,7 +229,7 @@ public static class AudioSourceFactory
                     format: fallbackStartupEntry.Format,
                     codec: fallbackStartupEntry.Codec,
                     bitrate: fallbackStartupEntry.Bitrate > 0 ? fallbackStartupEntry.Bitrate : bitrateKbps,
-                    cacheManager: _globalCacheManager,
+                    cacheManager: cacheManager,
                     config: config,
                     urlAcquirer: urlAcquirer,
                     urlRefresher: urlRefresher));
@@ -241,18 +260,18 @@ public static class AudioSourceFactory
             ? resolvedCacheKey
             : BuildCacheKey(trackId, format, bitrateKbps);
 
-        if (descriptor.Origin != StreamSource.DiskCachePartial && _globalCacheManager.IsFullyCached(finalCacheKey))
+        if (descriptor.Origin != StreamSource.DiskCachePartial && cacheManager.IsFullyCached(finalCacheKey))
         {
-            var cachePath = _globalCacheManager.GetCachePath(finalCacheKey);
+            var cachePath = cacheManager.GetCachePath(finalCacheKey);
             if (File.Exists(cachePath))
             {
-                var exactEntry = _globalCacheManager.GetCacheInfo(finalCacheKey);
+                var exactEntry = cacheManager.GetCacheInfo(finalCacheKey);
                 Log.Info($"[AudioSourceFactory] Source decision: LocalFileSource, track={trackId}, reason=full-cache");
                 return Task.FromResult<IAudioSource>(new LocalFileSource(
                     cachePath,
                     exactEntry?.TotalSize ?? 0,
                     trackId,
-                    _globalCacheManager,
+                    cacheManager,
                     finalCacheKey));
             }
         }
@@ -267,7 +286,7 @@ public static class AudioSourceFactory
             format,
             codec,
             bitrateKbps,
-            _globalCacheManager,
+            cacheManager,
             config,
             urlAcquirer,
             urlRefresher));
@@ -297,7 +316,8 @@ public static class AudioSourceFactory
           StreamingConfig? config = null,
           CancellationToken ct = default)
     {
-        if (_globalCacheManager == null)
+        var cacheManager = GlobalCache;
+        if (cacheManager == null)
         {
             throw new InvalidOperationException(
                 "AudioSourceFactory.InitializeGlobalCache() must be called before creating sources");
@@ -323,12 +343,12 @@ public static class AudioSourceFactory
                     cached.Value.Path,
                     cached.Value.Entry.TotalSize,
                     trackId,
-                    _globalCacheManager,
+                    cacheManager,
                     cached.Value.Entry.CacheKey);
             }
 
             int bootstrapBytes = Math.Min(config.InitialPrebufferBytes, int.MaxValue);
-            var startupEntry = _globalCacheManager.FindBestStartupCache(trackId, bootstrapBytes);
+            var startupEntry = cacheManager.FindBestStartupCache(trackId, bootstrapBytes);
             if (startupEntry != null)
             {
                 Log.Info($"[AudioSourceFactory] Partial-cache bootstrap: {trackId} " +
@@ -343,7 +363,7 @@ public static class AudioSourceFactory
                     format: startupEntry.Format,
                     codec: startupEntry.Codec,
                     bitrate: startupEntry.Bitrate > 0 ? startupEntry.Bitrate : bitrateHint,
-                    cacheManager: _globalCacheManager,
+                    cacheManager: cacheManager,
                     config: config,
                     urlAcquirer: urlAcquirer,
                     urlRefresher: urlRefresher);
@@ -362,18 +382,18 @@ public static class AudioSourceFactory
         int finalBitrate = bitrateHint > 0 ? bitrateHint : detectedBitrate;
         string cacheKey = BuildCacheKey(trackId, format, finalBitrate);
 
-        if (_globalCacheManager.IsFullyCached(cacheKey))
+        if (cacheManager.IsFullyCached(cacheKey))
         {
-            var cachePath = _globalCacheManager.GetCachePath(cacheKey);
+            var cachePath = cacheManager.GetCachePath(cacheKey);
             if (File.Exists(cachePath))
             {
-                var exactEntry = _globalCacheManager.GetCacheInfo(cacheKey);
+                var exactEntry = cacheManager.GetCacheInfo(cacheKey);
                 Log.Info($"[AudioSourceFactory] Exact cache hit: {cacheKey}");
                 return new LocalFileSource(
                     cachePath,
                     exactEntry?.TotalSize ?? 0,
                     trackId,
-                    _globalCacheManager,
+                    cacheManager,
                     cacheKey);
             }
         }
@@ -388,7 +408,7 @@ public static class AudioSourceFactory
             format,
             codec,
             finalBitrate,
-            _globalCacheManager,
+            cacheManager,
             config,
             urlAcquirer,
             urlRefresher);

@@ -76,12 +76,14 @@ public sealed class TrackRegistry
             Task.Run(CleanupDeadReferences);
         }
 
+        var activeCache = AudioSourceFactory.TryGetInitializedGlobalCache();
+
         lock (_registryLock)
         {
             if (_pinned.TryGetValue(incoming.Id, out var pinned))
             {
                 pinned.UpdateMetadata(incoming, hasUserContext);
-                HydrateTrackFromAudioCache(pinned, AudioSourceFactory.GlobalCache);
+                HydrateTrackFromAudioCache(pinned, activeCache);
                 UpdatePinStatusInternal(pinned);
                 return pinned;
             }
@@ -89,13 +91,13 @@ public sealed class TrackRegistry
             if (_cache.TryGetValue(incoming.Id, out var weakRef) && weakRef.TryGetTarget(out var cached))
             {
                 cached.UpdateMetadata(incoming, hasUserContext);
-                HydrateTrackFromAudioCache(cached, AudioSourceFactory.GlobalCache);
+                HydrateTrackFromAudioCache(cached, activeCache);
                 UpdatePinStatusInternal(cached);
                 return cached;
             }
 
             _cache[incoming.Id] = new WeakReference<TrackInfo>(incoming);
-            HydrateTrackFromAudioCache(incoming, AudioSourceFactory.GlobalCache);
+            HydrateTrackFromAudioCache(incoming, activeCache);
             UpdatePinStatusInternal(incoming);
             return incoming;
         }
@@ -344,7 +346,27 @@ public sealed class TrackRegistry
             }
         }
 
-        AudioSourceFactory.GlobalCache.HydrateCacheStatus(_pinned.Values);
+        var initializedCache = AudioSourceFactory.TryGetInitializedGlobalCache();
+        if (initializedCache != null)
+        {
+            initializedCache.HydrateCacheStatus(_pinned.Values);
+        }
+        else
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var cache = AudioSourceFactory.GlobalCache;
+                    cache.HydrateCacheStatus(_pinned.Values);
+                    SubscribeToCacheEvents();
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"[TrackRegistry] Deferred audio cache hydration failed: {ex.Message}");
+                }
+            }, CancellationToken.None);
+        }
 
         sw.Stop();
         Log.Info($"[TrackRegistry] Hydrated {_pinned.Count} pinned tracks in {sw.ElapsedMilliseconds}ms");
@@ -433,12 +455,50 @@ public sealed class TrackRegistry
     /// <summary>
     /// Подписывается на глобальные события изменений кэша аудиофайлов на устройстве.
     /// </summary>
+    private int _isSubscribedToCacheEvents;
+
+    /// <summary>
+    /// Подписывается на глобальные события изменений кэша аудиофайлов на устройстве.
+    /// </summary>
     public void SubscribeToCacheEvents()
     {
-        AudioSourceFactory.GlobalCache.OnCacheCleared += HandleCacheCleared;
-        AudioSourceFactory.GlobalCache.OnFormatCached += HandleFormatCached;
+        var cache = AudioSourceFactory.TryGetInitializedGlobalCache();
+        if (cache == null) return;
+
+        if (Interlocked.CompareExchange(ref _isSubscribedToCacheEvents, 1, 0) != 0)
+            return;
+
+        cache.OnCacheCleared += HandleCacheCleared;
+        cache.OnFormatCached += HandleFormatCached;
+        cache.OnEntryEvicted += HandleEntryEvicted;
 
         Log.Info("[TrackRegistry] Subscribed to AudioCache events");
+    }
+
+    /// <summary>
+    /// Сбрасывает статус IsCached трека при его вытеснении из LRU-кэша.
+    /// </summary>
+    private void HandleEntryEvicted(string trackId)
+    {
+        if (string.IsNullOrEmpty(trackId)) return;
+
+        if (_pinned.TryGetValue(trackId, out var pinned) && pinned.IsCached && !pinned.IsDownloaded)
+        {
+            if (AudioSourceFactory.GlobalCache.FindBestCacheByTrackId(trackId) == null)
+            {
+                pinned.ClearCacheStatus();
+                Log.Debug($"[TrackRegistry] Evicted cache status reset for pinned track {trackId}");
+            }
+        }
+
+        if (_cache.TryGetValue(trackId, out var weak) && weak.TryGetTarget(out var cached) && cached.IsCached && !cached.IsDownloaded)
+        {
+            if (AudioSourceFactory.GlobalCache.FindBestCacheByTrackId(trackId) == null)
+            {
+                cached.ClearCacheStatus();
+                Log.Debug($"[TrackRegistry] Evicted cache status reset for cached track {trackId}");
+            }
+        }
     }
 
     /// <summary>

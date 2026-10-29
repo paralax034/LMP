@@ -1,6 +1,7 @@
 using LMP.Core.Audio.Http;
 using LMP.Core.Youtube.Bridge.Common;
 using LMP.Tests.Framework;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.Tests.Unit;
 
@@ -46,6 +47,7 @@ public static class CacheTests
         using var tempFile = new TempFileCookie();
 
         var writeCache = new DecryptorCache(tempFile.Path, MaxMemorySize, MaxDiskSize);
+        await writeCache.LoadAsync(TestVersion).ConfigureAwait(false);
         const int testEntriesCount = 10;
 
         for (int i = 0; i < testEntriesCount; i++)
@@ -165,6 +167,225 @@ public static class CacheTests
         {
             try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
         }
+    }
+
+    [TestMethod(TestCategory.Unit, "AudioCache LRU Eviction & Limit Enforcement", Group = TestGroups.Storage, Order = 5)]
+    public static async Task TestAudioCacheLruEvictionAsync()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "LMP_AudioCacheLruTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            // Создаем кэш-менеджер с лимитом 3 MB
+            using var manager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 3);
+
+            // 1. Создаем 3 полных трека по 1 MB каждый
+            const int trackSize = 1024 * 1024;
+            byte[] dummyData = new byte[trackSize];
+            Array.Fill(dummyData, (byte)0x42);
+
+            string key1 = AudioSourceFactory.BuildCacheKey("track1", AudioFormat.WebM, 160);
+            string key2 = AudioSourceFactory.BuildCacheKey("track2", AudioFormat.WebM, 160);
+            string key3 = AudioSourceFactory.BuildCacheKey("track3", AudioFormat.WebM, 160);
+
+            var entry1 = manager.CreateOrUpdate(key1, "track1", "https://url1", trackSize, AudioFormat.WebM, Core.Audio.Interfaces.AudioCodec.Opus, 160);
+            entry1.LastAccessedAt = DateTime.UtcNow.AddMinutes(-30);
+            await manager.WriteRangeAsync(key1, 0, dummyData).ConfigureAwait(false);
+
+            var entry2 = manager.CreateOrUpdate(key2, "track2", "https://url2", trackSize, AudioFormat.WebM, Core.Audio.Interfaces.AudioCodec.Opus, 160);
+            entry2.LastAccessedAt = DateTime.UtcNow.AddMinutes(-20);
+            await manager.WriteRangeAsync(key2, 0, dummyData).ConfigureAwait(false);
+
+            var entry3 = manager.CreateOrUpdate(key3, "track3", "https://url3", trackSize, AudioFormat.WebM, Core.Audio.Interfaces.AudioCodec.Opus, 160);
+            entry3.LastAccessedAt = DateTime.UtcNow.AddMinutes(-10);
+            await manager.WriteRangeAsync(key3, 0, dummyData).ConfigureAwait(false);
+
+            TestAssert.True(manager.IsFullyCached(key1), "Key1 should be fully cached");
+            TestAssert.True(manager.IsFullyCached(key2), "Key2 should be fully cached");
+            TestAssert.True(manager.IsFullyCached(key3), "Key3 should be fully cached");
+
+            // 2. Добавляем 4-й трек (1 MB) -> суммарно 4 MB при лимите 3 MB
+            string key4 = AudioSourceFactory.BuildCacheKey("track4", AudioFormat.WebM, 160);
+            var entry4 = manager.CreateOrUpdate(key4, "track4", "https://url4", trackSize, AudioFormat.WebM, Core.Audio.Interfaces.AudioCodec.Opus, 160);
+            entry4.LastAccessedAt = DateTime.UtcNow;
+            await manager.WriteRangeAsync(key4, 0, dummyData).ConfigureAwait(false);
+
+            // WriteRangeAsync триггерит EnforceLimitsAsync
+            // Самый старый по LastAccessedAt — key1 (30 минут назад). Он должен быть вытеснен!
+            TestAssert.False(manager.IsFullyCached(key1), "Key1 (oldest LRU) must be evicted");
+            TestAssert.False(File.Exists(manager.GetCachePath(key1)), "Key1 file must be deleted from disk");
+
+            TestAssert.True(manager.IsFullyCached(key2), "Key2 must be preserved");
+            TestAssert.True(manager.IsFullyCached(key3), "Key3 must be preserved");
+            TestAssert.True(manager.IsFullyCached(key4), "Key4 must be preserved");
+
+            // 3. Проверка защиты Lease от вытеснения:
+            // Блокируем key2 через AcquireLease.
+            manager.AcquireLease(key2);
+            try
+            {
+                // Снижаем лимит до 1 MB
+                manager.UpdateMaxCacheSizeMb(1);
+                // Ожидаем завершения очистки
+                await manager.EnforceLimitsAsync().ConfigureAwait(false);
+
+                // key2 удерживается Lease -> не должен быть удален!
+                TestAssert.True(manager.IsFullyCached(key2), "Key2 with active lease must NOT be evicted");
+                TestAssert.True(File.Exists(manager.GetCachePath(key2)), "Key2 file must remain on disk while leased");
+            }
+            finally
+            {
+                manager.ReleaseLease(key2);
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod(TestCategory.Unit, "Storage Settings SQLite Roundtrip & Validation", Group = TestGroups.Storage, Order = 6)]
+    public static async Task TestStorageSettingsPersistenceAsync()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "LMP_StorageSettingsTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string tempDbPath = Path.Combine(tempDir, "test_settings.db");
+
+        try
+        {
+            var factory = new Core.Data.LowMemorySqliteConnectionFactory(tempDbPath);
+            await using (var conn = await factory.OpenConnectionAsync().ConfigureAwait(false))
+            {
+                await Core.Data.DatabaseExtensions.EnsureTablesCreatedAsync(conn, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            var settingsRepo = new Core.Data.Repositories.SettingsRepository(factory);
+            const string testKey = "Test_StorageLimits_Settings";
+
+            var settings = new Core.Models.AppSettings
+            {
+                Storage = new Core.Models.StorageSettings
+                {
+                    AudioCacheLimitMb = 3500,
+                    ImageCacheLimitMb = 750,
+                    DownloadedTracksLimitMb = 12000,
+                    MaxBitmapCacheItems = 50,
+                    AutoSaveToDownloads = true
+                }
+            };
+
+            await settingsRepo.SetAsync(testKey, settings).ConfigureAwait(false);
+
+            var loaded = await settingsRepo.GetAsync<Core.Models.AppSettings>(testKey).ConfigureAwait(false);
+            TestAssert.NotNull(loaded, "Failed to load saved AppSettings from isolated repository");
+            TestAssert.Equal(3500, loaded.Storage.AudioCacheLimitMb);
+            TestAssert.Equal(750, loaded.Storage.ImageCacheLimitMb);
+            TestAssert.Equal(12000, loaded.Storage.DownloadedTracksLimitMb);
+            TestAssert.Equal(50, loaded.Storage.MaxBitmapCacheItems);
+            TestAssert.True(loaded.Storage.AutoSaveToDownloads);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [TestMethod(TestCategory.Unit, "ImageCache Memory LRU & Disk Stats Verification", Group = TestGroups.Storage, Order = 7)]
+    public static Task TestImageCacheLimitsAndStatsAsync(IServiceProvider services)
+    {
+        var imageCache = services.GetRequiredService<Core.Services.ImageCacheService>();
+        var library = services.GetRequiredService<Core.Services.LibraryService>();
+
+        int origMaxItems = library.Settings.Storage.MaxBitmapCacheItems;
+        try
+        {
+            var (memItems, _, diskFiles, diskMb) = imageCache.GetStats();
+            TestAssert.True(memItems >= 0, "Memory items count must be >= 0");
+            TestAssert.True(diskFiles >= 0, "Disk files count must be >= 0");
+            TestAssert.True(diskMb >= 0, "Disk MB must be >= 0");
+
+            library.Settings.Storage.MaxBitmapCacheItems = 1;
+            imageCache.EnforceLimits();
+
+            var (enforcedMem, _, _, _) = imageCache.GetStats();
+            TestAssert.True(enforcedMem <= 1, "EnforceLimits must evict RAM bitmaps down to MaxBitmapCacheItems");
+
+            imageCache.ClearMemoryCache();
+            var (clearedMem, _, _, _) = imageCache.GetStats();
+            TestAssert.Equal(0, clearedMem);
+        }
+        finally
+        {
+            library.Settings.Storage.MaxBitmapCacheItems = origMaxItems;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "DownloadService Storage Limit Rejection", Group = TestGroups.Storage, Order = 8)]
+    public static Task TestDownloadServiceQuotaCheckAsync(IServiceProvider services)
+    {
+        var library = services.GetRequiredService<Core.Services.LibraryService>();
+        var youtube = services.GetRequiredService<Core.Services.YoutubeProvider>();
+
+        string tempDownloads = Path.Combine(Path.GetTempPath(), "LMP_DownloadQuotaTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDownloads);
+
+        try
+        {
+            string dummyFile = Path.Combine(tempDownloads, "existing_track.mp3");
+            byte[] dummyData = new byte[2 * 1024 * 1024];
+            File.WriteAllBytes(dummyFile, dummyData);
+
+            // Меняем только in-memory поля Settings.DownloadPath и DownloadedTracksLimitMb без вызова SaveSettingsImmediate()
+            string origPath = library.Settings.DownloadPath;
+            int origLimit = library.Settings.Storage.DownloadedTracksLimitMb;
+
+            library.Settings.DownloadPath = tempDownloads;
+            library.Settings.Storage.DownloadedTracksLimitMb = 1;
+
+            try
+            {
+                var downloadService = new Core.Services.DownloadService(youtube, library);
+
+                var track = new TrackInfo
+                {
+                    Id = "quota_test_track",
+                    Title = "Test Quota Track"
+                };
+
+                bool completedCalled = false;
+                bool completedSuccess = true;
+
+                downloadService.OnCompleted += (id, success, _) =>
+                {
+                    if (id == track.Id)
+                    {
+                        completedCalled = true;
+                        completedSuccess = success;
+                    }
+                };
+
+                downloadService.StartDownload(track);
+
+                TestAssert.True(completedCalled, "OnCompleted must be invoked when quota is exceeded");
+                TestAssert.False(completedSuccess, "Download must fail when quota is exceeded");
+                TestAssert.False(downloadService.IsDownloading(track.Id), "Track must not remain in active tasks");
+            }
+            finally
+            {
+                library.Settings.DownloadPath = origPath;
+                library.Settings.Storage.DownloadedTracksLimitMb = origLimit;
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDownloads)) Directory.Delete(tempDownloads, recursive: true); } catch { }
+        }
+
+        return Task.CompletedTask;
     }
 
     private sealed class TempFileCookie : IDisposable

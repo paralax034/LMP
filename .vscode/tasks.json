@@ -62,6 +62,25 @@
             }
         },
         {
+            "label": "build: restore",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat restore nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "build",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
             "label": "build: clean",
             "type": "shell",
             "command": "${workspaceFolder}\\build.bat clean nopause",
@@ -73,6 +92,183 @@
                 }
             },
             "group": "build",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "run: fast",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat fast nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "build",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "test: all (headless)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "test: unit (headless)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test Unit nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "test: storage (headless)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test Storage nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "test: audio (headless)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test Audio nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "test: custom filter (headless)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test ${input:testFilter} nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "test: list all discovered",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test list nobuild nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "test: ui (DebugWindow)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test-ui nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "test: ui + autorun Unit",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat test-ui Unit run nopause",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": ["/d", "/c", "chcp 65001 >nul &&"]
+                }
+            },
+            "group": "test",
             "problemMatcher": "$msCompile",
             "presentation": {
                 "reveal": "always",
@@ -301,6 +497,14 @@
                 "focus": true
             },
             "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testFilter",
+            "type": "promptString",
+            "description": "Group (Storage, Audio, Cipher...), Category (Unit, Integration...), or Test/Class name filter:",
+            "default": "Storage"
         }
     ]
 }

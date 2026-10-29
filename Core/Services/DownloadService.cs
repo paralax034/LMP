@@ -54,6 +54,19 @@ public sealed class DownloadService
                 return;
         }
 
+        // Проверяем квоту папки загрузок
+        long limitMb = _library.Settings.Storage.DownloadedTracksLimitMb;
+        if (limitMb > 0)
+        {
+            var (_, currentSizeMb) = Audio.Cache.AudioCacheManager.GetDownloadsStats(_library.DownloadPath);
+            if (currentSizeMb >= limitMb)
+            {
+                Log.Warn($"[DownloadService] Download limit reached: {currentSizeMb}MB >= {limitMb}MB. Download aborted for {track.Id}.");
+                OnCompleted?.Invoke(track.Id, false, null);
+                return;
+            }
+        }
+
         // Path 1: Already fully cached → instant export (0 network bytes)
         if (AudioSourceFactory.GlobalCache.IsTrackFullyCached(track.Id))
         {
@@ -83,7 +96,8 @@ public sealed class DownloadService
                 track.Id,
                 async id => await _library.GetTrackAsync(id).ConfigureAwait(false),
                 async t => await _library.AddOrUpdateTrackAsync(t).ConfigureAwait(false),
-                CancellationToken.None).ConfigureAwait(false);
+                CancellationToken.None,
+                _library.DownloadPath).ConfigureAwait(false);
 
             if (success)
             {
@@ -190,7 +204,8 @@ public sealed class DownloadService
                 track.Id,
                 async id => await _library.GetTrackAsync(id).ConfigureAwait(false),
                 async t => await _library.AddOrUpdateTrackAsync(t).ConfigureAwait(false),
-                ct).ConfigureAwait(false);
+                ct,
+                _library.DownloadPath).ConfigureAwait(false);
 
             if (exported)
             {

@@ -8,7 +8,6 @@ namespace LMP.Tests.Integration;
 /// Тесты и отладочные инструменты подсистемы уведомлений.
 /// Деструктивные операции выделены в категорию <see cref="TestCategory.Action"/>
 /// и изолированы от автоматических тестов с проверками (<see cref="TestCategory.Integration"/>).
-/// Сохранена полная бинарная совместимость с точками вызова в <c>ManualTests</c>.
 /// </summary>
 public static class NotificationTests
 {

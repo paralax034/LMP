@@ -2,6 +2,94 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "⚡ Debug (Fast Startup)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: debug",
+            "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
+            "args": ["--fast", "--avalonia-log-level=Warning"],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": false,
+            "suppressJITOptimizations": true,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": false,
+                "programOutput": true
+            },
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Debug/net11.0"]
+            }
+        },
+        {
+            "name": "🧪 Debug (Test UI Console)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: debug",
+            "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
+            "args": ["--test-ui", "--avalonia-log-level=Warning"],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": false,
+            "suppressJITOptimizations": true,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": false,
+                "programOutput": true
+            },
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Debug/net11.0"]
+            }
+        },
+        {
+            "name": "🧪 Debug (Headless Unit Tests)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: debug",
+            "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
+            "args": ["--test", "--test-category=Unit"],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": false,
+            "suppressJITOptimizations": true,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": false,
+                "programOutput": true
+            },
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Debug/net11.0"]
+            }
+        },
+        {
+            "name": "🧪 Debug (Headless All Tests)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build: debug",
+            "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
+            "args": ["--test"],
+            "cwd": "${workspaceFolder}",
+            "console": "internalConsole",
+            "justMyCode": false,
+            "suppressJITOptimizations": true,
+            "logging": {
+                "moduleLoad": false,
+                "exceptions": false,
+                "programOutput": true
+            },
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Debug/net11.0"]
+            }
+        },
+        {
             "name": "🎵 Debug (quiet)",
             "type": "coreclr",
             "request": "launch",

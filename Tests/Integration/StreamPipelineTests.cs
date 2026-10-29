@@ -176,7 +176,7 @@ public static class StreamPipelineTests
     }
 
     /// <summary>
-    /// Точка вызова полного пайплайна для <c>ManualTests</c>.
+    /// Внутренняя проверка всех аудио-потоков манифеста для заданного <paramref name="videoId"/>.
     /// </summary>
     public static async Task TestFullPipelineInternalAsync(
         IServiceProvider services, string videoId = "dQw4w9WgXcQ", CancellationToken ct = default)

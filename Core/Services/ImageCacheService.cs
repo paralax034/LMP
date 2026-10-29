@@ -61,6 +61,7 @@ public sealed class ImageCacheService : IDisposable
     private readonly ConcurrentDictionary<ulong, Task> _pendingDiskDownloads = [];
 
     private long _currentDiskCacheBytes;
+    private int _currentDiskFileCount;
     private long _currentMemoryCacheBytes;
     private bool _isDisposed;
     private int _loadCounter;
@@ -355,6 +356,7 @@ public sealed class ImageCacheService : IDisposable
             {
                 File.Move(tmpPath, finalPath, overwrite: true);
                 Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
+                Interlocked.Increment(ref _currentDiskFileCount);
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException && File.Exists(finalPath))
             {
@@ -465,46 +467,58 @@ public sealed class ImageCacheService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Принудительно приводит RAM-кэш изображений к заданным лимитам <see cref="MaxMemoryItems"/> и <see cref="MaxMemoryBytes"/>.
+    /// </summary>
+    /// <param name="aggressive">Если <c>true</c>, дополнительно сокращает RAM-кэш вдвое при высоком давлении памяти.</param>
+    private void EnforceMemoryLimits(bool aggressive = false)
+    {
+        List<RefCountedBitmap>? evictedEntries = null;
+        long evictedBytes = 0;
+
+        lock (_lruLock)
+        {
+            int targetItems = MaxMemoryItems;
+            long targetBytes = MaxMemoryBytes;
+
+            if (aggressive)
+                targetItems = Math.Min(targetItems, _memoryCache.Count / 2);
+
+            while ((_memoryCache.Count > targetItems || _currentMemoryCacheBytes > targetBytes)
+                   && _lruOrder.Last != null)
+            {
+                evictedBytes += EvictLastUnsafe(out var removed);
+                if (removed != null)
+                {
+                    evictedEntries ??= new List<RefCountedBitmap>(4);
+                    evictedEntries.Add(removed);
+                }
+            }
+        }
+
+        if (evictedEntries != null)
+        {
+            for (int i = 0; i < evictedEntries.Count; i++)
+                evictedEntries[i].Dispose();
+        }
+
+        if (evictedBytes > 0)
+            GC.RemoveMemoryPressure(evictedBytes);
+    }
+
     private async Task PerformMaintenanceAsync()
     {
         var memInfo = GC.GetGCMemoryInfo();
-        if (memInfo.MemoryLoadBytes > memInfo.HighMemoryLoadThresholdBytes * 0.85)
-        {
-            List<RefCountedBitmap>? evictedEntries = null;
-            long evictedBytes = 0;
-
-            lock (_lruLock)
-            {
-                int toRemove = _memoryCache.Count / 2;
-                for (int i = 0; i < toRemove && _lruOrder.Last != null; i++)
-                {
-                    evictedBytes += EvictLastUnsafe(out var removed);
-                    if (removed != null)
-                    {
-                        evictedEntries ??= new List<RefCountedBitmap>(toRemove);
-                        evictedEntries.Add(removed);
-                    }
-                }
-            }
-
-            if (evictedEntries != null)
-            {
-                for (int i = 0; i < evictedEntries.Count; i++)
-                    evictedEntries[i].Dispose();
-            }
-
-            if (evictedBytes > 0)
-                GC.RemoveMemoryPressure(evictedBytes);
-        }
+        bool highLoad = memInfo.MemoryLoadBytes > memInfo.HighMemoryLoadThresholdBytes * 0.85;
+        EnforceMemoryLimits(aggressive: highLoad);
 
         long limitBytes = (long)_library.Settings.Storage.ImageCacheLimitMb * 1024 * 1024;
-        if (_currentDiskCacheBytes > limitBytes)
+        if (Volatile.Read(ref _currentDiskCacheBytes) > limitBytes)
             await CleanupDiskCacheAsync(limitBytes).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Очистка дискового кэша с учётом времени последнего доступа.
-    /// Файлы моложе 5 минут не удаляются (могут быть в memory cache).
+    /// Очистка дискового кэша по времени модификации файла до 70% установленной квоты.
     /// </summary>
     private async Task CleanupDiskCacheAsync(long limitBytes)
     {
@@ -514,30 +528,32 @@ public sealed class ImageCacheService : IDisposable
             {
                 var files = new DirectoryInfo(G.Folder.ImageCache)
                     .GetFiles()
-                    .Where(static f => !f.Extension.EndsWith(".tmp"))
-                    .OrderBy(static f => f.LastAccessTimeUtc)
+                    .Where(static f => !f.Extension.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(static f => f.LastWriteTimeUtc)
                     .ToList();
 
-                var cutoff = DateTime.UtcNow.AddMinutes(-5);
                 long targetSize = (long)(limitBytes * 0.7);
                 long deletedBytes = 0;
+                int deletedCount = 0;
 
                 foreach (var file in files)
                 {
-                    if (_currentDiskCacheBytes - deletedBytes <= targetSize) break;
-                    if (file.LastAccessTimeUtc > cutoff) continue;
+                    if (Volatile.Read(ref _currentDiskCacheBytes) - deletedBytes <= targetSize) break;
 
                     try
                     {
                         var size = file.Length;
                         file.Delete();
                         deletedBytes += size;
+                        deletedCount++;
                     }
                     catch { }
                 }
 
                 if (deletedBytes > 0)
                     Interlocked.Add(ref _currentDiskCacheBytes, -deletedBytes);
+                if (deletedCount > 0)
+                    Interlocked.Add(ref _currentDiskFileCount, -deletedCount);
             }
             catch { }
         }).ConfigureAwait(false);
@@ -586,6 +602,7 @@ public sealed class ImageCacheService : IDisposable
                 try { File.Delete(f); } catch { }
 
             Volatile.Write(ref _currentDiskCacheBytes, 0);
+            Volatile.Write(ref _currentDiskFileCount, 0);
         });
     }
 
@@ -593,10 +610,17 @@ public sealed class ImageCacheService : IDisposable
     {
         try
         {
-            long total = new DirectoryInfo(G.Folder.ImageCache)
-                .EnumerateFiles()
-                .Sum(static f => f.Length);
+            var files = new DirectoryInfo(G.Folder.ImageCache)
+                .GetFiles()
+                .Where(static f => !f.Extension.EndsWith(".tmp"))
+                .ToArray();
+
+            long total = 0;
+            for (int i = 0; i < files.Length; i++)
+                total += files[i].Length;
+
             Volatile.Write(ref _currentDiskCacheBytes, total);
+            Volatile.Write(ref _currentDiskFileCount, files.Length);
         }
         catch { }
     }
@@ -673,10 +697,17 @@ public sealed class ImageCacheService : IDisposable
     {
         int memItems;
         lock (_lruLock) memItems = _memoryCache.Count;
-        return (memItems, _currentMemoryCacheBytes / 1024 / 1024, 0, _currentDiskCacheBytes / 1024 / 1024);
+        return (memItems, _currentMemoryCacheBytes / 1024 / 1024, Volatile.Read(ref _currentDiskFileCount), _currentDiskCacheBytes / 1024 / 1024);
     }
 
-    public void EnforceLimits() => _ = PerformMaintenanceAsync();
+    /// <summary>
+    /// Немедленно применяет лимит элементов в RAM и запускает фоновую проверку дисковой квоты.
+    /// </summary>
+    public void EnforceLimits()
+    {
+        EnforceMemoryLimits(aggressive: false);
+        _ = PerformMaintenanceAsync();
+    }
 
     public void Dispose()
     {

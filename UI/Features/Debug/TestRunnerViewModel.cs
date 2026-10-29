@@ -202,6 +202,53 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
         EnsureDiscovered();
     }
 
+    /// <summary>
+    /// Применяет фильтры командной строки к UI-раннеру и при наличии флага <c>--autorun</c> автоматически запускает отфильтрованные тесты.
+    /// </summary>
+    public void ApplyCliArguments(string[] args)
+    {
+        if (args.Length == 0) return;
+
+        bool autoRun = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (string.IsNullOrEmpty(arg)) continue;
+
+            if (string.Equals(arg, "--autorun", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "--run", StringComparison.OrdinalIgnoreCase))
+            {
+                autoRun = true;
+            }
+            else if (arg.StartsWith("--test-group=", StringComparison.OrdinalIgnoreCase))
+            {
+                var rawGroup = arg[13..].Trim();
+                if (!string.IsNullOrEmpty(rawGroup))
+                    SelectedGroup = TestGroups.Normalize(rawGroup);
+            }
+            else if (arg.StartsWith("--test-category=", StringComparison.OrdinalIgnoreCase))
+            {
+                var rawCat = arg[16..].Trim();
+                if (Enum.TryParse<TestCategory>(rawCat, ignoreCase: true, out var cat))
+                    SelectedCategory = cat;
+            }
+            else if (arg.StartsWith("--test-filter=", StringComparison.OrdinalIgnoreCase))
+            {
+                SearchFilter = arg[14..].Trim();
+            }
+        }
+
+        if (autoRun)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (RunFilteredCommand.CanExecute(null))
+                    _ = RunFilteredCommand.ExecuteAsync(null);
+            }, DispatcherPriority.Background);
+        }
+    }
+
     partial void OnSelectedCategoryChanged(TestCategory? value) => ApplyFilter();
     partial void OnSelectedGroupChanged(string? value) => ApplyFilter();
     partial void OnStateFilterChanged(TestStateFilter value) => ApplyFilter();

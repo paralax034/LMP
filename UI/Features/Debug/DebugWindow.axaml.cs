@@ -9,7 +9,11 @@ namespace LMP.UI.Features.Debug;
 /// </summary>
 public partial class DebugWindow : Window
 {
-    public DebugWindow()
+    public DebugWindow() : this([])
+    {
+    }
+
+    public DebugWindow(string[] cliArgs)
     {
         var vm = new DebugViewModel();
         DataContext = vm;
@@ -17,6 +21,11 @@ public partial class DebugWindow : Window
         InitializeComponent();
 
         vm.TestRunner.ScrollToIndexRequested += OnScrollToTestIndex;
+
+        if (cliArgs.Length > 0)
+        {
+            vm.TestRunner.ApplyCliArguments(cliArgs);
+        }
     }
 
     private void OnScrollToTestIndex(int index)

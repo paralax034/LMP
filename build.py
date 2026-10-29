@@ -4,7 +4,7 @@
 """
 LMP Universal Cross-Platform Build Engine.
 Coordinates compilation, Native AOT publishing, dependency verification,
-and clean passes across Windows, Linux, and macOS.
+fast startup, and test execution across Windows, Linux, and macOS.
 """
 
 import sys
@@ -67,11 +67,15 @@ def get_props_version(root: Path) -> str:
             minor = m_minor.group(1).strip()
     return f"{major}.{minor}"
 
+def get_debug_executable(root: Path) -> Path:
+    exe_name = "LMP.exe" if platform.system().lower() == "windows" else "LMP"
+    return root / "bin" / "Debug" / "net11.0" / exe_name
+
 def run_step(cmd: list[str], cwd: Path, description: str):
     print(f"{Color.YELLOW}>>> {description}...{Color.RESET}")
     res = subprocess.run(cmd, cwd=str(cwd))
     if res.returncode != 0:
-        print(f"\n{Color.RED}✗ Build failed at step: {description} (Exit code: {res.returncode}){Color.RESET}")
+        print(f"\n{Color.RED}✗ Step failed: {description} (Exit code: {res.returncode}){Color.RESET}")
         sys.exit(res.returncode)
 
 def clean_tree(root: Path):
@@ -94,6 +98,55 @@ def clean_tree(root: Path):
 
     print(f"  {Color.GREEN}✓ Clean complete! Pruned {deleted_dirs} temporary bin/obj folders.{Color.RESET}")
 
+def normalize_test_args(extra_args: list[str]) -> tuple[list[str], bool]:
+    """
+    Converts shorthand arguments after `build.py test` into canonical LMP test flags.
+    Returns (app_args, skip_build).
+    Examples:
+      build.bat test                   -> ['--test']
+      build.bat test list              -> ['--test-list']
+      build.bat test ui                -> ['--test-ui']
+      build.bat test ui Storage --run  -> ['--test-ui', '--test-group=Storage', '--autorun']
+      build.bat test Storage           -> ['--test-group=Storage']
+      build.bat test CacheTests        -> ['--test-filter=CacheTests']
+    """
+    known_groups = {"audio", "cipher", "network", "youtube", "storage", "playlists", "system", "cache"}
+    known_categories = {"unit", "integration", "benchmark", "e2e", "diagnostic", "action"}
+
+    skip_build = False
+    app_args: list[str] = []
+
+    for token in extra_args:
+        low = token.lower()
+        if low in ("--no-build", "nobuild"):
+            skip_build = True
+        elif low in ("ui", "--ui", "--test-ui", "--debug-ui"):
+            if "--test-ui" not in app_args:
+                app_args.append("--test-ui")
+        elif low in ("list", "--list", "--test-list"):
+            app_args.append("--test-list")
+        elif low in ("run", "--run", "--autorun"):
+            app_args.append("--autorun")
+        elif low.startswith("--group="):
+            app_args.append(f"--test-group={token[8:]}")
+        elif low.startswith("--category="):
+            app_args.append(f"--test-category={token[11:]}")
+        elif low.startswith("--filter="):
+            app_args.append(f"--test-filter={token[9:]}")
+        elif token.startswith("--"):
+            app_args.append(token)
+        elif low in known_groups:
+            app_args.append(f"--test-group={token}")
+        elif low in known_categories:
+            app_args.append(f"--test-category={token}")
+        else:
+            app_args.append(f"--test-filter={token}")
+
+    if not app_args:
+        app_args.append("--test")
+
+    return app_args, skip_build
+
 def main():
     root = Path(__file__).resolve().parent
 
@@ -105,8 +158,10 @@ def main():
         pause_on_exit = False
         args.remove("nopause")
 
+    extra_args: list[str] = []
     if args:
         mode = args[0].lower()
+        extra_args = args[1:]
 
     rid = get_platform_rid()
     commit_count, git_hash = get_git_info()
@@ -121,10 +176,10 @@ def main():
     print(f"  Platform RID : {Color.BOLD}{rid}{Color.RESET}")
     print(f"  Version      : {Color.BOLD}v{full_version}{Color.RESET}\n")
 
-    valid_modes = {"debug", "optimized", "release", "publish", "aot", "restore", "clean"}
+    valid_modes = {"debug", "fast", "test", " test-ui", "test-ui", "optimized", "release", "publish", "aot", "restore", "clean"}
     if mode not in valid_modes:
         print(f"{Color.RED}[ERROR] Unknown build mode '{mode}'.{Color.RESET}")
-        print(f"Available: {' | '.join(sorted(valid_modes))}\n")
+        print(f"Available: clean | debug | fast | optimized | publish | release | restore | test | test-ui\n")
         sys.exit(1)
 
     try:
@@ -137,6 +192,23 @@ def main():
 
         elif mode == "debug":
             run_step(["dotnet", "build", "LMP.sln", "-c", "Debug"], root, "Building Debug configuration")
+
+        elif mode == "fast":
+            skip_build = any(a.lower() in ("--no-build", "nobuild") for a in extra_args)
+            fwd_args = [a for a in extra_args if a.lower() not in ("--no-build", "nobuild")]
+            exe_path = get_debug_executable(root)
+            if not skip_build or not exe_path.is_file():
+                run_step(["dotnet", "build", "LMP.sln", "-c", "Debug"], root, "Building Debug configuration")
+            run_step([str(exe_path), "--fast"] + fwd_args, root, "Launching LMP in Fast Startup Mode (--fast)")
+
+        elif mode in ("test", "test-ui"):
+            if mode == "test-ui" and "ui" not in [a.lower() for a in extra_args]:
+                extra_args = ["ui"] + extra_args
+            test_args, skip_build = normalize_test_args(extra_args)
+            exe_path = get_debug_executable(root)
+            if not skip_build or not exe_path.is_file():
+                run_step(["dotnet", "build", "LMP.sln", "-c", "Debug"], root, "Building Debug configuration")
+            run_step([str(exe_path)] + test_args, root, f"Running LMP Tests ({' '.join(test_args)})")
 
         elif mode == "optimized":
             run_step([
@@ -183,13 +255,13 @@ def main():
 
             print(f"\n{Color.GREEN}✓ Native AOT publish completed successfully: ./publish{Color.RESET}")
 
-        print(f"\n{Color.GREEN}✓ Build successful{Color.RESET}\n")
+        print(f"\n{Color.GREEN}✓ Completed successfully{Color.RESET}\n")
 
     except KeyboardInterrupt:
-        print(f"\n{Color.YELLOW}[ABORTED] Build interrupted by user.{Color.RESET}")
+        print(f"\n{Color.YELLOW}[ABORTED] Interrupted by user.{Color.RESET}")
         sys.exit(130)
 
-    if pause_on_exit and sys.platform.startswith("win"):
+    if pause_on_exit and sys.platform.startswith("win") and mode not in ("test", "test-ui", "fast"):
         try:
             os.system("pause")
         except Exception:

@@ -152,6 +152,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
 
         AudioSourceFactory.ApplyInternetProfile(Settings.InternetProfile);
+        AudioSourceFactory.TryGetInitializedGlobalCache()?.UpdateMaxCacheSizeMb(Settings.Storage.AudioCacheLimitMb);
 
         var jsonPath = G.FilePath.LegacyDatabase;
         if (File.Exists(jsonPath))
@@ -270,6 +271,43 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         var tracks = await _tracks.GetLocalTracksAsync(CurrentOwnerId, limit, offset, ct).ConfigureAwait(false);
         await HydrateAndRegisterTracksAsync(tracks, ct).ConfigureAwait(false);
         return tracks;
+    }
+
+    /// <summary>
+    /// Сбрасывает флаг локальной загрузки и путь к файлу у всех скачанных треков в L1-кэше и БД SQLite.
+    /// </summary>
+    public async Task ClearDownloadsMetadataAsync(CancellationToken ct = default)
+    {
+        var downloadedInDb = await _tracks.GetDownloadedAsync(CurrentOwnerId, 10000, 0, ct).ConfigureAwait(false);
+        var updatedIds = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int i = 0; i < downloadedInDb.Count; i++)
+        {
+            var t = downloadedInDb[i];
+            updatedIds.Add(t.Id);
+            await _tracks.SetDownloadedAsync(t.Id, false, null, ct).ConfigureAwait(false);
+
+            var inMem = _registry.TryGet(t.Id);
+            if (inMem != null)
+            {
+                inMem.IsDownloaded = false;
+                inMem.LocalPath = null;
+                _registry.UpdatePinStatus(inMem);
+            }
+        }
+
+        foreach (var pinned in _registry.GetPinnedTracks())
+        {
+            if (pinned.IsDownloaded && updatedIds.Add(pinned.Id))
+            {
+                pinned.IsDownloaded = false;
+                pinned.LocalPath = null;
+                await _tracks.SetDownloadedAsync(pinned.Id, false, null, ct).ConfigureAwait(false);
+                _registry.UpdatePinStatus(pinned);
+            }
+        }
+
+        OnDataChanged?.Invoke();
     }
 
     /// <summary>

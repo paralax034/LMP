@@ -6,7 +6,6 @@ namespace LMP.UI.Features.Settings.ViewModels;
 public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 {
     private readonly LibraryService _library;
-    private readonly TrackRegistry _registry;
     private readonly ImageCacheService _imageCache;
     private readonly DialogService _dialog;
 
@@ -39,12 +38,10 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 
     public StorageCacheSettingsViewModel(
          LibraryService library,
-         TrackRegistry registry,
          ImageCacheService imageCache,
          DialogService dialog)
     {
         _library = library;
-        _registry = registry;
         _imageCache = imageCache;
         _dialog = dialog;
 
@@ -55,6 +52,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 
         AudioSourceFactory.GlobalCache.OnFormatCached += OnAudioFormatCached;
         AudioSourceFactory.GlobalCache.OnCacheCleared += OnAudioCacheCleared;
+        AudioSourceFactory.GlobalCache.OnEntryEvicted += OnAudioEntryEvicted;
 
         RefreshLists();
         LoadSettings();
@@ -64,6 +62,9 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
         Dispatcher.UIThread.Post(UpdateCacheStats);
 
     private void OnAudioCacheCleared() =>
+        Dispatcher.UIThread.Post(UpdateCacheStats);
+
+    private void OnAudioEntryEvicted(string trackId) =>
         Dispatcher.UIThread.Post(UpdateCacheStats);
 
     public void RefreshLists()
@@ -100,7 +101,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
             DownloadedTracksLimitMb = s.Storage.DownloadedTracksLimitMb;
             AutoSaveToDownloads = s.Storage.AutoSaveToDownloads;
 
-            MaxBitmapCacheItems = s.Storage.MaxBitmapCacheItems > 0 ? s.Storage.MaxBitmapCacheItems : 40;
+            MaxBitmapCacheItems = s.Storage.MaxBitmapCacheItems > 0 ? s.Storage.MaxBitmapCacheItems : 25;
             _isUpdatingPreset = true;
             SelectedImageCachePreset = MaxBitmapCacheItems switch
             {
@@ -157,6 +158,8 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
                     s.Storage.ImageCacheLimitMb = ImageCacheLimitMb;
                     s.Storage.AudioCacheLimitMb = AudioCacheLimitMb;
                 });
+                AudioSourceFactory.GlobalCache?.UpdateMaxCacheSizeMb(AudioCacheLimitMb);
+                _imageCache.EnforceLimits();
                 UpdateCacheStats();
             });
         _storageDebounceTimer.Start();
@@ -200,7 +203,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
         var (memItems, _, imgCount, imgSizeMb) = _imageCache.GetStats();
 
         var (audioFileCount, audioSizeMb) = AudioSourceFactory.GlobalCache.GetStatsCompact();
-        var (downloadFileCount, downloadSizeMb) = AudioCacheManager.GetDownloadsStats();
+        var (downloadFileCount, downloadSizeMb) = AudioCacheManager.GetDownloadsStats(_library.DownloadPath);
 
         ImageCacheStats = $"{imgSizeMb} MB / {ImageCacheLimitMb} MB ({imgCount} {SL["Common_Files"]}, RAM: {memItems})";
         AudioCacheStats = $"{audioSizeMb} MB / {AudioCacheLimitMb} MB ({audioFileCount} {SL["Common_Files"]})";
@@ -217,6 +220,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
         if (string.IsNullOrEmpty(newPath)) return;
         DownloadPath = newPath;
         _library.DownloadPath = newPath;
+        UpdateCacheStats();
     }
 
     private async Task ClearImageCacheAsync()
@@ -240,13 +244,8 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
     {
         if (!await _dialog.ConfirmAsync(SL["Dialog_Confirm_Title"], SL["Settings_ClearDownloadsConfirm"])) return;
 
-        await AudioCacheManager.ClearDownloadsAsync();
-
-        foreach (var track in _registry.GetPinnedTracks().Where(t => t.IsDownloaded))
-        {
-            track.IsDownloaded = false;
-            track.LocalPath = null;
-        }
+        await AudioCacheManager.ClearDownloadsAsync(_library.DownloadPath);
+        await _library.ClearDownloadsMetadataAsync();
 
         UpdateCacheStats();
     }
@@ -260,6 +259,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
             {
                 cache.OnFormatCached -= OnAudioFormatCached;
                 cache.OnCacheCleared -= OnAudioCacheCleared;
+                cache.OnEntryEvicted -= OnAudioEntryEvicted;
             }
 
             _storageDebounceTimer?.Stop();
