@@ -72,5 +72,7 @@
     "terminal.integrated.automationProfile.windows": {
         "path": "C:\\Windows\\System32\\cmd.exe",
         "args": []
-    }
+    },
+    "chat.useAgentsMdFile": true,
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true
 }
