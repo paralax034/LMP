@@ -349,10 +349,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             FormatDuration();
         }
 
-        for (int i = 0; i < targets.Count; i++)
-        {
-            await _playlistService.RemoveTrackFromPlaylistAsync(_currentPlaylistId, targets[i].Id);
-        }
+        await _playlistService.RemoveTracksFromPlaylistAsync(_currentPlaylistId, targets);
     }
 
     #endregion
@@ -455,7 +452,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         IsTwoWaySynced = playlist.SyncMode == PlaylistSyncMode.TwoWaySync;
         HasCloudSource = playlist.HasCloudLink || (IsLikedPlaylist && _auth.IsAuthenticated);
-        CanRefreshFromCloud = IsTwoWaySynced || (IsLikedPlaylist && _auth.IsAuthenticated);
+        CanRefreshFromCloud = playlist.CanPullFromCloud || (IsLikedPlaylist && _auth.IsAuthenticated);
         HasStatusChips = IsReadOnly || IsPrivate || IsUnlisted || HasCloudSource;
         LastSyncedText = FormatRelativeTime(playlist.LastSyncedAtUtc);
 
@@ -681,14 +678,42 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                     return;
                 }
 
+                var updatedPlaylist = await _playlistService.GetPlaylistAsync(_currentPlaylistId);
+                if (updatedPlaylist != null)
+                    _currentPlaylist = updatedPlaylist;
+
                 if (!preview.HasAnyDifference)
                 {
+                    Log.Info($"[Playlist] Sync check for '{PlaylistName}' ({_currentPlaylistId}): no differences found.");
+                    await LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
                     await _dialog.ShowInfoAsync(SL["Playlist_SyncWithCloud"], SL["Playlist_SyncNoChanges"]);
                     return;
                 }
 
-                var options = await _dialog.ShowPlaylistSyncDialogAsync(preview);
-                if (options == null) return;
+                PlaylistSyncOptions? options;
+                if (_currentPlaylist is { CanSyncToCloud: false } || _currentPlaylist is { IsReadOnly: true })
+                {
+                    Log.Info($"[Playlist] Playlist '{PlaylistName}' is read-only/foreign (Ownership={_currentPlaylist.Ownership}). " +
+                             "Skipping sync dialog and pulling cloud state directly (ReplaceLocal).");
+                    options = new PlaylistSyncOptions
+                    {
+                        Strategy = PlaylistSyncStrategy.ReplaceLocal,
+                        SyncName = preview.NameDiffers,
+                        SyncDescription = preview.DescriptionDiffers,
+                        SyncThumbnail = preview.ThumbnailDiffers,
+                        SyncTracks = preview.TracksDiffer
+                    };
+                }
+                else
+                {
+                    options = await _dialog.ShowPlaylistSyncDialogAsync(preview);
+                    if (options == null)
+                    {
+                        Log.Info($"[Playlist] Sync dialog cancelled by user for '{PlaylistName}'.");
+                        await LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
+                        return;
+                    }
+                }
 
                 var result = await _playlistService.ApplySyncAsync(_currentPlaylistId, preview, options);
 
@@ -791,15 +816,12 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         if (views is null or <= 0) return null;
 
         long v = views.Value;
-        if (v < 10_000)
+        if (v < 1_000_000)
             return SL.GetPlural("Playlist_Views", (int)v);
 
-        string number = v switch
-        {
-            >= 1_000_000_000 => string.Create(CultureInfo.CurrentCulture, $"{v / 1_000_000_000.0:0.#}B"),
-            >= 1_000_000 => string.Create(CultureInfo.CurrentCulture, $"{v / 1_000_000.0:0.#}M"),
-            _ => string.Create(CultureInfo.CurrentCulture, $"{v / 1_000.0:0.#}K")
-        };
+        string number = v >= 1_000_000_000
+            ? string.Create(CultureInfo.CurrentCulture, $"{v / 1_000_000_000.0:0.#}B")
+            : string.Create(CultureInfo.CurrentCulture, $"{v / 1_000_000.0:0.#}M");
 
         var pattern = SL["Playlist_Views_other"];
         return string.Format(CultureInfo.CurrentCulture, pattern, number);

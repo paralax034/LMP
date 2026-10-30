@@ -36,12 +36,21 @@ public sealed class FullPlaylistSyncData
     public string? Title { get; set; }
     public string? Description { get; set; }
     public string? ThumbnailUrl { get; set; }
+    public string? Author { get; set; }
+    public string? OwnerChannelId { get; set; }
+    public PlaylistVisibility Visibility { get; set; } = PlaylistVisibility.Unknown;
     public long? ViewCount { get; set; }
 
     /// <summary>
-    /// Дата последнего обновления, распарсенная из subtitle runs.
+    /// Дата последнего обновления, распарсенная из subtitle runs или YouTube Web stats.
     /// </summary>
     public DateOnly? ReleaseDate { get; set; }
+
+    /// <summary>
+    /// Признак того, что плейлист доступен для редактирования текущему аккаунту
+    /// (наличие <c>musicEditablePlaylistDetailHeaderRenderer</c> или форм редактирования <c>WEB</c>).
+    /// </summary>
+    public bool IsEditable { get; set; }
 
     public List<RemoteTrackInfo> Tracks { get; set; } = [];
 }

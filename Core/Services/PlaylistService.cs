@@ -613,17 +613,20 @@ public sealed class PlaylistService
 
         await _playlists.RemoveTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
 
-        if (playlist.SyncMode == PlaylistSyncMode.TwoWaySync && !string.IsNullOrEmpty(playlist.YoutubeId))
+        if (playlist.CanSyncToCloud)
         {
             var setVideoIds = new List<string>(trackIds.Count);
             for (int i = 0; i < trackIds.Count; i++)
             {
                 var svId = await _syncService.GetOrFetchSetVideoIdAsync(playlist, trackIds[i], ct).ConfigureAwait(false);
+                if (!playlist.CanSyncToCloud)
+                    break;
+
                 if (!string.IsNullOrEmpty(svId))
                     setVideoIds.Add(svId);
             }
 
-            if (setVideoIds.Count > 0)
+            if (setVideoIds.Count > 0 && playlist.CanSyncToCloud)
             {
                 await _syncService.RemoveTracksFromCloudAsync(playlist, setVideoIds).ConfigureAwait(false);
             }
@@ -640,6 +643,8 @@ public sealed class PlaylistService
         if (playlistId == LibraryService.LikedPlaylistId || oldIndex == newIndex) return;
 
         var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
+        if (playlist == null || !playlist.CanEditTracks) return;
+
         var trackIds = await _playlists.GetTrackIdsAsync(playlistId, CurrentOwnerId, ct).ConfigureAwait(false);
 
         if (oldIndex < 0 || oldIndex >= trackIds.Count || newIndex < 0 || newIndex >= trackIds.Count)
@@ -648,14 +653,11 @@ public sealed class PlaylistService
         var movingTrackId = trackIds[oldIndex];
         await _playlists.MoveTrackAsync(playlistId, oldIndex, newIndex, ct).ConfigureAwait(false);
 
-        if (playlist != null)
-        {
-            trackIds.RemoveAt(oldIndex);
-            trackIds.Insert(newIndex, movingTrackId);
+        trackIds.RemoveAt(oldIndex);
+        trackIds.Insert(newIndex, movingTrackId);
 
-            await _syncService.MoveTrackInCloudAsync(playlist, movingTrackId, newIndex, trackIds, ct).ConfigureAwait(false);
-            OnPlaylistChanged?.Invoke(playlist);
-        }
+        await _syncService.MoveTrackInCloudAsync(playlist, movingTrackId, newIndex, trackIds, ct).ConfigureAwait(false);
+        OnPlaylistChanged?.Invoke(playlist);
     }
 
     #endregion
@@ -686,6 +688,7 @@ public sealed class PlaylistService
         var result = await _syncService.ApplySyncAsync(playlist, preview, options, ct).ConfigureAwait(false);
         if (result.Success)
         {
+            InvalidateIndex();
             var updated = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false) ?? playlist;
             OnPlaylistChanged?.Invoke(updated);
         }
@@ -706,7 +709,10 @@ public sealed class PlaylistService
 
         var result = await _syncService.SyncDirectAsync(playlist, options, ct).ConfigureAwait(false);
         if (result.Success)
+        {
+            InvalidateIndex();
             OnPlaylistChanged?.Invoke(playlist);
+        }
 
         return result;
     }

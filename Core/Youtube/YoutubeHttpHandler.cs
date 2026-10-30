@@ -308,7 +308,8 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
                     if (cookiesUpdated)
                     {
-                        await Task.Delay(UnauthorizedCookieRetryDelayMs, cancellationToken).ConfigureAwait(false);
+                        if (!await cancellationToken.DelayNoThrowAsync(UnauthorizedCookieRetryDelayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                            cancellationToken.ThrowIfCancellationRequested();
                         continue;
                     }
 
@@ -318,7 +319,8 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
                 if ((int)response.StatusCode == 429)
                 {
                     Log.Warn("[YouTube] 429 Too Many Requests. Waiting...");
-                    await Task.Delay(RateLimitBaseDelayMs + (i * RateLimitStepDelayMs), cancellationToken).ConfigureAwait(false);
+                    if (!await cancellationToken.DelayNoThrowAsync(RateLimitBaseDelayMs + (i * RateLimitStepDelayMs), continueOnCapturedContext: false).ConfigureAwait(false))
+                        cancellationToken.ThrowIfCancellationRequested();
                     continue;
                 }
 
@@ -334,11 +336,8 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
                 if (i < maxAttempts - 1)
                 {
                     Log.Warn($"[YouTube] Network error: {ex.Message}. Retrying {i + 1}...");
-                    try
-                    {
-                        await Task.Delay(RetryBackoffBaseMs * (i + 1), cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) { throw; }
+                    if (!await cancellationToken.DelayNoThrowAsync(RetryBackoffBaseMs * (i + 1), continueOnCapturedContext: false).ConfigureAwait(false))
+                        cancellationToken.ThrowIfCancellationRequested();
                     continue;
                 }
 

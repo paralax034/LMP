@@ -112,7 +112,8 @@ internal class MusicController(HttpClient http)
         try
         {
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            UpdateVisitorData(await Json.ParseAsync(stream, cancellationToken));
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            UpdateVisitorData(doc.RootElement);
         }
         catch { /* best effort */ }
     }
@@ -183,14 +184,19 @@ internal class MusicController(HttpClient http)
 
         response.EnsureSuccessStatusCode();
 
-        var jsonStr = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        if (jsonStr.StartsWith(")]}'"))
+        using var buffer = new InnerTubeStreamBuffer(16 * 1024);
+        await using (var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
         {
-            jsonStr = jsonStr[4..];
+            await buffer.ReadAllAsync(stream, cancellationToken).ConfigureAwait(false);
         }
 
-        return Json.Parse(jsonStr);
+        var memory = buffer.WrittenMemory;
+        if (memory.Span.StartsWith(")]}'"u8))
+        {
+            memory = memory[4..];
+        }
+
+        return Json.Parse(memory);
     }
 
     public async Task<JsonElement> GetAccountMenuAsync(

@@ -74,9 +74,16 @@ public sealed class PlaylistClient(HttpClient http)
             var nextResponse = await _controller.GetPlaylistNextResponseAsync(
                 playlistId, null, 0, null, cancellationToken).ConfigureAwait(false);
 
+            var fallbackMappings = new List<(string TrackId, string SetVideoId)>();
+            var fallbackTracks = CollectTracks(
+                nextResponse.Videos,
+                new HashSet<string>(StringComparer.Ordinal),
+                fallbackMappings);
+
             return new PlaylistImportResult(
                 BuildPlaylistFromData(playlistId, nextResponse),
-                CollectTracks(nextResponse.Videos, new HashSet<string>(StringComparer.Ordinal)));
+                fallbackTracks,
+                fallbackMappings);
         }
 
         var playlist = BuildPlaylistFromData(playlistId, browseResponse);
@@ -112,7 +119,8 @@ public sealed class PlaylistClient(HttpClient http)
         Log.Debug($"[PlaylistClient] Import initial page: {firstPage.Count} videos, " +
                   $"has continuation: {continuationToken != null}");
 
-        var allTracks = CollectTracks(firstPage, encounteredIds);
+        var setVideoIdMappings = new List<(string TrackId, string SetVideoId)>(firstPage.Count);
+        var allTracks = CollectTracks(firstPage, encounteredIds, setVideoIdMappings);
 
         // Пагинация через continuation token
         while (!string.IsNullOrEmpty(continuationToken))
@@ -130,7 +138,7 @@ public sealed class PlaylistClient(HttpClient http)
 
                 if (contVideos.Count == 0) break;
 
-                AppendTracks(contVideos, encounteredIds, allTracks);
+                AppendTracks(contVideos, encounteredIds, allTracks, setVideoIdMappings);
                 visitorData ??= contResp.VisitorData;
                 continuationToken = contResp.ContinuationToken;
             }
@@ -143,7 +151,7 @@ public sealed class PlaylistClient(HttpClient http)
         }
 
         Log.Info($"[PlaylistClient] Import complete: '{playlistId}' → {allTracks.Count} tracks");
-        return new PlaylistImportResult(playlist, allTracks);
+        return new PlaylistImportResult(playlist, allTracks, setVideoIdMappings);
     }
 
     /// <summary>
@@ -277,10 +285,11 @@ public sealed class PlaylistClient(HttpClient http)
     /// </summary>
     private static List<TrackInfo> CollectTracks(
         IReadOnlyList<PlaylistVideoData> videos,
-        HashSet<string> encounteredIds)
+        HashSet<string> encounteredIds,
+        List<(string TrackId, string SetVideoId)>? setVideoIdMappings = null)
     {
         var result = new List<TrackInfo>(videos.Count);
-        AppendTracks(videos, encounteredIds, result);
+        AppendTracks(videos, encounteredIds, result, setVideoIdMappings);
         return result;
     }
 
@@ -291,7 +300,8 @@ public sealed class PlaylistClient(HttpClient http)
     private static void AppendTracks(
         IReadOnlyList<PlaylistVideoData> videos,
         HashSet<string> encounteredIds,
-        List<TrackInfo> target)
+        List<TrackInfo> target,
+        List<(string TrackId, string SetVideoId)>? setVideoIdMappings = null)
     {
         for (int i = 0; i < videos.Count; i++)
         {
@@ -303,9 +313,9 @@ public sealed class PlaylistClient(HttpClient http)
             var title = videoData.Title ?? string.Empty;
             var author = videoData.Author ?? LocalizationService.Instance["Track_UnknownAuthor"];
 
-            target.Add(new TrackInfo
+            var track = new TrackInfo
             {
-                // Идентификатор передается в сыром виде. Сеттер TrackInfo.Id автоматически 
+                // Идентификатор передается в сыром виде. Сеттер TrackInfo.Id автоматически
                 // применит кэшированное префиксирование "yt_", исключая лишние аллокации строк.
                 Id = videoId,
                 Title = title,
@@ -315,7 +325,14 @@ public sealed class PlaylistClient(HttpClient http)
                 ThumbnailUrl = ThumbnailUtils.GetBestUrl(videoData.Thumbnails, videoId),
                 Url = $"https://www.youtube.com/watch?v={videoId}",
                 IsMusic = DetectIfMusic(videoData, title, author)
-            });
+            };
+
+            target.Add(track);
+
+            if (setVideoIdMappings != null && !string.IsNullOrEmpty(videoData.SetVideoId))
+            {
+                setVideoIdMappings.Add((track.Id, videoData.SetVideoId));
+            }
         }
     }
 
@@ -369,4 +386,7 @@ public sealed class PlaylistClient(HttpClient http)
 /// </summary>
 /// <param name="Playlist">Метаданные плейлиста, полученные из API.</param>
 /// <param name="Tracks">Полный список треков со всеми страницами пагинации.</param>
-public sealed record PlaylistImportResult(Playlist Playlist, List<TrackInfo> Tracks);
+public sealed record PlaylistImportResult(
+    Playlist Playlist,
+    List<TrackInfo> Tracks,
+    IReadOnlyList<(string TrackId, string SetVideoId)>? SetVideoIdMappings = null);

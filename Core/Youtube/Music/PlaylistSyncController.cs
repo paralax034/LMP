@@ -8,6 +8,7 @@ namespace LMP.Core.Youtube.Music;
 internal sealed class PlaylistSyncController(HttpClient http)
 {
     private const string MusicApiUrl = "https://music.youtube.com/youtubei/v1";
+    private const string WebApiUrl = "https://www.youtube.com/youtubei/v1";
 
     private static readonly MediaTypeHeaderValue JsonContentType = new("application/json");
 
@@ -36,6 +37,30 @@ internal sealed class PlaylistSyncController(HttpClient http)
 
         writer.WriteEndObject();
 
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// WEB context for standard YouTube browse requests (exact views, release date, visibility, author).
+    /// </summary>
+    private static void WriteWebContext(Utf8JsonWriter writer)
+    {
+        writer.WritePropertyName(InnerTubeTokens.Context);
+        writer.WriteStartObject();
+
+        writer.WritePropertyName(InnerTubeTokens.Client);
+        writer.WriteStartObject();
+        writer.WriteString(InnerTubeTokens.ClientName, InnerTubeTokens.Web);
+        writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.WebClientVersion);
+        writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.InvariantHl);
+        writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.InvariantGl);
+        writer.WriteNumber(InnerTubeTokens.UtcOffsetMinutes, 0);
+
+        var visitorData = YoutubeClientUtils.VisitorData;
+        if (!string.IsNullOrEmpty(visitorData))
+            writer.WriteString(InnerTubeTokens.VisitorData, visitorData);
+
+        writer.WriteEndObject();
         writer.WriteEndObject();
     }
 
@@ -97,6 +122,10 @@ internal sealed class PlaylistSyncController(HttpClient http)
     {
         var browseId = YoutubeIdHelper.NormalizePlaylistBrowseId(playlistId);
 
+        // Запускаем чтение шапки из стандартного YouTube WEB параллельно с основным потоком WEB_REMIX:
+        // WEB отдаёт точные до единицы просмотры, точную дату обновления (stats[2]), приватность и канал автора.
+        var webMetadataTask = TryFetchWebBrowseMetadataAsync(browseId, ct);
+
         FullPlaylistSyncData playlistData;
         string? continuationToken;
         string? freshVisitor;
@@ -150,12 +179,83 @@ internal sealed class PlaylistSyncController(HttpClient http)
             page++;
         }
 
-        Log.Debug($"[PlaylistSync] Streamed header: title='{playlistData.Title ?? ""}', " +
-                  $"desc='{playlistData.Description?.Length ?? 0} chars', thumb='{playlistData.ThumbnailUrl ?? "null"}', " +
-                  $"views={playlistData.ViewCount?.ToString() ?? "null"}, date='{playlistData.ReleaseDate ?? null}'");
-        Log.Debug($"[PlaylistSync] WEB_REMIX: streamed {playlistData.Tracks.Count} tracks for {playlistId}");
+        var webMeta = await webMetadataTask.ConfigureAwait(false);
+        if (webMeta is { IsAvailable: true })
+        {
+            if (string.IsNullOrEmpty(playlistData.Title) && !string.IsNullOrEmpty(webMeta.Title))
+                playlistData.Title = webMeta.Title;
+
+            if (string.IsNullOrEmpty(playlistData.Description) && !string.IsNullOrEmpty(webMeta.Description))
+                playlistData.Description = webMeta.Description;
+
+            if (webMeta.ViewCount.HasValue)
+                playlistData.ViewCount = webMeta.ViewCount;
+
+            playlistData.ReleaseDate ??= webMeta.ReleaseDate;
+
+            if (!string.IsNullOrEmpty(webMeta.Author))
+                playlistData.Author = webMeta.Author;
+
+            if (!string.IsNullOrEmpty(webMeta.ChannelId))
+                playlistData.OwnerChannelId = webMeta.ChannelId;
+
+            if (webMeta.Visibility != PlaylistVisibility.Unknown)
+                playlistData.Visibility = webMeta.Visibility;
+
+            if (webMeta.IsEditable)
+                playlistData.IsEditable = true;
+        }
+
+        Log.Info($"[PlaylistSync] Cloud snapshot for '{playlistId}': title='{playlistData.Title ?? ""}', " +
+                 $"tracks={playlistData.Tracks.Count}, views={playlistData.ViewCount?.ToString() ?? "null"}, " +
+                 $"date={playlistData.ReleaseDate?.ToString("yyyy-MM-dd") ?? "null"}, " +
+                 $"visibility={playlistData.Visibility}, editable={playlistData.IsEditable}");
+        Log.Debug($"[PlaylistSync] Header details for '{playlistId}': author='{playlistData.Author ?? "null"}', " +
+                  $"channelId='{playlistData.OwnerChannelId ?? "null"}', descLen={playlistData.Description?.Length ?? 0}, " +
+                  $"thumb='{playlistData.ThumbnailUrl ?? "null"}'");
 
         return playlistData;
+    }
+
+    private async Task<Bridge.PlaylistBrowseResponse?> TryFetchWebBrowseMetadataAsync(
+        string browseId,
+        CancellationToken ct)
+    {
+        if (string.Equals(browseId, "VLLM", StringComparison.Ordinal) ||
+            string.Equals(browseId, "VLLL", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{WebApiUrl}/browse?prettyPrint=false");
+
+            var visitorData = YoutubeClientUtils.VisitorData;
+            if (!string.IsNullOrEmpty(visitorData))
+                request.Options.Set(YoutubeHttpHandler.VisitorDataKey, visitorData);
+
+            request.Content = CreateJsonContent(writer =>
+            {
+                writer.WriteString(InnerTubeTokens.BrowseId, browseId);
+                WriteWebContext(writer);
+                writer.WriteString(InnerTubeTokens.Params, InnerTubeConstants.Params.PlaylistVideoList);
+            });
+
+            using var response = await http.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            return await Bridge.PlaylistBrowseResponse.ParseAsync(stream, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Debug($"[PlaylistSync] Non-fatal WEB browse metadata enrichment skipped for '{browseId}': {ex.Message}");
+            return null;
+        }
     }
 
     #endregion

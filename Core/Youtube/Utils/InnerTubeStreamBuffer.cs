@@ -32,6 +32,11 @@ internal sealed class InnerTubeStreamBuffer : IDisposable
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _validBytes);
 
     /// <summary>
+    /// Непрерывный сегмент памяти валидных байт, вычитанных из сетевого потока.
+    /// </summary>
+    public ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, _validBytes);
+
+    /// <summary>
     /// Считывает весь сетевой поток в арендованный буфер из пула памяти.
     /// При необходимости буфер динамически расширяется с переарендой из пула.
     /// </summary>

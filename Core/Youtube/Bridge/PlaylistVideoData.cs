@@ -56,6 +56,11 @@ internal sealed class PlaylistVideoData
     public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
     /// <summary>
+    /// Уникальный идентификатор вхождения видеоролика в плейлист (для удаления и перемещения в облаке).
+    /// </summary>
+    public string? SetVideoId { get; init; }
+
+    /// <summary>
     /// Инициализирует плоскую модель трека из JSON-элемента <c>playlistVideoRenderer</c> или <c>playlistPanelVideoRenderer</c>.
     /// </summary>
     /// <param name="content">JSON-элемент видеоролика.</param>
@@ -68,6 +73,8 @@ internal sealed class PlaylistVideoData
             ?.GetInt32OrNull();
 
         Id = content.GetPropertyOrNull(InnerTubeTokens.VideoId)?.GetStringOrNull();
+        SetVideoId = content.GetPropertyOrNull(InnerTubeTokens.SetVideoId)?.GetStringOrNull()
+            ?? content.GetPropertyOrNull(InnerTubeTokens.PlaylistSetVideoId)?.GetStringOrNull();
 
         var titleEl = content.GetPropertyOrNull(InnerTubeTokens.Title);
         Title = titleEl is null

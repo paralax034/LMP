@@ -151,12 +151,18 @@ public static class YoutubeClientUtils
 				return (null, null, false);
 			}
 
-			var jsonStr = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-			if (jsonStr.StartsWith(")]}'"))
-				jsonStr = jsonStr[4..];
+			using var buffer = new InnerTubeStreamBuffer(16 * 1024);
+			await using (var stream = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false))
+			{
+				await buffer.ReadAllAsync(stream, cts.Token).ConfigureAwait(false);
+			}
 
-			var json = Json.Parse(jsonStr);
-			var value = json[0][2][0][0][13].GetStringOrNull();
+			var memory = buffer.WrittenMemory;
+			if (memory.Span.StartsWith(")]}'"u8))
+				memory = memory[4..];
+
+			using var doc = System.Text.Json.JsonDocument.Parse(memory);
+			var value = doc.RootElement[0][2][0][0][13].GetStringOrNull();
 
 			response.Headers.TryGetValues("Set-Cookie", out var setCookies);
 

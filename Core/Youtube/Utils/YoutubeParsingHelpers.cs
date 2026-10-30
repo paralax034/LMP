@@ -16,6 +16,10 @@ internal static class YoutubeParsingHelpers
         "MMM dd, yyyy",
         "MMMM d, yyyy",
         "MMMM dd, yyyy",
+        "d MMM yyyy",
+        "dd MMM yyyy",
+        "d MMMM yyyy",
+        "dd MMMM yyyy",
         "M/d/yyyy",
         "yyyy-MM-dd"
     ];
@@ -84,6 +88,7 @@ internal static class YoutubeParsingHelpers
         if (trimmed.IsEmpty) return false;
 
         return trimmed.Equals("today", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("just now", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("yesterday", StringComparison.OrdinalIgnoreCase)
             || trimmed.EndsWith("ago", StringComparison.OrdinalIgnoreCase);
     }
@@ -103,7 +108,8 @@ internal static class YoutubeParsingHelpers
         var trimmed = span.Trim();
         if (trimmed.IsEmpty) return null;
 
-        if (trimmed.Equals("today", StringComparison.OrdinalIgnoreCase))
+        if (trimmed.Equals("today", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("just now", StringComparison.OrdinalIgnoreCase))
             return DateOnly.FromDateTime(nowUtc);
 
         if (trimmed.Equals("yesterday", StringComparison.OrdinalIgnoreCase))
@@ -176,24 +182,84 @@ internal static class YoutubeParsingHelpers
     {
         if (text.IsEmpty) return null;
 
-        long result = 0;
+        long allDigits = 0;
+        long integerPart = 0;
+        long fractionPart = 0;
+        int fractionDigits = 0;
+        int separatorCount = 0;
         bool found = false;
+        int i = 0;
 
-        for (int i = 0; i < text.Length; i++)
+        for (; i < text.Length; i++)
         {
             char c = text[i];
             if (char.IsAsciiDigit(c))
             {
-                result = result * 10 + (c - '0');
+                int digit = c - '0';
+                allDigits = allDigits * 10 + digit;
+                if (separatorCount == 0)
+                {
+                    integerPart = integerPart * 10 + digit;
+                }
+                else
+                {
+                    fractionPart = fractionPart * 10 + digit;
+                    fractionDigits++;
+                }
                 found = true;
             }
-            else if (found && c != ',' && c != '.' && c != ' ' && c != '\u00A0')
+            else if (found && (c == '.' || c == ','))
+            {
+                separatorCount++;
+                fractionPart = 0;
+                fractionDigits = 0;
+            }
+            else if (found && (c == ' ' || c == '\u00A0'))
+            {
+                if (i + 1 < text.Length && char.IsAsciiDigit(text[i + 1]))
+                    continue;
+                break;
+            }
+            else if (found)
             {
                 break;
             }
         }
 
-        return found ? result : null;
+        if (!found) return null;
+
+        long multiplier = 1;
+        if (i < text.Length)
+        {
+            char suffix = text[i];
+            bool nextIsBoundary = i + 1 >= text.Length || !char.IsAsciiLetter(text[i + 1]);
+            if (nextIsBoundary)
+            {
+                multiplier = suffix switch
+                {
+                    'K' or 'k' => 1_000L,
+                    'M' or 'm' => 1_000_000L,
+                    'B' or 'b' => 1_000_000_000L,
+                    _ => 1L
+                };
+            }
+        }
+
+        if (multiplier > 1)
+        {
+            if (separatorCount == 1 && fractionDigits > 0)
+            {
+                long divisor = 1;
+                for (int d = 0; d < fractionDigits; d++)
+                    divisor *= 10;
+
+                return integerPart * multiplier + (fractionPart * multiplier) / divisor;
+            }
+
+            return allDigits * multiplier;
+        }
+
+        return allDigits;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

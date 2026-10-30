@@ -248,6 +248,26 @@ internal static class InnerTubeTokens
     public static ReadOnlySpan<byte> YpcTrailerRenderer => "ypcTrailerRenderer"u8;
     public static ReadOnlySpan<byte> PlayerVars => "playerVars"u8;
     public static ReadOnlySpan<byte> PlayerResponseProperty => "playerResponse"u8;
+    public static ReadOnlySpan<byte> Request => "request"u8;
+    public static ReadOnlySpan<byte> UseSsl => "useSsl"u8;
+    public static ReadOnlySpan<byte> Actions => "actions"u8;
+    public static ReadOnlySpan<byte> Action => "action"u8;
+    public static ReadOnlySpan<byte> AddedVideoId => "addedVideoId"u8;
+    public static ReadOnlySpan<byte> PlaylistEditResults => "playlistEditResults"u8;
+    public static ReadOnlySpan<byte> PlaylistEditVideoAddedResultData => "playlistEditVideoAddedResultData"u8;
+    public static ReadOnlySpan<byte> MovedSetVideoIdPredecessor => "movedSetVideoIdPredecessor"u8;
+    public static ReadOnlySpan<byte> MovedSetVideoIdSuccessor => "movedSetVideoIdSuccessor"u8;
+    public static ReadOnlySpan<byte> PlaylistName => "playlistName"u8;
+    public static ReadOnlySpan<byte> PlaylistDescription => "playlistDescription"u8;
+    public static ReadOnlySpan<byte> AddedCustomThumbnail => "addedCustomThumbnail"u8;
+    public static ReadOnlySpan<byte> ImageKey => "imageKey"u8;
+    public static ReadOnlySpan<byte> Type => "type"u8;
+    public static ReadOnlySpan<byte> PlaylistScottyEncryptedBlobId => "playlistScottyEncryptedBlobId"u8;
+    public static ReadOnlySpan<byte> EncryptedBlobId => "encryptedBlobId"u8;
+    public static ReadOnlySpan<byte> VideoIds => "videoIds"u8;
+    public static ReadOnlySpan<byte> ConfirmDialogEndpoint => "confirmDialogEndpoint"u8;
+    public static ReadOnlySpan<byte> ConfirmDialogRenderer => "confirmDialogRenderer"u8;
+    public static ReadOnlySpan<byte> DialogMessages => "dialogMessages"u8;
 }
 
 /// <summary>

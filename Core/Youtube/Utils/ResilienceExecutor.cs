@@ -31,7 +31,8 @@ internal static class ResilienceExecutor
             catch (Exception ex) when (attempt <= maxRetries && (ex is HttpRequestException or IOException or YoutubeExplodeException))
             {
                 Log.Warn($"[ResilienceExecutor] Attempt {attempt} failed: {ex.Message}. Retrying...");
-                await Task.Delay(150 * attempt, cancellationToken).ConfigureAwait(false);
+                if (!await cancellationToken.DelayNoThrowAsync(150 * attempt, continueOnCapturedContext: false).ConfigureAwait(false))
+                    cancellationToken.ThrowIfCancellationRequested();
             }
         }
     }

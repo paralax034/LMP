@@ -1,1 +1,0 @@
-namespace LMP.Core.Helpers;

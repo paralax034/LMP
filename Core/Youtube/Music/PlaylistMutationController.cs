@@ -13,14 +13,6 @@ internal sealed class PlaylistMutationController(HttpClient http)
     private const string CreatePlaylistEndpoint = "playlist/create";
     private const string DeletePlaylistEndpoint = "playlist/delete";
 
-    private static readonly byte[] Utf8Context = "context"u8.ToArray();
-    private static readonly byte[] Utf8Client = "client"u8.ToArray();
-    private static readonly byte[] Utf8ClientName = "clientName"u8.ToArray();
-    private static readonly byte[] Utf8ClientVersion = "clientVersion"u8.ToArray();
-    private static readonly byte[] Utf8Request = "request"u8.ToArray();
-    private static readonly byte[] Utf8UseSsl = "useSsl"u8.ToArray();
-    private static readonly byte[] Utf8Web = "WEB"u8.ToArray();
-
     private static readonly MediaTypeHeaderValue JsonContentType = new("application/json");
 
     /// <summary>
@@ -28,18 +20,18 @@ internal sealed class PlaylistMutationController(HttpClient http)
     /// </summary>
     private static void WriteContext(Utf8JsonWriter writer)
     {
-        writer.WritePropertyName(Utf8Context);
+        writer.WritePropertyName(Utils.InnerTubeTokens.Context);
         writer.WriteStartObject();
 
-        writer.WritePropertyName(Utf8Client);
+        writer.WritePropertyName(Utils.InnerTubeTokens.Client);
         writer.WriteStartObject();
-        writer.WriteString(Utf8ClientName, Utf8Web);
-        writer.WriteString(Utf8ClientVersion, YoutubeHttpHandler.WebClientVersion);
+        writer.WriteString(Utils.InnerTubeTokens.ClientName, Utils.InnerTubeTokens.Web);
+        writer.WriteString(Utils.InnerTubeTokens.ClientVersion, YoutubeHttpHandler.WebClientVersion);
         writer.WriteEndObject(); // client
 
-        writer.WritePropertyName(Utf8Request);
+        writer.WritePropertyName(Utils.InnerTubeTokens.Request);
         writer.WriteStartObject();
-        writer.WriteBoolean(Utf8UseSsl, false);
+        writer.WriteBoolean(Utils.InnerTubeTokens.UseSsl, false);
         writer.WriteEndObject(); // request
 
         writer.WriteEndObject(); // context
@@ -85,25 +77,6 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
         using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         return await Json.ParseAsync(stream, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Выполняет POST-запрос без чтения тела ответа.
-    /// </summary>
-    /// <param name="endpoint">Имя эндпоинта без query-параметров.</param>
-    /// <param name="writeBody">Делегат записи JSON-структуры запроса.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    private async Task PostFireAndForgetAsync(
-        string endpoint,
-        Action<Utf8JsonWriter> writeBody,
-        CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiUrl}/{endpoint}?prettyPrint=false");
-        request.Content = CreateJsonContent(writeBody);
-
-        using var response = await http.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
     }
 
     /// <summary>
@@ -415,10 +388,12 @@ internal sealed class PlaylistMutationController(HttpClient http)
         string playlistId,
         CancellationToken ct = default)
     {
-        await PostFireAndForgetAsync(DeletePlaylistEndpoint, writer =>
+        var root = await PostAsync(DeletePlaylistEndpoint, writer =>
         {
-            writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
+            writer.WriteString(Utils.InnerTubeTokens.PlaylistId, SanitizePlaylistId(playlistId));
         }, ct).ConfigureAwait(false);
+
+        CheckStatus(root);
     }
 
     /// <summary>
@@ -475,7 +450,18 @@ internal sealed class PlaylistMutationController(HttpClient http)
             if (!initiateResponse.Headers.TryGetValues("X-Goog-Upload-URL", out var uploadUrls))
                 throw new InvalidOperationException("No X-Goog-Upload-URL in response headers");
 
-            var uploadUrl = uploadUrls.First();
+            string? uploadUrl = null;
+            foreach (var candidateUrl in uploadUrls)
+            {
+                if (!string.IsNullOrEmpty(candidateUrl))
+                {
+                    uploadUrl = candidateUrl;
+                    break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(uploadUrl))
+                throw new InvalidOperationException("Empty X-Goog-Upload-URL in response headers");
             Log.Debug($"[Scotty] Got upload URL: {uploadUrl[..Math.Min(100, uploadUrl.Length)]}...");
 
             // STEP 2: Upload binary data

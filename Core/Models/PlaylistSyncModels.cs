@@ -61,11 +61,48 @@ public static class ThumbnailComparer
         if (span.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
             var qIdx = span.IndexOf('?');
-            return qIdx >= 0 ? span[..qIdx] : span;
+            if (qIdx >= 0)
+                span = span[..qIdx];
+
+            // Google CDN (googleusercontent.com / ggpht.com) кодирует размер через суффикс '=s1200' или '=w544-h544'
+            if (span.Contains("googleusercontent.com".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                span.Contains("ggpht.com".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            {
+                int lastSlash = span.LastIndexOf('/');
+                if (lastSlash >= 0)
+                {
+                    int eqOffset = span[(lastSlash + 1)..].IndexOf('=');
+                    if (eqOffset > 0)
+                        span = span[..(lastSlash + 1 + eqOffset)];
+                }
+            }
+
+            return span;
         }
 
         return span;
     }
+
+    /// <summary>
+    /// Проверяет, размещена ли обложка на внутренних CDN-серверах YouTube / Google.
+    /// Такие обложки управляются сервером и не загружаются повторно через Scotty протокол.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsYoutubeHosted(ReadOnlySpan<char> url)
+    {
+        if (url.IsEmpty) return false;
+        return url.Contains("ytimg.com".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("ggpht.com".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("googleusercontent.com".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("gstatic.com".AsSpan(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Проверяет, размещена ли обложка на внутренних CDN-серверах YouTube / Google.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsYoutubeHosted(string? url) =>
+        !string.IsNullOrWhiteSpace(url) && IsYoutubeHosted(url.AsSpan());
 
     /// <summary>
     /// Проверяет эквивалентность локальной и облачной обложки без аллокаций в куче.
@@ -85,7 +122,15 @@ public static class ThumbnailComparer
         if (normLocal.IsEmpty || normCloud.IsEmpty)
             return false;
 
-        if (!string.IsNullOrEmpty(youtubeId))
+        if (normLocal.Equals(normCloud, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Если обе ссылки принадлежат CDN YouTube/Google (например, i.ytimg.com и yt3.googleusercontent.com),
+        // обе являются серверными представлениями одной облачной обложки и не требуют Scotty-выгрузки
+        if (IsYoutubeHosted(normLocal) && IsYoutubeHosted(normCloud))
+            return true;
+
+        if (!string.IsNullOrEmpty(youtubeId) && youtubeId.Length <= 128)
         {
             Span<char> collageBuffer = stackalloc char[youtubeId.Length + 8];
             int written = 0;
@@ -103,7 +148,7 @@ public static class ThumbnailComparer
             }
         }
 
-        return normLocal.Equals(normCloud, StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 }
 

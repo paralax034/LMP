@@ -39,6 +39,13 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     /// Для owned playlists берётся из privacy dropdown, для остальных остаётся Unknown.
     /// </summary>
     public PlaylistVisibility Visibility { get; init; } = PlaylistVisibility.Unknown;
+
+    /// <summary>
+    /// Признак того, что плейлист принадлежит текущему аккаунту и доступен для редактирования
+    /// (наличие форм редактирования приватности, названия или описания в сайдбаре).
+    /// </summary>
+    public bool IsEditable { get; init; }
+
     public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
     /// <summary>
@@ -88,6 +95,10 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         var effectivePlaylistContents = ResolvePlaylistContents(content);
 
         IsAvailable = sidebar is not null || effectivePlaylistContents is not null;
+
+        IsEditable = privacyDropdownRenderer is not null
+                     || sidebarPrimary?.GetPropertyOrNull("titleForm") is not null
+                     || sidebarPrimary?.GetPropertyOrNull("descriptionForm") is not null;
 
         if (TryParseVisibility(privacyDropdownRenderer, out var visibility))
             Visibility = visibility;
@@ -391,7 +402,20 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
     private static long? ExtractViewCount(JsonElement content, JsonElement? sidebarPrimary)
     {
-        // 1. Попытка через новый UI (frameworkUpdates)
+        long? sidebarViews = null;
+
+        // 1. Классический Sidebar stats[1] всегда содержит точное несокращённое число просмотров (например, "53,412 views")
+        var stats = sidebarPrimary?.GetPropertyOrNull("stats");
+        if (stats?.ValueKind == JsonValueKind.Array && stats.Value.GetArrayLength() > 1)
+        {
+            var text = GetTextFromStat(stats.Value[1]);
+            sidebarViews = YoutubeParsingHelpers.ParseLongFromText(text);
+            if (sidebarViews.HasValue && sidebarViews.Value % 100 != 0)
+                return sidebarViews;
+        }
+
+        // 2. Новый UI (frameworkUpdates / pageHeaderViewModel)
+        long? headerViews = null;
         var mutations = content
             .GetPropertyOrNull("frameworkUpdates")
             ?.GetPropertyOrNull("entityBatchUpdate")
@@ -422,30 +446,25 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
                                 var text = part.GetPropertyOrNull("text")?.GetPropertyOrNull("content")?.GetStringOrNull();
                                 if (text != null && text.Contains("view", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    var views = YoutubeParsingHelpers.ParseLongFromText(text);
-                                    if (views.HasValue) return views;
+                                    headerViews = YoutubeParsingHelpers.ParseLongFromText(text);
+                                    if (headerViews.HasValue)
+                                        break;
                                 }
                             }
                         }
+                        if (headerViews.HasValue) break;
                     }
                 }
+                if (headerViews.HasValue) break;
             }
         }
 
-        // 2. Попытка через классический Sidebar stats[1]
-        var stats = sidebarPrimary?.GetPropertyOrNull("stats");
-        if (stats?.ValueKind == JsonValueKind.Array)
+        if (sidebarViews.HasValue && headerViews.HasValue)
         {
-            int len = stats.Value.GetArrayLength();
-            if (len > 1)
-            {
-                var text = GetTextFromStat(stats.Value[1]);
-                var views = YoutubeParsingHelpers.ParseLongFromText(text);
-                if (views.HasValue) return views;
-            }
+            return sidebarViews.Value % 100 != 0 ? sidebarViews : headerViews;
         }
 
-        return null;
+        return sidebarViews ?? headerViews;
     }
 
     private static DateOnly? ExtractReleaseDate(JsonElement content, JsonElement? sidebarPrimary)
@@ -552,8 +571,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
                 return relative;
         }
 
-        var year = YoutubeParsingHelpers.ParseYearFromText(span);
-        return year.HasValue ? new DateOnly(year.Value, 1, 1) : null;
+        return null;
     }
 
     private static List<PlaylistVideoData> ExtractVideos(JsonElement? effectivePlaylistContents)
@@ -643,6 +661,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         int totalLen = 0;
 
         string?[]? rentedArray = null;
+        char[]? rentedChars = null;
         try
         {
             rentedArray = System.Buffers.ArrayPool<string?>.Shared.Rent(dateRunCount);
@@ -663,7 +682,9 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
             if (totalLen == 0) return null;
 
-            Span<char> span = totalLen <= 128 ? stackalloc char[totalLen] : new char[totalLen];
+            Span<char> span = totalLen <= 128
+                ? stackalloc char[totalLen]
+                : (rentedChars = System.Buffers.ArrayPool<char>.Shared.Rent(totalLen)).AsSpan(0, totalLen);
             int pos = 0;
 
             for (int i = 0; i < dateRunCount; i++)
@@ -679,6 +700,10 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
         }
         finally
         {
+            if (rentedChars != null)
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(rentedChars);
+            }
             if (rentedArray != null)
             {
                 System.Buffers.ArrayPool<string?>.Shared.Return(rentedArray, clearArray: true);
@@ -706,8 +731,8 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string? GetTextFromStat(JsonElement stat) =>
-        stat.GetPropertyOrNull("simpleText")?.GetStringOrNull()
-        ?? YoutubeParsingHelpers.ConcatTextRuns(stat.GetPropertyOrNull("runs"));
+        stat.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull()
+        ?? YoutubeParsingHelpers.ConcatTextRuns(stat.GetPropertyOrNull(InnerTubeTokens.Runs));
 
     #endregion
 }

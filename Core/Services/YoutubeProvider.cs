@@ -1532,8 +1532,13 @@ public partial class YoutubeProvider : IDisposable
                     playlist.TrackIds.Add(tracks[i].Id);
                 }
 
-                // Извлечение и фиксация связей SetVideoId для исключения сетевых browse-запросов при будущем удалении
-                if (isAccountSync && AuthService?.IsAuthenticated == true && !string.IsNullOrEmpty(playlist.YoutubeId))
+                // Сохраняем SetVideoId, извлеченные напрямую при первичном browse-импорте,
+                // и обращаемся к повторному Sync-запросу только если они отсутствовали в ответе.
+                if (result.SetVideoIdMappings is { Count: > 0 } directMappings)
+                {
+                    await _libraryService.UpdateSetVideoIdsAsync(playlist.Id, directMappings, ct).ConfigureAwait(false);
+                }
+                else if (isAccountSync && AuthService?.IsAuthenticated == true && !string.IsNullOrEmpty(playlist.YoutubeId))
                 {
                     try
                     {
@@ -1595,10 +1600,16 @@ public partial class YoutubeProvider : IDisposable
             return;
         }
 
-        // Account sync: определяем ownership сравнением Author с UserName
+        // Account sync: определяем ownership по наличию приватного dropdown или сравнением с профилем
         if (AuthService?.IsAuthenticated != true)
         {
             playlist.Ownership = PlaylistOwnership.Unknown;
+            return;
+        }
+
+        if (playlist.Visibility is PlaylistVisibility.Private or PlaylistVisibility.Unlisted)
+        {
+            playlist.Ownership = PlaylistOwnership.Mine;
             return;
         }
 
@@ -1611,7 +1622,22 @@ public partial class YoutubeProvider : IDisposable
             return;
         }
 
-        playlist.Ownership = playlistAuthor.Equals(userName, StringComparison.OrdinalIgnoreCase)
+        bool matchesActiveUser = playlistAuthor.Equals(userName, StringComparison.OrdinalIgnoreCase);
+        if (!matchesActiveUser && AuthService.State.CachedAccounts is { Count: > 0 } cachedAccounts)
+        {
+            for (int i = 0; i < cachedAccounts.Count; i++)
+            {
+                if (cachedAccounts[i].IsSelected &&
+                    (playlistAuthor.Equals(cachedAccounts[i].Name, StringComparison.OrdinalIgnoreCase) ||
+                     playlistAuthor.Equals(cachedAccounts[i].Handle, StringComparison.OrdinalIgnoreCase)))
+                {
+                    matchesActiveUser = true;
+                    break;
+                }
+            }
+        }
+
+        playlist.Ownership = matchesActiveUser
             ? PlaylistOwnership.Mine
             : PlaylistOwnership.Foreign;
 

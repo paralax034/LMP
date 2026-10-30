@@ -143,10 +143,78 @@ public sealed class PlaylistSyncService
                 return null;
             }
 
-            if (playlist.IsCloudUnavailable)
+            bool healedMetadata = false;
+            if (ShouldUpdateViewCount(playlist.ViewCount, fullData.ViewCount))
             {
-                playlist.IsCloudUnavailable = false;
-                await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+                playlist.ViewCount = fullData.ViewCount;
+                healedMetadata = true;
+            }
+
+            if (fullData.ReleaseDate.HasValue && playlist.ReleaseDate != fullData.ReleaseDate)
+            {
+                playlist.ReleaseDate = fullData.ReleaseDate;
+                healedMetadata = true;
+            }
+            else if (!fullData.ReleaseDate.HasValue && playlist.ReleaseDate is { Month: 1, Day: 1 })
+            {
+                playlist.ReleaseDate = null;
+                healedMetadata = true;
+            }
+
+            if (!string.IsNullOrEmpty(fullData.Author) && !string.Equals(playlist.Author, fullData.Author, StringComparison.Ordinal))
+            {
+                playlist.Author = fullData.Author;
+                healedMetadata = true;
+            }
+
+            if (!string.IsNullOrEmpty(fullData.OwnerChannelId) && !string.Equals(playlist.OwnerChannelId, fullData.OwnerChannelId, StringComparison.Ordinal))
+            {
+                playlist.OwnerChannelId = fullData.OwnerChannelId;
+                healedMetadata = true;
+            }
+
+            if (fullData.Visibility != PlaylistVisibility.Unknown && playlist.Visibility != fullData.Visibility)
+            {
+                playlist.Visibility = fullData.Visibility;
+                healedMetadata = true;
+            }
+
+            // Строгое определение прав владения по наличию musicEditablePlaylistDetailHeaderRenderer или форм редактирования WEB
+            var detectedOwnership = fullData.IsEditable ? PlaylistOwnership.Mine : PlaylistOwnership.Foreign;
+            if (playlist.Ownership != PlaylistOwnership.System && playlist.Ownership != detectedOwnership)
+            {
+                Log.Info($"[PlaylistSync] Updating ownership for '{playlist.Name}' ({playlist.YoutubeId}): {playlist.Ownership} -> {detectedOwnership}");
+                playlist.Ownership = detectedOwnership;
+                healedMetadata = true;
+            }
+
+            // Для чужих (read-only) плейлистов сбрасываем ошибочно назначенные локальные мозаики на облачную обложку YouTube
+            if (playlist.Ownership == PlaylistOwnership.Foreign &&
+                !string.IsNullOrEmpty(fullData.ThumbnailUrl) &&
+                !ThumbnailComparer.IsYoutubeHosted(playlist.ThumbnailUrl))
+            {
+                playlist.ThumbnailUrl = fullData.ThumbnailUrl;
+                playlist.ComputedColor = null;
+                healedMetadata = true;
+            }
+
+            // Если локальная обложка является серверной ссылкой YouTube CDN, синхронизируем её с актуальным URL облака
+            if (ThumbnailComparer.IsYoutubeHosted(playlist.ThumbnailUrl) &&
+                !string.IsNullOrEmpty(fullData.ThumbnailUrl) &&
+                !string.Equals(playlist.ThumbnailUrl, fullData.ThumbnailUrl, StringComparison.Ordinal))
+            {
+                playlist.ThumbnailUrl = fullData.ThumbnailUrl;
+                healedMetadata = true;
+            }
+
+            // Если локальный файл обложки (мозаика/файл) уже был выгружен в облако и не менялся с момента синка,
+            // фиксируем маркер синхронизации, чтобы не предлагать повторную Scotty-выгрузку
+            bool localCoverAlreadySynced = IsLocalCoverAlreadySyncedWithCloud(playlist, fullData.ThumbnailUrl, out var normLocalThumb);
+            if (localCoverAlreadySynced && !string.IsNullOrEmpty(normLocalThumb) &&
+                !string.Equals(playlist.ETag, normLocalThumb, StringComparison.Ordinal))
+            {
+                playlist.ETag = normLocalThumb;
+                healedMetadata = true;
             }
 
             var localIdSet = new HashSet<string>(localTrackIds.Count, StringComparer.Ordinal);
@@ -157,23 +225,28 @@ public sealed class PlaylistSyncService
                     localIdSet.Add(rawId);
             }
 
+            var cloudIdSet = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
             int commonCount = 0;
             for (int i = 0; i < fullData.Tracks.Count; i++)
             {
-                if (localIdSet.Contains(fullData.Tracks[i].VideoId))
-                    commonCount++;
+                var cloudRawId = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
+                if (!string.IsNullOrEmpty(cloudRawId) && cloudIdSet.Add(cloudRawId))
+                {
+                    if (localIdSet.Contains(cloudRawId))
+                        commonCount++;
+                }
             }
 
-            int cloudOnlyCount = fullData.Tracks.Count - commonCount;
+            int cloudOnlyCount = cloudIdSet.Count - commonCount;
             int localOnlyCount = localIdSet.Count - commonCount;
 
-            return new PlaylistSyncPreview
+            var preview = new PlaylistSyncPreview
             {
                 LocalName = playlist.Name,
                 CloudName = fullData.Title ?? playlist.Name,
                 LocalDescription = playlist.Description,
                 CloudDescription = fullData.Description,
-                LocalThumbnailUrl = playlist.ThumbnailUrl,
+                LocalThumbnailUrl = localCoverAlreadySynced ? fullData.ThumbnailUrl : playlist.ThumbnailUrl,
                 CloudThumbnailUrl = fullData.ThumbnailUrl,
                 LocalOnlyTrackCount = localOnlyCount,
                 CloudOnlyTrackCount = cloudOnlyCount,
@@ -181,6 +254,28 @@ public sealed class PlaylistSyncService
                 YoutubePlaylistId = playlist.YoutubeId,
                 CachedCloudData = fullData
             };
+
+            // Если различий нет, плейлист полностью синхронизирован — фиксируем актуальное время синхронизации
+            if (!preview.HasAnyDifference)
+            {
+                playlist.LastSyncedAtUtc = DateTime.UtcNow;
+                healedMetadata = true;
+            }
+
+            if (playlist.IsCloudUnavailable || healedMetadata)
+            {
+                playlist.IsCloudUnavailable = false;
+                await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+            }
+
+            Log.Info($"[PlaylistSync] Preview built for '{playlist.Name}' ({playlist.YoutubeId}): " +
+                     $"hasDiff={preview.HasAnyDifference} (name={preview.NameDiffers}, desc={preview.DescriptionDiffers}, " +
+                     $"thumb={preview.ThumbnailDiffers}, +local={localOnlyCount}, +cloud={cloudOnlyCount}, common={commonCount}), " +
+                     $"ownership={playlist.Ownership}, canSyncToCloud={playlist.CanSyncToCloud}");
+            Log.Debug($"[PlaylistSync] Preview thumbs for '{playlist.Name}': local='{playlist.ThumbnailUrl ?? "null"}', " +
+                      $"cloud='{fullData.ThumbnailUrl ?? "null"}', alreadySyncedLocalCover={localCoverAlreadySynced}");
+
+            return preview;
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -251,11 +346,32 @@ public sealed class PlaylistSyncService
 
             if (cloudData != null)
             {
-                if (cloudData.ViewCount.HasValue && playlist.ViewCount != cloudData.ViewCount)
+                if (ShouldUpdateViewCount(playlist.ViewCount, cloudData.ViewCount))
                     playlist.ViewCount = cloudData.ViewCount;
 
-                if (playlist.ReleaseDate != cloudData.ReleaseDate)
+                if (!string.IsNullOrEmpty(cloudData.Author))
+                    playlist.Author = cloudData.Author;
+
+                if (!string.IsNullOrEmpty(cloudData.OwnerChannelId))
+                    playlist.OwnerChannelId = cloudData.OwnerChannelId;
+
+                if (cloudData.Visibility != PlaylistVisibility.Unknown)
+                    playlist.Visibility = cloudData.Visibility;
+
+                if (cloudData.ReleaseDate.HasValue)
+                {
                     playlist.ReleaseDate = cloudData.ReleaseDate;
+                }
+                else if (playlist.ReleaseDate is { Month: 1, Day: 1 })
+                {
+                    playlist.ReleaseDate = null;
+                }
+
+                if (addedToCloud > 0 || removedFromCloud > 0 ||
+                    (metadataChanged && options.Strategy != PlaylistSyncStrategy.ReplaceLocal))
+                {
+                    playlist.ReleaseDate = DateOnly.FromDateTime(DateTime.UtcNow);
+                }
 
                 if (string.IsNullOrEmpty(playlist.ThumbnailUrl) && !string.IsNullOrEmpty(cloudData.ThumbnailUrl))
                 {
@@ -275,7 +391,7 @@ public sealed class PlaylistSyncService
 
             await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
 
-            return new PlaylistSyncResult
+            var syncResult = new PlaylistSyncResult
             {
                 Success = true,
                 MetadataChanged = metadataChanged,
@@ -284,6 +400,12 @@ public sealed class PlaylistSyncService
                 TracksRemovedLocally = removedLocally,
                 TracksRemovedFromCloud = removedFromCloud
             };
+
+            Log.Info($"[PlaylistSync] Sync completed for '{playlist.Name}' ({playlist.YoutubeId}) [Strategy={options.Strategy}]: " +
+                                 $"{syncResult.Summary}, views={playlist.ViewCount?.ToString() ?? "null"}, " +
+                                 $"releaseDate={playlist.ReleaseDate?.ToString("yyyy-MM-dd") ?? "null"}");
+
+            return syncResult;
         }
         catch (Exception ex)
         {
@@ -395,7 +517,8 @@ public sealed class PlaylistSyncService
             {
                 try
                 {
-                    await Task.Delay(1000, ct).ConfigureAwait(false);
+                    if (!await ct.DelayNoThrowAsync(1000, continueOnCapturedContext: false).ConfigureAwait(false))
+                        return;
                     var fullData = await _youtube.GetFullPlaylistDataAsync(ytId, ct).ConfigureAwait(false);
                     if (fullData?.Tracks is { Count: > 0 } tracks)
                     {
@@ -444,8 +567,7 @@ public sealed class PlaylistSyncService
     public async Task AddTracksToCloudAsync(Playlist playlist, IReadOnlyList<string> trackIds,
         CancellationToken ct = default)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) ||
-            !_auth.IsAuthenticated)
+        if (!playlist.CanSyncToCloud || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
             return;
 
         try
@@ -470,6 +592,10 @@ public sealed class PlaylistSyncService
         {
             await DowngradeDeadCloudPlaylistAsync(playlist, ct).ConfigureAwait(false);
         }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            await DowngradeForeignPlaylistOnForbiddenAsync(playlist, ct).ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
             Log.Error($"[PlaylistSync] Batch add tracks to cloud failed: {ex.Message}");
@@ -482,11 +608,8 @@ public sealed class PlaylistSyncService
     public async Task<string?> GetOrFetchSetVideoIdAsync(Playlist playlist, string trackId,
         CancellationToken ct = default)
     {
-        bool needsYoutubeSync = (playlist.CanSyncToCloud || playlist.SyncMode == PlaylistSyncMode.TwoWaySync)
-                                && !string.IsNullOrEmpty(playlist.YoutubeId)
-                                && _auth.IsAuthenticated;
-
-        if (!needsYoutubeSync) return null;
+        if (!playlist.CanSyncToCloud || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
+            return null;
 
         string? setVideoId = await _playlists.GetSetVideoIdAsync(playlist.Id, trackId, ct).ConfigureAwait(false);
 
@@ -495,6 +618,12 @@ public sealed class PlaylistSyncService
             try
             {
                 var fullData = await _youtube.GetFullPlaylistDataAsync(playlist.YoutubeId!, ct).ConfigureAwait(false);
+                if (fullData is { IsEditable: false })
+                {
+                    await DowngradeForeignPlaylistOnForbiddenAsync(playlist, ct).ConfigureAwait(false);
+                    return null;
+                }
+
                 if (fullData?.Tracks is { Count: > 0 } remoteTracks)
                 {
                     var mappings = new List<(string TrackId, string SetVideoId)>(remoteTracks.Count);
@@ -517,6 +646,10 @@ public sealed class PlaylistSyncService
                     setVideoId = targetSetVideoId;
                 }
             }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                await DowngradeForeignPlaylistOnForbiddenAsync(playlist, ct).ConfigureAwait(false);
+            }
             catch (Exception ex)
             {
                 Log.Error($"[PlaylistSync] Failed to fetch setVideoIds: {ex.Message}");
@@ -534,13 +667,17 @@ public sealed class PlaylistSyncService
     /// <returns>Задача, представляющая асинхронную операцию удаления треков.</returns>
     public async Task RemoveTracksFromCloudAsync(Playlist playlist, IReadOnlyList<string> setVideoIds)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) ||
+        if (!playlist.CanSyncToCloud || string.IsNullOrEmpty(playlist.YoutubeId) ||
             !_auth.IsAuthenticated || setVideoIds.Count == 0)
             return;
 
         try
         {
             await _youtube.RemoveTracksFromPlaylistAsync(playlist.YoutubeId, setVideoIds).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            await DowngradeForeignPlaylistOnForbiddenAsync(playlist, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -554,8 +691,7 @@ public sealed class PlaylistSyncService
     public async Task MoveTrackInCloudAsync(Playlist playlist, string movingTrackId, int newIndex,
         List<string> newTrackIdsOrder, CancellationToken ct = default)
     {
-        if (playlist.SyncMode != PlaylistSyncMode.TwoWaySync || string.IsNullOrEmpty(playlist.YoutubeId) ||
-            !_auth.IsAuthenticated)
+        if (!playlist.CanSyncToCloud || string.IsNullOrEmpty(playlist.YoutubeId) || !_auth.IsAuthenticated)
             return;
 
         var movingSetVideoId =
@@ -586,6 +722,10 @@ public sealed class PlaylistSyncService
                     [(movingSetVideoId, predecessor, successor)],
                     ct).ConfigureAwait(false);
             }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                await DowngradeForeignPlaylistOnForbiddenAsync(playlist, ct).ConfigureAwait(false);
+            }
             catch (Exception ex)
             {
                 Log.Warn($"[PlaylistSync] Remote move sync failed: {ex.Message}");
@@ -596,6 +736,16 @@ public sealed class PlaylistSyncService
     /// <summary>
     /// Переводит удаленный плейлист в локальный режим при получении статуса 404 Not Found из облака.
     /// </summary>
+    private async Task DowngradeForeignPlaylistOnForbiddenAsync(Playlist playlist, CancellationToken ct)
+    {
+        if (playlist.Ownership == PlaylistOwnership.Foreign)
+            return;
+
+        playlist.Ownership = PlaylistOwnership.Foreign;
+        await _playlists.UpsertAsync(playlist, ct).ConfigureAwait(false);
+        Log.Warn($"[PlaylistSync] Playlist '{playlist.Name}' ({playlist.YoutubeId}) rejected cloud mutation (403 Forbidden / non-editable). Marked as Foreign read-only.");
+    }
+
     public async Task DowngradeDeadCloudPlaylistAsync(Playlist playlist, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(playlist);
@@ -624,7 +774,7 @@ public sealed class PlaylistSyncService
         CancellationToken ct)
     {
         bool changed = false;
-        bool isCloudSource = options.Strategy == PlaylistSyncStrategy.ReplaceLocal;
+        bool isCloudSource = options.Strategy == PlaylistSyncStrategy.ReplaceLocal || !playlist.CanSyncToCloud;
 
         if (options.SyncName && preview.NameDiffers)
         {
@@ -638,6 +788,14 @@ public sealed class PlaylistSyncService
                 try
                 {
                     await _youtube.RenamePlaylistAsync(playlist.YoutubeId!, playlist.Name).ConfigureAwait(false);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    Log.Warn($"[PlaylistSync] 403 Forbidden on rename for '{playlist.YoutubeId}'. Reverting to Foreign read-only.");
+                    playlist.Ownership = PlaylistOwnership.Foreign;
+                    playlist.Name = preview.CloudName;
+                    isCloudSource = true;
+                    changed = true;
                 }
                 catch (Exception ex)
                 {
@@ -660,6 +818,14 @@ public sealed class PlaylistSyncService
                     var targetDesc = playlist.Description?.Trim() ?? string.Empty;
                     await _youtube.EditPlaylistDescriptionAsync(playlist.YoutubeId!, targetDesc).ConfigureAwait(false);
                 }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    Log.Warn($"[PlaylistSync] 403 Forbidden on description edit for '{playlist.YoutubeId}'. Reverting to Foreign read-only.");
+                    playlist.Ownership = PlaylistOwnership.Foreign;
+                    playlist.Description = preview.CloudDescription ?? string.Empty;
+                    isCloudSource = true;
+                    changed = true;
+                }
                 catch (Exception ex)
                 {
                     Log.Error($"[PlaylistSync] Description update on YouTube failed: {ex.Message}");
@@ -669,18 +835,19 @@ public sealed class PlaylistSyncService
 
         if (options.SyncThumbnail && preview.ThumbnailDiffers)
         {
-            // При ReplaceLocal явно берем облачную обложку.
-            // При ReplaceCloud или Merge (при наличии локальной) отдаем приоритет локальной обложке и пушим ее в YouTube.
-            if (isCloudSource)
+            // При ReplaceLocal (или если локальная обложка пуста / находится на YouTube CDN) принимаем облачную обложку.
+            // При ReplaceCloud или Merge с пользовательским локальным файлом выгружаем его в YouTube через Scotty.
+            if (isCloudSource || string.IsNullOrEmpty(playlist.ThumbnailUrl) || ThumbnailComparer.IsYoutubeHosted(playlist.ThumbnailUrl))
             {
                 if (!string.IsNullOrEmpty(preview.CloudThumbnailUrl))
                 {
                     playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
+                    playlist.ETag = ThumbnailComparer.Normalize(playlist.ThumbnailUrl);
                     playlist.ComputedColor = null;
                     changed = true;
                 }
             }
-            else if (!string.IsNullOrEmpty(playlist.ThumbnailUrl))
+            else
             {
                 try
                 {
@@ -688,19 +855,26 @@ public sealed class PlaylistSyncService
                         .ConfigureAwait(false);
                     if (uploaded)
                     {
+                        playlist.ETag = ThumbnailComparer.Normalize(playlist.ThumbnailUrl);
                         changed = true;
                     }
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    Log.Warn($"[PlaylistSync] 403 Forbidden on thumbnail upload for '{playlist.YoutubeId}'. Reverting to Foreign read-only.");
+                    playlist.Ownership = PlaylistOwnership.Foreign;
+                    if (!string.IsNullOrEmpty(preview.CloudThumbnailUrl))
+                    {
+                        playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
+                        playlist.ETag = ThumbnailComparer.Normalize(playlist.ThumbnailUrl);
+                        playlist.ComputedColor = null;
+                    }
+                    changed = true;
                 }
                 catch (Exception ex)
                 {
                     Log.Error($"[PlaylistSync] Thumbnail upload failed: {ex.Message}");
                 }
-            }
-            else if (string.IsNullOrEmpty(playlist.ThumbnailUrl) && !string.IsNullOrEmpty(preview.CloudThumbnailUrl))
-            {
-                playlist.ThumbnailUrl = preview.CloudThumbnailUrl;
-                playlist.ComputedColor = null;
-                changed = true;
             }
         }
 
@@ -715,7 +889,13 @@ public sealed class PlaylistSyncService
         int removedLocally = 0;
         for (int i = 0; i < localTrackIds.Count; i++)
         {
-            await _playlists.RemoveTrackAsync(playlist.Id, localTrackIds[i], CurrentOwnerId, ct).ConfigureAwait(false);
+            var removedId = localTrackIds[i];
+            await _playlists.RemoveTrackAsync(playlist.Id, removedId, CurrentOwnerId, ct).ConfigureAwait(false);
+            if (_registry.TryGet(removedId) is { } existingTrack)
+            {
+                existingTrack.InPlaylists.Remove(playlist.Id);
+                _registry.UpdatePinStatus(existingTrack);
+            }
             removedLocally++;
         }
 
@@ -727,6 +907,8 @@ public sealed class PlaylistSyncService
             var remote = fullData.Tracks[i];
             var track = CreateTrackInfo(remote);
             var canonical = _registry.RegisterOrUpdate(track);
+            canonical.InPlaylists.Add(playlist.Id);
+            _registry.UpdatePinStatus(canonical);
 
             await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
             await _playlists.AddTrackAsync(playlist.Id, canonical.Id, CurrentOwnerId, null, ct).ConfigureAwait(false);
@@ -751,20 +933,42 @@ public sealed class PlaylistSyncService
         var localRawIdMap = new Dictionary<string, string>(localTrackIds.Count, StringComparer.Ordinal);
         for (int i = 0; i < localTrackIds.Count; i++)
         {
-            var raw = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
+            var localId = localTrackIds[i];
+            if (!localId.StartsWith("yt_", StringComparison.Ordinal))
+                continue;
+
+            var raw = YoutubeIdHelper.ExtractRawId(localId);
             if (!string.IsNullOrEmpty(raw))
-                localRawIdMap.TryAdd(raw, localTrackIds[i]);
+                localRawIdMap.TryAdd(raw, localId);
         }
 
         var toRemoveSetVideoIds = new List<string>();
+        var currentCloudTracks = new List<RemoteTrackInfo>(fullData.Tracks.Count);
+        var trackToSetVideoId = new Dictionary<string, string>(localRawIdMap.Count, StringComparer.Ordinal);
+        var cloudRawIdSet = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
+
         for (int i = 0; i < fullData.Tracks.Count; i++)
         {
             var cloudTrack = fullData.Tracks[i];
             var cloudRawId = YoutubeIdHelper.ExtractRawId(cloudTrack.VideoId);
+            bool hasValidSetId = !string.IsNullOrEmpty(cloudTrack.SetVideoId) &&
+                                 !cloudTrack.SetVideoId.Equals("to_be_updated_by_client", StringComparison.OrdinalIgnoreCase);
 
-            if (!localRawIdMap.ContainsKey(cloudRawId) &&
-                !string.IsNullOrEmpty(cloudTrack.SetVideoId) &&
-                !cloudTrack.SetVideoId.Equals("to_be_updated_by_client", StringComparison.OrdinalIgnoreCase))
+            if (localRawIdMap.TryGetValue(cloudRawId, out var originalLocalId))
+            {
+                if (cloudRawIdSet.Add(cloudRawId))
+                {
+                    currentCloudTracks.Add(cloudTrack);
+                    if (hasValidSetId)
+                        trackToSetVideoId[originalLocalId] = cloudTrack.SetVideoId;
+                }
+                else if (hasValidSetId)
+                {
+                    // Лишний дубликат того же трека в облаке подлежит удалению
+                    toRemoveSetVideoIds.Add(cloudTrack.SetVideoId);
+                }
+            }
+            else if (hasValidSetId)
             {
                 toRemoveSetVideoIds.Add(cloudTrack.SetVideoId);
             }
@@ -777,33 +981,16 @@ public sealed class PlaylistSyncService
             removedFromCloud = toRemoveSetVideoIds.Count;
         }
 
-        var currentCloudTracks = fullData.Tracks
-            .Where(t => localRawIdMap.ContainsKey(YoutubeIdHelper.ExtractRawId(t.VideoId)))
-            .ToList();
-
-        var trackToSetVideoId = new Dictionary<string, string>(localTrackIds.Count, StringComparer.Ordinal);
-        for (int i = 0; i < currentCloudTracks.Count; i++)
-        {
-            var t = currentCloudTracks[i];
-            var raw = YoutubeIdHelper.ExtractRawId(t.VideoId);
-            if (!string.IsNullOrEmpty(t.SetVideoId) && localRawIdMap.TryGetValue(raw, out var originalLocalId))
-                trackToSetVideoId[originalLocalId] = t.SetVideoId;
-        }
-
-        var cloudRawIdSet = new HashSet<string>(fullData.Tracks.Count, StringComparer.Ordinal);
-        for (int i = 0; i < fullData.Tracks.Count; i++)
-        {
-            var raw = YoutubeIdHelper.ExtractRawId(fullData.Tracks[i].VideoId);
-            if (!string.IsNullOrEmpty(raw))
-                cloudRawIdSet.Add(raw);
-        }
-
         var toUpload = new List<string>();
         for (int i = 0; i < localTrackIds.Count; i++)
         {
-            var raw = YoutubeIdHelper.ExtractRawId(localTrackIds[i]);
-            if (!cloudRawIdSet.Contains(raw))
-                toUpload.Add(localTrackIds[i]);
+            var localId = localTrackIds[i];
+            if (!localId.StartsWith("yt_", StringComparison.Ordinal))
+                continue;
+
+            var raw = YoutubeIdHelper.ExtractRawId(localId);
+            if (!string.IsNullOrEmpty(raw) && !cloudRawIdSet.Contains(raw))
+                toUpload.Add(localId);
         }
 
         int addedToCloud = 0;
@@ -821,14 +1008,20 @@ public sealed class PlaylistSyncService
 
         if (trackToSetVideoId.Count > 0)
         {
-            var mappings = trackToSetVideoId.Select(kvp => (kvp.Key, kvp.Value)).ToList();
+            var mappings = new List<(string TrackId, string SetVideoId)>(trackToSetVideoId.Count);
+            foreach (var kvp in trackToSetVideoId)
+                mappings.Add((kvp.Key, kvp.Value));
+
             await _playlists.UpdateSetVideoIdsAsync(playlist.Id, mappings, ct).ConfigureAwait(false);
         }
 
-        var simulatedCloudOrder = currentCloudTracks
-            .Select(t => t.SetVideoId)
-            .Where(s => !string.IsNullOrEmpty(s))
-            .ToList();
+        var simulatedCloudOrder = new List<string>(currentCloudTracks.Count + toUpload.Count);
+        for (int i = 0; i < currentCloudTracks.Count; i++)
+        {
+            var sid = currentCloudTracks[i].SetVideoId;
+            if (!string.IsNullOrEmpty(sid))
+                simulatedCloudOrder.Add(sid);
+        }
 
         for (int i = 0; i < toUpload.Count; i++)
         {
@@ -901,6 +1094,8 @@ public sealed class PlaylistSyncService
             {
                 var track = CreateTrackInfo(remote);
                 var canonical = _registry.RegisterOrUpdate(track);
+                canonical.InPlaylists.Add(playlist.Id);
+                _registry.UpdatePinStatus(canonical);
                 await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
                 await _playlists.AddTrackAsync(playlist.Id, canonical.Id, CurrentOwnerId, null, ct)
                     .ConfigureAwait(false);
@@ -947,19 +1142,84 @@ public sealed class PlaylistSyncService
     };
 
     /// <summary>
-    /// Выполняет загрузку пользовательской обложки плейлиста на серверы YouTube через Scotty Upload Protocol.
-    /// Игнорирует изображения, уже размещенные на CDN YouTube, и безопасно обрабатывает ошибки недоступности источника.
+    /// Определяет, нужно ли обновлять локальный счётчик просмотров значением из облака.
+    /// Защищает точное число просмотров (полученное из YouTube Web) от затирания округлённым до сотен/тысяч значением из WEB_REMIX.
     /// </summary>
+    private static bool ShouldUpdateViewCount(long? currentViews, long? cloudViews)
+    {
+        if (cloudViews is null)
+            return currentViews is not null;
+
+        if (currentViews is null or <= 0)
+            return true;
+
+        long cur = currentViews.Value;
+        long cloud = cloudViews.Value;
+        if (cur == cloud)
+            return false;
+
+        // Если в WEB_REMIX пришло округлённое значение (кратное 100 или 1000), а локально уже хранится точное число в том же диапазоне — сохраняем точное
+        if (cloud >= 1_000 && cloud % 100 == 0 && cur % 100 != 0)
+        {
+            long step = cloud >= 10_000 ? 1_000 : 100;
+            if (Math.Abs(cur - cloud) < step)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsLocalCoverAlreadySyncedWithCloud(
+        Playlist playlist,
+            string? cloudThumbnailUrl,
+            out string? normalizedLocal)
+    {
+        normalizedLocal = ThumbnailComparer.Normalize(playlist.ThumbnailUrl);
+        if (string.IsNullOrEmpty(normalizedLocal) || string.IsNullOrEmpty(cloudThumbnailUrl))
+            return false;
+
+        if (ThumbnailComparer.IsYoutubeHosted(normalizedLocal))
+            return true;
+
+        if (playlist.LastSyncedAtUtc is not { } lastSyncUtc)
+            return false;
+
+        string? localPath = null;
+        if (normalizedLocal.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Uri.TryCreate(normalizedLocal, UriKind.Absolute, out var uri))
+                localPath = uri.LocalPath;
+        }
+        else if (Path.IsPathRooted(normalizedLocal))
+        {
+            localPath = normalizedLocal;
+        }
+
+        if (!string.IsNullOrEmpty(localPath))
+        {
+            if (!File.Exists(localPath))
+                return false;
+
+            var lastWriteUtc = File.GetLastWriteTimeUtc(localPath);
+            if (lastWriteUtc > lastSyncUtc.AddSeconds(5))
+                return false;
+
+            return string.IsNullOrEmpty(playlist.ETag) ||
+                   string.Equals(playlist.ETag, normalizedLocal, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !string.IsNullOrEmpty(playlist.ETag) &&
+               string.Equals(playlist.ETag, normalizedLocal, StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<bool> UploadThumbnailToYoutubeAsync(string youtubePlaylistId, string thumbnailUrl,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(thumbnailUrl) || string.IsNullOrWhiteSpace(youtubePlaylistId))
             return false;
 
-        // Обложки YouTube CDN (ytimg, ggpht, gstatic) уже находятся на серверах Google и не подлежат повторной Scotty-выгрузке
-        if (thumbnailUrl.Contains("ytimg.com", StringComparison.OrdinalIgnoreCase) ||
-            thumbnailUrl.Contains("ggpht.com", StringComparison.OrdinalIgnoreCase) ||
-            thumbnailUrl.Contains("gstatic.com", StringComparison.OrdinalIgnoreCase))
+        // Обложки YouTube CDN (ytimg, ggpht, googleusercontent, gstatic) уже находятся на серверах Google и не подлежат повторной Scotty-выгрузке
+        if (ThumbnailComparer.IsYoutubeHosted(thumbnailUrl))
         {
             Log.Debug($"[PlaylistSync] Skipping upload for YouTube-hosted thumbnail on playlist {youtubePlaylistId}");
             return false;

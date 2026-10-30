@@ -61,9 +61,16 @@ internal static class PlaylistStreamingParser
             }
 
             // 2. Изолированный парсинг шапки
+            if (reader.ValueTextEquals(InnerTubeTokens.MusicEditablePlaylistDetailHeaderRenderer))
+            {
+                result.IsEditable = true;
+                using var headerDoc = JsonDocument.ParseValue(ref reader);
+                PopulateHeaderMetadata(headerDoc.RootElement, result);
+                continue;
+            }
+
             if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveHeaderRenderer) ||
-                reader.ValueTextEquals(InnerTubeTokens.MusicDetailHeaderRenderer) ||
-                reader.ValueTextEquals(InnerTubeTokens.MusicEditablePlaylistDetailHeaderRenderer))
+                reader.ValueTextEquals(InnerTubeTokens.MusicDetailHeaderRenderer))
             {
                 using var headerDoc = JsonDocument.ParseValue(ref reader);
                 PopulateHeaderMetadata(headerDoc.RootElement, result);
@@ -172,8 +179,8 @@ internal static class PlaylistStreamingParser
 
             // Фиксация входа в продолжение полки треков
             if (continuationShelfDepth == -1 &&
-                (reader.ValueTextEquals("musicPlaylistShelfContinuation") ||
-                 reader.ValueTextEquals("playlistVideoListContinuation")))
+                (reader.ValueTextEquals(InnerTubeTokens.MusicPlaylistShelfContinuation) ||
+                 reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoListContinuation)))
             {
                 if (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
                 {
@@ -440,59 +447,97 @@ internal static class PlaylistStreamingParser
     private static void PopulateHeaderMetadata(JsonElement headerElement, FullPlaylistSyncData target)
     {
         var targetElement = headerElement;
-        if (headerElement.TryGetProperty("header", out var nestedHeader))
+        if (headerElement.TryGetProperty(InnerTubeTokens.Header, out var nestedHeader))
         {
-            if (nestedHeader.TryGetProperty("musicResponsiveHeaderRenderer", out var nestedResponsive))
+            if (nestedHeader.TryGetProperty(InnerTubeTokens.MusicResponsiveHeaderRenderer, out var nestedResponsive))
                 targetElement = nestedResponsive;
         }
 
-        target.Title ??= targetElement.GetPropertyOrNull("title")?.GetPropertyOrNull("runs")
-            ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull("text")?.GetStringOrNull()
-            ?? targetElement.GetPropertyOrNull("title")?.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+        target.Title ??= targetElement.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.Runs)
+            ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull()
+            ?? targetElement.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull();
 
         // Извлечение описания: поддержка прямого runs (Web) и вложенного musicDescriptionShelfRenderer (YouTube Music)
-        var descContainer = targetElement.GetPropertyOrNull("description");
+        var descContainer = targetElement.GetPropertyOrNull(InnerTubeTokens.Description);
         if (descContainer.HasValue)
         {
-            var innerShelf = descContainer.Value.GetPropertyOrNull("musicDescriptionShelfRenderer");
-            var effectiveDesc = innerShelf?.GetPropertyOrNull("description") ?? descContainer.Value;
+            var innerShelf = descContainer.Value.GetPropertyOrNull(InnerTubeTokens.MusicDescriptionShelfRenderer);
+            var effectiveDesc = innerShelf?.GetPropertyOrNull(InnerTubeTokens.Description) ?? descContainer.Value;
 
-            target.Description ??= YoutubeParsingHelpers.ConcatTextRuns(effectiveDesc.GetPropertyOrNull("runs"))
-                ?? effectiveDesc.GetPropertyOrNull("simpleText")?.GetStringOrNull();
+            target.Description ??= YoutubeParsingHelpers.ConcatTextRuns(effectiveDesc.GetPropertyOrNull(InnerTubeTokens.Runs))
+                ?? effectiveDesc.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull();
         }
 
-        var thumbs = targetElement.GetPropertyOrNull("thumbnail")?.GetPropertyOrNull("musicThumbnailRenderer")
-            ?.GetPropertyOrNull("thumbnail")?.GetPropertyOrNull("thumbnails")
-            ?? targetElement.GetPropertyOrNull("thumbnail")?.GetPropertyOrNull("thumbnails");
+        var thumbs = targetElement.GetPropertyOrNull(InnerTubeTokens.Thumbnail)?.GetPropertyOrNull(InnerTubeTokens.MusicThumbnailRenderer)
+            ?.GetPropertyOrNull(InnerTubeTokens.Thumbnail)?.GetPropertyOrNull(InnerTubeTokens.Thumbnails)
+            ?? targetElement.GetPropertyOrNull(InnerTubeTokens.Thumbnail)?.GetPropertyOrNull(InnerTubeTokens.Thumbnails);
 
         if (thumbs is { ValueKind: JsonValueKind.Array } arr && arr.GetArrayLength() > 0)
         {
-            target.ThumbnailUrl = arr[arr.GetArrayLength() - 1].GetPropertyOrNull("url")?.GetStringOrNull();
+            target.ThumbnailUrl ??= arr[arr.GetArrayLength() - 1].GetPropertyOrNull(InnerTubeTokens.Url)?.GetStringOrNull();
         }
 
-        var viewsText = targetElement.GetPropertyOrNull("secondSubtitle")?.GetPropertyOrNull("runs")
-            ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull("text")?.GetStringOrNull();
+        var secondSubtitleRuns = targetElement.GetPropertyOrNull(InnerTubeTokens.SecondSubtitle)?.GetPropertyOrNull(InnerTubeTokens.Runs);
+        if (secondSubtitleRuns is { ValueKind: JsonValueKind.Array } secRuns)
+        {
+            int secLen = secRuns.GetArrayLength();
+            for (int i = 0; i < secLen; i++)
+            {
+                var text = secRuns[i].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
 
-        if (!string.IsNullOrEmpty(viewsText))
-            target.ViewCount = YoutubeParsingHelpers.ParseLongFromText(viewsText);
+                if (target.ViewCount is null && text.Contains("view", StringComparison.OrdinalIgnoreCase))
+                {
+                    target.ViewCount = YoutubeParsingHelpers.ParseLongFromText(text);
+                }
 
-        var subtitleRuns = targetElement.GetPropertyOrNull("subtitle")?.GetPropertyOrNull("runs");
+                target.ReleaseDate ??= TryParseHeaderDate(text);
+            }
+        }
+
+        var subtitleRuns = targetElement.GetPropertyOrNull(InnerTubeTokens.Subtitle)?.GetPropertyOrNull(InnerTubeTokens.Runs);
         if (subtitleRuns is { ValueKind: JsonValueKind.Array } sRuns && sRuns.GetArrayLength() > 0)
         {
-            for (int i = sRuns.GetArrayLength() - 1; i >= 0; i--)
+            for (int i = sRuns.GetArrayLength() - 1; i >= 0 && target.ReleaseDate is null; i--)
             {
-                var text = sRuns[i].GetPropertyOrNull("text")?.GetStringOrNull();
+                var text = sRuns[i].GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    var year = YoutubeParsingHelpers.ParseYearFromText(text);
-                    if (year.HasValue)
-                    {
-                        target.ReleaseDate = new DateOnly(year.Value, 1, 1);
-                        break;
-                    }
+                    target.ReleaseDate = TryParseHeaderDate(text);
                 }
             }
         }
+    }
+
+    private static DateOnly? TryParseHeaderDate(string text)
+    {
+        var span = text.AsSpan().Trim();
+        if (span.IsEmpty)
+            return null;
+
+        if (span.StartsWith("Last updated on ", StringComparison.OrdinalIgnoreCase))
+            span = span["Last updated on ".Length..].Trim();
+        else if (span.StartsWith("Updated ", StringComparison.OrdinalIgnoreCase))
+            span = span["Updated ".Length..].Trim();
+
+        if (span.IsEmpty)
+            return null;
+
+        if (DateOnly.TryParseExact(span, YoutubeParsingHelpers.DateFormats,
+                YoutubeParsingHelpers.EnCulture, DateTimeStyles.AllowWhiteSpaces, out var exactDate))
+        {
+            return exactDate;
+        }
+
+        if (YoutubeParsingHelpers.IsRelativeDate(span))
+        {
+            var rel = YoutubeParsingHelpers.ParseRelativeDate(span, DateTime.UtcNow);
+            if (rel.HasValue)
+                return rel;
+        }
+
+        return null;
     }
 
     #endregion
