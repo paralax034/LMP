@@ -359,6 +359,8 @@ public sealed partial class CachingStreamSource
         int logicalIndex, HttpRequestMessage request, HttpResponseMessage response)
     {
         int count = Volatile.Read(ref _consecutive403Count);
+        SessionCacheStore.Invalidate(_trackId);
+
         var nParam = UrlEx.TryGetQueryParameterValue(_currentUrl, "n");
         var cParam = UrlEx.TryGetQueryParameterValue(_currentUrl, "c");
         var reqUa = request.Headers.UserAgent.ToString();

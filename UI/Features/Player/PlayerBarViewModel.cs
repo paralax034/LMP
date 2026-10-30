@@ -999,7 +999,12 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void SetFullyBuffered()
     {
-        if (IsFullyBuffered && BufferProgressPercent >= 100) return;
+        if (IsFullyBuffered
+            && BufferProgressPercent >= 100
+            && BufferedRanges is [{ Start: <= 0.0, End: >= 1.0 }])
+        {
+            return;
+        }
 
         BufferProgressPercent = 100;
         BufferedRanges = [(0.0, 1.0)];

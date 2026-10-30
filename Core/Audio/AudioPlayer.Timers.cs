@@ -19,10 +19,21 @@ public sealed partial class AudioPlayer
         if (suspended)
         {
             StopTimers();
+            return;
         }
-        else if (_state == PlayerState.Playing && _activePipeline != null)
+
+        if (_activePipeline == null) return;
+
+        _events.RaisePositionChanged(Position);
+        RaiseBufferState();
+
+        if (_state == PlayerState.Playing)
         {
             StartTimers();
+        }
+        else if (_state == PlayerState.Buffering)
+        {
+            StartBufferTimer();
         }
     }
 
@@ -38,6 +49,14 @@ public sealed partial class AudioPlayer
         else
             _positionTimer.Change(0, interval);
 
+        StartBufferTimer();
+    }
+
+    /// <summary>Запускает или перезапускает только таймер состояния буфера.</summary>
+    private void StartBufferTimer()
+    {
+        if (_uiTimersSuspended || _disposed) return;
+
         if (_bufferTimer == null)
             _bufferTimer = new Timer(_ => RaiseBufferState(), null, 0, AudioConstants.BufferStateUpdateIntervalMs);
         else
@@ -51,7 +70,7 @@ public sealed partial class AudioPlayer
         _bufferTimer?.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
-    /// <summary>Запускает position timer с задержкой первого tick (после seek).</summary>
+    /// <summary>Запускает position timer с задержкой первого tick (после seek) и гарантирует работу таймера буфера.</summary>
     private void StartPositionTimerDelayed()
     {
         if (_uiTimersSuspended || _disposed) return;
@@ -62,6 +81,15 @@ public sealed partial class AudioPlayer
             _positionTimer = new Timer(_ => _events.RaisePositionChanged(Position), null, interval, interval);
         else
             _positionTimer.Change(interval, interval);
+
+        if (_state is PlayerState.Playing or PlayerState.Buffering)
+        {
+            StartBufferTimer();
+        }
+        else
+        {
+            RaiseBufferState();
+        }
     }
 
     /// <summary>Останавливает только position timer.</summary>

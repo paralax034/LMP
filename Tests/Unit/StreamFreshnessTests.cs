@@ -110,6 +110,113 @@ public static class StreamFreshnessTests
         TestAssert.Equal(1, refreshCalls);
     }
 
+    [TestMethod(TestCategory.Unit, "403 Refresh Outcomes: NoChange Network Deferral, StaleToken Breaker & SessionCache Purge", Group = TestGroups.Network, Order = 4)]
+    public static async Task Test403RefreshOutcomesAndSessionCachePurgeAsync()
+    {
+        var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        const string trackId = "yt_403_edge_test";
+        var initialUrl = $"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=initialNToken12&itag=251&clen=1000000";
+
+        // 1. Проверяем, что 403 диагностика немедленно вычищает протухший манифест из SessionCacheStore
+        var dummyStream = new Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
+            251,
+            initialUrl,
+            new Core.Youtube.Videos.Streams.Container("webm"),
+            new Core.Youtube.Videos.Streams.FileSize(1_000_000),
+            new Core.Youtube.Videos.Streams.Bitrate(160_000),
+            "opus",
+            null,
+            true,
+            false);
+
+        Core.Audio.Http.SessionCacheStore.RecordManifest(trackId, [dummyStream], -12.0f);
+        TestAssert.NotNull(Core.Audio.Http.SessionCacheStore.GetManifest(trackId), "Manifest must be recorded in SessionCacheStore");
+
+        using var tempCache = new TempCacheManager();
+        int mode = 0; // 0 = NoChange (null), 1 = StaleToken (expired + same n), 2 = Fresh URL
+        int refreshCount = 0;
+
+        var config = new StreamingConfig
+        {
+            RefreshCooldownMs = 10,
+            PostRefreshDelayMs = 5
+        };
+
+        using var source = new CachingStreamSource(
+            cacheKey: "yt_403_edge_test_WebM_160",
+            trackId: trackId,
+            url: initialUrl,
+            contentLength: 1_000_000,
+            format: AudioFormat.WebM,
+            codec: AudioCodec.Opus,
+            bitrate: 160,
+            cacheManager: tempCache.Manager,
+            config: config,
+            urlRefresher: _ =>
+            {
+                Interlocked.Increment(ref refreshCount);
+                return mode switch
+                {
+                    0 => Task.FromResult<string?>(null),
+                    1 => Task.FromResult<string?>($"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix - 600}&n=initialNToken12&sig=stale_{refreshCount}&itag=251"),
+                    _ => Task.FromResult<string?>($"https://rr2---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=freshNToken999&sig=ok&itag=251")
+                };
+            });
+
+        // Вызываем LogAndDiagnose403Async для проверки немедленной инвалидации SessionCacheStore
+        var diagMethod = typeof(CachingStreamSource).GetMethod(
+            "LogAndDiagnose403Async",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        using (var req = new HttpRequestMessage(HttpMethod.Get, initialUrl))
+        using (var resp = new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden) { Content = new StringContent("") })
+        {
+            await ((Task)diagMethod.Invoke(source, [0, req, resp])!).ConfigureAwait(false);
+        }
+
+        TestAssert.Null(
+            Core.Audio.Http.SessionCacheStore.GetManifest(trackId),
+            "HTTP 403 must immediately invalidate SessionCacheStore entry so Partial Cache Fast Start never reuses dead URL");
+
+        // 2. Проверяем CoordinatedRefreshAsync при обрыве интернета (refresher возвращает null -> NoChange, не инкрементирует circuit breaker)
+        var coordinatedRefreshMethod = typeof(CachingStreamSource).GetMethod(
+            "CoordinatedRefreshAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        var outcomeNoChange = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
+        TestAssert.Equal("NoChange", outcomeNoChange, "Null refresher result must yield NoChange (transient network outage)");
+
+        // 3. Проверяем StaleToken и открытие Circuit Breaker после 5 протухших рефрешей подряд
+        mode = 1;
+        for (int i = 0; i < 5; i++)
+        {
+            var outcomeStale = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
+            TestAssert.Equal("StaleToken", outcomeStale, $"Expected StaleToken on iteration {i + 1}");
+        }
+
+        bool circuitBroke = false;
+        try
+        {
+            _ = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
+        }
+        catch (Core.Exceptions.ChunkDownloadFatalException ex) when (ex.Reason == Core.Exceptions.ChunkDownloadFailureReason.Forbidden403)
+        {
+            circuitBroke = true;
+        }
+
+        TestAssert.True(circuitBroke, "CoordinatedRefreshAsync must open circuit breaker after 5 consecutive StaleToken refreshes");
+    }
+
+    private static async Task<string> InvokeCoordinatedRefreshAsync(
+        CachingStreamSource source,
+        System.Reflection.MethodInfo method)
+    {
+        var task = (Task)method.Invoke(source, [CancellationToken.None])!;
+        await task.ConfigureAwait(false);
+        var resultProp = task.GetType().GetProperty("Result")!;
+        return resultProp.GetValue(task)!.ToString()!;
+    }
+
     private sealed class TempCacheManager : IDisposable
     {
         private readonly string _tempDir;

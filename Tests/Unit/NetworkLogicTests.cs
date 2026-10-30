@@ -71,4 +71,44 @@ public static class NetworkLogicTests
             AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
         }
     }
+
+    [TestMethod(TestCategory.Unit, "YoutubeNetworkException Classification & User-Cancel Guard", Group = TestGroups.Network, Order = 3)]
+    public static Task TestYoutubeNetworkExceptionClassificationAsync()
+    {
+        // 1. Внутренний таймаут HttpClient при не отменённом внешнем токене -> Timeout
+        var internalTimeoutEx = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
+        var classifiedTimeout = Core.Youtube.Exceptions.YoutubeNetworkException.TryClassify(internalTimeoutEx, CancellationToken.None);
+        TestAssert.NotNull(classifiedTimeout, "HttpClient internal timeout must be classified as YoutubeNetworkException");
+        TestAssert.True(classifiedTimeout.IsTimeout, "Expected IsTimeout == true");
+        TestAssert.Equal("Error_Network_Timeout", classifiedTimeout.GetLocalizationKey());
+        TestAssert.Equal("Recommendation_CheckNetwork", classifiedTimeout.GetRecommendationKey());
+
+        // 2. Отмена самим пользователем (внешний токен отменён) -> обязана вернуть null, а не ложную ошибку сети!
+        using var userCts = new CancellationTokenSource();
+        userCts.Cancel();
+        var userCancelEx = new TaskCanceledException("User switched track", null, userCts.Token);
+        var classifiedUserCancel = Core.Youtube.Exceptions.YoutubeNetworkException.TryClassify(userCancelEx, userCts.Token);
+        TestAssert.Null(classifiedUserCancel, "User-initiated cancellation must NEVER be classified as a network error");
+
+        // 3. Ошибка SSL/TLS Handshake (DPI / ТСПУ блокировка) -> SslHandshakeFailure
+        var sslEx = new HttpRequestException(
+            "The SSL connection could not be established",
+            new System.Security.Authentication.AuthenticationException("Received an unexpected EOF or 0 bytes from the transport stream."));
+        var classifiedSsl = Core.Youtube.Exceptions.YoutubeNetworkException.TryClassify(sslEx, CancellationToken.None);
+        TestAssert.NotNull(classifiedSsl);
+        TestAssert.True(classifiedSsl.IsSslFailure, "Expected IsSslFailure == true");
+        TestAssert.Equal("Error_SslHandshake_Failed", classifiedSsl.GetLocalizationKey());
+        TestAssert.Equal("Recommendation_DpiBlocked", classifiedSsl.GetRecommendationKey());
+
+        // 4. Сброс сокета / недоступность сети -> ConnectionFailed
+        var socketEx = new HttpRequestException(
+            "Connection reset by peer",
+            new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionReset));
+        var classifiedConn = Core.Youtube.Exceptions.YoutubeNetworkException.TryClassify(socketEx, CancellationToken.None);
+        TestAssert.NotNull(classifiedConn);
+        TestAssert.True(classifiedConn.IsConnectionFailed, "Expected IsConnectionFailed == true");
+        TestAssert.Equal("Error_Network_ConnectionFailed", classifiedConn.GetLocalizationKey());
+
+        return Task.CompletedTask;
+    }
 }

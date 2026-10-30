@@ -201,28 +201,9 @@ public sealed class EqualizerCurveControl : Control
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool IsActuallyVisibleOnScreen()
-    {
-        if (!IsEffectivelyVisible) return false;
-
-        Visual? current = this;
-        while (current != null)
-        {
-            Visual? parent = current.GetVisualParent();
-            if (parent is PersistentPageHost && current is InputElement page && !page.IsHitTestVisible)
-                return false;
-            if (current.Opacity <= 0.001)
-                return false;
-            current = parent;
-        }
-
-        return true;
-    }
-
     private void EnsureAnimationLoop()
     {
-        if (_isRafActive || !IsActuallyVisibleOnScreen()) return;
+        if (_isRafActive || !PersistentPageHost.CanAnimateVisual(this)) return;
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel == null) return;
 
@@ -234,7 +215,7 @@ public sealed class EqualizerCurveControl : Control
 
     private void OnAnimationFrame(TimeSpan ts)
     {
-        if (!_isRafActive || !IsActuallyVisibleOnScreen() || ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
+        if (!_isRafActive || !PersistentPageHost.CanAnimateVisual(this) || ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
         {
             _isRafActive = false;
             return;
@@ -315,7 +296,7 @@ public sealed class EqualizerCurveControl : Control
                 (_, _) =>
                 {
                     _idlePollTimer?.Stop();
-                    if (IsActuallyVisibleOnScreen())
+                    if (PersistentPageHost.CanAnimateVisual(this))
                         EnsureAnimationLoop();
                 });
             _idlePollTimer.Start();
@@ -520,7 +501,7 @@ public sealed class EqualizerCurveControl : Control
 
     public override void Render(DrawingContext context)
     {
-        if (!_isRafActive && IsActuallyVisibleOnScreen())
+        if (!_isRafActive && PersistentPageHost.CanAnimateVisual(this))
             EnsureAnimationLoop();
 
         double w = Bounds.Width;

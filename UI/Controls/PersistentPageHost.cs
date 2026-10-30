@@ -3,6 +3,8 @@ using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using Avalonia.Input;
+using Avalonia.VisualTree;
 
 namespace LMP.UI.Controls;
 
@@ -28,6 +30,36 @@ public sealed class PersistentPageHost : Panel
     /// Возникает синхронно при смене активной страницы в хосте.
     /// </summary>
     public static event Action? ActivePageChanged;
+
+    /// <summary>
+    /// Единая точка проверки (DRY/SRP), находится ли визуальный элемент на активной видимой странице
+    /// в не-свёрнутом окне без активного режима приостановки <see cref="SuspendLevel"/>.
+    /// Не отсекает элементы по промежуточному <c>Opacity == 0</c> обычных контейнеров во время fade-in анимаций.
+    /// </summary>
+    public static bool CanAnimateVisual(Visual visual, TopLevel? cachedTopLevel = null)
+    {
+        if (!visual.IsEffectivelyVisible || ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
+            return false;
+
+        var topLevel = cachedTopLevel ?? TopLevel.GetTopLevel(visual);
+        if (topLevel == null)
+            return false;
+
+        if (topLevel is Window w && (!w.IsVisible || w.WindowState == WindowState.Minimized))
+            return false;
+
+        Visual? current = visual;
+        while (current != null)
+        {
+            Visual? parent = current.GetVisualParent();
+            if (parent is PersistentPageHost && current is InputElement page && !page.IsHitTestVisible)
+                return false;
+
+            current = parent;
+        }
+
+        return true;
+    }
 
     private readonly Dictionary<object, Control> _pageCache = new(8);
     private Control? _activeView;

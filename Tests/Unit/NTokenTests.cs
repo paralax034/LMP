@@ -85,18 +85,45 @@ public static class NTokenTests
         Log.Info($"[NToken] Idempotency guard OK in {sw.ElapsedMilliseconds}ms");
     }
 
+    private static string[] ResolveCandidatePlayerVersions()
+    {
+        var configured = TestConfig.Get().PlayerVersions.Versions;
+        var cached = PlayerContext.GetCachedVersions();
+
+        if (configured.Length == 0) return cached;
+        if (cached.Length == 0) return configured;
+
+        var combined = new List<string>(configured.Length + cached.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < cached.Length; i++)
+        {
+            if (seen.Add(cached[i]))
+                combined.Add(cached[i]);
+        }
+
+        for (int i = 0; i < configured.Length; i++)
+        {
+            if (seen.Add(configured[i]))
+                combined.Add(configured[i]);
+        }
+
+        return [.. combined];
+    }
+
     [TestMethod(TestCategory.Integration, "AST Solver & QuickJS Persistent Context",
         Group = TestGroups.Cipher, Order = 4, RequiresNetwork = false, TimeoutSeconds = 60)]
     public static async Task TestAstSolverWithPersistentContextAsync(CancellationToken ct = default)
     {
-        var config = TestConfig.Get().PlayerVersions;
+        var candidates = ResolveCandidatePlayerVersions();
         PlayerContext? context = null;
         string? usedVersion = null;
 
-        for (int i = 0; i < config.Versions.Length; i++)
+        for (int i = 0; i < candidates.Length; i++)
         {
-            var version = config.Versions[i];
-            context = PlayerContext.LoadFromCacheNoExpiry(version);
+            var version = candidates[i];
+            context = PlayerContext.LoadFromCacheNoExpiry(version, requireRawBaseJs: true)
+                   ?? PlayerContext.LoadFromCacheNoExpiry(version, requireRawBaseJs: false);
             if (context is not null)
             {
                 usedVersion = version;
@@ -109,26 +136,30 @@ public static class NTokenTests
             TestAssert.Skip($"No cached player versions found in {G.Folder.NTokenCache}");
         }
 
-        Log.Info($"[AST] Testing player version: {usedVersion} ({context!.BaseJs.Length / 1024}KB)");
+        Log.Info($"[AST] Testing player version: {usedVersion} (raw BaseJs={context!.BaseJs.Length / 1024}KB)");
 
-        var script = context.GetOrPrepareScript(() => YoutubeAstSolver.PreprocessPlayer(context.BaseJs));
+        var script = !string.IsNullOrEmpty(context.BaseJs)
+            ? YoutubeAstSolver.PreprocessPlayer(context.BaseJs)
+            : context.GetOrPrepareScript(() => YoutubeAstSolver.PreprocessPlayer(context.BaseJs));
+
         TestAssert.True(script.Contains("_result.n", StringComparison.Ordinal), "Preprocessed script missing _result.n");
         TestAssert.True(script.Contains("_result.sig", StringComparison.Ordinal), "Preprocessed script missing _result.sig");
 
-        var fixedManager = new FixedPlayerContextManager(context);
+        var freshContext = new PlayerContext(usedVersion!, string.Empty, preprocessedJs: script, sts: context.Sts, clientVersion: context.ClientVersion);
+        var fixedManager = new FixedPlayerContextManager(freshContext);
         using var jsService = new JsDecryptionService(fixedManager);
 
         await jsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
         var testToken = TestToken;
-        var decryptedN = await jsService.CallAsync("n", testToken).ConfigureAwait(false);
+        var decryptedN = await jsService.CallAsync("n", testToken, ct).ConfigureAwait(false);
 
         TestAssert.NotNullOrEmpty(decryptedN, "N-token decryption returned null/empty");
         TestAssert.False(string.Equals(decryptedN, testToken, StringComparison.Ordinal), "N-token unchanged after decryption");
         TestAssert.False(decryptedN.Contains("undefined", StringComparison.Ordinal), "Result contains 'undefined'");
 
         var testSig = TestConfig.Get().SigCipher.TestSignature;
-        var decryptedSig = await jsService.CallAsync("sig", testSig).ConfigureAwait(false);
+        var decryptedSig = await jsService.CallAsync("sig", testSig, ct).ConfigureAwait(false);
 
         TestAssert.NotNullOrEmpty(decryptedSig, "Sig decryption returned null/empty");
         TestAssert.False(string.Equals(decryptedSig, testSig, StringComparison.Ordinal), "Sig unchanged after decryption");
@@ -141,21 +172,22 @@ public static class NTokenTests
     public static async Task TestPlayerVersionCompatibilityAsync(CancellationToken ct = default)
     {
         var config = TestConfig.Get().PlayerVersions;
+        var versions = ResolveCandidatePlayerVersions();
 
-        if (config.Versions.Length == 0)
+        if (versions.Length == 0)
         {
-            TestAssert.Skip("No player versions configured in test-config.json");
+            TestAssert.Skip($"No player versions found in test-config.json or {G.Folder.NTokenCache}");
         }
 
         int passed = 0;
 
-        for (int i = 0; i < config.Versions.Length; i++)
+        for (int i = 0; i < versions.Length; i++)
         {
-            var version = config.Versions[i];
+            var version = versions[i];
             var context = PlayerContext.LoadFromCacheNoExpiry(version);
             if (context is null)
             {
-                Log.Warn($"  ⊘ Skipped: no cached base.js for {version}");
+                Log.Warn($"  ⊘ Skipped: no cached player artifacts for {version}");
                 continue;
             }
 
@@ -164,7 +196,7 @@ public static class NTokenTests
 
             await jsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
-            var nResult = await jsService.CallAsync("n", TestToken).ConfigureAwait(false);
+            var nResult = await jsService.CallAsync("n", TestToken, ct).ConfigureAwait(false);
             TestAssert.NotNullOrEmpty(nResult, $"Version {version}: N-token returned empty");
             TestAssert.False(string.Equals(nResult, TestToken, StringComparison.Ordinal), $"Version {version}: N-token unchanged");
 
@@ -173,7 +205,7 @@ public static class NTokenTests
                 for (int j = 0; j < cases.Length; j++)
                 {
                     var tc = cases[j];
-                    var result = await jsService.CallAsync("n", tc.Encrypted).ConfigureAwait(false);
+                    var result = await jsService.CallAsync("n", tc.Encrypted, ct).ConfigureAwait(false);
                     TestAssert.Equal(tc.Expected, result, $"Version {version}: Case {tc.Description ?? tc.Encrypted} failed");
                 }
             }
@@ -183,7 +215,7 @@ public static class NTokenTests
 
         if (passed == 0)
         {
-            TestAssert.Skip("None of the configured player versions could be loaded from local cache");
+            TestAssert.Skip("None of the candidate player versions could be loaded from local cache");
         }
 
         Log.Info($"[NToken] Compatibility: {passed} player version(s) passed");
@@ -233,7 +265,8 @@ internal sealed class FixedPlayerContextManager : PlayerContextManager
 {
     private readonly PlayerContext _context;
 
-    public FixedPlayerContextManager(PlayerContext context) : base(null!) =>
+    public FixedPlayerContextManager(PlayerContext context)
+        : base(static () => Core.Audio.Http.SharedHttpClient.Instance) =>
         _context = context;
 
     public override Task<PlayerContext> GetOrLoadAsync(CancellationToken ct = default) =>

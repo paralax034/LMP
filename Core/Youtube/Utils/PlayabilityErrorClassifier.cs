@@ -5,13 +5,13 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Безальтернативный высокопроизводительный классификатор ошибок playability от YouTube.
-/// Позволяет распознавать юридические ограничения и извлекать правообладателей.
+/// Высокопроизводительный классификатор инвариантных (hl=en) ошибок playability от YouTube InnerTube API.
+/// Распознаёт юридические/региональные ограничения и извлекает имя правообладателя.
 /// </summary>
 public static partial class PlayabilityErrorClassifier
 {
     /// <summary>
-    /// Анализирует сырое текстовое сообщение ошибки playability и классифицирует его.
+    /// Анализирует сырое текстовое сообщение ошибки playability (hl=en) и классифицирует его.
     /// </summary>
     /// <param name="errorMessage">Сырой текст ошибки от YouTube API.</param>
     /// <param name="claimant">Имя правообладателя (если найдено).</param>
@@ -24,40 +24,35 @@ public static partial class PlayabilityErrorClassifier
 
         if (errorMessage.Contains("copyright grounds", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("claimed content by", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("авторских прав", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("жалобы правообладателя", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("заблокировано по жалобе", StringComparison.OrdinalIgnoreCase))
+            errorMessage.Contains("copyright claim", StringComparison.OrdinalIgnoreCase))
         {
             claimant = ExtractCopyrightHolder(errorMessage);
             return StreamUnavailableReason.CopyrightBlocked;
         }
 
-        if (errorMessage.Contains("not available in your country", StringComparison.OrdinalIgnoreCase) ||
+        if (errorMessage.Contains("available in your country", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("blocked it in your country", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("not available in your region", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("недоступно в вашей стране", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("недоступно в вашем регионе", StringComparison.OrdinalIgnoreCase))
+            errorMessage.Contains("available in your region", StringComparison.OrdinalIgnoreCase))
         {
             return StreamUnavailableReason.RegionBlocked;
         }
 
         if (errorMessage.Contains("video is private", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("приватное видео", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("личный доступ", StringComparison.OrdinalIgnoreCase))
+            errorMessage.Contains("private video", StringComparison.OrdinalIgnoreCase))
         {
             return StreamUnavailableReason.Private;
         }
 
         if (errorMessage.Contains("removed by the uploader", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("video has been removed", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("deleted", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("удалено", StringComparison.OrdinalIgnoreCase))
+            errorMessage.Contains("no longer available", StringComparison.OrdinalIgnoreCase) ||
+            errorMessage.Contains("deleted", StringComparison.OrdinalIgnoreCase))
         {
             return StreamUnavailableReason.Removed;
         }
 
         if (errorMessage.Contains("age-restricted", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("возрастн", StringComparison.OrdinalIgnoreCase))
+            errorMessage.Contains("confirm your age", StringComparison.OrdinalIgnoreCase))
         {
             return StreamUnavailableReason.AgeRestricted;
         }
@@ -65,7 +60,7 @@ public static partial class PlayabilityErrorClassifier
         if (errorMessage.Contains("requires purchase", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("payment required", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("members-only", StringComparison.OrdinalIgnoreCase) ||
-            errorMessage.Contains("платный контент", StringComparison.OrdinalIgnoreCase))
+            errorMessage.Contains("channel's members", StringComparison.OrdinalIgnoreCase))
         {
             return StreamUnavailableReason.PaymentRequired;
         }
@@ -74,7 +69,7 @@ public static partial class PlayabilityErrorClassifier
     }
 
     /// <summary>
-    /// Вырезает имя правообладателя из сообщения об ошибке.
+    /// Извлекает имя правообладателя из инвариантного английского сообщения об ошибке.
     /// </summary>
     public static string ExtractCopyrightHolder(string error)
     {
@@ -89,10 +84,6 @@ public static partial class PlayabilityErrorClassifier
         if (match.Success)
             return CleanHolder(match.Groups[1].Value);
 
-        match = ClaimantRegexRuMatch.Match(error);
-        if (match.Success)
-            return CleanHolder(match.Groups[1].Value);
-
         return "YouTube Legal";
     }
 
@@ -104,12 +95,9 @@ public static partial class PlayabilityErrorClassifier
         return span.ToString();
     }
 
-    [GeneratedRegex(@"claimed content by\s+([A-Za-z0-9_.\-\s&'()]{2,40})", RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
+    [GeneratedRegex(@"claimed content by\s+([A-Za-z0-9_.\-\s&'()]{2,50})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ClaimantRegexEn { get; }
 
-    [GeneratedRegex(@"content from\s+([A-Za-z0-9_.\-\s&'()]{2,40}),\s+who", RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
+    [GeneratedRegex(@"content from\s+([A-Za-z0-9_.\-\s&'()]{2,50}),\s+who", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ClaimantRegexEnFrom { get; }
-
-    [GeneratedRegex(@"(?:жалобы правообладателя|по жалобе)\s+([A-Za-z0-9_.\-\s&'()А-Яа-яЁё]{2,40})", RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
-    private static partial Regex ClaimantRegexRuMatch { get; }
 }

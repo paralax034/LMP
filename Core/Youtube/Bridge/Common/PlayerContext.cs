@@ -269,12 +269,11 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Загружает кэшированный контекст плеера с диска БЕЗ валидации даты последнего изменения.
+    /// Загружает кэшированный контекст плеера с диска без проверки срока давности.
     /// </summary>
-    /// <remarks>
-    /// Используется преимущественно в Unit-тестах для работы со стабильными локальными дампами.
-    /// </remarks>
-    public static PlayerContext? LoadFromCacheNoExpiry(string version)
+    /// <param name="version">Хэш версии плеера.</param>
+    /// <param name="requireRawBaseJs">Если <c>true</c>, загружает оригинальный <c>base.js</c> для полного прогона AST-парсера.</param>
+    public static PlayerContext? LoadFromCacheNoExpiry(string version, bool requireRawBaseJs = false)
     {
         try
         {
@@ -285,7 +284,7 @@ public sealed partial class PlayerContext
 
             string? clientVersion = File.Exists(cverPath) ? File.ReadAllText(cverPath).Trim() : null;
 
-            if (File.Exists(prepPath) && File.Exists(stsPath))
+            if (!requireRawBaseJs && File.Exists(prepPath) && File.Exists(stsPath))
             {
                 var preprocessedJs = File.ReadAllText(prepPath);
                 var sts = File.ReadAllText(stsPath).Trim();
@@ -307,6 +306,49 @@ public sealed partial class PlayerContext
         {
             Log.Debug($"[PlayerContext] Cache load failed for {version}: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Возвращает список всех версий плеера, имеющих сохранённый <c>base.js</c> или <c>preprocessed.js</c> в локальном кэше (от новых к старым).
+    /// </summary>
+    public static string[] GetCachedVersions()
+    {
+        try
+        {
+            var dir = G.Folder.NTokenCache;
+            if (!Directory.Exists(dir)) return [];
+
+            var files = Directory.GetFiles(dir, "player_*_basejs.txt");
+            if (files.Length == 0)
+                files = Directory.GetFiles(dir, "player_*_preprocessed.js");
+
+            if (files.Length == 0) return [];
+
+            var items = new (string Version, DateTime LastWriteUtc)[files.Length];
+            int count = 0;
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                var match = PlayerVersionAnyFileRegex().Match(Path.GetFileName(files[i]));
+                if (match.Success)
+                {
+                    items[count++] = (match.Groups[1].Value, File.GetLastWriteTimeUtc(files[i]));
+                }
+            }
+
+            Array.Sort(items, 0, count, Comparer<(string Version, DateTime LastWriteUtc)>.Create(
+                static (a, b) => b.LastWriteUtc.CompareTo(a.LastWriteUtc)));
+
+            var result = new string[count];
+            for (int i = 0; i < count; i++)
+                result[i] = items[i].Version;
+
+            return result;
+        }
+        catch
+        {
+            return [];
         }
     }
 
@@ -430,6 +472,9 @@ public sealed partial class PlayerContext
 
     [GeneratedRegex(@"player_([a-fA-F0-9]+)_basejs\.txt")]
     private static partial Regex PlayerVersionRegex();
+
+    [GeneratedRegex(@"player_([a-fA-F0-9]+)_(?:basejs\.txt|preprocessed\.js)")]
+    private static partial Regex PlayerVersionAnyFileRegex();
 
     [GeneratedRegex(@"player\\?/([0-9a-fA-F]{8})\\?/")]
     private static partial Regex PlayerVersionIframeRegex();

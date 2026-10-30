@@ -456,10 +456,8 @@ public partial class PlayerBarView : UserControl
 
     private bool IsWindowVisibleForAnimation()
     {
-        if (_isSuspended || !IsEffectivelyVisible) return false;
-        if (_topLevel is Window w && (!w.IsVisible || w.WindowState == WindowState.Minimized))
-            return false;
-        return true;
+        if (_isSuspended) return false;
+        return Controls.PersistentPageHost.CanAnimateVisual(this, _topLevel);
     }
 
     private void EnsureRafRunning()

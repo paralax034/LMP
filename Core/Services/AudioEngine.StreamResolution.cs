@@ -7,6 +7,9 @@ namespace LMP.Core.Services;
 
 public sealed partial class AudioEngine
 {
+    private string? _lastSoftRefreshTrackId;
+    private long _lastSoftRefreshTick;
+
     #region Stream Resolution
 
     /// <summary>
@@ -343,25 +346,36 @@ public sealed partial class AudioEngine
             SessionCacheStore.Invalidate(trackId);
             _youtube.InvalidateMemoryCache(trackId);
 
-            Log.Info($"[AudioEngine] 403 refresh: per-track caches invalidated for {trackId}");
+            long nowTick = Environment.TickCount64;
+            bool hadRecentSoftRefresh = string.Equals(_lastSoftRefreshTrackId, trackId, StringComparison.Ordinal)
+                && (nowTick - Volatile.Read(ref _lastSoftRefreshTick)) < 60_000;
 
-            var descriptor = await _youtube
-                .RefreshStreamAsync(track, false, linked.Token)
-                .ConfigureAwait(false);
-
-            if (descriptor is { HasLiveUrl: true })
+            if (!hadRecentSoftRefresh)
             {
-                Log.Info($"[AudioEngine] Soft refresh returned new URL for {trackId}");
-                return descriptor.Value.Url;
+                _lastSoftRefreshTrackId = trackId;
+                Volatile.Write(ref _lastSoftRefreshTick, nowTick);
+
+                Log.Info($"[AudioEngine] 403 refresh: per-track caches invalidated for {trackId}");
+
+                var descriptor = await _youtube
+                    .RefreshStreamAsync(track, false, linked.Token)
+                    .ConfigureAwait(false);
+
+                if (descriptor is { HasLiveUrl: true })
+                {
+                    Log.Info($"[AudioEngine] Soft refresh returned new URL for {trackId}");
+                    return descriptor.Value.Url;
+                }
             }
 
-            Log.Warn($"[AudioEngine] Soft refresh failed for {trackId}, falling back to force refresh");
+            Log.Warn($"[AudioEngine] Escalating 403 refresh to force refresh (PoToken + client rotation) for {trackId}");
+            _lastSoftRefreshTrackId = null;
 
-            descriptor = await _youtube
+            var forcedDescriptor = await _youtube
                 .RefreshStreamAsync(track, true, linked.Token)
                 .ConfigureAwait(false);
 
-            return descriptor is { HasLiveUrl: true } ? descriptor.Value.Url : null;
+            return forcedDescriptor is { HasLiveUrl: true } ? forcedDescriptor.Value.Url : null;
         }
         catch (Exception) when (linked.IsCancellationRequested
                                 || sessionToken.IsCancellationRequested
@@ -371,8 +385,9 @@ public sealed partial class AudioEngine
         }
         catch (Exception ex)
         {
-            AbortCurrentTrackPlaybackAfterFatalError(trackId);
-            RaiseError(ex);
+            // Ошибка фонового обновления URL (например, временный обрыв сети/VPN) не должна убивать и убирать играющий трек;
+            // возврат null позволяет CachingStreamSource перейти в режим ожидания восстановления сети.
+            Log.Warn($"[AudioEngine] URL refresh failed for {trackId} (non-fatal, awaiting network recovery): {ex.Message}");
             return null;
         }
     }

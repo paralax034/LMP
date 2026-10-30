@@ -613,4 +613,46 @@ public static class AudioLogicTests
 
         return Task.CompletedTask;
     }
+
+    [TestMethod(TestCategory.Unit, "PlaybackErrorBehaviorMatrix & AudioPlayer Timer Lifecycle", Group = TestGroups.Audio, Order = 9)]
+    public static async Task TestPlaybackErrorMatrixAndTimerLifecycleAsync()
+    {
+        // 1. Проверка матрицы политик восстановления после ошибок воспроизведения
+        var dialogPolicy = UI.Helpers.PlaybackErrorBehaviorMatrix.Resolve(
+            PlaybackErrorBehavior.Dialog, PlaybackFailureBehavior.SkipAndPlay);
+        TestAssert.True(dialogPolicy.ShowNotification);
+        TestAssert.True(dialogPolicy.RequiresUserAction);
+        TestAssert.Equal(UI.Helpers.PlaybackRecoveryMode.AwaitUserAction, dialogPolicy.RecoveryMode);
+
+        var toastSkipPlay = UI.Helpers.PlaybackErrorBehaviorMatrix.Resolve(
+            PlaybackErrorBehavior.ToastAndSkip, PlaybackFailureBehavior.SkipAndPlay);
+        TestAssert.True(toastSkipPlay.ShowNotification);
+        TestAssert.False(toastSkipPlay.RequiresUserAction);
+        TestAssert.Equal(UI.Helpers.PlaybackRecoveryMode.SkipAndPlay, toastSkipPlay.RecoveryMode);
+
+        var ignoreStop = UI.Helpers.PlaybackErrorBehaviorMatrix.Resolve(
+            PlaybackErrorBehavior.Ignore, PlaybackFailureBehavior.Stop);
+        TestAssert.False(ignoreStop.ShowNotification, "Ignore mode must suppress notification toasts");
+        TestAssert.Equal(UI.Helpers.PlaybackRecoveryMode.Stop, ignoreStop.RecoveryMode);
+
+        // 2. Проверка сохранения активности _bufferTimer в AudioPlayer при переходах Buffering -> Suspend -> Resume -> StartPositionTimerDelayed
+        await using var player = new AudioPlayer(new AudioPlayerOptions
+        {
+            UseNullBackend = true,
+            PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
+        });
+
+        var stateField = typeof(AudioPlayer).GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var startPosDelayedMethod = typeof(AudioPlayer).GetMethod("StartPositionTimerDelayed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var bufferTimerField = typeof(AudioPlayer).GetField("_bufferTimer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        // Переводим плеер в состояние Buffering (как при Starvation) и проверяем, что StartPositionTimerDelayed запускает _bufferTimer
+        stateField.SetValue(player, PlayerState.Buffering);
+        player.SetUiTimersSuspended(true);
+        player.SetUiTimersSuspended(false);
+
+        startPosDelayedMethod.Invoke(player, null);
+        var bufferTimer = (Timer?)bufferTimerField.GetValue(player);
+        TestAssert.NotNull(bufferTimer, "_bufferTimer must be initialized and active when StartPositionTimerDelayed is called in Buffering/Playing state");
+    }
 }

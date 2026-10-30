@@ -352,18 +352,21 @@ public sealed class StreamClient
     /// <returns>Манифест со всеми доступными аудио-потоками.</returns>
     public async ValueTask<StreamManifest> GetManifestAsync(
         VideoId videoId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool forceRefresh = false)
     {
         bool isAuth = _isAuthenticatedCheck?.Invoke() ?? false;
 
-        bool preferWebRemix = YoutubeClientUtils.IsVpnActive
+        bool preferWebRemix = !forceRefresh
+               && YoutubeClientUtils.IsVpnActive
                && (_poTokenProvider?.HasActiveContext == true || isAuth);
 
         var (playerResponse, clientName) = await _controller.GetPlayerResponseWithFallbackAsync(
             videoId,
             cancellationToken,
             isAuthenticated: isAuth,
-            preferWebRemix: preferWebRemix).ConfigureAwait(false);
+            preferWebRemix: preferWebRemix,
+            forceMobilePriority: forceRefresh).ConfigureAwait(false);
 
         if (!playerResponse.IsPlayable)
         {

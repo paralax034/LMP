@@ -429,38 +429,13 @@ public sealed class AudioWaveBorder : Decorator
 
     private bool EffectiveUseWave => UseWaveAnimation ?? _globalUseWave;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool ShouldAnimate()
     {
-        if (_attachedTopLevel == null || !IsEffectivelyVisible)
-            return false;
-
-        if (_attachedTopLevel is Window w && (!w.IsVisible || w.WindowState == WindowState.Minimized))
-            return false;
-
-        if (ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
-            return false;
-
         if (!IsActive || !IsPlaying)
             return false;
 
-        Visual? current = this;
-        while (current != null)
-        {
-            Visual? parent = current.GetVisualParent();
-            if (parent is PersistentPageHost)
-            {
-                if (current is InputElement page && !page.IsHitTestVisible)
-                    return false;
-            }
-            else if (current.Opacity <= 0.001)
-            {
-                return false;
-            }
-
-            current = parent;
-        }
-
-        return true;
+        return PersistentPageHost.CanAnimateVisual(this, _attachedTopLevel);
     }
 
     private void EvaluateAnimationState()

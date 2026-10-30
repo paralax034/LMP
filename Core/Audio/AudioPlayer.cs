@@ -1065,11 +1065,13 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         var pipeline = cmd.Pipeline;
 
-        // Stop только если играем: при Buffering backend уже остановлен.
+        // Останавливаем только вывод звука и таймер позиции; таймер буфера оставляем активным,
+        // чтобы UI отображал прогресс докачки и пинг во время адаптивной ребуферизации.
         if (_state == PlayerState.Playing)
         {
             pipeline.Stop();
-            StopTimers();
+            StopPositionTimer();
+            StartBufferTimer();
         }
 
         SetState(PlayerState.Buffering);

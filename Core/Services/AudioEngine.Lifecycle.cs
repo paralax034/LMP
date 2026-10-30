@@ -94,32 +94,21 @@ public sealed partial class AudioEngine
 
         if (!string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal)) return;
 
-        lock (_queueLock)
-        {
-            if (_queue.Count <= 1 && _currentIndex >= 0 && _currentIndex < _queue.Count
-                && string.Equals(_queue[_currentIndex].Id, trackId, StringComparison.Ordinal))
-                _currentIndex = -1;
-        }
-
         BeginNewSession();
         _player.Stop();
     }
 
     /// <summary>
-    /// Сбрасывает и останавливает воспроизведение при возникновении критической ошибки.
+    /// Останавливает активный поток при критической ошибке, сохраняя текущий трек в плеере и очереди,
+    /// чтобы он не исчезал из интерфейса и пользователь мог возобновить его воспроизведение.
     /// </summary>
     public void StopAfterFatalPlaybackError()
     {
         AbortCurrentTrackPlaybackAfterFatalError(CurrentTrack?.Id);
 
-        CurrentTrack = null;
-        StreamInfo = AudioStreamInfo.Empty;
-
         RaiseOnUI(() =>
         {
-            OnTrackChanged?.Invoke(null);
-            OnPositionChanged?.Invoke(TimeSpan.Zero);
-            OnPlaybackStateChanged?.Invoke(false, false);
+            OnPlaybackStateChanged?.Invoke(false, true);
             OnLoadingStateChanged?.Invoke(false);
         });
     }

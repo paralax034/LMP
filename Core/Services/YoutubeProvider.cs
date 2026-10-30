@@ -614,7 +614,7 @@ public partial class YoutubeProvider : IDisposable
         {
             var vId = VideoId.Parse(rawVideoId);
             var manifest = await _youtube.Videos.Streams
-                .GetManifestAsync(vId, ct)
+                .GetManifestAsync(vId, ct, forceRefresh)
                 .ConfigureAwait(false);
 
             var audioStreams = manifest.GetAudioOnlyStreams()
@@ -1760,13 +1760,14 @@ public partial class YoutubeProvider : IDisposable
         Log.Warn($"[YouTube] [{rawVideoId}] Force refresh. Resetting caches...");
         try
         {
+            _poTokenProvider?.Invalidate();
             _nTokenDecryptor.InvalidateCache();
             _sigCipherDecryptor.InvalidateCache();
             _nTokenDecryptor.PlayerManager.InvalidateContext();
             _youtube.Videos.Streams.InvalidateCipherManifest();
             SessionCacheStore.Invalidate(trackId);
             _manifestRamCache.TryRemove(trackId, out _);
-            Log.Info($"[YouTube] [{rawVideoId}] Caches purged for force refresh.");
+            Log.Info($"[YouTube] [{rawVideoId}] Caches and PoToken purged for force refresh.");
         }
         catch (Exception ex)
         {

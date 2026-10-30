@@ -150,7 +150,7 @@ public sealed partial class CachingStreamSource
         if (diskRead > 0) return diskRead;
 
         int epochRetries = 0;
-        const int MaxEpochRetries = 15; // Расширенный бюджет (до 4.5 сек) для завершения QuickJS/BotGuard refresh
+        const int MaxEpochRetries = 15;
         const int EpochRetryDelayMs = 250;
         int consecutiveNetworkFailures = 0;
         bool networkStallPublished = false;
@@ -161,10 +161,9 @@ public sealed partial class CachingStreamSource
 
             try
             {
-                var downloadToken = CurrentDownloadToken;
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, downloadToken);
-
-                var result = await EnsureRangeAsync(position, requiredLength, linkedCts.Token, isCritical: true)
+                // Критическое чтение декодера использует только ct (отменяемый при Seek или Dispose),
+                // чтобы ResetDownloadEpoch() при HTTP 403 отменял фоновые preload-задачи, не убивая сам ReadAtAsync.
+                var result = await EnsureRangeAsync(position, requiredLength, ct, isCritical: true)
                     .ConfigureAwait(false);
 
                 switch (result)
@@ -209,26 +208,14 @@ public sealed partial class CachingStreamSource
 
                     case RangeDownloadResult.Cancelled:
                         ct.ThrowIfCancellationRequested();
-                        if (downloadToken.IsCancellationRequested)
+                        consecutiveNetworkFailures++;
+                        CheckAndPublishNetworkStall(
+                            ref networkStallPublished, consecutiveNetworkFailures, position);
+                        if (!await ct.DelayNoThrowAsync(
+                            ComputeNetworkRetryBackoff(consecutiveNetworkFailures), continueOnCapturedContext: false)
+                            .ConfigureAwait(false))
                         {
-                            epochRetries++;
-                            if (epochRetries >= MaxEpochRetries)
-                                throw CreateReadAtFatalException(position);
-                            if (!await ct.DelayNoThrowAsync(EpochRetryDelayMs, continueOnCapturedContext: false).ConfigureAwait(false))
-                                ct.ThrowIfCancellationRequested();
-                        }
-                        else
-                        {
-                            // ObjectDisposed от Rebuild — трактуем как transient сетевую ошибку.
-                            consecutiveNetworkFailures++;
-                            CheckAndPublishNetworkStall(
-                                ref networkStallPublished, consecutiveNetworkFailures, position);
-                            if (!await ct.DelayNoThrowAsync(
-                                ComputeNetworkRetryBackoff(consecutiveNetworkFailures), continueOnCapturedContext: false)
-                                .ConfigureAwait(false))
-                            {
-                                ct.ThrowIfCancellationRequested();
-                            }
+                            ct.ThrowIfCancellationRequested();
                         }
                         continue;
 
@@ -375,6 +362,8 @@ public sealed partial class CachingStreamSource
         int chunkIoExceptions = 0;
         bool warningPublished = false;
         int consecutiveStaleRefreshes = 0;
+        int urlRefreshCount = 0;
+        const int MaxUrlRefreshesPerRange = 4;
         const int MaxStaleRefreshesBeforeGivingUp = 3;
 
         for (int attempt = 0; attempt < maxAttempts; attempt++)
@@ -456,8 +445,12 @@ public sealed partial class CachingStreamSource
                             case UrlRefreshOutcome.Success:
                                 consecutiveStaleRefreshes = 0;
                                 chunkIoExceptions = 0;
-                                attempt = -1; // Сбрасываем попытки: на новом URL даём полный бюджет ретраев
-                                Log.Info($"[CachingSource] [{_trackId}] URL refreshed, retrying range {plan.Start} with fresh budget");
+                                urlRefreshCount++;
+                                if (urlRefreshCount <= MaxUrlRefreshesPerRange)
+                                {
+                                    attempt = -1; // На новом URL даём полный бюджет ретраев (до лимита рефрешей)
+                                }
+                                Log.Info($"[CachingSource] [{_trackId}] URL refreshed (#{urlRefreshCount}), retrying range {plan.Start} with fresh budget");
                                 continue;
 
                             case UrlRefreshOutcome.StaleToken:
@@ -480,12 +473,9 @@ public sealed partial class CachingStreamSource
                                 continue;
 
                             case UrlRefreshOutcome.NoChange:
-                                Log.Warn($"[CachingSource] [{_trackId}] Refresh returned no new URL. " +
-                                        $"Backing off before retry ({attempt + 1}/{maxAttempts})...");
-                                int noUrlBackoffMs = Math.Min((attempt + 1) * 2000, 8000);
-                                if (!await ct.DelayNoThrowAsync(noUrlBackoffMs, continueOnCapturedContext: false).ConfigureAwait(false))
-                                    return RangeDownloadResult.Cancelled;
-                                continue;
+                                Log.Warn($"[CachingSource] [{_trackId}] Refresh returned no new URL (network likely unavailable). " +
+                                        $"Deferring to network recovery loop...");
+                                return RangeDownloadResult.NetworkError;
 
                             default:
                                 continue;

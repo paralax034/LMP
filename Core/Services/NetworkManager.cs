@@ -39,8 +39,41 @@ public sealed partial class NetworkManager : IDisposable
     private int _isEvaluatingRoute;
     private bool _disposed;
 
+    private sealed class WeakAddressChangedSubscription
+    {
+        private readonly WeakReference<NetworkManager> _weakOwner;
+        private int _unsubscribed;
+
+        public WeakAddressChangedSubscription(NetworkManager owner)
+        {
+            _weakOwner = new WeakReference<NetworkManager>(owner);
+            NetworkChange.NetworkAddressChanged += OnAddressChanged;
+        }
+
+        private void OnAddressChanged(object? sender, EventArgs e)
+        {
+            if (_weakOwner.TryGetTarget(out var owner) && !Volatile.Read(ref owner._disposed))
+            {
+                owner.OnNetworkAddressChanged(sender, e);
+            }
+            else
+            {
+                Unsubscribe();
+            }
+        }
+
+        public void Unsubscribe()
+        {
+            if (Interlocked.Exchange(ref _unsubscribed, 1) == 0)
+            {
+                NetworkChange.NetworkAddressChanged -= OnAddressChanged;
+            }
+        }
+    }
+
     private readonly CancellationTokenSource _cts = new();
     private readonly Timer _addressDebounceTimer;
+    private readonly WeakAddressChangedSubscription _addressSubscription;
     private readonly Task _watchdogTask;
     public HttpClient AudioClient => _audioClient;
     public HttpClient ApiClient => _apiClient;
@@ -135,7 +168,7 @@ public sealed partial class NetworkManager : IDisposable
         (_audioClient, _apiClient, _imageClient, _probeClient, _updateClient) = CreateClientCluster(_currentProxy);
 
         _addressDebounceTimer = new Timer(OnAddressDebounceTimerCallback, this, Timeout.Infinite, Timeout.Infinite);
-        NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
+        _addressSubscription = new WeakAddressChangedSubscription(this);
         _watchdogTask = Task.Run(NetworkWatchdogLoopAsync);
 
         Log.Info($"[NetworkManager] Initialized. Outbound IP: {_lastOutboundIp ?? "(none)"}, VPN: {_isVpnActive}");
@@ -679,7 +712,7 @@ public sealed partial class NetworkManager : IDisposable
         if (Volatile.Read(ref _disposed)) return;
         Volatile.Write(ref _disposed, true);
 
-        NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+        _addressSubscription.Unsubscribe();
         _addressDebounceTimer.Dispose();
         _cts.Cancel();
         _cts.Dispose();

@@ -407,11 +407,12 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         VideoId videoId,
         CancellationToken cancellationToken,
         bool isAuthenticated = false,
-        bool preferWebRemix = false)
+        bool preferWebRemix = false,
+        bool forceMobilePriority = false)
     {
         // Если активен VPN и есть авторизация (либо BotGuard уже прогрет до 2мс fast-mint),
-        // сразу идём через WEB_REMIX, чтобы не терять ~250-700 мс на гарантированный BotDetection от ANDROID_VR на датацентровом IP.
-        bool useWebPriority = preferWebRemix || (isAuthenticated && YoutubeClientUtils.IsVpnActive);
+        // сразу идём через WEB_REMIX, кроме случаев принудительного рефреша после серии 403 от CDN.
+        bool useWebPriority = !forceMobilePriority && (preferWebRemix || (isAuthenticated && YoutubeClientUtils.IsVpnActive));
         var clients = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated, useWebPriority);
         var errors = new List<string>();
         var allBotDetection = true;

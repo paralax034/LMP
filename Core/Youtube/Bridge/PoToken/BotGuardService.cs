@@ -75,52 +75,64 @@ public sealed class BotGuardService : IDisposable
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
+            ct.ThrowIfCancellationRequested();
+
             if (attempt > 1)
             {
-                if (attempt <= 3)
-                    Log.Debug($"[BotGuardService] Retry {attempt}/{maxAttempts}...");
-                await Task.Delay(50, ct).ConfigureAwait(false);
+                Log.Debug($"[BotGuardService] Retry {attempt}/{maxAttempts}...");
+                await Task.Delay(150 * attempt, ct).ConfigureAwait(false);
             }
 
             Log.Debug($"[BotGuardService] Step 1: Fetching challenge (attempt {attempt})...");
 
-            var challenge = await WaaClient.FetchChallengeAsync(
-                _http, null, ct).ConfigureAwait(false);
-
-            if (challenge is null)
-            {
-                Log.Error("[BotGuardService] Failed to fetch challenge");
-                return null;
-            }
-
-            string bgScript = await GetOrDownloadBgScriptAsync(challenge, ct)
-                .ConfigureAwait(false);
-
-            if (string.IsNullOrEmpty(bgScript))
-            {
-                Log.Error("[BotGuardService] No bg.js script available");
-                return null;
-            }
-
-            await _lock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                var result = await RunPipelineAsync(bgScript, challenge, identifier, ct)
-                    .ConfigureAwait(false);
+                var challenge = await WaaClient.FetchChallengeAsync(
+                    _http, null, ct).ConfigureAwait(false);
 
-                if (result is not null)
+                if (challenge is null)
                 {
-                    Log.Info($"[BotGuardService] ✓ Pipeline succeeded on attempt {attempt} " +
-                             $"({sw.Elapsed.TotalMilliseconds:F0}ms)");
-                    return result;
+                    Log.Warn($"[BotGuardService] Failed to fetch challenge on attempt {attempt}/{maxAttempts}");
+                    continue;
                 }
 
-                ResetContext();
+                string bgScript = await GetOrDownloadBgScriptAsync(challenge, ct)
+                    .ConfigureAwait(false);
+
+                if (string.IsNullOrEmpty(bgScript))
+                {
+                    Log.Warn($"[BotGuardService] No bg.js script available on attempt {attempt}/{maxAttempts}");
+                    continue;
+                }
+
+                await _lock.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var result = await RunPipelineAsync(bgScript, challenge, identifier, ct)
+                        .ConfigureAwait(false);
+
+                    if (result is not null)
+                    {
+                        Log.Info($"[BotGuardService] ✓ Pipeline succeeded on attempt {attempt} " +
+                                 $"({sw.Elapsed.TotalMilliseconds:F0}ms)");
+                        return result;
+                    }
+
+                    ResetContext();
+                }
+                finally
+                {
+                    Log.Debug($"[BotGuardService] Attempt {attempt}: {sw.Elapsed.TotalMilliseconds:F0}ms");
+                    _lock.Release();
+                }
             }
-            finally
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                Log.Debug($"[BotGuardService] Attempt {attempt}: {sw.Elapsed.TotalMilliseconds:F0}ms");
-                _lock.Release();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[BotGuardService] Transient error on attempt {attempt}/{maxAttempts}: {ex.Message}");
             }
         }
 
