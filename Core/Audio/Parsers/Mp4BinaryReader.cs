@@ -146,58 +146,97 @@ public sealed class Mp4BinaryReader
     /// <param name="HeaderSize">Размер заголовка (8 для обычного, 16 для extended).</param>
     public readonly record struct BoxHeader(long Size, uint Type, int HeaderSize)
     {
-        /// <summary>Заголовок не прочитан (EOF или недостаточно данных).</summary>
+        /// <summary>Заголовок не прочитан (EOF, обрезанный хвост) либо size == 0 (зануленный блок).</summary>
         public bool IsEmpty => Size == 0;
     }
 
+    private const int CompactBoxHeaderSize = 8;
+    private const int ExtendedBoxHeaderSize = 16;
+
     /// <summary>
-    /// Читает заголовок MP4 box. Использует синхронный fast-path при мгновенном ответе потока.
+    /// Читает заголовок MP4 box. Частичные ответы потока (законны для любого <see cref="Stream"/>,
+    /// в том числе на стыке RAM-блоков кэша) дочитываются; пока поток отвечает синхронно — без аллокаций.
     /// </summary>
     /// <param name="ct">Токен отмены.</param>
-    /// <returns>Заголовок box. <see cref="BoxHeader.IsEmpty"/> = true при EOF.</returns>
+    /// <returns>
+    /// Заголовок box. <see cref="BoxHeader.IsEmpty"/> = true при EOF, в том числе при обрезанном хвосте короче 8 байт.
+    /// </returns>
     public ValueTask<BoxHeader> ReadBoxHeaderAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var readTask = _stream.ReadAsync(_ioBuffer.AsMemory(0, 8), ct);
-        if (readTask.IsCompletedSuccessfully)
+
+        int filled = 0;
+        while (filled < CompactBoxHeaderSize)
         {
+            var readTask = _stream.ReadAsync(_ioBuffer.AsMemory(filled, CompactBoxHeaderSize - filled), ct);
+            if (!readTask.IsCompletedSuccessfully)
+                return ReadBoxHeaderSlowAsync(readTask, filled, ct);
+
             int read = readTask.Result;
-            if (read < 8)
+            if (read <= 0)
+            {
+                // Настоящий EOF; отмена, замаскированная потоком под 0, не превращается в «пустой» заголовок
+                ct.ThrowIfCancellationRequested();
                 return new ValueTask<BoxHeader>(default(BoxHeader));
+            }
 
-            uint size = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer);
-            uint type = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer.AsSpan(4));
-
-            if (size != 1)
-                return new ValueTask<BoxHeader>(new BoxHeader(size, type, 8));
-
-            return ReadExtendedBoxHeaderSlowAsync(type, ct);
+            filled += read;
         }
 
-        return ReadBoxHeaderSlowAsync(readTask, ct);
+        return CompleteBoxHeader(ct);
     }
 
-    private async ValueTask<BoxHeader> ReadBoxHeaderSlowAsync(ValueTask<int> initialReadTask, CancellationToken ct)
+    /// <summary>
+    /// Разбирает собранные 8 байт заголовка; для size == 1 дочитывает 64-битный largesize.
+    /// </summary>
+    private ValueTask<BoxHeader> CompleteBoxHeader(CancellationToken ct)
     {
-        int read = await initialReadTask.ConfigureAwait(false);
-        if (read < 8)
-            return default;
-
         uint size = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer);
         uint type = BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer.AsSpan(4));
 
-        if (size == 1)
-            return await ReadExtendedBoxHeaderSlowAsync(type, ct).ConfigureAwait(false);
+        if (size != 1)
+            return new ValueTask<BoxHeader>(new BoxHeader(size, type, CompactBoxHeaderSize));
 
-        return new BoxHeader(size, type, 8);
+        var extendedRead = ReadExactlyAsync(_ioBuffer.AsMemory(0, 8), ct);
+        if (extendedRead.IsCompletedSuccessfully)
+        {
+            extendedRead.GetAwaiter().GetResult();
+            return new ValueTask<BoxHeader>(CreateExtendedHeader(type));
+        }
+
+        return AwaitExtendedBoxHeaderAsync(extendedRead, type);
     }
 
-    private async ValueTask<BoxHeader> ReadExtendedBoxHeaderSlowAsync(uint type, CancellationToken ct)
+    private async ValueTask<BoxHeader> ReadBoxHeaderSlowAsync(ValueTask<int> pendingRead, int filled, CancellationToken ct)
     {
-        await ReadExactlyAsync(_ioBuffer.AsMemory(0, 8), ct).ConfigureAwait(false);
-        long extSize = (long)BinaryPrimitives.ReadUInt64BigEndian(_ioBuffer);
-        return new BoxHeader(extSize, type, 16);
+        while (true)
+        {
+            int read = await pendingRead.ConfigureAwait(false);
+            if (read <= 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                return default;
+            }
+
+            filled += read;
+            if (filled >= CompactBoxHeaderSize)
+                break;
+
+            ct.ThrowIfCancellationRequested();
+            pendingRead = _stream.ReadAsync(_ioBuffer.AsMemory(filled, CompactBoxHeaderSize - filled), ct);
+        }
+
+        return await CompleteBoxHeader(ct).ConfigureAwait(false);
     }
+
+    private async ValueTask<BoxHeader> AwaitExtendedBoxHeaderAsync(ValueTask pendingRead, uint type)
+    {
+        await pendingRead.ConfigureAwait(false);
+        return CreateExtendedHeader(type);
+    }
+
+    private BoxHeader CreateExtendedHeader(uint type) =>
+        new((long)BinaryPrimitives.ReadUInt64BigEndian(_ioBuffer), type, ExtendedBoxHeaderSize);
 
     #endregion
 

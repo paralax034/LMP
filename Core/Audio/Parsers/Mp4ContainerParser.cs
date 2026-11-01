@@ -179,8 +179,9 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     }
 
     /// <summary>
-    /// Считывает сэмпл MP4 в переиспользуемый буфер. При отмене операции возвращает null,
-    /// предотвращая ложный <see cref="ParserCorruptionException"/>.
+    /// Считывает сэмпл MP4 в переиспользуемый буфер. Возвращает null только при отмене токена вызывающего,
+    /// предотвращая ложный <see cref="ParserCorruptionException"/>. Отмена эпохи чтения потока (seek/heal)
+    /// и утилизация пробрасываются: null для AudioPipeline означает EOF и привёл бы к ложному onTrackEnded.
     /// </summary>
     private ValueTask<AudioFrame?> ReadSampleAsFrameAsync(SampleInfo sample, CancellationToken ct)
     {
@@ -208,8 +209,11 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         }
         catch (Exception ex)
         {
-            if (ct.IsCancellationRequested || Helpers.CancellationHelper.IsCancellationLike(ex))
+            if (ct.IsCancellationRequested)
                 return new ValueTask<AudioFrame?>((AudioFrame?)null);
+
+            if (ex is ObjectDisposedException || Helpers.CancellationHelper.IsCancellationLike(ex))
+                throw;
 
             throw new ParserCorruptionException(sample.Offset, $"Failed to read MP4 sample at offset {sample.Offset}", ex);
         }
@@ -235,8 +239,12 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         }
         catch (Exception ex)
         {
-            if (ct.IsCancellationRequested || Helpers.CancellationHelper.IsCancellationLike(ex))
+            if (ct.IsCancellationRequested)
                 return null;
+
+            // Отмена эпохи чтения и утилизация — не порча контейнера и не EOF: пробрасываем вызывающему
+            if (ex is ObjectDisposedException || Helpers.CancellationHelper.IsCancellationLike(ex))
+                throw;
 
             throw new ParserCorruptionException(sample.Offset, $"Failed to read MP4 sample at offset {sample.Offset}", ex);
         }

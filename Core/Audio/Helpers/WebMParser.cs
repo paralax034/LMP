@@ -965,7 +965,8 @@ public sealed class WebMParser : IDisposable
                         continue;
                 }
             }
-            catch (OperationCanceledException)
+            // null только при отмене токена вызывающего; отмена эпохи чтения пробрасывается (иначе ложный EOF)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return null;
             }

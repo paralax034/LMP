@@ -292,7 +292,8 @@ public static class CacheTests
         }
     }
 
-    [TestMethod(TestCategory.Unit, "ImageCache Memory LRU & Disk Stats Verification", Group = TestGroups.Storage, Order = 7)]
+    // Деструктивно для живого приложения: ClearMemoryCache() сбрасывает обложки работающего ImageCacheService
+    [TestMethod(TestCategory.Action, "ImageCache Memory LRU & Disk Stats Verification", Group = TestGroups.Storage, Order = 7)]
     public static Task TestImageCacheLimitsAndStatsAsync(IServiceProvider services)
     {
         var imageCache = services.GetRequiredService<ImageCacheService>();
@@ -324,7 +325,8 @@ public static class CacheTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "DownloadService Storage Limit Rejection", Group = TestGroups.Storage, Order = 8)]
+    // Деструктивно для живого приложения: подменяет DownloadPath в общих настройках на время теста
+    [TestMethod(TestCategory.Action, "DownloadService Storage Limit Rejection", Group = TestGroups.Storage, Order = 8)]
     public static Task TestDownloadServiceQuotaCheckAsync(IServiceProvider services)
     {
         var library = services.GetRequiredService<LibraryService>();

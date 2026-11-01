@@ -729,7 +729,9 @@ public sealed partial class CachingStreamSource : IAudioSource
 
             return ReadFrameSlowAsync(vt, ct);
         }
-        catch (OperationCanceledException)
+        // null допустим только при отмене токена вызывающего: иначе AudioPipeline примет его за EOF.
+        // Отмена эпохи чтения пробрасывается и обрабатывается в AudioPipeline как transient retry.
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return new ValueTask<AudioFrame?>((AudioFrame?)null);
         }
@@ -764,7 +766,7 @@ public sealed partial class CachingStreamSource : IAudioSource
                 OnFrameRead(frame.Value);
             return frame;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return null;
         }
@@ -801,7 +803,7 @@ public sealed partial class CachingStreamSource : IAudioSource
                     OnFrameRead(frame.Value);
                 return frame;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return null;
             }

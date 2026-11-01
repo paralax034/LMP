@@ -98,7 +98,18 @@ public sealed class TestRunner
 
             // Вызов метода ВСЕГДА выносится на пул потоков во избежание блокировки UI-диспетчера Avalonia
             var task = Task.Run(() => InvokeTestMethod(descriptor, linkedCts.Token), linkedCts.Token);
-            await task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+            try
+            {
+                await task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!timeoutCts.IsCancellationRequested
+                && !externalCt.IsCancellationRequested
+                && (ex is OperationCanceledException || ex.InnerException is OperationCanceledException))
+            {
+                // OCE из самого теста без таймаута и без отмены пользователем — это падение теста, а не Timeout
+                throw new InvalidOperationException(
+                    $"Test threw OperationCanceledException without timeout or user cancellation: {(ex.InnerException ?? ex).Message}", ex);
+            }
 
             sw.Stop();
             return new TestResult

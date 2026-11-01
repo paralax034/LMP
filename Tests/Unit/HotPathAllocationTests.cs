@@ -204,19 +204,8 @@ public static partial class HotPathAllocationTests
     [TestMethod(TestCategory.Unit, "SharedPlaybackState Update & Get (0 Alloc)", Group = TestGroups.Audio, Order = 9)]
     public static Task TestSharedPlaybackStateZeroAllocAsync()
     {
-        var sharedStateType = typeof(AudioPlayer).GetNestedType(
-            "SharedPlaybackState",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
-            ?? throw new InvalidOperationException("SharedPlaybackState not found");
-
-        var instance = Activator.CreateInstance(sharedStateType)!;
-        var updateMethod = sharedStateType.GetMethod("Update")!;
-        var getPosMethod = sharedStateType.GetMethod("GetCurrentPosition")!;
-
-        var updateDel = (Action<long, int, int, int, bool, long>)Delegate.CreateDelegate(
-            typeof(Action<long, int, int, int, bool, long>), instance, updateMethod);
-        var getPosDel = (Func<TimeSpan>)Delegate.CreateDelegate(
-            typeof(Func<TimeSpan>), instance, getPosMethod);
+        // Прямой доступ к internal-типу через InternalsVisibleTo: без рефлексии, делегатов и боксинга
+        var sharedState = new AudioPlayer.SharedPlaybackState();
 
         long sampleCounter = 0;
         long ticksSink = 0;
@@ -224,8 +213,8 @@ public static partial class HotPathAllocationTests
         TestAssert.ZeroAlloc(() =>
         {
             sampleCounter += 960;
-            updateDel(sampleCounter, 9600, SampleRate, Channels, true, 180_000L);
-            ticksSink += getPosDel().Ticks;
+            sharedState.Update(sampleCounter, 9600, SampleRate, Channels, true, 180_000L);
+            ticksSink += sharedState.GetCurrentPosition().Ticks;
         }, WarmupIterations, MeasureIterations);
 
         return Task.CompletedTask;
@@ -322,7 +311,8 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "CachingStream RAM Hit ReadFrame (0 Alloc)", Group = TestGroups.Audio, Order = 13)]
+    // Тест измеряет только GetBufferedRanges; RAM-хит покрыт в CachingReadStreamContractTests (Order 25)
+    [TestMethod(TestCategory.Unit, "CachingStreamSource GetBufferedRanges (0 Alloc)", Group = TestGroups.Audio, Order = 13)]
     public static Task TestAsyncCachingReadStreamRamHitZeroAllocAsync()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "LMP_RamHitTest_" + Guid.NewGuid().ToString("N"));
@@ -357,7 +347,8 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "GetBufferedRanges & Dirty Flag (0 Alloc)", Group = TestGroups.Audio, Order = 14)]
+    // Тест измеряет AudioCacheManager.GetStats, а не GetBufferedRanges и dirty-флаг
+    [TestMethod(TestCategory.Unit, "AudioCacheManager GetStats (0 Alloc)", Group = TestGroups.Audio, Order = 14)]
     public static Task TestGetBufferedRangesAndCacheDirtyZeroAllocAsync()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "LMP_RangesTest_" + Guid.NewGuid().ToString("N"));

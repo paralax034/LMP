@@ -23,52 +23,46 @@ public static class AudioLogicTests
     [TestMethod(TestCategory.Unit, "Position Interpolation & Starvation Clamp", Group = TestGroups.Audio, Order = 1)]
     public static async Task TestSharedPlaybackStateInterpolationAsync()
     {
-        var sharedStateType = typeof(AudioPlayer).GetNestedType(
-            "SharedPlaybackState",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)
-            ?? throw new InvalidOperationException("SharedPlaybackState type not found");
-
-        var sharedState = Activator.CreateInstance(sharedStateType)!;
-        var updateMethod = sharedStateType.GetMethod("Update")!;
-        var getPositionMethod = sharedStateType.GetMethod("GetCurrentPosition")!;
+        // Прямой доступ к internal-типу через InternalsVisibleTo: без рефлексии и без риска обрезки при AOT-тримминге
+        var sharedState = new AudioPlayer.SharedPlaybackState();
 
         const long durationMs = 180_000;
         const long baseSamples = SampleRate * Channels * 10;
         const double basePositionSeconds = 10.0;
+        const int activeBufferedSamples = BufferSamples;
+        const double maxBufferedMs = activeBufferedSamples * 1000.0 / (SampleRate * Channels);
 
-        using var ring = new LockFreeRingBuffer<float>(BufferSamples * 4);
-        float[] pcmChunk = new float[BufferSamples];
-
-        // 1. Монотонный ход интерполяции при наличии данных в кольцевом буфере
-        ring.Write(pcmChunk.AsSpan());
-        int activeBufferedSamples = ring.Count;
-
-        updateMethod.Invoke(sharedState, [baseSamples, activeBufferedSamples, SampleRate, Channels, true, durationMs]);
+        // 1. Монотонный ход интерполяции в пределах фактического запаса PCM в кольцевом буфере
+        sharedState.Update(baseSamples, activeBufferedSamples, SampleRate, Channels, isPlaying: true, durationMs);
         await Task.Delay(25).ConfigureAwait(false);
 
-        var playingPosition = (TimeSpan)getPositionMethod.Invoke(sharedState, null)!;
-        double deltaMs = (playingPosition.TotalSeconds - basePositionSeconds) * 1000.0;
+        double deltaMs = (sharedState.GetCurrentPosition().TotalSeconds - basePositionSeconds) * 1000.0;
         TestAssert.True(deltaMs > 0.0, "Position must advance while playing with buffered samples");
+        TestAssert.True(deltaMs <= maxBufferedMs + 1e-6, $"Extrapolation exceeded buffered PCM: {deltaMs:F3}ms > {maxBufferedMs:F3}ms");
 
         // 2. Starvation Clamp: при пустом кольцевом буфере интерполяция обязана мгновенно остановиться
-        ring.Clear();
         long starvedBaseSamples = baseSamples + activeBufferedSamples;
         double starvedBaseSeconds = (double)starvedBaseSamples / (SampleRate * Channels);
 
-        updateMethod.Invoke(sharedState, [starvedBaseSamples, ring.Count, SampleRate, Channels, true, durationMs]);
+        sharedState.Update(starvedBaseSamples, 0, SampleRate, Channels, isPlaying: true, durationMs);
         await Task.Delay(25).ConfigureAwait(false);
 
-        var starvedPosition = (TimeSpan)getPositionMethod.Invoke(sharedState, null)!;
-        double starvedDeltaMs = Math.Abs((starvedPosition.TotalSeconds - starvedBaseSeconds) * 1000.0);
+        double starvedDeltaMs = Math.Abs((sharedState.GetCurrentPosition().TotalSeconds - starvedBaseSeconds) * 1000.0);
         TestAssert.True(starvedDeltaMs <= 0.001, $"Starvation clamp failed: drift={starvedDeltaMs:F4}ms");
 
-        // 3. Upper Bound Clamp: позиция никогда не должна превышать длительность трека
+        // 3. Пауза: позиция равна базе без экстраполяции
+        sharedState.Update(starvedBaseSamples, activeBufferedSamples, SampleRate, Channels, isPlaying: false, durationMs);
+        await Task.Delay(10).ConfigureAwait(false);
+
+        double pausedDeltaMs = Math.Abs((sharedState.GetCurrentPosition().TotalSeconds - starvedBaseSeconds) * 1000.0);
+        TestAssert.True(pausedDeltaMs <= 0.001, $"Paused position must not extrapolate: drift={pausedDeltaMs:F4}ms");
+
+        // 4. Upper Bound Clamp: позиция никогда не должна превышать длительность трека
         long nearEndSamples = (long)(durationMs / 1000.0 * SampleRate * Channels);
-        updateMethod.Invoke(sharedState, [nearEndSamples, activeBufferedSamples, SampleRate, Channels, true, durationMs]);
+        sharedState.Update(nearEndSamples, activeBufferedSamples, SampleRate, Channels, isPlaying: true, durationMs);
         await Task.Delay(20).ConfigureAwait(false);
 
-        var clampedPosition = (TimeSpan)getPositionMethod.Invoke(sharedState, null)!;
-        TestAssert.True(clampedPosition.TotalMilliseconds <= durationMs, "Position exceeded track duration");
+        TestAssert.True(sharedState.GetCurrentPosition().TotalMilliseconds <= durationMs, "Position exceeded track duration");
     }
 
     [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & State Machine Contracts", Group = TestGroups.Audio, Order = 2)]
@@ -324,9 +318,10 @@ public static class AudioLogicTests
             TestAssert.True(outL <= 0.985f && outR <= 0.985f, $"Limiter ceiling breached at frame {f}: L={outL:F5}");
             TestAssert.True(outR > 0f, "Right channel must not be zeroed out");
 
-            // Проверяем, что отношение L/R не разрушено независимым клиппингом одного канала
+            // Stereo Link: общий коэффициент для обоих каналов сохраняет отношение L/R ровно 4:1.
+            // Прежний порог (> 2.0) пропускал независимый клиппинг канала (L -> 0.985, R = 0.4 даёт 2.46).
             float ratio = outL / outR;
-            TestAssert.True(ratio > 2.0f && ratio <= 4.001f, $"Stereo image collapsed at frame {f}: L/R={ratio:F3}");
+            TestAssert.True(MathF.Abs(ratio - 4.0f) < 1e-3f, $"Stereo link broken at frame {f}: L/R={ratio:F5}, expected 4.0");
         }
 
         return Task.CompletedTask;
@@ -440,6 +435,8 @@ public static class AudioLogicTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
         var token = cts.Token;
+        // Токен не передаётся в Task.Run: при позднем старте задачи из пула он отменил бы её до запуска
+        // и превратил бы await в ложный TaskCanceledException
         var writerTask = Task.Run(() =>
         {
             int step = 0;
@@ -450,7 +447,7 @@ public static class AudioLogicTests
                     : EqualizerPresets.GetPresetBands(EqualizerPresets.VocalId);
                 eq.Configure(enabled: (step % 4) != 0, preset);
             }
-        }, token);
+        });
 
         float[] audioChunk = new float[256 * Channels];
         while (!token.IsCancellationRequested)
@@ -467,6 +464,10 @@ public static class AudioLogicTests
     [TestMethod(TestCategory.Unit, "AudioSpectrumAnalyzer Band Isolation & Visualizer Buffer (0 Alloc)", Group = TestGroups.Audio, Order = 7)]
     public static Task TestAudioSpectrumAnalyzerBandIsolationAndVisualizerBufferAsync()
     {
+        // AudioVisualizerBuffer — глобальное статическое состояние: активное воспроизведение перезапишет уровни
+        if (AudioVisualizerBuffer.HasRecentActivity)
+            TestAssert.Skip("AudioVisualizerBuffer is being fed by active playback; global state would corrupt assertions");
+
         var analyzer = new AudioSpectrumAnalyzer(SampleRate, Channels);
         float[] signal = new float[2048 * Channels];
         Span<float> bands10 = stackalloc float[EqualizerProcessor.BandCount];
@@ -562,11 +563,12 @@ public static class AudioLogicTests
             gain = EbuR128Analyzer.ComputeGainFromLufs(lufs, -14.0f, 3.0f);
         }, warmup: 40, iterations: 500, context: "EbuR128Analyzer Gating & Gain Computation");
 
-        // По стандарту ITU-R BS.1770-4 константа -0.691 dB компенсирует +0.653 dB подъём K-фильтра на 997 Гц,
-        // поэтому двухканальный синус с амплитудой 1.0 даёт ~0.0 LUFS (-0.038 LUFS)
+        // ITU-R BS.1770-4: подъём K-фильтра на 997 Гц равен +0.691 dB и ровно компенсируется константой −0.691,
+        // поэтому стерео-синус 0 dBFS обязан давать 0.00 LUFS. Допуск ±0.1 LU — требование EBU Tech 3341.
+        // RBJ-аппроксимация (ShelfFreqHz = 1500) даёт постоянный сдвиг около −0.04 LU — в пределах допуска.
         TestAssert.True(
-            MathF.Abs(lufs - (-0.038f)) < 0.02f,
-            $"ITU-R BS.1770-4 reference sine LUFS out of tolerance: {lufs:F3} LUFS");
+            MathF.Abs(lufs) < 0.1f,
+            $"ITU-R BS.1770-4 reference sine must read 0.00 ±0.1 LUFS (EBU Tech 3341), got {lufs:F3} LUFS");
         TestAssert.Equal(
             gain,
             EbuR128Analyzer.ComputeIntegratedGainFromBlocks(gatingBlocks, 4, -14.0f, 3.0f));
