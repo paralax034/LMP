@@ -324,8 +324,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
         _player = new AudioPlayer(new AudioPlayerOptions
         {
-            UrlAcquireCallback = AcquireUrlCallbackAsync,
-            UrlRefreshCallback = RefreshUrlCallbackAsync,
+            UrlProvider = ProvideStreamUrlAsync,
             PositionUpdateInterval = TimeSpan.FromMilliseconds(500),
             MaxRetryAttempts = 3,
             UseNullBackend = false,

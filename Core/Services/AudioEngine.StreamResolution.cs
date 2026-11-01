@@ -10,6 +10,21 @@ public sealed partial class AudioEngine
     private string? _lastSoftRefreshTrackId;
     private long _lastSoftRefreshTick;
 
+    /// <summary>Время жизни списка клиентов, исключённых после CDN 403 (мс).</summary>
+    private const long CdnForbiddenClientsTtlMs = 10 * 60 * 1000;
+
+    /// <summary>Защищает состояние клиентов, чьи URL получили CDN 403 для текущего трека.</summary>
+    private readonly Lock _cdnForbiddenClientsLock = new();
+
+    /// <summary>Трек, к которому относится <see cref="_cdnForbiddenClients"/>.</summary>
+    private string? _cdnForbiddenClientsTrackId;
+
+    /// <summary>Момент последней регистрации CDN 403 (<see cref="Environment.TickCount64"/>).</summary>
+    private long _cdnForbiddenClientsTick;
+
+    /// <summary>InnerTube-клиенты (параметр <c>c</c> stream URL), чьи URL CDN отверг с HTTP 403.</summary>
+    private readonly List<string> _cdnForbiddenClients = new(4);
+
     #region Stream Resolution
 
     /// <summary>
@@ -247,13 +262,25 @@ public sealed partial class AudioEngine
 
     #region URL Acquisition & Continuation
 
-    private Task<ContinuationUrlResult?> GetOrStartContinuationUrlAcquisitionAsync(TrackInfo track)
+    /// <summary>
+    /// Возвращает текущую single-flight задачу получения continuation URL трека либо запускает новую.
+    /// </summary>
+    /// <param name="track">Трек, для которого нужен continuation URL.</param>
+    /// <param name="variant">
+    /// Вариант (контейнер/битрейт), байты которого уже лежат в source и partial cache;
+    /// <c>null</c> — предпочтение трека (прежнее поведение).
+    /// </param>
+    /// <param name="expectedContentLength">Полный размер этого варианта (<c>clen</c>); <c>0</c>, если неизвестен.</param>
+    private Task<ContinuationUrlResult?> GetOrStartContinuationUrlAcquisitionAsync(
+        TrackInfo track,
+        StreamSelectionHint? variant,
+        long expectedContentLength)
     {
         if (_pendingUrlAcquisitions.TryGetValue(track.Id, out var existing))
             return existing;
 
         var sessionToken = GetSessionToken();
-        var created = AcquireContinuationUrlCoreAsync(track, sessionToken);
+        var created = AcquireContinuationUrlCoreAsync(track, variant, expectedContentLength, sessionToken);
 
         if (_pendingUrlAcquisitions.TryAdd(track.Id, created))
         {
@@ -264,11 +291,24 @@ public sealed partial class AudioEngine
         return _pendingUrlAcquisitions[track.Id];
     }
 
+    /// <summary>
+    /// Получает continuation URL ровно того варианта, который уже частично лежит в кэше:
+    /// session-манифест выбирается по точному <c>clen</c>, refresh выполняется с подсказкой варианта source.
+    /// URL другого варианта не возвращается: guard source всё равно отверг бы его и воспроизведение встало бы.
+    /// </summary>
+    /// <param name="track">Трек, для которого нужен continuation URL.</param>
+    /// <param name="variant">Вариант source; <c>null</c> — предпочтение трека.</param>
+    /// <param name="expectedContentLength">Ожидаемый <c>clen</c>; <c>0</c>, если неизвестен.</param>
+    /// <param name="ct">Токен сессии воспроизведения.</param>
     private async Task<ContinuationUrlResult?> AcquireContinuationUrlCoreAsync(
         TrackInfo track,
+        StreamSelectionHint? variant,
+        long expectedContentLength,
         CancellationToken ct)
     {
-        var requested = StreamSelectionHint.FromTrack(track, _library.Settings.RememberTrackFormat);
+        var requested = variant is { HasFormat: true } exactVariant
+            ? exactVariant
+            : StreamSelectionHint.FromTrack(track, _library.Settings.RememberTrackFormat);
 
         var diskEntry = await SessionCacheStore
             .TryGetManifestAndProbeAsync(track.Id, SharedHttpClient.Instance, ct)
@@ -276,7 +316,7 @@ public sealed partial class AudioEngine
 
         if (diskEntry != null)
         {
-            var selectedVariant = SelectBestVariantFromEntry(diskEntry.Variants, requested.Format);
+            var selectedVariant = SelectContinuationVariantFromEntry(diskEntry.Variants, requested, expectedContentLength);
             if (selectedVariant != null)
             {
                 return new ContinuationUrlResult(
@@ -289,11 +329,18 @@ public sealed partial class AudioEngine
             }
         }
 
-        var descriptor = await _youtube.RefreshStreamAsync(track, false, ct).ConfigureAwait(false);
+        var descriptor = await _youtube.RefreshStreamAsync(track, false, ct, variant).ConfigureAwait(false);
         if (descriptor is null || !descriptor.Value.HasLiveUrl)
             return null;
 
         var d = descriptor.Value;
+
+        if (expectedContentLength > 0 && d.ContentLengthBytes > 0 && d.ContentLengthBytes != expectedContentLength)
+        {
+            Log.Warn($"[AudioEngine] Continuation URL for {track.Id} skipped: variant {d.Format}/{d.BitrateKbps}kbps " +
+                     $"(itag={d.Itag}, clen={d.ContentLengthBytes}) does not match cached clen={expectedContentLength}");
+            return null;
+        }
 
         return new ContinuationUrlResult(
             d.Url,
@@ -333,13 +380,174 @@ public sealed partial class AudioEngine
         return (track == null || IsSealedFailedTrack(trackId)) ? null : track;
     }
 
-    private async ValueTask<string?> RefreshUrlCallbackAsync(string trackId, CancellationToken ct)
+    /// <summary>
+    /// Выбирает вариант session-манифеста для continuation URL. При известном размере допускается только точное
+    /// совпадение контейнера и <c>clen</c>: соседний вариант того же контейнера (например, itag 250 вместо 251)
+    /// имеет другие байтовые смещения, и guard source всё равно его отвергнет.
+    /// </summary>
+    /// <param name="variants">Варианты session-манифеста.</param>
+    /// <param name="requested">Подсказка варианта (контейнер/битрейт).</param>
+    /// <param name="expectedContentLength">Ожидаемый <c>clen</c>; <c>0</c> — выбор только по контейнеру (прежнее поведение).</param>
+    /// <returns>Подходящий вариант либо <c>null</c>.</returns>
+    internal static VariantEntry? SelectContinuationVariantFromEntry(
+        List<VariantEntry> variants,
+        StreamSelectionHint requested,
+        long expectedContentLength)
     {
+        ArgumentNullException.ThrowIfNull(variants);
+
+        if (expectedContentLength <= 0 || !requested.HasFormat)
+            return SelectBestVariantFromEntry(variants, requested.Format);
+
+        var blacklist = AudioSourceFactory.CdnBlacklist;
+        VariantEntry? blockedMatch = null;
+
+        for (int i = 0; i < variants.Count; i++)
+        {
+            var v = variants[i];
+            if (v.Format != requested.Format || v.Clen != expectedContentLength)
+                continue;
+
+            if (!blacklist.IsBlockedUrl(v.Url))
+                return v;
+
+            blockedMatch ??= v;
+        }
+
+        return blockedMatch;
+    }
+
+    /// <summary>
+    /// Единая точка входа source за stream URL. Запрос явно несёт трек и вариант потока source-инициатора,
+    /// поэтому engine не угадывает его по активному pipeline: это верно и во время <c>InitializeAsync</c>,
+    /// когда pipeline ещё не опубликован в <c>AudioPlayer</c>.
+    /// </summary>
+    /// <param name="request">Запрос source.</param>
+    /// <param name="ct">Токен отмены.</param>
+    /// <returns>Live URL совместимого варианта либо <c>null</c>.</returns>
+    private ValueTask<string?> ProvideStreamUrlAsync(StreamUrlRequest request, CancellationToken ct) =>
+        request.Kind == StreamUrlRequestKind.Refresh
+            ? RefreshUrlCallbackAsync(request, ct)
+            : AcquireUrlCallbackAsync(request, ct);
+
+    /// <summary>
+    /// Проверяет, относится ли сохранённый список исключённых клиентов к треку и не истёк ли TTL. Вызывать под lock.
+    /// </summary>
+    /// <param name="trackId">Идентификатор трека.</param>
+    private bool IsCdnForbiddenStateCurrent(string trackId) =>
+        string.Equals(_cdnForbiddenClientsTrackId, trackId, StringComparison.Ordinal)
+        && Environment.TickCount64 - _cdnForbiddenClientsTick < CdnForbiddenClientsTtlMs;
+
+    /// <summary>
+    /// Возвращает снимок клиентов, исключённых после CDN 403 для трека; пустой массив, если исключений нет.
+    /// </summary>
+    /// <param name="trackId">Идентификатор трека.</param>
+    private string[] GetCdnForbiddenClients(string trackId)
+    {
+        lock (_cdnForbiddenClientsLock)
+        {
+            return IsCdnForbiddenStateCurrent(trackId) ? _cdnForbiddenClients.ToArray() : Array.Empty<string>();
+        }
+    }
+
+    /// <summary>
+    /// Регистрирует клиента, чей URL отвергнут CDN с HTTP 403, и возвращает актуальный список исключений трека.
+    /// </summary>
+    /// <param name="trackId">Идентификатор трека.</param>
+    /// <param name="clientName">Значение параметра <c>c</c> отвергнутого URL; <c>null</c> — только продление TTL.</param>
+    private string[] RegisterCdnForbiddenClient(string trackId, string? clientName)
+    {
+        lock (_cdnForbiddenClientsLock)
+        {
+            if (!IsCdnForbiddenStateCurrent(trackId))
+            {
+                _cdnForbiddenClients.Clear();
+                _cdnForbiddenClientsTrackId = trackId;
+            }
+
+            _cdnForbiddenClientsTick = Environment.TickCount64;
+
+            if (!string.IsNullOrWhiteSpace(clientName)
+                && !_cdnForbiddenClients.Exists(c => string.Equals(c, clientName, StringComparison.OrdinalIgnoreCase)))
+            {
+                _cdnForbiddenClients.Add(clientName);
+            }
+
+            return _cdnForbiddenClients.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Возвращает URL обновлённого дескриптора, только если он адресует тот же вариант потока, что и source.
+    /// </summary>
+    /// <param name="request">Запрос source, описывающий ожидаемый вариант потока.</param>
+    /// <param name="descriptor">Результат refresh.</param>
+    /// <param name="trackId">Идентификатор трека (для диагностики).</param>
+    /// <param name="stage">Стадия refresh (для диагностики).</param>
+    /// <returns>Совместимый live URL либо <c>null</c>.</returns>
+    private static string? AcceptRefreshedUrl(
+        StreamUrlRequest request,
+        ResolvedStreamDescriptor? descriptor,
+        string trackId,
+        string stage)
+    {
+        if (descriptor is not { HasLiveUrl: true } d)
+            return null;
+
+        if (!request.IsCompatible(d.Format, d.ContentLengthBytes))
+        {
+            Log.Warn($"[AudioEngine] {stage} refresh for {trackId} returned incompatible variant " +
+                     $"({d.Format}/{d.BitrateKbps}kbps, itag={d.Itag}, clen={d.ContentLengthBytes}); source expects " +
+                     $"{request.Format}/{request.BitrateKbps}kbps, clen={request.ContentLength}");
+            return null;
+        }
+
+        return d.Url;
+    }
+
+    /// <summary>
+    /// Обновляет URL варианта потока source: soft refresh, при повторном CDN 403 — force refresh с исключением клиента.
+    /// </summary>
+    /// <param name="request">Запрос source с <see cref="StreamUrlRequestKind.Refresh"/>.</param>
+    /// <param name="ct">Токен отмены.</param>
+    /// <returns>Совместимый live URL либо <c>null</c>.</returns>
+    private async ValueTask<string?> RefreshUrlCallbackAsync(StreamUrlRequest request, CancellationToken ct)
+    {
+        string trackId = request.TrackId;
+
         var track = await TryResolveActiveTrackForCallbackAsync(trackId, ct).ConfigureAwait(false);
-        if (track == null) return null;
+        if (track == null)
+        {
+            Log.Warn($"[AudioEngine] URL refresh skipped for {trackId}: track is sealed after a fatal error or unresolvable");
+            return null;
+        }
 
         var sessionToken = GetSessionToken();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, sessionToken);
+
+        // Обновляем ровно тот вариант (контейнер/битрейт), чьи байты уже лежат в source и partial cache,
+        // а не текущее предпочтение пользователя: подмена WebM на MP4 ломает байтовые смещения.
+        StreamSelectionHint? variant = request.ToSelectionHint();
+
+        bool isForbiddenDriven = request.IsForbiddenDriven;
+
+        // URL, выданный для другого внешнего IP (смена узла VPN/сети), CDN отвергает при любом клиенте:
+        // клиент не виноват и не исключается, а свежий URL получает обычный soft refresh.
+        bool isEgressMismatch = isForbiddenDriven
+            && !LMP.Core.Youtube.Utils.StreamUrlEgressGuard.Shared.IsBoundToCurrentEgress(request.CurrentUrl);
+        bool blameClient = isForbiddenDriven && !isEgressMismatch;
+
+        // Клиент, чей URL только что получил HTTP 403 от CDN (параметр c=...).
+        string? failedClient = blameClient
+            ? UrlEx.TryGetQueryParameterValue(request.CurrentUrl, "c")
+            : null;
+
+        if (isEgressMismatch)
+        {
+            Log.Warn($"[AudioEngine] 403 for {trackId}: URL is bound to ip=" +
+                     $"{LMP.Core.Youtube.Utils.StreamUrlEgressGuard.TryGetBoundIp(request.CurrentUrl)}, " +
+                     $"current egress ip={LMP.Core.Youtube.Utils.StreamUrlEgressGuard.Shared.ObservedIp}; client is not blamed");
+        }
 
         try
         {
@@ -350,37 +558,56 @@ public sealed partial class AudioEngine
             bool hadRecentSoftRefresh = string.Equals(_lastSoftRefreshTrackId, trackId, StringComparison.Ordinal)
                 && (nowTick - Volatile.Read(ref _lastSoftRefreshTick)) < 60_000;
 
-            if (!hadRecentSoftRefresh)
+            // Первый 403 трека — обычно истёкший URL: soft refresh тем же клиентом.
+            // Повторный 403 означает, что CDN отвергает URL этого клиента — исключаем его.
+            string[] excludedClients = GetCdnForbiddenClients(trackId);
+            if (blameClient && (hadRecentSoftRefresh || excludedClients.Length > 0))
+                excludedClients = RegisterCdnForbiddenClient(trackId, failedClient);
+
+            if (!hadRecentSoftRefresh || isEgressMismatch)
             {
                 _lastSoftRefreshTrackId = trackId;
                 Volatile.Write(ref _lastSoftRefreshTick, nowTick);
 
-                Log.Info($"[AudioEngine] 403 refresh: per-track caches invalidated for {trackId}");
+                Log.Info($"[AudioEngine] {(isForbiddenDriven ? "403" : "TTL")} refresh: per-track caches invalidated for {trackId}");
 
                 var descriptor = await _youtube
-                    .RefreshStreamAsync(track, false, linked.Token)
+                    .RefreshStreamAsync(track, false, linked.Token, variant, excludedClients.Length > 0 ? excludedClients : null)
                     .ConfigureAwait(false);
 
-                if (descriptor is { HasLiveUrl: true })
+                string? softUrl = AcceptRefreshedUrl(request, descriptor, trackId, "Soft");
+                if (softUrl != null)
                 {
                     Log.Info($"[AudioEngine] Soft refresh returned new URL for {trackId}");
-                    return descriptor.Value.Url;
+                    return softUrl;
                 }
             }
 
-            Log.Warn($"[AudioEngine] Escalating 403 refresh to force refresh (PoToken + client rotation) for {trackId}");
+            if (blameClient)
+                excludedClients = RegisterCdnForbiddenClient(trackId, failedClient);
+
+            Log.Warn($"[AudioEngine] Escalating 403 refresh to force refresh (PoToken + client rotation) for {trackId}, " +
+                     $"failed client: {failedClient ?? "-"}, " +
+                     $"excluded clients: {(excludedClients.Length == 0 ? "-" : string.Join(",", excludedClients))}");
             _lastSoftRefreshTrackId = null;
 
+            // После CDN 403 force refresh всегда идёт по CDN-403 порядку (WEB первым), даже если клиент
+            // не распознан: ANDROID_VR первым почти гарантированно ловит bot detection и уходит в карантин на 2 часа.
+            IReadOnlyList<string>? forcedExclusions = isForbiddenDriven || excludedClients.Length > 0
+                ? excludedClients
+                : null;
+
             var forcedDescriptor = await _youtube
-                .RefreshStreamAsync(track, true, linked.Token)
+                .RefreshStreamAsync(track, true, linked.Token, variant, forcedExclusions)
                 .ConfigureAwait(false);
 
-            return forcedDescriptor is { HasLiveUrl: true } ? forcedDescriptor.Value.Url : null;
+            return AcceptRefreshedUrl(request, forcedDescriptor, trackId, "Force");
         }
         catch (Exception) when (linked.IsCancellationRequested
                                 || sessionToken.IsCancellationRequested
                                 || !string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal))
         {
+            Log.Debug($"[AudioEngine] URL refresh for {trackId} abandoned: cancelled or track switched");
             return null;
         }
         catch (Exception ex)
@@ -392,14 +619,27 @@ public sealed partial class AudioEngine
         }
     }
 
-    private async ValueTask<string?> AcquireUrlCallbackAsync(string trackId, CancellationToken ct)
+    /// <summary>
+    /// Получает continuation URL для варианта потока partial-cache source.
+    /// </summary>
+    /// <param name="request">Запрос source с <see cref="StreamUrlRequestKind.Acquire"/>.</param>
+    /// <param name="ct">Токен отмены.</param>
+    /// <returns>Live URL либо <c>null</c>.</returns>
+    private async ValueTask<string?> AcquireUrlCallbackAsync(StreamUrlRequest request, CancellationToken ct)
     {
+        // Continuation URL запрашивается для варианта source (partial cache), а не для предпочтения трека:
+        // иначе WebM-кэш получает MP4 URL, guard его отвергает, и воспроизведение встаёт навсегда.
+        string trackId = request.TrackId;
+
         var track = await TryResolveActiveTrackForCallbackAsync(trackId, ct).ConfigureAwait(false);
         if (track == null) return null;
 
         try
         {
-            var task = GetOrStartContinuationUrlAcquisitionAsync(track);
+            var task = GetOrStartContinuationUrlAcquisitionAsync(
+                track,
+                request.ToSelectionHint(),
+                request.ContentLength);
             var result = await task.WaitAsync(ct).ConfigureAwait(false);
             return result?.Url;
         }
@@ -484,7 +724,10 @@ public sealed partial class AudioEngine
                 return;
             }
 
-            var result = await GetOrStartContinuationUrlAcquisitionAsync(track)
+            var result = await GetOrStartContinuationUrlAcquisitionAsync(
+                    track,
+                    new StreamSelectionHint(expectedEntry.Format, expectedEntry.Bitrate),
+                    expectedEntry.TotalSize)
                 .WaitAsync(ct)
                 .ConfigureAwait(false);
 

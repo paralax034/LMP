@@ -223,9 +223,11 @@ public sealed partial class DebugViewModel : ViewModelBase
 
             var options = new AudioPlayerOptions
             {
-                UrlRefreshCallback = async (_, ct) =>
+                // Обновляем ровно вариант source из запроса: URL другого контейнера guard source всё равно отвергнет.
+                UrlProvider = async (request, ct) =>
                 {
-                    var refreshed = await Youtube.RefreshStreamAsync(track, forceRefresh: true, ct: ct);
+                    var refreshed = await Youtube.RefreshStreamAsync(
+                        track, forceRefresh: true, ct: ct, variantOverride: request.ToSelectionHint());
                     return refreshed?.Url;
                 }
             };

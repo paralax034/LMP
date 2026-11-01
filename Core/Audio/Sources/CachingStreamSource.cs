@@ -47,8 +47,12 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <summary>Задержка между retry чтения при смене эпохи (мс).</summary>
     private const int ReadAtEpochRetryDelayMs = 30;
 
-    /// <summary>Количество последовательных 403 refresh-failures перед открытием breaker.</summary>
-    private const int MaxRefreshFailuresBeforeCircuitBreak = 5;
+    /// <summary>
+    /// Единый бюджет refresh после HTTP 403: сколько попыток получить URL допускается без единого успешного ответа CDN.
+    /// Расход определяет таблица <see cref="DecideRefresh"/>; после исчерпания source выбрасывает
+    /// <see cref="ChunkDownloadFatalException"/> вместо бесконечного retry.
+    /// </summary>
+    private const int MaxForbiddenRefreshBudget = 3;
 
     /// <summary>Минимальная граница seek clamp.</summary>
     private const long SeekLowerBound = 0;
@@ -139,22 +143,22 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// HTTP-клиент берётся из SharedHttpClient.Instance при каждом запросе,
     /// чтобы автоматически использовать пересобранный клиент после Rebuild().
     /// Захват ссылки в конструкторе приводил бы к использованию disposed клиента.
+    /// Явно внедрённый клиент (детерминированные тесты) имеет приоритет.
     /// </summary>
-    private static HttpClient CurrentHttpClient => Audio.Http.SharedHttpClient.Instance;
+    private HttpClient CurrentHttpClient => _httpClientOverride ?? Audio.Http.SharedHttpClient.Instance;
+
+    /// <summary>
+    /// Внедрённый HTTP-клиент; <c>null</c> — используется общий клиент приложения.
+    /// </summary>
+    private readonly HttpClient? _httpClientOverride;
 
     private readonly AudioCacheManager _cacheManager;
 
     /// <summary>
-    /// Callback для первичного continuation acquire.
-    /// Используется в <see cref="EnsureUrlAvailableAsync"/> при первом network miss.
+    /// Поставщик stream URL: первичный continuation acquire (partial cache) и refresh после 403/истечения TTL.
+    /// Запрос всегда формирует этот source (<see cref="CreateUrlRequest"/>), поэтому получатель знает трек и вариант.
     /// </summary>
-    private readonly Func<CancellationToken, Task<string?>>? _urlAcquirer;
-
-    /// <summary>
-    /// Callback для forced URL refresh.
-    /// Используется только при 403/expired URL.
-    /// </summary>
-    private readonly Func<CancellationToken, Task<string?>>? _urlRefresher;
+    private readonly StreamUrlProvider? _urlProvider;
 
     //  Parsing 
 
@@ -229,7 +233,17 @@ public sealed partial class CachingStreamSource : IAudioSource
     private DateTime _lastRefreshTime = DateTime.MinValue;
     private int _consecutive403Count;
     private int _requestSequenceNumber;
-    private int _consecutiveRefreshFailures;
+    /// <summary>
+    /// Израсходованный единый бюджет refresh после HTTP 403. Успешный refresh его НЕ сбрасывает —
+    /// только реальный 2xx от CDN, поэтому цикл «новый URL → снова 403» конечен.
+    /// </summary>
+    private int _forbiddenRefreshBudgetSpent;
+
+    /// <summary>Исход последней попытки, израсходовавшей бюджет; только для диагностики fatal.</summary>
+    private RefreshOutcome _lastBudgetRefreshOutcome;
+
+    /// <summary>Флаг (0/1): бесплатный refresh после смены внешнего IP уже использован в текущем окне бюджета.</summary>
+    private int _egressRefreshUsed;
     private Exception? _lastDownloadException;
 
     // Source-level circuit breaker
@@ -363,6 +377,61 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <summary>Уникальный ключ записи в дисковом кэше.</summary>
     public string CacheKey => _cacheKey;
 
+    /// <summary>Идентификатор трека, которому принадлежит source.</summary>
+    internal string TrackId => _trackId;
+
+    /// <summary>Контейнер потока, байты которого уже лежат в RAM и дисковом кэше.</summary>
+    internal AudioFormat ContainerFormat => _format;
+
+    /// <summary>Текущий stream URL (пустая строка до получения continuation URL).</summary>
+    internal string CurrentUrl => _currentUrl;
+
+    /// <summary>
+    /// Указывает, что последний ответ CDN был HTTP 403 и текущий URL ещё не заменён рабочим.
+    /// </summary>
+    internal bool HasPendingForbidden => Volatile.Read(ref _consecutive403Count) > 0;
+
+    /// <summary>
+    /// Проверяет, адресует ли URL-кандидат тот же вариант потока (itag/clen), что и source.
+    /// </summary>
+    /// <param name="url">Проверяемый stream URL.</param>
+    /// <returns><c>true</c>, если URL можно применить без порчи кэша.</returns>
+    internal bool IsCompatibleStreamUrl(string url) =>
+        !string.IsNullOrWhiteSpace(url) && IsUrlVariantCompatible(url, out _);
+
+    /// <summary>
+    /// Создаёт явный запрос URL: трек, вариант потока и состояние CDN 403 этого source.
+    /// </summary>
+    /// <param name="kind">Назначение запроса.</param>
+    /// <returns>Неизменяемый запрос, не удерживающий ссылку на source.</returns>
+    internal StreamUrlRequest CreateUrlRequest(StreamUrlRequestKind kind)
+    {
+        long totalSize = _cacheEntry?.TotalSize ?? 0;
+
+        return new StreamUrlRequest(
+            kind,
+            _trackId,
+            _format,
+            Bitrate,
+            totalSize > 0 ? totalSize : _contentLength,
+            _currentUrl,
+            HasPendingForbidden);
+    }
+
+    /// <summary>
+    /// Есть ли у source поставщик URL.
+    /// </summary>
+    internal bool HasUrlProvider => _urlProvider != null;
+
+    /// <summary>
+    /// Запрашивает stream URL у поставщика от имени этого source. URL не применяется: решение принимает вызывающий.
+    /// </summary>
+    /// <param name="kind">Назначение запроса.</param>
+    /// <param name="ct">Токен отмены.</param>
+    /// <returns>URL от поставщика либо <c>null</c>, если поставщика нет или URL получить не удалось.</returns>
+    internal ValueTask<string?> RequestUrlAsync(StreamUrlRequestKind kind, CancellationToken ct) =>
+        _urlProvider?.Invoke(CreateUrlRequest(kind), ct) ?? ValueTask.FromResult<string?>(null);
+
     /// <summary>Количество непрерывных байт от начала файла (contiguous prefix).</summary>
     public long ContiguousPrefixBytes => _cacheEntry?.GetContiguousDownloadedBytesFrom(0) ?? 0;
 
@@ -398,7 +467,10 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <param name="bitrate">Битрейт в kbps.</param>
     /// <param name="cacheManager">Менеджер дискового кэша.</param>
     /// <param name="config">Конфигурация стриминга.</param>
-    /// <param name="urlRefresher">Делегат обновления URL при 403.</param>
+    /// <param name="urlProvider">Поставщик URL для первичного acquire (partial cache) и refresh при 403.</param>
+    /// <param name="httpClient">
+    /// Необязательный HTTP-клиент для детерминированных тестов; по умолчанию — <c>SharedHttpClient.Instance</c>.
+    /// </param>
     public CachingStreamSource(
         string cacheKey,
         string trackId,
@@ -409,8 +481,8 @@ public sealed partial class CachingStreamSource : IAudioSource
         int bitrate,
         AudioCacheManager cacheManager,
         StreamingConfig config,
-        Func<CancellationToken, Task<string?>>? urlAcquirer = null,
-        Func<CancellationToken, Task<string?>>? urlRefresher = null)
+        StreamUrlProvider? urlProvider = null,
+        HttpClient? httpClient = null)
     {
         _config = config;
         _cacheKey = cacheKey;
@@ -420,8 +492,8 @@ public sealed partial class CachingStreamSource : IAudioSource
         _format = format;
         _bitrate = bitrate;
         _cacheManager = cacheManager;
-        _urlAcquirer = urlAcquirer;
-        _urlRefresher = urlRefresher;
+        _urlProvider = urlProvider;
+        _httpClientOverride = httpClient;
         Codec = codec;
 
         _requestAlignmentBytes = Math.Max(4096, config.RequestAlignmentBytes);
@@ -915,6 +987,12 @@ public sealed partial class CachingStreamSource : IAudioSource
             if (!string.IsNullOrWhiteSpace(_currentUrl))
                 return false;
 
+            if (!IsUrlVariantCompatible(url, out string? rejectReason))
+            {
+                Log.Warn($"[CachingSource] [{_trackId}] External continuation URL rejected: variant mismatch ({rejectReason})");
+                return false;
+            }
+
             _currentUrl = url;
             pendingTcs = _continuationUrlTcs;
             _continuationUrlTcs = null;
@@ -932,12 +1010,20 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <summary>
     /// Атомарно обновляет stream URL после успешного refresh.
     /// Сбрасывает счётчик consecutive 403 и обновляет URL в cache entry.
+    /// URL другого варианта (itag/clen) отвергается без изменения состояния.
     /// </summary>
     /// <param name="newUrl">Новый валидный stream URL.</param>
-    internal void UpdateUrl(string newUrl)
+    /// <returns><c>true</c>, если URL применён; <c>false</c> при dispose, пустом URL или чужом варианте.</returns>
+    internal bool UpdateUrl(string newUrl)
     {
         if (_disposed || string.IsNullOrWhiteSpace(newUrl))
-            return;
+            return false;
+
+        if (!IsUrlVariantCompatible(newUrl, out string? rejectReason))
+        {
+            Log.Warn($"[CachingSource] [{_trackId}] UpdateUrl rejected: variant mismatch ({rejectReason})");
+            return false;
+        }
 
         _currentUrl = newUrl;
         Volatile.Write(ref _consecutive403Count, 0);
@@ -946,6 +1032,7 @@ public sealed partial class CachingStreamSource : IAudioSource
 
         string host = Uri.TryCreate(newUrl, UriKind.Absolute, out var uri) ? uri.Host : "?";
         Log.Warn($"[CachingSource] URL updated after refresh: track={_trackId}, host={host}, consecutive403Reset=true");
+        return true;
     }
 
     #endregion

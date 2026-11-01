@@ -334,7 +334,6 @@ public sealed partial class AudioPlayer
                 }
 
                 pipeline.StartDecoding(
-                    CreateUrlRefresher(),
                     _options,
                     CreateTrackEndedCallback(cmd.SessionId),
                     CreateErrorCallback(cmd.SessionId, pipeline));
@@ -386,7 +385,7 @@ public sealed partial class AudioPlayer
                     RestorePlaybackActiveState(pipeline);
 
                     ResumeOrDefer(pipeline, pcmReady, sourceReady, warmupPlan, sessionAtStart,
-                        startTimers: false, configurePipeline: false, trackId: _currentTrackId, logContext: "Seek warmup");
+                        startTimers: false, configurePipeline: false, logContext: "Seek warmup");
                 }
                 else
                 {
@@ -613,8 +612,7 @@ public sealed partial class AudioPlayer
         ResumePlaybackSequence(
             cmd.Pipeline,
             startTimers: true,
-            configurePipeline: false,
-            trackId: _currentTrackId);
+            configurePipeline: false);
 
         Log.Info("[Seek] Deferred seek buffer ready. Playback resumed automatically.");
         return Task.CompletedTask;

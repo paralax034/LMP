@@ -403,17 +403,50 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
     #region Fallback & DASH Methods
 
+    /// <summary>
+    /// Запрашивает player response, перебирая fallback-цепочку клиентов до первого воспроизводимого ответа.
+    /// </summary>
+    /// <param name="videoId">Идентификатор видео.</param>
+    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <param name="isAuthenticated">Есть ли авторизованная сессия.</param>
+    /// <param name="preferWebRemix">Поставить WEB_REMIX первым (VPN + прогретый BotGuard).</param>
+    /// <param name="forceMobilePriority">Принудительный refresh: отключает WEB_REMIX-приоритет.</param>
+    /// <param name="excludedClients">
+    /// Клиенты, чьи URL для этого видео отвергнуты CDN с HTTP 403. Любое не-<c>null</c> значение (в том числе пустое)
+    /// включает порядок <see cref="YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden"/>.
+    /// </param>
     public async ValueTask<(PlayerResponse Response, string ClientName)> GetPlayerResponseWithFallbackAsync(
         VideoId videoId,
         CancellationToken cancellationToken,
         bool isAuthenticated = false,
         bool preferWebRemix = false,
-        bool forceMobilePriority = false)
+        bool forceMobilePriority = false,
+        IReadOnlyList<string>? excludedClients = null)
     {
         // Если активен VPN и есть авторизация (либо BotGuard уже прогрет до 2мс fast-mint),
         // сразу идём через WEB_REMIX, кроме случаев принудительного рефреша после серии 403 от CDN.
         bool useWebPriority = !forceMobilePriority && (preferWebRemix || (isAuthenticated && YoutubeClientUtils.IsVpnActive));
-        var clients = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated, useWebPriority);
+
+        // После CDN 403 клиенты с отвергнутыми URL исключаются, ANDROID_VR уходит в конец цепочки.
+        // excludedClients != null — запрос после CDN 403. Даже при пустом списке (клиент URL не распознан)
+        // используется CDN-403 порядок: ANDROID_VR первым почти гарантированно ловит bot detection.
+        bool hasExcludedClients = excludedClients is not null;
+        var clients = hasExcludedClients
+            ? YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden(excludedClients!)
+            : YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated, useWebPriority);
+
+        if (clients.Length == 0)
+        {
+            Log.Warn($"[VideoController] [{videoId}] All stream clients excluded after CDN 403: {string.Join(",", excludedClients!)}");
+            throw new StreamUnavailableException(
+                $"All stream clients were rejected by CDN with HTTP 403 for {videoId}",
+                videoId.Value,
+                StreamUnavailableReason.Forbidden403,
+                httpStatusCode: 403);
+        }
+
+        if (hasExcludedClients)
+            Log.Info($"[VideoController] [{videoId}] CDN-403 fallback order: {string.Join(" -> ", clients)}");
         var errors = new List<string>();
         var allBotDetection = true;
         bool hasLoginRequired = false;

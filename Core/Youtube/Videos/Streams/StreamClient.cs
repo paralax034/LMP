@@ -349,11 +349,14 @@ public sealed class StreamClient
     /// </summary>
     /// <param name="videoId">ID видео.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
+    /// <param name="forceRefresh">Принудительный refresh после CDN 403: без WEB_REMIX-приоритета.</param>
+    /// <param name="excludedClients">Клиенты, чьи URL отвергнуты CDN с HTTP 403; исключаются из fallback-цепочки.</param>
     /// <returns>Манифест со всеми доступными аудио-потоками.</returns>
     public async ValueTask<StreamManifest> GetManifestAsync(
         VideoId videoId,
         CancellationToken cancellationToken = default,
-        bool forceRefresh = false)
+        bool forceRefresh = false,
+        IReadOnlyList<string>? excludedClients = null)
     {
         bool isAuth = _isAuthenticatedCheck?.Invoke() ?? false;
 
@@ -366,7 +369,8 @@ public sealed class StreamClient
             cancellationToken,
             isAuthenticated: isAuth,
             preferWebRemix: preferWebRemix,
-            forceMobilePriority: forceRefresh).ConfigureAwait(false);
+            forceMobilePriority: forceRefresh,
+            excludedClients: excludedClients).ConfigureAwait(false);
 
         if (!playerResponse.IsPlayable)
         {

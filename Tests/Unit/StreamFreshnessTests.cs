@@ -71,7 +71,7 @@ public static class StreamFreshnessTests
             bitrate: 160,
             cacheManager: tempCache.Manager,
             config: new StreamingConfig(),
-            urlRefresher: MockRefresher);
+            urlProvider: (_, ct) => new ValueTask<string?>(MockRefresher(ct)));
 
         await source.EnsureStreamFreshnessAsync(CancellationToken.None).ConfigureAwait(false);
 
@@ -99,10 +99,10 @@ public static class StreamFreshnessTests
             bitrate: 160,
             cacheManager: tempCache.Manager,
             config: new StreamingConfig(),
-            urlRefresher: _ =>
+            urlProvider: (_, _) =>
             {
                 Interlocked.Increment(ref refreshCalls);
-                return Task.FromResult<string?>(freshUrl);
+                return ValueTask.FromResult<string?>(freshUrl);
             });
 
         await source.EnsureStreamFreshnessAsync(CancellationToken.None).ConfigureAwait(false);
@@ -110,7 +110,7 @@ public static class StreamFreshnessTests
         TestAssert.Equal(1, refreshCalls);
     }
 
-    [TestMethod(TestCategory.Unit, "403 Refresh Outcomes: NoChange Network Deferral, StaleToken Breaker & SessionCache Purge", Group = TestGroups.Network, Order = 4)]
+    [TestMethod(TestCategory.Unit, "403 Refresh Outcomes: NoUrl Network Deferral, SameUrl Budget & SessionCache Purge", Group = TestGroups.Network, Order = 4)]
     public static async Task Test403RefreshOutcomesAndSessionCachePurgeAsync()
     {
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -133,7 +133,7 @@ public static class StreamFreshnessTests
         TestAssert.NotNull(Core.Audio.Http.SessionCacheStore.GetManifest(trackId), "Manifest must be recorded in SessionCacheStore");
 
         using var tempCache = new TempCacheManager();
-        int mode = 0; // 0 = NoChange (null), 1 = StaleToken (expired + same n), 2 = Fresh URL
+        int mode = 0; // 0 = NoUrl (null), 1 = SameUrl (expired + same n), 2 = Fresh URL
         int refreshCount = 0;
 
         var config = new StreamingConfig
@@ -152,14 +152,14 @@ public static class StreamFreshnessTests
             bitrate: 160,
             cacheManager: tempCache.Manager,
             config: config,
-            urlRefresher: _ =>
+            urlProvider: (_, _) =>
             {
                 Interlocked.Increment(ref refreshCount);
                 return mode switch
                 {
-                    0 => Task.FromResult<string?>(null),
-                    1 => Task.FromResult<string?>($"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix - 600}&n=initialNToken12&sig=stale_{refreshCount}&itag=251"),
-                    _ => Task.FromResult<string?>($"https://rr2---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=freshNToken999&sig=ok&itag=251")
+                    0 => ValueTask.FromResult<string?>(null),
+                    1 => ValueTask.FromResult<string?>($"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix - 600}&n=initialNToken12&sig=stale_{refreshCount}&itag=251"),
+                    _ => ValueTask.FromResult<string?>($"https://rr2---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=freshNToken999&sig=ok&itag=251")
                 };
             });
 
@@ -178,33 +178,73 @@ public static class StreamFreshnessTests
             Core.Audio.Http.SessionCacheStore.GetManifest(trackId),
             "HTTP 403 must immediately invalidate SessionCacheStore entry so Partial Cache Fast Start never reuses dead URL");
 
-        // 2. Проверяем CoordinatedRefreshAsync при обрыве интернета (refresher возвращает null -> NoChange, не инкрементирует circuit breaker)
+        // 2. Проактивный refresh (HTTP 403 не было) при обрыве интернета: поставщик вернул null -> NoUrl, бюджет не расходуется
         var coordinatedRefreshMethod = typeof(CachingStreamSource).GetMethod(
             "CoordinatedRefreshAsync",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
 
-        var outcomeNoChange = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
-        TestAssert.Equal("NoChange", outcomeNoChange, "Null refresher result must yield NoChange (transient network outage)");
-
-        // 3. Проверяем StaleToken и открытие Circuit Breaker после 5 протухших рефрешей подряд
-        mode = 1;
         for (int i = 0; i < 5; i++)
         {
-            var outcomeStale = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
-            TestAssert.Equal("StaleToken", outcomeStale, $"Expected StaleToken on iteration {i + 1}");
+            var outcomeNoUrl = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
+            TestAssert.Equal("NoUrl", outcomeNoUrl, "Null provider result must yield NoUrl (transient network outage)");
         }
 
-        bool circuitBroke = false;
+        // 3. После HTTP 403 устаревший URL (прежний n-token, истёкший expire) -> SameUrl списывает единый бюджет;
+        //    после исчерпания (3 = CachingStreamSource.MaxForbiddenRefreshBudget) refresh эскалирует в Forbidden403.
+        var pendingForbiddenField = typeof(CachingStreamSource).GetField(
+            "_consecutive403Count",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        pendingForbiddenField.SetValue(source, 1);
+
+        mode = 1;
+        for (int i = 0; i < 3; i++)
+        {
+            var outcomeSame = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
+            TestAssert.Equal("SameUrl", outcomeSame, $"Expected SameUrl on iteration {i + 1}");
+        }
+
+        Core.Exceptions.ChunkDownloadFatalException? fatal = null;
         try
         {
             _ = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
         }
         catch (Core.Exceptions.ChunkDownloadFatalException ex) when (ex.Reason == Core.Exceptions.ChunkDownloadFailureReason.Forbidden403)
         {
-            circuitBroke = true;
+            fatal = ex;
         }
 
-        TestAssert.True(circuitBroke, "CoordinatedRefreshAsync must open circuit breaker after 5 consecutive StaleToken refreshes");
+        TestAssert.NotNull(fatal, "Exhausted refresh budget after HTTP 403 must escalate to fatal Forbidden403");
+        TestAssert.True(fatal!.Message.Contains("same or stale stream URL", StringComparison.Ordinal),
+            $"Fatal message must name the stale URL cause instead of blaming the CDN, got: {fatal.Message}");
+    }
+
+    [TestMethod(TestCategory.Unit, "Resume Freshness Skips Empty URL During Acquisition", Group = TestGroups.Network, Order = 5)]
+    public static async Task TestResumeFreshnessSkipsEmptyUrlAsync()
+    {
+        int providerCalls = 0;
+        using var tempCache = new TempCacheManager();
+
+        using var source = new CachingStreamSource(
+            cacheKey: "test_empty_url_resume",
+            trackId: "yt_empty_url_resume",
+            url: string.Empty,
+            contentLength: 5_000_000,
+            format: AudioFormat.WebM,
+            codec: AudioCodec.Opus,
+            bitrate: 160,
+            cacheManager: tempCache.Manager,
+            config: new StreamingConfig(),
+            urlProvider: (_, _) =>
+            {
+                Interlocked.Increment(ref providerCalls);
+                return ValueTask.FromResult<string?>(null);
+            });
+
+        // Partial cache bootstrap: URL ещё не получен, им владеет single-flight acquisition.
+        await source.EnsureStreamFreshnessAsync(CancellationToken.None).ConfigureAwait(false);
+
+        TestAssert.Equal(0, Volatile.Read(ref providerCalls),
+            "Resume freshness check must not issue a TTL refresh while the source has no URL yet");
     }
 
     private static async Task<string> InvokeCoordinatedRefreshAsync(

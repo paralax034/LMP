@@ -595,19 +595,36 @@ public partial class YoutubeProvider : IDisposable
     ///   <item>YouTube API call: Запрашивает полный манифест со всеми медиа-вариантами, сохраняя их в RAM и на диск (1 API на все форматы).</item>
     /// </list>
     /// </summary>
+    /// <param name="track">Трек, для которого требуется stream URL.</param>
+    /// <param name="forceRefresh">Игнорировать локальные кэши и сбросить состояние PoToken/cipher перед запросом.</param>
+    /// <param name="ct">Токен отмены.</param>
+    /// <param name="variantOverride">
+    /// Точный вариант (контейнер/битрейт) уже работающего source. Имеет приоритет над предпочтением трека,
+    /// чтобы refresh не подменил WebM на MP4 посреди partial cache.
+    /// </param>
+    /// <param name="excludedClients">
+    /// Клиенты, чьи URL этого трека отвергнуты CDN с HTTP 403. При наличии RAM/disk-манифесты пропускаются.
+    /// </param>
     public async Task<ResolvedStreamDescriptor?> RefreshStreamAsync(
         TrackInfo track,
         bool forceRefresh = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        StreamSelectionHint? variantOverride = null,
+        IReadOnlyList<string>? excludedClients = null)
     {
         EnsureInitializedOnDemand();
 
         var rawVideoId = track.GetRawIdSpan().ToString();
         if (string.IsNullOrEmpty(rawVideoId)) return null;
 
-        var requested = StreamSelectionHint.FromTrack(track, _libraryService?.Settings.RememberTrackFormat == true);
+        var requested = variantOverride is { HasFormat: true } exactVariant
+            ? exactVariant
+            : StreamSelectionHint.FromTrack(track, _libraryService?.Settings.RememberTrackFormat == true);
 
-        Log.Info($"[YouTube] RefreshStreamAsync start: track={track.Id}, force={forceRefresh}, target={requested.Format?.ToContainerName() ?? "-"}/{requested.BitrateKbps}");
+        bool hasExcludedClients = excludedClients is { Count: > 0 };
+
+        Log.Info($"[YouTube] RefreshStreamAsync start: track={track.Id}, force={forceRefresh}, target={requested.Format?.ToContainerName() ?? "-"}/{requested.BitrateKbps}" +
+                 (hasExcludedClients ? $", excluded={string.Join(",", excludedClients!)}" : ""));
 
         if (forceRefresh)
         {
@@ -641,9 +658,17 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
-        if (!forceRefresh && _manifestRamCache.TryGetValue(track.Id, out var ramManifest))
+        // Манифесты в RAM/на диске могут содержать URL клиента, которого CDN уже отверг с 403: при исключениях — только API.
+        if (!forceRefresh && !hasExcludedClients && _manifestRamCache.TryGetValue(track.Id, out var ramManifest))
         {
             var d = SelectFromManifest(ramManifest, track.Id, requested.Format, requested.BitrateKbps, StreamSource.ProviderMemoryCache);
+            if (d != null && !StreamUrlEgressGuard.Shared.IsBoundToCurrentEgress(d.Value.Url))
+            {
+                Log.Info($"[YouTube] RAM manifest for {track.Id} is bound to another egress IP, dropping");
+                _manifestRamCache.TryRemove(track.Id, out _);
+                d = null;
+            }
+
             if (d != null)
             {
                 Log.Info($"[YouTube] RefreshStreamAsync RAM MANIFEST -> {d}");
@@ -651,7 +676,7 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
-        if (!forceRefresh)
+        if (!forceRefresh && !hasExcludedClients)
         {
             var diskEntry = await SessionCacheStore
                 .TryGetManifestAndProbeAsync(track.Id, Audio.Http.SharedHttpClient.Instance, ct)
@@ -677,7 +702,7 @@ public partial class YoutubeProvider : IDisposable
         {
             var vId = VideoId.Parse(rawVideoId);
             var manifest = await _youtube.Videos.Streams
-                .GetManifestAsync(vId, ct, forceRefresh)
+                .GetManifestAsync(vId, ct, forceRefresh, excludedClients)
                 .ConfigureAwait(false);
 
             var audioStreams = manifest.GetAudioOnlyStreams()
@@ -1901,7 +1926,9 @@ public partial class YoutubeProvider : IDisposable
         string trackId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId : $"yt_{videoId}";
         if (_manifestRamCache.TryGetValue(trackId, out var manifest))
         {
-            return SelectFromManifest(manifest, trackId, format, bitrate, StreamSource.ProviderMemoryCache);
+            // URL, выданный для другого внешнего IP, CDN отвергнет с HTTP 403: такой дескриптор не отдаём.
+            var d = SelectFromManifest(manifest, trackId, format, bitrate, StreamSource.ProviderMemoryCache);
+            return d is { } found && !StreamUrlEgressGuard.Shared.IsBoundToCurrentEgress(found.Url) ? null : d;
         }
         return null;
     }

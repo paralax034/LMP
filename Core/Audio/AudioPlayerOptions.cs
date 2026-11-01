@@ -8,8 +8,11 @@ namespace LMP.Core.Audio;
 /// </summary>
 public sealed class AudioPlayerOptions
 {
-    /// <summary>Колбэк для обновления протухших URL на лету.</summary>
-    public Func<string, CancellationToken, ValueTask<string?>>? UrlRefreshCallback { get; init; }
+    /// <summary>
+    /// Поставщик stream URL для source: первичный acquire continuation URL у partial cache и refresh при 403.
+    /// Запрос явно несёт трек и вариант потока source-инициатора.
+    /// </summary>
+    public StreamUrlProvider? UrlProvider { get; init; }
 
     /// <summary>
     /// Вызывается при обнаружении starvation (200+ underrun подряд).
@@ -59,10 +62,4 @@ public sealed class AudioPlayerOptions
     /// Аргументы: trackId, integrated LUFS, source.
     /// </summary>
     public Action<string, float, LoudnessSource>? OnIntegratedLufsResolved { get; init; }
-
-    /// <summary>
-    /// Callback для первичного получения continuation URL у partial-cache source.
-    /// Используется только для initial network acquire, не для 403 refresh.
-    /// </summary>
-    public Func<string, CancellationToken, ValueTask<string?>>? UrlAcquireCallback { get; init; }
 }

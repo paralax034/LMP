@@ -107,16 +107,14 @@ public static class AudioSourceFactory
     /// Создаёт экземпляр аудиоисточника на основе дескриптора потока.
     /// </summary>
     /// <param name="descriptor">Дескриптор разрешенного потока.</param>
-    /// <param name="urlAcquirer">Callback первичного получения URL продолжения.</param>
-    /// <param name="urlRefresher">Callback обнуления и повторного получения URL при 403.</param>
+    /// <param name="urlProvider">Поставщик URL для continuation acquire и refresh при 403.</param>
     /// <param name="config">Конфигурация параметров стриминга.</param>
     /// <returns>Инициализированный экземпляр аудиоисточника.</returns>
     /// <exception cref="InvalidOperationException">Выбрасывается, если глобальный кэш не был инициализирован.</exception>
     /// <exception cref="ArgumentException">Выбрасывается при отсутствии URL и локального кэша.</exception>
     public static Task<IAudioSource> CreateAsync(
         ResolvedStreamDescriptor descriptor,
-        Func<CancellationToken, Task<string?>>? urlAcquirer = null,
-        Func<CancellationToken, Task<string?>>? urlRefresher = null,
+        StreamUrlProvider? urlProvider = null,
         StreamingConfig? config = null)
     {
         var cacheManager = GlobalCache;
@@ -179,8 +177,7 @@ public static class AudioSourceFactory
                     bitrateKbps > 0 ? bitrateKbps : (startupEntry?.Bitrate ?? 128),
                     cacheManager,
                     config,
-                    urlAcquirer,
-                    urlRefresher));
+                    urlProvider));
             }
 
             if (TryCreateFullCacheSource(cacheManager, resolvedCacheKey, trackId) is { } exactSource)
@@ -211,8 +208,7 @@ public static class AudioSourceFactory
                     fallbackStartupEntry.Bitrate > 0 ? fallbackStartupEntry.Bitrate : bitrateKbps,
                     cacheManager,
                     config,
-                    urlAcquirer,
-                    urlRefresher));
+                    urlProvider));
             }
 
             throw new ArgumentException("No URL provided and no cache available", nameof(descriptor));
@@ -258,8 +254,7 @@ public static class AudioSourceFactory
             bitrateKbps,
             cacheManager,
             config,
-            urlAcquirer,
-            urlRefresher));
+            urlProvider));
     }
 
     /// <summary>
@@ -267,8 +262,7 @@ public static class AudioSourceFactory
     /// </summary>
     /// <param name="url">Прямой URL потока или путь к локальному файлу.</param>
     /// <param name="httpClient">HTTP-клиент для сетевых запросов.</param>
-    /// <param name="urlAcquirer">Callback первичного получения URL продолжения.</param>
-    /// <param name="urlRefresher">Callback обновления URL при 403.</param>
+    /// <param name="urlProvider">Поставщик URL для continuation acquire и refresh при 403.</param>
     /// <param name="trackId">Идентификатор трека.</param>
     /// <param name="bitrateHint">Предполагаемый битрейт в kbps.</param>
     /// <param name="config">Конфигурация параметров стриминга.</param>
@@ -279,8 +273,7 @@ public static class AudioSourceFactory
     public static async Task<IAudioSource> CreateAsync(
           string url,
           HttpClient httpClient,
-          Func<CancellationToken, Task<string?>>? urlAcquirer = null,
-          Func<CancellationToken, Task<string?>>? urlRefresher = null,
+          StreamUrlProvider? urlProvider = null,
           string? trackId = null,
           int bitrateHint = 0,
           StreamingConfig? config = null,
@@ -335,8 +328,7 @@ public static class AudioSourceFactory
                     bitrate: startupEntry.Bitrate > 0 ? startupEntry.Bitrate : bitrateHint,
                     cacheManager: cacheManager,
                     config: config,
-                    urlAcquirer: urlAcquirer,
-                    urlRefresher: urlRefresher);
+                    urlProvider: urlProvider);
             }
 
             throw new ArgumentException("No URL provided and no cache available", nameof(url));
@@ -380,8 +372,7 @@ public static class AudioSourceFactory
             finalBitrate,
             cacheManager,
             config,
-            urlAcquirer,
-            urlRefresher);
+            urlProvider);
     }
 
     /// <summary>
@@ -576,8 +567,7 @@ public static class AudioSourceFactory
         int bitrate,
         AudioCacheManager cacheManager,
         StreamingConfig config,
-        Func<CancellationToken, Task<string?>>? urlAcquirer,
-        Func<CancellationToken, Task<string?>>? urlRefresher)
+        StreamUrlProvider? urlProvider)
     {
         Log.Info($"[AudioSourceFactory] Source decision: CachingStreamSource, track={trackId}, reason=partial-cache-bootstrap, cacheKey={cacheKey}");
         return new CachingStreamSource(
@@ -590,8 +580,7 @@ public static class AudioSourceFactory
             bitrate: bitrate,
             cacheManager: cacheManager,
             config: config,
-            urlAcquirer: urlAcquirer,
-            urlRefresher: urlRefresher);
+            urlProvider: urlProvider);
     }
 
     private static long ExtractContentLengthFromUrl(string url) =>

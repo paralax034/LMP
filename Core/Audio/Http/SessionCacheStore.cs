@@ -298,6 +298,9 @@ internal static class SessionCacheStore
 
         string firstUrl = streams[0].Url;
 
+        // Свежий ответ player API: параметр ip его URL — внешний адрес, с которого YouTube видит клиента.
+        StreamUrlEgressGuard.Shared.ObserveFreshUrl(firstUrl);
+
         if (!TryExtractCdnHost(firstUrl, out var cdnHost))
             cdnHost = "";
 
@@ -389,6 +392,9 @@ internal static class SessionCacheStore
         lock (_lock)
         {
             entry = FindMustHoldLock(trackId);
+            if (entry is not null && DropIfForeignEgressMustHoldLock(entry))
+                return null;
+
             if (entry is null || entry.Variants.Count == 0)
                 return null;
 
@@ -468,13 +474,36 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
+    /// Удаляет запись, чьи URL выданы для другого внешнего IP (смена узла VPN или сети). Вызывается под lock.
+    /// </summary>
+    /// <param name="entry">Проверяемая запись.</param>
+    /// <returns><c>true</c>, если запись удалена.</returns>
+    private static bool DropIfForeignEgressMustHoldLock(TrackManifestEntry entry)
+    {
+        if (entry.Variants.Count == 0)
+            return false;
+
+        string url = entry.Variants[0].Url;
+        var guard = StreamUrlEgressGuard.Shared;
+        if (guard.IsBoundToCurrentEgress(url))
+            return false;
+
+        Log.Info($"[SessionCache] Manifest for {entry.TrackId} is bound to ip={StreamUrlEgressGuard.TryGetBoundIp(url)}, " +
+                 $"current egress ip={guard.ObservedIp}. Dropping.");
+        DropMustHoldLock(entry.TrackId);
+        return true;
+    }
+
+    /// <summary>
     /// Возвращает закэшированную запись манифеста без probe (для локального чтения).
+    /// Запись с URL, выданными для другого внешнего IP, удаляется: CDN отверг бы их с HTTP 403.
     /// </summary>
     public static TrackManifestEntry? GetManifest(string trackId)
     {
         lock (_lock)
         {
-            return FindMustHoldLock(trackId);
+            var found = FindMustHoldLock(trackId);
+            return found is not null && DropIfForeignEgressMustHoldLock(found) ? null : found;
         }
     }
 

@@ -164,8 +164,6 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// </summary>
     public static async Task<AudioPipeline> CreateAsync(
         ResolvedStreamDescriptor descriptor,
-        Func<CancellationToken, Task<string?>>? urlAcquirer,
-        Func<CancellationToken, Task<string?>>? urlRefresher,
         AudioPlayerOptions options,
         IPlaybackBackend sharedBackend,
         CancellationToken ct)
@@ -181,10 +179,10 @@ public sealed class AudioPipeline : IAsyncDisposable
 
         try
         {
+            // Поставщик URL передаётся source целиком: source сам указывает в запросе свой трек и вариант потока
             source = await AudioSourceFactory.CreateAsync(
                  descriptor,
-                 urlAcquirer,
-                 urlRefresher,
+                 options.UrlProvider,
                  options.StreamingConfig).ConfigureAwait(false);
 
             bool initialized;
@@ -192,7 +190,8 @@ public sealed class AudioPipeline : IAsyncDisposable
             {
                 initialized = await source.InitializeAsync(lifetimeCts.Token).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is CdnUnavailableException or UrlExpiredException or HttpRequestException && urlRefresher != null)
+            catch (Exception ex) when (ex is CdnUnavailableException or UrlExpiredException or HttpRequestException
+                                       && source is Sources.CachingStreamSource { HasUrlProvider: true } cachingSource)
             {
                 if (ex is CdnUnavailableException cdnEx && !string.IsNullOrEmpty(cdnEx.Host))
                 {
@@ -204,10 +203,11 @@ public sealed class AudioPipeline : IAsyncDisposable
 
                 Log.Warn($"[AudioPipeline] Initial source initialization failed ({ex.GetType().Name}: {ex.Message}). Proactively refreshing stream URL...");
 
-                var refreshedUrl = await urlRefresher(lifetimeCts.Token).ConfigureAwait(false);
+                // Pipeline ещё не опубликован в AudioPlayer: запрос формирует сам source, контекст не теряется.
+                var refreshedUrl = await cachingSource.RequestUrlAsync(StreamUrlRequestKind.Refresh, lifetimeCts.Token).ConfigureAwait(false);
                 lifetimeCts.Token.ThrowIfCancellationRequested();
 
-                if (!string.IsNullOrEmpty(refreshedUrl) && source is Sources.CachingStreamSource cachingSource)
+                if (!string.IsNullOrEmpty(refreshedUrl))
                 {
                     cachingSource.UpdateUrl(refreshedUrl);
                     Log.Info($"[AudioPipeline] Proactive URL refreshed for {descriptor.TrackId}. Retrying source initialization...");
@@ -343,7 +343,6 @@ public sealed class AudioPipeline : IAsyncDisposable
     internal void SetDeviceLostHandler(Action handler) => _onDeviceLostExternal = handler;
 
     internal async Task RecoverFromDeviceLossAsync(
-        Func<CancellationToken, Task<string?>>? urlRefresher,
         AudioPlayerOptions options,
         Action? onTrackEnded,
         Action<Exception>? onError,
@@ -365,7 +364,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         ct.ThrowIfCancellationRequested();
         _deviceLost = false;
 
-        StartDecoding(urlRefresher, options, onTrackEnded, onError);
+        StartDecoding(options, onTrackEnded, onError);
         Log.Info("[AudioPipeline] Recovered from device loss");
     }
 
@@ -385,7 +384,6 @@ public sealed class AudioPipeline : IAsyncDisposable
     #region Decoder Loop
 
     public void StartDecoding(
-     Func<CancellationToken, Task<string?>>? urlRefresher,
      AudioPlayerOptions options,
      Action? onTrackEnded,
      Action<Exception>? onError)
@@ -402,7 +400,7 @@ public sealed class AudioPipeline : IAsyncDisposable
 #endif
 
         _decoderTask = Task.Run(
-            () => DecoderLoopAsync(urlRefresher, options, onTrackEnded, onError, token));
+            () => DecoderLoopAsync(options, onTrackEnded, onError, token));
 
 #if AUDIO_SPLICE_AUDIT
         const int ShortTrackIdLength = 8;
@@ -440,11 +438,10 @@ public sealed class AudioPipeline : IAsyncDisposable
     }
 
     private async Task DecoderLoopAsync(
-           Func<CancellationToken, Task<string?>>? urlRefresher,
            AudioPlayerOptions options,
            Action? onTrackEnded,
            Action<Exception>? onError,
-CancellationToken ct)
+           CancellationToken ct)
     {
         int retryCount = 0;
         int requiredSpace = _decoder.MaxFrameSize * _decoder.Channels;
@@ -491,19 +488,15 @@ CancellationToken ct)
                     onError?.Invoke(ex);
                     break;
                 }
-                catch (UrlExpiredException) when (urlRefresher != null)
+                catch (UrlExpiredException) when (_source is Sources.CachingStreamSource { HasUrlProvider: true } cachingSource)
                 {
                     Log.Warn($"[AudioPipeline] UrlExpiredException: track={_streamInfo.TrackId}, attempting refresh");
-                    var newUrl = await urlRefresher(ct).ConfigureAwait(false);
+                    var newUrl = await cachingSource.RequestUrlAsync(StreamUrlRequestKind.Refresh, ct).ConfigureAwait(false);
                     Log.Warn($"[AudioPipeline] UrlExpiredException refresh result: track={_streamInfo.TrackId}, success={!string.IsNullOrEmpty(newUrl)}");
                     if (!string.IsNullOrEmpty(newUrl))
                     {
-                        if (_source is Sources.CachingStreamSource cachingSource)
-                        {
-                            cachingSource.UpdateUrl(newUrl);
-                            Log.Warn($"[AudioPipeline] Refreshed URL applied to source: track={_streamInfo.TrackId}");
-                        }
-
+                        cachingSource.UpdateUrl(newUrl);
+                        Log.Warn($"[AudioPipeline] Refreshed URL applied to source: track={_streamInfo.TrackId}");
                         continue;
                     }
                     throw;

@@ -87,11 +87,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private Task? _oldPipelineDisposeTask;
 
     private SessionGuard _session;
-    private string? _currentTrackId;
-    private Func<CancellationToken, Task<string?>>? _cachedUrlRefresher;
-    private string? _cachedUrlRefresherTrackId;
-    private Func<CancellationToken, Task<string?>>? _cachedUrlAcquirer;
-    private string? _cachedUrlAcquirerTrackId;
 
     private readonly SharedPlaybackState _sharedState = new();
 
@@ -208,7 +203,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         CancelActiveSeek();
 
         int session = _session.BeginNew();
-        _currentTrackId = descriptor.TrackId;
         _lastRawPlayedSamples = -1;
 
         _commandChannel.Writer.TryWrite(
@@ -476,7 +470,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             await pipeline.WaitForBackendWarmupAsync(ResumeWarmupTimeoutMs, _lifetimeCts.Token).ConfigureAwait(false);
         }
 
-        ResumePlaybackSequence(pipeline, startTimers: true, configurePipeline: false, trackId: _currentTrackId);
+        ResumePlaybackSequence(pipeline, startTimers: true, configurePipeline: false);
     }
 
     private Task HandleStopAsync()
@@ -494,7 +488,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         }
 
         _sharedBackend.Flush();
-        _currentTrackId = null;
         SetState(PlayerState.Idle);
 
         return Task.CompletedTask;
@@ -534,11 +527,11 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private void ResumePlaybackSequence(
         AudioPipeline pipeline,
         bool startTimers,
-        bool configurePipeline,
-        string? trackId = null)
+        bool configurePipeline)
     {
+        // Трек берётся у самого pipeline: у плеера нет своего «текущего трека», который гонка Stop/Play могла бы обнулить
         if (configurePipeline)
-            _options.OnPipelineConfiguring?.Invoke(pipeline, trackId);
+            _options.OnPipelineConfiguring?.Invoke(pipeline, pipeline.StreamInfo.TrackId);
 
         pipeline.ActivateFillLoop();
         pipeline.Start();
@@ -661,7 +654,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         }
 
         pipeline.StartDecoding(
-            CreateUrlRefresher(),
             _options,
             CreateTrackEndedCallback(cmd.SessionId),
             CreateErrorCallback(cmd.SessionId, pipeline));
@@ -704,8 +696,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
             var pipeline = await AudioPipeline.CreateAsync(
                 cmd.Descriptor,
-                CreateUrlAcquirer(),
-                CreateUrlRefresher(),
                 _options,
                 _sharedBackend,
                 ct).ConfigureAwait(false);
@@ -874,7 +864,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         int sessionId,
         bool startTimers,
         bool configurePipeline,
-        string? trackId = null,
         string? logContext = null)
     {
         // Если весь хвост трека до EOF уже локально скачан и в кольцевом буфере есть декодированные сэмплы,
@@ -888,7 +877,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         if (pcmReady && sourceReady)
         {
-            ResumePlaybackSequence(pipeline, startTimers, configurePipeline, trackId);
+            ResumePlaybackSequence(pipeline, startTimers, configurePipeline);
             return;
         }
 
@@ -955,8 +944,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         _events.RaiseTrackEnded();
 
-        _currentTrackId = null;
-
         var old = Interlocked.Exchange(ref _activePipeline, null);
         if (old != null)
             TrackAndFirePipelineDispose(old);
@@ -997,7 +984,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 return false;
 
             pipeline.StartDecoding(
-                CreateUrlRefresher(),
                 _options,
                 CreateTrackEndedCallback(sessionId),
                 CreateErrorCallback(sessionId, pipeline));
@@ -1190,18 +1176,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private PlaybackIntent CurrentPlaybackIntent =>
         (PlaybackIntent)Volatile.Read(ref _playbackIntent);
 
-    private Func<CancellationToken, Task<string?>>? CreateUrlAcquirer() =>
-        GetOrCreateUrlCallback(
-            _options.UrlAcquireCallback,
-            ref _cachedUrlAcquirer,
-            ref _cachedUrlAcquirerTrackId);
-
-    private Func<CancellationToken, Task<string?>>? CreateUrlRefresher() =>
-        GetOrCreateUrlCallback(
-            _options.UrlRefreshCallback,
-            ref _cachedUrlRefresher,
-            ref _cachedUrlRefresherTrackId);
-
     /// <summary>
     /// Создаёт session-bound callback завершения трека.
     /// </summary>
@@ -1224,28 +1198,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             if (_disposed) return;
             _commandChannel.Writer.TryWrite(new PlayerErrorCommand(sessionId, pipeline, ex));
         };
-    }
-
-    /// <summary>
-    /// Возвращает кэшированный URL callback для текущего трека или создаёт новый.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Func<CancellationToken, Task<string?>>? GetOrCreateUrlCallback(
-        Func<string, CancellationToken, ValueTask<string?>>? optionCallback,
-        ref Func<CancellationToken, Task<string?>>? cachedCallback,
-        ref string? cachedTrackId)
-    {
-        if (optionCallback == null || string.IsNullOrEmpty(_currentTrackId))
-            return null;
-
-        string trackId = _currentTrackId;
-
-        if (cachedCallback != null && cachedTrackId == trackId)
-            return cachedCallback;
-
-        cachedTrackId = trackId;
-        cachedCallback = ct => optionCallback(trackId, ct).AsTask();
-        return cachedCallback;
     }
 
     #endregion

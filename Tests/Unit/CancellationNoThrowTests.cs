@@ -13,6 +13,12 @@ public static class CancellationNoThrowTests
     private const int CancelIterations = 2_000;
 
     /// <summary>
+    /// Верхняя граница времени на бросающую ветку. Без отладчика 2 000 отмен занимают около 10 мс,
+    /// граница срабатывает только под профилировщиком или иным перехватчиком исключений.
+    /// </summary>
+    private static readonly TimeSpan ThrowingPathBudget = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
     /// Проверяет контракты <see cref="TokenExtensions.DelayNoThrowAsync(CancellationToken, int, bool)"/>
     /// и <see cref="TokenExtensions.WhenCanceledAsync"/>: без исключений и с 0 B на синхронной ветке.
     /// </summary>
@@ -62,6 +68,8 @@ public static class CancellationNoThrowTests
     /// <summary>
     /// Измеряет цену одной отмены: <c>Task.Delay(ms, ct)</c> с перехватом исключения против <c>DelayNoThrowAsync</c>.
     /// Оба пути завершаются синхронно на одном потоке, поэтому поточный счётчик аллокаций корректен.
+    /// Под отладчиком бросающая ветка не запускается: каждое first-chance исключение останавливает
+    /// все управляемые потоки процесса, включая аудиопоток, на 10–20 мс.
     /// </summary>
     [TestMethod(TestCategory.Benchmark, "Cancellation Cost: Task.Delay(ms, ct) vs DelayNoThrowAsync",
         Group = TestGroups.System, Order = 21, TimeoutSeconds = 60)]
@@ -70,29 +78,19 @@ public static class CancellationNoThrowTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         var token = cts.Token;
+        bool debuggerAttached = Debugger.IsAttached;
 
-        // Прогрев обоих путей (JIT, первичная раскрутка стека)
+        // Прогрев (JIT, первичная раскрутка стека). Бросающую ветку под отладчиком не трогаем.
         for (int i = 0; i < 50; i++)
         {
-            _ = await ThrowingDelayAsync(token).ConfigureAwait(false);
+            if (!debuggerAttached)
+                _ = await ThrowingDelayAsync(token).ConfigureAwait(false);
             _ = await TokenExtensions.DelayNoThrowAsync(token, 100, continueOnCapturedContext: false).ConfigureAwait(false);
         }
 
         int threadId = Environment.CurrentManagedThreadId;
 
-        // 1. Текущий паттерн: Task.Delay(ms, ct) + OperationCanceledException
-        int thrown = 0;
-        long throwAllocBefore = GC.GetAllocatedBytesForCurrentThread();
-        long throwStart = Stopwatch.GetTimestamp();
-        for (int i = 0; i < CancelIterations; i++)
-        {
-            if (await ThrowingDelayAsync(token).ConfigureAwait(false))
-                thrown++;
-        }
-        double throwNs = Stopwatch.GetElapsedTime(throwStart).TotalNanoseconds / CancelIterations;
-        long throwBytes = GC.GetAllocatedBytesForCurrentThread() - throwAllocBefore;
-
-        // 2. Целевой паттерн инварианта 3: DelayNoThrowAsync
+        // 1. Целевой паттерн инварианта 3: DelayNoThrowAsync. Безопасен в любом окружении.
         int canceledNoThrow = 0;
         long noThrowAllocBefore = GC.GetAllocatedBytesForCurrentThread();
         long noThrowStart = Stopwatch.GetTimestamp();
@@ -107,14 +105,44 @@ public static class CancellationNoThrowTests
         if (Environment.CurrentManagedThreadId != threadId)
             TestAssert.Skip("Continuation hopped threads; per-thread allocation counter is not comparable");
 
-        Log.Info($"[Benchmark] Task.Delay(ms, ct) + catch | {throwNs,10:F1} ns/cancel | {(double)throwBytes / CancelIterations,8:F1} B/cancel");
         Log.Info($"[Benchmark] DelayNoThrowAsync        | {noThrowNs,10:F1} ns/cancel | {(double)noThrowBytes / CancelIterations,8:F1} B/cancel");
 
-        TestAssert.Equal(CancelIterations, thrown, "Every pre-canceled Task.Delay must throw");
         TestAssert.Equal(CancelIterations, canceledNoThrow, "Every pre-canceled DelayNoThrowAsync must return false");
         TestAssert.Equal(0L, noThrowBytes, "DelayNoThrowAsync cancellation path must allocate 0 B");
-        TestAssert.True(throwBytes > 0, "Throwing cancellation path is expected to allocate (exception + canceled task)");
-        TestAssert.True(throwNs >= noThrowNs * 10.0, $"Expected >=10x overhead for throwing path: {throwNs:F1}ns vs {noThrowNs:F1}ns");
+
+        if (debuggerAttached)
+        {
+            // Каждое исключение под отладчиком = остановка всего процесса: 2 000 отмен давали 20-45 с заиканий звука и UI
+            TestAssert.Skip("Debugger attached: throwing path skipped, every first-chance exception suspends all managed threads");
+        }
+        else
+        {
+            // 2. Запрещённый паттерн: Task.Delay(ms, ct) + OperationCanceledException, ограничен по времени
+            int thrown = 0;
+            int throwIterations = 0;
+            long throwAllocBefore = GC.GetAllocatedBytesForCurrentThread();
+            long throwStart = Stopwatch.GetTimestamp();
+            while (throwIterations < CancelIterations)
+            {
+                if (await ThrowingDelayAsync(token).ConfigureAwait(false))
+                    thrown++;
+                throwIterations++;
+
+                if ((throwIterations & 63) == 0 && Stopwatch.GetElapsedTime(throwStart) > ThrowingPathBudget)
+                    break;
+            }
+            double throwNs = Stopwatch.GetElapsedTime(throwStart).TotalNanoseconds / throwIterations;
+            long throwBytes = GC.GetAllocatedBytesForCurrentThread() - throwAllocBefore;
+
+            if (Environment.CurrentManagedThreadId != threadId)
+                TestAssert.Skip("Continuation hopped threads; per-thread allocation counter is not comparable");
+
+            Log.Info($"[Benchmark] Task.Delay(ms, ct) + catch | {throwNs,10:F1} ns/cancel | {(double)throwBytes / throwIterations,8:F1} B/cancel | n={throwIterations}");
+
+            TestAssert.Equal(throwIterations, thrown, "Every pre-canceled Task.Delay must throw");
+            TestAssert.True(throwBytes > 0, "Throwing cancellation path is expected to allocate (exception + canceled task)");
+            TestAssert.True(throwNs >= noThrowNs * 10.0, $"Expected >=10x overhead for throwing path: {throwNs:F1}ns vs {noThrowNs:F1}ns");
+        }
     }
 
     private static async Task<bool> ThrowingDelayAsync(CancellationToken token)

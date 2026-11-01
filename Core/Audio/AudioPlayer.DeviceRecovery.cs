@@ -91,7 +91,6 @@ public sealed partial class AudioPlayer
         try
         {
             await pipeline.RecoverFromDeviceLossAsync(
-                CreateUrlRefresher(),
                 _options,
                 CreateTrackEndedCallback(cmd.SessionId),
                 CreateErrorCallback(cmd.SessionId, pipeline),
@@ -134,7 +133,7 @@ public sealed partial class AudioPlayer
             SetState(PlayerState.Buffering);
             ResumeOrDefer(pipeline, pcmReady, sourceReady, warmupPlan, cmd.SessionId,
                 startTimers: true, configurePipeline: true,
-                trackId: _currentTrackId, logContext: "Device recovery warmup");
+                logContext: "Device recovery warmup");
 
             Log.Info("[AudioPlayer] Device recovery complete");
             _events.RaiseDeviceRestored();

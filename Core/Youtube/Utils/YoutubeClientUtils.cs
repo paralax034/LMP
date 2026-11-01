@@ -271,6 +271,48 @@ public static class YoutubeClientUtils
 	public static string[] StreamFallbackClients => StreamFallbackClientsDefault;
 
 	/// <summary>
+	/// Порядок клиентов после HTTP 403 от CDN на уже выданных URL.
+	/// WEB идёт первым (браузерный профиль: именно он воспроизводит трек в браузере),
+	/// ANDROID_VR — последним: после серии 403 он почти гарантированно получает bot detection
+	/// и уходит в двухчасовой карантин.
+	/// </summary>
+	public static readonly string[] StreamFallbackClientsAfterCdnForbidden =
+	[
+		YoutubeClientNames.Web,
+		YoutubeClientNames.WebRemix,
+		YoutubeClientNames.AndroidVr,
+	];
+
+	/// <summary>
+	/// Возвращает fallback-цепочку после CDN 403 без клиентов, чьи URL этого трека уже отвергнуты CDN.
+	/// </summary>
+	/// <param name="excludedClients">API-имена клиентов (значение параметра <c>c</c> в stream URL), получивших CDN 403.</param>
+	/// <returns>Новый массив клиентов в порядке приоритета; пустой, если исключены все.</returns>
+	public static string[] GetStreamFallbackClientsAfterCdnForbidden(IReadOnlyList<string> excludedClients)
+	{
+		ArgumentNullException.ThrowIfNull(excludedClients);
+
+		var result = new List<string>(StreamFallbackClientsAfterCdnForbidden.Length);
+		foreach (var client in StreamFallbackClientsAfterCdnForbidden)
+		{
+			bool isExcluded = false;
+			for (int i = 0; i < excludedClients.Count; i++)
+			{
+				if (string.Equals(excludedClients[i], client, StringComparison.OrdinalIgnoreCase))
+				{
+					isExcluded = true;
+					break;
+				}
+			}
+
+			if (!isExcluded)
+				result.Add(client);
+		}
+
+		return result.ToArray();
+	}
+
+	/// <summary>
 	/// Возвращает строковый идентификатор клиента для YouTube API.
 	/// Enum.ToString() даёт "AndroidVR", а API ожидает "ANDROID_VR" — прямое
 	/// преобразование через switch исключает ошибки при добавлении новых клиентов.

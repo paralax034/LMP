@@ -343,7 +343,7 @@ public sealed partial class CachingStreamSource
         {
             Log.Info($"[CachingSource] [{_trackId}] URL expired/expiring soon. Proactive refresh before request...");
             var proactiveOutcome = await CoordinatedRefreshAsync(ct).ConfigureAwait(false);
-            if (proactiveOutcome == UrlRefreshOutcome.Success)
+            if (proactiveOutcome is RefreshOutcome.NewUrl or RefreshOutcome.EgressChanged)
             {
                 Log.Info($"[CachingSource] [{_trackId}] Proactive refresh succeeded before range {position}");
             }
@@ -361,10 +361,6 @@ public sealed partial class CachingStreamSource
         int maxAttempts = _config.MaxNetworkRetries;
         int chunkIoExceptions = 0;
         bool warningPublished = false;
-        int consecutiveStaleRefreshes = 0;
-        int urlRefreshCount = 0;
-        const int MaxUrlRefreshesPerRange = 4;
-        const int MaxStaleRefreshesBeforeGivingUp = 3;
 
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
@@ -428,57 +424,34 @@ public sealed partial class CachingStreamSource
                         ResetDownloadEpoch();
 
                         Log.Warn($"[CachingSource] [{_trackId}] HTTP 403 on range {plan.Start}-{plan.Start + plan.Length - 1L}. " +
-                                $"Attempt {attempt + 1}/{maxAttempts}. Refreshing URL...");
+                                $"Refreshing URL (refresh budget {Volatile.Read(ref _forbiddenRefreshBudgetSpent)}/{MaxForbiddenRefreshBudget})...");
 
-                        UrlRefreshOutcome outcome;
-                        try
-                        {
-                            outcome = await CoordinatedRefreshAsync(ct).ConfigureAwait(false);
-                        }
-                        catch (ChunkDownloadFatalException)
-                        {
-                            throw;
-                        }
+                        // Исчерпание единого бюджета бросает ChunkDownloadFatalException(Forbidden403) из CoordinatedRefreshAsync.
+                        RefreshOutcome outcome = await CoordinatedRefreshAsync(ct).ConfigureAwait(false);
 
-                        switch (outcome)
+                        switch (DecideRefresh(outcome, forbiddenDriven: true).Action)
                         {
-                            case UrlRefreshOutcome.Success:
-                                consecutiveStaleRefreshes = 0;
+                            case RangeRetryAction.RetryNow:
                                 chunkIoExceptions = 0;
-                                urlRefreshCount++;
-                                if (urlRefreshCount <= MaxUrlRefreshesPerRange)
-                                {
-                                    attempt = -1; // На новом URL даём полный бюджет ретраев (до лимита рефрешей)
-                                }
-                                Log.Info($"[CachingSource] [{_trackId}] URL refreshed (#{urlRefreshCount}), retrying range {plan.Start} with fresh budget");
+                                // Число refresh ограничено бюджетом source, поэтому новый URL получает полный набор сетевых попыток.
+                                attempt = -1;
+                                Log.Info($"[CachingSource] [{_trackId}] URL refreshed ({outcome}), retrying range {plan.Start} with fresh attempts");
                                 continue;
 
-                            case UrlRefreshOutcome.StaleToken:
-                                consecutiveStaleRefreshes++;
-                                Log.Warn($"[CachingSource] [{_trackId}] Stale n-token after refresh " +
-                                        $"({consecutiveStaleRefreshes}/{MaxStaleRefreshesBeforeGivingUp}). " +
-                                        $"Backing off before retry...");
-
-                                if (consecutiveStaleRefreshes >= MaxStaleRefreshesBeforeGivingUp)
+                            case RangeRetryAction.RetryAfterBackoff:
                                 {
-                                    Log.Error($"[CachingSource] [{_trackId}] Too many stale refreshes. " +
-                                            $"Escalating to fatal.");
-                                    throw CreateReadAtFatalException(position);
+                                    int backoffMs = GetSameUrlBackoffMs();
+                                    Log.Warn($"[CachingSource] [{_trackId}] Refresh returned the same URL. " +
+                                            $"Backing off {backoffMs}ms before retry...");
+                                    if (!await ct.DelayNoThrowAsync(backoffMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                        return RangeDownloadResult.Cancelled;
+                                    continue;
                                 }
-
-                                // Exponential backoff: 1s, 2s, 4s
-                                int backoffMs = (int)Math.Pow(2, consecutiveStaleRefreshes - 1) * 1000;
-                                if (!await ct.DelayNoThrowAsync(backoffMs, continueOnCapturedContext: false).ConfigureAwait(false))
-                                    return RangeDownloadResult.Cancelled;
-                                continue;
-
-                            case UrlRefreshOutcome.NoChange:
-                                Log.Warn($"[CachingSource] [{_trackId}] Refresh returned no new URL (network likely unavailable). " +
-                                        $"Deferring to network recovery loop...");
-                                return RangeDownloadResult.NetworkError;
 
                             default:
-                                continue;
+                                Log.Warn($"[CachingSource] [{_trackId}] Refresh returned no URL (provider unavailable or network down). " +
+                                        $"Deferring to network recovery loop...");
+                                return RangeDownloadResult.NetworkError;
                         }
                     }
 
@@ -709,6 +682,8 @@ public sealed partial class CachingStreamSource
 
         Log.Debug($"[CachingSource] Range {plan.Start}-{end}: GET rn={rn}");
 
+        // Базовый URL запроса: 403 по уже заменённому URL не должен расходовать бюджет refresh.
+        string requestBaseUrl = _currentUrl;
         using var request = CreateRangeRequest(logicalIndex, plan.Start, end, rn);
         HttpResponseMessage response;
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -758,6 +733,13 @@ public sealed partial class CachingStreamSource
 
             if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
             {
+                if (!ReferenceEquals(requestBaseUrl, _currentUrl))
+                {
+                    // URL уже заменён параллельным refresh: этот 403 относится к старому URL.
+                    Log.Debug($"[CachingSource] [{_trackId}] Stale 403 for replaced URL on range {plan.Start}-{end}, retrying with current URL");
+                    return RangeDownloadResult.NetworkError;
+                }
+
                 Interlocked.Increment(ref _consecutive403Count);
                 await LogAndDiagnose403Async(logicalIndex, request, response).ConfigureAwait(false);
                 return RangeDownloadResult.Forbidden403;
@@ -770,6 +752,8 @@ public sealed partial class CachingStreamSource
             }
 
             Volatile.Write(ref _consecutive403Count, 0);
+            if (response.IsSuccessStatusCode)
+                ResetForbiddenRefreshBudget();
 
             // После первого успешного ответа запоминаем CDN-ноду для speculative pre-warm.
             Http.CdnConnectionPreWarmer.RecordHost(_currentUrl);
