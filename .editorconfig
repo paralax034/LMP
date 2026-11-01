@@ -12,6 +12,15 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 charset = utf-8
 
+# --- Line Ending Overrides ---
+# bash не переносит \r: скрипты оболочки только с LF в любой ОС.
+[*.sh]
+end_of_line = lf
+
+# Файлы локализации отформатированы с отступом в два пробела.
+[Assets/Localization/*.json]
+indent_size = 2
+
 # --- Generated Code Overrides ---
 [SharpJaad.AAC/**.cs]
 generated_code = true
