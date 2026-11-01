@@ -14,58 +14,48 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <PropertyGroup Label="Package Versions">
-    <!-- Entity Framework Core: 10.0.11 (патчи безопасности/багфиксы) -->
-    <MsExtVersion>10.0.14</MsExtVersion>
-    <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
-    <AvaloniaVersion>12.1.4</AvaloniaVersion>
-    <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
-    <SkiaSharpVersion>4.154.0</SkiaSharpVersion>
-  </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <!-- Отключаем рефлексию JSON в Release для Native AOT -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <!-- Подавляем внутренние некритичные предупреждения ILC для EF Core -->
+    <!-- Подавляем предупреждения анализа тримминга/AOT сторонних зависимостей синхронно с корневым проектом -->
     <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
   </PropertyGroup>
 
   <ItemGroup Label="UI Core Dependencies">
-    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="AsyncImageLoader.Avalonia" Version="$(AsyncImageLoaderVersion)" />
-    <PackageReference Include="SkiaSharp" Version="$(SkiaSharpVersion)" />
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="AsyncImageLoader.Avalonia" />
+    <!-- SkiaSharp приходит транзитивно через Avalonia.Skia: версия Skia всегда совпадает с ожидаемой Avalonia -->
+    <PackageReference Include="Avalonia.Skia" />
   </ItemGroup>
 
   <ItemGroup Label="Serialization">
-    <PackageReference Include="MemoryPack" Version="1.21.4" />
-  </ItemGroup>
-
-  <!-- SQLite Native Provider -->
-  <ItemGroup Label="Entity Framework">
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="MemoryPack" />
   </ItemGroup>
 
   <ItemGroup Label="MVVM">
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
   </ItemGroup>
 
   <ItemGroup Label="Microsoft Extensions">
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="$(MsExtVersion)" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 
   <ItemGroup Label="Audio">
-    <PackageReference Include="Concentus" Version="2.2.2" />
+    <PackageReference Include="Concentus" />
   </ItemGroup>
 
   <ItemGroup Label="Scripting">
-    <PackageReference Include="Acornima" Version="1.9.1" />
+    <PackageReference Include="Acornima" />
   </ItemGroup>
 
   <ItemGroup Label="Data &amp; Security">
-    <!-- Синхронизировано до $(EfCoreVersion) для работы с базами SQLite браузеров -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="$(MsExtVersion)" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+    <!--
+      ADO.NET-провайдер SQLite для библиотеки и чтения баз браузеров.
+      Нативный мост SQLitePCLRaw (bundle_e_sqlite3) приходит транзитивно в версии, ожидаемой провайдером.
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 
   <ItemGroup>

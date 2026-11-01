@@ -556,24 +556,26 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     #region Очистка и завершение
 
+    /// <summary>
+    /// Полностью сбрасывает библиотеку: удаляет файл базы вместе с журналами WAL/SHM и атомарно создаёт чистую схему.
+    /// </summary>
+    /// <remarks>
+    /// Ошибки удаления не подавляются: если файл заблокирован, старая база осталась бы на месте,
+    /// а оставшийся <c>-wal</c> мог бы примениться к новой базе при открытии.
+    /// </remarks>
     public async Task ResetAsync(CancellationToken ct = default)
     {
         _registry.Clear();
 
         SqliteConnection.ClearAllPools();
         var dbPath = G.FilePath.Database;
-        if (File.Exists(dbPath))
-        {
-            try { File.Delete(dbPath); } catch { }
-            try { File.Delete(dbPath + "-wal"); } catch { }
-            try { File.Delete(dbPath + "-shm"); } catch { }
-        }
+        File.Delete(dbPath + "-wal"); // журналы первыми: если файл занят, основная база останется нетронутой
+        File.Delete(dbPath + "-shm");
+        File.Delete(dbPath);
 
         await using var connection = await _connectionFactory.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await connection.EnsureTablesCreatedAsync(ct).ConfigureAwait(false);
-        await connection.MigrateSchemaAsync(ct).ConfigureAwait(false);
+        await connection.ApplySchemaMigrationAsync(DatabaseExtensions.CurrentDbVersion, ct).ConfigureAwait(false);
         await connection.OptimizeAsync(ct).ConfigureAwait(false);
-        await connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, ct).ConfigureAwait(false);
 
         Settings = new AppSettings();
         OnDataChanged?.Invoke();

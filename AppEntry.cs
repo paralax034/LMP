@@ -69,14 +69,16 @@ public sealed class AppEntry
     [STAThread]
     public static void Main(string[] args)
     {
-        // 1. Инициализация нативного моста SQLite для Native AOT (критично перед любым вызовом к БД)
+        // 1. Инициализация нативного моста SQLite для Native AOT (критично перед любым вызовом к БД).
+        // Логгер еще не инициализирован: ошибка сохраняется и пробрасывается как фатальная сразу после Log.Initialize().
+        Exception? sqliteInitError = null;
         try
         {
             SQLitePCL.Batteries_V2.Init();
         }
         catch (Exception ex)
         {
-            Log.Debug($"[AppEntry] SQLite batteries initialization notice: {ex.Message}");
+            sqliteInitError = ex;
         }
 
         // 2. Ожидание завершения родительского процесса при обновлении и безопасная очистка .old файлов
@@ -219,6 +221,13 @@ public sealed class AppEntry
             Log.Initialize();
             Log.Info($"{G.AppId} starting...");
 
+            // Без нативного моста любая операция с БД невозможна: запуск прерывается через общий фатальный обработчик ниже.
+            if (sqliteInitError is not null)
+            {
+                throw new InvalidOperationException(
+                    "SQLite native bridge (SQLitePCL.Batteries_V2) failed to initialize.", sqliteInitError);
+            }
+
             if (enableTelemetry)
             {
                 ProcessFlightRecorder.SetEnabled(true, G.Folder.Logs);
@@ -227,6 +236,13 @@ public sealed class AppEntry
             BootstrapSettings.Initialize();
 
             var services = new ServiceCollection();
+#if DEBUG
+            if (!IsTestUiMode && LMP.Tests.ManualTests.HasTestCliArguments(args))
+            {
+                var testDbFolder = G.FilePath.UseIsolatedTestDatabase();
+                Log.Info($"[Tests] Isolated test database: {testDbFolder}");
+            }
+#endif
             ConfigureServices(services);
             Services = services.BuildServiceProvider();
 
@@ -253,19 +269,31 @@ public sealed class AppEntry
         }
         catch (Exception ex)
         {
-            Log.Fatal($"Global crash: {ex.Message}\n{ex.StackTrace}");
+            // Ненулевой код возврата обязателен: иначе headless-запуск (verify, CI) считает фатальный сбой успехом.
+            Environment.ExitCode = 1;
+            Log.Fatal($"Global crash: {ex}");
             if (!isHeadlessTest)
             {
                 OsNotificationHelper.ShowFatalError("LMP Fatal Startup Error", ex.Message, ex.ToString());
             }
             else
             {
-                Console.Error.WriteLine($"[LMP Fatal Error] {ex.Message}\n{ex.StackTrace}");
+                Console.Error.WriteLine($"[LMP Fatal Error] {ex}");
             }
         }
         finally
         {
             ProcessFlightRecorder.ShutdownGlobal();
+#if DEBUG
+            try
+            {
+                G.FilePath.CleanupIsolatedTestDatabase();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[Tests] Failed to remove isolated test database: {ex.Message}");
+            }
+#endif
             Log.Shutdown();
         }
     }
@@ -315,10 +343,17 @@ public sealed class AppEntry
         return builder;
     }
 
+    private const int MigrationMaxAttempts = 3;
+    private const int MigrationRetryDelayMs = 250;
+
+    /// <summary>
+    /// Проверяет и обновляет схему базы. При повреждении (SQLITE_CORRUPT, SQLITE_NOTADB) пересоздает базу,
+    /// при блокировке (SQLITE_BUSY, SQLITE_LOCKED) повторяет попытку, а любую другую ошибку считает фатальной
+    /// и оставляет файл нетронутым.
+    /// </summary>
     private static void MigrateDatabaseSync(bool fastMode = false)
     {
         var dbPath = G.FilePath.Database;
-
         if (!File.Exists(dbPath))
         {
             CreateFreshDatabase();
@@ -331,7 +366,7 @@ public sealed class AppEntry
             try
             {
                 var bakPath = dbPath + ".bak";
-                File.Copy(dbPath, bakPath, overwrite: true);
+                DatabaseExtensions.CreateConsistentBackup(dbPath, bakPath);
                 Log.Info($"[DB] Safety backup created: {bakPath}");
             }
             catch (Exception ex)
@@ -340,45 +375,60 @@ public sealed class AppEntry
             }
         }
 
-        int dbVersion = 0;
-
-        try
+        for (int attempt = 1; ; attempt++)
         {
-            var connectionFactory = Services.GetRequiredService<ISqliteConnectionFactory>();
-            using var connection = connectionFactory.CreateConnection();
-            connection.Open();
-
-            dbVersion = connection.GetDatabaseVersionAsync(CancellationToken.None).GetAwaiter().GetResult();
-
-            if (dbVersion < DatabaseExtensions.CurrentDbVersion)
+            try
             {
-                if (dbVersion < 3)
-                {
-                    WasMigratedFromLegacy = true;
-                }
-
-                Log.Info($"[DB] Upgrading schema: v{dbVersion} -> v{DatabaseExtensions.CurrentDbVersion}");
-
-                connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None)
-                    .GetAwaiter().GetResult();
-
-                Log.Info($"[DB] Schema upgrade complete (Version: {DatabaseExtensions.CurrentDbVersion})");
+                MigrateExistingDatabase(fastMode);
+                return;
             }
-            else if (!fastMode)
+            catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.IsTransientLockError() && attempt < MigrationMaxAttempts)
             {
-                connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
-                connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-
-                Log.Info($"[DB] Database schema is current (Version: {dbVersion})");
+                Log.Warn($"[DB] Database is locked (SQLite {ex.SqliteErrorCode}), retrying migration {attempt}/{MigrationMaxAttempts}...");
+                Thread.Sleep(MigrationRetryDelayMs * attempt);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.IsCorruptionError())
+            {
+                Log.Error($"[DB] Database file is corrupted (SQLite {ex.SqliteErrorCode}): {ex.Message}");
+                BackupAndRecreateDatabase(dbPath);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal($"[DB] Schema migration failed, database left untouched: {ex.Message}");
+                throw;
             }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// Открывает существующую базу и при устаревшей версии выполняет транзакционную миграцию схемы.
+    /// </summary>
+    private static void MigrateExistingDatabase(bool fastMode)
+    {
+        var connectionFactory = Services.GetRequiredService<ISqliteConnectionFactory>();
+        using var connection = connectionFactory.CreateConnection();
+        connection.Open();
+
+        int dbVersion = connection.GetDatabaseVersionAsync(CancellationToken.None).GetAwaiter().GetResult();
+        if (dbVersion < DatabaseExtensions.CurrentDbVersion)
         {
-            Log.Error($"[DB] Incremental migration from v{dbVersion} failed: {ex.Message}");
-            BackupAndRecreateDatabase(dbPath);
+            Log.Info($"[DB] Upgrading schema: v{dbVersion} -> v{DatabaseExtensions.CurrentDbVersion}");
+            connection.ApplySchemaMigrationAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None)
+                .GetAwaiter().GetResult();
+
+            // Флаг выставляется только после COMMIT: при откате миграции наследие v1–v2 остается нетронутым.
+            if (dbVersion < 3)
+                WasMigratedFromLegacy = true;
+
+            connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Log.Info($"[DB] Schema upgrade complete (Version: {DatabaseExtensions.CurrentDbVersion})");
+        }
+        else if (!fastMode)
+        {
+            connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Log.Info($"[DB] Database schema is current (Version: {dbVersion})");
         }
     }
 
@@ -389,13 +439,9 @@ public sealed class AppEntry
             var connectionFactory = Services.GetRequiredService<ISqliteConnectionFactory>();
             using var connection = connectionFactory.CreateConnection();
             connection.Open();
-
-            connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
-            connection.MigrateSchemaAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.ApplySchemaMigrationAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None)
+                .GetAwaiter().GetResult();
             connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
-            connection.SetDatabaseVersionAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None).GetAwaiter()
-                .GetResult();
-
             Log.Info($"[DB] Fresh database created (Version: {DatabaseExtensions.CurrentDbVersion})");
         }
         catch (Exception ex)
@@ -405,28 +451,56 @@ public sealed class AppEntry
         }
     }
 
+    /// <summary>
+    /// Переносит файл, если он существует, с заменой файла назначения.
+    /// </summary>
+    private static void MoveIfExists(string source, string destination)
+    {
+        if (File.Exists(source))
+            File.Move(source, destination, overwrite: true);
+    }
+
+    /// <summary>
+    /// Восстанавливает работоспособность при поврежденной базе (SQLITE_CORRUPT, SQLITE_NOTADB): пытается снять
+    /// согласованную копию, переносит исходные файлы вместе с журналами в карантин и создает чистую базу.
+    /// </summary>
     private static void BackupAndRecreateDatabase(string dbPath)
     {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        var stamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+
+        // Поврежденный файл часто не читается целиком, поэтому согласованная копия — попытка, а не условие восстановления.
         try
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
+            var backupPath = dbPath + ".backup." + stamp;
+            DatabaseExtensions.CreateConsistentBackup(dbPath, backupPath);
+            Log.Info($"[DB] Consistent backup of damaged database created: {backupPath}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[DB] Consistent backup of damaged database failed, keeping raw files only: {ex.Message}");
+        }
 
-            if (File.Exists(dbPath))
-            {
-                var backupPath = dbPath + $".backup.{DateTime.Now:yyyyMMddHHmmss}";
-                File.Move(dbPath, backupPath, overwrite: true);
-                Log.Info($"[DB] Incompatible database backed up to: {backupPath}");
-            }
+        // Журналы переносятся первыми: оставленный -wal применился бы к новой базе.
+        // Сбой переноса фатален, пересоздавать базу поверх неперенесенных файлов нельзя.
+        var quarantinePath = dbPath + ".corrupt." + stamp;
+        MoveIfExists(dbPath + "-wal", quarantinePath + "-wal");
+        MoveIfExists(dbPath + "-shm", quarantinePath + "-shm");
+        MoveIfExists(dbPath, quarantinePath);
+        Log.Info($"[DB] Damaged database moved to quarantine: {quarantinePath}");
 
+        try
+        {
             var auth = Services.GetRequiredService<CookieAuthService>();
             auth.Logout();
             Log.Info("[DB] Authorization cleared after database recreation.");
         }
-        catch (Exception backupEx)
+        catch (Exception ex)
         {
-            Log.Error($"[DB] Failed to backup database before recreation: {backupEx.Message}");
+            Log.Warn($"[DB] Failed to clear authorization after database recreation: {ex.Message}");
         }
 
         try

@@ -10,7 +10,7 @@ namespace LMP.Core.Data.Repositories;
 
 /// <summary>
 /// Реализация репозитория управления треками в SQLite-хранилище.
-/// Использует асинхронный контекст EF Core Factory для предотвращения блокировок потоков.
+/// Работает через асинхронные команды ADO.NET (Microsoft.Data.Sqlite), не блокируя вызывающие потоки.
 /// </summary>
 public sealed partial class TrackRepository : ITrackRepository
 {

@@ -1,0 +1,43 @@
+<Project>
+  <!--
+    Central Package Management: единый источник версий пакетов для всех проектов решения.
+    SkiaSharp и SQLitePCLRaw намеренно не перечислены: их версии приходят транзитивно
+    (через Avalonia.Skia и Microsoft.Data.Sqlite) и остаются согласованными с этими пакетами.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Пакеты семейства Avalonia обновляются только синхронно -->
+    <AvaloniaVersion>12.1.4</AvaloniaVersion>
+  </PropertyGroup>
+
+  <ItemGroup Label="Avalonia">
+    <PackageVersion Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Skia" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="AsyncImageLoader.Avalonia" Version="3.8.0" />
+    <PackageVersion Include="Xaml.Behaviors.Avalonia" Version="12.0.7" />
+  </ItemGroup>
+
+  <ItemGroup Label="MVVM &amp; Extensions">
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup Label="Data &amp; Security">
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+    <PackageVersion Include="MemoryPack" Version="1.21.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Audio &amp; Scripting">
+    <PackageVersion Include="Concentus" Version="2.2.2" />
+    <PackageVersion Include="Concentus.Native" Version="1.5.2" />
+    <PackageVersion Include="Acornima" Version="1.9.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Platform Interop">
+    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.95.2" />
+  </ItemGroup>
+</Project>

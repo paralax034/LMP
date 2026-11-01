@@ -13,144 +13,149 @@ public static class DatabaseExtensions
     /// </summary>
     public const int CurrentDbVersion = 6;
 
+    private const int SqliteBusy = 5;
+    private const int SqliteLocked = 6;
+    private const int SqliteCorrupt = 11;
+    private const int SqliteNotADb = 26;
+
     /// <summary>
-    /// Идемпотентно создает все необходимые таблицы и индексы базы данных в режиме Native AOT.
+    /// Идемпотентный DDL-пакет таблиц схемы без индексов.
     /// </summary>
-    /// <param name="context">Экземпляр контекста базы данных <see cref="LibraryDbContext"/>.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию выполнения DDL-пакета.</returns>
     /// <remarks>
-    /// Заменяет заблокированный в Native AOT метод <c>Database.EnsureCreated()</c>.
-    /// Выполняет нативный составной SQL-скрипт схемы без обращения к design-time метаданным и рефлексии.
-    /// Безопасен для многократного вызова благодаря директивам <c>IF NOT EXISTS</c>.
+    /// Отделён от <see cref="IndexesDdl"/>: в унаследованных базах часть колонок (например, <c>OwnerId</c>)
+    /// появляется только после <see cref="MigrateSchemaAsync"/>, поэтому индексы по ним строятся после миграции колонок.
     /// </remarks>
+    private const string TablesDdl = """
+        CREATE TABLE IF NOT EXISTS "Notifications" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_Notifications" PRIMARY KEY,
+            "TitleKey" TEXT NULL,
+            "TitleRaw" TEXT NULL,
+            "MessageKey" TEXT NULL,
+            "MessageRaw" TEXT NULL,
+            "MessageArgsJson" TEXT NULL,
+            "RecommendationKey" TEXT NULL,
+            "Severity" INTEGER NOT NULL,
+            "IsRead" INTEGER NOT NULL,
+            "TrackId" TEXT NULL,
+            "TrackTitle" TEXT NULL,
+            "ExceptionDetails" TEXT NULL,
+            "AttemptsJson" TEXT NULL,
+            "CreatedAt" TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS "Playlists" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_Playlists" PRIMARY KEY,
+            "Name" TEXT NOT NULL,
+            "YoutubeId" TEXT NULL,
+            "Author" TEXT NULL,
+            "ThumbnailUrl" TEXT NULL,
+            "CustomColor" TEXT NULL,
+            "ComputedColor" TEXT NULL,
+            "Description" TEXT NULL,
+            "OwnerId" TEXT NOT NULL DEFAULT '',
+            "OwnerChannelId" TEXT NULL,
+            "Ownership" INTEGER NOT NULL,
+            "Visibility" INTEGER NOT NULL,
+            "SyncMode" INTEGER NOT NULL,
+            "ViewCount" INTEGER NULL,
+            "ReleaseDate" TEXT NULL,
+            "CloudTrackCount" INTEGER NULL,
+            "LastSyncedAtUtc" TEXT NULL,
+            "IsCloudUnavailable" INTEGER NOT NULL,
+            "CreatedAt" TEXT NOT NULL,
+            "UpdatedAt" TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS "RecentlyPlayed" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_RecentlyPlayed" PRIMARY KEY AUTOINCREMENT,
+            "TrackId" TEXT NOT NULL,
+            "PlayedAt" TEXT NOT NULL,
+            "OwnerId" TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS "Settings" (
+            "Key" TEXT NOT NULL CONSTRAINT "PK_Settings" PRIMARY KEY,
+            "Value" TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS "Tracks" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_Tracks" PRIMARY KEY,
+            "Title" TEXT NOT NULL,
+            "Author" TEXT NOT NULL,
+            "ChannelId" TEXT NULL,
+            "Url" TEXT NOT NULL,
+            "DurationTicks" INTEGER NOT NULL,
+            "ThumbnailUrl" TEXT NOT NULL,
+            "IsOfficialArtist" INTEGER NOT NULL,
+            "IsMusic" INTEGER NOT NULL,
+            "IsDisliked" INTEGER NOT NULL,
+            "IsDownloaded" INTEGER NOT NULL,
+            "LocalPath" TEXT NULL,
+            "PreferredContainer" TEXT NULL,
+            "PreferredBitrate" INTEGER NOT NULL,
+            "RadioSeedId" TEXT NULL,
+            "IntegratedLufs" REAL NULL,
+            "IntegratedLufsSource" INTEGER NOT NULL DEFAULT 0,
+            "EqualizerPresetId" TEXT NULL,
+            "CreatedAt" TEXT NOT NULL,
+            "UpdatedAt" TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS "LikedTracks" (
+            "OwnerId" TEXT NOT NULL,
+            "TrackId" TEXT NOT NULL,
+            "LikedAt" TEXT NOT NULL,
+            CONSTRAINT "PK_LikedTracks" PRIMARY KEY ("OwnerId", "TrackId"),
+            CONSTRAINT "FK_LikedTracks_Tracks_TrackId" FOREIGN KEY ("TrackId") REFERENCES "Tracks" ("Id") ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS "PlaylistTracks" (
+            "PlaylistId" TEXT NOT NULL,
+            "TrackId" TEXT NOT NULL,
+            "Position" INTEGER NOT NULL,
+            "SetVideoId" TEXT NULL,
+            CONSTRAINT "PK_PlaylistTracks" PRIMARY KEY ("PlaylistId", "TrackId"),
+            CONSTRAINT "FK_PlaylistTracks_Playlists_PlaylistId" FOREIGN KEY ("PlaylistId") REFERENCES "Playlists" ("Id") ON DELETE CASCADE,
+            CONSTRAINT "FK_PlaylistTracks_Tracks_TrackId" FOREIGN KEY ("TrackId") REFERENCES "Tracks" ("Id") ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS "CloudMutationOutbox" (
+            "TargetId" TEXT NOT NULL,
+            "OwnerId" TEXT NOT NULL,
+            "PayloadJson" TEXT NOT NULL,
+            "UpdatedAtTicks" INTEGER NOT NULL,
+            "RetryCount" INTEGER NOT NULL DEFAULT 0,
+            CONSTRAINT "PK_CloudMutationOutbox" PRIMARY KEY ("TargetId", "OwnerId")
+        );
+        """;
+
+    /// <summary>
+    /// Идемпотентный DDL-пакет индексов схемы; выполняется только после появления всех индексируемых колонок.
+    /// </summary>
+    private const string IndexesDdl = """
+        CREATE INDEX IF NOT EXISTS "IX_CloudMutationOutbox_OwnerId_UpdatedAtTicks" ON "CloudMutationOutbox" ("OwnerId", "UpdatedAtTicks");
+        CREATE INDEX IF NOT EXISTS "IX_LikedTracks_OwnerId" ON "LikedTracks" ("OwnerId");
+        CREATE INDEX IF NOT EXISTS "IX_LikedTracks_TrackId" ON "LikedTracks" ("TrackId");
+        CREATE INDEX IF NOT EXISTS "IX_Notifications_CreatedAt" ON "Notifications" ("CreatedAt");
+        CREATE INDEX IF NOT EXISTS "IX_Notifications_IsRead" ON "Notifications" ("IsRead");
+        CREATE INDEX IF NOT EXISTS "IX_Playlists_OwnerId" ON "Playlists" ("OwnerId");
+        CREATE INDEX IF NOT EXISTS "IX_PlaylistTracks_PlaylistId_Position" ON "PlaylistTracks" ("PlaylistId", "Position");
+        CREATE INDEX IF NOT EXISTS "IX_PlaylistTracks_TrackId" ON "PlaylistTracks" ("TrackId");
+        CREATE INDEX IF NOT EXISTS "IX_RecentlyPlayed_OwnerId" ON "RecentlyPlayed" ("OwnerId");
+        CREATE INDEX IF NOT EXISTS "IX_RecentlyPlayed_PlayedAt" ON "RecentlyPlayed" ("PlayedAt");
+        CREATE INDEX IF NOT EXISTS "IX_RecentlyPlayed_TrackId" ON "RecentlyPlayed" ("TrackId");
+        CREATE INDEX IF NOT EXISTS "IX_Tracks_IsDownloaded" ON "Tracks" ("IsDownloaded");
+        CREATE INDEX IF NOT EXISTS "IX_Tracks_Title_Author" ON "Tracks" ("Title", "Author");
+        CREATE INDEX IF NOT EXISTS "IX_Tracks_UpdatedAt" ON "Tracks" ("UpdatedAt");
+        """;
+
     public static async Task EnsureTablesCreatedAsync(this SqliteConnection context, CancellationToken ct = default)
     {
-        const string ddlSql = """
-                CREATE TABLE IF NOT EXISTS "Notifications" (
-                    "Id" TEXT NOT NULL CONSTRAINT "PK_Notifications" PRIMARY KEY,
-                    "TitleKey" TEXT NULL,
-                    "TitleRaw" TEXT NULL,
-                    "MessageKey" TEXT NULL,
-                    "MessageRaw" TEXT NULL,
-                    "MessageArgsJson" TEXT NULL,
-                    "RecommendationKey" TEXT NULL,
-                    "Severity" INTEGER NOT NULL,
-                    "IsRead" INTEGER NOT NULL,
-                    "TrackId" TEXT NULL,
-                    "TrackTitle" TEXT NULL,
-                    "ExceptionDetails" TEXT NULL,
-                    "AttemptsJson" TEXT NULL,
-                    "CreatedAt" TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS "Playlists" (
-                    "Id" TEXT NOT NULL CONSTRAINT "PK_Playlists" PRIMARY KEY,
-                    "Name" TEXT NOT NULL,
-                    "YoutubeId" TEXT NULL,
-                    "Author" TEXT NULL,
-                    "ThumbnailUrl" TEXT NULL,
-                    "CustomColor" TEXT NULL,
-                    "ComputedColor" TEXT NULL,
-                    "Description" TEXT NULL,
-                    "OwnerId" TEXT NOT NULL DEFAULT '',
-                    "OwnerChannelId" TEXT NULL,
-                    "Ownership" INTEGER NOT NULL,
-                    "Visibility" INTEGER NOT NULL,
-                    "SyncMode" INTEGER NOT NULL,
-                    "ViewCount" INTEGER NULL,
-                    "ReleaseDate" TEXT NULL,
-                    "CloudTrackCount" INTEGER NULL,
-                    "LastSyncedAtUtc" TEXT NULL,
-                    "IsCloudUnavailable" INTEGER NOT NULL,
-                    "CreatedAt" TEXT NOT NULL,
-                    "UpdatedAt" TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS "RecentlyPlayed" (
-                    "Id" INTEGER NOT NULL CONSTRAINT "PK_RecentlyPlayed" PRIMARY KEY AUTOINCREMENT,
-                    "TrackId" TEXT NOT NULL,
-                    "PlayedAt" TEXT NOT NULL,
-                    "OwnerId" TEXT NOT NULL DEFAULT ''
-                );
-
-                CREATE TABLE IF NOT EXISTS "Settings" (
-                    "Key" TEXT NOT NULL CONSTRAINT "PK_Settings" PRIMARY KEY,
-                    "Value" TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS "Tracks" (
-                    "Id" TEXT NOT NULL CONSTRAINT "PK_Tracks" PRIMARY KEY,
-                    "Title" TEXT NOT NULL,
-                    "Author" TEXT NOT NULL,
-                    "ChannelId" TEXT NULL,
-                    "Url" TEXT NOT NULL,
-                    "DurationTicks" INTEGER NOT NULL,
-                    "ThumbnailUrl" TEXT NOT NULL,
-                    "IsOfficialArtist" INTEGER NOT NULL,
-                    "IsMusic" INTEGER NOT NULL,
-                    "IsDisliked" INTEGER NOT NULL,
-                    "IsDownloaded" INTEGER NOT NULL,
-                    "LocalPath" TEXT NULL,
-                    "PreferredContainer" TEXT NULL,
-                    "PreferredBitrate" INTEGER NOT NULL,
-                    "RadioSeedId" TEXT NULL,
-                    "IntegratedLufs" REAL NULL,
-                    "IntegratedLufsSource" INTEGER NOT NULL DEFAULT 0,
-                    "EqualizerPresetId" TEXT NULL,
-                    "CreatedAt" TEXT NOT NULL,
-                    "UpdatedAt" TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS "LikedTracks" (
-                    "OwnerId" TEXT NOT NULL,
-                    "TrackId" TEXT NOT NULL,
-                    "LikedAt" TEXT NOT NULL,
-                    CONSTRAINT "PK_LikedTracks" PRIMARY KEY ("OwnerId", "TrackId"),
-                    CONSTRAINT "FK_LikedTracks_Tracks_TrackId" FOREIGN KEY ("TrackId") REFERENCES "Tracks" ("Id") ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS "PlaylistTracks" (
-                    "PlaylistId" TEXT NOT NULL,
-                    "TrackId" TEXT NOT NULL,
-                    "Position" INTEGER NOT NULL,
-                    "SetVideoId" TEXT NULL,
-                    CONSTRAINT "PK_PlaylistTracks" PRIMARY KEY ("PlaylistId", "TrackId"),
-                    CONSTRAINT "FK_PlaylistTracks_Playlists_PlaylistId" FOREIGN KEY ("PlaylistId") REFERENCES "Playlists" ("Id") ON DELETE CASCADE,
-                    CONSTRAINT "FK_PlaylistTracks_Tracks_TrackId" FOREIGN KEY ("TrackId") REFERENCES "Tracks" ("Id") ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS "CloudMutationOutbox" (
-                    "TargetId" TEXT NOT NULL,
-                    "OwnerId" TEXT NOT NULL,
-                    "PayloadJson" TEXT NOT NULL,
-                    "UpdatedAtTicks" INTEGER NOT NULL,
-                    "RetryCount" INTEGER NOT NULL DEFAULT 0,
-                    CONSTRAINT "PK_CloudMutationOutbox" PRIMARY KEY ("TargetId", "OwnerId")
-                );
-
-                CREATE INDEX IF NOT EXISTS "IX_CloudMutationOutbox_OwnerId_UpdatedAtTicks" ON "CloudMutationOutbox" ("OwnerId", "UpdatedAtTicks");
-                CREATE INDEX IF NOT EXISTS "IX_LikedTracks_OwnerId" ON "LikedTracks" ("OwnerId");
-                CREATE INDEX IF NOT EXISTS "IX_LikedTracks_TrackId" ON "LikedTracks" ("TrackId");
-                CREATE INDEX IF NOT EXISTS "IX_Notifications_CreatedAt" ON "Notifications" ("CreatedAt");
-                CREATE INDEX IF NOT EXISTS "IX_Notifications_IsRead" ON "Notifications" ("IsRead");
-                CREATE INDEX IF NOT EXISTS "IX_Playlists_OwnerId" ON "Playlists" ("OwnerId");
-                CREATE INDEX IF NOT EXISTS "IX_PlaylistTracks_PlaylistId_Position" ON "PlaylistTracks" ("PlaylistId", "Position");
-                CREATE INDEX IF NOT EXISTS "IX_PlaylistTracks_TrackId" ON "PlaylistTracks" ("TrackId");
-                CREATE INDEX IF NOT EXISTS "IX_RecentlyPlayed_OwnerId" ON "RecentlyPlayed" ("OwnerId");
-                CREATE INDEX IF NOT EXISTS "IX_RecentlyPlayed_PlayedAt" ON "RecentlyPlayed" ("PlayedAt");
-                CREATE INDEX IF NOT EXISTS "IX_RecentlyPlayed_TrackId" ON "RecentlyPlayed" ("TrackId");
-                CREATE INDEX IF NOT EXISTS "IX_Tracks_IsDownloaded" ON "Tracks" ("IsDownloaded");
-                CREATE INDEX IF NOT EXISTS "IX_Tracks_Title_Author" ON "Tracks" ("Title", "Author");
-                CREATE INDEX IF NOT EXISTS "IX_Tracks_UpdatedAt" ON "Tracks" ("UpdatedAt");
-                """;
-
         bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try
         {
-            await using var cmd = context.CreateCommand();
-            cmd.CommandText = ddlSql;
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await ExecuteSqlAsync(context, TablesDdl, ct).ConfigureAwait(false);
+            await ExecuteSqlAsync(context, IndexesDdl, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -159,19 +164,89 @@ public static class DatabaseExtensions
         }
     }
 
+    public static async Task ApplySchemaMigrationAsync(this SqliteConnection context, int targetVersion, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(targetVersion);
+
+        bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
+        try
+        {
+            await ExecuteSqlAsync(context, "BEGIN IMMEDIATE;", ct).ConfigureAwait(false);
+            try
+            {
+                await ExecuteSqlAsync(context, TablesDdl, ct).ConfigureAwait(false);
+                await context.MigrateSchemaAsync(ct).ConfigureAwait(false);
+                await ExecuteSqlAsync(context, IndexesDdl, ct).ConfigureAwait(false);
+                await context.SetDatabaseVersionAsync(targetVersion, ct).ConfigureAwait(false);
+                await ExecuteSqlAsync(context, "COMMIT;", ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await RollbackIfActiveAsync(context).ConfigureAwait(false);
+                throw;
+            }
+        }
+        finally
+        {
+            if (closeOnExit)
+                await context.CloseAsync().ConfigureAwait(false);
+        }
+    }
+
+    public static bool IsTransientLockError(this SqliteException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        int primary = ex.SqliteErrorCode & 0xFF;
+        return primary is SqliteBusy or SqliteLocked;
+    }
+
+    public static bool IsCorruptionError(this SqliteException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        int primary = ex.SqliteErrorCode & 0xFF;
+        return primary is SqliteCorrupt or SqliteNotADb;
+    }
+
     /// <summary>
-    /// Извлекает текущую целочисленную версию схемы SQLite из заголовка базы данных.
+    /// Создает транзакционно согласованную копию базы через <c>VACUUM INTO</c> с учетом страниц, находящихся в <c>-wal</c>.
     /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Целочисленное значение прагмы user_version базы данных.</returns>
+    /// <param name="dbPath">Путь к исходному файлу базы данных.</param>
+    /// <param name="backupPath">Путь к итоговому файлу резервной копии; существующий файл атомарно заменяется.</param>
     /// <remarks>
-    /// Выполняет прямой скалярный SQL-запрос без выделения промежуточных буферов памяти.
+    /// В отличие от <c>File.Copy</c>, не теряет транзакции из журнала WAL и не читает файл посреди checkpoint.
+    /// <c>VACUUM INTO</c> требует отсутствующего целевого файла, поэтому копия пишется во временный файл
+    /// и переименовывается только после успеха: прерванный бэкап не затирает предыдущий.
     /// </remarks>
+    public static void CreateConsistentBackup(string dbPath, string backupPath)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(dbPath);
+        ArgumentException.ThrowIfNullOrEmpty(backupPath);
+
+        var tempPath = backupPath + ".tmp";
+        File.Delete(tempPath);
+
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        };
+
+        using (var connection = new SqliteConnection(builder.ConnectionString))
+        {
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "VACUUM INTO $path;";
+            cmd.Parameters.AddWithValue("$path", tempPath);
+            cmd.ExecuteNonQuery();
+        }
+
+        File.Move(tempPath, backupPath, overwrite: true);
+    }
+
     public static async Task<int> GetDatabaseVersionAsync(this SqliteConnection context, CancellationToken ct = default)
     {
         bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
-
         try
         {
             await using var cmd = context.CreateCommand();
@@ -186,17 +261,9 @@ public static class DatabaseExtensions
         }
     }
 
-    /// <summary>
-    /// Записывает новое целочисленное значение версии схемы SQLite в заголовок файла БД.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="version">Новый порядковый номер версии схемы.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию фиксации версии базы данных.</returns>
     public static async Task SetDatabaseVersionAsync(this SqliteConnection context, int version, CancellationToken ct = default)
     {
         bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
-
         try
         {
             await using var cmd = context.CreateCommand();
@@ -210,17 +277,10 @@ public static class DatabaseExtensions
         }
     }
 
-    /// <summary>
-    /// Применяет инкрементальные обновления колонок, индексов и данных существующей схемы.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию миграции структуры таблиц.</returns>
     public static async Task MigrateSchemaAsync(this SqliteConnection context, CancellationToken ct = default)
     {
         await AddColumnIfNotExistsAsync(context, "Playlists", "OwnerId", "TEXT NOT NULL DEFAULT ''", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "RecentlyPlayed", "OwnerId", "TEXT NOT NULL DEFAULT ''", ct).ConfigureAwait(false);
-
         await AddColumnIfNotExistsAsync(context, "Playlists", "CustomColor", "TEXT", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Playlists", "ComputedColor", "TEXT", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Playlists", "Description", "TEXT", ct).ConfigureAwait(false);
@@ -237,7 +297,6 @@ public static class DatabaseExtensions
         await AddColumnIfNotExistsAsync(context, "Playlists", "IsCloudUnavailable", "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Playlists", "ViewCount", "INTEGER", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Playlists", "ReleaseDate", "TEXT", ct).ConfigureAwait(false);
-
         await AddColumnIfNotExistsAsync(context, "Tracks", "IntegratedLufs", "REAL", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Tracks", "IntegratedLufsSource", "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Tracks", "EqualizerPresetId", "TEXT", ct).ConfigureAwait(false);
@@ -257,7 +316,6 @@ public static class DatabaseExtensions
                     "RetryCount" INTEGER NOT NULL DEFAULT 0,
                     CONSTRAINT "PK_CloudMutationOutbox" PRIMARY KEY ("TargetId", "OwnerId")
                 );
-
                 CREATE INDEX IF NOT EXISTS "IX_CloudMutationOutbox_OwnerId_UpdatedAtTicks" ON "CloudMutationOutbox" ("OwnerId", "UpdatedAtTicks");
                 """;
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -271,50 +329,26 @@ public static class DatabaseExtensions
         await MigrateCloudPublicOwnershipAsync(context, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Выполняет внутреннюю миграцию флагов владения и видимости для публичных облачных плейлистов.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию миграции флагов плейлистов.</returns>
     private static async Task MigrateCloudPublicOwnershipAsync(
         SqliteConnection context, CancellationToken ct)
     {
+        bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try
         {
-            bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
-
-            try
-            {
-                await using var cmd = context.CreateCommand();
-                cmd.CommandText =
-                    "UPDATE Playlists SET Ownership = 2, Visibility = 3 WHERE SyncMode = 2 AND Ownership = 0;";
-
-                int affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                if (affected > 0)
-                    Log.Info($"[DB] Migrated {affected} CloudPublic playlist(s) → Foreign + Public");
-            }
-            finally
-            {
-                if (closeOnExit && context.State == System.Data.ConnectionState.Open)
-                    await context.CloseAsync().ConfigureAwait(false);
-            }
+            await using var cmd = context.CreateCommand();
+            cmd.CommandText =
+                "UPDATE Playlists SET Ownership = 2, Visibility = 3 WHERE SyncMode = 2 AND Ownership = 0;";
+            int affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            if (affected > 0)
+                Log.Info($"[DB] Migrated {affected} CloudPublic playlist(s) → Foreign + Public");
         }
-        catch (Exception ex)
+        finally
         {
-            Log.Warn($"[DB] CloudPublic ownership migration warning: {ex.Message}");
+            if (closeOnExit && context.State == System.Data.ConnectionState.Open)
+                await context.CloseAsync().ConfigureAwait(false);
         }
     }
 
-    /// <summary>
-    /// Проверяет наличие колонки через PRAGMA table_info и добавляет её при отсутствии через ALTER TABLE.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="tableName">Имя проверяемой таблицы.</param>
-    /// <param name="columnName">Имя добавляемой колонки.</param>
-    /// <param name="columnType">Тип данных и ограничения SQLite для создаваемой колонки.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию проверки и изменения схемы таблицы.</returns>
     private static async Task AddColumnIfNotExistsAsync(
         SqliteConnection context,
         string tableName,
@@ -322,61 +356,43 @@ public static class DatabaseExtensions
         string columnType,
         CancellationToken ct)
     {
+        bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try
         {
-            bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
-
-            try
+            bool columnExists = false;
+            await using (var cmd = context.CreateCommand())
             {
-                bool columnExists = false;
-                await using (var cmd = context.CreateCommand())
+                cmd.CommandText = "PRAGMA table_info(" + tableName + ");";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    cmd.CommandText = "PRAGMA table_info(" + tableName + ");";
-
-                    await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                    while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                    var name = reader.GetString(1);
+                    if (string.Equals(name, columnName, StringComparison.OrdinalIgnoreCase))
                     {
-                        var name = reader.GetString(1);
-                        if (string.Equals(name, columnName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            columnExists = true;
-                            break;
-                        }
+                        columnExists = true;
+                        break;
                     }
                 }
-
-                if (!columnExists)
-                {
-                    var alterSql = string.Concat(
-                        "ALTER TABLE ", tableName,
-                        " ADD COLUMN ", columnName,
-                        " ", columnType, ";");
-
-                    await using var alterCmd = context.CreateCommand();
-                    alterCmd.CommandText = alterSql;
-                    await alterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
-                    Log.Info(string.Concat("[DB] Added column ", tableName, ".", columnName, " (", columnType, ")"));
-                }
             }
-            finally
+
+            if (!columnExists)
             {
-                if (closeOnExit && context.State == System.Data.ConnectionState.Open)
-                    await context.CloseAsync().ConfigureAwait(false);
+                var alterSql = string.Concat(
+                    "ALTER TABLE ", tableName,
+                    " ADD COLUMN ", columnName,
+                    " ", columnType, ";");
+
+                await ExecuteSqlAsync(context, alterSql, ct).ConfigureAwait(false);
+                Log.Info(string.Concat("[DB] Added column ", tableName, ".", columnName, " (", columnType, ")"));
             }
         }
-        catch (Exception ex)
+        finally
         {
-            Log.Error(string.Concat("[DB] Migration failed for ", tableName, ".", columnName, ": ", ex.Message));
+            if (closeOnExit && context.State == System.Data.ConnectionState.Open)
+                await context.CloseAsync().ConfigureAwait(false);
         }
     }
 
-    /// <summary>
-    /// Создает персистентную таблицу LikedTracks и первичный индекс по пользователю при их отсутствии.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию создания таблицы лайков.</returns>
     private static async Task EnsureLikedTracksTableAsync(SqliteConnection context, CancellationToken ct)
     {
         const string sql = """
@@ -404,146 +420,93 @@ public static class DatabaseExtensions
         }
     }
 
-    /// <summary>
-    /// Переносит исторические лайки из устаревшей колонки Tracks.IsLiked в таблицу LikedTracks.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию миграции устаревших лайков.</returns>
     private static async Task MigrateLegacyLikesAsync(SqliteConnection context, CancellationToken ct)
     {
+        bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try
         {
-            bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
-
-            try
+            bool hasIsLiked = false;
+            await using (var cmd = context.CreateCommand())
             {
-                bool hasIsLiked = false;
-                await using (var cmd = context.CreateCommand())
+                cmd.CommandText = "PRAGMA table_info(Tracks);";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    cmd.CommandText = "PRAGMA table_info(Tracks);";
-                    await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                    while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                    if (string.Equals(reader.GetString(1), "IsLiked", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (string.Equals(reader.GetString(1), "IsLiked", StringComparison.OrdinalIgnoreCase))
-                        {
-                            hasIsLiked = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (hasIsLiked)
-                {
-                    Log.Info("[DB] Migrating legacy likes from Tracks.IsLiked to LikedTracks...");
-
-                    int migrated = 0;
-                    await using (var cmd = context.CreateCommand())
-                    {
-                        cmd.CommandText = """
-                                INSERT OR IGNORE INTO LikedTracks (OwnerId, TrackId, LikedAt)
-                                SELECT '', Id, datetime('now') FROM Tracks WHERE IsLiked = 1;
-                                """;
-                        migrated = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                        if (migrated > 0)
-                        {
-                            Log.Info($"[DB] Successfully migrated {migrated} legacy likes.");
-                            await SaveSuccessMigrationNotificationAsync(context, ct).ConfigureAwait(false);
-                        }
-                    }
-
-                    try
-                    {
-                        await using var cmdDropIdx = context.CreateCommand();
-                        cmdDropIdx.CommandText = "DROP INDEX IF EXISTS IX_Tracks_IsLiked;";
-                        await cmdDropIdx.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                        Log.Info("[DB] Index IX_Tracks_IsLiked dropped to prevent schema lock during migration.");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warn($"[DB] Failed to drop index IX_Tracks_IsLiked: {ex.Message}");
-                    }
-
-                    try
-                    {
-                        await using var cmdDropCol = context.CreateCommand();
-                        cmdDropCol.CommandText = "ALTER TABLE Tracks DROP COLUMN IsLiked;";
-                        await cmdDropCol.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                        Log.Info("[DB] Legacy column Tracks.IsLiked dropped successfully.");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warn($"[DB] Could not drop legacy column Tracks.IsLiked: {ex.Message}");
+                        hasIsLiked = true;
+                        break;
                     }
                 }
             }
-            finally
+
+            if (!hasIsLiked)
+                return;
+
+            Log.Info("[DB] Migrating legacy likes from Tracks.IsLiked to LikedTracks...");
+
+            int migrated;
+            await using (var cmd = context.CreateCommand())
             {
-                if (closeOnExit && context.State == System.Data.ConnectionState.Open)
-                    await context.CloseAsync().ConfigureAwait(false);
+                cmd.CommandText = """
+                    INSERT OR IGNORE INTO LikedTracks (OwnerId, TrackId, LikedAt)
+                    SELECT '', Id, datetime('now') FROM Tracks WHERE IsLiked = 1;
+                    """;
+                migrated = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
+
+            if (migrated > 0)
+            {
+                Log.Info($"[DB] Successfully migrated {migrated} legacy likes.");
+                await SaveSuccessMigrationNotificationAsync(context, ct).ConfigureAwait(false);
+            }
+
+            await ExecuteSqlAsync(context, "DROP INDEX IF EXISTS IX_Tracks_IsLiked;", ct).ConfigureAwait(false);
+            await ExecuteSqlAsync(context, "ALTER TABLE Tracks DROP COLUMN IsLiked;", ct).ConfigureAwait(false);
+            Log.Info("[DB] Legacy column Tracks.IsLiked and index IX_Tracks_IsLiked dropped.");
         }
-        catch (Exception ex)
+        finally
         {
-            Log.Error($"[DB] Legacy likes migration failed: {ex.Message}");
+            if (closeOnExit && context.State == System.Data.ConnectionState.Open)
+                await context.CloseAsync().ConfigureAwait(false);
         }
     }
 
-    /// <summary>
-    /// Сохраняет системное уведомление об успешной миграции структуры лайков в базу данных.
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию сохранения уведомления.</returns>
     private static async Task SaveSuccessMigrationNotificationAsync(SqliteConnection context, CancellationToken ct)
     {
+        bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try
         {
-            bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
+            await using var cmd = context.CreateCommand();
+            cmd.CommandText = """
+                    INSERT INTO Notifications (
+                        Id, TitleKey, TitleRaw, MessageKey, MessageRaw,
+                        MessageArgsJson, RecommendationKey, Severity, IsRead,
+                        TrackId, TrackTitle, ExceptionDetails, AttemptsJson, CreatedAt
+                    )
+                    VALUES (
+                        @id, @titleKey, NULL, @messageKey, NULL,
+                        NULL, NULL, @severity, 0,
+                        NULL, NULL, NULL, NULL, @createdAt
+                    );
+                    """;
 
-            try
-            {
-                await using var cmd = context.CreateCommand();
-                cmd.CommandText = """
-                        INSERT INTO Notifications (
-                            Id, TitleKey, TitleRaw, MessageKey, MessageRaw,
-                            MessageArgsJson, RecommendationKey, Severity, IsRead,
-                            TrackId, TrackTitle, ExceptionDetails, AttemptsJson, CreatedAt
-                        )
-                        VALUES (
-                            @id, @titleKey, NULL, @messageKey, NULL,
-                            NULL, NULL, @severity, 0,
-                            NULL, NULL, NULL, NULL, @createdAt
-                        );
-                        """;
+            AddParameter(cmd, "@id", Guid.NewGuid().ToString());
+            AddParameter(cmd, "@titleKey", "Playlist_SyncComplete_Toast_Title");
+            AddParameter(cmd, "@messageKey", "Sync_Success_Msg_LikedOnly");
+            AddParameter(cmd, "@severity", (int)NotificationSeverity.Success);
+            AddParameter(cmd, "@createdAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
 
-                AddParameter(cmd, "@id", Guid.NewGuid().ToString());
-                AddParameter(cmd, "@titleKey", "Playlist_SyncComplete_Toast_Title");
-                AddParameter(cmd, "@messageKey", "Sync_Success_Msg_LikedOnly");
-                AddParameter(cmd, "@severity", (int)NotificationSeverity.Success);
-                AddParameter(cmd, "@createdAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
-
-                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                Log.Info("[DB] Success migration notification saved to database");
-            }
-            finally
-            {
-                if (closeOnExit && context.State == System.Data.ConnectionState.Open)
-                    await context.CloseAsync().ConfigureAwait(false);
-            }
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            Log.Info("[DB] Success migration notification saved to database");
         }
-        catch (Exception ex)
+        finally
         {
-            Log.Warn($"[DB] Failed to save success migration notification: {ex.Message}");
+            if (closeOnExit && context.State == System.Data.ConnectionState.Open)
+                await context.CloseAsync().ConfigureAwait(false);
         }
     }
 
-    /// <summary>
-    /// Применяет персистентные оптимизации базы данных SQLite (WAL-журналирование и лимиты памяти).
-    /// </summary>
-    /// <param name="context">Активное подключение к базе данных SQLite.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию оптимизации параметров базы данных.</returns>
     public static async Task OptimizeAsync(this SqliteConnection context, CancellationToken ct = default)
     {
         bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
@@ -566,12 +529,29 @@ public static class DatabaseExtensions
         }
     }
 
-    /// <summary>
-    /// Гарантирует перевод подключения SQLite в открытое состояние без дублирующих системных вызовов.
-    /// </summary>
-    /// <param name="connection">Экземпляр подключения <see cref="SqliteConnection"/>.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns><c>true</c>, если подключение было открыто данным методом; <c>false</c>, если оно уже было открыто.</returns>
+    private static async Task ExecuteSqlAsync(SqliteConnection context, string sql, CancellationToken ct)
+    {
+        await using var cmd = context.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task RollbackIfActiveAsync(SqliteConnection context)
+    {
+        var handle = context.Handle;
+        if (context.State != ConnectionState.Open || handle is null || SQLitePCL.raw.sqlite3_get_autocommit(handle) != 0)
+            return;
+
+        try
+        {
+            await ExecuteSqlAsync(context, "ROLLBACK;", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (SqliteException ex)
+        {
+            Log.Error($"[DB] Rollback of failed schema migration failed: {ex.Message}");
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static async Task<bool> EnsureConnectionOpenAsync(SqliteConnection connection, CancellationToken ct)
     {
@@ -580,15 +560,10 @@ public static class DatabaseExtensions
             await connection.OpenAsync(ct).ConfigureAwait(false);
             return true;
         }
+
         return false;
     }
 
-    /// <summary>
-    /// Добавляет типизированный параметр к выполняемой команде SQLite.
-    /// </summary>
-    /// <param name="cmd">Команда базы данных <see cref="DbCommand"/>.</param>
-    /// <param name="name">Уникальное имя SQL-параметра.</param>
-    /// <param name="value">Значение параметра или <see cref="DBNull.Value"/> при его отсутствии.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AddParameter(DbCommand cmd, string name, object? value)
     {

@@ -416,10 +416,28 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Запрашивает подтверждение и полностью сбрасывает библиотеку и настройки.
+    /// Сбой сброса не роняет UI: ошибка логируется и показывается пользователю с просьбой перезапустить приложение,
+    /// поскольку состояние в памяти к этому моменту уже очищено.
+    /// </summary>
     private async Task ResetLibraryAsync()
     {
         if (!await _dialog.ConfirmAsync(SL["Dialog_Warning_Title"], SL["Dialog_ResetMessage"])) return;
-        await _library.ResetAsync();
+
+        try
+        {
+            await _library.ResetAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[GeneralSettings] Library reset failed: {ex}");
+            await _dialog.ShowInfoAsync(
+                SL["Dialog_Error_Title"],
+                string.Format(SL["Dialog_ResetFailed"], ex.Message));
+            return;
+        }
+
         OnLibraryReset?.Invoke();
         await _dialog.ShowInfoAsync(SL["Dialog_Done_Title"], SL["Dialog_ResetComplete"]);
     }

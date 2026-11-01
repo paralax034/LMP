@@ -194,8 +194,64 @@ public static class G
         public static readonly string Bootstrap = Path.Combine(Folder.Data, "bootstrap.json");
         public static readonly string Cookie = Path.Combine(Folder.Data, "auth_cookies.txt");
         public static readonly string LegacyDatabase = Path.Combine(Folder.Data, "library.json");
-        public static readonly string Database = Path.Combine(Folder.Data, "library.db");
+        /// <summary>
+        /// Путь к файлу основной базы данных библиотеки.
+        /// В отладочной сборке при headless-запуске CLI-тестов перенаправляется во временный каталог процесса.
+        /// </summary>
+        public static string Database { get; private set; } = Path.Combine(Folder.Data, "library.db");
         public static readonly string Theme = Path.Combine(Folder.Data, "theme.json");
+
+#if DEBUG
+        /// <summary>
+        /// Префикс временного каталога изолированной тестовой базы данных.
+        /// </summary>
+        public const string TestDatabaseFolderPrefix = "LMP-tests-";
+
+        /// <summary>
+        /// Временный каталог изолированной тестовой базы данных; <c>null</c>, если изоляция не включена.
+        /// </summary>
+        public static string? IsolatedTestDatabaseFolder { get; private set; }
+
+        /// <summary>
+        /// Перенаправляет <see cref="Database"/> во временный каталог <c>%TEMP%/LMP-tests-{pid}</c>.
+        /// Вызывается строго до регистрации служб и первого обращения к базе данных.
+        /// </summary>
+        /// <returns>Полный путь к созданному временному каталогу.</returns>
+        public static string UseIsolatedTestDatabase()
+        {
+            var folder = Path.Combine(
+                Path.GetTempPath(),
+                TestDatabaseFolderPrefix + Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
+
+            Directory.CreateDirectory(folder);
+
+            IsolatedTestDatabaseFolder = folder;
+            Database = Path.Combine(folder, "library.db");
+            return folder;
+        }
+
+        /// <summary>
+        /// Сбрасывает пулы подключений SQLite и удаляет временный каталог изолированной тестовой базы данных.
+        /// </summary>
+        /// <remarks>
+        /// Исключения файловой системы пробрасываются вызывающему коду для журналирования.
+        /// </remarks>
+        public static void CleanupIsolatedTestDatabase()
+        {
+            var folder = IsolatedTestDatabaseFolder;
+            if (folder is null)
+                return;
+
+            IsolatedTestDatabaseFolder = null;
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
+        }
+#endif
 
         /// <summary>
         /// Файл состояния авторизации (профиль пользователя, кэш данных).

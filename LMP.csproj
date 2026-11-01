@@ -1,21 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <!--      ВЕРСИИ ПАКЕТОВ        -->
-    <PropertyGroup Label="Package Versions">
-        <AvaloniaVersion>12.1.4</AvaloniaVersion>
-
-        <!-- MVVM стек CommunityToolkit: современный генератор кода свойств и команд -->
-        <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
-
-        <!-- Microsoft Extensions (совпадает с TFM): 10.0.12 -->
-        <MsExtVersion>10.0.14</MsExtVersion>
-
-        <!-- AsyncImageLoader: 3.8.0 — поддержка Avalonia 12 -->
-        <AsyncImageLoaderVersion>3.8.0</AsyncImageLoaderVersion>
-
-        <!-- Поведение XAML для Avalonia 12 -->
-        <XamlBehaviorsVersion>12.0.7</XamlBehaviorsVersion>
-    </PropertyGroup>
+    <!-- Версии пакетов задаются централизованно в Directory.Packages.props -->
 
     <!--   ОСНОВНЫЕ НАСТРОЙКИ       -->
     <PropertyGroup Label="Core Settings">
@@ -47,10 +32,6 @@
         <!-- Нужно для низкоуровневых аудио-операций (PCM-буферы, нативный interop) -->
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-        <!-- Раздельные lock-файлы под каждую конфигурацию (устраняет взаимную перезапись) -->
-        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-        <NuGetLockFilePath>packages.$(Configuration).lock.json</NuGetLockFilePath>
-
         <!-- Подавляет IL20xx/IL30xx ошибки при AOT-анализе -->
         <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
         <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
@@ -73,12 +54,6 @@
           Для медиа-приложений с большими кэшами изображений/аудио — правильный выбор.
         -->
         <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
-
-        <!--
-          Компактификация Large Object Heap при следующем GC-цикле.
-          Борется с фрагментацией после выгрузки крупных аудио/картинок из памяти.
-        -->
-        <GCLargeObjectHeapCompactionMode>CompactOnce</GCLargeObjectHeapCompactionMode>
 
         <!--
           Tiered Compilation + Dynamic PGO:
@@ -152,27 +127,27 @@
     </ItemGroup>
 
     <ItemGroup Label="Avalonia Core">
-        <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)"/>
-        <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)"/>
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)"/>
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)"/>
-        <PackageReference Include="Concentus.Native" Version="1.5.2"/>
+        <PackageReference Include="Avalonia"/>
+        <PackageReference Include="Avalonia.Desktop"/>
+        <PackageReference Include="Avalonia.Themes.Fluent"/>
+        <PackageReference Include="Avalonia.Fonts.Inter"/>
+        <PackageReference Include="Concentus.Native"/>
     </ItemGroup>
 
     <ItemGroup Label="Avalonia Community">
-        <PackageReference Include="Xaml.Behaviors.Avalonia" Version="$(XamlBehaviorsVersion)"/>
+        <PackageReference Include="Xaml.Behaviors.Avalonia"/>
     </ItemGroup>
 
     <ItemGroup Label="MVVM">
-        <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)"/>
+        <PackageReference Include="CommunityToolkit.Mvvm"/>
     </ItemGroup>
 
     <ItemGroup Label="UI Utilities">
-        <PackageReference Include="AsyncImageLoader.Avalonia" Version="$(AsyncImageLoaderVersion)"/>
+        <PackageReference Include="AsyncImageLoader.Avalonia"/>
     </ItemGroup>
 
     <ItemGroup Label="Linux Interop">
-        <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2"/>
+        <PackageReference Include="Tmds.DBus.Protocol"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -399,6 +399,11 @@ public static partial class HotPathAllocationTests
     public static Task TestNetworkManagerAndDelayNoThrowZeroAllocAsync() =>
         NetworkLogicTests.TestNetworkManagerLogicZeroAllocAsync();
 
+    /// <summary>
+    /// Проверяет согласованность ключа дискового кэша FNV-1a для перегрузок string/span, приоритет клиента WEB_REMIX
+    /// и детерминированное освобождение <see cref="RefCountedBitmap"/>. Проверки растровых изображений требуют
+    /// инициализированной платформы Avalonia, поэтому в headless CLI они пропускаются.
+    /// </summary>
     [TestMethod(TestCategory.Unit, "ImageCache & DominantColor FNV-1a Key Sync & Native Dispose", Group = TestGroups.System, Order = 98)]
     public static Task TestImageCacheKeySyncAndRefCountedDisposeAsync()
     {
@@ -409,6 +414,15 @@ public static partial class HotPathAllocationTests
         TestAssert.Equal(path1, path2);
         TestAssert.True(path1.EndsWith("B1D0BC95F084A249", StringComparison.Ordinal) || Path.GetFileName(path1).Length == 16,
             "Disk cache key must be a 16-char FNV-1a hex string");
+
+        bool preferWebOnVpn = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated: true, preferWebRemix: true)[0]
+            == YoutubeClientNames.WebRemix;
+        TestAssert.True(preferWebOnVpn, "WEB_REMIX must be prioritized when preferWebRemix is true");
+
+        // В headless CLI (--test-category) Avalonia не инициализирована: WriteableBitmap не найдёт IPlatformRenderInterface.
+        // Платформенно-независимые проверки выше уже выполнены, поэтому пропуск не скрывает их результат.
+        if (Avalonia.Application.Current is null)
+            TestAssert.Skip("Avalonia platform is not initialized (headless CLI); bitmap dispose checks require UI test mode");
 
         using var bmp = new Avalonia.Media.Imaging.WriteableBitmap(
             new Avalonia.PixelSize(4, 4),
@@ -426,10 +440,6 @@ public static partial class HotPathAllocationTests
         var validSize = bmp.Size;
         TestAssert.True(validSize.Width > 0 && validSize.Height > 0,
             "Bitmap.Size must remain accessible for bound Image controls after cache eviction");
-
-        bool preferWebOnVpn = YoutubeClientUtils.GetStreamFallbackClients(isAuthenticated: true, preferWebRemix: true)[0]
-            == YoutubeClientNames.WebRemix;
-        TestAssert.True(preferWebOnVpn, "WEB_REMIX must be prioritized when preferWebRemix is true");
 
         return Task.CompletedTask;
     }

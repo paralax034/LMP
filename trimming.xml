@@ -1,39 +1,25 @@
 <!--
-  Trimmer Root Descriptor.
-  Защищает типы, используемые через EF Core, нативный P/Invoke,
-  SQLite-провайдер и скомпилированные контексты JSON.
+  Trimmer Root Descriptor для Release (Native AOT, TrimMode=full).
+  Сохраняются только сборки, которые тримминг не может полностью проанализировать статически:
+  нативный interop аудиокодека Opus и SQLite.
+  Намеренно не перечислены (совместимы с триммингом без дескриптора):
+  - System.Text.Json: AppJsonContext использует source generation, рефлексивный fallback в Release отключен;
+  - MemoryPack: сериализаторы генерируются на этапе компиляции;
+  - модели LMP.Core: БД работает через ADO.NET без рефлексивного маппинга;
+  - Microsoft.Extensions.DependencyInjection: регистрации аннотированы DynamicallyAccessedMembers.
 -->
 <linker>
 
-  <!-- ADO NET -->
-  <assembly fullname="LMP.Core">
-    <!-- JSON Source Generation контекст -->
-    <type fullname="LMP.Core.Models.AppJsonContext" preserve="all" />
-
-    <!-- Модели, используемые в настройках и сохранении состояния -->
-    <type fullname="LMP.Core.Models.AppSettings" preserve="all" />
-    <type fullname="LMP.Core.Models.BootstrapSettings" preserve="all" />
-    <type fullname="LMP.Core.Models.ThemeSettings" preserve="all" />
-    <type fullname="LMP.Core.Models.StreamingConfig" preserve="all" />
-
-    <!-- Доменные модели сущностей данных -->
-    <type fullname="LMP.Core.Models.TrackInfo" preserve="all" />
-    <type fullname="LMP.Core.Models.Playlist" preserve="all" />
-  </assembly>
-
-  <!-- Concentus -->
+  <!-- Opus: управляемый декодер Concentus и нативная обертка libopus -->
   <assembly fullname="Concentus" preserve="all" />
   <assembly fullname="Concentus.Native" preserve="all" />
 
-  <!-- SQLite native interop и низкоуровневый драйвер C-библиотеки -->
+  <!--
+    SQLite: ADO.NET-провайдер и нативный мост SQLitePCLRaw (P/Invoke и обратные вызовы из нативного кода).
+    Пакет Microsoft.Data.Sqlite.Core поставляет сборку Microsoft.Data.Sqlite; сборки с именем пакета не существует.
+  -->
   <assembly fullname="Microsoft.Data.Sqlite" preserve="all" />
-  <assembly fullname="Microsoft.Data.Sqlite.Core" preserve="all" />
   <assembly fullname="SQLitePCLRaw.core" preserve="all" />
   <assembly fullname="SQLitePCLRaw.provider.e_sqlite3" preserve="all" />
-
-  <!-- Базовые сборки Avalonia UI для отрисовки и разметки XAML -->
-
-  <!-- Microsoft Dependency Injection -->
-  <assembly fullname="Microsoft.Extensions.DependencyInjection" preserve="all" />
 
 </linker>
