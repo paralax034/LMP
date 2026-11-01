@@ -32,6 +32,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     private readonly YoutubeProvider? _youtube;
     private readonly CookieAuthService? _auth;
     private readonly TrackRegistry? _trackRegistry;
+    private readonly PlaylistSyncService? _playlistSync;
 
     private readonly HashSet<string> _activePlaylistTrackIds = new(StringComparer.Ordinal);
     private int _expectedPlaylistTrackCount;
@@ -105,7 +106,8 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         NotificationService? notificationService = null,
         YoutubeProvider? youtube = null,
         CookieAuthService? auth = null,
-        TrackRegistry? trackRegistry = null)
+        TrackRegistry? trackRegistry = null,
+        PlaylistSyncService? playlistSync = null)
     {
         _audio = audio;
         _library = library;
@@ -113,6 +115,13 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         _youtube = youtube;
         _auth = auth;
         _trackRegistry = trackRegistry;
+        _playlistSync = playlistSync;
+
+        if (_playlistSync != null)
+        {
+            _playlistSync.IsAudioBufferingCheck = () =>
+                _audio.IsLoading || (_audio.IsPlaying && !_audio.IsFullyBuffered && _audio.BufferProgress < 0.15);
+        }
 
         CurrentTrack = _audio.CurrentTrack;
         IsPlaying = _audio.IsPlaying;
@@ -318,25 +327,32 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
                         ?? _library.GetTrack(track.Id)
                         ?? track;
 
-        bool targetLikedState = !canonical.IsLiked;
+        bool previousLikedState = canonical.IsLiked;
+        bool targetLikedState = !previousLikedState;
 
         canonical.SetLikedState(targetLikedState);
         _trackRegistry?.UpdatePinStatus(canonical);
 
-        if (_auth?.IsAuthenticated == true && _youtube != null)
+        bool syncToCloud = _auth?.IsAuthenticated == true && _library.Settings.LikeSyncMode != LikeSyncMode.LocalOnly;
+
+        // Намерение ставится в Outbox синхронно, до первого await: порядок постановки совпадает с порядком кликов
+        if (syncToCloud && _playlistSync != null)
+            _playlistSync.EnqueueLikeMutation(canonical.Id, targetLikedState, previousLikedState);
+
+        // Optimistic Local-First: фиксируем состояние в SQLite и уведомляем UI
+        await _library.SetLikeStateAsync(canonical, targetLikedState, ct).ConfigureAwait(false);
+
+        if (syncToCloud && _playlistSync == null && _youtube != null)
         {
             try
             {
                 await _youtube.LikeTrackAsync(canonical.Id, targetLikedState).ConfigureAwait(false);
-                Log.Info($"[PlayerControl] Track {canonical.Id} liked={targetLikedState} synced to YouTube");
             }
             catch (Exception ex)
             {
                 Log.Error($"[PlayerControl] Failed to sync like to YouTube: {ex.Message}");
             }
         }
-
-        await _library.SetLikeStateAsync(canonical, targetLikedState, ct).ConfigureAwait(false);
     }
 
     /// <summary>

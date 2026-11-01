@@ -334,6 +334,40 @@ public sealed class PlaylistRepository : IPlaylistRepository
     }
 
     /// <inheritdoc />
+    public async Task<bool> UpdateCloudLinkStateAsync(
+        string playlistId,
+        string? youtubeId,
+        DateTime? lastSyncedAtUtc,
+        bool isCloudUnavailable,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE Playlists SET
+                YoutubeId = COALESCE(@youtubeId, YoutubeId),
+                Ownership = CASE WHEN @youtubeId IS NULL THEN Ownership ELSE @mine END,
+                LastSyncedAtUtc = COALESCE(@lastSyncedAtUtc, LastSyncedAtUtc),
+                IsCloudUnavailable = @isCloudUnavailable,
+                UpdatedAt = @updatedAt
+            WHERE Id = @id
+              AND SyncMode = @twoWay
+              AND (@youtubeId IS NULL OR YoutubeId IS NULL OR YoutubeId = '' OR YoutubeId = @youtubeId);
+            """;
+
+        AddParameter(cmd, "@id", playlistId);
+        AddParameter(cmd, "@youtubeId", youtubeId);
+        AddParameter(cmd, "@mine", (int)PlaylistOwnership.Mine);
+        AddParameter(cmd, "@lastSyncedAtUtc", lastSyncedAtUtc?.ToString("o", CultureInfo.InvariantCulture));
+        AddParameter(cmd, "@isCloudUnavailable", isCloudUnavailable ? 1 : 0);
+        AddParameter(cmd, "@updatedAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+        AddParameter(cmd, "@twoWay", (int)PlaylistSyncMode.TwoWaySync);
+
+        int affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    /// <inheritdoc />
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -1041,9 +1075,9 @@ public sealed class PlaylistRepository : IPlaylistRepository
     /// <param name="mappings">Коллекция пар: Идентификатор трека -> setVideoId.</param>
     /// <param name="ct">Токен отмены асинхронной операции.</param>
     public async Task UpdateSetVideoIdsAsync(
-        string playlistId,
-        IReadOnlyList<(string TrackId, string SetVideoId)> mappings,
-        CancellationToken ct = default)
+            string playlistId,
+            IReadOnlyList<(string TrackId, string SetVideoId)> mappings,
+            CancellationToken ct = default)
     {
         if (mappings.Count == 0) return;
 
@@ -1088,6 +1122,78 @@ public sealed class PlaylistRepository : IPlaylistRepository
             await transaction.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<Dictionary<string, string?>> GetSetVideoIdsAsync(
+        string playlistId,
+        IReadOnlyList<string> trackIds,
+        CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, string?>(trackIds.Count, StringComparer.Ordinal);
+        if (trackIds.Count == 0) return result;
+
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        const int chunkSize = 500;
+        for (int i = 0; i < trackIds.Count; i += chunkSize)
+        {
+            int count = Math.Min(chunkSize, trackIds.Count - i);
+            await using var cmd = connection.CreateCommand();
+
+            var paramNames = new string[count];
+            for (int j = 0; j < count; j++)
+            {
+                var paramName = $"@t{j}";
+                paramNames[j] = paramName;
+                AddParameter(cmd, paramName, trackIds[i + j]);
+            }
+
+            cmd.CommandText = $"""
+                SELECT TrackId, SetVideoId
+                FROM PlaylistTracks
+                WHERE PlaylistId = @pId AND TrackId IN ({string.Join(',', paramNames)});
+                """;
+            AddParameter(cmd, "@pId", playlistId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var tId = reader.GetString(0);
+                var svId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                result[tId] = svId;
+            }
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<List<(string TrackId, string? SetVideoId)>> GetTracksWithSetVideoIdsAsync(
+        string playlistId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        var result = new List<(string TrackId, string? SetVideoId)>();
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT TrackId, SetVideoId
+            FROM PlaylistTracks
+            WHERE PlaylistId = @pId
+            ORDER BY Position;
+            """;
+        AddParameter(cmd, "@pId", playlistId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var tId = reader.GetString(0);
+            var svId = reader.IsDBNull(1) ? null : reader.GetString(1);
+            result.Add((tId, svId));
+        }
+
+        return result;
     }
 
     #endregion

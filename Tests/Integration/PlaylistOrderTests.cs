@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using LMP.Core.Data.Repositories;
 using LMP.Tests.Framework;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -126,9 +127,13 @@ public static class PlaylistOrderTests
         }
         finally
         {
+            var trackRepository = services.GetRequiredService<ITrackRepository>();
             for (int i = 0; i < testTracks.Count; i++)
             {
                 await playlistService.RemoveTrackFromPlaylistAsync(LibraryService.LikedPlaylistId, testTracks[i].Id).ConfigureAwait(false);
+
+                // Тестовые строки не должны оставаться в Tracks и попадать в библиотеку пользователя
+                await trackRepository.DeleteAsync(testTracks[i].Id).ConfigureAwait(false);
             }
         }
     }
@@ -173,6 +178,145 @@ public static class PlaylistOrderTests
         finally
         {
             await playlistService.DeletePlaylistAsync(playlistId).ConfigureAwait(false);
+
+            var trackRepository = services.GetRequiredService<ITrackRepository>();
+            await trackRepository.DeleteAsync(tA.Id).ConfigureAwait(false);
+            await trackRepository.DeleteAsync(tB.Id).ConfigureAwait(false);
+            await trackRepository.DeleteAsync(tC.Id).ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod(TestCategory.Unit, "LIS Minimal Reorder Compression",
+        Group = TestGroups.Playlists, Order = 6, RequiresNetwork = false, TimeoutSeconds = 10)]
+    public static Task TestLisMinimalReorderCompressionAsync()
+    {
+        // 1. Идентичные списки -> 0 перемещений
+        var baseList = new List<string> { "sv_0", "sv_1", "sv_2", "sv_3", "sv_4", "sv_5" };
+        var sameMoves = PlaylistSyncService.BuildMinimalReorderMoves(baseList, baseList);
+        TestAssert.Equal(0, sameMoves.Count, "Identical order must produce 0 moves");
+
+        // 2. Перенос первого элемента в самый конец списка из 6 элементов:
+        // LIS находит {sv_1, sv_2, sv_3, sv_4, sv_5} длиной 5 и генерирует ровно 1 команду вместо 5!
+        var movedFirstToLast = new List<string> { "sv_1", "sv_2", "sv_3", "sv_4", "sv_5", "sv_0" };
+        var singleMove = PlaylistSyncService.BuildMinimalReorderMoves(baseList, movedFirstToLast);
+        TestAssert.Equal(1, singleMove.Count, "Moving 1st track to end must require exactly 1 LIS move");
+        TestAssert.Equal("sv_0", singleMove[0].SetVideoId);
+        TestAssert.Equal("sv_5", singleMove[0].Predecessor);
+
+        // 3. Проверка точной сходимости сложной перестановки к целевому порядку
+        var complexTarget = new List<string> { "sv_4", "sv_1", "sv_0", "sv_5", "sv_2", "sv_3" };
+        var complexMoves = PlaylistSyncService.BuildMinimalReorderMoves(baseList, complexTarget);
+        TestAssert.True(complexMoves.Count <= 3, $"Expected <= 3 moves via LIS, got {complexMoves.Count}");
+
+        var simulated = new List<string>(baseList);
+        for (int i = 0; i < complexMoves.Count; i++)
+        {
+            var (sid, pred, succ) = complexMoves[i];
+            simulated.Remove(sid);
+            if (!string.IsNullOrEmpty(pred))
+            {
+                int pIdx = simulated.IndexOf(pred);
+                simulated.Insert(pIdx + 1, sid);
+            }
+            else if (!string.IsNullOrEmpty(succ))
+            {
+                int sIdx = simulated.IndexOf(succ);
+                simulated.Insert(sIdx, sid);
+            }
+        }
+
+        for (int i = 0; i < complexTarget.Count; i++)
+        {
+            TestAssert.Equal(complexTarget[i], simulated[i], $"Simulated order mismatch at index {i}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Integration, "Smart Outbox Coalescing, SetVideoId Preservation & Annihilation",
+        Group = TestGroups.Playlists, Order = 7, RequiresNetwork = false, TimeoutSeconds = 15)]
+    public static async Task TestSmartOutboxCoalescingAndSetVideoIdPreservationAsync(IServiceProvider services)
+    {
+        var playlistRepo = services.GetRequiredService<IPlaylistRepository>();
+        var trackRepo = services.GetRequiredService<ITrackRepository>();
+
+        var t1 = new TrackInfo { Id = "yt_outbox_test_1", Title = "Outbox Track 1", Author = "Test" };
+        var t2 = new TrackInfo { Id = "yt_outbox_test_2", Title = "Outbox Track 2", Author = "Test" };
+        await trackRepo.UpsertAsync(t1).ConfigureAwait(false);
+        await trackRepo.UpsertAsync(t2).ConfigureAwait(false);
+
+        var testPlaylist = new Playlist
+        {
+            Id = "pl_outbox_test_" + Guid.NewGuid().ToString("N"),
+            Name = "Outbox Test",
+            OwnerId = "test_owner"
+        };
+
+        try
+        {
+            await playlistRepo.UpsertAsync(testPlaylist).ConfigureAwait(false);
+            await playlistRepo.AddTracksAsync(testPlaylist.Id, [t1.Id, t2.Id], "test_owner").ConfigureAwait(false);
+            await playlistRepo.UpdateSetVideoIdsAsync(
+                testPlaylist.Id,
+                [(t1.Id, "SV_TEST_001"), (t2.Id, "SV_TEST_002")]).ConfigureAwait(false);
+
+            // Проверяем пакетное чтение SetVideoId до удаления строк из PlaylistTracks
+            var preDeleteMap = await playlistRepo.GetSetVideoIdsAsync(testPlaylist.Id, [t1.Id, t2.Id]).ConfigureAwait(false);
+            TestAssert.Equal(2, preDeleteMap.Count);
+            TestAssert.Equal("SV_TEST_001", preDeleteMap[t1.Id]);
+            TestAssert.Equal("SV_TEST_002", preDeleteMap[t2.Id]);
+
+            var orderedWithSv = await playlistRepo.GetTracksWithSetVideoIdsAsync(testPlaylist.Id).ConfigureAwait(false);
+            TestAssert.Equal(2, orderedWithSv.Count);
+            TestAssert.Equal("SV_TEST_001", orderedWithSv[0].SetVideoId);
+            TestAssert.Equal("SV_TEST_002", orderedWithSv[1].SetVideoId);
+
+            // Проверяем реактивное создание, перевод при смене языка и аннигиляцию живой задачи в NotificationService
+            var notifications = services.GetRequiredService<NotificationService>();
+            const string testTaskKey = "outbox:test_live_task";
+            notifications.UpsertTaskNotification(
+                taskKey: testTaskKey,
+                titleKey: "CloudTask_LikesTitle",
+                titleRaw: null,
+                messageKey: "CloudTask_LikesSummary",
+                messageArgs: [2],
+                messageRaw: null,
+                dynamicMessageFactory: null,
+                statusText: "10 sec",
+                progress: 0.4,
+                isIndeterminate: false,
+                actionKey: "CloudTask_ForceSend",
+                isCancelAction: false);
+
+            TestAssert.True(notifications.HasActiveTasks, "NotificationService must report HasActiveTasks=true");
+            notifications.CompleteTaskNotification(testTaskKey, removeIfAnnihilated: true);
+            TestAssert.False(notifications.HasActiveTasks, "NotificationService must report HasActiveTasks=false after annihilation");
+
+            // Проверяем защиту от зомби-плейлистов при отложенном удалении (GetPendingDeletedYoutubeIds & CancelPendingDeleteByYoutubeId)
+            var syncService = services.GetRequiredService<PlaylistSyncService>();
+            var auth = services.GetRequiredService<CookieAuthService>();
+            if (auth.IsAuthenticated)
+            {
+                var dummyCloudPl = new Playlist
+                {
+                    Id = "pl_zombie_guard_" + Guid.NewGuid().ToString("N"),
+                    Name = "Zombie Guard Test",
+                    YoutubeId = "PL_ZOMBIE_TEST_999",
+                    SyncMode = PlaylistSyncMode.TwoWaySync
+                };
+
+                syncService.EnqueueDeletePlaylist(dummyCloudPl);
+                var pendingDeletes = syncService.GetPendingDeletedYoutubeIds();
+                TestAssert.True(pendingDeletes.Contains("PL_ZOMBIE_TEST_999"), "Pending deleted YoutubeId must be tracked");
+
+                bool cancelled = syncService.CancelPendingDeleteByYoutubeId("PL_ZOMBIE_TEST_999");
+                TestAssert.True(cancelled, "CancelPendingDeleteByYoutubeId must cancel pending delete");
+                TestAssert.False(syncService.GetPendingDeletedYoutubeIds().Contains("PL_ZOMBIE_TEST_999"), "YoutubeId must be removed after cancel");
+            }
+        }
+        finally
+        {
+            await playlistRepo.DeleteAsync(testPlaylist.Id).ConfigureAwait(false);
         }
     }
 

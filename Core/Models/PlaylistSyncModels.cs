@@ -166,6 +166,13 @@ public sealed class PlaylistSyncPreview
     public int LocalOnlyTrackCount { get; init; }
     public int CloudOnlyTrackCount { get; init; }
     public int CommonTrackCount { get; init; }
+
+    /// <summary>
+    /// Число локальных треков, уже связанных с облаком (есть <c>SetVideoId</c>), но удалённых из облачного
+    /// плейлиста на другом устройстве. Слияние удаляет их локально вместо повторной выгрузки.
+    /// </summary>
+    public int CloudRemovedTrackCount { get; init; }
+
     public string? YoutubePlaylistId { get; init; }
 
     /// <summary>
@@ -177,7 +184,7 @@ public sealed class PlaylistSyncPreview
     public bool NameDiffers => !string.Equals(LocalName, CloudName, StringComparison.Ordinal);
     public bool DescriptionDiffers => !string.Equals(LocalDescription ?? string.Empty, CloudDescription ?? string.Empty, StringComparison.Ordinal);
     public bool ThumbnailDiffers => !ThumbnailComparer.AreEquivalent(LocalThumbnailUrl, CloudThumbnailUrl, YoutubePlaylistId);
-    public bool TracksDiffer => LocalOnlyTrackCount > 0 || CloudOnlyTrackCount > 0;
+    public bool TracksDiffer => LocalOnlyTrackCount > 0 || CloudOnlyTrackCount > 0 || CloudRemovedTrackCount > 0;
     public bool HasAnyDifference => NameDiffers || DescriptionDiffers || ThumbnailDiffers || TracksDiffer;
 }
 
@@ -199,4 +206,114 @@ public sealed class PlaylistSyncResult
         : $"Failed: {ErrorMessage}";
 
     public static PlaylistSyncResult Fail(string error) => new() { Success = false, ErrorMessage = error };
+}
+
+/// <summary>
+/// Запись об удаляемом из облачного плейлиста треке с сохранённым связующим идентификатором <c>SetVideoId</c>.
+/// </summary>
+public sealed class CloudTrackRemoveEntry
+{
+    public required string TrackId { get; init; }
+    public string? SetVideoId { get; set; }
+}
+
+/// <summary>
+/// Запись о мутации статуса «Мне нравится» для трека с сохранением базового состояния для аннигиляции пар.
+/// </summary>
+public sealed class CloudLikeMutationEntry
+{
+    public required string TrackId { get; init; }
+    public bool BaselineLiked { get; init; }
+    public bool TargetLiked { get; set; }
+}
+
+/// <summary>
+/// Коалесцированное состояние ожидающих облачных мутаций для одного плейлиста или системной корзины лайков.
+/// Сериализуется через <see cref="AppJsonContext"/> в таблицу <c>CloudMutationOutbox</c>.
+/// </summary>
+public sealed class CloudPlaylistOutboxState
+{
+    /// <summary>Идентификатор локального плейлиста или <c>__likes__</c> для системной очереди лайков.</summary>
+    public required string TargetId { get; init; }
+
+    /// <summary>Идентификатор владельца локальной сессии (<c>OwnerId</c>).</summary>
+    public required string OwnerId { get; init; }
+
+    /// <summary>Отображаемое имя плейлиста для карточки задачи в центре уведомлений.</summary>
+    public string? PlaylistDisplayName { get; set; }
+
+    /// <summary>Облачный идентификатор плейлиста на YouTube.</summary>
+    public string? YoutubePlaylistId { get; set; }
+
+    /// <summary>Флаг необходимости создания нового плейлиста в YouTube на Фазе 0 (оффлайн-оптимизм).</summary>
+    public bool PendingCreatePlaylist { get; set; }
+
+    /// <summary>Флаг необходимости удаления плейлиста из YouTube (терминальная операция).</summary>
+    public bool PendingDeletePlaylist { get; set; }
+
+    /// <summary>Треки, ожидающие пакетного добавления в облачный плейлист (Фаза 2).</summary>
+    public List<string> PendingAddTrackIds { get; set; } = [];
+
+    /// <summary>Треки, ожидающие пакетного удаления из облачного плейлиста (Фаза 1).</summary>
+    public List<CloudTrackRemoveEntry> PendingRemoveTracks { get; set; } = [];
+
+    /// <summary>Флаг наличия ожидающей синхронизации порядка треков (Фаза 3).</summary>
+    public bool HasPendingReorder { get; set; }
+
+    /// <summary>Исходный порядок треков до начала серии локальных перетаскиваний (для аннигиляции и LIS-сжатия).</summary>
+    public List<string>? BaselineTrackOrder { get; set; }
+
+    /// <summary>Целевой локальный порядок треков после завершения перетаскиваний.</summary>
+    public List<string>? TargetTrackOrder { get; set; }
+
+    /// <summary>Флаг наличия ожидающего переименования плейлиста (Last-Write-Wins).</summary>
+    public bool HasPendingName { get; set; }
+
+    /// <summary>Базовое имя плейлиста до начала серии переименований.</summary>
+    public string? BaselineName { get; set; }
+
+    /// <summary>Целевое имя плейлиста для отправки в YouTube.</summary>
+    public string? TargetName { get; set; }
+
+    /// <summary>Флаг наличия ожидающего изменения описания плейлиста (Last-Write-Wins).</summary>
+    public bool HasPendingDescription { get; set; }
+
+    /// <summary>Базовое описание плейлиста до начала редактирования.</summary>
+    public string? BaselineDescription { get; set; }
+
+    /// <summary>Целевое описание плейлиста для отправки в YouTube.</summary>
+    public string? TargetDescription { get; set; }
+
+    /// <summary>Флаг наличия ожидающей выгрузки пользовательской обложки через Scotty (Last-Write-Wins).</summary>
+    public bool HasPendingThumbnail { get; set; }
+
+    /// <summary>Целевой путь или URL обложки для выгрузки через Scotty.</summary>
+    public string? TargetThumbnailUrl { get; set; }
+
+    /// <summary>Коалесцированные мутации лайков (используется при <c>TargetId == "__likes__"</c>).</summary>
+    public List<CloudLikeMutationEntry> PendingLikes { get; set; } = [];
+
+    /// <summary>Количество неудачных сетевых попыток сброса состояния.</summary>
+    public int RetryCount { get; set; }
+
+    /// <summary>Метка времени первой постановки в текущее окно коалесценции в UTC-тиках.</summary>
+    public long FirstEnqueuedAtUtcTicks { get; set; }
+
+    /// <summary>Метка времени последнего изменения в UTC-тиках.</summary>
+    public long UpdatedAtUtcTicks { get; set; }
+
+    /// <summary>
+    /// Возвращает <see langword="true"/>, если все накопленные мутации были взаимно аннигилированы или выполнены.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsEmpty =>
+        !PendingCreatePlaylist &&
+        !PendingDeletePlaylist &&
+        PendingAddTrackIds.Count == 0 &&
+        PendingRemoveTracks.Count == 0 &&
+        !HasPendingReorder &&
+        !HasPendingName &&
+        !HasPendingDescription &&
+        !HasPendingThumbnail &&
+        PendingLikes.Count == 0;
 }

@@ -56,7 +56,7 @@ public sealed class AppEntry
 
 #if DEBUG
     /// <summary>
-    /// Флаг запуска непосредственно в окно <see cref="LMP.UI.Features.Debug.DebugWindow"/> (<c>--test-ui</c> / <c>--debug-ui</c>)
+    /// Флаг запуска непосредственно в окно <see cref="UI.Features.Debug.DebugWindow"/> (<c>--test-ui</c> / <c>--debug-ui</c>)
     /// без инициализации главного окна плеера.
     /// </summary>
     public static bool IsTestUiMode { get; private set; }
@@ -701,7 +701,9 @@ public sealed class AppEntry
             sp.GetRequiredService<LibraryService>(),
             sp.GetService<NotificationService>(),
             sp.GetService<YoutubeProvider>(),
-            sp.GetService<CookieAuthService>()));
+            sp.GetService<CookieAuthService>(),
+            sp.GetService<TrackRegistry>(),
+            sp.GetService<PlaylistSyncService>()));
 
         services.AddTransient<HomeViewModel>();
         services.AddTransient<SearchViewModel>();

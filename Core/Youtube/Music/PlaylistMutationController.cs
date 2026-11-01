@@ -220,27 +220,29 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
         CheckStatus(root);
 
-        // Parse setVideoIds from response
-        var result = new List<string?>(videoIds.Count);
+        // Ответ выравнивается по videoId: сервер может пропустить дубликат или недоступный трек и сдвинуть индексы
         var editResults = root.GetPropertyOrNull("playlistEditResults");
+        var responseItems = new List<(string? VideoId, string? SetVideoId)>(videoIds.Count);
 
         if (editResults?.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in editResults.Value.EnumerateArray())
             {
-                var setVideoId = item
-                    .GetPropertyOrNull("playlistEditVideoAddedResultData")
-                    ?.GetPropertyOrNull("setVideoId")
-                    ?.GetStringOrNull();
-                result.Add(setVideoId);
+                var added = item.GetPropertyOrNull("playlistEditVideoAddedResultData");
+                if (added == null)
+                {
+                    // Сохраняем позицию: позиционный fallback допустим только при совпадении длины ответа
+                    responseItems.Add((null, null));
+                    continue;
+                }
+
+                responseItems.Add((
+                    added.Value.GetPropertyOrNull("videoId")?.GetStringOrNull(),
+                    added.Value.GetPropertyOrNull("setVideoId")?.GetStringOrNull()));
             }
         }
 
-        // Pad with nulls if response has fewer results than requested
-        while (result.Count < videoIds.Count)
-            result.Add(null);
-
-        return result;
+        return PlaylistEditResultAligner.Align(videoIds, responseItems);
     }
 
     /// <summary>
@@ -338,43 +340,52 @@ internal sealed class PlaylistMutationController(HttpClient http)
     /// <summary>
     /// Renames a playlist.
     /// </summary>
-    public async Task RenamePlaylistAsync(
+    public Task RenamePlaylistAsync(
         string playlistId,
         string newTitle,
-        CancellationToken ct = default)
-    {
-        var root = await PostAsync(EditPlaylistEndpoint, writer =>
-        {
-            writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
-
-            writer.WriteStartArray("actions");
-            writer.WriteStartObject();
-            writer.WriteString("action", "ACTION_SET_PLAYLIST_NAME");
-            writer.WriteString("playlistName", newTitle);
-            writer.WriteEndObject();
-            writer.WriteEndArray();
-        }, ct).ConfigureAwait(false);
-
-        CheckStatus(root);
-    }
+        CancellationToken ct = default) =>
+        EditPlaylistDetailsAsync(playlistId, newTitle, description: null, ct);
 
     /// <summary>
     /// Updates playlist description.
     /// </summary>
-    public async Task SetPlaylistDescriptionAsync(
+    public Task SetPlaylistDescriptionAsync(
         string playlistId,
         string description,
+        CancellationToken ct = default) =>
+        EditPlaylistDetailsAsync(playlistId, newTitle: null, description, ct);
+
+    /// <summary>
+    /// Updates playlist title and/or description in a single edit_playlist request.
+    /// </summary>
+    public async Task EditPlaylistDetailsAsync(
+        string playlistId,
+        string? newTitle,
+        string? description,
         CancellationToken ct = default)
     {
+        if (newTitle == null && description == null) return;
+
         var root = await PostAsync(EditPlaylistEndpoint, writer =>
         {
             writer.WriteString("playlistId", SanitizePlaylistId(playlistId));
 
             writer.WriteStartArray("actions");
-            writer.WriteStartObject();
-            writer.WriteString("action", "ACTION_SET_PLAYLIST_DESCRIPTION");
-            writer.WriteString("playlistDescription", description);
-            writer.WriteEndObject();
+            if (newTitle != null)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("action", "ACTION_SET_PLAYLIST_NAME");
+                writer.WriteString("playlistName", newTitle);
+                writer.WriteEndObject();
+            }
+
+            if (description != null)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("action", "ACTION_SET_PLAYLIST_DESCRIPTION");
+                writer.WriteString("playlistDescription", description);
+                writer.WriteEndObject();
+            }
             writer.WriteEndArray();
         }, ct).ConfigureAwait(false);
 

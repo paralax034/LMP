@@ -49,6 +49,23 @@ public interface IPlaylistRepository
     Task UpsertAsync(Playlist playlist, CancellationToken ct = default);
 
     /// <summary>
+    /// Точечно обновляет облачную привязку плейлиста без перезаписи остальных колонок.
+    /// Не воскрешает удалённую строку и не затирает параллельные правки имени/описания.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор локального плейлиста.</param>
+    /// <param name="youtubeId">Новый облачный идентификатор либо <see langword="null"/>, чтобы оставить текущий.</param>
+    /// <param name="lastSyncedAtUtc">Метка успешной синхронизации либо <see langword="null"/>, чтобы оставить текущую.</param>
+    /// <param name="isCloudUnavailable">Флаг недоступности облачной копии.</param>
+    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <returns><see langword="true"/>, если строка существует, находится в режиме TwoWaySync и не привязана к другому YoutubeId.</returns>
+    Task<bool> UpdateCloudLinkStateAsync(
+        string playlistId,
+        string? youtubeId,
+        DateTime? lastSyncedAtUtc,
+        bool isCloudUnavailable,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Удаляет плейлист по его уникальному идентификатору.
     /// </summary>
     /// <param name="id">Идентификатор удаляемого плейлиста.</param>
@@ -224,4 +241,27 @@ public interface IPlaylistRepository
     /// <param name="ct">Токен отмены асинхронной операции.</param>
     /// <returns>Словарь, где ключ — ID плейлиста, а значение — набор ID входящих в него треков.</returns>
     Task<Dictionary<string, HashSet<string>>> GetAllPlaylistTrackIdsAsync(string ownerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Пакетно извлекает сохранённые идентификаторы связи <c>SetVideoId</c> для указанного набора треков плейлиста.
+    /// Должен вызываться до удаления строк из <c>PlaylistTracks</c>, чтобы избежать потери <c>SetVideoId</c>.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор локального плейлиста.</param>
+    /// <param name="trackIds">Список идентификаторов треков.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>Словарь соответствий <c>TrackId -&gt; SetVideoId</c>.</returns>
+    Task<Dictionary<string, string?>> GetSetVideoIdsAsync(
+        string playlistId,
+        IReadOnlyList<string> trackIds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Возвращает упорядоченный по позиции список пар <c>(TrackId, SetVideoId)</c> всех треков плейлиста.
+    /// </summary>
+    /// <param name="playlistId">Идентификатор локального плейлиста.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>Упорядоченный список треков с их облачными связями.</returns>
+    Task<List<(string TrackId, string? SetVideoId)>> GetTracksWithSetVideoIdsAsync(
+        string playlistId,
+        CancellationToken ct = default);
 }

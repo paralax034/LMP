@@ -226,12 +226,11 @@
         <Border Grid.Row="0" Classes="header-strip">
             <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Stretch">
 
-                <!-- LEFT: Блоки статистики -->
+                <!-- LEFT: Блоки статистики (остаются видимыми во время синхронизации, плавно обновляя счётчики) -->
                 <StackPanel Grid.Column="0"
                             Orientation="Horizontal"
                             Spacing="0"
                             VerticalAlignment="Stretch"
-                            IsVisible="{Binding !IsSyncing}"
                             Opacity="{Binding IsStatsVisible, Converter={StaticResource BoolToOpacity}}">
                     <StackPanel.Transitions>
                         <Transitions>
@@ -286,27 +285,6 @@
                     </Border>
                 </StackPanel>
 
-                <!-- CENTER: Синхронизация -->
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="8"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsVisible="{Binding IsSyncing}">
-                    <PathIcon Data="{StaticResource Icon.Sync}"
-                              Classes="spinning"
-                              Width="14"
-                              Height="14"
-                              Foreground="{DynamicResource AccentBrush}"
-                              VerticalAlignment="Center"
-                              IsHitTestVisible="False" />
-                    <TextBlock Text="{Binding SyncStatus}"
-                               FontSize="12"
-                               Foreground="{DynamicResource TextMutedBrush}"
-                               VerticalAlignment="Center"
-                               IsHitTestVisible="False" />
-                </StackPanel>
-
                 <!-- RIGHT: Действия -->
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
@@ -328,7 +306,6 @@
 
                     <Button Command="{Binding OpenCreateCommand}"
                             Classes="header-action-btn"
-                            IsEnabled="{Binding !IsSyncing}"
                             ToolTip.Tip="{Binding L[Library_CreatePlaylist]}">
                         <PathIcon Data="{StaticResource Icon.Plus}" IsHitTestVisible="False" />
                     </Button>

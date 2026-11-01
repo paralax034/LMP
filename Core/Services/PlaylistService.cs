@@ -55,6 +55,7 @@ public sealed class PlaylistService
         _syncService = syncService;
 
         _auth.OnAuthStateChanged += InvalidateIndex;
+        _syncService.OnCloudPlaylistStateChanged += playlist => OnPlaylistChanged?.Invoke(playlist);
     }
 
     #region Read API
@@ -397,6 +398,8 @@ public sealed class PlaylistService
         var playlist = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
         if (playlist == null) return;
 
+        _syncService.DiscardPlaylistOutbox(playlistId);
+
         playlist.SyncMode = PlaylistSyncMode.LocalOnly;
         playlist.YoutubeId = null;
         playlist.UpdatedAt = DateTime.Now;
@@ -449,10 +452,44 @@ public sealed class PlaylistService
     {
         if (playlistId == LibraryService.LikedPlaylistId) return;
 
+        var existing = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
+        if (existing == null) return;
+
+        var baselineName = existing.Name;
         await _playlists.RenameAsync(playlistId, newName, ct).ConfigureAwait(false);
+
         var updated = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
         if (updated != null)
+        {
+            if (updated.IsCloudBound)
+            {
+                _syncService.EnqueueMetadataUpdate(updated, newName: newName, baselineName: baselineName);
+            }
+
             OnPlaylistChanged?.Invoke(updated);
+        }
+    }
+
+    /// <summary>
+    /// Ставит в фоновую очередь Outbox обновление метаданных (имени, описания, обложки) облачного плейлиста по стратегии Last-Write-Wins.
+    /// </summary>
+    public void EnqueueCloudMetadataUpdate(
+        Playlist playlist,
+        string? newName = null,
+        string? baselineName = null,
+        string? newDescription = null,
+        string? baselineDescription = null,
+        string? newThumbnailUrl = null,
+        bool thumbnailChanged = false)
+    {
+        _syncService.EnqueueMetadataUpdate(
+            playlist,
+            newName,
+            baselineName,
+            newDescription,
+            baselineDescription,
+            newThumbnailUrl,
+            thumbnailChanged);
     }
 
     /// <summary>
@@ -479,9 +516,13 @@ public sealed class PlaylistService
 
         await _playlists.DeleteAsync(playlistId, ct).ConfigureAwait(false);
 
-        if (deleteFromCloud && !string.IsNullOrEmpty(playlist.YoutubeId) && playlist.SyncMode == PlaylistSyncMode.TwoWaySync)
+        if (deleteFromCloud && playlist.SyncMode == PlaylistSyncMode.TwoWaySync)
         {
-            await _syncService.DeleteCloudPlaylistAsync(playlist.YoutubeId).ConfigureAwait(false);
+            _syncService.EnqueueDeletePlaylist(playlist);
+        }
+        else
+        {
+            _syncService.DiscardPlaylistOutbox(playlistId);
         }
 
         OnPlaylistRemoved?.Invoke(playlistId);
@@ -505,11 +546,14 @@ public sealed class PlaylistService
             for (int i = 0; i < tracks.Count; i++)
             {
                 var canonical = _registry.RegisterOrUpdate(tracks[i]);
+                bool wasLiked = canonical.IsLiked;
                 await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
                 await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, true, ct: ct).ConfigureAwait(false);
-                canonical.IsLiked = true;
+                canonical.SetLikedState(true);
                 canonical.InPlaylists.Add(LibraryService.LikedPlaylistId);
                 _registry.UpdatePinStatus(canonical);
+
+                _syncService.EnqueueLikeMutation(canonical.Id, targetLiked: true, baselineLiked: wasLiked);
             }
 
             var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
@@ -544,13 +588,17 @@ public sealed class PlaylistService
 
         await _playlists.AddTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
 
-        await _syncService.AddTracksToCloudAsync(playlist, trackIds, ct).ConfigureAwait(false);
+        // IsCloudBound вместо CanSyncToCloud: правки плейлиста, ожидающего создания, не должны теряться
+        if (playlist.IsCloudBound)
+        {
+            _syncService.EnqueueAddTracks(playlist, trackIds);
+        }
 
         OnPlaylistChanged?.Invoke(playlist);
     }
 
     /// <summary>
-    /// Удаляет трек из локального плейлиста и синхронизирует удаление (с использованием SetVideoId) в облако.
+    /// Удаляет трек из локального плейлиста и ставит удаление (с сохранённым SetVideoId) в фоновую очередь Outbox.
     /// </summary>
     /// <param name="playlistId">Идентификатор плейлиста.</param>
     /// <param name="trackId">Идентификатор удаляемого трека.</param>
@@ -563,7 +611,8 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Пакетно удаляет коллекцию треков из локального плейлиста и синхронизирует удаление в облако.
+    /// Пакетно удаляет коллекцию треков из локального плейлиста и неблокирующе ставит удаление в облачную очередь Outbox.
+    /// Извлекает сохранённые <c>SetVideoId</c> до удаления записей из таблицы <c>PlaylistTracks</c>.
     /// </summary>
     public async Task RemoveTracksFromPlaylistAsync(string playlistId, IReadOnlyList<TrackInfo> tracks, CancellationToken ct = default)
     {
@@ -574,11 +623,15 @@ public sealed class PlaylistService
             for (int i = 0; i < tracks.Count; i++)
             {
                 var t = tracks[i];
-                await _tracks.SetLikedAsync(t.Id, CurrentOwnerId, false, ct: ct).ConfigureAwait(false);
                 var trackInfo = _registry.TryGet(t.Id) ?? t;
+                bool wasLiked = trackInfo.IsLiked;
+
+                await _tracks.SetLikedAsync(t.Id, CurrentOwnerId, false, ct: ct).ConfigureAwait(false);
                 trackInfo.SetLikedState(false);
                 trackInfo.InPlaylists.Remove(LibraryService.LikedPlaylistId);
                 _registry.UpdatePinStatus(trackInfo);
+
+                _syncService.EnqueueLikeMutation(trackInfo.Id, targetLiked: false, baselineLiked: wasLiked);
             }
 
             var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
@@ -611,32 +664,35 @@ public sealed class PlaylistService
             }
         }
 
+        // Извлекаем SetVideoId из БД ДО удаления строк из PlaylistTracks
+        bool isCloudBound = playlist.IsCloudBound;
+        Dictionary<string, string?>? existingSetVideoIds = null;
+        if (isCloudBound)
+        {
+            existingSetVideoIds = await _playlists.GetSetVideoIdsAsync(playlistId, trackIds, ct).ConfigureAwait(false);
+        }
+
         await _playlists.RemoveTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
 
-        if (playlist.CanSyncToCloud)
+        if (isCloudBound)
         {
-            var setVideoIds = new List<string>(trackIds.Count);
+            var removedEntries = new List<(string TrackId, string? SetVideoId)>(trackIds.Count);
             for (int i = 0; i < trackIds.Count; i++)
             {
-                var svId = await _syncService.GetOrFetchSetVideoIdAsync(playlist, trackIds[i], ct).ConfigureAwait(false);
-                if (!playlist.CanSyncToCloud)
-                    break;
-
-                if (!string.IsNullOrEmpty(svId))
-                    setVideoIds.Add(svId);
+                var tId = trackIds[i];
+                string? svId = null;
+                existingSetVideoIds?.TryGetValue(tId, out svId);
+                removedEntries.Add((tId, svId));
             }
 
-            if (setVideoIds.Count > 0 && playlist.CanSyncToCloud)
-            {
-                await _syncService.RemoveTracksFromCloudAsync(playlist, setVideoIds).ConfigureAwait(false);
-            }
+            _syncService.EnqueueRemoveTracks(playlist, removedEntries);
         }
 
         OnPlaylistChanged?.Invoke(playlist);
     }
 
     /// <summary>
-    /// Изменяет индекс трека в локальном плейлисте и синхронизирует этот сдвиг в облачном представлении.
+    /// Изменяет индекс трека в локальном плейлисте и ставит сжатую перестановку в облачную очередь Outbox.
     /// </summary>
     public async Task MovePlaylistTrackAsync(string playlistId, int oldIndex, int newIndex, CancellationToken ct = default)
     {
@@ -650,13 +706,17 @@ public sealed class PlaylistService
         if (oldIndex < 0 || oldIndex >= trackIds.Count || newIndex < 0 || newIndex >= trackIds.Count)
             return;
 
+        var baselineOrder = new List<string>(trackIds);
         var movingTrackId = trackIds[oldIndex];
         await _playlists.MoveTrackAsync(playlistId, oldIndex, newIndex, ct).ConfigureAwait(false);
 
         trackIds.RemoveAt(oldIndex);
         trackIds.Insert(newIndex, movingTrackId);
 
-        await _syncService.MoveTrackInCloudAsync(playlist, movingTrackId, newIndex, trackIds, ct).ConfigureAwait(false);
+        if (playlist.IsCloudBound)
+        {
+            _syncService.EnqueueReorderTracks(playlist, baselineOrder, trackIds);
+        }
         OnPlaylistChanged?.Invoke(playlist);
     }
 

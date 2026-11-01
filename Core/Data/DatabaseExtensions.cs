@@ -11,7 +11,7 @@ public static class DatabaseExtensions
     /// <summary>
     /// Текущая версия схемы базы данных.
     /// </summary>
-    public const int CurrentDbVersion = 5;
+    public const int CurrentDbVersion = 6;
 
     /// <summary>
     /// Идемпотентно создает все необходимые таблицы и индексы базы данных в режиме Native AOT.
@@ -120,6 +120,16 @@ public static class DatabaseExtensions
                     CONSTRAINT "FK_PlaylistTracks_Tracks_TrackId" FOREIGN KEY ("TrackId") REFERENCES "Tracks" ("Id") ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS "CloudMutationOutbox" (
+                    "TargetId" TEXT NOT NULL,
+                    "OwnerId" TEXT NOT NULL,
+                    "PayloadJson" TEXT NOT NULL,
+                    "UpdatedAtTicks" INTEGER NOT NULL,
+                    "RetryCount" INTEGER NOT NULL DEFAULT 0,
+                    CONSTRAINT "PK_CloudMutationOutbox" PRIMARY KEY ("TargetId", "OwnerId")
+                );
+
+                CREATE INDEX IF NOT EXISTS "IX_CloudMutationOutbox_OwnerId_UpdatedAtTicks" ON "CloudMutationOutbox" ("OwnerId", "UpdatedAtTicks");
                 CREATE INDEX IF NOT EXISTS "IX_LikedTracks_OwnerId" ON "LikedTracks" ("OwnerId");
                 CREATE INDEX IF NOT EXISTS "IX_LikedTracks_TrackId" ON "LikedTracks" ("TrackId");
                 CREATE INDEX IF NOT EXISTS "IX_Notifications_CreatedAt" ON "Notifications" ("CreatedAt");
@@ -236,7 +246,20 @@ public static class DatabaseExtensions
         try
         {
             await using var cmd = context.CreateCommand();
-            cmd.CommandText = "UPDATE Playlists SET ReleaseDate = NULL WHERE ReleaseDate IS NOT NULL AND ReleaseDate NOT GLOB '????-??-??';";
+            cmd.CommandText = """
+                UPDATE Playlists SET ReleaseDate = NULL WHERE ReleaseDate IS NOT NULL AND ReleaseDate NOT GLOB '????-??-??';
+
+                CREATE TABLE IF NOT EXISTS "CloudMutationOutbox" (
+                    "TargetId" TEXT NOT NULL,
+                    "OwnerId" TEXT NOT NULL,
+                    "PayloadJson" TEXT NOT NULL,
+                    "UpdatedAtTicks" INTEGER NOT NULL,
+                    "RetryCount" INTEGER NOT NULL DEFAULT 0,
+                    CONSTRAINT "PK_CloudMutationOutbox" PRIMARY KEY ("TargetId", "OwnerId")
+                );
+
+                CREATE INDEX IF NOT EXISTS "IX_CloudMutationOutbox_OwnerId_UpdatedAtTicks" ON "CloudMutationOutbox" ("OwnerId", "UpdatedAtTicks");
+                """;
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         finally

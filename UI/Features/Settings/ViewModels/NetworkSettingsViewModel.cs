@@ -9,6 +9,7 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
 {
     private readonly NetworkManager _networkManager;
     private readonly LibraryService _library;
+    private readonly PlaylistSyncService _playlistSync;
     private DispatcherTimer? _proxyDebounceTimer;
     private bool _isLoading;
 
@@ -44,6 +45,9 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
     [ObservableProperty] public partial IReadOnlyList<LocalizedItem<InternetProfile>> InternetProfileOptions { get; private set; } = [];
     [ObservableProperty] public partial LocalizedItem<InternetProfile>? SelectedInternetProfile { get; set; }
 
+    [ObservableProperty] public partial IReadOnlyList<LocalizedItem<CloudSyncBatchInterval>> CloudBatchIntervalOptions { get; private set; } = [];
+    [ObservableProperty] public partial LocalizedItem<CloudSyncBatchInterval>? SelectedCloudBatchInterval { get; set; }
+
     [ObservableProperty] public partial bool ProxyEnabled { get; set; }
     [ObservableProperty] public partial string ProxyHost { get; set; } = "127.0.0.1";
     [ObservableProperty] public partial int ProxyPort { get; set; } = 8080;
@@ -53,10 +57,14 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
 
     public IAsyncRelayCommand TestNetworkCommand { get; }
 
-    public NetworkSettingsViewModel(NetworkManager networkManager, LibraryService library)
+    public NetworkSettingsViewModel(
+        NetworkManager networkManager,
+        LibraryService library,
+        PlaylistSyncService playlistSync)
     {
         _networkManager = networkManager;
         _library = library;
+        _playlistSync = playlistSync;
 
         TestNetworkCommand = new AsyncRelayCommand(TestNetworkAsync);
 
@@ -72,6 +80,10 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
             var currentProfile = SelectedInternetProfile?.Value ?? _library.Settings.InternetProfile;
             InternetProfileOptions = LocalizedItem.CreateList<InternetProfile>("NetProfile_");
             SelectedInternetProfile = InternetProfileOptions.FindByValue(currentProfile, 1);
+
+            var currentBatch = SelectedCloudBatchInterval?.Value ?? _library.Settings.CloudBatchInterval;
+            CloudBatchIntervalOptions = LocalizedItem.CreateList<CloudSyncBatchInterval>("CloudBatch_");
+            SelectedCloudBatchInterval = CloudBatchIntervalOptions.FindByValue(currentBatch, 0);
         }
         finally
         {
@@ -86,6 +98,7 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
         {
             var s = _library.Settings;
             SelectedInternetProfile = InternetProfileOptions.FindByValue(s.InternetProfile, 1);
+            SelectedCloudBatchInterval = CloudBatchIntervalOptions.FindByValue(s.CloudBatchInterval, 0);
 
             ProxyEnabled = s.Proxy.Enabled;
             ProxyHost = string.IsNullOrWhiteSpace(s.Proxy.Host) ? "127.0.0.1" : s.Proxy.Host;
@@ -105,6 +118,14 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.InternetProfile = value.Value);
         _ = AudioEngine.ReinitializeWithProfileAsync(value.Value);
+    }
+
+    partial void OnSelectedCloudBatchIntervalChanged(LocalizedItem<CloudSyncBatchInterval>? value)
+    {
+        if (_isLoading || value is null) return;
+        _library.UpdateSettings(s => s.CloudBatchInterval = value.Value);
+        _playlistSync.OnBatchIntervalChanged();
+        Log.Info($"[Settings] CloudSyncBatchInterval changed to {value.Value} ({(int)value.Value}s)");
     }
 
     partial void OnProxyEnabledChanged(bool value) => OnProxyParamChanged();

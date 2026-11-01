@@ -180,6 +180,16 @@ internal sealed class PlaylistSyncController(HttpClient http)
         }
 
         var webMeta = await webMetadataTask.ConfigureAwait(false);
+
+        // Если WEB_REMIX вернул пустой ответ (без заголовка и треков) И стандартный YouTube WEB подтвердил,
+        // что плейлист больше не существует (удалён в облаке) — выбрасываем PlaylistUnavailableException для авто-даунгрейда в LocalOnly.
+        if (string.IsNullOrEmpty(playlistData.Title) &&
+            playlistData.Tracks.Count == 0 &&
+            webMeta is { IsAvailable: false })
+        {
+            throw new Exceptions.PlaylistUnavailableException($"Playlist '{playlistId}' does not exist on YouTube.");
+        }
+
         if (webMeta is { IsAvailable: true })
         {
             if (string.IsNullOrEmpty(playlistData.Title) && !string.IsNullOrEmpty(webMeta.Title))

@@ -20,12 +20,26 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
     // O(1) счётчик, обновляется при каждой мутации коллекции
     private int _unreadCount;
+    private int _activeTaskCount;
+    private readonly HashSet<string> _activeTaskKeys = new(StringComparer.Ordinal);
+    private readonly Lock _taskStateLock = new();
 
     public ObservableCollection<Notification> Notifications { get; } = [];
 
     /// <inheritdoc cref="_unreadCount"/>
     public int UnreadCount => _unreadCount;
     public bool HasUnread => _unreadCount > 0;
+
+    /// <summary>
+    /// Количество активных фоновых задач облака в панели уведомлений (потокобезопасно).
+    /// </summary>
+    public int ActiveTaskCount => Volatile.Read(ref _activeTaskCount);
+    public bool HasActiveTasks => Volatile.Read(ref _activeTaskCount) > 0;
+
+    /// <summary>
+    /// Событие, вызываемое при изменении состояния любой фоновой задачи.
+    /// </summary>
+    public event Action? OnTasksChanged;
 
     private Notification? _currentToast;
     public Notification? CurrentToast
@@ -49,6 +63,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     {
         _libraryService = libraryService;
         _repository = repository;
+        LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
         Log.Info("[NotificationService] Initialized");
     }
 
@@ -200,6 +215,237 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     public static void PlaySuccessSound() => OsSoundPlayer.PlaySuccess();
+
+    /// <summary>
+    /// Создаёт или реактивно обновляет на месте карточку активной фоновой задачи в панели уведомлений.
+    /// </summary>
+    public void UpsertTaskNotification(
+        string taskKey,
+        string? titleKey,
+        string? titleRaw,
+        string? messageKey,
+        object[]? messageArgs,
+        string? messageRaw,
+        Func<string>? dynamicMessageFactory,
+        string? statusText,
+        double progress,
+        bool isIndeterminate,
+        string? actionKey = null,
+        System.Windows.Input.ICommand? actionCommand = null,
+        bool isCancelAction = false,
+        DateTime? deadlineUtc = null,
+        bool hideProgress = false)
+    {
+        if (string.IsNullOrEmpty(taskKey)) return;
+
+        bool countChanged = false;
+        lock (_taskStateLock)
+        {
+            if (_activeTaskKeys.Add(taskKey))
+            {
+                Volatile.Write(ref _activeTaskCount, _activeTaskKeys.Count);
+                countChanged = true;
+            }
+        }
+
+        void ApplyOnUi()
+        {
+            Notification? existing = null;
+            for (int i = 0; i < Notifications.Count; i++)
+            {
+                if (Notifications[i].IsTask &&
+                    Notifications[i].IsTaskActive &&
+                    string.Equals(Notifications[i].TaskKey, taskKey, StringComparison.Ordinal))
+                {
+                    existing = Notifications[i];
+                    break;
+                }
+            }
+
+            if (existing != null)
+            {
+                existing.TitleKey = titleKey;
+                existing.TitleRaw = titleRaw;
+                existing.MessageKey = messageKey;
+                existing.MessageArgs = messageArgs;
+                existing.MessageRaw = messageRaw;
+                existing.DynamicMessageFactory = dynamicMessageFactory;
+                existing.TaskStatusText = statusText;
+                existing.TaskProgress = Math.Clamp(progress, 0.0, 1.0);
+                existing.IsTaskIndeterminate = isIndeterminate;
+                existing.IsTaskProgressHidden = hideProgress;
+                existing.TaskDeadlineUtc = deadlineUtc;
+                existing.TaskActionKey = actionKey;
+                existing.TaskActionCommand = actionCommand;
+                existing.IsCancelAction = isCancelAction;
+                existing.NotifyVisualStateChanged();
+            }
+            else
+            {
+                var taskNotif = new Notification
+                {
+                    TaskKey = taskKey,
+                    IsTask = true,
+                    IsTaskActive = true,
+                    IsRead = true,
+                    TitleKey = titleKey,
+                    TitleRaw = titleRaw,
+                    MessageKey = messageKey,
+                    MessageArgs = messageArgs,
+                    MessageRaw = messageRaw,
+                    DynamicMessageFactory = dynamicMessageFactory,
+                    TaskStatusText = statusText,
+                    TaskProgress = Math.Clamp(progress, 0.0, 1.0),
+                    IsTaskIndeterminate = isIndeterminate,
+                    IsTaskProgressHidden = hideProgress,
+                    TaskDeadlineUtc = deadlineUtc,
+                    TaskActionKey = actionKey,
+                    TaskActionCommand = actionCommand,
+                    IsCancelAction = isCancelAction,
+                    Severity = NotificationSeverity.Info
+                };
+
+                Notifications.Insert(0, taskNotif);
+            }
+
+            if (countChanged)
+            {
+                OnPropertyChanged(nameof(ActiveTaskCount));
+                OnPropertyChanged(nameof(HasActiveTasks));
+            }
+
+            OnTasksChanged?.Invoke();
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+            ApplyOnUi();
+        else
+            Dispatcher.UIThread.Post(ApplyOnUi);
+    }
+
+    /// <summary>
+    /// Завершает активную фоновую задачу на месте (превращая её в запись истории с галочкой)
+    /// либо удаляет её без следа, если операция была взаимно аннигилирована (<paramref name="removeIfAnnihilated"/>).
+    /// </summary>
+    public void CompleteTaskNotification(
+        string taskKey,
+        string? completedMessageKey = null,
+        object[]? completedMessageArgs = null,
+        string? completedMessageRaw = null,
+        Func<string>? dynamicMessageFactory = null,
+        NotificationSeverity severity = NotificationSeverity.Success,
+        bool removeIfAnnihilated = false)
+    {
+        if (string.IsNullOrEmpty(taskKey)) return;
+
+        bool wasActive;
+        lock (_taskStateLock)
+        {
+            wasActive = _activeTaskKeys.Remove(taskKey);
+            if (wasActive)
+                Volatile.Write(ref _activeTaskCount, _activeTaskKeys.Count);
+        }
+
+        void ApplyOnUi()
+        {
+            Notification? existing = null;
+            int idx = -1;
+            for (int i = 0; i < Notifications.Count; i++)
+            {
+                if (Notifications[i].IsTask &&
+                    Notifications[i].IsTaskActive &&
+                    string.Equals(Notifications[i].TaskKey, taskKey, StringComparison.Ordinal))
+                {
+                    existing = Notifications[i];
+                    idx = i;
+                    break;
+                }
+            }
+
+            if (existing != null)
+            {
+                if (removeIfAnnihilated)
+                {
+                    Notifications.RemoveAt(idx);
+                }
+                else
+                {
+                    existing.IsTaskActive = false;
+                    existing.TaskProgress = 1.0;
+                    existing.IsTaskIndeterminate = false;
+                    existing.TaskStatusText = null;
+                    existing.TaskActionKey = null;
+                    existing.TaskActionRaw = null;
+                    existing.TaskActionCommand = null;
+                    existing.IsCancelAction = false;
+                    existing.Severity = severity;
+                    existing.Timestamp = DateTime.UtcNow;
+
+                    existing.DynamicMessageFactory = dynamicMessageFactory;
+                    if (!string.IsNullOrEmpty(completedMessageKey))
+                    {
+                        existing.MessageKey = completedMessageKey;
+                        existing.MessageArgs = completedMessageArgs;
+                        existing.MessageRaw = null;
+                    }
+                    else if (!string.IsNullOrEmpty(completedMessageRaw))
+                    {
+                        existing.MessageKey = null;
+                        existing.MessageArgs = null;
+                        existing.MessageRaw = completedMessageRaw;
+                    }
+
+                    existing.NotifyVisualStateChanged();
+                    _ = PersistAsync(existing);
+                }
+            }
+
+            if (wasActive)
+            {
+                OnPropertyChanged(nameof(ActiveTaskCount));
+                OnPropertyChanged(nameof(HasActiveTasks));
+            }
+
+            OnTasksChanged?.Invoke();
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+            ApplyOnUi();
+        else
+            Dispatcher.UIThread.Post(ApplyOnUi);
+    }
+
+    private void OnLanguageChanged(object? sender, string langCode)
+    {
+        void RefreshAllOnUi()
+        {
+            for (int i = 0; i < Notifications.Count; i++)
+                Notifications[i].NotifyVisualStateChanged();
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+            RefreshAllOnUi();
+        else
+            Dispatcher.UIThread.Post(RefreshAllOnUi);
+    }
+
+    private void RecalculateActiveTasks()
+    {
+        lock (_taskStateLock)
+        {
+            _activeTaskKeys.Clear();
+            for (int i = 0; i < Notifications.Count; i++)
+            {
+                var n = Notifications[i];
+                if (n.IsTask && n.IsTaskActive && !string.IsNullOrEmpty(n.TaskKey))
+                    _activeTaskKeys.Add(n.TaskKey);
+            }
+            Volatile.Write(ref _activeTaskCount, _activeTaskKeys.Count);
+        }
+
+        OnPropertyChanged(nameof(ActiveTaskCount));
+        OnPropertyChanged(nameof(HasActiveTasks));
+    }
 
     private async Task PublishAsync(Notification notification, bool showToast, int durationMs, CancellationToken ct)
     {
@@ -405,9 +651,17 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     {
         Dispatcher.UIThread.Post(() =>
         {
-            Notifications.Clear();
+            // Сохраняем активные невыполненные задачи, очищая только завершённую историю уведомлений
+            for (int i = Notifications.Count - 1; i >= 0; i--)
+            {
+                if (!Notifications[i].IsTaskActive)
+                    Notifications.RemoveAt(i);
+            }
+
             _unreadCount = 0;
+            RecalculateActiveTasks();
             RaiseUnreadProperties();
+            OnTasksChanged?.Invoke();
         });
 
         _ = Task.Run(async () =>
@@ -562,6 +816,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
         _cleanupCts?.Cancel();
         _cleanupCts?.Dispose();
         _toastCts?.Cancel();

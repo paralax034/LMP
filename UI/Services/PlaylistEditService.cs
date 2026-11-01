@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using LMP.UI.Dialogs;
 
 namespace LMP.UI.Services;
@@ -26,22 +25,6 @@ public sealed class PlaylistEditService
         _auth = auth;
         _notifications = notifications;
         _dialog = dialog;
-    }
-
-    private static void RunOnUi(Action action)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-            action();
-        else
-            Dispatcher.UIThread.Post(action);
-    }
-
-    private static void RunOnUi<T>(Action<T> action, T arg)
-    {
-        if (Dispatcher.UIThread.CheckAccess())
-            action(arg);
-        else
-            Dispatcher.UIThread.Post(() => action(arg));
     }
 
     public sealed record EditResult(bool Changed, Playlist Playlist);
@@ -79,6 +62,11 @@ public sealed class PlaylistEditService
             return await CreateCopyAsync(playlist, result, lockNavigation, unlockNavigation).ConfigureAwait(false);
 
         bool changed = false;
+        bool nameChanged = false;
+        bool descChanged = false;
+        bool thumbChanged = false;
+        string baselineName = playlist.Name;
+        string? baselineDesc = playlist.Description;
 
         // 1. Rename
         if (!LibraryService.IsSystemPlaylist(playlistId))
@@ -89,6 +77,7 @@ public sealed class PlaylistEditService
             {
                 playlist.Name = newName;
                 changed = true;
+                nameChanged = true;
             }
         }
 
@@ -102,6 +91,7 @@ public sealed class PlaylistEditService
                     playlist.ThumbnailUrl = result.ThumbnailUrl;
                     playlist.ComputedColor = null;
                     changed = true;
+                    thumbChanged = true;
                 }
                 else
                 {
@@ -118,6 +108,7 @@ public sealed class PlaylistEditService
                 playlist.ThumbnailUrl = null;
                 playlist.ComputedColor = null;
                 changed = true;
+                thumbChanged = true;
             }
         }
 
@@ -126,6 +117,7 @@ public sealed class PlaylistEditService
         {
             playlist.Description = result.Description?.Trim();
             changed = true;
+            descChanged = true;
         }
 
         // 4. Custom Color
@@ -148,6 +140,20 @@ public sealed class PlaylistEditService
         {
             playlist.UpdatedAt = DateTime.Now;
             await _playlistService.AddOrUpdatePlaylistAsync(playlist).ConfigureAwait(false);
+
+            bool staysSynced = playlist.IsCloudBound &&
+                               (!result.SyncToCloud.HasValue || result.SyncToCloud.Value);
+            if (staysSynced && (nameChanged || descChanged || thumbChanged))
+            {
+                _playlistService.EnqueueCloudMetadataUpdate(
+                    playlist,
+                    newName: nameChanged ? playlist.Name : null,
+                    baselineName: baselineName,
+                    newDescription: descChanged ? (playlist.Description ?? string.Empty) : null,
+                    baselineDescription: baselineDesc,
+                    newThumbnailUrl: playlist.ThumbnailUrl,
+                    thumbnailChanged: thumbChanged);
+            }
         }
 
         // 6. Sync toggle: выполняется строго после фиксации метаданных, чтобы не затереть облачные идентификаторы
@@ -201,7 +207,8 @@ public sealed class PlaylistEditService
         Action<string> lockNavigation,
         Action unlockNavigation)
     {
-        RunOnUi(lockNavigation, SL["Playlist_CreatingCopy"]);
+        _ = lockNavigation;
+        _ = unlockNavigation;
         try
         {
             var copyName = string.IsNullOrWhiteSpace(editorResult.Name)
@@ -241,10 +248,6 @@ public sealed class PlaylistEditService
             _notifications.TryPlayErrorSound();
             return null;
         }
-        finally
-        {
-            RunOnUi(unlockNavigation);
-        }
     }
 
     private async Task<bool> TryLinkToCloudAsync(
@@ -252,7 +255,8 @@ public sealed class PlaylistEditService
         Action<string> lockNavigation,
         Action unlockNavigation)
     {
-        RunOnUi(lockNavigation, SL["Playlist_LinkingToCloud"]);
+        _ = lockNavigation;
+        _ = unlockNavigation;
         try
         {
             bool success = await _playlistService.LinkToCloudAsync(localPlaylistId).ConfigureAwait(false);
@@ -289,10 +293,6 @@ public sealed class PlaylistEditService
 
             _notifications.TryPlayErrorSound();
             return false;
-        }
-        finally
-        {
-            RunOnUi(unlockNavigation);
         }
     }
 

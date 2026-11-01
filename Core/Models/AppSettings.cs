@@ -21,6 +21,37 @@ public enum InternetProfile
 }
 
 /// <summary>
+/// Интервал пакетного накопления (коалесценции) облачных мутаций перед отправкой в YouTube.
+/// Значение перечисления соответствует длительности окна в секундах (от 10 секунд до 3 часов).
+/// </summary>
+public enum CloudSyncBatchInterval
+{
+    /// <summary>10 секунд (быстрая коалесценция серий кликов).</summary>
+    Sec10 = 10,
+
+    /// <summary>30 секунд.</summary>
+    Sec30 = 30,
+
+    /// <summary>1 минута (по умолчанию — баланс между отзывчивостью и числом запросов).</summary>
+    Min1 = 60,
+
+    /// <summary>5 минут.</summary>
+    Min5 = 300,
+
+    /// <summary>15 минут.</summary>
+    Min15 = 900,
+
+    /// <summary>30 минут.</summary>
+    Min30 = 1800,
+
+    /// <summary>1 час.</summary>
+    Hour1 = 3600,
+
+    /// <summary>3 часа.</summary>
+    Hour3 = 10800
+}
+
+/// <summary>
 /// Тип кривой интерполяции громкости.
 /// </summary>
 public enum VolumeCurveType
@@ -409,6 +440,7 @@ public sealed class AppSettings
 
     // === Network (9-11) ===
     public InternetProfile InternetProfile { get; set; } = InternetProfile.Medium;
+    public CloudSyncBatchInterval CloudBatchInterval { get; set; } = CloudSyncBatchInterval.Min1;
     public ProxySettings Proxy { get; set; } = new();
     public StorageSettings Storage { get; set; } = new();
 
@@ -431,13 +463,13 @@ public sealed class AppSettings
 
     /// <summary>
     /// Оптимизировать UI при потере фокуса окна.
-    /// 
+    ///
     /// <para><b>true:</b> При сворачивании или потере фокуса приостанавливаются
     /// тяжёлые UI-обновления (позиция, буфер, анимации). Экономит CPU.</para>
-    /// 
+    ///
     /// <para><b>false:</b> UI работает штатно даже без фокуса.
     /// Полезно для пользователей со вторым монитором.</para>
-    /// 
+    ///
     /// <para>Настройка НЕ влияет на сворачивание в tray — там всегда оптимизация.</para>
     /// </summary>
     public bool OptimizeWhenInactive { get; set; } = true;

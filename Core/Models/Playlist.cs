@@ -248,10 +248,17 @@ public sealed class Playlist : IBatchItem, ISearchResult
     public bool CanSyncToCloud => (IsMine || Ownership == PlaylistOwnership.Unknown) && HasCloudLink && SyncMode == PlaylistSyncMode.TwoWaySync;
 
     /// <summary>
+    /// Плейлист привязан к облаку для исходящих мутаций, включая ожидающее создание (YoutubeId ещё не получен).
+    /// Правки такого плейлиста обязаны попадать в Outbox, иначе они теряются до завершения Фазы 0.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsCloudBound => (IsMine || Ownership == PlaylistOwnership.Unknown) && SyncMode == PlaylistSyncMode.TwoWaySync && !IsCloudUnavailable;
+
+    /// <summary>
     /// Можно получить свежие данные из YouTube.
     /// </summary>
     [JsonIgnore]
-    public bool CanPullFromCloud => HasCloudLink;
+    public bool CanPullFromCloud => !string.IsNullOrEmpty(YoutubeId);
 
     #endregion
 

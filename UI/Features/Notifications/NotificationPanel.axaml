@@ -31,6 +31,33 @@
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
+        <!-- Контурная подсветка активной кнопки фильтра в шапке уведомлений -->
+        <Style Selector="Button.header-icon-btn.active">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+
+        <!-- Компактная контурная кнопка действия внутри задачи (Отправить сейчас / Отмена) -->
+        <Style Selector="Button.task-action-btn">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.task-action-btn:pointerover">
+            <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+
         <!-- Блок рекомендации: аккуратный акцентный штрих слева без тяжелых рамок -->
         <Style Selector="Border.recommendation-quote">
             <Setter Property="Background" Value="Transparent" />
@@ -123,21 +150,62 @@
 
         <Grid RowDefinitions="Auto, *">
 
-            <!-- Компактная служебная строка: счетчик и минималистичная кнопка очистки -->
+            <!-- Компактная служебная строка: иконки фильтрации (Все / Уведомления / Задачи), принудительная отправка и очистка -->
             <Grid Grid.Row="0"
-                ColumnDefinitions="*, Auto"
-                Margin="16,8,10,8"
-                IsVisible="{Binding HasNotifications}">
-                <TextBlock Grid.Column="0"
-                    Text="{Binding Notifications.Count, StringFormat='{}{0}'}"
-                    FontSize="12"
-                    FontWeight="SemiBold"
-                    Foreground="{DynamicResource TextSecondaryBrush}"
-                    VerticalAlignment="Center" />
+                ColumnDefinitions="Auto, *, Auto, Auto"
+                Margin="10,6,10,6">
 
-                <Button Grid.Column="1"
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                    <Button Classes="header-icon-btn"
+                        Classes.active="{Binding IsFilterAll}"
+                        Command="{Binding SetFilterAllCommand}"
+                        ToolTip.Tip="{Binding L[Notification_Filter_All]}"
+                        Width="26" Height="26" Padding="4">
+                        <PathIcon Data="{StaticResource Icon.BellOutline}" Width="13" Height="13" />
+                    </Button>
+
+                    <Button Classes="header-icon-btn"
+                        Classes.active="{Binding IsFilterNotifications}"
+                        Command="{Binding SetFilterNotificationsCommand}"
+                        ToolTip.Tip="{Binding L[Notification_Filter_Notifications]}"
+                        Width="26" Height="26" Padding="4">
+                        <PathIcon Data="{StaticResource Icon.InformationOutline}" Width="13" Height="13" />
+                    </Button>
+
+                    <Button Classes="header-icon-btn"
+                        Classes.active="{Binding IsFilterTasks}"
+                        Command="{Binding SetFilterTasksCommand}"
+                        ToolTip.Tip="{Binding L[Notification_Filter_Tasks]}"
+                        Width="26" Height="26" Padding="4">
+                        <PathIcon Data="{StaticResource Icon.CloudSync}" Width="14" Height="14" />
+                    </Button>
+
+                    <TextBlock Text="{Binding DisplayedNotifications.Count, StringFormat='{}{0}'}"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        Foreground="{DynamicResource TextMutedBrush}"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Button Grid.Column="2"
+                    Classes="header-icon-btn"
+                    Command="{Binding ForceFlushAllCommand}"
+                    IsVisible="{Binding HasActiveTasks}"
+                    ToolTip.Tip="{Binding L[CloudTask_ForceAll]}"
+                    Width="26" Height="26"
+                    Padding="3"
+                    Margin="0,0,2,0"
+                    VerticalAlignment="Center">
+                    <PathIcon Data="{StaticResource Icon.CloudUpload}"
+                        Foreground="{DynamicResource AccentBrush}"
+                        Width="14" Height="14" />
+                </Button>
+
+                <Button Grid.Column="3"
                     Classes="header-icon-btn"
                     Command="{Binding ClearAllCommand}"
+                    IsVisible="{Binding HasNotifications}"
                     ToolTip.Tip="{Binding L[Notification_Clear]}"
                     Width="26" Height="26"
                     Padding="3"
@@ -149,8 +217,7 @@
 
             <!-- Тонкий разделитель под служебной шапкой -->
             <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom"
-                Background="{DynamicResource BgHighlightTransparentBrush}"
-                IsVisible="{Binding HasNotifications}" />
+                Background="{DynamicResource BgHighlightTransparentBrush}" />
 
             <!-- ═══ ВЫСОКОПРОИЗВОДИТЕЛЬНЫЙ СПИСОК УВЕДОМЛЕНИЙ ═══ -->
             <Grid Grid.Row="1">
@@ -173,14 +240,14 @@
                         Opacity="0.7" />
                 </StackPanel>
 
-                <!-- 
+                <!--
                     ListBox с аппаратной пиксельной виртуализацией:
                     ScrollViewer.IsScrollInertiaEnabled="True" гарантирует плавный 60/120 FPS скролл.
                     Focusable="False" отключает холостые проходы поиска фокуса.
                     MaxHeight="450" гарантирует ограничение области прокрутки внутри Popup.
                 -->
                 <ListBox IsVisible="{Binding HasNotifications}"
-                    ItemsSource="{Binding Notifications}"
+                    ItemsSource="{Binding DisplayedNotifications}"
                     Background="Transparent"
                     BorderThickness="0"
                     Padding="0"
@@ -256,6 +323,41 @@
                                             TextWrapping="Wrap"
                                             LineHeight="16"
                                             Margin="0,1,0,0" />
+
+                                        <!-- Полоса прогресса (только для задач с реальным прогрессом) и кнопка быстрого действия (Send Now / Cancel) -->
+                                        <StackPanel Spacing="6"
+                                            Margin="0,5,0,2"
+                                            IsVisible="{Binding ShowTaskFooter}">
+                                            <ProgressBar Minimum="0" Maximum="1"
+                                                IsVisible="{Binding ShowTaskProgress}"
+                                                Value="{Binding TaskProgress}"
+                                                IsIndeterminate="{Binding IsTaskIndeterminate}"
+                                                Height="3"
+                                                CornerRadius="1.5" />
+
+                                            <Button Classes="task-action-btn"
+                                                HorizontalAlignment="Left"
+                                                IsVisible="{Binding HasTaskAction}"
+                                                Command="{Binding TaskActionCommand}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <PathIcon Data="{StaticResource Icon.CloudUpload}"
+                                                        IsVisible="{Binding !IsCancelAction}"
+                                                        Width="12" Height="12"
+                                                        Foreground="{DynamicResource AccentBrush}"
+                                                        VerticalAlignment="Center" />
+                                                    <PathIcon Data="{StaticResource Icon.Close}"
+                                                        IsVisible="{Binding IsCancelAction}"
+                                                        Width="10" Height="10"
+                                                        Foreground="{DynamicResource AccentBrush}"
+                                                        VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding TaskActionText}"
+                                                        FontSize="11"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="{DynamicResource AccentBrush}"
+                                                        VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
 
                                         <!-- Контекст трека с оригинальной кнопкой CopyLinkButton -->
                                         <Grid Classes="track-info-strip"

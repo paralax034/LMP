@@ -521,6 +521,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         try
         {
+            // Подавляем повторный вызов LoadPlaylistAsync от собственного сохранения вычисленного цвета шапки
+            _lastLocalMutationTime = DateTime.Now;
             _currentPlaylist.ComputedColor = colorHex;
             await _playlistService.AddOrUpdatePlaylistAsync(_currentPlaylist);
         }
@@ -644,7 +646,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             return;
 
         IsSyncing = true;
-        _mainWindow.LockNavigation(SL["Playlist_SyncInProgress"]);
 
         try
         {
@@ -666,7 +667,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 var preview = await _playlistService.BuildPreviewAsync(_currentPlaylistId);
                 if (preview == null)
                 {
-                    // Если плейлист был автоматически переведен в LocalOnly (404 Not Found), обновляем UI и выходим
                     var current = await _playlistService.GetPlaylistAsync(_currentPlaylistId);
                     if (current is { SyncMode: PlaylistSyncMode.LocalOnly })
                     {
@@ -674,7 +674,10 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                         return;
                     }
 
-                    await _dialog.ShowInfoAsync(SL["Dialog_Error_Title"], SL["Playlist_SyncFetchFailed"]);
+                    await notifications.ShowToastAsync(
+                        titleKey: "Dialog_Error_Title",
+                        messageKey: "Playlist_SyncFetchFailed",
+                        severity: NotificationSeverity.Error);
                     return;
                 }
 
@@ -686,7 +689,10 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 {
                     Log.Info($"[Playlist] Sync check for '{PlaylistName}' ({_currentPlaylistId}): no differences found.");
                     await LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
-                    await _dialog.ShowInfoAsync(SL["Playlist_SyncWithCloud"], SL["Playlist_SyncNoChanges"]);
+                    await notifications.ShowToastAsync(
+                        titleKey: "Playlist_SyncWithCloud",
+                        messageKey: "Playlist_SyncNoChanges",
+                        severity: NotificationSeverity.Info);
                     return;
                 }
 
@@ -715,10 +721,12 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                     }
                 }
 
+                _lastLocalMutationTime = DateTime.Now;
                 var result = await _playlistService.ApplySyncAsync(_currentPlaylistId, preview, options);
 
                 if (result.Success)
                 {
+                    _lastLocalMutationTime = DateTime.Now;
                     await LoadPlaylistAsync(_currentPlaylistId);
 
                     if (result.TracksAddedLocally > 0 || result.TracksAddedToCloud > 0 ||
@@ -753,20 +761,23 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         finally
         {
             IsSyncing = false;
-            _mainWindow.UnlockNavigation();
             Volatile.Write(ref _syncInProgressGate, 0);
         }
     }
 
     private async Task EditPlaylistAsync()
     {
+        _lastLocalMutationTime = DateTime.Now;
         var result = await _editService.EditPlaylistAsync(
             _currentPlaylistId,
             _mainWindow.LockNavigation,
             _mainWindow.UnlockNavigation);
 
         if (result is { Changed: true })
+        {
+            _lastLocalMutationTime = DateTime.Now;
             await LoadPlaylistAsync(_currentPlaylistId);
+        }
     }
 
     private async Task CopyPlaylistLinkAsync()

@@ -263,9 +263,9 @@ public static class CacheTests
             var settingsRepo = new Core.Data.Repositories.SettingsRepository(factory);
             const string testKey = "Test_StorageLimits_Settings";
 
-            var settings = new Core.Models.AppSettings
+            var settings = new AppSettings
             {
-                Storage = new Core.Models.StorageSettings
+                Storage = new StorageSettings
                 {
                     AudioCacheLimitMb = 3500,
                     ImageCacheLimitMb = 750,
@@ -277,7 +277,7 @@ public static class CacheTests
 
             await settingsRepo.SetAsync(testKey, settings).ConfigureAwait(false);
 
-            var loaded = await settingsRepo.GetAsync<Core.Models.AppSettings>(testKey).ConfigureAwait(false);
+            var loaded = await settingsRepo.GetAsync<AppSettings>(testKey).ConfigureAwait(false);
             TestAssert.NotNull(loaded, "Failed to load saved AppSettings from isolated repository");
             TestAssert.Equal(3500, loaded.Storage.AudioCacheLimitMb);
             TestAssert.Equal(750, loaded.Storage.ImageCacheLimitMb);
@@ -295,8 +295,8 @@ public static class CacheTests
     [TestMethod(TestCategory.Unit, "ImageCache Memory LRU & Disk Stats Verification", Group = TestGroups.Storage, Order = 7)]
     public static Task TestImageCacheLimitsAndStatsAsync(IServiceProvider services)
     {
-        var imageCache = services.GetRequiredService<Core.Services.ImageCacheService>();
-        var library = services.GetRequiredService<Core.Services.LibraryService>();
+        var imageCache = services.GetRequiredService<ImageCacheService>();
+        var library = services.GetRequiredService<LibraryService>();
 
         int origMaxItems = library.Settings.Storage.MaxBitmapCacheItems;
         try
@@ -327,8 +327,8 @@ public static class CacheTests
     [TestMethod(TestCategory.Unit, "DownloadService Storage Limit Rejection", Group = TestGroups.Storage, Order = 8)]
     public static Task TestDownloadServiceQuotaCheckAsync(IServiceProvider services)
     {
-        var library = services.GetRequiredService<Core.Services.LibraryService>();
-        var youtube = services.GetRequiredService<Core.Services.YoutubeProvider>();
+        var library = services.GetRequiredService<LibraryService>();
+        var youtube = services.GetRequiredService<YoutubeProvider>();
 
         string tempDownloads = Path.Combine(Path.GetTempPath(), "LMP_DownloadQuotaTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDownloads);
@@ -348,7 +348,7 @@ public static class CacheTests
 
             try
             {
-                var downloadService = new Core.Services.DownloadService(youtube, library);
+                var downloadService = new DownloadService(youtube, library);
 
                 var track = new TrackInfo
                 {

@@ -43,7 +43,8 @@ public partial class YoutubeUserDataService
     /// <returns>Список моделей треков <see cref="TrackInfo"/>, отмеченных лайком на YouTube.</returns>
     public async Task<List<TrackInfo>> GetLikedTracksAsync(
         YoutubeProvider provider,
-        LikeSyncMode mode = LikeSyncMode.MusicOnly)
+        LikeSyncMode mode = LikeSyncMode.MusicOnly,
+        CancellationToken ct = default)
     {
         if (!_auth.IsAuthenticated) return [];
 
@@ -57,20 +58,24 @@ public partial class YoutubeUserDataService
                     Log.Info("[Sync] Fetching Music Likes (LM) from YouTube Music...");
                     try
                     {
-                        likedTracks = await provider.GetClient().Music.GetLikedTracksAsync().ConfigureAwait(false);
+                        likedTracks = await provider.GetClient().Music.GetLikedTracksAsync(ct).ConfigureAwait(false);
                         Log.Info($"[Sync] Got {likedTracks.Count} music likes from LM.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {
                         Log.Warn($"[Sync] Music API failed, falling back to LL: {ex.Message}");
-                        var allLikes = await GetAllLikedVideosAsync(provider).ConfigureAwait(false);
+                        var allLikes = await GetAllLikedVideosAsync(provider, ct).ConfigureAwait(false);
                         likedTracks = allLikes.FindAll(t => t.IsMusic);
                     }
                     break;
 
                 case LikeSyncMode.AllVideos:
                     Log.Info("[Sync] Fetching ALL Liked Videos (LL)...");
-                    likedTracks = await GetAllLikedVideosAsync(provider).ConfigureAwait(false);
+                    likedTracks = await GetAllLikedVideosAsync(provider, ct).ConfigureAwait(false);
                     break;
 
                 case LikeSyncMode.LocalOnly:
@@ -80,6 +85,8 @@ public partial class YoutubeUserDataService
                 default:
                     return [];
             }
+
+            ct.ThrowIfCancellationRequested();
 
             for (int i = 0; i < likedTracks.Count; i++)
             {
@@ -95,6 +102,10 @@ public partial class YoutubeUserDataService
             Log.Info($"[Sync] Total liked tracks: {likedTracks.Count}");
             return likedTracks;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Log.Error($"[Sync] Failed to fetch liked tracks: {ex.Message}");
@@ -105,12 +116,14 @@ public partial class YoutubeUserDataService
     /// <summary>
     /// Выполняет постраничную выгрузку всех понравившихся видео (плейлист "LL") до лимита в 1000 элементов.
     /// </summary>
-    private static async Task<List<TrackInfo>> GetAllLikedVideosAsync(YoutubeProvider provider)
+    private static async Task<List<TrackInfo>> GetAllLikedVideosAsync(
+        YoutubeProvider provider,
+        CancellationToken ct)
     {
         return await provider.GetClient().Playlists
-            .GetVideosAsync(new PlaylistId("LL"))
-            .TakeAsync(1000)
-            .ToListAsync()
+            .GetVideosAsync(new PlaylistId("LL"), ct)
+            .TakeAsync(1000, ct)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
     }
 

@@ -53,6 +53,7 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(RepeatMode))]
 [JsonSerializable(typeof(AudioQualityPreference))]
 [JsonSerializable(typeof(InternetProfile))]
+[JsonSerializable(typeof(CloudSyncBatchInterval))]
 [JsonSerializable(typeof(YoutubeClientProfile))]
 [JsonSerializable(typeof(VolumeCurveType))]
 [JsonSerializable(typeof(TrackAnimationSpeed))]
@@ -66,6 +67,11 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(EqualizerPreset))]
 [JsonSerializable(typeof(List<EqualizerPreset>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(CloudTrackRemoveEntry))]
+[JsonSerializable(typeof(List<CloudTrackRemoveEntry>))]
+[JsonSerializable(typeof(CloudLikeMutationEntry))]
+[JsonSerializable(typeof(List<CloudLikeMutationEntry>))]
+[JsonSerializable(typeof(CloudPlaylistOutboxState))]
 [JsonSourceGenerationOptions(
     WriteIndented = false,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,

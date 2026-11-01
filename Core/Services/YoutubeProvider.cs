@@ -269,13 +269,14 @@ public partial class YoutubeProvider : IDisposable
         }
     }
 
-    /// <summary>   
+    /// <summary>
     /// Создаёт новый облачный плейлист в аккаунте YouTube.
     /// </summary>
     public async Task<string?> CreatePlaylistAsync(
         string title,
         IReadOnlyList<string>? videoIds = null,
-        string? description = null)
+        string? description = null,
+        CancellationToken ct = default)
     {
         if (AuthService?.IsAuthenticated != true)
             throw new InvalidOperationException("Cannot create cloud playlist: user is not authenticated.");
@@ -284,7 +285,7 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            var ytId = await _youtube.Mutations.CreatePlaylistAsync(title, videoIds, description);
+            var ytId = await _youtube.Mutations.CreatePlaylistAsync(title, videoIds, description, ct);
             Log.Info($"[Music] Created playlist '{title}' → YT ID: {ytId}");
             return ytId;
         }
@@ -308,13 +309,7 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            var rawIds = new List<string>(trackIds.Count);
-            for (int i = 0; i < trackIds.Count; i++)
-                rawIds.Add(YoutubeIdHelper.ExtractRawId(trackIds[i]));
-
-            var result = await _youtube.Mutations.AddTracksAsync(playlistId, rawIds);
-            Log.Info($"[Music] Batch added {trackIds.Count} tracks to {playlistId}");
-            return result;
+            return await MutationsClientAddTracksAsync(playlistId, trackIds, CancellationToken.None).ConfigureAwait(false);
         }
         catch (BotDetectionException) { throw; }
         catch (Exception ex)
@@ -322,6 +317,27 @@ public partial class YoutubeProvider : IDisposable
             Log.Error($"[Music] Failed to batch add to playlist: {ex.Message}");
             return [];
         }
+    }
+
+    /// <summary>
+    /// Выполняет пакетное добавление треков в облачный плейлист с пробросом сетевых и HTTP-исключений для очереди Outbox.
+    /// </summary>
+    internal async Task<List<string?>> MutationsClientAddTracksAsync(
+        string playlistId,
+        IReadOnlyList<string> trackIds,
+        CancellationToken ct = default)
+    {
+        if (AuthService?.IsAuthenticated != true || trackIds.Count == 0) return [];
+
+        VideoController.ThrowIfInCooldown();
+
+        var rawIds = new List<string>(trackIds.Count);
+        for (int i = 0; i < trackIds.Count; i++)
+            rawIds.Add(YoutubeIdHelper.ExtractRawId(trackIds[i]));
+
+        var result = await GetClient().Mutations.AddTracksAsync(playlistId, rawIds, ct).ConfigureAwait(false);
+        Log.Info($"[Music] Batch added {trackIds.Count} tracks to {playlistId}");
+        return result;
     }
 
     /// <summary>
@@ -336,8 +352,7 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            await _youtube.Mutations.RemoveTracksAsync(playlistId, setVideoIds);
-            Log.Info($"[Music] Batch removed {setVideoIds.Count} tracks from {playlistId}");
+            await MutationsClientRemoveTracksAsync(playlistId, setVideoIds, CancellationToken.None).ConfigureAwait(false);
         }
         catch (BotDetectionException) { throw; }
         catch (Exception ex)
@@ -345,6 +360,22 @@ public partial class YoutubeProvider : IDisposable
             Log.Error($"[Music] Failed to batch remove from playlist: {ex.Message}");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Выполняет пакетное удаление элементов из облачного плейлиста с поддержкой токена отмены для очереди Outbox.
+    /// </summary>
+    internal async Task MutationsClientRemoveTracksAsync(
+        string playlistId,
+        IReadOnlyList<string> setVideoIds,
+        CancellationToken ct = default)
+    {
+        if (AuthService?.IsAuthenticated != true || setVideoIds.Count == 0) return;
+
+        VideoController.ThrowIfInCooldown();
+
+        await GetClient().Mutations.RemoveTracksAsync(playlistId, setVideoIds, ct).ConfigureAwait(false);
+        Log.Info($"[Music] Batch removed {setVideoIds.Count} tracks from {playlistId}");
     }
 
     /// <summary>
@@ -429,6 +460,38 @@ public partial class YoutubeProvider : IDisposable
         catch (Exception ex)
         {
             Log.Error($"[Music] Failed to upload thumbnail for playlist {playlistId}: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Изменяет название и/или описание облачного плейлиста одним запросом.
+    /// </summary>
+    public async Task EditPlaylistDetailsAsync(
+        string playlistId,
+        string? newTitle,
+        string? description,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(playlistId))
+            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
+
+        if (AuthService?.IsAuthenticated != true)
+            throw new InvalidOperationException("Cannot edit cloud playlist: user is not authenticated.");
+
+        VideoController.ThrowIfInCooldown();
+
+        try
+        {
+            await _youtube.Mutations.EditPlaylistDetailsAsync(playlistId, newTitle, description, ct)
+                .ConfigureAwait(false);
+            Log.Info($"[Music] Updated details for playlist {playlistId} " +
+                     $"(name={newTitle != null}, desc={description != null})");
+        }
+        catch (BotDetectionException) { throw; }
+        catch (Exception ex)
+        {
+            Log.Error($"[Music] Failed to update playlist details {playlistId}: {ex.Message}");
             throw;
         }
     }
@@ -1525,12 +1588,10 @@ public partial class YoutubeProvider : IDisposable
             var tracks = result.Tracks;
             if (_libraryService != null)
             {
+                ct.ThrowIfCancellationRequested();
+                await _libraryService.AddOrUpdateTracksBatchAsync(tracks, ct).ConfigureAwait(false);
                 for (int i = 0; i < tracks.Count; i++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    await _libraryService.AddOrUpdateTrackAsync(tracks[i], ct).ConfigureAwait(false);
                     playlist.TrackIds.Add(tracks[i].Id);
-                }
 
                 // Сохраняем SetVideoId, извлеченные напрямую при первичном browse-импорте,
                 // и обращаемся к повторному Sync-запросу только если они отсутствовали в ответе.
@@ -1573,7 +1634,11 @@ public partial class YoutubeProvider : IDisposable
                      $"Ownership={playlist.Ownership}, Visibility={playlist.Visibility}");
             return playlist;
         }
-        catch (BotDetectionException) { return null; }
+        catch (BotDetectionException) { throw; }
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
+        {
+            throw;
+        }
         catch (OperationCanceledException) { throw; }
         catch (PlaylistUnavailableException ex)
         {

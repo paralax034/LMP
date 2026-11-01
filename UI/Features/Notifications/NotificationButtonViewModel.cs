@@ -9,8 +9,9 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
 
     [ObservableProperty] public partial bool IsPanelOpen { get; set; }
 
-    public bool HasUnread => _notificationService.HasUnread;
-    public int UnreadCount => _notificationService.UnreadCount;
+    public bool HasUnread => _notificationService.HasUnread || _notificationService.HasActiveTasks;
+    public int UnreadCount => _notificationService.UnreadCount + _notificationService.ActiveTaskCount;
+    public bool HasActiveTasks => _notificationService.HasActiveTasks;
     public string UnreadCountText => UnreadCount > 9 ? "9+" : UnreadCount.ToString();
 
     public IRelayCommand TogglePanelCommand { get; }
@@ -25,10 +26,13 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
         _notificationService.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(NotificationService.UnreadCount)
-                                or nameof(NotificationService.HasUnread))
+                                or nameof(NotificationService.HasUnread)
+                                or nameof(NotificationService.ActiveTaskCount)
+                                or nameof(NotificationService.HasActiveTasks))
             {
                 OnPropertyChanged(nameof(HasUnread));
                 OnPropertyChanged(nameof(UnreadCount));
+                OnPropertyChanged(nameof(HasActiveTasks));
                 OnPropertyChanged(nameof(UnreadCountText));
             }
         };
@@ -42,8 +46,6 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
                 Log.Debug("[NotificationButton] Panel opened");
                 _ = _panelViewModel.OnPanelOpenedAsync();
 
-                // Откладываем маркировку прочтения на фоновый приоритет UI-потока,
-                // чтобы не блокировать открывающий проход Measure/Arrange для Popup.
                 Dispatcher.UIThread.Post(
                     static state => ((NotificationService)state!).MarkAllAsRead(),
                     _notificationService,
@@ -51,4 +53,7 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
             }
         });
     }
+
+    // Popup связан TwoWay: закрытие кликом вне панели тоже останавливает таймер обратного отсчёта
+    partial void OnIsPanelOpenChanged(bool value) => _panelViewModel.SetPanelVisible(value);
 }

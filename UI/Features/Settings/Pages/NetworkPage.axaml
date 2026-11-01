@@ -116,6 +116,21 @@
                         MinWidth="200" />
                 </Grid>
 
+                <Grid ColumnDefinitions="*,16,Auto">
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Classes="label"
+                            Text="{Binding L[Settings_CloudBatchInterval]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_CloudBatchIntervalDesc]}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ComboBox Grid.Column="2"
+                        SelectedItem="{Binding SelectedCloudBatchInterval}"
+                        ItemsSource="{Binding CloudBatchIntervalOptions}"
+                        VerticalAlignment="Center"
+                        MinWidth="200" />
+                </Grid>
+
                 <Expander Header="{Binding L[Settings_Proxy]}">
                     <StackPanel Spacing="12">
                         <CheckBox Content="{Binding L[Common_Enable]}"

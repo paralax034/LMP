@@ -10,7 +10,8 @@ namespace LMP.UI.Features.Library;
 
 /// <summary>
 /// ViewModel страницы «Библиотека» — высокопроизводительное управление плейлистами пользователя.
-/// Поддерживает кинематический параллельный счетчик статистики со сглаживанием CubicEaseOut и потокобезопасную предварительную загрузку.
+/// Поддерживает кинематический параллельный счетчик статистики со сглаживанием CubicEaseOut,
+/// неблокирующий многопоточный импорт из YouTube с защитой от 403/BotDetection и потокобезопасную предзагрузку.
 /// </summary>
 public sealed partial class LibraryViewModel : ViewModelBase
 {
@@ -25,6 +26,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
     private readonly PlaylistService _playlistService;
+    private readonly PlaylistSyncService _playlistSync;
     private readonly YoutubeProvider _youtube;
     private readonly CookieAuthService _auth;
     private readonly DialogService _dialog;
@@ -43,7 +45,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
     private DispatcherTimer? _statsRollTimer;
     private Stopwatch? _statsRollStopwatch;
 
-    private Task? _initialLoadTask;
+    private readonly Task? _initialLoadTask;
     private bool _isDisposed;
     private bool _isDataLoaded;
     private bool _isDirty;
@@ -70,7 +72,11 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
     [ObservableProperty] public partial bool IsContentReady { get; private set; }
     public bool IsLoading { get; private set; }
-    [ObservableProperty] public partial bool IsSyncing { get; private set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SyncAccountPlaylistsCommand))]
+    public partial bool IsSyncing { get; private set; }
+
     [ObservableProperty] public partial double SyncProgress { get; private set; }
     [ObservableProperty] public partial string SyncStatus { get; private set; } = string.Empty;
     [ObservableProperty] public partial bool IsAuthenticated { get; private set; }
@@ -105,6 +111,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
     public LibraryViewModel(
         LibraryService library,
         PlaylistService playlistService,
+        PlaylistSyncService playlistSync,
         YoutubeProvider youtube,
         CookieAuthService auth,
         MainWindowViewModel mainWindow,
@@ -117,6 +124,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
         _audio = audio;
         _library = library;
         _playlistService = playlistService;
+        _playlistSync = playlistSync;
         _youtube = youtube;
         _auth = auth;
         _dialog = dialog;
@@ -183,7 +191,6 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
         _isViewActive = true;
 
-        // Если предварительная загрузка со сплэша еще завершается, ожидаем её без перезапуска
         if (_initialLoadTask is { IsCompleted: false } task)
         {
             try
@@ -267,7 +274,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
     private void OnPlaylistChangedIncremental(Core.Models.Playlist playlist)
     {
-        if (_isDisposed || IsSyncing) return;
+        if (_isDisposed) return;
 
         if (!_isViewActive)
         {
@@ -280,7 +287,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
             try
             {
                 var result = await _playlistService.GetPlaylistWithCountAsync(playlist.Id);
-                if (result == null) return;
+                if (result == null || _isDisposed) return;
 
                 var (freshPlaylist, trackCount) = result.Value;
                 var existingVm = Playlists.FirstOrDefault(vm => vm.Id == playlist.Id);
@@ -302,7 +309,14 @@ public sealed partial class LibraryViewModel : ViewModelBase
                     vm.Show();
                 }
 
-                UpdateStatsInBackground(animateFromZero: false);
+                if (IsSyncing)
+                {
+                    OnLibraryDataChanged();
+                }
+                else
+                {
+                    UpdateStatsInBackground(animateFromZero: false);
+                }
             }
             catch (Exception ex)
             {
@@ -313,7 +327,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
     private void OnPlaylistRemovedIncremental(string playlistId)
     {
-        if (_isDisposed || IsSyncing) return;
+        if (_isDisposed) return;
 
         if (!_isViewActive)
         {
@@ -335,7 +349,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
     private void OnLibraryDataChanged()
     {
-        if (_isDisposed || IsSyncing) return;
+        if (_isDisposed) return;
 
         if (!_isViewActive)
         {
@@ -351,18 +365,18 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
         _dataChangedTimer?.Stop();
         _dataChangedTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(300),
+            TimeSpan.FromMilliseconds(350),
             DispatcherPriority.Background,
             (_, _) =>
             {
                 _dataChangedTimer?.Stop();
-                if (_isDisposed || IsSyncing || !_isViewActive) return;
+                if (_isDisposed || !_isViewActive) return;
 
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        if (_isDisposed || IsSyncing || !_isViewActive) return;
+                        if (_isDisposed || !_isViewActive) return;
                         await RefreshLikedTrackCountAsync().ConfigureAwait(false);
                         UpdateStatsInBackground(animateFromZero: false);
                     }
@@ -433,7 +447,6 @@ public sealed partial class LibraryViewModel : ViewModelBase
             _startTracks = _lastRenderedTracks;
             _startDurationTicks = _lastRenderedDurationTicks;
 
-            // Если изменений нет, мгновенно фиксируем финальные значения
             if (_startPlaylists == _targetPlaylists &&
                 _startTracks == _targetTracks &&
                 _startDurationTicks == _targetDurationTicks)
@@ -466,7 +479,6 @@ public sealed partial class LibraryViewModel : ViewModelBase
         double elapsed = _statsRollStopwatch.Elapsed.TotalMilliseconds;
         double progress = Math.Clamp(elapsed / StatsAnimationDurationMs, 0.0, 1.0);
 
-        // Кинематическая кривая замедления Cubic Ease-Out: 1 - (1 - t)^3
         double ease = 1.0 - Math.Pow(1.0 - progress, 3);
 
         RenderStatsFrame(ease);
@@ -628,22 +640,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
         if (result.SyncToCloud && _auth.IsAuthenticated)
         {
-            _mainWindow.LockNavigation(SL["Playlist_CreatingCloud"]);
-            try
-            {
-                bool success = await _playlistService.LinkToCloudAsync(playlist.Id);
-                if (!success)
-                {
-                    await _notifications.ShowToastAsync(
-                        titleKey: "Dialog_Warning_Title",
-                        messageKey: "Playlist_CloudCreateFailed",
-                        severity: NotificationSeverity.Warning);
-                }
-            }
-            finally
-            {
-                _mainWindow.UnlockNavigation();
-            }
+            await _playlistService.LinkToCloudAsync(playlist.Id);
         }
     }
 
@@ -689,40 +686,61 @@ public sealed partial class LibraryViewModel : ViewModelBase
         }
     }
 
+    private void SetIsSyncingOnUi(bool syncing)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            IsSyncing = syncing;
+            SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                IsSyncing = syncing;
+                SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
+            });
+        }
+    }
+
     private async Task SyncAccountPlaylistsAsync()
     {
-        if (_isDisposed) return;
+        if (_isDisposed || IsSyncing) return;
+
+        if (!_auth.IsAuthenticated)
+        {
+            await _dialog.ShowInfoAsync(SL["Library_SyncYoutube"], SL["Auth_NotSignedIn"]);
+            return;
+        }
 
         _syncCts?.Cancel();
         _syncCts?.Dispose();
         _syncCts = new CancellationTokenSource();
         var ct = _syncCts.Token;
 
-        IsSyncing = true;
-        IsStatsVisible = false;
-        SyncProgress = 0;
+        SetIsSyncingOnUi(true);
+        SyncProgress = 0.05;
         SyncStatus = SL["Sync_FetchingPlaylists"];
-
-        _mainWindow.LockNavigation(SL["Sync_InProgress"]);
+        bool backgroundStarted = false;
 
         try
         {
-            List<PlaylistSearchResult> playlistsToImport = [];
-            if (!_auth.IsAuthenticated)
-            {
-                await _dialog.ShowInfoAsync(SL["Library_SyncYoutube"], SL["Auth_NotSignedIn"]);
-                return;
-            }
-
+            List<PlaylistSearchResult> playlistsToImport;
             try
             {
                 var ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync();
                 ct.ThrowIfCancellationRequested();
-                SyncProgress = 0.1;
+
+                // Исключаем плейлисты, которые прямо сейчас ожидают удаления в Outbox (защита от зомби-плейлистов)
+                // Ждём гидратацию Outbox: иначе удаление из прошлой сессии ещё не видно и плейлист импортируется обратно
+                var pendingDeletedYtIds = await _playlistSync.GetPendingDeletedYoutubeIdsAsync(ct: ct);
 
                 var filtered = ytPlaylists
-                    .Where(p => !string.IsNullOrEmpty(p.YoutubeId) && p.YoutubeId != "LM" && p.YoutubeId != "VLLM" &&
-                                !p.YoutubeId.StartsWith("RD"))
+                    .Where(p => !string.IsNullOrEmpty(p.YoutubeId) &&
+                                p.YoutubeId != "LM" &&
+                                p.YoutubeId != "VLLM" &&
+                                !p.YoutubeId.StartsWith("RD") &&
+                                !pendingDeletedYtIds.Contains(p.YoutubeId))
                     .ToList();
 
                 playlistsToImport =
@@ -749,7 +767,6 @@ public sealed partial class LibraryViewModel : ViewModelBase
                 return;
             }
 
-            SyncProgress = 0.15;
             var allPlaylists = await _playlistService.GetAllPlaylistsAsync(ct);
 
             if (playlistsToImport.Count == 0)
@@ -762,165 +779,266 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
                 if (confirmSyncLikes)
                 {
-                    SyncStatus = SL["Sync_LikedSongs"];
-                    await _playlistService.SyncLikedTracksAsync(ct);
-                    await _dialog.ShowInfoAsync(
-                        SL["Dialog_Done_Title"],
-                        SL["Sync_Success_Msg_LikedOnly"]);
+                    backgroundStarted = true;
+                    _ = RunBackgroundPlaylistsImportAsync([], [], [], ct);
                 }
 
                 return;
             }
 
             ct.ThrowIfCancellationRequested();
-            SyncStatus = SL["Sync_SelectPlaylists"];
 
-            var existingLocal = allPlaylists
+            var existingByName = allPlaylists
                 .Where(p => p.IsLocal)
                 .GroupBy(p => p.Name, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-            var localNames = new HashSet<string>(existingLocal.Keys, StringComparer.Ordinal);
+
+            var existingByYtId = allPlaylists
+                .Where(p => p.IsLocal && !string.IsNullOrEmpty(p.YoutubeId))
+                .GroupBy(p => p.YoutubeId!, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+            var localNames = new HashSet<string>(existingByName.Keys, StringComparer.Ordinal);
+            for (int i = 0; i < playlistsToImport.Count; i++)
+            {
+                if (existingByYtId.ContainsKey(playlistsToImport[i].Id.Value))
+                    localNames.Add(playlistsToImport[i].Title);
+            }
 
             var decisions = await _dialog.ShowSyncSelectionAsync(playlistsToImport, localNames);
-            if (decisions.Count == 0 || _isDisposed) return;
-
-            ct.ThrowIfCancellationRequested();
-            SyncProgress = 0.2;
-            SyncStatus = SL["Sync_ImportingPlaylists"];
-
-            int importedCount = 0;
-            int mergedCount = 0;
-            int processed = 0;
-            int totalToProcess = decisions.Count;
-
-            foreach (var decision in decisions)
+            if (decisions.Count == 0 || _isDisposed)
             {
-                ct.ThrowIfCancellationRequested();
-                if (_isDisposed) return;
-
-                SyncStatus = string.Format(SL["Sync_ImportingPlaylist"], decision.Playlist.Title);
-
-                var fullPlaylist = await _youtube.ImportPlaylistAsync(
-                    decision.Playlist.Id.Value, _auth.IsAuthenticated, ct);
-
-                if (fullPlaylist == null)
-                {
-                    processed++;
-                    SyncProgress = 0.2 + (0.65 * processed / totalToProcess);
-                    continue;
-                }
-
-                existingLocal.TryGetValue(decision.Playlist.Title, out var existing);
-
-                if (decision.Action == MergeAction.Merge && existing != null)
-                {
-                    var existingTrackIds = await _playlistService.GetPlaylistTrackIdsAsync(existing.Id, ct);
-                    var existingTrackSet = new HashSet<string>(existingTrackIds, StringComparer.Ordinal);
-
-                    bool tracksChanged = false;
-                    bool metadataChanged = ApplyMergedCloudMetadata(existing, fullPlaylist);
-
-                    foreach (var trackId in fullPlaylist.TrackIds)
-                    {
-                        if (existingTrackSet.Add(trackId))
-                        {
-                            existing.TrackIds.Add(trackId);
-                            tracksChanged = true;
-                        }
-
-                        var t = await _library.GetTrackAsync(trackId, ct);
-                        if (t != null && !t.InPlaylists.Contains(existing.Id))
-                        {
-                            t.InPlaylists.Add(existing.Id);
-                            await _library.AddOrUpdateTrackAsync(t, ct);
-                        }
-                    }
-
-                    if (tracksChanged || metadataChanged)
-                        await _playlistService.AddOrUpdatePlaylistAsync(existing, ct);
-
-                    mergedCount++;
-                }
-                else
-                {
-                    if (decision.Action == MergeAction.Duplicate && existing != null)
-                        fullPlaylist.Name = $"{decision.Playlist.Title} ({SL["Sync_DuplicateName"]})";
-
-                    if (_auth.IsAuthenticated)
-                    {
-                        fullPlaylist.SyncMode = PlaylistSyncMode.TwoWaySync;
-                        fullPlaylist.YoutubeId = decision.Playlist.Id.Value;
-                    }
-
-                    await _playlistService.AddOrUpdatePlaylistAsync(fullPlaylist, ct);
-                    importedCount++;
-                }
-
-                processed++;
-                SyncProgress = 0.2 + (0.65 * processed / totalToProcess);
+                return;
             }
 
-            ct.ThrowIfCancellationRequested();
-            SyncStatus = SL["Sync_LikedSongs"];
-            SyncProgress = 0.9;
-            await _playlistService.SyncLikedTracksAsync(ct);
-
-            SyncProgress = 1.0;
-            SyncStatus = SL["Sync_Complete"];
-
-            if (!_isDisposed)
-            {
-                await _notifications.ShowToastAsync(
-                    "Sync_Complete_Title",
-                    "Sync_Success_Msg",
-                    NotificationSeverity.Success,
-                    durationMs: 5000,
-                    messageArgs: [importedCount, mergedCount]);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            SyncStatus = SL["Sync_Cancelled"];
+            backgroundStarted = true;
+            _ = RunBackgroundPlaylistsImportAsync(decisions, existingByName, existingByYtId, ct);
         }
         catch (Exception ex)
         {
-            Log.Error($"[Library] Sync error: {ex.Message}");
-            if (!_isDisposed)
-            {
-                await _notifications.ShowToastAsync(
-                    "Dialog_Error_Title",
-                    "Sync_Error_API",
-                    NotificationSeverity.Error,
-                    durationMs: 6000,
-                    messageArgs: [ex.Message]);
-            }
+            Log.Error($"[Library] Sync initialization error: {ex.Message}");
         }
         finally
         {
-            await Task.Delay(300, CancellationToken.None);
+            if (!backgroundStarted)
+            {
+                SetIsSyncingOnUi(false);
+                SyncProgress = 0;
+                SyncStatus = string.Empty;
+            }
+        }
+    }
+
+    private async Task RunBackgroundPlaylistsImportAsync(
+        List<SyncDecision> decisions,
+        Dictionary<string, Core.Models.Playlist> existingByName,
+        Dictionary<string, Core.Models.Playlist> existingByYtId,
+        CancellationToken ct)
+    {
+        const string importTaskKey = "import:youtube_account";
+        int importedCount = 0;
+        int mergedCount = 0;
+        int processed = 0;
+        int abortedBy403OrCooldown = 0;
+        var mergeLock = new SemaphoreSlim(1, 1);
+
+        // Масштабируем число потоков от интернет-профиля: Low=1, Medium=2 (баланс), High=3, Ultra=4
+        int maxDegree = _library.Settings.InternetProfile switch
+        {
+            InternetProfile.Low => 1,
+            InternetProfile.Medium => 2,
+            InternetProfile.High => 3,
+            InternetProfile.Ultra => 4,
+            _ => 2
+        };
+
+        using var throttle = new SemaphoreSlim(maxDegree, maxDegree);
+        using var abortCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var linkedCt = abortCts.Token;
+
+        void UpdateImportTaskUi(string? msgKey, object[]? msgArgs, double prog)
+        {
+            double clamped = Math.Clamp(prog, 0.0, 1.0);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!_isDisposed)
+                    SyncProgress = clamped;
+            });
+
+            _notifications.UpsertTaskNotification(
+                taskKey: importTaskKey,
+                titleKey: "Library_SyncYoutube",
+                titleRaw: null,
+                messageKey: msgKey,
+                messageArgs: msgArgs,
+                messageRaw: null,
+                dynamicMessageFactory: null,
+                statusText: decisions.Count > 0 ? $"{Math.Min(Volatile.Read(ref processed), decisions.Count)}/{decisions.Count}" : null,
+                progress: clamped,
+                isIndeterminate: false,
+                actionKey: "Button_Cancel",
+                actionCommand: CancelSyncCommand,
+                isCancelAction: true);
+        }
+
+        try
+        {
+            UpdateImportTaskUi("Sync_ImportingPlaylists", null, 0.05);
+
+            var tasks = new List<Task>(decisions.Count);
+            for (int i = 0; i < decisions.Count; i++)
+            {
+                var decision = decisions[i];
+                tasks.Add(Task.Run(async () =>
+                {
+                    await throttle.WaitAsync(linkedCt).ConfigureAwait(false);
+                    try
+                    {
+                        linkedCt.ThrowIfCancellationRequested();
+                        if (_isDisposed || Volatile.Read(ref abortedBy403OrCooldown) != 0)
+                            return;
+
+                        UpdateImportTaskUi(
+                            "Sync_ImportingPlaylist",
+                            [decision.Playlist.Title],
+                            0.1 + (0.75 * Volatile.Read(ref processed) / Math.Max(1, decisions.Count)));
+
+                        var ytId = decision.Playlist.Id.Value;
+                        _playlistSync.CancelPendingDeleteByYoutubeId(ytId);
+
+                        Core.Models.Playlist? fullPlaylist;
+                        try
+                        {
+                            fullPlaylist = await _youtube.ImportPlaylistAsync(
+                                ytId, _auth.IsAuthenticated, linkedCt).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (ex is Core.Youtube.Exceptions.BotDetectionException or HttpRequestException)
+                        {
+                            if (Interlocked.Exchange(ref abortedBy403OrCooldown, 1) == 0)
+                            {
+                                Log.Warn($"[Library] Aborting parallel import due to rate-limit/403 on '{ytId}': {ex.Message}");
+                                abortCts.Cancel();
+                            }
+                            throw;
+                        }
+
+                        if (fullPlaylist == null)
+                        {
+                            Interlocked.Increment(ref processed);
+                            return;
+                        }
+
+                        await mergeLock.WaitAsync(linkedCt).ConfigureAwait(false);
+                        try
+                        {
+                            if (!existingByYtId.TryGetValue(ytId, out var existing))
+                                existingByName.TryGetValue(decision.Playlist.Title, out existing);
+
+                            if ((decision.Action == MergeAction.Merge || (existingByYtId.ContainsKey(ytId) && decision.Action != MergeAction.Duplicate)) && existing != null)
+                            {
+                                var existingTrackIds = await _playlistService.GetPlaylistTrackIdsAsync(existing.Id, linkedCt).ConfigureAwait(false);
+                                var existingTrackSet = new HashSet<string>(existingTrackIds, StringComparer.Ordinal);
+
+                                bool tracksChanged = false;
+                                bool metadataChanged = ApplyMergedCloudMetadata(existing, fullPlaylist);
+
+                                for (int tIdx = 0; tIdx < fullPlaylist.TrackIds.Count; tIdx++)
+                                {
+                                    var trackId = fullPlaylist.TrackIds[tIdx];
+                                    if (existingTrackSet.Add(trackId))
+                                    {
+                                        existing.TrackIds.Add(trackId);
+                                        tracksChanged = true;
+                                    }
+
+                                    var t = _library.GetTrack(trackId);
+                                    t?.InPlaylists.Add(existing.Id);
+                                }
+
+                                if (tracksChanged || metadataChanged)
+                                    await _playlistService.AddOrUpdatePlaylistAsync(existing, linkedCt).ConfigureAwait(false);
+
+                                Interlocked.Increment(ref mergedCount);
+                            }
+                            else
+                            {
+                                if (decision.Action == MergeAction.Duplicate && existing != null)
+                                    fullPlaylist.Name = $"{decision.Playlist.Title} ({SL["Sync_DuplicateName"]})";
+
+                                if (_auth.IsAuthenticated)
+                                {
+                                    fullPlaylist.SyncMode = PlaylistSyncMode.TwoWaySync;
+                                    fullPlaylist.YoutubeId = ytId;
+                                }
+
+                                await _playlistService.AddOrUpdatePlaylistAsync(fullPlaylist, linkedCt).ConfigureAwait(false);
+                                Interlocked.Increment(ref importedCount);
+                            }
+                        }
+                        finally
+                        {
+                            mergeLock.Release();
+                        }
+
+                        int done = Interlocked.Increment(ref processed);
+                        UpdateImportTaskUi(
+                            "Sync_ImportingPlaylist",
+                            [decision.Playlist.Title],
+                            0.1 + (0.75 * done / Math.Max(1, decisions.Count)));
+                    }
+                    finally
+                    {
+                        throttle.Release();
+                    }
+                }, linkedCt));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+            UpdateImportTaskUi("Sync_LikedSongs", null, 0.9);
+            await _playlistService.SyncLikedTracksAsync(ct).ConfigureAwait(false);
+
+            _notifications.CompleteTaskNotification(
+                importTaskKey,
+                completedMessageKey: decisions.Count > 0 ? "Sync_Success_Msg" : "Sync_Success_Msg_LikedOnly",
+                completedMessageArgs: decisions.Count > 0 ? [importedCount, mergedCount] : null,
+                severity: NotificationSeverity.Success);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _notifications.CompleteTaskNotification(
+                importTaskKey,
+                completedMessageKey: "Sync_Cancelled",
+                severity: NotificationSeverity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[Library] Background sync error: {ex.Message}");
+            _notifications.CompleteTaskNotification(
+                importTaskKey,
+                completedMessageRaw: SL["Sync_Error_API"] + ": " + ex.Message,
+                severity: NotificationSeverity.Error);
+        }
+        finally
+        {
+            mergeLock.Dispose();
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                try
-                {
-                    _mainWindow.UnlockNavigation();
-                }
-                catch (Exception ex)
-                {
-                    Log.Debug($"[Library] Navigation unlock notice: {ex.Message}");
-                }
-
                 if (!_isDisposed)
                 {
                     IsSyncing = false;
+                    SyncAccountPlaylistsCommand.NotifyCanExecuteChanged();
                     SyncProgress = 0;
                     SyncStatus = string.Empty;
                     try
                     {
-                        await LoadPlaylistsAsync();
+                        await RefreshLikedTrackCountAsync().ConfigureAwait(false);
+                        UpdateStatsInBackground(animateFromZero: false);
                     }
                     catch (Exception ex)
                     {
-                        Log.Warn($"[Library] Post-sync reload playlists failed: {ex.Message}");
+                        Log.Warn($"[Library] Post-sync stats refresh failed: {ex.Message}");
                     }
                 }
             });
@@ -1094,15 +1212,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
         if (!confirmed) return;
 
-        _mainWindow.LockNavigation(SL["Playlist_Deleting"]);
-        try
-        {
-            await _playlistService.DeletePlaylistAsync(playlistId, deleteFromCloud: true);
-        }
-        finally
-        {
-            _mainWindow.UnlockNavigation();
-        }
+        await _playlistService.DeletePlaylistAsync(playlistId, deleteFromCloud: true);
     }
 
     private void OnPlaylistsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

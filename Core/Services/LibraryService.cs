@@ -24,6 +24,9 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     private readonly LegacyMigrationService _migration;
 
     private readonly SemaphoreSlim _settingsLock = new(1, 1);
+
+    // Сериализует запись лайков: при быстрых кликах в SQLite попадает последнее состояние, а не порядок завершения задач
+    private readonly SemaphoreSlim _likeWriteGate = new(1, 1);
     private readonly Timer _saveDebounceTimer;
 
     private string _lastHydratedOwnerId = string.Empty;
@@ -198,6 +201,31 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Пакетно регистрирует и сохраняет список треков за 1 транзакцию SQLite без N+1 запросов.
+    /// </summary>
+    public async Task AddOrUpdateTracksBatchAsync(IReadOnlyList<TrackInfo> tracks, CancellationToken ct = default)
+    {
+        if (tracks.Count == 0) return;
+
+        var trackIds = new List<string>(tracks.Count);
+        for (int i = 0; i < tracks.Count; i++)
+            trackIds.Add(tracks[i].Id);
+
+        var playlistsMap = await _playlists.GetPlaylistsForTracksAsync(trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
+        var canonicalList = new List<TrackInfo>(tracks.Count);
+
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            var t = tracks[i];
+            t.InPlaylists = playlistsMap.TryGetValue(t.Id, out var pls) ? pls : [];
+            var canonical = _registry.RegisterOrUpdate(t);
+            canonicalList.Add(canonical);
+        }
+
+        await _tracks.UpsertBatchAsync(canonicalList, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Извлекает трек из оперативного L1-кэша реестра без обращения к базе данных.
     /// </summary>
     /// <param name="id">Идентификатор трека.</param>
@@ -357,16 +385,28 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     {
         var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
 
+        // Оптимистичное состояние в L1 ставится до ожидания гейта: UI видит клик мгновенно
         canonical.SetLikedState(isLiked);
 
-        await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
-        await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, isLiked, ct: ct).ConfigureAwait(false);
+        await _likeWriteGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Last-Write-Wins: пишем актуальное значение, которое мог изменить более поздний клик
+            bool latestLiked = canonical.IsLiked;
 
-        canonical.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(canonical.Id, CurrentOwnerId, ct).ConfigureAwait(false);
-        if (isLiked)
-            canonical.InPlaylists.Add(LikedPlaylistId);
-        else
-            canonical.InPlaylists.Remove(LikedPlaylistId);
+            await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+            await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, latestLiked, ct: ct).ConfigureAwait(false);
+
+            canonical.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(canonical.Id, CurrentOwnerId, ct).ConfigureAwait(false);
+            if (canonical.IsLiked)
+                canonical.InPlaylists.Add(LikedPlaylistId);
+            else
+                canonical.InPlaylists.Remove(LikedPlaylistId);
+        }
+        finally
+        {
+            _likeWriteGate.Release();
+        }
 
         _registry.UpdatePinStatus(canonical);
 
