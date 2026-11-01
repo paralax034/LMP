@@ -144,14 +144,9 @@ cd LMP
 
 # Run in debug mode (via cross-platform build engine)
 python build.py debug
-# or on Windows:
-build.bat debug
 
 # Build standalone Native AOT release
 python build.py publish
-# or on Windows / Unix:
-build.bat publish
-# ./build.sh publish
 ```
 
 ---
@@ -275,14 +270,9 @@ cd LMP
 
 # Запуск в режиме отладки (через кроссплатформенный сборочный движок)
 python build.py debug
-# или на Windows:
-build.bat debug
 
 # Публикация нативного релиза (Native AOT)
 python build.py publish
-# или на Windows / Unix:
-build.bat publish
-# ./build.sh publish
 ```
 
 ---

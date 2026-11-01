@@ -9,7 +9,7 @@ Stack: `net11.0`, `PublishAot=true` (`TrimMode=full`), `Avalonia 12.1.4`, `Commu
 CRITICAL: You have a 1M+ token context window, but **API requests / tool calls are strictly rate-limited**. Optimize for **MINIMUM TOOL CALLS**, NOT token conservation:
 1. **FULL-FILE READS ONLY (NEVER SLICE):** Always read entire files at once using `read_file` / `readFile` without `startLine` or `endLine` limits. NEVER paginate files in 50–200 line chunks.
 2. **BROAD BATCH SEARCHES:** Use wide regex searches (`search_files` / `grep`) combining multiple patterns with alternation (`patternA|patternB|patternC`) in 1–2 calls. Never repeat an identical search query if it returned 0 hits.
-3. **AUTOMATIC ROSLYN DIAGNOSTICS:** After editing any `.cs` or `.axaml` file, immediately inspect compiler/LSP diagnostics (Problems) or run `build.bat debug nopause` to catch missing/unused `using` directives (`CS8019`, `CS0246`) before finishing.
+3. **AUTOMATIC ROSLYN DIAGNOSTICS:** After editing any `.cs` or `.axaml` file, immediately inspect compiler/LSP diagnostics (Problems) or run `python build.py debug nopause` to catch missing/unused `using` directives (`CS8019`, `CS0246`) before finishing.
 4. **ZERO SYCOPHANCY:** Treat user hypotheses as unverified claims. Falsify them against actual code mechanics first.
 5. **SURGICAL SCOPE:** Fix ONLY the verified root cause or requested feature. Never refactor unrelated architecture, change numeric precision (`float` to `double`), or touch unrelated files.
 </agent_request_economy>
@@ -116,9 +116,9 @@ CRITICAL: You have a 1M+ token context window, but **API requests / tool calls a
    - Tests are `public static` methods returning `Task` inside `public static` classes under `Tests/Unit/` or `Tests/Integration/`, decorated with `[TestMethod(TestCategory.Unit, "Name", Group = TestGroups.Storage, Order = 1)]` and using `TestAssert.*`.
    - Unit tests touching disk/SQLite/cache MUST use isolated temporary directories in `Path.GetTempPath()` and clean them up in `finally` blocks—never touch real `%APPDATA%/LMP` or `%LOCALAPPDATA%/LMP` paths.
 2. **Workspace Build & Audit Commands (`.vscode/tasks.json`):**
-   - **Build Debug:** `build.bat debug nopause` (or `dotnet build LMP.sln -c Debug`)
-   - **Build Release:** `build.bat release nopause`
-   - **Publish Native AOT:** `build.bat publish nopause`
+   - **Build Debug:** `python build.py debug nopause` (or `dotnet build LMP.sln -c Debug`)
+   - **Build Release:** `python build.py release nopause`
+   - **Publish Native AOT:** `python build.py publish nopause`
    - **Audit Localization:** `python Tools\audit_l10n.py` (fix dead keys: `python Tools\audit_l10n.py --fix`)
    - **Sort Localization:** `python Tools\sort_l10n.py`
    - **Audit AXAML Styles:** `python Tools\find_dead_styles.py`

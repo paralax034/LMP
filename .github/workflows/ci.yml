@@ -32,10 +32,10 @@ jobs:
               run: dotnet restore --force-evaluate
 
             - name: Build Debug
-              run: ./build.bat debug nopause
+              run: python build.py debug nopause
 
             - name: Build Optimized Debug
-              run: ./build.bat optimized nopause
+              run: python build.py optimized nopause
 
             - name: Validate Native AOT Publish
-              run: ./build.bat publish nopause
+              run: python build.py publish nopause

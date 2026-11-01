@@ -103,12 +103,12 @@ def normalize_test_args(extra_args: list[str]) -> tuple[list[str], bool]:
     Converts shorthand arguments after `build.py test` into canonical LMP test flags.
     Returns (app_args, skip_build).
     Examples:
-      build.bat test                   -> ['--test']
-      build.bat test list              -> ['--test-list']
-      build.bat test ui                -> ['--test-ui']
-      build.bat test ui Storage --run  -> ['--test-ui', '--test-group=Storage', '--autorun']
-      build.bat test Storage           -> ['--test-group=Storage']
-      build.bat test CacheTests        -> ['--test-filter=CacheTests']
+      python build.py test                   -> ['--test']
+      python build.py test list              -> ['--test-list']
+      python build.py test ui                -> ['--test-ui']
+      python build.py test ui Storage --run  -> ['--test-ui', '--test-group=Storage', '--autorun']
+      python build.py test Storage           -> ['--test-group=Storage']
+      python build.py test CacheTests        -> ['--test-filter=CacheTests']
     """
     known_groups = {"audio", "cipher", "network", "youtube", "storage", "playlists", "system", "cache"}
     known_categories = {"unit", "integration", "benchmark", "e2e", "diagnostic", "action"}
@@ -147,7 +147,28 @@ def normalize_test_args(extra_args: list[str]) -> tuple[list[str], bool]:
 
     return app_args, skip_build
 
+def configure_utf8_io():
+    """
+    Заменяет бывшую обёртку build.bat (chcp 65001).
+    Собственные stdout/stderr переводятся на UTF-8: при выводе в канал или файл Python
+    кодирует текст в ANSI, и символы рамок вызывали UnicodeEncodeError.
+    Консоль Windows переключается на UTF-8, чтобы вывод dotnet и MSBuild с кириллицей не искажался,
+    а дочерние Python-инструменты наследуют режим UTF-8 через PYTHONUTF8.
+    """
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+            ctypes.windll.kernel32.SetConsoleCP(65001)
+        except (AttributeError, OSError):
+            pass
+
 def main():
+    configure_utf8_io()
     root = Path(__file__).resolve().parent
 
     args = sys.argv[1:]

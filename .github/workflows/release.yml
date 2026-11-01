@@ -39,7 +39,7 @@ jobs:
 
             # Native AOT Publish
             - name: Build Release Publish
-              run: ./build.bat publish nopause
+              run: python build.py publish nopause
 
             # Archive Release Package
             - name: Archive Release

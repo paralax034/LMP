@@ -4,7 +4,7 @@
         {
             "label": "build: debug",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat debug nopause",
+            "command": "python build.py debug nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -26,7 +26,7 @@
         {
             "label": "build: optimized",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat optimized nopause",
+            "command": "python build.py optimized nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -45,7 +45,7 @@
         {
             "label": "build: release",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat release nopause",
+            "command": "python build.py release nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -64,7 +64,7 @@
         {
             "label": "build: restore",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat restore nopause",
+            "command": "python build.py restore nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -83,7 +83,7 @@
         {
             "label": "build: clean",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat clean nopause",
+            "command": "python build.py clean nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -102,7 +102,7 @@
         {
             "label": "run: fast",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat fast nopause",
+            "command": "python build.py fast nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -121,7 +121,7 @@
         {
             "label": "test: all (headless)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test nopause",
+            "command": "python build.py test nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -141,7 +141,7 @@
         {
             "label": "test: unit (headless)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test Unit nopause",
+            "command": "python build.py test Unit nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -161,7 +161,7 @@
         {
             "label": "test: storage (headless)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test Storage nopause",
+            "command": "python build.py test Storage nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -181,7 +181,7 @@
         {
             "label": "test: audio (headless)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test Audio nopause",
+            "command": "python build.py test Audio nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -201,7 +201,7 @@
         {
             "label": "test: custom filter (headless)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test ${input:testFilter} nopause",
+            "command": "python build.py test ${input:testFilter} nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -221,7 +221,7 @@
         {
             "label": "test: list all discovered",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test list nobuild nopause",
+            "command": "python build.py test list nobuild nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -241,7 +241,7 @@
         {
             "label": "test: ui (DebugWindow)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test-ui nopause",
+            "command": "python build.py test-ui nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -260,7 +260,7 @@
         {
             "label": "test: ui + autorun Unit",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat test-ui Unit run nopause",
+            "command": "python build.py test-ui Unit run nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {
@@ -431,7 +431,7 @@
         {
             "label": "publish: release",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat publish nopause",
+            "command": "python build.py publish nopause",
             "options": {
                 "cwd": "${workspaceFolder}",
                 "shell": {

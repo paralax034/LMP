@@ -54,10 +54,10 @@ jobs:
 
             # Compilation
             - name: Build Debug
-              run: ./build.bat debug nopause
+              run: python build.py debug nopause
 
             - name: Build Release (Native AOT Publish)
-              run: ./build.bat publish nopause
+              run: python build.py publish nopause
 
             # Archiving
             - name: Archive Debug Build

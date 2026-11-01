@@ -87,7 +87,7 @@ def resolve_gh() -> str:
             shutil.rmtree(temp_extract, ignore_errors=True)
 
 def run_cmd(cmd: list, cwd: Path, error_msg: str):
-    res = subprocess.run(cmd, cwd=str(cwd), shell=(os.name == 'nt' and cmd[0].endswith('.bat')))
+    res = subprocess.run(cmd, cwd=str(cwd))
     if res.returncode != 0:
         print(f"{Color.RED}[ERROR] {error_msg} (Exit code: {res.returncode}){Color.RESET}")
         sys.exit(res.returncode)
@@ -143,14 +143,14 @@ def main():
         }
     )
 
-    build_script = root / "build.bat"
+    build_script = root / "build.py"
     if not skip_build:
         if not release_only:
             print(f"{Color.YELLOW}>>> Compiling Debug configuration...{Color.RESET}")
-            run_cmd([str(build_script), "debug", "nopause"], root, "Debug compilation failed")
+            run_cmd([sys.executable, str(build_script), "debug", "nopause"], root, "Debug compilation failed")
 
         print(f"{Color.YELLOW}>>> Compiling Release (Native AOT publish)...{Color.RESET}")
-        run_cmd([str(build_script), "publish", "nopause"], root, "Native AOT publish failed")
+        run_cmd([sys.executable, str(build_script), "publish", "nopause"], root, "Native AOT publish failed")
 
     publish_dir = root / "publish"
     debug_dir = root / "bin" / "Debug" / "net11.0"
