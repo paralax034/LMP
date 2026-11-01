@@ -1,0 +1,34 @@
+# Нормализация концов строк: в индексе текст всегда хранится с LF,
+# в рабочем дереве Windows получает CRLF (core.eol=native).
+* text=auto
+
+# bash не переносит \r: скрипты оболочки только с LF в любой ОС.
+*.sh    text eol=lf
+
+# cmd.exe ненадёжно обрабатывает метки и goto в файлах с LF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Двоичные файлы: без нормализации и текстового diff.
+*.dll   binary
+*.exe   binary
+*.pdb   binary
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.mp3   binary
+*.m4a   binary
+*.opus  binary
+*.webm  binary
+*.wav   binary
+*.db    binary
+*.7z    binary
+*.zip   binary
+*.pyc   binary
