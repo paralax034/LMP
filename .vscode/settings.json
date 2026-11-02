@@ -19,7 +19,8 @@
         "**/.svn": true,
         "**/.hg": true,
         "**/.DS_Store": true,
-        "**/Thumbs.db": true
+        "**/Thumbs.db": true,
+        "__pycache__/": true
     },
     "files.watcherExclude": {
         ".run": true,
