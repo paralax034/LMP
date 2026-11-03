@@ -335,10 +335,85 @@ public sealed partial class CachingStreamSource
 
     #region Buffer Ranges
 
+    /// <summary>
+    /// Сливает отсортированные дисковые диапазоны и RAM-блоки в нормализованные отрезки <c>[0.0, 1.0]</c>
+    /// одним линейным проходом, без промежуточных коллекций и сортировки.
+    /// </summary>
+    /// <param name="diskRanges">Дисковые диапазоны, отсортированные по началу.</param>
+    /// <param name="ramBlocks">RAM-блоки, отсортированные по началу.</param>
+    /// <param name="contentLength">Полный размер контента (байт), больше нуля.</param>
+    /// <param name="destination">
+    /// Буфер результата не короче значения режима подсчёта; пустой буфер включает режим подсчёта.
+    /// </param>
+    /// <returns>Число слитых отрезков.</returns>
+    internal static int MergeBufferedRanges(
+        ReadOnlySpan<LMP.Core.Audio.Cache.CacheByteRange> diskRanges,
+        ReadOnlySpan<RamRangeBlock> ramBlocks,
+        long contentLength,
+        Span<(double Start, double End)> destination)
+    {
+        bool countOnly = destination.IsEmpty;
+        int count = 0;
+        int diskIndex = 0;
+        int ramIndex = 0;
+        long mergedStart = -1;
+        long mergedEnd = -1;
+
+        while (diskIndex < diskRanges.Length || ramIndex < ramBlocks.Length)
+        {
+            long start;
+            long end;
+
+            if (ramIndex >= ramBlocks.Length
+                || (diskIndex < diskRanges.Length && diskRanges[diskIndex].Start <= ramBlocks[ramIndex].StartOffset))
+            {
+                start = diskRanges[diskIndex].Start;
+                end = diskRanges[diskIndex].EndExclusive;
+                diskIndex++;
+            }
+            else
+            {
+                start = ramBlocks[ramIndex].StartOffset;
+                end = ramBlocks[ramIndex].EndOffsetExclusive;
+                ramIndex++;
+            }
+
+            if (mergedStart < 0)
+            {
+                mergedStart = start;
+                mergedEnd = end;
+                continue;
+            }
+
+            if (start <= mergedEnd)
+            {
+                if (end > mergedEnd)
+                    mergedEnd = end;
+                continue;
+            }
+
+            if (!countOnly)
+                destination[count] = ((double)mergedStart / contentLength, (double)mergedEnd / contentLength);
+            count++;
+            mergedStart = start;
+            mergedEnd = end;
+        }
+
+        if (mergedStart >= 0)
+        {
+            if (!countOnly)
+                destination[count] = ((double)mergedStart / contentLength, (double)mergedEnd / contentLength);
+            count++;
+        }
+
+        return count;
+    }
+
     /// <inheritdoc/>
     /// <remarks>
     /// Объединяет диапазоны из disk-кэша и RAM-кэша,
     /// нормализует в <c>[0.0, 1.0]</c> относительно <see cref="_contentLength"/>.
+    /// Перестройка идёт только при смене версий и аллоцирует лишь снимки и точный по размеру результат.
     /// </remarks>
     public IReadOnlyList<(double Start, double End)> GetBufferedRanges()
     {
@@ -348,7 +423,7 @@ public sealed partial class CachingStreamSource
 
         if (entry.IsComplete)
         {
-            if (_cachedBufferedRanges.Count > 0)
+            if (_cachedBufferedRanges.Length > 0)
             {
                 lock (_bufferedRangesCacheLock)
                 {
@@ -370,66 +445,23 @@ public sealed partial class CachingStreamSource
         var diskRanges = entry.GetDownloadedRangesSnapshot(out long snapDiskVer);
         var ramBlocks = _ramCache.GetRangesSnapshot(out long snapRamVer);
 
-        if (diskRanges.Length == 0 && ramBlocks.Length == 0)
+        // Оба снимка отсортированы по началу: первый проход считает отрезки, второй заполняет точный массив.
+        int count = MergeBufferedRanges(diskRanges, ramBlocks, _contentLength, []);
+        (double Start, double End)[] merged = [];
+        if (count > 0)
         {
-            lock (_bufferedRangesCacheLock)
-            {
-                _cachedDiskRangesVersion = snapDiskVer;
-                _cachedRamRangesVersion = snapRamVer;
-                _cachedBufferedRanges = [];
-                return _cachedBufferedRanges;
-            }
+            merged = new (double Start, double End)[count];
+            _ = MergeBufferedRanges(diskRanges, ramBlocks, _contentLength, merged);
         }
-
-        var all = new List<(long Start, long End)>(diskRanges.Length + ramBlocks.Length);
-
-        for (int i = 0; i < diskRanges.Length; i++)
-            all.Add((diskRanges[i].Start, diskRanges[i].EndExclusive));
-
-        for (int i = 0; i < ramBlocks.Length; i++)
-            all.Add((ramBlocks[i].StartOffset, ramBlocks[i].EndOffsetExclusive));
-
-        all.Sort(static (a, b) => a.Start.CompareTo(b.Start));
-
-        var merged = new List<(double Start, double End)>(all.Count);
-        long mergedStart = -1;
-        long mergedEnd = -1;
-
-        for (int i = 0; i < all.Count; i++)
-        {
-            var (s, e) = all[i];
-
-            if (mergedStart < 0)
-            {
-                mergedStart = s;
-                mergedEnd = e;
-                continue;
-            }
-
-            if (s <= mergedEnd)
-            {
-                if (e > mergedEnd)
-                    mergedEnd = e;
-            }
-            else
-            {
-                merged.Add(((double)mergedStart / _contentLength, (double)mergedEnd / _contentLength));
-                mergedStart = s;
-                mergedEnd = e;
-            }
-        }
-
-        if (mergedStart >= 0)
-            merged.Add(((double)mergedStart / _contentLength, (double)mergedEnd / _contentLength));
 
         lock (_bufferedRangesCacheLock)
         {
             _cachedDiskRangesVersion = snapDiskVer;
             _cachedRamRangesVersion = snapRamVer;
             _cachedBufferedRanges = merged;
+        }
             return _cachedBufferedRanges;
         }
-    }
 
     #endregion
 }

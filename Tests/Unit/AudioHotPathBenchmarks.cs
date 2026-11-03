@@ -19,34 +19,57 @@ public static class AudioHotPathBenchmarks
     private const int MeasureIterations = 20_000;
     private const int AllocCheckIterations = 200;
 
+    /// <summary>Число раундов замера; нечётное, чтобы медиана была ровно средним элементом.</summary>
+    private const int MeasureRounds = 5;
+
+    /// <summary>
+    /// Минимальная длительность прогрева. Счёт вызовов для перехода на оптимизированный уровень JIT стартует
+    /// лишь после 100 мс без новой компиляции, затем код пересобирается в фоне: 50 вызовов не успевают дойти до Tier1.
+    /// </summary>
+    private static readonly TimeSpan WarmupDuration = TimeSpan.FromMilliseconds(250);
+
     private readonly record struct BenchmarkResult(
         string Name,
-        double MeanNs,
-        double OpsPerSec);
+        double MedianNs,
+        double OpsPerSec,
+        double SpreadPercent);
 
     private static BenchmarkResult RunBenchmark(string name, Action action, int iterations = MeasureIterations)
     {
-        for (int i = 0; i < WarmupIterations; i++) action();
+        // Прогрев по времени, а не по числу вызовов: замер обязан начаться уже на оптимизированном коде
+        long warmupStart = Stopwatch.GetTimestamp();
+        int warmed = 0;
+        while (warmed < WarmupIterations || Stopwatch.GetElapsedTime(warmupStart) < WarmupDuration)
+        {
+            action();
+            warmed++;
+        }
 
-        long startTs = Stopwatch.GetTimestamp();
-        for (int i = 0; i < iterations; i++) action();
-        long elapsedTs = Stopwatch.GetTimestamp() - startTs;
+        int perRound = Math.Max(1, iterations / MeasureRounds);
+        Span<double> rounds = stackalloc double[MeasureRounds];
+        for (int round = 0; round < MeasureRounds; round++)
+        {
+            long roundStart = Stopwatch.GetTimestamp();
+            for (int i = 0; i < perRound; i++) action();
+            rounds[round] = Stopwatch.GetElapsedTime(roundStart).TotalNanoseconds / perRound;
+        }
 
-        double totalNs = elapsedTs * 1_000_000_000.0 / Stopwatch.Frequency;
-        double meanNs = totalNs / iterations;
-        double opsPerSec = iterations / (totalNs / 1_000_000_000.0);
+        rounds.Sort();
+        double medianNs = rounds[MeasureRounds / 2];
+        double spreadPercent = medianNs > 0 ? (rounds[^1] - rounds[0]) / medianNs * 100.0 : 0.0;
 
-        return new BenchmarkResult(name, meanNs, opsPerSec);
+        return new BenchmarkResult(name, medianNs, 1_000_000_000.0 / medianNs, spreadPercent);
     }
 
     /// <summary>
     /// Измеряет операцию, публикует результат в лог и проверяет отсутствие управляемых аллокаций.
     /// Тайминги только логируются: пороги по времени нестабильны на общем десктопе.
+    /// В лог идёт медиана раундов и их разброс: большой разброс помечает замер как недостоверный.
     /// </summary>
     private static void MeasureZeroAlloc(string name, Action action, int iterations = MeasureIterations)
     {
         var result = RunBenchmark(name, action, iterations);
-        Log.Info($"[Benchmark] {result.Name,-40} | {result.MeanNs,8:F1} ns/op | {result.OpsPerSec,10:F0} ops/s");
+        Log.Info($"[Benchmark] {result.Name,-40} | {result.MedianNs,8:F1} ns/op | {result.OpsPerSec,10:F0} ops/s | spread {result.SpreadPercent,5:F1}%");
         TestAssert.ZeroAlloc(action, warmup: 0, iterations: AllocCheckIterations, context: name);
     }
 
@@ -56,6 +79,60 @@ public static class AudioHotPathBenchmarks
         for (int i = 0; i < length; i++)
             buf[i] = MathF.Sin(i * 0.1f) * 0.5f;
         return buf;
+    }
+
+    /// <summary>
+    /// Помечает бенчмарк неубедительным (Skipped), если тайминги процесса не отражают релизный кодоген.
+    /// </summary>
+    internal static void SkipIfUnoptimizedCodegen()
+    {
+        // Инкрементальная сборка не перекомпилирует сборку при смене одного Optimize, отсюда --no-incremental
+        string? reason = DescribeUnoptimizedCodegen();
+        if (reason != null)
+            TestAssert.Skip($"Inconclusive: {reason}. Re-run after 'dotnet build -c Debug -p:Optimize=true --no-incremental' without a debugger.");
+    }
+
+    private static string? DescribeUnoptimizedCodegen()
+    {
+        if (Debugger.IsAttached)
+            return "debugger attached";
+
+        System.Reflection.Assembly hotPath = typeof(GainProcessor).Assembly;
+        if (IsJitOptimizerDisabled(hotPath))
+            return $"assembly '{hotPath.GetName().Name}' is built without optimizations";
+
+        System.Reflection.Assembly harness = typeof(AudioHotPathBenchmarks).Assembly;
+        if (harness != hotPath && IsJitOptimizerDisabled(harness))
+            return $"assembly '{harness.GetName().Name}' is built without optimizations";
+
+        return null;
+    }
+
+    private static bool IsJitOptimizerDisabled(System.Reflection.Assembly assembly) =>
+        Attribute.GetCustomAttribute(assembly, typeof(DebuggableAttribute)) is DebuggableAttribute { IsJITOptimizerDisabled: true };
+
+    /// <summary>
+    /// Шапка прогона бенчмарков: записывает в лог среду измерений и помечает прогон неубедительным, если кодоген не релизный.
+    /// </summary>
+    [TestMethod(TestCategory.Benchmark, "Benchmark Environment Header",
+        Group = TestGroups.Audio, Order = 0)]
+    public static Task TestBenchmarkEnvironmentHeaderAsync()
+    {
+        Log.Info($"[Benchmark] Runtime={System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}"
+            + $" | OS={System.Runtime.InteropServices.RuntimeInformation.OSDescription}"
+            + $" | Arch={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}"
+            + $" | Vector<float>.Count={System.Numerics.Vector<float>.Count}"
+            + $" | V128={System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated}"
+            + $" | V256={System.Runtime.Intrinsics.Vector256.IsHardwareAccelerated}"
+            + $" | Fma={System.Runtime.Intrinsics.X86.Fma.IsSupported}"
+            + $" | Avx2={System.Runtime.Intrinsics.X86.Avx2.IsSupported}"
+            + $" | AdvSimd={System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported}"
+            + $" | JitCompiled={System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeCompiled}"
+            + $" | JitOptimizerDisabled={IsJitOptimizerDisabled(typeof(GainProcessor).Assembly)}"
+            + $" | Debugger={Debugger.IsAttached}");
+
+        SkipIfUnoptimizedCodegen();
+        return Task.CompletedTask;
     }
 
     /// <summary>

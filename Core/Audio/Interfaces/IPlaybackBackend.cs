@@ -160,11 +160,25 @@ public interface IPlaybackBackend : IDisposable
     /// </summary>
     int BufferedSamples { get; }
 
-    /// <summary>
-    /// Количество байт во внутреннем буфере.
-    /// Используется для диагностики warmup.
-    /// </summary>
     int BufferedBytes { get; }
+
+    /// <summary>
+    /// Монотонный счётчик сэмплов источника (frames × channels), переданных устройству из <see cref="AudioDataCallback"/>
+    /// за всё время жизни бэкенда. Не сбрасывается при Flush/Reinitialize: потребитель привязывается к нему через точку отсчёта.
+    /// </summary>
+    long RenderedSamples { get; }
+
+    /// <summary>
+    /// Частота устройства вывода в Гц, в которой считается <see cref="BufferedSamples"/>.
+    /// <c>0</c> — бэкенд не ресемплирует, и потребитель берёт частоту источника.
+    /// </summary>
+    int DeviceSampleRate => 0;
+
+    /// <summary>
+    /// Возвращает согласованный снимок часов рендера без блокировок и аллокаций.
+    /// Снимок публикует единственный писатель — поток устройства.
+    /// </summary>
+    RenderClockSnapshot ReadRenderClock();
 
     /// <summary>Название бэкенда для диагностики.</summary>
     string Name { get; }

@@ -154,4 +154,11 @@
         <ProjectReference Include="Core/LMP.Core.csproj"/>
     </ItemGroup>
 
+    <!-- Генератор реестра тестов: только анализатор, в выходную сборку не попадает. Release тесты не собирает -->
+    <ItemGroup Label="Test Registry Generator" Condition="'$(Configuration)' != 'Release'">
+        <ProjectReference Include="Tools/LMP.Tests.Generator/LMP.Tests.Generator.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
 </Project>

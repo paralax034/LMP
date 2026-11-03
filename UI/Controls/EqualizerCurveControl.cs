@@ -27,7 +27,8 @@ public sealed class EqualizerCurveControl : Control
     private const double SpectrumLerpDown = 10.0;
     private const double MinFrameIntervalSeconds = 0.0155; // ~60 FPS cap
 
-    private static readonly string[] Labels10Band = ["31", "62", "125", "250", "500", "1к", "2к", "4к", "8к", "16к"];
+    // Технические подписи частот в нотации SI с латинской «k», как в Hints5BandFreqs: переводу не подлежат
+    private static readonly string[] Labels10Band = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
     private static readonly string[] Hints10BandKeys =
     [
         "Eq_Hint10_0", "Eq_Hint10_1", "Eq_Hint10_2", "Eq_Hint10_3", "Eq_Hint10_4",

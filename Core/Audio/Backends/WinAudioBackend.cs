@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Interfaces;
+using LMP.Core.Audio.Normalization;
 using LMP.Core.Exceptions;
 
 namespace LMP.Core.Audio.Backends;
@@ -331,6 +333,26 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private int _sourceSampleRate;
     private volatile int _bufferedSamples;
 
+    /// <summary>Сэмплы источника, забранные из <see cref="_callback"/>; изменяется только под <see cref="_stateLock"/>.</summary>
+    private long _clockPulledSamples;
+
+    /// <summary>
+    /// Сэмплы источника, переданные устройству (забранные минус ожидающие в ресемплере); монотонны, читаются через <see cref="Volatile"/>.
+    /// </summary>
+    private long _clockRenderedSamples;
+
+    /// <summary>Часы рендера: единственный писатель — поток WASAPI после <c>ReleaseBuffer</c>.</summary>
+    private readonly RenderClock _renderClock = new();
+
+    /// <summary>Фреймы, зафиксированные в буфере устройства за всё время (источник и тишина); только поток WASAPI.</summary>
+    private long _deviceFramesCommitted;
+
+    /// <summary>Начало последнего отрезка тишины в шкале <see cref="_deviceFramesCommitted"/>; только поток WASAPI.</summary>
+    private long _silenceRunStart;
+
+    /// <summary>Конец последнего отрезка тишины в шкале <see cref="_deviceFramesCommitted"/>; только поток WASAPI.</summary>
+    private long _silenceRunEnd;
+
     // Состояние 4-точечного C1 кубического ресемплера Эрмита (для бесшовного воспроизведения 44.1 кГц в 48 кГц сессии WASAPI без пересоздания IAudioClient)
     private readonly float[] _resampleSourceBuf = new float[4096 * 8];
     private readonly float[] _resampleHistory = new float[4 * 8]; // 4 фрейма истории [y_{-1}, y_0, y_1, y_2]
@@ -417,6 +439,15 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
     /// <inheritdoc/>
     public int BufferedBytes => BufferedSamples * sizeof(float);
+
+    /// <inheritdoc/>
+    public long RenderedSamples => Volatile.Read(ref _clockRenderedSamples);
+
+    /// <inheritdoc/>
+    public int DeviceSampleRate => _sampleRate;
+
+    /// <inheritdoc/>
+    public RenderClockSnapshot ReadRenderClock() => _renderClock.Read();
 
     #endregion
 
@@ -778,11 +809,89 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         _resampleFracPhase = 0.0;
         _resampleHistoryPrimed = false;
         _resampleHistory.AsSpan().Clear();
+
+        // Ожидавшие в ресемплере сэмплы отброшены и уже не прозвучат: счётчик рендера догоняет забранные
+        Volatile.Write(ref _clockRenderedSamples, _clockPulledSamples);
+    }
+
+    /// <summary>
+    /// Пересчитывает счётчик переданных устройству сэмплов: забранные из callback минус ещё не израсходованные ресемплером.
+    /// Вызывается строго под <see cref="_stateLock"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void UpdateRenderedSamplesUnderLock(int ch)
+    {
+        long pending = (long)Math.Max(0, _resampleSourceValidFrames - _resampleSourceCursor) * ch;
+        Volatile.Write(ref _clockRenderedSamples, _clockPulledSamples - pending);
+    }
+
+    /// <summary>
+    /// Учитывает коммит в буфер устройства. Подряд идущие коммиты без данных источника (тишина недогруза, рампа к нулю)
+    /// склеиваются в отрезок, который часы рендера не экстраполируют. Вызывается только потоком WASAPI.
+    /// </summary>
+    /// <param name="frames">Число зафиксированных фреймов устройства.</param>
+    /// <param name="fromSource">Фреймы несут сэмплы, забранные из <see cref="_callback"/>.</param>
+    private void TrackDeviceCommit(uint frames, bool fromSource)
+    {
+        if (frames == 0)
+            return;
+
+        long start = _deviceFramesCommitted;
+        _deviceFramesCommitted = start + frames;
+
+        if (fromSource)
+            return;
+
+        if (_silenceRunEnd != start)
+            _silenceRunStart = start;
+
+        _silenceRunEnd = start + frames;
+    }
+
+    /// <summary>
+    /// Публикует снимок часов рендера после коммита в устройство. Вызывается только потоком WASAPI.
+    /// </summary>
+    /// <param name="queuedDeviceFrames">Фреймы устройства, ожидающие воспроизведения (padding после коммита).</param>
+    private void PublishRenderClock(uint queuedDeviceFrames)
+    {
+        int ch = Math.Clamp(_channels, 1, 8);
+        int srcRate = _sourceSampleRate;
+        int dstRate = _sampleRate;
+
+        // Голова воспроизведения в шкале коммитов: тишина недогруза в очереди не считается звучащим источником
+        long committed = _deviceFramesCommitted;
+        long head = committed - queuedDeviceFrames;
+        long silenceQueued = Math.Max(0L, Math.Min(committed, _silenceRunEnd) - Math.Max(head, _silenceRunStart));
+        long sourceQueued = Math.Max(0L, queuedDeviceFrames - silenceQueued);
+
+        // Экстраполировать можно только отрезок источника, который устройство проиграет подряд до ближайшей тишины
+        long contiguous = head < _silenceRunStart
+            ? Math.Min(sourceQueued, _silenceRunStart - head)
+            : head < _silenceRunEnd ? 0L : sourceQueued;
+
+        long contiguousSamples = ToSourceSamples(contiguous, ch, srcRate, dstRate);
+        long played = Volatile.Read(ref _clockRenderedSamples) - ToSourceSamples(sourceQueued, ch, srcRate, dstRate);
+
+        _renderClock.Publish(
+            played + contiguousSamples,
+            (int)Math.Min(contiguousSamples, int.MaxValue),
+            System.Diagnostics.Stopwatch.GetTimestamp(),
+            Math.Max(1, srcRate) * ch);
+    }
+
+    /// <summary>Переводит фреймы устройства в сэмплы источника с учётом ресемплинга.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long ToSourceSamples(long deviceFrames, int ch, int srcRate, int dstRate)
+    {
+        long samples = deviceFrames * ch;
+        return srcRate > 0 && dstRate > 0 && srcRate != dstRate ? samples * srcRate / dstRate : samples;
     }
 
     /// <summary>
     /// Читает фреймы из <see cref="_callback"/> и при несовпадении частоты источника (например, 44100 Гц AAC)
     /// с частотой движка WASAPI (48000 Гц) выполняет 4-точечную C1 кубическую интерполяцию Эрмита за 0 B аллокаций.
+    /// Межотсчётные пики, порождённые интерполяцией поверх гарантии лимитера, кадр за кадром возвращаются
+    /// под его потолок через <see cref="TruePeakLimiter.SoftCeilingScale"/> со стерео-связкой каналов.
     /// Вызывается строго под <see cref="_stateLock"/>.
     /// </summary>
     private int ReadCallbackWithResamplingUnderLock(Span<float> targetSpan, int requestedOutFrames)
@@ -796,7 +905,12 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
         if (srcRate == dstRate || srcRate <= 0 || dstRate <= 0)
         {
-            return _callback(targetSpan[..(requestedOutFrames * ch)]);
+            int directFrames = _callback(targetSpan[..(requestedOutFrames * ch)]);
+            if (directFrames > 0)
+                _clockPulledSamples += (long)directFrames * ch;
+
+            Volatile.Write(ref _clockRenderedSamples, _clockPulledSamples);
+            return directFrames;
         }
 
         double step = (double)srcRate / dstRate;
@@ -819,9 +933,11 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                     int readIn = _callback(srcBuf[..(neededInFrames * ch)]);
                     if (readIn <= 0)
                     {
+                        UpdateRenderedSamplesUnderLock(ch);
                         return outFrame;
                     }
 
+                    _clockPulledSamples += (long)readIn * ch;
                     _resampleSourceValidFrames = readIn;
                     _resampleSourceCursor = 0;
                 }
@@ -868,6 +984,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
             float t = (float)_resampleFracPhase;
             int outBase = outFrame * ch;
+            float framePeak = 0f;
 
             for (int c = 0; c < ch; c++)
             {
@@ -882,13 +999,24 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 float c2 = ym1 - 2.5f * y0 + 2.0f * y1 - 0.5f * y2;
                 float c3 = 0.5f * (y2 - ym1) + 1.5f * (y0 - y1);
 
-                targetSpan[outBase + c] = ((c3 * t + c2) * t + c1) * t + c0;
+                float y = ((c3 * t + c2) * t + c1) * t + c0;
+                targetSpan[outBase + c] = y;
+                framePeak = MathF.Max(framePeak, MathF.Abs(y));
+            }
+
+            // Кубика выходит за отсчёты, которые видел лимитер: пик кадра возвращаем под его потолок, не трогая сигнал ниже колена
+            float guardScale = TruePeakLimiter.SoftCeilingScale(framePeak);
+            if (guardScale < 1.0f)
+            {
+                for (int c = 0; c < ch; c++)
+                    targetSpan[outBase + c] *= guardScale;
             }
 
             outFrame++;
             _resampleFracPhase += step;
         }
 
+        UpdateRenderedSamplesUnderLock(ch);
         return outFrame;
     }
 
@@ -1103,6 +1231,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                                         }
                                     }
                                     _ = RenderClientReleaseBuffer(_renderClient, (uint)rampLen, flags);
+                                    TrackDeviceCommit((uint)rampLen, fromSource: false);
                                 }
                             }
                             else if (idlePadding == 0)
@@ -1206,6 +1335,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
                     uint releaseFlags = 0;
                     uint framesToCommit = availableFrames;
+                    bool committedSource = false;
 
                     if (pData != null)
                     {
@@ -1248,6 +1378,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                                 Span<float> validPcmSpan = targetSpan[..validPcmFloats];
 
                                 framesToCommit = (uint)validPcmFrames;
+                                committedSource = true;
 
                                 _gainProcessor.Process(validPcmSpan);
 
@@ -1486,7 +1617,10 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                     uint totalBufferedFrames = paddingFrames + framesToCommit;
                     _bufferedSamples = (int)(totalBufferedFrames * (uint)_channels);
                     paddingFrames = totalBufferedFrames;
+                    TrackDeviceCommit(framesToCommit, committedSource);
                 }
+
+                PublishRenderClock(paddingFrames);
 
                 if (!wasapiStarted)
                 {

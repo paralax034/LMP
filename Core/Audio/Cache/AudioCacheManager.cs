@@ -687,6 +687,79 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Читает диапазон байт из файла кэша напрямую в буфер вызывающего кода,
+    /// без промежуточной аренды и повторного копирования.
+    /// </summary>
+    /// <param name="cacheKey">Ключ записи кэша.</param>
+    /// <param name="offset">Абсолютное смещение начала диапазона.</param>
+    /// <param name="destination">Буфер назначения; его длина задаёт объём чтения.</param>
+    /// <param name="ct">Токен отмены.</param>
+    /// <returns>
+    /// Число прочитанных байт (длина буфера, усечённая по концу файла);
+    /// <c>0</c>, если диапазон не скачан, файл недоступен или прочитан не полностью.
+    /// </returns>
+    public async ValueTask<int> ReadRangeIntoAsync(
+        string cacheKey,
+        long offset,
+        Memory<byte> destination,
+        CancellationToken ct = default)
+    {
+        if (!_entries.TryGetValue(cacheKey, out var entry)) return 0;
+        if (offset < 0 || destination.IsEmpty) return 0;
+
+        long remaining = entry.TotalSize - offset;
+        if (remaining <= 0) return 0;
+
+        int expectedLength = destination.Length;
+        if (expectedLength > remaining)
+            expectedLength = (int)remaining;
+        if (!entry.IsRangeDownloaded(offset, expectedLength)) return 0;
+
+        var fileHandle = TryGetFileHandle(cacheKey);
+        if (fileHandle == null) return 0;
+
+        fileHandle.BeginIo();
+        try
+        {
+            var handle = fileHandle.GetOrOpen(FileMode.Open);
+            var buffer = destination[..expectedLength];
+            int totalRead = 0;
+
+            while (totalRead < expectedLength)
+            {
+                int read = await RandomAccess.ReadAsync(
+                    handle, buffer[totalRead..], offset + totalRead, ct).ConfigureAwait(false);
+                if (read == 0) break;
+                totalRead += read;
+            }
+
+            if (totalRead != expectedLength)
+            {
+                entry.InvalidateRange(offset, expectedLength);
+                MarkDirty();
+                Log.Warn($"[AudioCache] Short read range of {cacheKey}: " +
+                         $"offset={offset}, expected={expectedLength}, got={totalRead}. Range invalidated.");
+                return 0;
+            }
+
+            entry.LastAccessedAt = DateTime.UtcNow;
+            return expectedLength;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return 0;
+        }
+        finally
+        {
+            fileHandle.EndIo();
+        }
+    }
+
+    /// <summary>
     /// Читает произвольный диапазон байт из файла кэша.
     /// </summary>
     public async ValueTask<(IMemoryOwner<byte> Owner, int Length)?> ReadRangeAsync(

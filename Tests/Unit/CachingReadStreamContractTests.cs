@@ -13,6 +13,10 @@ public static class CachingReadStreamContractTests
 {
     private const int ContentLength = 4096;
 
+    /// <summary>Прямой доступ к RAM-кэшу источника без рефлексии, совместимый с AOT.</summary>
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_ramCache")]
+    private static extern ref SlidingRamCache SourceRamCache(CachingStreamSource source);
+
     private enum ReadOutcome : byte
     {
         Data,
@@ -25,6 +29,8 @@ public static class CachingReadStreamContractTests
     /// Доказывает P1: ReadAsync возвращает 0 (EOF по контракту Stream) при отмене и утилизации источника,
     /// хотя позиция далека от конца; Mp4BinaryReader превращает это в пустой заголовок,
     /// а Fragment.cs — в ParserCorruptionException.
+    /// Синхронный Read подчиняется тому же контракту: RAM-хит отдаёт данные и продвигает позицию,
+    /// а утилизация бросает ObjectDisposedException вместо ложного EOF.
     /// </summary>
     [TestMethod(TestCategory.Unit, "AsyncCachingReadStream Cancel & Dispose Are Not EOF", Group = TestGroups.Audio, Order = 24)]
     public static async Task TestReadAsyncCancellationIsNotEndOfStreamAsync()
@@ -61,11 +67,28 @@ public static class CachingReadStreamContractTests
                     TestAssert.Equal(0L, stream.Position, "Canceled read must not advance position");
                 }
 
-                // 2. Утилизированный источник: ожидается ObjectDisposedException, а не EOF
+                // 2. Синхронный RAM-хит отдаёт данные и продвигает позицию через CAS
+                byte[] payload = new byte[2048];
+                for (int i = 0; i < payload.Length; i++)
+                    payload[i] = (byte)(i * 3);
+                AddBlock(SourceRamCache(source), payload, 0, payload.Length);
+
+                int syncRead = stream.Read(buffer, 0, buffer.Length);
+                TestAssert.Equal(buffer.Length, syncRead, "Sync Read must serve a RAM hit in full");
+                TestAssert.Equal((long)buffer.Length, stream.Position, "Sync RAM hit must advance position");
+                TestAssert.True(buffer.AsSpan().SequenceEqual(payload.AsSpan(0, buffer.Length)),
+                    "Sync RAM hit must copy bytes from position 0");
+
+                // 3. Утилизированный источник: ожидается ObjectDisposedException, а не EOF
                 source.Dispose();
                 var disposedOutcome = await ReadOutcomeAsync(stream, buffer, CancellationToken.None).ConfigureAwait(false);
                 TestAssert.Equal(ReadOutcome.Disposed, disposedOutcome,
                     $"ReadAsync on a disposed source must throw ObjectDisposedException, got {disposedOutcome}");
+
+                // 4. Синхронный Read на утилизированном источнике подчиняется тому же контракту
+                var syncDisposedOutcome = SyncReadOutcome(stream, buffer);
+                TestAssert.Equal(ReadOutcome.Disposed, syncDisposedOutcome,
+                    $"Sync Read on a disposed source must throw ObjectDisposedException, got {syncDisposedOutcome}");
             }
             finally
             {
@@ -118,6 +141,23 @@ public static class CachingReadStreamContractTests
         try
         {
             int read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
+            return read == 0 ? ReadOutcome.EndOfStream : ReadOutcome.Data;
+        }
+        catch (ObjectDisposedException)
+        {
+            return ReadOutcome.Disposed;
+        }
+        catch (OperationCanceledException)
+        {
+            return ReadOutcome.Canceled;
+        }
+    }
+
+    private static ReadOutcome SyncReadOutcome(Stream stream, byte[] buffer)
+    {
+        try
+        {
+            int read = stream.Read(buffer, 0, buffer.Length);
             return read == 0 ? ReadOutcome.EndOfStream : ReadOutcome.Data;
         }
         catch (ObjectDisposedException)

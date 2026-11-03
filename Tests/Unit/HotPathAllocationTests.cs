@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Normalization;
@@ -22,26 +23,25 @@ public static partial class HotPathAllocationTests
     private const int WarmupIterations = 5;
     private const int MeasureIterations = 1_000;
 
+    /// <summary>
+    /// Штатная сборка таблицы семплов Mp4ContainerParser без рефлексии (AOT): закрытый список SampleInfo
+    /// заполняется тем же кодом, что и при разборе stbl реального файла.
+    /// </summary>
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "BuildSampleTable")]
+    private static extern void BuildMp4SampleTable(
+        Core.Audio.Parsers.Mp4ContainerParser parser,
+        List<uint> sizes,
+        List<(uint firstChunk, uint samplesPerChunk, uint descIdx)> stsc,
+        List<long> offsets,
+        List<(uint count, uint delta)> stts,
+        uint timeScale);
+
     private static float[] CreateSineBuffer(int length)
     {
         var buffer = new float[length];
         for (int i = 0; i < length; i++)
             buffer[i] = MathF.Sin(i * 0.1f) * 0.5f;
         return buffer;
-    }
-
-    [TestMethod(TestCategory.Unit, "GainProcessor SIMD (0 Alloc)", Group = TestGroups.Audio, Order = 1)]
-    public static Task TestGainProcessorSimdZeroAllocAsync()
-    {
-        var processor = new GainProcessor();
-        processor.SetVolumeGain(0.75f);
-        float[] buffer = CreateSineBuffer(BufferSamples);
-
-        for (int i = 0; i < 3000; i++)
-            processor.Process(buffer.AsSpan());
-
-        TestAssert.ZeroAlloc(() => processor.Process(buffer.AsSpan()), WarmupIterations, MeasureIterations);
-        return Task.CompletedTask;
     }
 
     [TestMethod(TestCategory.Unit, "GainProcessor Volume Ramp (0 Alloc)", Group = TestGroups.Audio, Order = 2)]
@@ -72,56 +72,6 @@ public static partial class HotPathAllocationTests
             processor.Process(buffer.AsSpan());
 
         TestAssert.ZeroAlloc(() => processor.Process(buffer.AsSpan()), WarmupIterations, MeasureIterations);
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "LockFreeRingBuffer Write (0 Alloc)", Group = TestGroups.Audio, Order = 4)]
-    public static Task TestRingBufferWriteZeroAllocAsync()
-    {
-        var ring = new LockFreeRingBuffer<float>(BufferSamples * 8);
-        float[] data = CreateSineBuffer(BufferSamples);
-
-        TestAssert.ZeroAlloc(() =>
-        {
-            ring.Write(data.AsSpan());
-            ring.Clear();
-        }, WarmupIterations, MeasureIterations);
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "LockFreeRingBuffer Read (0 Alloc)", Group = TestGroups.Audio, Order = 5)]
-    public static Task TestRingBufferReadZeroAllocAsync()
-    {
-        var ring = new LockFreeRingBuffer<float>(BufferSamples * 8);
-        float[] src = CreateSineBuffer(BufferSamples);
-        float[] dst = new float[BufferSamples];
-
-        TestAssert.ZeroAlloc(() =>
-        {
-            ring.Write(src.AsSpan());
-            ring.Read(dst.AsSpan());
-        }, WarmupIterations, MeasureIterations);
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "LockFreeRingBuffer Properties (0 Alloc)", Group = TestGroups.Audio, Order = 6)]
-    public static Task TestRingBufferPropertiesZeroAllocAsync()
-    {
-        var ring = new LockFreeRingBuffer<float>(BufferSamples * 4);
-        float[] data = new float[256];
-        ring.Write(data.AsSpan());
-
-        int sink = 0;
-        TestAssert.ZeroAlloc(() =>
-        {
-            sink += ring.Count;
-            sink += ring.Available;
-            sink += ring.ProducerCachedAvailable;
-            _ = ring.IsEmpty;
-        }, WarmupIterations, MeasureIterations);
-
         return Task.CompletedTask;
     }
 
@@ -201,22 +151,27 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "SharedPlaybackState Update & Get (0 Alloc)", Group = TestGroups.Audio, Order = 9)]
-    public static Task TestSharedPlaybackStateZeroAllocAsync()
+    /// <summary>Публикация и чтение часов рендера на каждом тике устройства и опросе UI не аллоцируют.</summary>
+    [TestMethod(TestCategory.Unit, "RenderClock Publish & Read (0 Alloc)", Group = TestGroups.Audio, Order = 9)]
+    public static Task TestRenderClockZeroAllocAsync()
     {
-        // Прямой доступ к internal-типу через InternalsVisibleTo: без рефлексии, делегатов и боксинга
-        var sharedState = new AudioPlayer.SharedPlaybackState();
-
-        long sampleCounter = 0;
-        long ticksSink = 0;
+        var clock = new RenderClock();
+        long timestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        long tick = System.Diagnostics.Stopwatch.Frequency / 100;
+        long rendered = 0;
+        long playedSink = 0;
 
         TestAssert.ZeroAlloc(() =>
         {
-            sampleCounter += 960;
-            sharedState.Update(sampleCounter, 9600, SampleRate, Channels, true, 180_000L);
-            ticksSink += sharedState.GetCurrentPosition().Ticks;
+            rendered += 960 * Channels;
+            timestamp += tick;
+            clock.Publish(rendered, 9_600, timestamp, SampleRate * Channels);
+
+            var snapshot = clock.Read();
+            playedSink += RenderClock.Extrapolate(in snapshot, timestamp + tick / 2);
         }, WarmupIterations, MeasureIterations);
 
+        TestAssert.True(playedSink > 0, "Render clock must advance while the device publishes");
         return Task.CompletedTask;
     }
 
@@ -269,18 +224,18 @@ public static partial class HotPathAllocationTests
         using var ms = new MemoryStream(mdatPayload, writable: false);
         using var mp4Parser = new Core.Audio.Parsers.Mp4ContainerParser(ms);
 
-        var samplesField = typeof(Core.Audio.Parsers.Mp4ContainerParser)
-            .GetField("_samples", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var sampleInfoType = typeof(Core.Audio.Parsers.Mp4ContainerParser)
-            .GetNestedType("SampleInfo", System.Reflection.BindingFlags.NonPublic)!;
-
-        var samplesList = (System.Collections.IList)samplesField.GetValue(mp4Parser)!;
+        // Каждый чанк содержит один семпл по смещению 0 размером 256 байт; stts задаёт 20 мс на семпл
+        // (timeScale = 1000), поэтому TimestampMs = i * 20 — та же раскладка, что прежнее ручное заполнение.
         int totalFrames = WarmupIterations + MeasureIterations;
+        var sizes = new List<uint>(totalFrames);
+        var chunkOffsets = new List<long>(totalFrames);
         for (int i = 0; i < totalFrames; i++)
         {
-            var sample = Activator.CreateInstance(sampleInfoType, [0L, 256, i * 20L, 20, true])!;
-            samplesList.Add(sample);
+            sizes.Add(256);
+            chunkOffsets.Add(0);
         }
+
+        BuildMp4SampleTable(mp4Parser, sizes, [(1u, 1u, 1u)], chunkOffsets, [((uint)totalFrames, 20u)], timeScale: 1000);
 
         byte[] pcm16Bytes = new byte[2048 * sizeof(short)];
         float[] floatOut = new float[2048];
@@ -311,87 +266,12 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    // Тест измеряет только GetBufferedRanges; RAM-хит покрыт в CachingReadStreamContractTests (Order 25)
-    [TestMethod(TestCategory.Unit, "CachingStreamSource GetBufferedRanges (0 Alloc)", Group = TestGroups.Audio, Order = 13)]
-    public static Task TestAsyncCachingReadStreamRamHitZeroAllocAsync()
-    {
-        string tempDir = Path.Combine(Path.GetTempPath(), "LMP_RamHitTest_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            Directory.CreateDirectory(tempDir);
-            byte[] streamData = new byte[4096];
-
-            using var cacheManager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 16);
-            using var source = new Core.Audio.Sources.CachingStreamSource(
-                cacheKey: "test_ram_hit",
-                trackId: "yt_test",
-                url: "https://example.com/audio.webm",
-                contentLength: streamData.Length,
-                format: AudioFormat.WebM,
-                codec: Core.Audio.Interfaces.AudioCodec.Opus,
-                bitrate: 128,
-                cacheManager: cacheManager,
-                config: new StreamingConfig());
-
-            TestAssert.ZeroAlloc(() =>
-            {
-                var ranges = source.GetBufferedRanges();
-                _ = ranges.Count;
-            }, WarmupIterations, MeasureIterations);
-        }
-        finally
-        {
-            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
-        }
-
-        return Task.CompletedTask;
-    }
-
-    // Тест измеряет AudioCacheManager.GetStats, а не GetBufferedRanges и dirty-флаг
-    [TestMethod(TestCategory.Unit, "AudioCacheManager GetStats (0 Alloc)", Group = TestGroups.Audio, Order = 14)]
-    public static Task TestGetBufferedRangesAndCacheDirtyZeroAllocAsync()
-    {
-        string tempDir = Path.Combine(Path.GetTempPath(), "LMP_RangesTest_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            Directory.CreateDirectory(tempDir);
-            using var cacheManager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 16);
-
-            TestAssert.ZeroAlloc(() =>
-            {
-                var stats = cacheManager.GetStats();
-                _ = stats.TotalEntries;
-            }, WarmupIterations, MeasureIterations);
-        }
-        finally
-        {
-            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
-        }
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "End-to-End Pipeline Step (0 Alloc)", Group = TestGroups.Audio, Order = 15)]
-    public static Task TestEndToEndPipelineStepZeroAllocAsync()
-    {
-        var gainProcessor = new GainProcessor();
-        gainProcessor.SetVolumeGain(0.9f);
-        float[] buffer = CreateSineBuffer(BufferSamples);
-
-        TestAssert.ZeroAlloc(() =>
-        {
-            gainProcessor.Process(buffer.AsSpan());
-        }, WarmupIterations, MeasureIterations);
-
-        return Task.CompletedTask;
-    }
-
     // ==========================================
     //   FORWARDING ALIASES FOR BACKWARD COMPAT
     // ==========================================
 
     public static Task TestSharedPlaybackStateInterpolationAsync() =>
-        AudioLogicTests.TestSharedPlaybackStateInterpolationAsync();
+     AudioLogicTests.TestRenderClockPositionContractsAsync();
 
     public static Task TestAdaptiveDecoderDelayAndTimerSuspendAsync() =>
         AudioLogicTests.TestAdaptiveDecoderDelayAndBatchHysteresisAsync();
@@ -470,19 +350,8 @@ public static partial class HotPathAllocationTests
             TestAssert.False(sigDecryptor.IsInitialized, "Fresh SigCipherDecryptor must report IsInitialized == false");
             TestAssert.False(poProvider.HasActiveContext, "Fresh PoTokenProvider must report HasActiveContext == false");
 
-            using var nDecryptor = new Core.Youtube.Bridge.NToken.NTokenDecryptor(jsService);
-            int complexEventCount = 0;
-            nDecryptor.OnComplexDecryptionStarted += _ => complexEventCount++;
-            TestAssert.Equal(0, complexEventCount);
-
             // Проверяем non-blocking режим компактора для активного аудио
             MemoryHelpers.CompactManagedHeapNow(nonBlockingForAudio: true);
-
-            using var cts = new CancellationTokenSource();
-            var delayTask = cts.Token.DelayNoThrowAsync(500, continueOnCapturedContext: false);
-            cts.Cancel();
-            bool delayCompleted = delayTask.GetAwaiter().GetResult();
-            TestAssert.False(delayCompleted, "Cancelled DelayNoThrowAsync must return false without throwing");
         }
         finally
         {

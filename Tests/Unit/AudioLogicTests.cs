@@ -20,49 +20,57 @@ public static class AudioLogicTests
     private const int Channels = 2;
     private const int BufferSamples = SampleRate / 10 * Channels; // 100 мс стерео
 
-    [TestMethod(TestCategory.Unit, "Position Interpolation & Starvation Clamp", Group = TestGroups.Audio, Order = 1)]
-    public static async Task TestSharedPlaybackStateInterpolationAsync()
+    /// <summary>Позиция по часам рендера: ход в пределах очереди устройства, удержание при голодании и ограничение длительностью трека.</summary>
+    [TestMethod(TestCategory.Unit, "Render Clock Position: Extrapolation, Starvation Hold & Duration Clamp", Group = TestGroups.Audio, Order = 1)]
+    public static async Task TestRenderClockPositionContractsAsync()
     {
-        // Прямой доступ к internal-типу через InternalsVisibleTo: без рефлексии и без риска обрезки при AOT-тримминге
-        var sharedState = new AudioPlayer.SharedPlaybackState();
+        const int samplesPerSecond = SampleRate * Channels;
+        const long baseSamples = 10L * samplesPerSecond;
+        const long t0 = 1_000_000;
+        long frequency = System.Diagnostics.Stopwatch.Frequency;
 
-        const long durationMs = 180_000;
-        const long baseSamples = SampleRate * Channels * 10;
-        const double basePositionSeconds = 10.0;
-        const int activeBufferedSamples = BufferSamples;
-        const double maxBufferedMs = activeBufferedSamples * 1000.0 / (SampleRate * Channels);
+        var clock = new RenderClock();
 
-        // 1. Монотонный ход интерполяции в пределах фактического запаса PCM в кольцевом буфере
-        sharedState.Update(baseSamples, activeBufferedSamples, SampleRate, Channels, isPlaying: true, durationMs);
-        await Task.Delay(25).ConfigureAwait(false);
+        // 1. Устройству передано 10 с + 100 мс, из них 100 мс ещё в очереди: прозвучало ровно 10 с
+        clock.Publish(baseSamples + BufferSamples, BufferSamples, t0, samplesPerSecond);
+        RenderClockSnapshot snapshot = clock.Read();
+        TestAssert.Equal(baseSamples, snapshot.PlayedSamples);
 
-        double deltaMs = (sharedState.GetCurrentPosition().TotalSeconds - basePositionSeconds) * 1000.0;
-        TestAssert.True(deltaMs > 0.0, "Position must advance while playing with buffered samples");
-        TestAssert.True(deltaMs <= maxBufferedMs + 1e-6, $"Extrapolation exceeded buffered PCM: {deltaMs:F3}ms > {maxBufferedMs:F3}ms");
+        // 2. Между показаниями позиция идёт по реальному времени, но не дальше переданного устройству
+        long after25Ms = RenderClock.Extrapolate(in snapshot, t0 + frequency / 40);
+        TestAssert.True(Math.Abs(after25Ms - baseSamples - 2_400) <= 1, $"25 ms must advance 2400 samples, got {after25Ms - baseSamples}");
 
-        // 2. Starvation Clamp: при пустом кольцевом буфере интерполяция обязана мгновенно остановиться
-        long starvedBaseSamples = baseSamples + activeBufferedSamples;
-        double starvedBaseSeconds = (double)starvedBaseSamples / (SampleRate * Channels);
+        long rendered = baseSamples + BufferSamples;
+        TestAssert.Equal(rendered, RenderClock.Extrapolate(in snapshot, t0 + frequency), "Extrapolation must not run past the device queue");
 
-        sharedState.Update(starvedBaseSamples, 0, SampleRate, Channels, isPlaying: true, durationMs);
-        await Task.Delay(25).ConfigureAwait(false);
+        // 3. Голодание: очередь пуста, позиция стоит, а не убегает вперёд по таймеру
+        clock.Publish(rendered, 0, t0 + frequency, samplesPerSecond);
+        RenderClockSnapshot starved = clock.Read();
+        TestAssert.Equal(rendered, RenderClock.Extrapolate(in starved, t0 + 2 * frequency), "Starved clock must hold its position");
 
-        double starvedDeltaMs = Math.Abs((sharedState.GetCurrentPosition().TotalSeconds - starvedBaseSeconds) * 1000.0);
-        TestAssert.True(starvedDeltaMs <= 0.001, $"Starvation clamp failed: drift={starvedDeltaMs:F4}ms");
+        // 4. Сбой показаний (счётчик «назад»): позиция не откатывается
+        clock.Publish(rendered - 4_800, 0, t0 + 2 * frequency, samplesPerSecond);
+        TestAssert.True(clock.Read().PlayedSamples >= rendered, "Render clock must never move backwards");
 
-        // 3. Пауза: позиция равна базе без экстраполяции
-        sharedState.Update(starvedBaseSamples, activeBufferedSamples, SampleRate, Channels, isPlaying: false, durationMs);
-        await Task.Delay(10).ConfigureAwait(false);
+        // 5. Позиция pipeline ограничена длительностью трека
+        var backend = new NullAudioBackend();
+        var pipeline = AudioPipelineTestHarness.Create(
+            new BlockingAudioSource(SampleRate, Channels),
+            new ConstantDecoder(SampleRate, Channels, framesPerDecode: 960, maxFrameSize: 960, value: 0f),
+            backend,
+            new LockFreeRingBuffer<float>(4_096),
+            new AudioStreamInfo { DurationMs = 1_000 });
 
-        double pausedDeltaMs = Math.Abs((sharedState.GetCurrentPosition().TotalSeconds - starvedBaseSeconds) * 1000.0);
-        TestAssert.True(pausedDeltaMs <= 0.001, $"Paused position must not extrapolate: drift={pausedDeltaMs:F4}ms");
-
-        // 4. Upper Bound Clamp: позиция никогда не должна превышать длительность трека
-        long nearEndSamples = (long)(durationMs / 1000.0 * SampleRate * Channels);
-        sharedState.Update(nearEndSamples, activeBufferedSamples, SampleRate, Channels, isPlaying: true, durationMs);
-        await Task.Delay(20).ConfigureAwait(false);
-
-        TestAssert.True(sharedState.GetCurrentPosition().TotalMilliseconds <= durationMs, "Position exceeded track duration");
+        try
+        {
+            pipeline.SetDecodedSamplesPosition(2L * samplesPerSecond);
+            TestAssert.Equal(TimeSpan.FromSeconds(1), pipeline.GetPlaybackPosition(), "Position must be clamped to the track duration");
+        }
+        finally
+        {
+            await pipeline.DisposeAsync().ConfigureAwait(false);
+            backend.Dispose();
+        }
     }
 
     [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & State Machine Contracts", Group = TestGroups.Audio, Order = 2)]
@@ -616,6 +624,16 @@ public static class AudioLogicTests
         return Task.CompletedTask;
     }
 
+    // Закрытые члены AudioPlayer без рефлексии: сигнатуры связываются при первом вызове, совместимо с AOT.
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_state")]
+    private static extern ref PlayerState PlayerStateField(AudioPlayer player);
+
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Method, Name = "StartPositionTimerDelayed")]
+    private static extern void StartPositionTimerDelayed(AudioPlayer player);
+
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_bufferTimer")]
+    private static extern ref Timer? BufferTimerField(AudioPlayer player);
+
     [TestMethod(TestCategory.Unit, "PlaybackErrorBehaviorMatrix & AudioPlayer Timer Lifecycle", Group = TestGroups.Audio, Order = 9)]
     public static async Task TestPlaybackErrorMatrixAndTimerLifecycleAsync()
     {
@@ -644,17 +662,13 @@ public static class AudioLogicTests
             PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
         });
 
-        var stateField = typeof(AudioPlayer).GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var startPosDelayedMethod = typeof(AudioPlayer).GetMethod("StartPositionTimerDelayed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var bufferTimerField = typeof(AudioPlayer).GetField("_bufferTimer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-
         // Переводим плеер в состояние Buffering (как при Starvation) и проверяем, что StartPositionTimerDelayed запускает _bufferTimer
-        stateField.SetValue(player, PlayerState.Buffering);
+        PlayerStateField(player) = PlayerState.Buffering;
         player.SetUiTimersSuspended(true);
         player.SetUiTimersSuspended(false);
 
-        startPosDelayedMethod.Invoke(player, null);
-        var bufferTimer = (Timer?)bufferTimerField.GetValue(player);
+        StartPositionTimerDelayed(player);
+        var bufferTimer = BufferTimerField(player);
         TestAssert.NotNull(bufferTimer, "_bufferTimer must be initialized and active when StartPositionTimerDelayed is called in Buffering/Playing state");
     }
 }

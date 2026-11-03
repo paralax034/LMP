@@ -6,11 +6,16 @@ namespace LMP.Tests.Unit;
 
 /// <summary>
 /// Контракты безысключительного ожидания и измерение цены паттерна <c>Task.Delay(ms, ct)</c>,
-/// который сейчас используется в AudioPlayer.Seek.cs (стр. 505, 550) и CachingStreamSource.Refresh.cs (стр. 196, 309).
+/// от которого очищены циклы ожидания AudioPlayer.Seek.cs и повторы AudioPipeline.DecoderLoopAsync.
 /// </summary>
 public static class CancellationNoThrowTests
 {
     private const int CancelIterations = 2_000;
+
+    /// <summary>Число раундов замера: медиана по ним гасит разовые паузы GC и перекомпиляцию JIT посреди цикла.</summary>
+    private const int MeasureRounds = 5;
+
+    private const int RoundIterations = CancelIterations / MeasureRounds;
 
     /// <summary>
     /// Верхняя граница времени на бросающую ветку. Без отладчика 2 000 отмен занимают около 10 мс,
@@ -68,6 +73,7 @@ public static class CancellationNoThrowTests
     /// <summary>
     /// Измеряет цену одной отмены: <c>Task.Delay(ms, ct)</c> с перехватом исключения против <c>DelayNoThrowAsync</c>.
     /// Оба пути завершаются синхронно на одном потоке, поэтому поточный счётчик аллокаций корректен.
+    /// Время каждого пути — медиана <see cref="MeasureRounds"/> раундов, чтобы одиночный выброс не решал исход сравнения.
     /// Под отладчиком бросающая ветка не запускается: каждое first-chance исключение останавливает
     /// все управляемые потоки процесса, включая аудиопоток, на 10–20 мс.
     /// </summary>
@@ -91,21 +97,28 @@ public static class CancellationNoThrowTests
         int threadId = Environment.CurrentManagedThreadId;
 
         // 1. Целевой паттерн инварианта 3: DelayNoThrowAsync. Безопасен в любом окружении.
+        // Массив раундов создаётся до снимка счётчика, чтобы не попасть в учёт аллокаций
+        double[] noThrowRounds = new double[MeasureRounds];
         int canceledNoThrow = 0;
         long noThrowAllocBefore = GC.GetAllocatedBytesForCurrentThread();
-        long noThrowStart = Stopwatch.GetTimestamp();
-        for (int i = 0; i < CancelIterations; i++)
+        for (int round = 0; round < MeasureRounds; round++)
         {
-            if (!await TokenExtensions.DelayNoThrowAsync(token, 100, continueOnCapturedContext: false).ConfigureAwait(false))
-                canceledNoThrow++;
+            long roundStart = Stopwatch.GetTimestamp();
+            for (int i = 0; i < RoundIterations; i++)
+            {
+                if (!await TokenExtensions.DelayNoThrowAsync(token, 100, continueOnCapturedContext: false).ConfigureAwait(false))
+                    canceledNoThrow++;
+            }
+
+            noThrowRounds[round] = Stopwatch.GetElapsedTime(roundStart).TotalNanoseconds / RoundIterations;
         }
-        double noThrowNs = Stopwatch.GetElapsedTime(noThrowStart).TotalNanoseconds / CancelIterations;
         long noThrowBytes = GC.GetAllocatedBytesForCurrentThread() - noThrowAllocBefore;
+        double noThrowNs = MedianInPlace(noThrowRounds);
 
         if (Environment.CurrentManagedThreadId != threadId)
             TestAssert.Skip("Continuation hopped threads; per-thread allocation counter is not comparable");
 
-        Log.Info($"[Benchmark] DelayNoThrowAsync        | {noThrowNs,10:F1} ns/cancel | {(double)noThrowBytes / CancelIterations,8:F1} B/cancel");
+        Log.Info($"[Benchmark] DelayNoThrowAsync        | {noThrowNs,10:F1} ns/cancel | {(double)noThrowBytes / CancelIterations,8:F1} B/cancel | median of {MeasureRounds}");
 
         TestAssert.Equal(CancelIterations, canceledNoThrow, "Every pre-canceled DelayNoThrowAsync must return false");
         TestAssert.Equal(0L, noThrowBytes, "DelayNoThrowAsync cancellation path must allocate 0 B");
@@ -118,26 +131,32 @@ public static class CancellationNoThrowTests
         else
         {
             // 2. Запрещённый паттерн: Task.Delay(ms, ct) + OperationCanceledException, ограничен по времени
+            // Бюджет проверяется между раундами: хотя бы один раунд выполняется всегда, медиана берётся по завершённым
+            double[] throwRounds = new double[MeasureRounds];
+            int completedRounds = 0;
             int thrown = 0;
             int throwIterations = 0;
             long throwAllocBefore = GC.GetAllocatedBytesForCurrentThread();
             long throwStart = Stopwatch.GetTimestamp();
-            while (throwIterations < CancelIterations)
+            while (completedRounds < MeasureRounds && Stopwatch.GetElapsedTime(throwStart) <= ThrowingPathBudget)
             {
-                if (await ThrowingDelayAsync(token).ConfigureAwait(false))
-                    thrown++;
-                throwIterations++;
+                long roundStart = Stopwatch.GetTimestamp();
+                for (int i = 0; i < RoundIterations; i++)
+                {
+                    if (await ThrowingDelayAsync(token).ConfigureAwait(false))
+                        thrown++;
+                }
 
-                if ((throwIterations & 63) == 0 && Stopwatch.GetElapsedTime(throwStart) > ThrowingPathBudget)
-                    break;
+                throwIterations += RoundIterations;
+                throwRounds[completedRounds++] = Stopwatch.GetElapsedTime(roundStart).TotalNanoseconds / RoundIterations;
             }
-            double throwNs = Stopwatch.GetElapsedTime(throwStart).TotalNanoseconds / throwIterations;
             long throwBytes = GC.GetAllocatedBytesForCurrentThread() - throwAllocBefore;
+            double throwNs = MedianInPlace(throwRounds.AsSpan(0, completedRounds));
 
             if (Environment.CurrentManagedThreadId != threadId)
                 TestAssert.Skip("Continuation hopped threads; per-thread allocation counter is not comparable");
 
-            Log.Info($"[Benchmark] Task.Delay(ms, ct) + catch | {throwNs,10:F1} ns/cancel | {(double)throwBytes / throwIterations,8:F1} B/cancel | n={throwIterations}");
+            Log.Info($"[Benchmark] Task.Delay(ms, ct) + catch | {throwNs,10:F1} ns/cancel | {(double)throwBytes / throwIterations,8:F1} B/cancel | n={throwIterations} | median of {completedRounds}");
 
             TestAssert.Equal(throwIterations, thrown, "Every pre-canceled Task.Delay must throw");
             TestAssert.True(throwBytes > 0, "Throwing cancellation path is expected to allocate (exception + canceled task)");
@@ -157,5 +176,13 @@ public static class CancellationNoThrowTests
         {
             return true;
         }
+    }
+
+    /// <summary>Медиана замеров раундов. Сортирует переданный срез на месте и не аллоцирует.</summary>
+    private static double MedianInPlace(Span<double> rounds)
+    {
+        rounds.Sort();
+        int mid = rounds.Length / 2;
+        return (rounds.Length & 1) != 0 ? rounds[mid] : 0.5 * (rounds[mid - 1] + rounds[mid]);
     }
 }

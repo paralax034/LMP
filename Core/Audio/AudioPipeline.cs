@@ -72,6 +72,17 @@ public sealed class AudioPipeline : IAsyncDisposable
 
     private Task? _deviceEventTask;
 
+    /// <summary>
+    /// Точка привязки часов рендера к потоку: позиция <c>BaseSamples</c> соответствует показанию
+    /// <see cref="IPlaybackBackend.RenderedSamples"/>, равному <c>RenderedSamples</c>. Публикуется атомарной заменой ссылки.
+    /// </summary>
+    private sealed record ClockOrigin(long BaseSamples, long RenderedSamples);
+
+    private ClockOrigin _clockOrigin;
+
+    /// <summary>Анализ спектра приостановлен из-за отсутствия читателей; изменяется только аудио-callback'ом.</summary>
+    private bool _spectrumSuspended;
+
 #if AUDIO_SPLICE_AUDIT
     private int _decoderRestartCount;
 #endif
@@ -104,8 +115,33 @@ public sealed class AudioPipeline : IAsyncDisposable
     /// <summary>Количество каналов декодера.</summary>
     public int Channels => _decoder.Channels;
 
-    /// <summary>Количество воспроизведённых сэмплов (decoded - buffered).</summary>
-    public long PlayedSamples => Interlocked.Read(ref _decodedSamples) - _pcmBuffer.Count;
+    /// <summary>
+    /// Позиция потока в сэмплах (frames × channels), фактически прозвучавшая на устройстве.
+    /// Читает снимок часов рендера и экстраполирует его на текущий момент без блокировок, мутаций и аллокаций.
+    /// </summary>
+    public long PlayedSamples
+    {
+        get
+        {
+            ClockOrigin origin = Volatile.Read(ref _clockOrigin);
+            RenderClockSnapshot snapshot = _backend.ReadRenderClock();
+            long played = RenderClock.Extrapolate(in snapshot, System.Diagnostics.Stopwatch.GetTimestamp());
+            return RenderClock.MapToStream(played, origin.RenderedSamples, origin.BaseSamples);
+        }
+    }
+
+    /// <summary>
+    /// Текущая позиция воспроизведения по часам рендера, ограниченная длительностью трека.
+    /// </summary>
+    public TimeSpan GetPlaybackPosition()
+    {
+        int samplesPerSecond = SampleRate * Channels;
+        if (samplesPerSecond <= 0) return TimeSpan.Zero;
+
+        double seconds = (double)PlayedSamples / samplesPerSecond;
+        double maxSeconds = Math.Max(0L, _streamInfo.DurationMs) / 1000.0;
+        return TimeSpan.FromSeconds(Math.Clamp(seconds, 0.0, maxSeconds));
+    }
 
     /// <summary>Количество сэмплов в backend буфере.</summary>
     public int BackendBufferedSamples => _backend.BufferedSamples;
@@ -132,13 +168,13 @@ public sealed class AudioPipeline : IAsyncDisposable
     #region Constructor
 
     private AudioPipeline(
-        IAudioSource source,
-        IAudioDecoder decoder,
-        IPlaybackBackend backend,
-        LockFreeRingBuffer<float> pcmBuffer,
-        float[] decodeBuffer,
-        AudioStreamInfo streamInfo,
-        CancellationTokenSource lifetimeCts)
+    IAudioSource source,
+    IAudioDecoder decoder,
+    IPlaybackBackend backend,
+    LockFreeRingBuffer<float> pcmBuffer,
+    float[] decodeBuffer,
+    AudioStreamInfo streamInfo,
+    CancellationTokenSource lifetimeCts)
     {
         _source = source;
         _decoder = decoder;
@@ -153,6 +189,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         _truePeakLimiter = new TruePeakLimiter(decoder.SampleRate);
         _analyzer3Band = new AudioSpectrumAnalyzer(decoder.SampleRate, decoder.Channels);
         _gainCrossfader = new GainCrossfader(1.0f);
+        _clockOrigin = new ClockOrigin(0, backend.RenderedSamples);
     }
 
     #endregion
@@ -250,6 +287,9 @@ public sealed class AudioPipeline : IAsyncDisposable
                 pipeline._deviceLost = true;
                 Log.Warn($"[AudioPipeline] Created in degraded mode: {ex.Message}");
             }
+
+            // Reinitialize сбросил ресемплер и мог продвинуть счётчик рендера: точка отсчёта берётся после него
+            pipeline.RebaseRenderClock(0);
 
             sharedBackend.SetDeviceLostCallback(pipeline.NotifyDeviceLost);
             sharedBackend.SetStarvationCallback(pipeline.NotifyStarvation);
@@ -361,6 +401,9 @@ public sealed class AudioPipeline : IAsyncDisposable
         _backend.SetStarvationCallback(NotifyStarvation);
         _backend.SetDeviceAvailableCallback(NotifyDeviceAvailable);
 
+        // Кольцо очищено, а декодер продолжит с места остановки: часы отсчитываются от его позиции
+        RebaseRenderClock(Interlocked.Read(ref _decodedSamples));
+
         ct.ThrowIfCancellationRequested();
         _deviceLost = false;
 
@@ -383,15 +426,25 @@ public sealed class AudioPipeline : IAsyncDisposable
 
     #region Decoder Loop
 
+    /// <summary>
+    /// Запускает цикл декодирования. Если прежний цикл после таймаута остановки ещё жив, новый ждёт его выхода:
+    /// у SPSC-кольца в любой момент ровно один продюсер. Живой неотменённый цикл повторно не запускается.
+    /// </summary>
     public void StartDecoding(
      AudioPlayerOptions options,
      Action? onTrackEnded,
      Action<Exception>? onError)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_decoderTask is { IsCompleted: false }) return;
 
-        _decoderCts?.Dispose();
+        var previousTask = _decoderTask;
+        var previousCts = _decoderCts;
+        bool previousAlive = previousTask is { IsCompleted: false };
+        if (previousAlive && previousCts?.IsCancellationRequested != true) return;
+
+        if (!previousAlive)
+            previousCts?.Dispose();
+
         _decoderCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         var token = _decoderCts.Token;
 
@@ -399,7 +452,9 @@ public sealed class AudioPipeline : IAsyncDisposable
         int restartCount = Interlocked.Increment(ref _decoderRestartCount);
 #endif
 
-        _decoderTask = Task.Run(
+        _decoderTask = previousAlive
+            ? Task.Run(() => RunAfterPreviousLoopAsync(previousTask!, previousCts, options, onTrackEnded, onError, token))
+            : Task.Run(
             () => DecoderLoopAsync(options, onTrackEnded, onError, token));
 
 #if AUDIO_SPLICE_AUDIT
@@ -428,13 +483,38 @@ public sealed class AudioPipeline : IAsyncDisposable
             cachingSource.CancelActiveReads();
 
         try { await task.WaitAsync(timeout).ConfigureAwait(false); }
-        catch (TimeoutException) { Log.Warn("[AudioPipeline] Decoder stop timeout"); }
+        catch (TimeoutException)
+        {
+            // Зависший цикл остаётся зарегистрированным владельцем кольца вместе со своим CTS:
+            // следующий StartDecoding дождётся его выхода, а не запустит второго продюсера
+            Log.Warn("[AudioPipeline] Decoder stop timeout");
+            return;
+        }
         catch (OperationCanceledException) { }
         catch (Exception ex) { Log.Warn($"[AudioPipeline] Decoder stop error: {ex.Message}"); }
 
-        _decoderTask = null;
-        _decoderCts = null;
+        // Пока ждали, мог стартовать новый цикл: сбрасываем только то, чем владели на входе
+        if (ReferenceEquals(_decoderTask, task)) _decoderTask = null;
+        if (ReferenceEquals(_decoderCts, cts)) _decoderCts = null;
         try { cts.Dispose(); } catch (ObjectDisposedException) { }
+    }
+
+    /// <summary>
+    /// Новый цикл поверх зависшего: стартует только после выхода прежнего, затем освобождает его CTS.
+    /// </summary>
+    private async Task RunAfterPreviousLoopAsync(
+        Task previousTask,
+        CancellationTokenSource? previousCts,
+        AudioPlayerOptions options,
+        Action? onTrackEnded,
+        Action<Exception>? onError,
+        CancellationToken ct)
+    {
+        await previousTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        try { previousCts?.Dispose(); } catch (ObjectDisposedException) { }
+
+        if (ct.IsCancellationRequested) return;
+        await DecoderLoopAsync(options, onTrackEnded, onError, ct).ConfigureAwait(false);
     }
 
     private async Task DecoderLoopAsync(
@@ -478,8 +558,8 @@ public sealed class AudioPipeline : IAsyncDisposable
                 catch (OperationCanceledException) when (retryCount++ < options.MaxRetryAttempts)
                 {
                     Log.Warn($"[AudioPipeline] Read transient cancel (retry {retryCount}/{options.MaxRetryAttempts})");
-                    await Task.Delay(options.RetryDelay).ConfigureAwait(false);
-                    if (ct.IsCancellationRequested) break;
+                    if (!await ct.DelayNoThrowAsync(options.RetryDelay, continueOnCapturedContext: false).ConfigureAwait(false))
+                        break;
                     continue;
                 }
                 catch (OperationCanceledException ex)
@@ -538,10 +618,13 @@ public sealed class AudioPipeline : IAsyncDisposable
                 catch (Exception ex) when (ex is not CacheInvalidatedException && retryCount++ < options.MaxRetryAttempts)
                 {
                     Log.Warn($"[AudioPipeline] Read retry {retryCount}: {ex.Message}");
-                    await Task.Delay(options.RetryDelay).ConfigureAwait(false);
-                    if (ct.IsCancellationRequested) break;
+                    if (!await ct.DelayNoThrowAsync(options.RetryDelay, continueOnCapturedContext: false).ConfigureAwait(false))
+                        break;
                     continue;
                 }
+
+                // Чтение, вернувшееся уже после отмены, кольцом не владеет: фрейм отбрасывается до декодирования
+                if (ct.IsCancellationRequested) break;
 
                 if (frame == null)
                 {
@@ -623,8 +706,28 @@ public sealed class AudioPipeline : IAsyncDisposable
                     if (samplesDecoded > 0)
                     {
                         int totalSamples = samplesDecoded * _decoder.Channels;
-                        _pcmBuffer.Write(_decodeBuffer.AsSpan(0, totalSamples));
-                        Interlocked.Add(ref _decodedSamples, totalSamples);
+                        int written = 0;
+                        while (true)
+                        {
+                            int accepted = _pcmBuffer.Write(_decodeBuffer.AsSpan(written, totalSamples - written));
+                            written += accepted;
+                            // Часы ребейзятся от этого счётчика: в нём только то, что действительно попало в кольцо
+                            Interlocked.Add(ref _decodedSamples, accepted);
+                            if (written >= totalSamples) break;
+
+                            // Пока дописываем остаток, прогрев должен иметь шанс завершиться: иначе потребитель не стартует и не освободит место
+                            int pendingThreshold = Volatile.Read(ref _warmupThreshold);
+                            if (pendingThreshold > 0 && _pcmBuffer.Count >= pendingThreshold)
+                            {
+                                Volatile.Write(ref _warmupThreshold, 0);
+                                Interlocked.Exchange(ref _warmupTcs, null)?.TrySetResult();
+                            }
+
+                            // Кольцо приняло лишь часть блока: остаток дописывается по мере освобождения места, а не теряется
+                            int delayMs = ComputeBufferFullDelayMs(_pcmBuffer.Count, _decoder.SampleRate, _decoder.Channels);
+                            if (!await ct.DelayNoThrowAsync(delayMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                                break;
+                        }
 
                         int threshold = Volatile.Read(ref _warmupThreshold);
                         if (threshold > 0 && _pcmBuffer.Count >= threshold)
@@ -739,14 +842,20 @@ public sealed class AudioPipeline : IAsyncDisposable
         _backend.Start();
     }
 
+    /// <summary>
+    /// Останавливает вывод; состояние спектра сбрасывается отложенно в аудио-callback'е, который ещё доигрывает fade-out.
+    /// </summary>
     public void Stop()
     {
         if (_disposed) return;
         _source.SetPlaybackActive(false);
         _backend.Stop();
-        _analyzer3Band.Reset();
+        _analyzer3Band.RequestReset();
     }
 
+    /// <summary>
+    /// Сбрасывает буферы backend и PCM-кольца; состояние спектра сбрасывается отложенно в аудио-callback'е.
+    /// </summary>
     public void Flush()
     {
         if (_disposed) return;
@@ -761,7 +870,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         var tcs = Interlocked.Exchange(ref _warmupTcs, null);
         tcs?.TrySetResult();
 
-        _analyzer3Band.Reset();
+        _analyzer3Band.RequestReset();
     }
 
     internal void NotifyStarvation()
@@ -776,6 +885,10 @@ public sealed class AudioPipeline : IAsyncDisposable
             Volatile.Write(ref _deviceEventTask, Task.Run(handler));
     }
 
+    /// <summary>
+    /// Готовит DSP-цепочку к перемотке; состояние спектра сбрасывается отложенно в аудио-callback'е.
+    /// </summary>
+    /// <param name="targetMs">Целевая позиция в миллисекундах; <c>-1</c>, если цель неизвестна.</param>
     public void PrepareForSeek(long targetMs = -1)
     {
         ArmDecoderWarmupAfterSeek(targetMs);
@@ -783,7 +896,7 @@ public sealed class AudioPipeline : IAsyncDisposable
         _analyzer.PrepareForSeek();
         _equalizer.Reset();
         _truePeakLimiter.Reset();
-        _analyzer3Band.Reset();
+        _analyzer3Band.RequestReset();
 
 #if AUDIO_SPLICE_AUDIT
         _dbgCallbackTickAfterSeek = 0;
@@ -869,8 +982,37 @@ public sealed class AudioPipeline : IAsyncDisposable
         }
     }
 
-    public void SetDecodedSamplesPosition(long samples) =>
+    /// <summary>
+    /// Задаёт позицию декодера и привязывает к ней часы рендера: следующий прозвучавший сэмпл соответствует <paramref name="samples"/>.
+    /// </summary>
+    /// <param name="samples">Позиция потока в сэмплах (frames × channels).</param>
+    public void SetDecodedSamplesPosition(long samples)
+    {
         Volatile.Write(ref _decodedSamples, samples);
+        RebaseRenderClock(samples);
+    }
+
+    /// <summary>
+    /// Переводит очередь устройства в задержку показа уровней в тиках <see cref="System.Diagnostics.Stopwatch"/>.
+    /// </summary>
+    /// <param name="bufferedDeviceSamples">Сэмплы в очереди устройства (кадры устройства × каналы).</param>
+    /// <param name="deviceSampleRate">Частота устройства в Гц, в которой считается очередь.</param>
+    /// <param name="channels">Число каналов.</param>
+    /// <returns>Задержка в тиках; <c>0</c> при пустой очереди или неизвестной частоте.</returns>
+    internal static long ComputePresentationDelayTicks(int bufferedDeviceSamples, int deviceSampleRate, int channels)
+    {
+        long samplesPerSecond = (long)deviceSampleRate * channels;
+        if (bufferedDeviceSamples <= 0 || samplesPerSecond <= 0)
+            return 0;
+
+        return bufferedDeviceSamples * System.Diagnostics.Stopwatch.Frequency / samplesPerSecond;
+    }
+
+    /// <summary>
+    /// Привязывает часы рендера к позиции потока: всё, что backend уже передал устройству, звучит до точки привязки.
+    /// </summary>
+    private void RebaseRenderClock(long baseSamples) =>
+        Volatile.Write(ref _clockOrigin, new ClockOrigin(baseSamples, _backend.RenderedSamples));
 
     public float GetLockedNormalizationGain() => _analyzer.GetLockedGain();
 
@@ -1012,7 +1154,25 @@ public sealed class AudioPipeline : IAsyncDisposable
             }
 #endif
 
-            _analyzer3Band.ProcessBlock(samples, channels);
+            if (AudioVisualizerBuffer.HasActiveReaders)
+            {
+                // Спектр считается только для живых читателей: опрос UI продлевает аренду, без него callback не тратит время рендера
+                _spectrumSuspended = false;
+
+                // Уровни публикуются к моменту фактического звучания блока; очередь устройства считается в его собственной частоте
+                int deviceRate = _backend.DeviceSampleRate;
+                long delayTicks = ComputePresentationDelayTicks(
+                    _backend.BufferedSamples,
+                    deviceRate > 0 ? deviceRate : _decoder.SampleRate,
+                    channels);
+
+                _analyzer3Band.ProcessBlock(samples, channels, delayTicks);
+            }
+            else if (!_spectrumSuspended)
+            {
+                _spectrumSuspended = true;
+                _analyzer3Band.Reset();
+            }
         }
         else
         {
@@ -1066,12 +1226,15 @@ public sealed class AudioPipeline : IAsyncDisposable
 
     #region Dispose
 
+    /// <summary>
+    /// Освобождает pipeline; общий backend продолжает жить, поэтому спектр сбрасывается отложенно, а не из чужого потока.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
 
-        _analyzer3Band.Reset();
+        _analyzer3Band.RequestReset();
 
         try { _lifetimeCts.Cancel(); } catch (ObjectDisposedException) { }
         try { _decoderCts?.Cancel(); } catch (ObjectDisposedException) { }

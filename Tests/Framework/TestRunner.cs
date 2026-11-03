@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 
 namespace LMP.Tests.Framework;
 
@@ -97,7 +96,7 @@ public sealed class TestRunner
                 externalCt, timeoutCts.Token);
 
             // Вызов метода ВСЕГДА выносится на пул потоков во избежание блокировки UI-диспетчера Avalonia
-            var task = Task.Run(() => InvokeTestMethod(descriptor, linkedCts.Token), linkedCts.Token);
+            var task = Task.Run(() => descriptor.Invoke(_services, linkedCts.Token), linkedCts.Token);
             try
             {
                 await task.WaitAsync(linkedCts.Token).ConfigureAwait(false);
@@ -124,8 +123,6 @@ public sealed class TestRunner
             sw.Stop();
 
             var inner = ex is AggregateException agg ? agg.InnerException ?? ex : ex;
-            if (inner is TargetInvocationException tie)
-                inner = tie.InnerException ?? tie;
 
             if (inner is TestSkippedException skipped)
             {
@@ -168,20 +165,5 @@ public sealed class TestRunner
                 ErrorMessage = inner.Message,
             };
         }
-    }
-
-    private Task InvokeTestMethod(TestDescriptor descriptor, CancellationToken ct)
-    {
-        object?[] args = descriptor.Signature switch
-        {
-            TestParameterSignature.ServicesOnly => [_services],
-            TestParameterSignature.TokenOnly => [ct],
-            TestParameterSignature.ServicesAndToken => [_services, ct],
-            TestParameterSignature.TokenAndServices => [ct, _services],
-            _ => []
-        };
-
-        var result = descriptor.Method.Invoke(null, args);
-        return result is Task task ? task : Task.CompletedTask;
     }
 }

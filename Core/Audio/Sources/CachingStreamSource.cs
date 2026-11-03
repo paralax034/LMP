@@ -90,6 +90,9 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <summary>Начальный backoff circuit breaker (мс).</summary>
     private const int SourceCircuitBreakerInitialBackoffMs = 2_000;
 
+    /// <summary>Максимальная пауза между порциями тела HTTP-ответа, после которой соединение считается зависшим (мс).</summary>
+    private const int BodyIdleTimeoutMs = 10_000;
+
     /// <summary>Максимальный backoff circuit breaker (мс).</summary>
     private const int SourceCircuitBreakerMaxBackoffMs = 30_000;
 
@@ -276,7 +279,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     private readonly Lock _bufferedRangesCacheLock = new();
     private long _cachedDiskRangesVersion = -1;
     private long _cachedRamRangesVersion = -1;
-    private List<(double Start, double End)> _cachedBufferedRanges = [];
+    private (double Start, double End)[] _cachedBufferedRanges = [];
 
     #endregion
 

@@ -88,13 +88,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private SessionGuard _session;
 
-    private readonly SharedPlaybackState _sharedState = new();
-
-    /// <summary>
-    /// Последнее сырое значение played samples из драйвера.
-    /// </summary>
-    private long _lastRawPlayedSamples = -1;
-
     #endregion
 
     #region Properties
@@ -105,31 +98,10 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     /// <summary>Текущее детальное состояние.</summary>
     public PlayerState DetailedState => _state;
 
-    /// <summary>Текущая позиция воспроизведения.</summary>
-    public TimeSpan Position
-    {
-        get
-        {
-            var pipeline = _activePipeline;
-            if (pipeline == null) return TimeSpan.Zero;
-
-            long played = Math.Max(0, pipeline.PlayedSamples - pipeline.BackendBufferedSamples);
-
-            if (played != Volatile.Read(ref _lastRawPlayedSamples))
-            {
-                Volatile.Write(ref _lastRawPlayedSamples, played);
-                _sharedState.Update(
-                    played,
-                    pipeline.BufferedSamples,
-                    pipeline.SampleRate,
-                    pipeline.Channels,
-                    _state == PlayerState.Playing,
-                    (long)Duration.TotalMilliseconds);
-            }
-
-            return _sharedState.GetCurrentPosition();
-        }
-    }
+    /// <summary>
+    /// Текущая позиция воспроизведения по часам рендера активного pipeline: чистое чтение без блокировок, мутаций и аллокаций.
+    /// </summary>
+    public TimeSpan Position => _activePipeline?.GetPlaybackPosition() ?? TimeSpan.Zero;
 
     /// <summary>Длительность текущего трека.</summary>
     public TimeSpan Duration => _activePipeline != null
@@ -203,7 +175,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         CancelActiveSeek();
 
         int session = _session.BeginNew();
-        _lastRawPlayedSamples = -1;
 
         _commandChannel.Writer.TryWrite(
             new PlayCommand(descriptor, session, seekPosition, ct));
@@ -281,7 +252,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         SetPlaybackIntent(PlaybackIntent.Stop);
         CancelActiveSeek();
-        _lastRawPlayedSamples = -1;
 
         _commandChannel.Writer.TryWrite(new StopCommand(_session.BeginNew()));
     }
@@ -715,7 +685,9 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 TrackAndFirePipelineDispose(oldPipeline);
 
             _sharedBackend.Flush();
-            _lastRawPlayedSamples = -1;
+
+            // Flush захватил хвост кроссфейда и сбросил ресемплер: часы нового трека отсчитываются от текущего счётчика рендера
+            pipeline.SetDecodedSamplesPosition(0);
 
             _events.RaiseStreamInfo(pipeline.StreamInfo);
 
@@ -961,7 +933,6 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         {
             SetState(PlayerState.Buffering);
             StopTimers();
-            _lastRawPlayedSamples = -1;
 
             await pipeline.StopDecodingAsync(
                  TimeSpan.FromMilliseconds(RewindDecoderStopTimeoutMs)).ConfigureAwait(false);

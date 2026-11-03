@@ -71,8 +71,7 @@ public static class DataSmokeTests
     [TestMethod(TestCategory.Unit, "Headless Test Database Isolation", Group = TestGroups.Storage, Order = 42)]
     public static Task TestDatabaseIsolationAsync()
     {
-        if (AppEntry.IsTestUiMode)
-            TestAssert.Skip("UI test mode intentionally works with the real database");
+        RequireIsolatedDatabase();
 
         string dbPath = G.FilePath.Database;
         string? folder = Path.GetDirectoryName(dbPath);
@@ -82,6 +81,20 @@ public static class DataSmokeTests
             $"Test database must live under the temp directory: {dbPath}");
         TestAssert.True(File.Exists(dbPath), $"Isolated database must be created before tests run: {dbPath}");
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Предусловие для тестов, которые работают с базой через рабочие сервисы.
+    /// Без изолированной временной базы тест пропускается, чтобы прогон из GUI-хоста не оставлял
+    /// тестовых строк в библиотеке пользователя.
+    /// </summary>
+    internal static void RequireIsolatedDatabase()
+    {
+        if (AppEntry.IsTestUiMode)
+            TestAssert.Skip("UI test mode intentionally works with the real database");
+
+        if (G.FilePath.IsolatedTestDatabaseFolder is null)
+            TestAssert.Skip("Host runs on the user database; database tests require the headless test host");
     }
 
     [TestMethod(TestCategory.Unit, "Schema Migration Rolls Back Atomically On Failure", Group = TestGroups.Storage, Order = 43)]
@@ -124,6 +137,37 @@ public static class DataSmokeTests
         {
             Directory.Delete(scratch, recursive: true);
         }
+    }
+
+    /// <summary>
+    /// Вердикт проверки изоляции согласован с хостом: где изолированная база не включена (GUI-хост),
+    /// проверка обязана пропускаться, а не падать ложным красным.
+    /// </summary>
+    [TestMethod(TestCategory.Unit, "Test Database Isolation Verdict Matches Host", Group = TestGroups.Storage, Order = 44)]
+    public static async Task TestDatabaseIsolationVerdictAsync()
+    {
+        if (AppEntry.IsTestUiMode)
+            TestAssert.Skip("UI test mode intentionally works with the real database");
+
+        bool isolated = G.FilePath.IsolatedTestDatabaseFolder != null;
+        Exception? failure = null;
+        try
+        {
+            await TestDatabaseIsolationAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        if (isolated)
+        {
+            TestAssert.Null(failure, $"Isolated host must pass the isolation check: {failure?.Message}");
+            return;
+        }
+
+        TestAssert.True(failure is TestSkippedException,
+            $"Host without an isolated database must skip the isolation check, got {failure?.GetType().Name ?? "pass"}: {failure?.Message}");
     }
 
     [TestMethod(TestCategory.Unit, "SkiaSharp 3.x Native Raster & PNG Roundtrip", Group = TestGroups.System, Order = 40)]

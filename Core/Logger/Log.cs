@@ -22,6 +22,23 @@ public static class Log
     public static LogLevel MinLevel { get; set; } = LogLevel.Info;
 #endif
 
+#if DEBUG
+    private static volatile bool _consoleOutputEnabled = true;
+
+    /// <summary>
+    /// Зеркалирование логов в консоль (только Debug). Headless-прогон тестов отключает его,
+    /// чтобы вывод раннера не тонул в диагностике; файл лога пишется всегда.
+    /// </summary>
+    public static bool ConsoleOutputEnabled
+    {
+        get => _consoleOutputEnabled;
+        set => _consoleOutputEnabled = value;
+    }
+
+    /// <summary>Полный путь к файлу лога текущего запуска или <c>null</c> до инициализации.</summary>
+    public static string? CurrentLogFile => _processor?.LogFilePath;
+#endif
+
     /// <summary>
     /// Проверка активности уровня. Используется InterpolatedStringHandler-ами
     /// для short-circuit вычисления интерполированных строк.

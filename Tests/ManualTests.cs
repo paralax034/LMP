@@ -58,10 +58,12 @@ public static class ManualTests
     /// <summary>
     /// Разбирает CLI-аргументы, фильтрует тесты через <see cref="TestDiscovery"/> и выполняет их через <see cref="TestRunner"/>.
     /// Возвращает код завершения процесса (<c>0</c> — успех, <c>1</c> — есть упавшие тесты или фильтр пуст).
+    /// Без <c>--verbose</c> логи во время прогона пишутся только в файл, путь к нему печатается в итогах.
     /// </summary>
     public static async Task<int> RunCliAsync(string[] args, CancellationToken ct = default)
     {
         bool listOnly = false;
+        bool verbose = false;
         HashSet<string>? groupFilter = null;
         HashSet<TestCategory>? categoryFilter = null;
         List<string>? nameFilters = null;
@@ -74,6 +76,10 @@ public static class ManualTests
             if (string.Equals(arg, "--test-list", StringComparison.OrdinalIgnoreCase))
             {
                 listOnly = true;
+            }
+            else if (string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase))
+            {
+                verbose = true;
             }
             else if (string.Equals(arg, "--run-cache-tests", StringComparison.OrdinalIgnoreCase))
             {
@@ -143,6 +149,11 @@ public static class ManualTests
             return 1;
         }
 
+        // Диагностика тестируемых подсистем остаётся в файле лога; консоль показывает только ход прогона.
+        // Флаг --verbose возвращает прежнее зеркалирование логов для разбора конкретного сбоя.
+        if (!verbose)
+            Log.ConsoleOutputEnabled = false;
+
         var sw = Stopwatch.StartNew();
 
         Console.WriteLine("\n" + new string('=', 70));
@@ -204,7 +215,8 @@ public static class ManualTests
 
         Console.WriteLine("\n" + new string('=', 70));
         Console.WriteLine($"  RESULTS: {passed} passed, {failed} failed, {skipped} skipped ({sw.Elapsed.TotalSeconds:F1}s)");
-        Console.WriteLine(new string('=', 70) + "\n");
+        Console.WriteLine(new string('=', 70));
+        Console.WriteLine($"  Full log: {Log.CurrentLogFile}\n");
 
         return failed > 0 ? 1 : 0;
     }

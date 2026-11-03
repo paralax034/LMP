@@ -167,37 +167,30 @@ public sealed partial class CachingStreamSource
         /// <inheritdoc/>
         /// <remarks>
         /// Горячий путь: если данные в RAM — синхронное копирование без планировщика.
-        /// Холодный путь: sync-over-async fallback для парсеров, вызывающих <c>Read</c>.
-        /// Синхронный путь сохраняет прежнюю семантику (0 при отмене и ошибке I/O): парсеры Core его не используют.
+        /// Холодный путь: sync-over-async fallback для внешних потребителей <see cref="Stream"/>; парсеры Core его не используют.
+        /// Контракт совпадает с <see cref="ReadAsync(Memory{byte}, CancellationToken)"/>: <c>0</c> означает только конец контента,
+        /// отмена бросает <see cref="OperationCanceledException"/>, утилизация — <see cref="ObjectDisposedException"/>,
+        /// а RAM-хит продвигает позицию через CAS и не затирает конкурентный seek.
         /// </remarks>
         public override int Read(byte[] buffer, int offset, int count)
         {
+            if (IsDisposed)
+                throw CreateDisposedException();
+
             long posBefore = Volatile.Read(ref _position);
             if (posBefore >= _source._contentLength) return 0;
 
-            // Быстрый путь: данные уже в RAM
-            if (_source._ramCache.TryRead(posBefore, buffer.AsMemory(offset, count), out int ramRead))
-            {
-                Volatile.Write(ref _position, posBefore + ramRead);
+            // Быстрый путь: данные уже в RAM; проигранный CAS означает seek, и чтение уходит в медленный путь с новой позиции
+            if (_source._ramCache.TryRead(posBefore, buffer.AsMemory(offset, count), out int ramRead)
+                && Interlocked.CompareExchange(ref _position, posBefore + ramRead, posBefore) == posBefore)
                 return ramRead;
-            }
 
-            // Медленный путь: сетевой запрос через sync-over-async
-            try
-            {
-                return ReadAsyncCore(buffer.AsMemory(offset, count), GetCurrentReadToken())
-                    .AsTask()
-                    .ConfigureAwait(false)
-                    .GetAwaiter()
-                    .GetResult();
-            }
-            catch (OperationCanceledException) { return 0; }
-            catch (ObjectDisposedException) { return 0; }
-            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException or ObjectDisposedException) { return 0; }
-            catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException)
-            {
-                return 0;
-            }
+            // Медленный путь: sync-over-async; отмена, утилизация и ошибки I/O пробрасываются без маскировки под EOF
+            return ReadAsyncCore(buffer.AsMemory(offset, count), GetCurrentReadToken())
+                .AsTask()
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
         }
 
         /// <inheritdoc/>

@@ -13,7 +13,11 @@ public sealed partial class CachingStreamSource
     /// <summary>
     /// Исход одной попытки обновления stream URL.
     /// </summary>
-    private enum RefreshOutcome
+    /// <remarks>
+    /// Вместе с <see cref="RangeRetryAction"/> и <see cref="RefreshDecision"/> открыт сборке тестов:
+    /// закрытые методы refresh вызываются через <c>UnsafeAccessor</c> с типизированной сигнатурой, без рефлексии.
+    /// </remarks>
+    internal enum RefreshOutcome
     {
         /// <summary>Получен и применён новый совместимый URL со свежим сроком или новым n-token.</summary>
         NewUrl,
@@ -36,7 +40,7 @@ public sealed partial class CachingStreamSource
     /// <summary>
     /// Действие с диапазоном после refresh.
     /// </summary>
-    private enum RangeRetryAction
+    internal enum RangeRetryAction
     {
         /// <summary>Повторить запрос сразу с полным набором сетевых попыток.</summary>
         RetryNow,
@@ -53,7 +57,7 @@ public sealed partial class CachingStreamSource
     /// </summary>
     /// <param name="SpendsBudget">Списывает ли попытка единицу единого бюджета.</param>
     /// <param name="Action">Действие с диапазоном.</param>
-    private readonly record struct RefreshDecision(bool SpendsBudget, RangeRetryAction Action);
+    internal readonly record struct RefreshDecision(bool SpendsBudget, RangeRetryAction Action);
 
     /// <summary>
     /// Единая таблица решений refresh. После HTTP 403 бюджет списывает любая попытка, кроме смены внешнего IP;

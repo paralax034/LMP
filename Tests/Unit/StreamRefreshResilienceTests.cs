@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
-using System.Reflection;
 using System.Runtime.ExceptionServices;
 using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Interfaces;
@@ -9,6 +8,9 @@ using LMP.Core.Audio.Sources;
 using LMP.Core.Exceptions;
 using LMP.Core.Youtube.Utils;
 using LMP.Tests.Framework;
+using RangeRetryAction = LMP.Core.Audio.Sources.CachingStreamSource.RangeRetryAction;
+using RefreshDecision = LMP.Core.Audio.Sources.CachingStreamSource.RefreshDecision;
+using RefreshOutcome = LMP.Core.Audio.Sources.CachingStreamSource.RefreshOutcome;
 
 namespace LMP.Tests.Unit;
 
@@ -110,34 +112,29 @@ public static class StreamRefreshResilienceTests
             _ => Task.FromResult(nextUrl),
             contentLength: WebmLength);
 
-        var coordinated = GetPrivateMethod("CoordinatedRefreshAsync");
-        var currentUrlProperty = typeof(CachingStreamSource).GetProperty(
-            "CurrentUrl", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var updateUrlMethod = GetPrivateMethod("UpdateUrl");
-
         // 1. MP4 (itag 140) вместо WebM (itag 251): ровно сценарий порчи partial cache из лога.
         nextUrl = BuildUrl(nowUnix, "mp4Tok", 140, Mp4Length);
-        string outcome = await InvokeOutcomeAsync(source, coordinated, CancellationToken.None).ConfigureAwait(false);
-        TestAssert.Equal("NoUrl", outcome, "Foreign itag must be rejected as NoUrl");
-        TestAssert.Equal(webmUrl, (string)currentUrlProperty.GetValue(source)!, "Current URL must stay on the original variant");
+        var outcome = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+        TestAssert.Equal(RefreshOutcome.NoUrl, outcome, "Foreign itag must be rejected as NoUrl");
+        TestAssert.Equal(webmUrl, source.CurrentUrl, "Current URL must stay on the original variant");
 
         // 2. Тот же itag, но другой clen (например, DRC-версия): байтовые смещения несовместимы.
         nextUrl = BuildUrl(nowUnix, "drcTok", 251, Mp4Length);
-        outcome = await InvokeOutcomeAsync(source, coordinated, CancellationToken.None).ConfigureAwait(false);
-        TestAssert.Equal("NoUrl", outcome, "Same itag with foreign clen must be rejected");
-        TestAssert.Equal(webmUrl, (string)currentUrlProperty.GetValue(source)!, "Current URL must not change on clen mismatch");
+        outcome = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+        TestAssert.Equal(RefreshOutcome.NoUrl, outcome, "Same itag with foreign clen must be rejected");
+        TestAssert.Equal(webmUrl, source.CurrentUrl, "Current URL must not change on clen mismatch");
 
         // 3. Совместимый свежий URL принимается.
         string compatibleUrl = BuildUrl(nowUnix, "okTok", 251, WebmLength);
         nextUrl = compatibleUrl;
-        outcome = await InvokeOutcomeAsync(source, coordinated, CancellationToken.None).ConfigureAwait(false);
-        TestAssert.Equal("NewUrl", outcome, "Compatible URL must be accepted");
-        TestAssert.Equal(compatibleUrl, (string)currentUrlProperty.GetValue(source)!, "Compatible URL must become current");
+        outcome = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+        TestAssert.Equal(RefreshOutcome.NewUrl, outcome, "Compatible URL must be accepted");
+        TestAssert.Equal(compatibleUrl, source.CurrentUrl, "Compatible URL must become current");
 
         // 4. Внешний UpdateUrl (AudioPipeline) защищён тем же guard.
-        bool applied = (bool)updateUrlMethod.Invoke(source, [BuildUrl(nowUnix, "mp4Tok2", 140, Mp4Length)])!;
+        bool applied = source.UpdateUrl(BuildUrl(nowUnix, "mp4Tok2", 140, Mp4Length));
         TestAssert.False(applied, "UpdateUrl must reject a foreign variant");
-        TestAssert.Equal(compatibleUrl, (string)currentUrlProperty.GetValue(source)!, "UpdateUrl rejection must keep current URL");
+        TestAssert.Equal(compatibleUrl, source.CurrentUrl, "UpdateUrl rejection must keep current URL");
     }
 
     [TestMethod(TestCategory.Unit, "CDN 403 Fallback Order Excludes Failed Clients", Group = TestGroups.Network, Order = 33)]
@@ -313,9 +310,6 @@ public static class StreamRefreshResilienceTests
             },
             config: config);
 
-        var coordinated = GetPrivateMethod("CoordinatedRefreshAsync");
-        var waitForConcurrent = GetPrivateMethod("WaitForConcurrentRefreshAsync");
-
         int cancelExceptions = 0;
         void OnFirstChance(object? sender, FirstChanceExceptionEventArgs e)
         {
@@ -328,20 +322,20 @@ public static class StreamRefreshResilienceTests
         try
         {
             // Initiator удерживает _refreshLock, пока refresher не отпущен.
-            var initiatorTask = InvokeOutcomeAsync(source, coordinated, CancellationToken.None);
+            var initiatorTask = CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None);
             await refresherEntered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
             using var waiterCts = new CancellationTokenSource();
-            var waiterTask = InvokeOutcomeAsync(source, waitForConcurrent, waiterCts.Token);
+            var waiterTask = CachingStreamSourceAccessors.WaitForConcurrentRefreshAsync(source, waiterCts.Token);
 
             refresherGate.SetResult(BuildUrl(nowUnix, "freshTok", 251, ContentLength));
-            string initiatorOutcome = await initiatorTask.ConfigureAwait(false);
-            TestAssert.Equal("NewUrl", initiatorOutcome, "Initiator refresh must succeed");
+            var initiatorOutcome = await initiatorTask.ConfigureAwait(false);
+            TestAssert.Equal(RefreshOutcome.NewUrl, initiatorOutcome, "Initiator refresh must succeed");
 
             // Waiter уже получил lock и находится в PostRefreshDelay (1500 мс) — отменяем посередине.
             waiterCts.CancelAfter(300);
 
-            string waiterOutcome;
+            RefreshOutcome waiterOutcome;
             try
             {
                 waiterOutcome = await waiterTask.ConfigureAwait(false);
@@ -352,7 +346,7 @@ public static class StreamRefreshResilienceTests
                 throw new UnreachableException();
             }
 
-            TestAssert.Equal("NoUrl", waiterOutcome, "Cancelled waiter must report NoUrl");
+            TestAssert.Equal(RefreshOutcome.NoUrl, waiterOutcome, "Cancelled waiter must report NoUrl");
         }
         finally
         {
@@ -419,10 +413,10 @@ public static class StreamRefreshResilienceTests
 
         try
         {
-            string outcome = await InvokeOutcomeAsync(source, GetPrivateMethod("EnsureUrlAvailableAsync"), CancellationToken.None)
+            bool urlReady = await CachingStreamSourceAccessors.EnsureUrlAvailableAsync(source, CancellationToken.None)
                 .ConfigureAwait(false);
 
-            TestAssert.Equal("True", outcome, "Compatible acquired URL must make the source URL available");
+            TestAssert.True(urlReady, "Compatible acquired URL must make the source URL available");
             TestAssert.Equal(acquiredUrl, source.CurrentUrl, "Acquired URL must be applied to the source");
             TestAssert.Equal(1, requests.Count, "Single-flight acquire must call the provider exactly once");
             TestAssert.True(requests.TryDequeue(out var acquire), "Provider must receive the acquire request");
@@ -442,31 +436,26 @@ public static class StreamRefreshResilienceTests
     [TestMethod(TestCategory.Unit, "Refresh Decision Table Uses Single Budget", Group = TestGroups.Network, Order = 41)]
     public static Task TestRefreshDecisionTableAsync()
     {
-        var outcomeType = typeof(CachingStreamSource).GetNestedType("RefreshOutcome", BindingFlags.NonPublic)
-            ?? throw new MissingMemberException(nameof(CachingStreamSource), "RefreshOutcome");
-        var decide = typeof(CachingStreamSource).GetMethod("DecideRefresh", BindingFlags.NonPublic | BindingFlags.Static)
-            ?? throw new MissingMethodException(nameof(CachingStreamSource), "DecideRefresh");
-
-        string Decide(string outcome, bool forbiddenDriven) =>
-            decide.Invoke(null, [Enum.Parse(outcomeType, outcome), forbiddenDriven])!.ToString()!;
-
-        static string Expected(bool spendsBudget, string action) =>
-            $"RefreshDecision {{ SpendsBudget = {spendsBudget}, Action = {action} }}";
+        static RefreshDecision Decide(RefreshOutcome outcome, bool forbiddenDriven) =>
+            CachingStreamSourceAccessors.DecideRefresh(null, outcome, forbiddenDriven);
 
         // После HTTP 403 любая попытка, кроме смены внешнего IP, списывает единицу одного общего бюджета.
-        TestAssert.Equal(Expected(true, "RetryNow"), Decide("NewUrl", true),
+        TestAssert.Equal(new RefreshDecision(true, RangeRetryAction.RetryNow), Decide(RefreshOutcome.NewUrl, true),
             "Fresh URL after 403 must spend the budget and retry at once");
-        TestAssert.Equal(Expected(true, "RetryAfterBackoff"), Decide("SameUrl", true),
+        TestAssert.Equal(new RefreshDecision(true, RangeRetryAction.RetryAfterBackoff), Decide(RefreshOutcome.SameUrl, true),
             "Same or stale URL after 403 must spend the budget and back off");
-        TestAssert.Equal(Expected(true, "DeferToNetworkRecovery"), Decide("NoUrl", true),
+        TestAssert.Equal(new RefreshDecision(true, RangeRetryAction.DeferToNetworkRecovery), Decide(RefreshOutcome.NoUrl, true),
             "Missing URL after 403 must spend the budget and defer to network recovery");
-        TestAssert.Equal(Expected(false, "RetryNow"), Decide("EgressChanged", true),
+        TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.RetryNow), Decide(RefreshOutcome.EgressChanged, true),
             "Egress change is not a CDN rejection and must not spend the budget");
 
         // Проактивный TTL-refresh бюджет не трогает.
-        TestAssert.Equal(Expected(false, "RetryNow"), Decide("NewUrl", false), "TTL refresh must not spend the budget");
-        TestAssert.Equal(Expected(false, "RetryAfterBackoff"), Decide("SameUrl", false), "Stale TTL refresh must not spend the budget");
-        TestAssert.Equal(Expected(false, "DeferToNetworkRecovery"), Decide("NoUrl", false), "Failed TTL refresh must not spend the budget");
+        TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.RetryNow), Decide(RefreshOutcome.NewUrl, false),
+            "TTL refresh must not spend the budget");
+        TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.RetryAfterBackoff), Decide(RefreshOutcome.SameUrl, false),
+            "Stale TTL refresh must not spend the budget");
+        TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.DeferToNetworkRecovery), Decide(RefreshOutcome.NoUrl, false),
+            "Failed TTL refresh must not spend the budget");
 
         return Task.CompletedTask;
     }
@@ -483,7 +472,6 @@ public static class StreamRefreshResilienceTests
     /// </summary>
     private static async Task<FatalRun> RunReadAtUntilFatalAsync(CachingStreamSource source, int timeoutMs)
     {
-        var readAt = GetPrivateMethod("ReadAtAsync");
         byte[] buffer = new byte[4096];
         int cancelExceptions = 0;
 
@@ -500,8 +488,7 @@ public static class StreamRefreshResilienceTests
         FlowScope.Value = true;
         try
         {
-            var task = (Task<int>)readAt.Invoke(source, [0L, new Memory<byte>(buffer), cts.Token])!;
-            int read = await task.ConfigureAwait(false);
+            int read = await source.ReadAtAsync(0L, buffer, cts.Token).ConfigureAwait(false);
             TestAssert.Fail($"ReadAtAsync returned {read} bytes from an always-403 CDN instead of escalating");
         }
         catch (ChunkDownloadFatalException ex)
@@ -569,17 +556,6 @@ public static class StreamRefreshResilienceTests
 
     private static string BuildEgressUrl(string ip) =>
         $"https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&ip={ip}&itag=251&c=WEB_REMIX";
-
-    private static MethodInfo GetPrivateMethod(string name) =>
-        typeof(CachingStreamSource).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)
-        ?? throw new MissingMethodException(nameof(CachingStreamSource), name);
-
-    private static async Task<string> InvokeOutcomeAsync(CachingStreamSource source, MethodInfo method, CancellationToken ct)
-    {
-        var task = (Task)method.Invoke(source, [ct])!;
-        await task.ConfigureAwait(false);
-        return task.GetType().GetProperty("Result")!.GetValue(task)!.ToString()!;
-    }
 
     /// <summary>
     /// HTTP-обработчик, отвечающий 403 Forbidden на любой запрос (модель CDN, отвергающего все URL).

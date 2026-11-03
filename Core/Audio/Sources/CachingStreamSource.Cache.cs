@@ -250,6 +250,38 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
+        /// Возвращает свободный от блоков промежуток вокруг <paramref name="position"/>:
+        /// от конца ближайшего блока слева до начала ближайшего блока справа.
+        /// </summary>
+        /// <param name="position">Позиция, для которой ищется промежуток.</param>
+        /// <param name="freeStart">Конец ближайшего блока слева; <c>0</c>, если его нет.</param>
+        /// <param name="freeEndExclusive">Начало ближайшего блока справа; <see cref="long.MaxValue"/>, если его нет.</param>
+        /// <returns><c>false</c>, если позиция уже покрыта блоком.</returns>
+        public bool TryGetFreeWindow(long position, out long freeStart, out long freeEndExclusive)
+        {
+            freeStart = 0;
+            freeEndExclusive = long.MaxValue;
+            lock (_lock)
+            {
+                for (int i = 0; i < _blocks.Count; i++)
+                {
+                    var current = _blocks[i];
+                    if (current.StartOffset > position)
+                    {
+                        freeEndExclusive = current.StartOffset;
+                        return true;
+                    }
+
+                    if (position < current.EndOffsetExclusive)
+                        return false;
+
+                    freeStart = current.EndOffsetExclusive;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
         /// Удаляет блок, содержащий <paramref name="position"/>, и возвращает его.
         /// </summary>
         /// <param name="position">Позиция внутри искомого блока.</param>

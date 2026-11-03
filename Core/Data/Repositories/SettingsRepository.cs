@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using MemoryPack;
@@ -7,13 +8,14 @@ namespace LMP.Core.Data.Repositories;
 /// <summary>
 /// Репозиторий настроек на базе SQLite.
 /// Реализован на прямом ADO.NET для полной совместимости с Native AOT без использования LINQ-деревьев.
+/// JSON идёт только через метаданные <see cref="AppJsonContext"/>, поэтому Debug и Release ведут себя одинаково.
 /// </summary>
 public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISettingsRepository
 {
     private readonly ISqliteConnectionFactory _factory = factory;
 
     /// <inheritdoc />
-    public async Task<T?> GetAsync<T>(
+    public async Task<T?> GetAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] T>(
         string key,
         CancellationToken ct = default) where T : class
     {
@@ -95,7 +97,7 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
     }
 
     /// <inheritdoc />
-    public async Task<T> GetOrDefaultAsync<T>(
+    public async Task<T> GetOrDefaultAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] T>(
         string key,
         T defaultValue,
         CancellationToken ct = default) where T : class
@@ -177,26 +179,21 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
 
     #region Serialization Helpers
 
-    private static string SerializeJson<T>(T value)
-    {
-        if (AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
-        {
-            return JsonSerializer.Serialize(value, jsonTypeInfo);
-        }
+    // Тип без [JsonSerializable] в AppJsonContext — ошибка регистрации, а не повод молча уйти в рефлексию:
+    // в Release рефлексивный путь отключён, и Debug обязан падать так же.
+    private static JsonTypeInfo<T> ResolveTypeInfo<T>() =>
+        AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) as JsonTypeInfo<T>
+        ?? throw new NotSupportedException(
+            $"Type '{typeof(T).FullName}' is not registered in AppJsonContext. Add [JsonSerializable(typeof({typeof(T).Name}))].");
 
-        return JsonSerializer.Serialize(value);
-    }
+    private static string SerializeJson<T>(T value) =>
+        JsonSerializer.Serialize(value, ResolveTypeInfo<T>());
 
     private static T? DeserializeJson<T>(string json) where T : class
     {
         try
         {
-            if (AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
-            {
-                return JsonSerializer.Deserialize(json, jsonTypeInfo);
-            }
-
-            return JsonSerializer.Deserialize<T>(json);
+            return JsonSerializer.Deserialize(json, ResolveTypeInfo<T>());
         }
         catch (Exception ex)
         {
@@ -209,12 +206,7 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
     {
         try
         {
-            if (AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) is JsonTypeInfo<T> jsonTypeInfo)
-            {
-                return JsonSerializer.Deserialize(bytes, jsonTypeInfo);
-            }
-
-            return JsonSerializer.Deserialize<T>(bytes);
+            return JsonSerializer.Deserialize(bytes, ResolveTypeInfo<T>());
         }
         catch
         {

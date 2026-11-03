@@ -29,6 +29,24 @@ public sealed partial class CachingStreamSource
         return remainder == 0 ? value : value + (alignment - remainder);
     }
 
+    /// <summary>
+    /// Возвращает длину запроса от <paramref name="planStart"/>, которая покрывает весь диапазон
+    /// <c>[requestedPosition, requestedPosition + minimumLength)</c> даже при невыровненной позиции, но не выходит за конец контента.
+    /// </summary>
+    /// <param name="requestedPosition">Позиция, с которой читатель ждёт данные.</param>
+    /// <param name="minimumLength">Минимум байт, необходимый читателю от <paramref name="requestedPosition"/>.</param>
+    /// <param name="planStart">Выровненное начало планируемого запроса.</param>
+    /// <param name="contentLength">Полная длина контента.</param>
+    /// <returns>Длина в байтах; <c>0</c>, если <paramref name="planStart"/> лежит за концом контента.</returns>
+    internal static int ComputeCriticalSpan(long requestedPosition, int minimumLength, long planStart, long contentLength)
+    {
+        long available = contentLength - planStart;
+        if (available <= 0) return 0;
+
+        long required = Math.Max(minimumLength, requestedPosition + minimumLength - planStart);
+        return (int)Math.Min(required, available);
+    }
+
     // --- Buffer Queries ---
 
     /// <summary>
@@ -230,7 +248,9 @@ public sealed partial class CachingStreamSource
                 start = adjustedStart;
         }
 
-        int minLengthAligned = AlignUp(Math.Max(minimumLength, _config.MinRequestSizeBytes), _requestAlignmentBytes);
+        // Невыровненная позиция: план от AlignDown(position) обязан покрыть и голову, иначе хвост окна уйдёт во второй критический GET
+        int requiredSpan = ComputeCriticalSpan(requestedPosition, minimumLength, start, _contentLength);
+        int minLengthAligned = AlignUp(Math.Max(requiredSpan, _config.MinRequestSizeBytes), _requestAlignmentBytes);
 
         long currentPosition = Volatile.Read(ref _currentReadOffset);
         if (currentPosition < 0 || currentPosition >= _contentLength)
@@ -338,8 +358,8 @@ public sealed partial class CachingStreamSource
         if (remaining <= 0) return new DownloadPlan(start, 0);
 
         if (selectedBytes > remaining) selectedBytes = remaining;
-        if (selectedBytes < minimumLength)
-            selectedBytes = Math.Min(AlignUp(minimumLength, _requestAlignmentBytes), remaining);
+        if (selectedBytes < requiredSpan)
+            selectedBytes = Math.Min(AlignUp(requiredSpan, _requestAlignmentBytes), remaining);
 
         int plannedLength = (int)selectedBytes;
 

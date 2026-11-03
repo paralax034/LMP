@@ -14,7 +14,7 @@
         "**/bin/": true,
         "**/obj/": true,
         "publish/": true,
-        "publish-dev/": true,
+        "publish-*/": true,
         "**/.git": true,
         "**/.svn": true,
         "**/.hg": true,

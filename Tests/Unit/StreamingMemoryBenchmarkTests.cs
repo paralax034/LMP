@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using LMP.Core.Youtube;
 using LMP.Core.Youtube.Bridge.Common;
@@ -14,6 +14,18 @@ namespace LMP.Tests.Unit;
 /// </summary>
 public static class StreamingMemoryBenchmarkTests
 {
+  /// <summary>
+  /// P/Invoke <c>SetProcessWorkingSetSize</c> из MemoryHelpers без рефлексии: связывание идёт только с сигнатурой
+  /// <c>(nint, nint, nint) -> bool</c>, поэтому возврат к 32-битным параметрам даёт <see cref="MissingMethodException"/>.
+  /// Первый параметр задаёт статический тип-владелец и всегда <c>null</c>.
+  /// </summary>
+  [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "_SetProcessWorkingSetSize")]
+  private static extern bool SetProcessWorkingSetSize(
+      [UnsafeAccessorType("LMP.Core.Helpers.MemoryHelpers, LMP.Core")] object? owner,
+      nint process,
+      nint minimumWorkingSetSize,
+      nint maximumWorkingSetSize);
+
   [TestMethod(TestCategory.Benchmark, "YTM 600-Track Parser Throughput & LOH Invariance", Group = TestGroups.Youtube, Order = 1)]
   public static async Task BenchmarkYtmStreaming600TracksAsync()
   {
@@ -69,16 +81,12 @@ public static class StreamingMemoryBenchmarkTests
   [TestMethod(TestCategory.Benchmark, "PlayerContext ReleaseRawScripts & Post-AST Heap Compaction", Group = TestGroups.Cipher, Order = 3)]
   public static Task BenchmarkAstAndLohCompactionAsync()
   {
-    // 1. Проверяем корректность 64-битной сигнатуры P/Invoke в MemoryHelpers
-    var pinvokeMethod = typeof(MemoryHelpers).GetMethod(
-        "_SetProcessWorkingSetSize",
-        BindingFlags.NonPublic | BindingFlags.Static);
-    TestAssert.NotNull(pinvokeMethod);
-
-    var parameters = pinvokeMethod.GetParameters();
-    TestAssert.Equal(3, parameters.Length);
-    TestAssert.Equal(typeof(nint), parameters[1].ParameterType);
-    TestAssert.Equal(typeof(nint), parameters[2].ParameterType);
+    // 1. Проверяем 64-битную сигнатуру P/Invoke в MemoryHelpers. Нулевой хэндл недопустим: вызов доходит до kernel32
+    //    и возвращает false, не трогая Working Set процесса перед замером.
+    if (OperatingSystem.IsWindows())
+      TestAssert.False(
+          SetProcessWorkingSetSize(null, nint.Zero, -1, -1),
+          "SetProcessWorkingSetSize must reject a null process handle");
 
     // 2. Замеряем baseline закоммиченной памяти до тяжелой фазы
     MemoryHelpers.CompactManagedHeapNow();

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.CompilerServices;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
@@ -9,39 +10,37 @@ namespace LMP.Tests.Unit;
 /// </summary>
 public static class NetworkLogicTests
 {
+    // Статический доступ к приватным методам без рефлексии: связывание идёт на этапе JIT/AOT, триммер видит обе ссылки
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "IsSpecialTunIpRange")]
+    private static extern bool IsSpecialTunIpRange(NetworkManager? owner, IPAddress ip);
+
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "ContainsVpnKeyword")]
+    private static extern bool ContainsVpnKeyword(NetworkManager? owner, string? text);
+
     [TestMethod(TestCategory.Unit, "NetworkManager Route Evaluation & Tun Parsing (0 Alloc)", Group = TestGroups.Network, Order = 1)]
     public static Task TestNetworkManagerLogicZeroAllocAsync()
     {
-        var isSpecialTunMethod = typeof(NetworkManager).GetMethod(
-            "IsSpecialTunIpRange",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
-            ?? throw new InvalidOperationException("IsSpecialTunIpRange not found");
-
-        var containsVpnMethod = typeof(NetworkManager).GetMethod(
-            "ContainsVpnKeyword",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
-            ?? throw new InvalidOperationException("ContainsVpnKeyword not found");
-
-        var isSpecialTunDel = (Func<IPAddress, bool>)Delegate.CreateDelegate(
-            typeof(Func<IPAddress, bool>), isSpecialTunMethod);
-        var containsVpnDel = (Func<string?, bool>)Delegate.CreateDelegate(
-            typeof(Func<string?, bool>), containsVpnMethod);
-
         var tunIp = IPAddress.Parse("198.18.0.1");
         var lanIp = IPAddress.Parse("192.168.1.100");
 
-        TestAssert.True(isSpecialTunDel(tunIp), "198.18.0.1 must be recognized as TUN IP");
-        TestAssert.False(isSpecialTunDel(lanIp), "192.168.1.100 must not be recognized as TUN IP");
+        TestAssert.True(IsSpecialTunIpRange(null, tunIp), "198.18.0.1 must be recognized as TUN IP");
+        TestAssert.False(IsSpecialTunIpRange(null, lanIp), "192.168.1.100 must not be recognized as TUN IP");
 
-        TestAssert.True(containsVpnDel("Mihomo Virtual TUN Adapter"), "Failed to match VPN adapter");
-        TestAssert.False(containsVpnDel("Realtek PCIe GbE Family Controller"), "False-positive VPN match");
+        TestAssert.True(ContainsVpnKeyword(null, "Mihomo Virtual TUN Adapter"), "Failed to match VPN adapter");
+        TestAssert.False(ContainsVpnKeyword(null, "Realtek PCIe GbE Family Controller"), "False-positive VPN match");
+
+        // Границы слова в IsTunOrTapIdentifier: отдельные tun/tap и utunN — туннели, «Tun» внутри слова — нет
+        TestAssert.True(ContainsVpnKeyword(null, "utun3"), "macOS-style utunN must be recognized as TUN");
+        TestAssert.True(ContainsVpnKeyword(null, "TAP-Windows Adapter V9"), "Standalone TAP token must be recognized");
+        TestAssert.False(ContainsVpnKeyword(null, "Hauppauge TV Tuner"), "'Tun' inside a word must not match");
+        TestAssert.False(ContainsVpnKeyword(null, null), "Null description must not match");
 
         // Проверка отсутствия аллокаций
         TestAssert.ZeroAlloc(() =>
         {
-            _ = isSpecialTunDel(tunIp);
-            _ = isSpecialTunDel(lanIp);
-            _ = containsVpnDel("sing-box Virtual TUN");
+            _ = IsSpecialTunIpRange(null, tunIp);
+            _ = IsSpecialTunIpRange(null, lanIp);
+            _ = ContainsVpnKeyword(null, "sing-box Virtual TUN");
         }, warmup: 5, iterations: 1000);
 
         return Task.CompletedTask;

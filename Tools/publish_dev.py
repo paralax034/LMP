@@ -95,6 +95,7 @@ def run_cmd(cmd: list, cwd: Path, error_msg: str):
 def main():
     skip_build = "--skip-build" in sys.argv
     release_only = "--release-only" in sys.argv
+    skip_tests = "--skip-tests" in sys.argv
     retention_count = 10
 
     for arg in sys.argv:
@@ -131,7 +132,6 @@ def main():
     full_version = f"{commit_count}-{short_hash}"
     history_tag = f"dev-{commit_count}"
     latest_tag = "dev"
-    source_env = "CI Runner" if os.getenv("GITHUB_ACTIONS") else "Local Workstation"
 
     print_banner(
         f"LMP Dev Deployment Pipeline: v{full_version}",
@@ -139,21 +139,28 @@ def main():
             "Snapshot Tag": history_tag,
             "Floating Tag": latest_tag,
             "Release Only": release_only,
-            "Skip Build": skip_build
+            "Skip Build": skip_build,
+            "Skip Tests": skip_tests
         }
     )
 
     build_script = root / "build.py"
     if not skip_build:
         if not release_only:
-            print(f"{Color.YELLOW}>>> Compiling Debug configuration...{Color.RESET}")
-            run_cmd([sys.executable, str(build_script), "debug", "nopause"], root, "Debug compilation failed")
+            # Debug-канал публикуется как Native AOT: тестеры получают тот же рантайм, что и в Release, плюс консоль логов и тест-раннер.
+            print(f"{Color.YELLOW}>>> Compiling Debug (Native AOT publish)...{Color.RESET}")
+            run_cmd([sys.executable, str(build_script), "aot-debug", "nopause"], root, "Debug Native AOT publish failed")
+
+            # Гейт качества до Release-публикации: Unit-тесты прогоняются на уже собранном AOT-бинарнике без пересборки.
+            if not skip_tests:
+                print(f"{Color.YELLOW}>>> Running Unit tests under Native AOT...{Color.RESET}")
+                run_cmd([sys.executable, str(build_script), "aot-test", "--category=Unit", "run", "nobuild", "nopause"], root, "Native AOT unit tests failed")
 
         print(f"{Color.YELLOW}>>> Compiling Release (Native AOT publish)...{Color.RESET}")
         run_cmd([sys.executable, str(build_script), "publish", "nopause"], root, "Native AOT publish failed")
 
     publish_dir = root / "publish"
-    debug_dir = root / "bin" / "Debug" / "net11.0"
+    debug_dir = root / "publish-aot-debug"
 
     versioned_release_7z = artifacts_dir / f"LMP-Release-v{full_version}.7z"
     print(f"{Color.YELLOW}>>> Packing Release package (LZMA2 Ultra, 64MB dict)...{Color.RESET}")
@@ -168,7 +175,8 @@ def main():
 
     if not release_only and debug_dir.exists():
         print(f"{Color.YELLOW}>>> Packing Debug package (LZMA2 Fast, 16MB dict)...{Color.RESET}")
-        run_cmd([seven_zip, "a", "-t7z", "-m0=lzma2", "-mx=5", "-md=16m", "-ms=on", "-mmt=8", str(versioned_debug_7z), f"{debug_dir}/*"], root, "Debug archiving failed")
+        # Нативный PDB AOT-бинарника весит сотни мегабайт и нужен только для разбора дампов, поэтому остаётся локально в publish-aot-debug.
+        run_cmd([seven_zip, "a", "-t7z", "-m0=lzma2", "-mx=5", "-md=16m", "-ms=on", "-mmt=8", "-xr!*.pdb", str(versioned_debug_7z), f"{debug_dir}/*"], root, "Debug archiving failed")
         versioned_files.append(str(versioned_debug_7z))
 
     latest_release_7z = artifacts_dir / "LMP-Release-latest.7z"
@@ -191,8 +199,7 @@ def main():
         f"| Architecture | Native AOT (win-x64) |\n"
         f"| Tag | `{history_tag}` |\n"
         f"| Commit | `{short_hash}` |\n"
-        f"| Total Commits | {commit_count} |\n"
-        f"| Environment | {source_env} |\n\n"
+        f"| Total Commits | {commit_count} |\n\n"
         f"Latest rolling release is permanently accessible at [`{latest_tag}`](https://github.com/{repo_slug}/releases/tag/{latest_tag}).\n"
     )
 
@@ -204,12 +211,11 @@ def main():
         f"| Architecture | Native AOT (win-x64) |\n"
         f"| Commit Number | `{commit_count}` |\n"
         f"| Snapshot Tag | [`{history_tag}`](https://github.com/{repo_slug}/releases/tag/{history_tag}) |\n"
-        f"| Environment | {source_env} |\n"
         f"| Updated At | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} |\n\n"
         f"### 📥 Permanent Download Links:\n"
         f"- **[Download LMP-Release-latest.zip](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Release-latest.zip)** — Native In-App Updater Package (Fast Extraction)\n"
         f"- **[Download LMP-Release-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Release-latest.7z)** — Native AOT Standalone (Maximum LZMA2 Compression)\n"
-        f"- **[Download LMP-Debug-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Debug-latest.7z)** — Debug build with logging console\n"
+        f"- **[Download LMP-Debug-latest.7z](https://github.com/{repo_slug}/releases/download/{latest_tag}/LMP-Debug-latest.7z)** — Debug build (Native AOT) with logging console and test runner\n"
     )
 
     print(f"{Color.GREEN}>>> Publishing snapshot release '{history_tag}'...{Color.RESET}")

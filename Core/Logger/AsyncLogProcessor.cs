@@ -64,6 +64,11 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
         ).Unwrap();
     }
 
+#if DEBUG
+    /// <summary>Полный путь к файлу лога текущего запуска.</summary>
+    public string LogFilePath => _currentLogFile;
+#endif
+
     /// <summary>
     /// Добавляет сообщение в очередь. Неблокирующий вызов.
     /// При переполнении очереди старые сообщения отбрасываются.
@@ -111,8 +116,11 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
                         FormatLog(sb, log);
 
 #if DEBUG
-                        // В Debug выводим в консоль с цветами
-                        WriteToConsole(log, sb.ToString());
+                        // В Debug выводим в консоль с цветами, если зеркалирование не отключено headless-раннером тестов
+                        if (Log.ConsoleOutputEnabled)
+                        {
+                            WriteToConsole(log, sb.ToString());
+                        }
 #endif
                         // Запись StringBuilder напрямую в StreamWriter без промежуточной аллокации ToString()
                         await sw.WriteAsync(sb).ConfigureAwait(false);
@@ -138,7 +146,10 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
             sb.Clear();
             FormatLog(sb, msg);
 #if DEBUG
-            WriteToConsole(msg, sb.ToString());
+            if (Log.ConsoleOutputEnabled)
+            {
+                WriteToConsole(msg, sb.ToString());
+            }
 #endif
             await sw.WriteAsync(sb).ConfigureAwait(false);
         }

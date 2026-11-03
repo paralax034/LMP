@@ -95,17 +95,31 @@ public static class UpdateTests
     [TestMethod(TestCategory.Unit, "Prune Pending .old Update Binaries", Group = TestGroups.System, Order = 4)]
     public static Task TestCleanupPassAsync()
     {
-        string dummyOldFile = Path.Combine(AppContext.BaseDirectory, $"temp_test_{Guid.NewGuid():N}.old");
-        File.WriteAllText(dummyOldFile, "cleanup-test-payload");
+        // Изолированная песочница: ни каталог exe, ни реальный %LOCALAPPDATA%/LMP/Update не затрагиваются.
+        string root = Path.Combine(Path.GetTempPath(), $"LMP_UpdateCleanupTest_{Guid.NewGuid():N}");
+        string baseDir = Path.Combine(root, "app");
+        string updateDir = Path.Combine(root, "Update");
 
-        TestAssert.True(File.Exists(dummyOldFile), "Failed to prepare test old file");
-
-        UpdateService.CleanupPendingOldFiles();
-
-        if (File.Exists(dummyOldFile))
+        try
         {
-            try { File.Delete(dummyOldFile); } catch { }
-            TestAssert.Fail("CleanupPendingOldFiles failed to prune the old file");
+            Directory.CreateDirectory(baseDir);
+            Directory.CreateDirectory(updateDir);
+
+            string oldFile = Path.Combine(baseDir, "LMP.exe.old");
+            string liveFile = Path.Combine(baseDir, "LMP.exe");
+            File.WriteAllText(oldFile, "cleanup-test-payload");
+            File.WriteAllText(liveFile, "live-binary");
+            File.WriteAllText(Path.Combine(updateDir, "payload.zip"), "staged-update");
+
+            UpdateService.CleanupPendingOldFiles(baseDir, updateDir);
+
+            TestAssert.False(File.Exists(oldFile), "CleanupPendingOldFiles failed to prune the old file");
+            TestAssert.True(File.Exists(liveFile), "CleanupPendingOldFiles must not touch live binaries");
+            TestAssert.False(Directory.Exists(updateDir), "CleanupPendingOldFiles must prune the update staging directory");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
         }
 
         return Task.CompletedTask;

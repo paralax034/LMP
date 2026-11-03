@@ -81,6 +81,16 @@ public sealed class TruePeakLimiter
     }
 
     /// <summary>
+    /// Множитель, который мягко вписывает пик кадра под <see cref="Ceiling"/> той же C2-кривой, что и сам лимитер.
+    /// При пике не выше <see cref="KneeStart"/> возвращает ровно 1: сигнал, не дошедший до колена, проходит бит-в-бит.
+    /// Нужен узлам после лимитера, которые сами порождают межотсчётные пики (ресемплер WASAPI).
+    /// </summary>
+    /// <param name="peak">Модуль наибольшего отсчёта кадра по всем каналам.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float SoftCeilingScale(float peak)
+        => peak > KneeStart ? SoftCeilingPositive(peak) / peak : 1.0f;
+
+    /// <summary>
     /// Обрабатывает interleaved PCM буфер in-place (Zero-Latency, 100% сохранение стерео-баланса L/R и фазы при Seek).
     /// </summary>
     /// <param name="samples">Interleaved PCM сэмплы (in-place обработка).</param>

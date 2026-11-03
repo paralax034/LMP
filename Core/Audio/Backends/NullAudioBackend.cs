@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Interfaces;
 
 namespace LMP.Core.Audio.Backends;
@@ -23,6 +25,13 @@ public sealed class NullAudioBackend : IPlaybackBackend
     private Task? _consumeTask;
     private CancellationTokenSource? _cts;
 
+    /// <summary>
+    /// Сериализует вызов callback и публикацию часов: у <see cref="RenderClock"/> допускается только один писатель.
+    /// </summary>
+    private readonly Lock _pullLock = new();
+    private readonly RenderClock _renderClock = new();
+    private long _renderedSamples;
+
     #endregion
 
     #region Properties
@@ -45,6 +54,13 @@ public sealed class NullAudioBackend : IPlaybackBackend
     /// <inheritdoc/>
     /// <remarks>NullBackend никогда не теряет устройство — всегда <c>false</c>.</remarks>
     public bool IsDeviceLost => false;
+
+    /// <inheritdoc/>
+    /// <remarks>У NullBackend нет очереди устройства: сэмпл считается воспроизведённым в момент выдачи callback'ом.</remarks>
+    public long RenderedSamples => Volatile.Read(ref _renderedSamples);
+
+    /// <inheritdoc/>
+    public RenderClockSnapshot ReadRenderClock() => _renderClock.Read();
 
     #endregion
 
@@ -118,9 +134,28 @@ public sealed class NullAudioBackend : IPlaybackBackend
 
         while (!ct.IsCancellationRequested && _playing)
         {
-            _callback?.Invoke(buffer);
+            ConsumeTick(buffer, samplesPerSecond);
             if (!await ct.DelayNoThrowAsync(delayMs, continueOnCapturedContext: false).ConfigureAwait(false))
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Забирает один блок у callback и публикует часы рендера под <see cref="_pullLock"/>.
+    /// </summary>
+    private void ConsumeTick(float[] buffer, int samplesPerSecond)
+    {
+        lock (_pullLock)
+        {
+            int frames = _callback?.Invoke(buffer) ?? 0;
+            long rendered = _renderedSamples;
+            if (frames > 0)
+            {
+                rendered += (long)frames * Math.Max(1, _channels);
+                Volatile.Write(ref _renderedSamples, rendered);
+            }
+
+            _renderClock.Publish(rendered, 0, Stopwatch.GetTimestamp(), samplesPerSecond);
         }
     }
 

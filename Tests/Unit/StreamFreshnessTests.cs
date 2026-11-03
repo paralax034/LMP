@@ -2,6 +2,7 @@ using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Sources;
 using LMP.Tests.Framework;
+using RefreshOutcome = LMP.Core.Audio.Sources.CachingStreamSource.RefreshOutcome;
 
 namespace LMP.Tests.Unit;
 
@@ -164,14 +165,10 @@ public static class StreamFreshnessTests
             });
 
         // Вызываем LogAndDiagnose403Async для проверки немедленной инвалидации SessionCacheStore
-        var diagMethod = typeof(CachingStreamSource).GetMethod(
-            "LogAndDiagnose403Async",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-
         using (var req = new HttpRequestMessage(HttpMethod.Get, initialUrl))
         using (var resp = new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden) { Content = new StringContent("") })
         {
-            await ((Task)diagMethod.Invoke(source, [0, req, resp])!).ConfigureAwait(false);
+            await CachingStreamSourceAccessors.LogAndDiagnose403Async(source, 0, req, resp).ConfigureAwait(false);
         }
 
         TestAssert.Null(
@@ -179,34 +176,27 @@ public static class StreamFreshnessTests
             "HTTP 403 must immediately invalidate SessionCacheStore entry so Partial Cache Fast Start never reuses dead URL");
 
         // 2. Проактивный refresh (HTTP 403 не было) при обрыве интернета: поставщик вернул null -> NoUrl, бюджет не расходуется
-        var coordinatedRefreshMethod = typeof(CachingStreamSource).GetMethod(
-            "CoordinatedRefreshAsync",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-
         for (int i = 0; i < 5; i++)
         {
-            var outcomeNoUrl = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
-            TestAssert.Equal("NoUrl", outcomeNoUrl, "Null provider result must yield NoUrl (transient network outage)");
+            var outcomeNoUrl = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+            TestAssert.Equal(RefreshOutcome.NoUrl, outcomeNoUrl, "Null provider result must yield NoUrl (transient network outage)");
         }
 
         // 3. После HTTP 403 устаревший URL (прежний n-token, истёкший expire) -> SameUrl списывает единый бюджет;
         //    после исчерпания (3 = CachingStreamSource.MaxForbiddenRefreshBudget) refresh эскалирует в Forbidden403.
-        var pendingForbiddenField = typeof(CachingStreamSource).GetField(
-            "_consecutive403Count",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        pendingForbiddenField.SetValue(source, 1);
+        Volatile.Write(ref CachingStreamSourceAccessors.Consecutive403Count(source), 1);
 
         mode = 1;
         for (int i = 0; i < 3; i++)
         {
-            var outcomeSame = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
-            TestAssert.Equal("SameUrl", outcomeSame, $"Expected SameUrl on iteration {i + 1}");
+            var outcomeSame = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+            TestAssert.Equal(RefreshOutcome.SameUrl, outcomeSame, $"Expected SameUrl on iteration {i + 1}");
         }
 
         Core.Exceptions.ChunkDownloadFatalException? fatal = null;
         try
         {
-            _ = await InvokeCoordinatedRefreshAsync(source, coordinatedRefreshMethod).ConfigureAwait(false);
+            _ = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Core.Exceptions.ChunkDownloadFatalException ex) when (ex.Reason == Core.Exceptions.ChunkDownloadFailureReason.Forbidden403)
         {
@@ -245,16 +235,6 @@ public static class StreamFreshnessTests
 
         TestAssert.Equal(0, Volatile.Read(ref providerCalls),
             "Resume freshness check must not issue a TTL refresh while the source has no URL yet");
-    }
-
-    private static async Task<string> InvokeCoordinatedRefreshAsync(
-        CachingStreamSource source,
-        System.Reflection.MethodInfo method)
-    {
-        var task = (Task)method.Invoke(source, [CancellationToken.None])!;
-        await task.ConfigureAwait(false);
-        var resultProp = task.GetType().GetProperty("Result")!;
-        return resultProp.GetValue(task)!.ToString()!;
     }
 
     private sealed class TempCacheManager : IDisposable

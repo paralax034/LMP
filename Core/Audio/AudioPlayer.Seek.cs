@@ -163,7 +163,6 @@ public sealed partial class AudioPlayer
             SetState(PlayerState.Buffering);
 
         StopPositionTimer();
-        _lastRawPlayedSamples = -1;
 
         pipeline.Source.SetPlaybackActive(false);
 
@@ -500,7 +499,8 @@ public sealed partial class AudioPlayer
 
                     if (seekThreshold > 0 && ringBufferSamples == 0)
                     {
-                        await Task.Delay(100, ct).ConfigureAwait(false);
+                        if (!await ct.DelayNoThrowAsync(100, continueOnCapturedContext: false).ConfigureAwait(false))
+                            return;
                         continue;
                     }
 
@@ -545,7 +545,8 @@ public sealed partial class AudioPlayer
                     return;
                 }
 
-                await Task.Delay(100, ct).ConfigureAwait(false);
+                if (!await ct.DelayNoThrowAsync(100, continueOnCapturedContext: false).ConfigureAwait(false))
+                    return;
             }
         }
         catch (OperationCanceledException)

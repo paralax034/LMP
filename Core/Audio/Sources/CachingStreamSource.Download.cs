@@ -252,6 +252,8 @@ public sealed partial class CachingStreamSource
 
     /// <summary>
     /// Пытается загрузить диапазон из дискового кэша в RAM и прочитать данные из него.
+    /// Окно чтения ограничено свободным промежутком между соседними RAM-блоками: блок гарантированно
+    /// коммитится в RAM, и следующий промах по соседней позиции не уходит на диск повторно.
     /// </summary>
     /// <param name="position">Абсолютная позиция начала чтения.</param>
     /// <param name="minimumLength">Минимально необходимый объём данных.</param>
@@ -265,36 +267,82 @@ public sealed partial class CachingStreamSource
         if (!_cacheEntry.TryGetContainingRange(position, out long rangeStart, out long rangeEndExclusive))
             return 0;
 
-        long loadStart = AlignDown(position, _requestAlignmentBytes);
-        if (loadStart < rangeStart) loadStart = rangeStart;
+        // Параллельная загрузка уже закоммитила позицию в RAM: диск не нужен.
+        if (!_ramCache.TryGetFreeWindow(position, out long freeStart, out long freeEndExclusive))
+            return _ramCache.TryRead(position, target, out int ramRead) ? ramRead : 0;
 
         int desiredLength = AlignUp(Math.Max(minimumLength, _config.MinRequestSizeBytes), _requestAlignmentBytes);
-        long available = rangeEndExclusive - loadStart;
-        if (available <= 0) return 0;
-        if (desiredLength > available) desiredLength = (int)available;
+        if (!TryComputeDiskLoadWindow(
+                position, desiredLength, _requestAlignmentBytes,
+                rangeStart, rangeEndExclusive, freeStart, freeEndExclusive,
+                out long loadStart, out int loadLength))
+            return 0;
 
-        var diskResult = await _cacheManager
-            .ReadRangeAsync(_cacheKey, loadStart, desiredLength, ct)
-            .ConfigureAwait(false);
-
-        if (!diskResult.HasValue) return 0;
-
-        var (owner, length) = diskResult.Value;
-        byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(length);
+        byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(loadLength);
+        RamRangeBlock? block = null;
         try
         {
-            owner.Memory.Span[..length].CopyTo(rentedBuffer.AsSpan(0, length));
+            int length = await _cacheManager
+                .ReadRangeIntoAsync(_cacheKey, loadStart, rentedBuffer.AsMemory(0, loadLength), ct)
+                .ConfigureAwait(false);
+
+            if (length > 0)
+                block = new RamRangeBlock(loadStart, rentedBuffer, length);
         }
         finally
         {
-            owner.Dispose();
+            // Буфер переходит во владение блока только при успешном чтении.
+            if (block == null)
+                ArrayPool<byte>.Shared.Return(rentedBuffer);
         }
 
-        var block = new RamRangeBlock(loadStart, rentedBuffer, length);
+        if (block == null) return 0;
+
         int copied = CopyFromBlock(block.Memory.Span, (int)(position - loadStart), target);
 
         if (!_ramCache.TryAdd(block)) block.Dispose();
         return copied;
+    }
+
+    /// <summary>
+    /// Вычисляет окно чтения с диска для RAM-промаха: начало выравнивается вниз, затем окно
+    /// ограничивается дисковым диапазоном и свободным промежутком между соседними RAM-блоками.
+    /// </summary>
+    /// <param name="position">Позиция промаха.</param>
+    /// <param name="desiredLength">Желаемая выровненная длина окна.</param>
+    /// <param name="alignment">Размер выравнивания запросов (байт).</param>
+    /// <param name="rangeStart">Начало дискового диапазона, содержащего позицию.</param>
+    /// <param name="rangeEndExclusive">Исключительная граница дискового диапазона.</param>
+    /// <param name="freeStart">Конец ближайшего RAM-блока слева.</param>
+    /// <param name="freeEndExclusive">Начало ближайшего RAM-блока справа.</param>
+    /// <param name="loadStart">Начало окна.</param>
+    /// <param name="loadLength">Длина окна.</param>
+    /// <returns><c>false</c>, если окно не содержит <paramref name="position"/>.</returns>
+    internal static bool TryComputeDiskLoadWindow(
+        long position,
+        int desiredLength,
+        int alignment,
+        long rangeStart,
+        long rangeEndExclusive,
+        long freeStart,
+        long freeEndExclusive,
+        out long loadStart,
+        out int loadLength)
+    {
+        loadStart = AlignDown(position, alignment);
+        if (loadStart < rangeStart) loadStart = rangeStart;
+        if (loadStart < freeStart) loadStart = freeStart;
+
+        long loadEnd = Math.Min(rangeEndExclusive, freeEndExclusive);
+        long available = loadEnd - loadStart;
+        if (available <= 0 || position < loadStart || position >= loadEnd)
+        {
+            loadLength = 0;
+            return false;
+        }
+
+        loadLength = desiredLength < available ? desiredLength : (int)available;
+        return position < loadStart + loadLength;
     }
 
     private static int CopyFromBlock(ReadOnlySpan<byte> blockData, int offset, Memory<byte> buffer)
@@ -371,21 +419,22 @@ public sealed partial class CachingStreamSource
 
             if (TryGetOverlappingActiveDownload(position, minimumLength, out var overlapping))
             {
-                await WaitForActiveDownloadAsync(overlapping!.LazyTask.Value, ct).ConfigureAwait(false);
+                await JoinActiveDownloadAsync(overlapping!, isCritical, ct).ConfigureAwait(false);
                 continue;
             }
 
             var plan = BuildDownloadPlan(position, minimumLength, isCritical);
+            ActiveRangeDownload? candidate = null;
             var ownerLazy = new Lazy<Task<RangeDownloadResult>>(
-                () => DownloadRangeCoreAsync(plan, ct, isCritical),
+                () => DownloadRangeCoreAsync(plan, candidate!, ct),
                 LazyThreadSafetyMode.ExecutionAndPublication);
 
-            var candidate = new ActiveRangeDownload(plan.Start, plan.Length, ownerLazy);
+            candidate = new ActiveRangeDownload(plan.Start, plan.Length, isCritical, ownerLazy);
             var actual = RegisterOrGetActiveDownload(candidate);
 
             if (!ReferenceEquals(actual, candidate))
             {
-                await WaitForActiveDownloadAsync(actual.LazyTask.Value, ct).ConfigureAwait(false);
+                await JoinActiveDownloadAsync(actual, isCritical, ct).ConfigureAwait(false);
                 continue;
             }
 
@@ -568,9 +617,13 @@ public sealed partial class CachingStreamSource
 
     /// <summary>
     /// Оркестрирует загрузку диапазона: circuit breaker → слот семафора → URL guard → HTTP.
+    /// Фоновая загрузка, к которой присоединился критический читатель, перестаёт ждать слот.
     /// </summary>
+    /// <param name="plan">План загружаемого диапазона байт.</param>
+    /// <param name="download">Дескриптор загрузки в реестре: приоритет и сигнал его повышения.</param>
+    /// <param name="ct">Токен отмены текущей операции.</param>
     private async Task<RangeDownloadResult> DownloadRangeCoreAsync(
-        DownloadPlan plan, CancellationToken ct, bool isCritical)
+        DownloadPlan plan, ActiveRangeDownload download, CancellationToken ct)
     {
         if (_disposed) return RangeDownloadResult.Cancelled;
         if (IsRangeLocallyAvailable(plan.Start, plan.Length)) return RangeDownloadResult.Success;
@@ -586,12 +639,25 @@ public sealed partial class CachingStreamSource
         bool gotSlot = false;
         try
         {
-            if (!isCritical)
+            if (!download.IsCritical)
             {
-                gotSlot = await _downloadSlots
-                    .WaitAsync(_config.DownloadSlotTimeoutMs, ct)
+                var slotOutcome = await WaitForSlotOrPromotionAsync(
+                        _downloadSlots, _config.DownloadSlotTimeoutMs, download.PromotionTask, ct)
                     .ConfigureAwait(false);
-                if (!gotSlot) return RangeDownloadResult.SlotTimeout;
+
+                switch (slotOutcome)
+                {
+                    case SlotWaitOutcome.Acquired:
+                        gotSlot = true;
+                        break;
+                    case SlotWaitOutcome.Promoted:
+                        Log.Debug($"[CachingSource] [{_trackId}] Range {plan.Start}: joined by critical reader, slot wait skipped");
+                        break;
+                    case SlotWaitOutcome.TimedOut:
+                        return RangeDownloadResult.SlotTimeout;
+                    default:
+                        return RangeDownloadResult.Cancelled;
+                }
             }
 
             if (_disposed) return RangeDownloadResult.Cancelled;
@@ -778,10 +844,14 @@ public sealed partial class CachingStreamSource
                 int actualLength;
                 var bodySw = System.Diagnostics.Stopwatch.StartNew();
 
+                // Таймаут SendAsync покрывает только заголовки: тело получает собственный idle-дедлайн,
+                // который перезапускается после каждой порции данных.
+                using var bodyIdleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
                 try
                 {
                     actualLength = await ReadStreamFullyAsync(
-                        contentStream, rentedBuffer.AsMemory(0, plan.Length), ct)
+                        contentStream, rentedBuffer.AsMemory(0, plan.Length), bodyIdleCts, BodyIdleTimeoutMs)
                         .ConfigureAwait(false);
                 }
                 catch (ObjectDisposedException)
@@ -819,6 +889,21 @@ public sealed partial class CachingStreamSource
                 finally
                 {
                     bodySw.Stop();
+                }
+
+                // Idle-дедлайн сработал при живом внешнем токене: это зависшее соединение, а не отмена.
+                if (actualLength < plan.Length
+                    && bodyIdleCts.IsCancellationRequested
+                    && !ct.IsCancellationRequested
+                    && !_disposed
+                    && _lifetimeCts?.IsCancellationRequested != true)
+                {
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
+                    _lastDownloadException = new TimeoutException(
+                        $"Range {plan.Start}-{end} body idle for more than {BodyIdleTimeoutMs}ms");
+                    Log.Warn($"[CachingSource] [{_trackId}] Range {plan.Start}-{end} body stalled: " +
+                             $"{actualLength}/{plan.Length} bytes, idle>{BodyIdleTimeoutMs}ms");
+                    return RangeDownloadResult.NetworkError;
                 }
 
                 // Игнорируем микро-замеры (< 16KB или < 20мс) — ложные всплески TCP slow-start.
@@ -909,20 +994,25 @@ public sealed partial class CachingStreamSource
 
     /// <summary>
     /// Читает поток полностью в буфер, пока не достигнут его конец или EOF потока.
+    /// Перед каждым чтением перезапускается idle-дедлайн <paramref name="idleCts"/>: медленная, но живая
+    /// передача не прерывается, а зависшее соединение отменяется через <paramref name="idleTimeoutMs"/>.
     /// </summary>
     /// <param name="stream">Входной поток данных HTTP-ответа.</param>
     /// <param name="buffer">Целевой буфер в памяти.</param>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="idleCts">Источник отмены, связанный с внешним токеном; владеет им вызывающий код.</param>
+    /// <param name="idleTimeoutMs">Максимальная пауза между порциями данных (мс).</param>
     /// <returns>Фактическое количество успешно вычитанных байт.</returns>
-    private static async ValueTask<int> ReadStreamFullyAsync(
-         Stream stream, Memory<byte> buffer, CancellationToken ct)
+    internal static async ValueTask<int> ReadStreamFullyAsync(
+         Stream stream, Memory<byte> buffer, CancellationTokenSource idleCts, int idleTimeoutMs)
     {
+        CancellationToken ct = idleCts.Token;
         int totalRead = 0;
         while (totalRead < buffer.Length)
         {
             int read;
             try
             {
+                idleCts.CancelAfter(idleTimeoutMs);
                 read = await stream.ReadAsync(buffer[totalRead..], ct).ConfigureAwait(false);
             }
             catch (ObjectDisposedException)
@@ -944,6 +1034,11 @@ public sealed partial class CachingStreamSource
             if (read == 0) break;
             totalRead += read;
         }
+
+        // Снимаем дедлайн: срабатывание после выхода из цикла не должно выглядеть как зависание.
+        if (!ct.IsCancellationRequested)
+            idleCts.CancelAfter(Timeout.Infinite);
+
         return totalRead;
     }
 

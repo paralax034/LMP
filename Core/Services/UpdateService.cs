@@ -508,11 +508,19 @@ public sealed partial class UpdateService : IDisposable
     /// Очищает устаревшие резервные копии (.old) и временные каталоги при старте.
     /// Использует короткий retry-цикл для компенсации асинхронного освобождения дескрипторов ядром Windows NTFS.
     /// </summary>
-    public static void CleanupPendingOldFiles()
+    public static void CleanupPendingOldFiles() =>
+        CleanupPendingOldFiles(AppContext.BaseDirectory, G.Folder.Update);
+
+    /// <summary>
+    /// Очищает <c>.old</c>-бинарники в <paramref name="baseDir"/> и каталог распаковки <paramref name="updateDir"/>.
+    /// Явные пути позволяют тестам работать во временной папке, не трогая каталог приложения и реальный <c>%LOCALAPPDATA%/LMP</c>.
+    /// </summary>
+    /// <param name="baseDir">Каталог исполняемого файла, где лежат <c>.old</c>-копии.</param>
+    /// <param name="updateDir">Временный каталог скачанного обновления.</param>
+    public static void CleanupPendingOldFiles(string baseDir, string updateDir)
     {
         try
         {
-            string baseDir = AppContext.BaseDirectory;
             var oldFiles = Directory.GetFiles(baseDir, "*.old", SearchOption.TopDirectoryOnly);
             if (oldFiles.Length == 0) return;
 
@@ -548,12 +556,12 @@ public sealed partial class UpdateService : IDisposable
                     Log.Debug($"[UpdateService] File '{Path.GetFileName(oldFile)}' still locked by OS driver. Will be pruned on next launch.");
             }
 
-            if (Directory.Exists(G.Folder.Update))
+            if (Directory.Exists(updateDir))
             {
                 try
                 {
-                    Directory.Delete(G.Folder.Update, recursive: true);
-                    Log.Debug($"[UpdateService] Pruned temporary update directory '{G.Folder.Update}'");
+                    Directory.Delete(updateDir, recursive: true);
+                    Log.Debug($"[UpdateService] Pruned temporary update directory '{updateDir}'");
                 }
                 catch { }
             }

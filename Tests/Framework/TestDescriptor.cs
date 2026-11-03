@@ -1,5 +1,3 @@
-using System.Reflection;
-
 namespace LMP.Tests.Framework;
 
 /// <summary>
@@ -13,6 +11,29 @@ public enum TestParameterSignature : byte
     ServicesAndToken = 3,
     TokenAndServices = 4
 }
+
+/// <summary>
+/// Делегат вызова тестового метода с унифицированными аргументами; формируется генератором реестра,
+/// который сам раскладывает сервисы и токен в порядке параметров исходного метода.
+/// </summary>
+/// <param name="services">Контейнер сервисов приложения.</param>
+/// <param name="ct">Токен отмены с учётом таймаута теста.</param>
+public delegate Task TestInvoker(IServiceProvider services, CancellationToken ct);
+
+/// <summary>
+/// Регистрация теста, созданная генератором LMP.Tests.Generator на этапе сборки (без рефлексии).
+/// </summary>
+/// <param name="ClassName">Имя содержащего класса.</param>
+/// <param name="MethodName">Имя тестового метода.</param>
+/// <param name="Attribute">Экземпляр атрибута с аргументами из исходного кода.</param>
+/// <param name="Signature">Сигнатура параметров метода.</param>
+/// <param name="Invoke">Статический делегат вызова метода.</param>
+public readonly record struct TestRegistration(
+    string ClassName,
+    string MethodName,
+    TestMethodAttribute Attribute,
+    TestParameterSignature Signature,
+    TestInvoker Invoke);
 
 /// <summary>
 /// Дескриптор зарегистрированного теста или отладочного действия.
@@ -52,8 +73,8 @@ public sealed record TestDescriptor
     /// <summary>Сигнатура параметров метода.</summary>
     public required TestParameterSignature Signature { get; init; }
 
-    /// <summary>Отражение метода теста для прямого вызова.</summary>
-    public required MethodInfo Method { get; init; }
+    /// <summary>Делегат вызова теста, сформированный генератором реестра.</summary>
+    public required TestInvoker Invoke { get; init; }
 }
 
 /// <summary>Состояние выполнения теста.</summary>

@@ -1,10 +1,9 @@
 using System.Collections.Frozen;
-using System.Reflection;
 
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Автоматическое обнаружение тестов через рефлексию.
+/// Обнаружение тестов по реестру, который LMP.Tests.Generator строит на этапе сборки: без рефлексии и совместимо с AOT.
 /// Кэширует дескрипторы, отсортированные списки и группы один раз за время жизни процесса.
 /// Потокобезопасен, не производит повторных аллокаций при открытии UI.
 /// </summary>
@@ -128,74 +127,31 @@ public static class TestDiscovery
 
     private static FrozenDictionary<string, TestDescriptor> Discover()
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        var result = new Dictionary<string, TestDescriptor>(64, StringComparer.Ordinal);
+        var registrations = GeneratedTestRegistry.Create();
+        var result = new Dictionary<string, TestDescriptor>(registrations.Length, StringComparer.Ordinal);
 
-        foreach (var type in assembly.GetTypes())
+        foreach (var registration in registrations)
         {
-            if (!type.IsClass || !type.IsAbstract || !type.IsSealed) continue;
-            if (type.Namespace is null || !type.Namespace.StartsWith("LMP.Tests", StringComparison.Ordinal)) continue;
+            var attr = registration.Attribute;
+            var className = registration.ClassName;
+            var id = $"{className}.{registration.MethodName}";
 
-            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            result[id] = new TestDescriptor
             {
-                var attr = method.GetCustomAttribute<TestMethodAttribute>();
-                if (attr is null) continue;
-
-                if (method.ReturnType != typeof(Task))
-                {
-                    Log.Warn($"[TestDiscovery] Skipping {type.Name}.{method.Name}: return type must be Task, got {method.ReturnType.Name}");
-                    continue;
-                }
-
-                var parameters = method.GetParameters();
-                TestParameterSignature signature;
-
-                switch (parameters.Length)
-                {
-                    case 0:
-                        signature = TestParameterSignature.None;
-                        break;
-                    case 1 when parameters[0].ParameterType == typeof(IServiceProvider):
-                        signature = TestParameterSignature.ServicesOnly;
-                        break;
-                    case 1 when parameters[0].ParameterType == typeof(CancellationToken):
-                        signature = TestParameterSignature.TokenOnly;
-                        break;
-                    case 2 when parameters[0].ParameterType == typeof(IServiceProvider) && parameters[1].ParameterType == typeof(CancellationToken):
-                        signature = TestParameterSignature.ServicesAndToken;
-                        break;
-                    case 2 when parameters[0].ParameterType == typeof(CancellationToken) && parameters[1].ParameterType == typeof(IServiceProvider):
-                        signature = TestParameterSignature.TokenAndServices;
-                        break;
-                    default:
-                        Log.Warn($"[TestDiscovery] Skipping {type.Name}.{method.Name}: unsupported parameters count ({parameters.Length})");
-                        continue;
-                }
-
-                var className = type.Name;
-                var displayName = attr.DisplayName ?? FormatMethodName(method.Name);
-                var id = $"{className}.{method.Name}";
-
-                var rawGroup = attr.Group ?? InferGroupFromClassName(className);
-                var group = TestGroups.Normalize(rawGroup);
-
-                result[id] = new TestDescriptor
-                {
-                    Id = id,
-                    DisplayName = displayName,
-                    Category = attr.Category,
-                    Group = group,
-                    ClassName = className,
-                    Order = attr.Order,
-                    RequiresNetwork = attr.RequiresNetwork,
-                    TimeoutSeconds = attr.TimeoutSeconds,
-                    Signature = signature,
-                    Method = method,
-                };
-            }
+                Id = id,
+                DisplayName = attr.DisplayName ?? FormatMethodName(registration.MethodName),
+                Category = attr.Category,
+                Group = TestGroups.Normalize(attr.Group ?? InferGroupFromClassName(className)),
+                ClassName = className,
+                Order = attr.Order,
+                RequiresNetwork = attr.RequiresNetwork,
+                TimeoutSeconds = attr.TimeoutSeconds,
+                Signature = registration.Signature,
+                Invoke = registration.Invoke,
+            };
         }
 
-        Log.Info($"[TestDiscovery] Found {result.Count} tests in {assembly.GetName().Name}");
+        Log.Info($"[TestDiscovery] Found {result.Count} tests in compile-time registry");
         return result.ToFrozenDictionary(StringComparer.Ordinal);
     }
 

@@ -58,10 +58,17 @@ CRITICAL: You have a 1M+ token context window, but **API requests / tool calls a
 2. **Native AOT & Full Trimming (`PublishAot=true`, `TrimMode=full`):**
    - `IL2026`, `IL3050`, `IL3051` warnings are muted in `.csproj`—YOU are the strict AOT guardrail.
    - Reflection (`Type.GetType`, `Activator.CreateInstance`, `Expression.Compile`, dynamic `ReflectionBinding`) is **BANNED**.
-   - **JSON Serialization:** `JsonSerializerIsReflectionEnabledByDefault=false`. Always pass a source-generated `JsonTypeInfo<T>` from `AppJsonContext.Default` or `AppJsonContext.DefaultPretty` (`Core/Models/AppJsonContext.cs`).
-   - **MemoryPack:** Binary cache/DB models must be `partial` and decorated with `[MemoryPackable]`.
+   - **JSON Serialization:** `JsonSerializerIsReflectionEnabledByDefault=false`. Always pass a source-generated `JsonTypeInfo<T>` from `AppJsonContext.DefaultCompact` or `AppJsonContext.DefaultPretty` (`Core/Models/AppJsonContext.cs`). Generic helpers resolve metadata via `AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) as JsonTypeInfo<T>` and throw `NotSupportedException` for unregistered types—NEVER fall back to reflection-based `JsonSerializerOptions`, not even under `#if DEBUG`.
+   - **MemoryPack:** Binary cache/DB models must be `partial` and decorated with `[MemoryPackable]`. Generic APIs that forward `T` to `MemoryPackSerializer` (it looks up the static formatter-registration method of `T` via reflection) MUST annotate `T` with `[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]`, and the same annotation MUST be repeated on every interface declaration, override, and generic caller up the chain (otherwise `IL2091` / `IL2095`).
 3. **Native Interop:**
    - Use source-generated `[LibraryImport]` over `[DllImport]`, pin buffers safely (`fixed` / `MemoryHandle`), and guard Windows-only calls with `OperatingSystem.IsWindows()` (CA1416).
+4. **Debug Native AOT Verification (`python build.py aot-test`):**
+   - `LMP.Core` mutes trim/AOT analysis only in `Release` (`NoWarn` / `SuppressTrimAnalysisWarnings`), so a green Release publish does NOT prove trim safety. `aot-debug` / `aot-test` publish the `Debug` configuration with `PublishAot=true`, `TrimMode=full`, `trimming.xml`, and reflection-free JSON; under `TreatWarningsAsErrors` every `IL2xxx` / `IL3xxx` becomes a build error.
+   - Fix the root cause (DAM annotations, source-generated metadata, `trimming.xml` roots)—never add `NoWarn` or `[UnconditionalSuppressMessage]` just to make the Debug AOT build pass.
+   - Debug AOT restores against its own lock file `packages.DebugAot.lock.json` (never merge it into `packages.Debug.lock.json`) and publishes to `publish-aot-debug/`.
+5. **Compile-Time Test Discovery (`Tools/LMP.Tests.Generator`):**
+   - Tests are discovered by an incremental source generator (no reflection); `TestDiscovery` consumes the generated registry. Unsupported signatures fail the build with `LMPT001`; inaccessible methods/classes are skipped with warning `LMPT002` (a bug—fix it, never suppress it).
+   - The generator project targets `netstandard2.0` and MUST keep `TreatAsLocalProperty="PublishAot;PublishTrimmed;IsAotCompatible;RuntimeIdentifier;SelfContained"` with AOT/trim properties forced off; otherwise a command-line `-p:PublishAot=true` breaks it with `NETSDK1207`.
 </build_and_aot_invariants>
 
 <memory_and_hot_path_invariants>
@@ -113,17 +120,28 @@ CRITICAL: You have a 1M+ token context window, but **API requests / tool calls a
 1. **Custom In-Tree Test Framework (`Tests/Framework/`):**
    - LMP does **NOT** use xUnit/NUnit/MSTest. Do NOT run `dotnet test`.
    - Never launch `LMP.exe` without headless flags (`SingleInstanceGuard` will exit if the main player is open, or fatal errors will pop up blocking Win32 `MessageBox`).
-   - Tests are `public static` methods returning `Task` inside `public static` classes under `Tests/Unit/` or `Tests/Integration/`, decorated with `[TestMethod(TestCategory.Unit, "Name", Group = TestGroups.Storage, Order = 1)]` and using `TestAssert.*`.
+   - Tests are `public static` methods returning `Task` inside `public` or `internal` `static` classes under `Tests/Unit/` or `Tests/Integration/` (namespaces `LMP.Tests.*`), decorated with `[TestMethod(TestCategory.Unit, "Name", Group = TestGroups.Storage, Order = 1)]` and using `TestAssert.*`. Supported signatures: `()`, `(CancellationToken)`, `(IServiceProvider)`, `(IServiceProvider, CancellationToken)`, `(CancellationToken, IServiceProvider)`.
    - Unit tests touching disk/SQLite/cache MUST use isolated temporary directories in `Path.GetTempPath()` and clean them up in `finally` blocks—never touch real `%APPDATA%/LMP` or `%LOCALAPPDATA%/LMP` paths.
+   - Every test must pass under both JIT (`test`) and Native AOT (`aot-test`); a result that differs between them is a trim/AOT bug in product code, not in the test.
+   - Unit tests MUST be hermetic: no real network and no real app folders. Inject `HttpMessageHandler` mocks and pre-seed global state (e.g. `YoutubeClientUtils.VisitorData`) instead of letting code fall back to `SharedHttpClient`; pass explicit temp paths to helpers that default to `G.Folder.*`. Anything needing live YouTube belongs to `Integration`.
+   - Headless CLI runs keep subsystem logs out of the console (file only; the path is printed under `RESULTS`). Add `verbose` (`--verbose`) to mirror logs to the console while debugging a failure.
 2. **Workspace Build & Audit Commands (`.vscode/tasks.json`):**
    - **Build Debug:** `python build.py debug nopause` (or `dotnet build LMP.sln -c Debug`)
    - **Build Release:** `python build.py release nopause`
    - **Publish Native AOT:** `python build.py publish nopause`
+   - **Run Unit Tests (JIT):** `python build.py test --category=Unit run nopause` (`nobuild` reuses the last Debug build; `verbose` mirrors logs to the console; `--group=Storage`, `--filter=Name`, `list` are also supported)
+   - **Publish Debug Native AOT:** `python build.py aot-debug nopause` (output: `publish-aot-debug/`)
+   - **Run Unit Tests (Native AOT):** `python build.py aot-test --category=Unit run nopause` (`nobuild` reuses `publish-aot-debug/`). Mandatory after changes touching serialization, generics over MemoryPack/JSON, DI wiring, or `trimming.xml`.
+   - **Publish Dev Builds (local only; the repository has no CI workflows):** `python Tools\publish_dev.py [--skip-tests] [--release-only] [--skip-build] [--retention=N]` — Debug AOT publish → AOT Unit-test gate → Release AOT publish → 7z/zip → `gh release` (`dev` + `dev-<commitCount>`).
    - **Audit Localization:** `python Tools\audit_l10n.py` (fix dead keys: `python Tools\audit_l10n.py --fix`)
    - **Sort Localization:** `python Tools\sort_l10n.py`
    - **Audit AXAML Styles:** `python Tools\find_dead_styles.py`
    - **Audit Dead Code (fast):** `python Tools\find_dead_code.py --skip-build`
    - **Format Code:** `dotnet format LMP.sln`
+3. **JIT vs Native AOT Diagnostics:**
+   - F5 / `build.py debug` / `build.py test` stay on JIT for fast iteration and source-level debugging.
+   - Native AOT stack traces contain method names but no file/line numbers: reproduce under JIT (`test`) to get line info, then confirm the fix under `aot-test`.
+   - `Benchmark` category figures are representative only under `aot-test` (no tiered JIT/PGO warm-up); never compare JIT and AOT numbers directly.
 </testing_and_tooling>
 
 <commit_style>

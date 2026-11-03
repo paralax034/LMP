@@ -157,6 +157,10 @@ public static class PlayerResponseTests
   public static async Task TestVideoControllerFallbackMatrixAsync()
   {
     Core.Youtube.Videos.VideoController.ResetBotDetectionState();
+
+    // Предзаполненный VisitorData исключает реальный запрос к sw.js_data: Unit-тест не должен зависеть от сети.
+    var previousVisitorData = Core.Youtube.Utils.YoutubeClientUtils.VisitorData;
+    Core.Youtube.Utils.YoutubeClientUtils.VisitorData = "CgtVbml0VGVzdFZpc2l0b3I%3D";
     try
     {
       var calledClients = new List<string>();
@@ -302,6 +306,7 @@ public static class PlayerResponseTests
     }
     finally
     {
+      Core.Youtube.Utils.YoutubeClientUtils.VisitorData = previousVisitorData;
       Core.Youtube.Videos.VideoController.ResetBotDetectionState();
     }
   }

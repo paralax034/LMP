@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishTrimmed;IsAotCompatible;RuntimeIdentifier;SelfContained">
+
+    <!--
+      Генератор реестра тестов: на этапе сборки превращает методы с [TestMethod] в таблицу
+      дескрипторов с готовыми делегатами вызова. Заменяет рефлексивное обнаружение в TestDiscovery.
+      Анализаторы Roslyn обязаны собираться под netstandard2.0.
+    -->
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <IsPackable>false</IsPackable>
+
+        <!--
+          Анализатор исполняется внутри компилятора и никогда не публикуется: AOT-свойства, переданные
+          в командной строке для приложения (dotnet publish -p:PublishAot=true), здесь принудительно гасятся.
+          Без этого netstandard2.0 падает с NETSDK1207.
+        -->
+        <PublishAot>false</PublishAot>
+        <PublishTrimmed>false</PublishTrimmed>
+        <IsAotCompatible>false</IsAotCompatible>
+        <RuntimeIdentifier></RuntimeIdentifier>
+        <SelfContained>false</SelfContained>
+
+        <!-- RS2008: учёт релизов анализатора не нужен внутреннему генератору -->
+        <NoWarn>$(NoWarn);RS2008</NoWarn>
+
+        <!-- Версия Roslyn фиксируется здесь: генератор не участвует в общем графе пакетов приложения -->
+        <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all"/>
+    </ItemGroup>
+
+</Project>

@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
@@ -12,7 +14,11 @@ public interface ISettingsRepository
     /// <param name="key">Уникальный строковый ключ настройки.</param>
     /// <param name="ct">Токен отмены асинхронной операции.</param>
     /// <returns>Экземпляр модели или <c>null</c>, если ключ отсутствует.</returns>
-    Task<T?> GetAsync<T>(
+    /// <remarks>
+    /// Аннотация <see cref="DynamicallyAccessedMembersAttribute"/> обязана совпадать с реализацией (IL2095):
+    /// MemoryPack при первом обращении ищет у <typeparamref name="T"/> статический метод регистрации форматтера.
+    /// </remarks>
+    Task<T?> GetAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] T>(
         string key,
         CancellationToken ct = default) where T : class;
 
@@ -24,7 +30,8 @@ public interface ISettingsRepository
     /// <param name="defaultValue">Значение по умолчанию.</param>
     /// <param name="ct">Токен отмены асинхронной операции.</param>
     /// <returns>Десериализованный экземпляр или значение по умолчанию.</returns>
-    Task<T> GetOrDefaultAsync<T>(
+    /// <remarks>Тип пробрасывается в <see cref="GetAsync{T}"/>, поэтому несёт ту же аннотацию тримминга.</remarks>
+    Task<T> GetOrDefaultAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] T>(
         string key,
         T defaultValue,
         CancellationToken ct = default) where T : class;

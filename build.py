@@ -71,6 +71,35 @@ def get_debug_executable(root: Path) -> Path:
     exe_name = "LMP.exe" if platform.system().lower() == "windows" else "LMP"
     return root / "bin" / "Debug" / "net11.0" / exe_name
 
+def get_debug_aot_executable(root: Path) -> Path:
+    exe_name = "LMP.exe" if platform.system().lower() == "windows" else "LMP"
+    return root / "publish-aot-debug" / exe_name
+
+def publish_debug_aot(root: Path, rid: str) -> Path:
+    """
+    Публикует Debug-сборку (тесты, DebugWindow, консоль логов) как Native AOT в ./publish-aot-debug.
+    Ограничения тримминга и JSON совпадают с Release, поэтому IL-предупреждения всплывают здесь как ошибки.
+    Отдельный lock-файл не даёт packages.Debug.lock.json переключаться между JIT- и AOT-графом зависимостей.
+    """
+    out_dir = root / "publish-aot-debug"
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
+    run_step([
+        "dotnet", "publish", "LMP.csproj",
+        "-c", "Debug",
+        "-r", rid,
+        "-p:PublishAot=true",
+        "-p:PublishTrimmed=true",
+        "-p:TrimMode=full",
+        "-p:TrimmerRootDescriptor=trimming.xml",
+        "-p:JsonSerializerIsReflectionEnabledByDefault=false",
+        "-p:Optimize=true",
+        "-p:IlcOptimizationPreference=Speed",
+        "-p:NuGetLockFilePath=packages.DebugAot.lock.json",
+        "-o", str(out_dir)
+    ], root, f"Publishing Debug Native AOT build ({rid})")
+    return get_debug_aot_executable(root)
+
 def run_step(cmd: list[str], cwd: Path, description: str):
     print(f"{Color.YELLOW}>>> {description}...{Color.RESET}")
     res = subprocess.run(cmd, cwd=str(cwd))
@@ -81,7 +110,7 @@ def run_step(cmd: list[str], cwd: Path, description: str):
 def clean_tree(root: Path):
     print(f"{Color.YELLOW}>>> Cleaning all project build artifacts and temporary folders...{Color.RESET}")
 
-    targets = ["publish", "publish-dev", "publish_aot"]
+    targets = ["publish", "publish-dev", "publish_aot", "publish-aot-debug"]
     for t in targets:
         p = root / t
         if p.exists():
@@ -109,6 +138,7 @@ def normalize_test_args(extra_args: list[str]) -> tuple[list[str], bool]:
       python build.py test ui Storage --run  -> ['--test-ui', '--test-group=Storage', '--autorun']
       python build.py test Storage           -> ['--test-group=Storage']
       python build.py test CacheTests        -> ['--test-filter=CacheTests']
+      python build.py test Unit run verbose  -> ['--test-category=Unit', '--autorun', '--verbose']
     """
     known_groups = {"audio", "cipher", "network", "youtube", "storage", "playlists", "system", "cache"}
     known_categories = {"unit", "integration", "benchmark", "e2e", "diagnostic", "action"}
@@ -127,6 +157,8 @@ def normalize_test_args(extra_args: list[str]) -> tuple[list[str], bool]:
             app_args.append("--test-list")
         elif low in ("run", "--run", "--autorun"):
             app_args.append("--autorun")
+        elif low in ("verbose", "--verbose"):
+            app_args.append("--verbose")
         elif low.startswith("--group="):
             app_args.append(f"--test-group={token[8:]}")
         elif low.startswith("--category="):
@@ -142,8 +174,10 @@ def normalize_test_args(extra_args: list[str]) -> tuple[list[str], bool]:
         else:
             app_args.append(f"--test-filter={token}")
 
-    if not app_args:
-        app_args.append("--test")
+    # Модификаторы (--autorun, --verbose) сами по себе не включают тестовый режим: без селектора добавляется --test,
+    # иначе `build.py test run` запустил бы обычный GUI-плеер.
+    if not any(a.startswith(("--test", "--run-")) for a in app_args):
+        app_args.insert(0, "--test")
 
     return app_args, skip_build
 
@@ -197,10 +231,10 @@ def main():
     print(f"  Platform RID : {Color.BOLD}{rid}{Color.RESET}")
     print(f"  Version      : {Color.BOLD}v{full_version}{Color.RESET}\n")
 
-    valid_modes = {"debug", "fast", "test", " test-ui", "test-ui", "optimized", "release", "publish", "aot", "restore", "clean"}
+    valid_modes = {"debug", "fast", "test", " test-ui", "test-ui", "optimized", "release", "publish", "aot", "aot-debug", "aot-test", "restore", "clean"}
     if mode not in valid_modes:
         print(f"{Color.RED}[ERROR] Unknown build mode '{mode}'.{Color.RESET}")
-        print(f"Available: clean | debug | fast | optimized | publish | release | restore | test | test-ui\n")
+        print(f"Available: aot-debug | aot-test | clean | debug | fast | optimized | publish | release | restore | test | test-ui\n")
         sys.exit(1)
 
     try:
@@ -237,6 +271,17 @@ def main():
                 "-p:Optimize=true",
                 "-p:DebugType=embedded"
             ], root, "Building Optimized Debug configuration")
+
+        elif mode == "aot-debug":
+            exe_path = publish_debug_aot(root, rid)
+            print(f"\n{Color.GREEN}✓ Debug Native AOT publish completed successfully: {exe_path}{Color.RESET}")
+
+        elif mode == "aot-test":
+            test_args, skip_build = normalize_test_args(extra_args)
+            exe_path = get_debug_aot_executable(root)
+            if not skip_build or not exe_path.is_file():
+                exe_path = publish_debug_aot(root, rid)
+            run_step([str(exe_path)] + test_args, root, f"Running LMP Tests under Native AOT ({' '.join(test_args)})")
 
         elif mode == "release":
             dead_code_tool = root / "Tools" / "find_dead_code.py"
@@ -282,7 +327,7 @@ def main():
         print(f"\n{Color.YELLOW}[ABORTED] Interrupted by user.{Color.RESET}")
         sys.exit(130)
 
-    if pause_on_exit and sys.platform.startswith("win") and mode not in ("test", "test-ui", "fast"):
+    if pause_on_exit and sys.platform.startswith("win") and mode not in ("test", "test-ui", "fast", "aot-test"):
         try:
             os.system("pause")
         except Exception:
