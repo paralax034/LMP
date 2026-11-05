@@ -41,7 +41,7 @@ public static class PoTokenTests
     public static async Task TestFullPipelineAsync()
     {
         using var service = new BotGuardService(SharedHttpClient.Instance);
-        var visitorId = LMP.Core.Youtube.Utils.YoutubeClientUtils.VisitorData;
+        var visitorId = Core.Youtube.Utils.YoutubeClientUtils.VisitorData;
 
         var sw = Stopwatch.StartNew();
         var token = await service.GenerateAsync(visitorId).ConfigureAwait(false);

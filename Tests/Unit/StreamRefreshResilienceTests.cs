@@ -246,18 +246,18 @@ public static class StreamRefreshResilienceTests
 
         var webmHint = new StreamSelectionHint(AudioFormat.WebM, 129);
 
-        var exact = LMP.Core.Services.AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, WebmLength);
+        var exact = AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, WebmLength);
         TestAssert.Equal(251, exact?.Itag ?? 0,
             "Partial WebM cache must continue with the variant whose clen matches, not the first WebM variant");
 
-        var unknownSize = LMP.Core.Services.AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 1_234_567);
+        var unknownSize = AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 1_234_567);
         TestAssert.Null(unknownSize, "Missing clen match must not fall back to a foreign variant");
 
-        var foreignContainer = LMP.Core.Services.AudioEngine.SelectContinuationVariantFromEntry(
+        var foreignContainer = AudioEngine.SelectContinuationVariantFromEntry(
             variants, new StreamSelectionHint(AudioFormat.Mp4, 128), WebmLength);
         TestAssert.Null(foreignContainer, "Container mismatch must be rejected even with equal clen");
 
-        var legacy = LMP.Core.Services.AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 0);
+        var legacy = AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 0);
         TestAssert.Equal(AudioFormat.WebM, legacy?.Format ?? AudioFormat.Unknown,
             "Without clen the legacy container-based selection must be kept");
 

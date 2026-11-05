@@ -189,32 +189,53 @@ public sealed partial class AudioEngine
         RaiseOnUI(() => OnQueueChanged?.Invoke());
     }
 
+    /// <summary>
+    /// Удаляет трек из очереди. Удалённый играющий трек сразу сменяется стоявшим следом по правилам «Далее»:
+    /// в конце очереди — круг при RepeatMode.All или остановка; на паузе следующий трек загружается без запуска.
+    /// </summary>
     public void RemoveFromQueue(TrackInfo track)
     {
-        bool needStop = false;
         int removedIndex = -1;
+        bool removedCurrent = false;
+        bool canMove = false;
+        // Намерение слушать — из состояния движка: после загрузки «на паузе» плеер в Stopped, и !IsPaused запустил бы звук
+        bool startPlaying = CurrentTrack != null && _playIntent;
+        var trackId = track.Id;
 
         lock (_queueLock)
         {
-            int idx = _queue.FindIndex(t => t.Id == track.Id);
-            if (idx == -1) return;
-            removedIndex = idx;
-            if (idx == _currentIndex) { needStop = _queue.Count == 1; if (idx == _queue.Count - 1) _currentIndex--; }
-            else if (idx < _currentIndex) _currentIndex--;
-            _queue.RemoveAt(idx);
+            for (int i = 0; i < _queue.Count; i++)
+            {
+                if (_queue[i].Id == trackId) { removedIndex = i; break; }
+            }
+
+            if (removedIndex == -1) return;
+
+            removedCurrent = removedIndex == _currentIndex;
+            _queue.RemoveAt(removedIndex);
+            _currentIndex = ComputeIndexAfterRemove(removedIndex, _currentIndex);
+            if (removedCurrent) canMove = TryMoveNext(userInitiated: true);
             InvalidateQueueSnapshot();
         }
 
-        if (removedIndex >= 0)
+        RaiseOnUI(() =>
         {
-            RaiseOnUI(() =>
-            {
-                OnQueueItemRemoved?.Invoke(removedIndex, track);
-                OnQueueChanged?.Invoke();
-            });
-        }
+            OnQueueItemRemoved?.Invoke(removedIndex, track);
+            OnQueueChanged?.Invoke();
+        });
 
-        if (needStop) Stop();
+        if (!removedCurrent) return;
+
+        if (canMove)
+        {
+            ResetSealedFailedTrack();
+            int session = BeginNewSession();
+            EnqueueCommand(new PlayCurrentIndexCommand(session, startPlaying));
+        }
+        else
+        {
+            Stop();
+        }
     }
 
     public void MoveQueueItem(int from, int to)
@@ -306,20 +327,47 @@ public sealed partial class AudioEngine
         if (_queue.Count == 0) return false;
         if (!userInitiated && RepeatMode == RepeatMode.One) return true;
 
-        if (_currentIndex + 1 < _queue.Count) { _currentIndex++; return true; }
+        int next = ComputeNextIndex(_currentIndex, _queue.Count, RepeatMode == RepeatMode.All, userInitiated);
+        if (next < 0) return false;
 
-        if (RepeatMode == RepeatMode.All)
+        // Переход на новый круг при RepeatMode.All: в авто-режиме перемешивания очередь перемешивается заново
+        if (next <= _currentIndex && ShuffleEnabled && _queue.Count > 1)
         {
-            if (!userInitiated && _queue.Count == 1) return false;
-            if (ShuffleEnabled && _queue.Count > 1)
-            {
-                ApplyShuffleInPlace(preserveCurrentAtStart: false);
-                _queueMutatedByNavigation = true;
-            }
-            _currentIndex = 0;
-            return true;
+            ApplyShuffleInPlace(preserveCurrentAtStart: false);
+            _queueMutatedByNavigation = true;
         }
-        return false;
+
+        _currentIndex = next;
+        return true;
+    }
+
+    /// <summary>
+    /// Чистая арифметика шага «вперёд» по очереди без учёта RepeatMode.One.
+    /// Возвращает индекс следующего трека или -1, если очередь закончилась.
+    /// </summary>
+    internal static int ComputeNextIndex(int currentIndex, int count, bool repeatAll, bool userInitiated)
+    {
+        if (count == 0) return -1;
+        if (currentIndex + 1 < count) return currentIndex + 1;
+        if (!repeatAll || (!userInitiated && count == 1)) return -1;
+        return 0;
+    }
+
+    /// <summary>
+    /// Чистая арифметика индекса текущего трека после удаления элемента очереди.
+    /// Удаление самого текущего трека отводит индекс на предыдущий слот, чтобы шаг «вперёд» попал на трек, стоявший следом.
+    /// </summary>
+    internal static int ComputeIndexAfterRemove(int removedIndex, int currentIndex)
+    {
+        return removedIndex <= currentIndex ? currentIndex - 1 : currentIndex;
+    }
+
+    /// <summary>
+    /// Устарел ли авто-переход по концу трека: очередь уже стоит на другом треке (удаление играющего или ручной переход).
+    /// </summary>
+    internal static bool IsStaleTrackEnd(string? endedTrackId, string? queueTrackId)
+    {
+        return endedTrackId != null && queueTrackId != null && !string.Equals(endedTrackId, queueTrackId, StringComparison.Ordinal);
     }
 
     private bool TryMovePrevious()

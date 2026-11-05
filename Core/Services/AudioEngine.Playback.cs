@@ -29,7 +29,7 @@ public sealed partial class AudioEngine
                             break;
 
                         case PlayCurrentIndexCommand pci:
-                            await PlayCurrentIndexAsync(pci.Session).ConfigureAwait(false);
+                            await PlayCurrentIndexAsync(pci.Session, startPlaying: pci.StartPlaying).ConfigureAwait(false);
                             break;
 
                         case NavigateCommand nav:
@@ -101,15 +101,24 @@ public sealed partial class AudioEngine
 
     private async Task HandleNavigateAsync(NavigateCommand cmd)
     {
-        int session = BeginNewSession();
         bool canMove;
         bool queueMutated;
 
         lock (_queueLock)
         {
+            // Отложенный авто-переход по концу трека, с которого очередь уже ушла, отбрасывается до BeginNewSession:
+            // иначе он отменит запущенный следующий трек и перескочит через него
+            if (cmd.EndedTrackId != null &&
+                IsStaleTrackEnd(cmd.EndedTrackId, (uint)_currentIndex < (uint)_queue.Count ? _queue[_currentIndex].Id : null))
+            {
+                return;
+            }
+
             canMove = cmd.Forward ? TryMoveNext(cmd.UserInitiated) : TryMovePrevious();
             queueMutated = _queueMutatedByNavigation;
         }
+
+        int session = BeginNewSession();
 
         if (queueMutated) RaiseOnUI(() => OnQueueChanged?.Invoke());
 
@@ -178,6 +187,7 @@ public sealed partial class AudioEngine
         if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
             return;
 
+        _playIntent = startPlaying;
         SetManualLoading(true);
 
         try
@@ -358,6 +368,10 @@ public sealed partial class AudioEngine
 
     private void HandlePlayerStateChanged(PlaybackState state)
     {
+        // Намерение сверяется с фактом: смена качества и восстановление запускают PlayAsync в обход SetPlaybackStateAsync
+        if (state == PlaybackState.Playing) _playIntent = true;
+        else if (state == PlaybackState.Paused) _playIntent = false;
+
         ApplyLifecycleSourceSuspendPolicy();
 
         RaiseOnUI(() =>
@@ -378,7 +392,7 @@ public sealed partial class AudioEngine
     private void HandlePlayerTrackEnded()
     {
         if (_player.State is PlaybackState.Loading or PlaybackState.Buffering) return;
-        EnqueueCommand(new NavigateCommand(Forward: true, UserInitiated: false));
+        EnqueueCommand(new NavigateCommand(Forward: true, UserInitiated: false, EndedTrackId: CurrentTrack?.Id));
     }
 
     private void HandleStreamInfoChanged(AudioStreamInfo info)

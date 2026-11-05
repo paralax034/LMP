@@ -513,6 +513,7 @@
   "Playlist_TracksCount": "{0} треков",
   "Playlist_TracksCount_0": "Пусто",
   "Playlist_TracksCount_1": "{0} трек",
+  "Playlist_TracksCount_2": "{0} трека",
   "Playlist_TracksCount_other": "{0} треков",
   "Playlist_TracksRemoved_Toast": "Удалено треков из «{1}»: {0}",
   "Playlist_Unlink": "Отвязать",

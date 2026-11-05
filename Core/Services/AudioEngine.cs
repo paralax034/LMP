@@ -35,14 +35,15 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// <summary>Запустить очередь с указанного трека.</summary>
     private sealed record StartQueueCommand(IEnumerable<TrackInfo> Tracks, TrackInfo StartTrack, int Session) : IEngineCommand;
 
-    /// <summary>Воспроизвести текущий индекс очереди.</summary>
-    private sealed record PlayCurrentIndexCommand(int Session) : IEngineCommand;
+    /// <summary>Воспроизвести текущий индекс очереди; при StartPlaying = false трек загружается на паузе.</summary>
+    private sealed record PlayCurrentIndexCommand(int Session, bool StartPlaying = true) : IEngineCommand;
 
     /// <summary>Навигация вперёд/назад.</summary>
     /// <param name="Forward">Направление движения.</param>
     /// <param name="UserInitiated">Инициировано ли пользователем.</param>
     /// <param name="StartPlaying">Запускать ли воспроизведение на целевом треке.</param>
-    private sealed record NavigateCommand(bool Forward, bool UserInitiated, bool StartPlaying = true) : IEngineCommand;
+    /// <param name="EndedTrackId">Id естественно завершившегося трека для авто-перехода; null — переход без проверки устаревания.</param>
+    private sealed record NavigateCommand(bool Forward, bool UserInitiated, bool StartPlaying = true, string? EndedTrackId = null) : IEngineCommand;
 
     /// <summary>Смена формата/качества активного трека (встраивается в очередь для избежания гонки состояний).</summary>
     private sealed record SwitchQualityCommand(
@@ -180,6 +181,9 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private string? _nTokenWarnedTrackId;
     private string? _sealedFailedTrackId;
     private volatile bool _isManualLoading;
+
+    // Намерение слушать. Не выводится из _player.State: трек, загруженный «на паузе», стоит в Stopped, а не в Paused
+    private volatile bool _playIntent;
 
     /// <summary>
     /// Очередь отложенных записей integrated loudness в БД.
@@ -471,8 +475,13 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Запускает или ставит на паузу воспроизведение и фиксирует намерение пользователя слушать.
+    /// </summary>
+    /// <param name="shouldPlay">true — играть, false — пауза.</param>
     public async Task SetPlaybackStateAsync(bool shouldPlay)
     {
+        _playIntent = shouldPlay;
         if (shouldPlay)
         {
             if (_player.State == PlaybackState.Paused) _player.Resume();
@@ -491,6 +500,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     public void Stop()
     {
+        _playIntent = false;
         BeginNewSession();
         _player.Stop();
 

@@ -513,6 +513,7 @@
   "Playlist_TracksCount": "{0} tracks",
   "Playlist_TracksCount_0": "Empty",
   "Playlist_TracksCount_1": "{0} track",
+  "Playlist_TracksCount_2": "{0} tracks",
   "Playlist_TracksCount_other": "{0} tracks",
   "Playlist_TracksRemoved_Toast": "Removed {0} tracks from \"{1}\"",
   "Playlist_Unlink": "Unlink",

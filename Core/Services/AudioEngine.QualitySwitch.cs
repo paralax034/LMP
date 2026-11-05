@@ -39,8 +39,10 @@ public sealed partial class AudioEngine
         try
         {
             var elapsed = (DateTime.UtcNow - _lastQualitySwitchTime).TotalMilliseconds;
-            if (elapsed < QualitySwitchCooldownMs)
-                await Task.Delay(QualitySwitchCooldownMs - (int)elapsed, ct).ConfigureAwait(false);
+            // Кулдаун без исключений: отмена сессии (новый трек или качество) просто завершает обработчик
+            if (elapsed < QualitySwitchCooldownMs &&
+                !await ct.DelayNoThrowAsync(QualitySwitchCooldownMs - (int)elapsed, continueOnCapturedContext: false).ConfigureAwait(false))
+                return;
 
             _lastQualitySwitchTime = DateTime.UtcNow;
 

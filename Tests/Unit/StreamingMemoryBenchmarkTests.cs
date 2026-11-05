@@ -135,7 +135,7 @@ public static class StreamingMemoryBenchmarkTests
     return Task.CompletedTask;
   }
 
-  [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+  [System.Runtime.CompilerServices.MethodImpl(MethodImplOptions.NoInlining)]
   private static PlayerContext CreateSimulatedBloatedPlayerContext()
   {
     string syntheticBaseJs = new string('a', 1_500_000) + "signatureTimestamp:20590;clientVersion:\"2.20260301.01.00\"";

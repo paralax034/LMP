@@ -112,7 +112,7 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
         base.OnAccountChanged();
         _isDataLoaded = false;
 
-        if (ViewModelBase.CurrentSuspendLevel == SuspendLevel.None)
+        if (CurrentSuspendLevel == SuspendLevel.None)
         {
             _ = Dispatcher.UIThread.InvokeAsync(async () => await LoadTracksAsync(force: true), DispatcherPriority.Background);
         }

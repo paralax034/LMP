@@ -634,26 +634,77 @@ public static class AudioLogicTests
     [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_bufferTimer")]
     private static extern ref Timer? BufferTimerField(AudioPlayer player);
 
+    /// <summary>
+    /// Проверяет арифметику индекса очереди при удалении трека: удалённый играющий трек сразу сменяется стоявшим следом
+    /// без пропуска, удаление последнего ведёт к концу очереди или кругу, а отложенный авто-переход по концу удалённого трека отбрасывается.
+    /// </summary>
+    [TestMethod(TestCategory.Unit, "Queue Remove Current -> No Skip", Group = TestGroups.Audio, Order = 13)]
+    public static Task TestQueueRemoveCurrentNoSkipAsync()
+    {
+        // Удаление в движке: сдвиг индекса, а для текущего трека — шаг «вперёд» как у «Далее» (userInitiated: true)
+        static int RemoveAndResolve(int removedIndex, int currentIndex, int countBefore, bool repeatAll)
+        {
+            int index = AudioEngine.ComputeIndexAfterRemove(removedIndex, currentIndex);
+            return removedIndex == currentIndex
+                ? AudioEngine.ComputeNextIndex(index, countBefore - 1, repeatAll, userInitiated: true)
+                : index;
+        }
+
+        // 1. A, B, C; играет A; удаляем A -> сразу B (индекс 0 в B, C), а не C
+        TestAssert.Equal(0, RemoveAndResolve(0, 0, 3, repeatAll: false), "Removing playing A must start B, not skip to C");
+
+        // 2. A, B, C, D; играет B; удаляем B -> C (индекс 1 в A, C, D)
+        TestAssert.Equal(1, RemoveAndResolve(1, 1, 4, repeatAll: false), "Removing playing middle track must start the next one");
+
+        // 3. Играющий последний: без повтора — конец очереди, с RepeatMode.All — первый трек
+        TestAssert.Equal(-1, RemoveAndResolve(2, 2, 3, repeatAll: false), "Removing playing last track without repeat must end the queue");
+        TestAssert.Equal(0, RemoveAndResolve(2, 2, 3, repeatAll: true), "Removing playing last track with RepeatAll must wrap to the first");
+
+        // 4. Единственный трек -> остановка даже при RepeatMode.All
+        TestAssert.Equal(-1, RemoveAndResolve(0, 0, 1, repeatAll: true), "Removing the only track must stop playback");
+
+        // 5. Чужие треки: до текущего — индекс на 1 меньше, после — без изменений
+        TestAssert.Equal(1, RemoveAndResolve(0, 2, 3, repeatAll: false), "Removing a track before current must shift index down");
+        TestAssert.Equal(0, RemoveAndResolve(2, 0, 3, repeatAll: false), "Removing a track after current must keep index");
+
+        // 6. Два быстрых удаления: A, B, C; играет A; удаляем A, затем B до его старта -> C
+        int afterFirst = RemoveAndResolve(0, 0, 3, repeatAll: false);
+        TestAssert.Equal(0, RemoveAndResolve(0, afterFirst, 2, repeatAll: false), "Second quick removal must start C");
+
+        // 7. Регресс навигации: обычный шаг, конец очереди, круг и одиночный трек при авто-переходе
+        TestAssert.Equal(1, AudioEngine.ComputeNextIndex(0, 3, repeatAll: false, userInitiated: false));
+        TestAssert.Equal(-1, AudioEngine.ComputeNextIndex(2, 3, repeatAll: false, userInitiated: false));
+        TestAssert.Equal(0, AudioEngine.ComputeNextIndex(2, 3, repeatAll: true, userInitiated: false));
+        TestAssert.Equal(-1, AudioEngine.ComputeNextIndex(0, 1, repeatAll: true, userInitiated: false), "Auto-advance on single track with RepeatAll must stop");
+
+        // 8. Авто-переход по концу удалённого A устарел: очередь уже стоит на B
+        TestAssert.True(AudioEngine.IsStaleTrackEnd("A", "B"), "Track-end of removed A must be dropped");
+        TestAssert.False(AudioEngine.IsStaleTrackEnd("A", "A"), "Natural track-end must advance");
+        TestAssert.False(AudioEngine.IsStaleTrackEnd(null, "B"), "User navigation is never stale");
+
+        return Task.CompletedTask;
+    }
+
     [TestMethod(TestCategory.Unit, "PlaybackErrorBehaviorMatrix & AudioPlayer Timer Lifecycle", Group = TestGroups.Audio, Order = 9)]
     public static async Task TestPlaybackErrorMatrixAndTimerLifecycleAsync()
     {
         // 1. Проверка матрицы политик восстановления после ошибок воспроизведения
-        var dialogPolicy = UI.Helpers.PlaybackErrorBehaviorMatrix.Resolve(
+        var dialogPolicy = PlaybackErrorBehaviorMatrix.Resolve(
             PlaybackErrorBehavior.Dialog, PlaybackFailureBehavior.SkipAndPlay);
         TestAssert.True(dialogPolicy.ShowNotification);
         TestAssert.True(dialogPolicy.RequiresUserAction);
-        TestAssert.Equal(UI.Helpers.PlaybackRecoveryMode.AwaitUserAction, dialogPolicy.RecoveryMode);
+        TestAssert.Equal(PlaybackRecoveryMode.AwaitUserAction, dialogPolicy.RecoveryMode);
 
-        var toastSkipPlay = UI.Helpers.PlaybackErrorBehaviorMatrix.Resolve(
+        var toastSkipPlay = PlaybackErrorBehaviorMatrix.Resolve(
             PlaybackErrorBehavior.ToastAndSkip, PlaybackFailureBehavior.SkipAndPlay);
         TestAssert.True(toastSkipPlay.ShowNotification);
         TestAssert.False(toastSkipPlay.RequiresUserAction);
-        TestAssert.Equal(UI.Helpers.PlaybackRecoveryMode.SkipAndPlay, toastSkipPlay.RecoveryMode);
+        TestAssert.Equal(PlaybackRecoveryMode.SkipAndPlay, toastSkipPlay.RecoveryMode);
 
-        var ignoreStop = UI.Helpers.PlaybackErrorBehaviorMatrix.Resolve(
+        var ignoreStop = PlaybackErrorBehaviorMatrix.Resolve(
             PlaybackErrorBehavior.Ignore, PlaybackFailureBehavior.Stop);
         TestAssert.False(ignoreStop.ShowNotification, "Ignore mode must suppress notification toasts");
-        TestAssert.Equal(UI.Helpers.PlaybackRecoveryMode.Stop, ignoreStop.RecoveryMode);
+        TestAssert.Equal(PlaybackRecoveryMode.Stop, ignoreStop.RecoveryMode);
 
         // 2. Проверка сохранения активности _bufferTimer в AudioPlayer при переходах Buffering -> Suspend -> Resume -> StartPositionTimerDelayed
         await using var player = new AudioPlayer(new AudioPlayerOptions

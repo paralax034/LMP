@@ -654,18 +654,18 @@ public static class PlaylistStreamingParserTests
         "googleusercontent.com URLs with different =s576/=s1200 size suffixes must be equivalent");
 
     // Проверка компактных суффиксов K/M/B и разделителей тысяч в ParseLongFromText
-    TestAssert.Equal(31_000L, Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("31K views".AsSpan()));
-    TestAssert.Equal(31_500L, Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("31.5K views".AsSpan()));
-    TestAssert.Equal(1_250_000L, Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("1.25M views".AsSpan()));
-    TestAssert.Equal(2_000_000_000L, Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("2B views".AsSpan()));
-    TestAssert.Equal(1_500_000L, Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("1,500,000 views".AsSpan()));
-    TestAssert.Equal(31L, Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("31 views".AsSpan()));
+    TestAssert.Equal(31_000L, YoutubeParsingHelpers.ParseLongFromText("31K views".AsSpan()));
+    TestAssert.Equal(31_500L, YoutubeParsingHelpers.ParseLongFromText("31.5K views".AsSpan()));
+    TestAssert.Equal(1_250_000L, YoutubeParsingHelpers.ParseLongFromText("1.25M views".AsSpan()));
+    TestAssert.Equal(2_000_000_000L, YoutubeParsingHelpers.ParseLongFromText("2B views".AsSpan()));
+    TestAssert.Equal(1_500_000L, YoutubeParsingHelpers.ParseLongFromText("1,500,000 views".AsSpan()));
+    TestAssert.Equal(31L, YoutubeParsingHelpers.ParseLongFromText("31 views".AsSpan()));
 
-    TestAssert.Equal("dQw4w9WgXcQ", Core.Youtube.Utils.YoutubeIdHelper.ExtractRawId("yt_dQw4w9WgXcQ"));
-    TestAssert.Equal(2026, Core.Youtube.Utils.YoutubeParsingHelpers.ParseYearFromText("Updated 2026".AsSpan()));
-    TestAssert.Equal(new DateOnly(2026, 10, 28), Core.Youtube.Utils.YoutubeParsingHelpers.ParseRelativeDate("2 days ago".AsSpan(), nowUtc));
+    TestAssert.Equal("dQw4w9WgXcQ", YoutubeIdHelper.ExtractRawId("yt_dQw4w9WgXcQ"));
+    TestAssert.Equal(2026, YoutubeParsingHelpers.ParseYearFromText("Updated 2026".AsSpan()));
+    TestAssert.Equal(new DateOnly(2026, 10, 28), YoutubeParsingHelpers.ParseRelativeDate("2 days ago".AsSpan(), nowUtc));
 
-    var reason = Core.Youtube.Utils.PlayabilityErrorClassifier.Classify(
+    var reason = PlayabilityErrorClassifier.Classify(
         "Video unavailable. This video contains content from SME, who has blocked it on copyright grounds",
         out var claimant);
     TestAssert.Equal(Core.Youtube.Exceptions.StreamUnavailableReason.CopyrightBlocked, reason);
@@ -678,11 +678,11 @@ public static class PlaylistStreamingParserTests
     TestAssert.ZeroAlloc(() =>
     {
       _ = ThumbnailComparer.AreEquivalent(googleContent576, googleContent1200, playlistId);
-      _ = Core.Youtube.Utils.YoutubeIdHelper.ExtractRawIdSpan("yt_pl_PL1234567890".AsSpan());
-      _ = Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("31.5K views".AsSpan());
-      _ = Core.Youtube.Utils.YoutubeParsingHelpers.ParseLongFromText("1,500,000 views".AsSpan());
-      _ = Core.Youtube.Utils.YoutubeParsingHelpers.ParseYearFromText("2026".AsSpan());
-      _ = Core.Youtube.Utils.YoutubeParsingHelpers.ParseRelativeDate("3 weeks ago".AsSpan(), nowUtc);
+      _ = YoutubeIdHelper.ExtractRawIdSpan("yt_pl_PL1234567890".AsSpan());
+      _ = YoutubeParsingHelpers.ParseLongFromText("31.5K views".AsSpan());
+      _ = YoutubeParsingHelpers.ParseLongFromText("1,500,000 views".AsSpan());
+      _ = YoutubeParsingHelpers.ParseYearFromText("2026".AsSpan());
+      _ = YoutubeParsingHelpers.ParseRelativeDate("3 weeks ago".AsSpan(), nowUtc);
     }, warmup: 10, iterations: 1000, context: "YoutubeHotPathUtils");
 
     return Task.CompletedTask;

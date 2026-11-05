@@ -2,6 +2,7 @@
 using AsyncImageLoader;
 using Avalonia;
 using LMP.Core.Audio.Cache;
+using LMP.Core.Audio.Http;
 using LMP.Core.Data;
 using LMP.Core.Data.Repositories;
 using LMP.Core.Diagnostics;
@@ -114,7 +115,7 @@ public sealed class AppEntry
         UpdateService.CleanupPendingOldFiles();
 
 #if DEBUG
-        UpdateService.DebugSimulatedCommitCount = LMP.Tests.Framework.TestConfig.Get().General.SimulateOldCommitCount;
+        UpdateService.DebugSimulatedCommitCount = Tests.Framework.TestConfig.Get().General.SimulateOldCommitCount;
 #endif
 
         CommandLineArgs = args;
@@ -142,7 +143,7 @@ public sealed class AppEntry
             var arg = args[i];
             if (string.Equals(arg, "--headless", StringComparison.OrdinalIgnoreCase)
 #if DEBUG
-                || (!IsTestUiMode && LMP.Tests.ManualTests.IsTestCliArgument(arg))
+                || (!IsTestUiMode && Tests.ManualTests.IsTestCliArgument(arg))
 #endif
                )
             {
@@ -237,7 +238,7 @@ public sealed class AppEntry
 
             var services = new ServiceCollection();
 #if DEBUG
-            if (!IsTestUiMode && LMP.Tests.ManualTests.HasTestCliArguments(args))
+            if (!IsTestUiMode && Tests.ManualTests.HasTestCliArguments(args))
             {
                 var testDbFolder = G.FilePath.UseIsolatedTestDatabase();
                 Log.Info($"[Tests] Isolated test database: {testDbFolder}");
@@ -247,17 +248,17 @@ public sealed class AppEntry
             Services = services.BuildServiceProvider();
 
             AudioSourceFactory.RegisterLazyFactory(() => Services.GetRequiredService<AudioCacheManager>());
-            LMP.Core.Audio.Http.SharedHttpClient.RegisterLazyFactory(() => Services.GetRequiredService<NetworkManager>());
+            SharedHttpClient.RegisterLazyFactory(() => Services.GetRequiredService<NetworkManager>());
 
             LifecycleRegistry.Instance = Services.GetRequiredService<LifecycleRegistry>();
             LifecycleRegistry.ActiveUiPageResolver = () =>
                 Services.GetService<MainWindowViewModel>()?.CurrentPage;
 
 #if DEBUG
-            if (!IsTestUiMode && LMP.Tests.ManualTests.HasTestCliArguments(args))
+            if (!IsTestUiMode && Tests.ManualTests.HasTestCliArguments(args))
             {
                 MigrateDatabaseSync(fastMode: true);
-                Environment.ExitCode = LMP.Tests.ManualTests.RunCliAsync(args).GetAwaiter().GetResult();
+                Environment.ExitCode = Tests.ManualTests.RunCliAsync(args).GetAwaiter().GetResult();
                 return;
             }
 #endif
@@ -677,7 +678,7 @@ public sealed class AppEntry
         services.AddSingleton(_ =>
         {
             var net = new NetworkManager();
-            LMP.Core.Audio.Http.SharedHttpClient.Initialize(net);
+            SharedHttpClient.Initialize(net);
             return net;
         });
 

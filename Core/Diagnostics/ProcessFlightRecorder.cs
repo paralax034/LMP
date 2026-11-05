@@ -93,6 +93,15 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     /// </summary>
     public static bool IsEnabled { get; private set; }
 
+    // Avalonia привязывает Dispatcher.UIThread к первому обратившемуся потоку: пинг из рекордера до AppBuilder.Setup
+    // присвоил бы диспетчер ему, и Win32Platform.Initialize на STA-потоке Main упал бы в VerifyAccess
+    private static volatile bool _uiDispatcherReady;
+
+    /// <summary>
+    /// Разрешает замер отклика UI. Вызывается из запущенного цикла UI-потока после инициализации платформы Avalonia.
+    /// </summary>
+    public static void MarkUiDispatcherReady() => _uiDispatcherReady = true;
+
     /// <summary>
     /// Путь к текущему файлу детальной телеметрии.
     /// </summary>
@@ -216,7 +225,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
     private double MeasureUiPingLatencyMs()
     {
-        if (!_hasBaseline)
+        // Флаг читается без обращения к Dispatcher.UIThread: даже CheckAccess() создал бы диспетчер на этом потоке
+        if (!_hasBaseline || !_uiDispatcherReady)
             return 0.0;
 
         try

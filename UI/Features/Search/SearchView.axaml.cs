@@ -69,7 +69,7 @@ public partial class SearchView : UserControl
                 }
             };
 
-            searchBox.AddHandler(InputElement.KeyDownEvent, OnSearchBoxKeyDown, RoutingStrategies.Tunnel);
+            searchBox.AddHandler(KeyDownEvent, OnSearchBoxKeyDown, RoutingStrategies.Tunnel);
             searchBox.AddHandler(TextBox.PastingFromClipboardEvent, OnSearchBoxPastingFromClipboard, RoutingStrategies.Tunnel);
         }
     }

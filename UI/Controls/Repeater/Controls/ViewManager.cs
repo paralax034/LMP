@@ -119,7 +119,7 @@ namespace Avalonia.Controls
             // и одновременно отпустил ссылку на вытесненный TrackItemViewModel.
             if (virtInfo.MustClearDataContext)
             {
-                element.SetCurrentValue(Control.DataContextProperty, null);
+                element.SetCurrentValue(StyledElement.DataContextProperty, null);
                 virtInfo.MustClearDataContext = false;
             }
 
@@ -642,7 +642,7 @@ namespace Avalonia.Controls
             if (data != element)
             {
                 // Prepare the element
-                element.SetCurrentValue(Control.DataContextProperty, data);
+                element.SetCurrentValue(StyledElement.DataContextProperty, data);
                 virtInfo.MustClearDataContext = true;
             }
 

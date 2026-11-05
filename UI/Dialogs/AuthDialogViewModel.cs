@@ -475,7 +475,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     private async Task CopyPathToClipboardAsync()
     {
         if (string.IsNullOrEmpty(ExtensionFolderPath)) return;
-        await Helpers.Clipboard.SetTextAsync(ExtensionFolderPath);
+        await Clipboard.SetTextAsync(ExtensionFolderPath);
         IsPathCopied = true;
         CopyHintService.Instance.Show(SL["Extension_Path_Copied_Toast"], CopyHintKind.Success);
     }
@@ -483,7 +483,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     private async Task CopyLinkAsync(string? url)
     {
         if (string.IsNullOrEmpty(url)) return;
-        await Helpers.Clipboard.SetTextAsync(url);
+        await Clipboard.SetTextAsync(url);
         CopyHintService.Instance.Show(SL["Extension_Link_Copied_Toast"], CopyHintKind.Success);
     }
 

@@ -26,6 +26,8 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         Log.Info("Framework initialization completed.");
+        // Флаг поднимается уже из цикла: синхронные тема, локализация и splash не дают ложных SPIKE-пингов по 400 мс
+        Dispatcher.UIThread.Post(LMP.Core.Diagnostics.ProcessFlightRecorder.MarkUiDispatcherReady, DispatcherPriority.Background);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

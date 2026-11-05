@@ -118,7 +118,7 @@ public partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     private void HandleGlobalAccountHydrated()
     {
-        Dispatcher.UIThread.Post(() => { ViewModelBase.BroadcastAccountChanged(); }, DispatcherPriority.Normal);
+        Dispatcher.UIThread.Post(() => { BroadcastAccountChanged(); }, DispatcherPriority.Normal);
     }
 
     public void LockNavigation(string reason)
