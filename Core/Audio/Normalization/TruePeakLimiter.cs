@@ -77,7 +77,8 @@ public sealed class TruePeakLimiter
     {
         float u = (abs - KneeStart) * InvKneeSpan;
         float u2 = u * u;
-        return KneeStart + KneeSpan * ((u + u2) / (1.0f + u + u2));
+        float sum = u + u2;
+        return KneeStart + KneeSpan * (sum * Helpers.SpanMathHelper.FastReciprocal(1.0f + sum));
     }
 
     /// <summary>
@@ -88,14 +89,14 @@ public sealed class TruePeakLimiter
     /// <param name="peak">Модуль наибольшего отсчёта кадра по всем каналам.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static float SoftCeilingScale(float peak)
-        => peak > KneeStart ? SoftCeilingPositive(peak) / peak : 1.0f;
+        => peak > KneeStart ? SoftCeilingPositive(peak) * Helpers.SpanMathHelper.FastReciprocal(peak) : 1.0f;
 
     /// <summary>
     /// Обрабатывает interleaved PCM буфер in-place (Zero-Latency, 100% сохранение стерео-баланса L/R и фазы при Seek).
     /// </summary>
     /// <param name="samples">Interleaved PCM сэмплы (in-place обработка).</param>
     /// <param name="crossfader">Ссылка на crossfader для per-sample gain interpolation.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     public void Process(Span<float> samples, ref GainCrossfader crossfader)
     {
         int length = samples.Length;
@@ -119,9 +120,11 @@ public sealed class TruePeakLimiter
             float inL = Unsafe.Add(ref samplesRef, i) * gain;
             float inR = Unsafe.Add(ref samplesRef, i + 1) * gain;
 
-            float absPeak = MathF.Max(MathF.Abs(inL), MathF.Abs(inR));
+            float absL = MathF.Abs(inL);
+            float absR = MathF.Abs(inR);
+            float absPeak = absL > absR ? absL : absR;
             float neededGain = absPeak > KneeStart
-                ? KneeStart / absPeak
+                ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absPeak)
                 : 1.0f;
 
             if (neededGain <= targetEnv)
@@ -139,19 +142,18 @@ public sealed class TruePeakLimiter
             }
             else
             {
-                targetEnv = releaseCoef * targetEnv + (1f - releaseCoef) * 1.0f;
+                targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
             }
 
-            envGain = targetEnv < envGain
-                ? attackCoef * envGain + (1f - attackCoef) * targetEnv
-                : releaseCoef * envGain + (1f - releaseCoef) * targetEnv;
+            float coef = targetEnv < envGain ? attackCoef : releaseCoef;
+            envGain = targetEnv + coef * (envGain - targetEnv);
 
             float outL = inL * envGain;
             float outR = inR * envGain;
-            float outPeak = MathF.Max(MathF.Abs(outL), MathF.Abs(outR));
+            float outPeak = absPeak * envGain;
             if (outPeak > KneeStart)
             {
-                float softScale = SoftCeilingPositive(outPeak) / outPeak;
+                float softScale = SoftCeilingPositive(outPeak) * Helpers.SpanMathHelper.FastReciprocal(outPeak);
                 outL *= softScale;
                 outR *= softScale;
             }
@@ -167,7 +169,7 @@ public sealed class TruePeakLimiter
             float absAmp = MathF.Abs(amplified);
 
             float neededGain = absAmp > KneeStart
-                ? KneeStart / absAmp
+                ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absAmp)
                 : 1.0f;
 
             if (neededGain < targetEnv)
@@ -181,15 +183,14 @@ public sealed class TruePeakLimiter
             }
             else
             {
-                targetEnv = releaseCoef * targetEnv + (1f - releaseCoef) * 1.0f;
+                targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
             }
 
-            envGain = targetEnv < envGain
-                ? attackCoef * envGain + (1f - attackCoef) * targetEnv
-                : releaseCoef * envGain + (1f - releaseCoef) * targetEnv;
+            float coef = targetEnv < envGain ? attackCoef : releaseCoef;
+            envGain = targetEnv + coef * (envGain - targetEnv);
 
             float outM = amplified * envGain;
-            float outAbs = MathF.Abs(outM);
+            float outAbs = absAmp * envGain;
             if (outAbs > KneeStart)
                 outM = MathF.CopySign(SoftCeilingPositive(outAbs), outM);
 

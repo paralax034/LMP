@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace LMP.Core.Audio.Helpers;
 
@@ -54,7 +56,7 @@ public static class EqualizerPresets
     private static readonly float[] AmbientBands = [3.5f, 3.0f, 1.5f, 0.0f, -1.0f, -0.5f, 0.5f, 0.5f, 1.0f, 2.5f];
     private static readonly float[] RockBands = [2.5f, 3.0f, 1.5f, -1.5f, -1.0f, 1.0f, 2.0f, 1.5f, 0.5f, 1.0f];
     private static readonly float[] RapBands = [4.5f, 5.0f, 2.0f, -1.5f, -1.0f, 1.0f, 1.5f, 0.5f, 0.0f, 1.0f];
-    public static readonly float[] PopBands = [2.0f, 2.5f, 1.0f, -1.0f, -0.5f, 1.5f, 1.5f, 1.0f, 0.5f, 1.5f];
+    private static readonly float[] PopBands = [2.0f, 2.5f, 1.0f, -1.0f, -0.5f, 1.5f, 1.5f, 1.0f, 0.5f, 1.5f];
     private static readonly float[] AcousticBands = [1.5f, 2.0f, 1.0f, -1.0f, 0.5f, 1.5f, 1.5f, 0.5f, 0.5f, 1.5f];
 
     private static readonly string[] BuiltInIdsArray =
@@ -244,9 +246,11 @@ public sealed class EqualizerProcessor
         public float A1;
         public float A2;
         public float A3;
+        public float PadA;
         public float M0;
         public float M1;
         public float M2;
+        public float PadM;
 
         /// <summary>
         /// Посэмпловый шаг однополюсного НЧ-фильтра сглаживания коэффициентов (1-pole LPF без ВЧ-ступенек подблоков).
@@ -254,6 +258,25 @@ public sealed class EqualizerProcessor
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SmoothStepTowards(in SvfCoefficientsF target, float alpha)
         {
+            if (Sse.IsSupported)
+            {
+                ref float selfRef = ref Unsafe.As<SvfCoefficientsF, float>(ref this);
+                ref float targetRef = ref Unsafe.As<SvfCoefficientsF, float>(ref Unsafe.AsRef(in target));
+
+                var vAlpha = Vector128.Create(alpha);
+                var curA = Vector128.LoadUnsafe(ref selfRef);
+                var tgtA = Vector128.LoadUnsafe(ref targetRef);
+                var curM = Vector128.LoadUnsafe(ref selfRef, 4);
+                var tgtM = Vector128.LoadUnsafe(ref targetRef, 4);
+
+                curA = Sse.Add(curA, Sse.Multiply(Sse.Subtract(tgtA, curA), vAlpha));
+                curM = Sse.Add(curM, Sse.Multiply(Sse.Subtract(tgtM, curM), vAlpha));
+
+                Vector128.StoreUnsafe(curA, ref selfRef);
+                Vector128.StoreUnsafe(curM, ref selfRef, 4);
+                return;
+            }
+
             A1 += (target.A1 - A1) * alpha;
             A2 += (target.A2 - A2) * alpha;
             A3 += (target.A3 - A3) * alpha;
@@ -271,8 +294,11 @@ public sealed class EqualizerProcessor
         public double Ic2EqL;
         public double Ic2EqR;
 
+        /// <summary>
+        /// Обрабатывает стереопару без вызовов <see cref="Math.FusedMultiplyAdd"/> (используется для нестандартного числа каналов).
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void ProcessStereoDouble(ref double left, ref double right, in SvfCoefficientsF c)
+        public void ProcessStereoScalar(ref double left, ref double right, in SvfCoefficientsF c)
         {
             double inL = left;
             double inR = right;
@@ -284,23 +310,23 @@ public sealed class EqualizerProcessor
             double v3L = inL - Ic2EqL;
             double v3R = inR - Ic2EqR;
 
-            double v1L = Math.FusedMultiplyAdd(a1, Ic1EqL, a2 * v3L);
-            double v1R = Math.FusedMultiplyAdd(a1, Ic1EqR, a2 * v3R);
+            double v1L = a1 * Ic1EqL + a2 * v3L;
+            double v1R = a1 * Ic1EqR + a2 * v3R;
 
-            double v2L = Ic2EqL + Math.FusedMultiplyAdd(a2, Ic1EqL, a3 * v3L);
-            double v2R = Ic2EqR + Math.FusedMultiplyAdd(a2, Ic1EqR, a3 * v3R);
+            double v2L = Ic2EqL + (a2 * Ic1EqL + a3 * v3L);
+            double v2R = Ic2EqR + (a2 * Ic1EqR + a3 * v3R);
 
-            Ic1EqL = 2.0 * v1L - Ic1EqL;
-            Ic1EqR = 2.0 * v1R - Ic1EqR;
-            Ic2EqL = 2.0 * v2L - Ic2EqL;
-            Ic2EqR = 2.0 * v2R - Ic2EqR;
+            Ic1EqL = (v1L + v1L) - Ic1EqL;
+            Ic1EqR = (v1R + v1R) - Ic1EqR;
+            Ic2EqL = (v2L + v2L) - Ic2EqL;
+            Ic2EqR = (v2R + v2R) - Ic2EqR;
 
             double m0 = c.M0;
             double m1 = c.M1;
             double m2 = c.M2;
 
-            left = Math.FusedMultiplyAdd(m0, inL, Math.FusedMultiplyAdd(m1, v1L, m2 * v2L));
-            right = Math.FusedMultiplyAdd(m0, inR, Math.FusedMultiplyAdd(m1, v1R, m2 * v2R));
+            left = m0 * inL + (m1 * v1L + m2 * v2L);
+            right = m0 * inR + (m1 * v1R + m2 * v2R);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -423,9 +449,11 @@ public sealed class EqualizerProcessor
             A1 = (float)a1,
             A2 = (float)a2,
             A3 = (float)a3,
+            PadA = 0f,
             M0 = (float)m0,
             M1 = (float)m1,
-            M2 = (float)m2
+            M2 = (float)m2,
+            PadM = 0f
         };
     }
 
@@ -562,7 +590,7 @@ public sealed class EqualizerProcessor
             _states[i].Reset();
     }
 
-    public void Process(Span<float> samples)
+    public unsafe void Process(Span<float> samples)
     {
         if (samples.IsEmpty) return;
 
@@ -575,14 +603,16 @@ public sealed class EqualizerProcessor
         int totalFrames = samples.Length / channels;
         if (totalFrames <= 0) return;
 
-        ref float bufRef = ref MemoryMarshal.GetReference(samples);
-
         if (channels == 2)
         {
-            ProcessStereoInternal(ref bufRef, totalFrames);
+            fixed (float* pSamples = samples)
+            {
+                ProcessStereoInternal(pSamples, totalFrames, samples);
+            }
         }
         else
         {
+            ref float bufRef = ref MemoryMarshal.GetReference(samples);
             ProcessGenericChannelsInternal(ref bufRef, totalFrames, channels);
         }
 
@@ -611,47 +641,492 @@ public sealed class EqualizerProcessor
         }
         else
         {
-            // Посэмпловое однополюсное сглаживание (Per-Sample 1-Pole LPF, 48 кГц):
-            // 0 ступенек подблоков, 0 ВЧ-алиасинга при кручении НЧ!
             _currentPreampGain += (_targetPreampGain - _currentPreampGain) * SampleSmoothAlpha;
-            _currentCoeffs[0].SmoothStepTowards(in _targetCoeffs[0], SampleSmoothAlpha);
-            _currentCoeffs[1].SmoothStepTowards(in _targetCoeffs[1], SampleSmoothAlpha);
-            _currentCoeffs[2].SmoothStepTowards(in _targetCoeffs[2], SampleSmoothAlpha);
-            _currentCoeffs[3].SmoothStepTowards(in _targetCoeffs[3], SampleSmoothAlpha);
-            _currentCoeffs[4].SmoothStepTowards(in _targetCoeffs[4], SampleSmoothAlpha);
-            _currentCoeffs[5].SmoothStepTowards(in _targetCoeffs[5], SampleSmoothAlpha);
-            _currentCoeffs[6].SmoothStepTowards(in _targetCoeffs[6], SampleSmoothAlpha);
-            _currentCoeffs[7].SmoothStepTowards(in _targetCoeffs[7], SampleSmoothAlpha);
-            _currentCoeffs[8].SmoothStepTowards(in _targetCoeffs[8], SampleSmoothAlpha);
-            _currentCoeffs[9].SmoothStepTowards(in _targetCoeffs[9], SampleSmoothAlpha);
+            for (int b = 0; b < BandCount; b++)
+                _currentCoeffs[b].SmoothStepTowards(in _targetCoeffs[b], SampleSmoothAlpha);
+        }
+    }
+
+    /// <summary>
+    /// Диспетчеризует стерео-обработку по пути стационарных коэффициентов (99.9% времени)
+    /// и пути плавной перестройки параметров (30 мс окно при движении ползунков).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private unsafe void ProcessStereoInternal(float* pSamples, int totalFrames, Span<float> samplesSpan)
+    {
+        int rampRem = _rampFramesRemaining;
+        if (rampRem > 0)
+        {
+            int rampFrames = Math.Min(totalFrames, rampRem);
+            if (Fma.IsSupported)
+                ProcessStereoRampFma(pSamples, rampFrames);
+            else if (Sse2.IsSupported)
+                ProcessStereoRampSse2(pSamples, rampFrames);
+            else
+                ProcessStereoRampScalar(pSamples, rampFrames);
+
+            int steadyFrames = totalFrames - rampFrames;
+            if (steadyFrames > 0)
+            {
+                float* pSteady = pSamples + (nuint)rampFrames * 2;
+                Span<float> steadySpan = samplesSpan.Slice(rampFrames * 2, steadyFrames * 2);
+                DispatchStereoSteady(pSteady, steadyFrames, steadySpan);
+            }
+        }
+        else
+        {
+            DispatchStereoSteady(pSamples, totalFrames, samplesSpan);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessStereoInternal(ref float bufRef, int totalFrames)
+    private unsafe void DispatchStereoSteady(float* pSamples, int totalFrames, Span<float> samplesSpan)
     {
-        for (int frameIdx = 0; frameIdx < totalFrames; frameIdx++)
+        float preamp = _currentPreampGain;
+        if (MathF.Abs(preamp - 1.0f) > 1e-6f)
+            SpanMathHelper.MultiplyByConstant(samplesSpan, preamp);
+
+        if (Fma.IsSupported)
+            ProcessStereoSteadyFma(pSamples, totalFrames);
+        else if (Sse2.IsSupported)
+            ProcessStereoSteadySse2(pSamples, totalFrames);
+        else
+            ProcessStereoSteadyScalar(pSamples, totalFrames);
+    }
+
+    /// <summary>
+    /// Горячее ядро эквалайзера (FMA3 + SSE2, Band-Major):
+    /// держит состояния <c>ic1</c>, <c>ic2</c> и 6 коэффициентов в 8 регистрах XMM,
+    /// обрабатывает L и R каналы одновременно в <see cref="Vector128{Double}"/>
+    /// (≤ 12 регистров XMM, 0 <c>call</c>, 0 обращений к стеку <c>[rsp + disp]</c> внутри цикла).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessStereoSteadyFma(float* pSamples, int totalFrames)
+    {
+        if (!Fma.IsSupported)
+            return;
+
+        float* pEnd = pSamples + (nuint)totalFrames * 2;
+        ref StereoSvfState stateBase = ref _states[0];
+        ref SvfCoefficientsF coeffBase = ref _currentCoeffs[0];
+
+        for (int b = 0; b < BandCount; b++)
+        {
+            ref StereoSvfState st = ref Unsafe.Add(ref stateBase, b);
+            ref readonly SvfCoefficientsF cf = ref Unsafe.Add(ref coeffBase, b);
+
+            var ic1 = Vector128.LoadUnsafe(ref st.Ic1EqL);
+            var ic2 = Vector128.LoadUnsafe(ref st.Ic2EqL);
+
+            var va1 = Vector128.Create((double)cf.A1);
+            var va2 = Vector128.Create((double)cf.A2);
+            var va3 = Vector128.Create((double)cf.A3);
+            var vm0 = Vector128.Create((double)cf.M0);
+            var vm1 = Vector128.Create((double)cf.M1);
+            var vm2 = Vector128.Create((double)cf.M2);
+
+            float* ptr = pSamples;
+            while (ptr < pEnd)
+            {
+                var raw64 = Sse2.LoadScalarVector128((double*)ptr);
+                var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+                var v3 = Sse2.Subtract(x, ic2);
+                var v1 = Fma.MultiplyAdd(va1, ic1, Sse2.Multiply(va2, v3));
+                var v2 = Sse2.Add(ic2, Fma.MultiplyAdd(va2, ic1, Sse2.Multiply(va3, v3)));
+
+                ic1 = Sse2.Subtract(Sse2.Add(v1, v1), ic1);
+                ic2 = Sse2.Subtract(Sse2.Add(v2, v2), ic2);
+
+                var y = Fma.MultiplyAdd(vm0, x, Fma.MultiplyAdd(vm1, v1, Sse2.Multiply(vm2, v2)));
+
+                var packedOut = Vector128.AsDouble(Sse2.ConvertToVector128Single(y));
+                Sse2.StoreScalar((double*)ptr, packedOut);
+                ptr += 2;
+            }
+
+            Vector128.StoreUnsafe(ic1, ref st.Ic1EqL);
+            Vector128.StoreUnsafe(ic2, ref st.Ic2EqL);
+        }
+    }
+
+    /// <summary>
+    /// Горячее ядро эквалайзера для процессоров без AVX2/FMA3 (базовый SSE2, Pentium/Celeron):
+    /// использует упакованный <see cref="Vector128{Double}"/> (<c>mulpd</c> + <c>addpd</c>)
+    /// без единого вызова <c>call fma</c> и без проливов регистров на стек.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessStereoSteadySse2(float* pSamples, int totalFrames)
+    {
+        if (!Sse2.IsSupported)
+            return;
+
+        float* pEnd = pSamples + (nuint)totalFrames * 2;
+        ref StereoSvfState stateBase = ref _states[0];
+        ref SvfCoefficientsF coeffBase = ref _currentCoeffs[0];
+
+        for (int b = 0; b < BandCount; b++)
+        {
+            ref StereoSvfState st = ref Unsafe.Add(ref stateBase, b);
+            ref readonly SvfCoefficientsF cf = ref Unsafe.Add(ref coeffBase, b);
+
+            var ic1 = Vector128.LoadUnsafe(ref st.Ic1EqL);
+            var ic2 = Vector128.LoadUnsafe(ref st.Ic2EqL);
+
+            var va1 = Vector128.Create((double)cf.A1);
+            var va2 = Vector128.Create((double)cf.A2);
+            var va3 = Vector128.Create((double)cf.A3);
+            var vm0 = Vector128.Create((double)cf.M0);
+            var vm1 = Vector128.Create((double)cf.M1);
+            var vm2 = Vector128.Create((double)cf.M2);
+
+            float* ptr = pSamples;
+            while (ptr < pEnd)
+            {
+                var raw64 = Sse2.LoadScalarVector128((double*)ptr);
+                var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+                var v3 = Sse2.Subtract(x, ic2);
+                var v1 = Sse2.Add(Sse2.Multiply(va1, ic1), Sse2.Multiply(va2, v3));
+                var v2 = Sse2.Add(ic2, Sse2.Add(Sse2.Multiply(va2, ic1), Sse2.Multiply(va3, v3)));
+
+                ic1 = Sse2.Subtract(Sse2.Add(v1, v1), ic1);
+                ic2 = Sse2.Subtract(Sse2.Add(v2, v2), ic2);
+
+                var y = Sse2.Add(
+                    Sse2.Multiply(vm0, x),
+                    Sse2.Add(Sse2.Multiply(vm1, v1), Sse2.Multiply(vm2, v2)));
+
+                var packedOut = Vector128.AsDouble(Sse2.ConvertToVector128Single(y));
+                Sse2.StoreScalar((double*)ptr, packedOut);
+                ptr += 2;
+            }
+
+            Vector128.StoreUnsafe(ic1, ref st.Ic1EqL);
+            Vector128.StoreUnsafe(ic2, ref st.Ic2EqL);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessStereoSteadyScalar(float* pSamples, int totalFrames)
+    {
+        float* pEnd = pSamples + (nuint)totalFrames * 2;
+        for (int b = 0; b < BandCount; b++)
+        {
+            ref StereoSvfState st = ref _states[b];
+            ref readonly SvfCoefficientsF cf = ref _currentCoeffs[b];
+            double ic1L = st.Ic1EqL;
+            double ic1R = st.Ic1EqR;
+            double ic2L = st.Ic2EqL;
+            double ic2R = st.Ic2EqR;
+            double a1 = cf.A1, a2 = cf.A2, a3 = cf.A3;
+            double m0 = cf.M0, m1 = cf.M1, m2 = cf.M2;
+
+            float* ptr = pSamples;
+            while (ptr < pEnd)
+            {
+                double inL = ptr[0];
+                double inR = ptr[1];
+
+                double v3L = inL - ic2L;
+                double v3R = inR - ic2R;
+
+                double v1L = a1 * ic1L + a2 * v3L;
+                double v1R = a1 * ic1R + a2 * v3R;
+
+                double v2L = ic2L + (a2 * ic1L + a3 * v3L);
+                double v2R = ic2R + (a2 * ic1R + a3 * v3R);
+
+                ic1L = (v1L + v1L) - ic1L;
+                ic1R = (v1R + v1R) - ic1R;
+                ic2L = (v2L + v2L) - ic2L;
+                ic2R = (v2R + v2R) - ic2R;
+
+                ptr[0] = (float)(m0 * inL + (m1 * v1L + m2 * v2L));
+                ptr[1] = (float)(m0 * inR + (m1 * v1R + m2 * v2R));
+                ptr += 2;
+            }
+
+            st.Ic1EqL = ic1L;
+            st.Ic1EqR = ic1R;
+            st.Ic2EqL = ic2L;
+            st.Ic2EqR = ic2R;
+        }
+    }
+
+    /// <summary>
+    /// Каскадная обработка 30-мс окна плавной перестройки коэффициентов (FMA3 + SSE2, Band-Major):
+    /// изоморфна посэмпловому сглаживанию, удерживает коэффициенты и состояния в 14 регистрах XMM без <c>call</c> и без стека.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessStereoRampFma(float* pSamples, int rampFrames)
+    {
+        if (!Fma.IsSupported)
+            return;
+
+        int initialRem = _rampFramesRemaining;
+        float curPreamp = _currentPreampGain;
+        float tgtPreamp = _targetPreampGain;
+
+        for (int f = 0; f < rampFrames; f++)
+        {
+            int remAfter = initialRem - 1 - f;
+            curPreamp = remAfter == 0
+                ? tgtPreamp
+                : curPreamp + (tgtPreamp - curPreamp) * SampleSmoothAlpha;
+
+            float* pFrame = pSamples + (nuint)f * 2;
+            pFrame[0] *= curPreamp;
+            pFrame[1] *= curPreamp;
+        }
+        _currentPreampGain = curPreamp;
+
+        bool completesRamp = (initialRem - rampFrames) == 0;
+        int smoothSteps = completesRamp ? rampFrames - 1 : rampFrames;
+        float* pSmoothEnd = pSamples + (nuint)smoothSteps * 2;
+        float* pEnd = pSamples + (nuint)rampFrames * 2;
+
+        var vAlpha = Vector128.Create(SampleSmoothAlpha);
+        ref StereoSvfState stateBase = ref _states[0];
+        ref SvfCoefficientsF curBase = ref _currentCoeffs[0];
+        ref SvfCoefficientsF tgtBase = ref _targetCoeffs[0];
+
+        for (int b = 0; b < BandCount; b++)
+        {
+            ref StereoSvfState st = ref Unsafe.Add(ref stateBase, b);
+            ref SvfCoefficientsF curCf = ref Unsafe.Add(ref curBase, b);
+            ref readonly SvfCoefficientsF tgtCf = ref Unsafe.Add(ref tgtBase, b);
+
+            var ic1 = Vector128.LoadUnsafe(ref st.Ic1EqL);
+            var ic2 = Vector128.LoadUnsafe(ref st.Ic2EqL);
+
+            var curA = Vector128.LoadUnsafe(ref curCf.A1);
+            var curM = Vector128.LoadUnsafe(ref curCf.M0);
+            var tgtA = Vector128.LoadUnsafe(in tgtCf.A1);
+            var tgtM = Vector128.LoadUnsafe(in tgtCf.M0);
+
+            float* ptr = pSamples;
+            while (ptr < pSmoothEnd)
+            {
+                curA = Fma.MultiplyAdd(Sse.Subtract(tgtA, curA), vAlpha, curA);
+                curM = Fma.MultiplyAdd(Sse.Subtract(tgtM, curM), vAlpha, curM);
+
+                var raw64 = Sse2.LoadScalarVector128((double*)ptr);
+                var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+                var a12 = Sse2.ConvertToVector128Double(curA);
+                var va1 = Sse2.UnpackLow(a12, a12);
+                var va2 = Sse2.UnpackHigh(a12, a12);
+                var a30 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curA, curA));
+                var va3 = Sse2.UnpackLow(a30, a30);
+
+                var v3 = Sse2.Subtract(x, ic2);
+                var v1 = Fma.MultiplyAdd(va1, ic1, Sse2.Multiply(va2, v3));
+                var v2 = Sse2.Add(ic2, Fma.MultiplyAdd(va2, ic1, Sse2.Multiply(va3, v3)));
+
+                ic1 = Sse2.Subtract(Sse2.Add(v1, v1), ic1);
+                ic2 = Sse2.Subtract(Sse2.Add(v2, v2), ic2);
+
+                var m01 = Sse2.ConvertToVector128Double(curM);
+                var vm0 = Sse2.UnpackLow(m01, m01);
+                var vm1 = Sse2.UnpackHigh(m01, m01);
+                var m20 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curM, curM));
+                var vm2 = Sse2.UnpackLow(m20, m20);
+
+                var y = Fma.MultiplyAdd(vm0, x, Fma.MultiplyAdd(vm1, v1, Sse2.Multiply(vm2, v2)));
+
+                var packedOut = Vector128.AsDouble(Sse2.ConvertToVector128Single(y));
+                Sse2.StoreScalar((double*)ptr, packedOut);
+                ptr += 2;
+            }
+
+            if (ptr < pEnd)
+            {
+                curA = tgtA;
+                curM = tgtM;
+
+                var raw64 = Sse2.LoadScalarVector128((double*)ptr);
+                var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+                var a12 = Sse2.ConvertToVector128Double(curA);
+                var va1 = Sse2.UnpackLow(a12, a12);
+                var va2 = Sse2.UnpackHigh(a12, a12);
+                var a30 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curA, curA));
+                var va3 = Sse2.UnpackLow(a30, a30);
+
+                var v3 = Sse2.Subtract(x, ic2);
+                var v1 = Fma.MultiplyAdd(va1, ic1, Sse2.Multiply(va2, v3));
+                var v2 = Sse2.Add(ic2, Fma.MultiplyAdd(va2, ic1, Sse2.Multiply(va3, v3)));
+
+                ic1 = Sse2.Subtract(Sse2.Add(v1, v1), ic1);
+                ic2 = Sse2.Subtract(Sse2.Add(v2, v2), ic2);
+
+                var m01 = Sse2.ConvertToVector128Double(curM);
+                var vm0 = Sse2.UnpackLow(m01, m01);
+                var vm1 = Sse2.UnpackHigh(m01, m01);
+                var m20 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curM, curM));
+                var vm2 = Sse2.UnpackLow(m20, m20);
+
+                var y = Fma.MultiplyAdd(vm0, x, Fma.MultiplyAdd(vm1, v1, Sse2.Multiply(vm2, v2)));
+
+                var packedOut = Vector128.AsDouble(Sse2.ConvertToVector128Single(y));
+                Sse2.StoreScalar((double*)ptr, packedOut);
+            }
+
+            Vector128.StoreUnsafe(curA, ref curCf.A1);
+            Vector128.StoreUnsafe(curM, ref curCf.M0);
+            Vector128.StoreUnsafe(ic1, ref st.Ic1EqL);
+            Vector128.StoreUnsafe(ic2, ref st.Ic2EqL);
+        }
+
+        _rampFramesRemaining = initialRem - rampFrames;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessStereoRampSse2(float* pSamples, int rampFrames)
+    {
+        if (!Sse2.IsSupported)
+            return;
+
+        int initialRem = _rampFramesRemaining;
+        float curPreamp = _currentPreampGain;
+        float tgtPreamp = _targetPreampGain;
+
+        for (int f = 0; f < rampFrames; f++)
+        {
+            int remAfter = initialRem - 1 - f;
+            curPreamp = remAfter == 0
+                ? tgtPreamp
+                : curPreamp + (tgtPreamp - curPreamp) * SampleSmoothAlpha;
+
+            float* pFrame = pSamples + (nuint)f * 2;
+            pFrame[0] *= curPreamp;
+            pFrame[1] *= curPreamp;
+        }
+        _currentPreampGain = curPreamp;
+
+        bool completesRamp = (initialRem - rampFrames) == 0;
+        int smoothSteps = completesRamp ? rampFrames - 1 : rampFrames;
+        float* pSmoothEnd = pSamples + (nuint)smoothSteps * 2;
+        float* pEnd = pSamples + (nuint)rampFrames * 2;
+
+        var vAlpha = Vector128.Create(SampleSmoothAlpha);
+        ref StereoSvfState stateBase = ref _states[0];
+        ref SvfCoefficientsF curBase = ref _currentCoeffs[0];
+        ref SvfCoefficientsF tgtBase = ref _targetCoeffs[0];
+
+        for (int b = 0; b < BandCount; b++)
+        {
+            ref StereoSvfState st = ref Unsafe.Add(ref stateBase, b);
+            ref SvfCoefficientsF curCf = ref Unsafe.Add(ref curBase, b);
+            ref readonly SvfCoefficientsF tgtCf = ref Unsafe.Add(ref tgtBase, b);
+
+            var ic1 = Vector128.LoadUnsafe(ref st.Ic1EqL);
+            var ic2 = Vector128.LoadUnsafe(ref st.Ic2EqL);
+
+            var curA = Vector128.LoadUnsafe(ref curCf.A1);
+            var curM = Vector128.LoadUnsafe(ref curCf.M0);
+            var tgtA = Vector128.LoadUnsafe(in tgtCf.A1);
+            var tgtM = Vector128.LoadUnsafe(in tgtCf.M0);
+
+            float* ptr = pSamples;
+            while (ptr < pSmoothEnd)
+            {
+                curA = Sse.Add(curA, Sse.Multiply(Sse.Subtract(tgtA, curA), vAlpha));
+                curM = Sse.Add(curM, Sse.Multiply(Sse.Subtract(tgtM, curM), vAlpha));
+
+                var raw64 = Sse2.LoadScalarVector128((double*)ptr);
+                var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+                var a12 = Sse2.ConvertToVector128Double(curA);
+                var va1 = Sse2.UnpackLow(a12, a12);
+                var va2 = Sse2.UnpackHigh(a12, a12);
+                var a30 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curA, curA));
+                var va3 = Sse2.UnpackLow(a30, a30);
+
+                var v3 = Sse2.Subtract(x, ic2);
+                var v1 = Sse2.Add(Sse2.Multiply(va1, ic1), Sse2.Multiply(va2, v3));
+                var v2 = Sse2.Add(ic2, Sse2.Add(Sse2.Multiply(va2, ic1), Sse2.Multiply(va3, v3)));
+
+                ic1 = Sse2.Subtract(Sse2.Add(v1, v1), ic1);
+                ic2 = Sse2.Subtract(Sse2.Add(v2, v2), ic2);
+
+                var m01 = Sse2.ConvertToVector128Double(curM);
+                var vm0 = Sse2.UnpackLow(m01, m01);
+                var vm1 = Sse2.UnpackHigh(m01, m01);
+                var m20 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curM, curM));
+                var vm2 = Sse2.UnpackLow(m20, m20);
+
+                var y = Sse2.Add(
+                    Sse2.Multiply(vm0, x),
+                    Sse2.Add(Sse2.Multiply(vm1, v1), Sse2.Multiply(vm2, v2)));
+
+                var packedOut = Vector128.AsDouble(Sse2.ConvertToVector128Single(y));
+                Sse2.StoreScalar((double*)ptr, packedOut);
+                ptr += 2;
+            }
+
+            if (ptr < pEnd)
+            {
+                curA = tgtA;
+                curM = tgtM;
+
+                var raw64 = Sse2.LoadScalarVector128((double*)ptr);
+                var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+                var a12 = Sse2.ConvertToVector128Double(curA);
+                var va1 = Sse2.UnpackLow(a12, a12);
+                var va2 = Sse2.UnpackHigh(a12, a12);
+                var a30 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curA, curA));
+                var va3 = Sse2.UnpackLow(a30, a30);
+
+                var v3 = Sse2.Subtract(x, ic2);
+                var v1 = Sse2.Add(Sse2.Multiply(va1, ic1), Sse2.Multiply(va2, v3));
+                var v2 = Sse2.Add(ic2, Sse2.Add(Sse2.Multiply(va2, ic1), Sse2.Multiply(va3, v3)));
+
+                ic1 = Sse2.Subtract(Sse2.Add(v1, v1), ic1);
+                ic2 = Sse2.Subtract(Sse2.Add(v2, v2), ic2);
+
+                var m01 = Sse2.ConvertToVector128Double(curM);
+                var vm0 = Sse2.UnpackLow(m01, m01);
+                var vm1 = Sse2.UnpackHigh(m01, m01);
+                var m20 = Sse2.ConvertToVector128Double(Sse.MoveHighToLow(curM, curM));
+                var vm2 = Sse2.UnpackLow(m20, m20);
+
+                var y = Sse2.Add(
+                    Sse2.Multiply(vm0, x),
+                    Sse2.Add(Sse2.Multiply(vm1, v1), Sse2.Multiply(vm2, v2)));
+
+                var packedOut = Vector128.AsDouble(Sse2.ConvertToVector128Single(y));
+                Sse2.StoreScalar((double*)ptr, packedOut);
+            }
+
+            Vector128.StoreUnsafe(curA, ref curCf.A1);
+            Vector128.StoreUnsafe(curM, ref curCf.M0);
+            Vector128.StoreUnsafe(ic1, ref st.Ic1EqL);
+            Vector128.StoreUnsafe(ic2, ref st.Ic2EqL);
+        }
+
+        _rampFramesRemaining = initialRem - rampFrames;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessStereoRampScalar(float* pSamples, int rampFrames)
+    {
+        for (int frameIdx = 0; frameIdx < rampFrames; frameIdx++)
         {
             StepSmootherOneFrame();
 
-            int sampleOffset = frameIdx * 2;
+            float* pFrame = pSamples + (nuint)frameIdx * 2;
             double preamp = _currentPreampGain;
-            double left = Unsafe.Add(ref bufRef, sampleOffset) * preamp;
-            double right = Unsafe.Add(ref bufRef, sampleOffset + 1) * preamp;
+            double left = pFrame[0] * preamp;
+            double right = pFrame[1] * preamp;
 
-            _states[0].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[0]);
-            _states[1].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[1]);
-            _states[2].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[2]);
-            _states[3].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[3]);
-            _states[4].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[4]);
-            _states[5].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[5]);
-            _states[6].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[6]);
-            _states[7].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[7]);
-            _states[8].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[8]);
-            _states[9].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[9]);
+            for (int b = 0; b < BandCount; b++)
+                _states[b].ProcessStereoScalar(ref left, ref right, in _currentCoeffs[b]);
 
-            Unsafe.Add(ref bufRef, sampleOffset) = (float)left;
-            Unsafe.Add(ref bufRef, sampleOffset + 1) = (float)right;
+            pFrame[0] = (float)left;
+            pFrame[1] = (float)right;
         }
     }
 
@@ -667,7 +1142,7 @@ public sealed class EqualizerProcessor
                 double dummy = 0.0;
 
                 for (int b = 0; b < BandCount; b++)
-                    _states[b].ProcessStereoDouble(ref mono, ref dummy, in _currentCoeffs[b]);
+                    _states[b].ProcessStereoScalar(ref mono, ref dummy, in _currentCoeffs[b]);
 
                 Unsafe.Add(ref bufRef, f) = (float)mono;
             }
@@ -683,7 +1158,7 @@ public sealed class EqualizerProcessor
                 double right = Unsafe.Add(ref bufRef, idx + 1) * preamp;
 
                 for (int b = 0; b < BandCount; b++)
-                    _states[b].ProcessStereoDouble(ref left, ref right, in _currentCoeffs[b]);
+                    _states[b].ProcessStereoScalar(ref left, ref right, in _currentCoeffs[b]);
 
                 Unsafe.Add(ref bufRef, idx) = (float)left;
                 Unsafe.Add(ref bufRef, idx + 1) = (float)right;
@@ -698,9 +1173,13 @@ public sealed class EqualizerProcessor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void SyncPublishedParameters()
     {
-        if (Volatile.Read(ref _publishedVersion) == _localVersion)
-            return;
+        if (Volatile.Read(ref _publishedVersion) != _localVersion)
+            SyncPublishedParametersSlow();
+    }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void SyncPublishedParametersSlow()
+    {
         BandSvfCoeffArray snapshotCoeffs;
         float snapshotPreamp;
         bool snapshotBypass;

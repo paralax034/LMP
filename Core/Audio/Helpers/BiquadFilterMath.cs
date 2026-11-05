@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace LMP.Core.Audio.Helpers;
 
@@ -243,30 +245,180 @@ public sealed class KWeightingFilter
         _highPassState = new BiquadState[channels];
     }
 
-    public void ProcessBlock(ReadOnlySpan<float> input, Span<double> output)
+    public unsafe void ProcessBlock(ReadOnlySpan<float> input, Span<double> output)
     {
         int channels = _channels;
-        if (channels == 0 || input.Length == 0) return;
+        if (channels <= 0 || input.Length == 0 || output.Length < input.Length) return;
+
+        int frameCount = input.Length / channels;
+        if (frameCount <= 0) return;
+
+        if (channels == 2 && Sse2.IsSupported)
+        {
+            fixed (float* pIn = input)
+            fixed (double* pOut = output)
+            {
+                if (Fma.IsSupported)
+                    ProcessBlockStereoFma(pIn, pOut, frameCount);
+                else
+                    ProcessBlockStereoSse2(pIn, pOut, frameCount);
+            }
+            return;
+        }
 
         ref var shelfRef = ref MemoryMarshal.GetArrayDataReference(_shelfState);
         ref var hpRef = ref MemoryMarshal.GetArrayDataReference(_highPassState);
+        ref float inRef = ref MemoryMarshal.GetReference(input);
+        ref double outRef = ref MemoryMarshal.GetReference(output);
 
         var shelf = _shelf;
         var hp = _highPass;
-
-        int frameCount = input.Length / channels;
         int idx = 0;
 
         for (int frame = 0; frame < frameCount; frame++)
         {
             for (int ch = 0; ch < channels; ch++, idx++)
             {
-                double x = input[idx];
+                double x = Unsafe.Add(ref inRef, idx);
                 x = Unsafe.Add(ref shelfRef, ch).Process(x, in shelf);
                 x = Unsafe.Add(ref hpRef, ch).Process(x, in hp);
-                output[idx] = x;
+                Unsafe.Add(ref outRef, idx) = x;
             }
         }
+    }
+
+    /// <summary>
+    /// Векторизованный стерео-проход K-Weighting (FMA3 + SSE2):
+    /// использует тождество RBJ High-Pass (<c>B2 == B0</c>, <c>B1 == -2 * B0</c>), сокращая число регистров
+    /// с 17 до 15 XMM (0 обращений к стеку <c>[rsp + disp]</c> внутри цикла).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessBlockStereoFma(float* pIn, double* pOut, int frameCount)
+    {
+        if (!Fma.IsSupported)
+            return;
+
+        ref var shelf0 = ref _shelfState[0];
+        ref var shelf1 = ref _shelfState[1];
+        ref var hp0 = ref _highPassState[0];
+        ref var hp1 = ref _highPassState[1];
+
+        var sZ1 = Vector128.Create(shelf0.Z1, shelf1.Z1);
+        var sZ2 = Vector128.Create(shelf0.Z2, shelf1.Z2);
+        var hZ1 = Vector128.Create(hp0.Z1, hp1.Z1);
+        var hZ2 = Vector128.Create(hp0.Z2, hp1.Z2);
+
+        var sB0 = Vector128.Create(_shelf.B0);
+        var sB1 = Vector128.Create(_shelf.B1);
+        var sB2 = Vector128.Create(_shelf.B2);
+        var sA1 = Vector128.Create(_shelf.A1);
+        var sA2 = Vector128.Create(_shelf.A2);
+
+        var hB0 = Vector128.Create(_highPass.B0);
+        var hA1 = Vector128.Create(_highPass.A1);
+        var hA2 = Vector128.Create(_highPass.A2);
+
+        float* ptrIn = pIn;
+        float* ptrEnd = pIn + (nuint)frameCount * 2;
+        double* ptrOut = pOut;
+
+        while (ptrIn < ptrEnd)
+        {
+            var raw64 = Sse2.LoadScalarVector128((double*)ptrIn);
+            var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+            var yShelf = Fma.MultiplyAdd(sB0, x, sZ1);
+            sZ1 = Fma.MultiplySubtract(sB1, x, Fma.MultiplySubtract(sA1, yShelf, sZ2));
+            sZ2 = Fma.MultiplySubtract(sB2, x, Sse2.Multiply(sA2, yShelf));
+
+            var hB0x = Sse2.Multiply(hB0, yShelf);
+            var yHp = Sse2.Add(hB0x, hZ1);
+            var negB1x = Sse2.Add(hB0x, hB0x);
+            hZ1 = Sse2.Subtract(Sse2.Subtract(hZ2, negB1x), Sse2.Multiply(hA1, yHp));
+            hZ2 = Sse2.Subtract(hB0x, Sse2.Multiply(hA2, yHp));
+
+            Vector128.Store(yHp, ptrOut);
+            ptrIn += 2;
+            ptrOut += 2;
+        }
+
+        shelf0.Z1 = Vector128.ToScalar(sZ1);
+        shelf1.Z1 = Vector128.ToScalar(Sse2.UnpackHigh(sZ1, sZ1));
+        shelf0.Z2 = Vector128.ToScalar(sZ2);
+        shelf1.Z2 = Vector128.ToScalar(Sse2.UnpackHigh(sZ2, sZ2));
+
+        hp0.Z1 = Vector128.ToScalar(hZ1);
+        hp1.Z1 = Vector128.ToScalar(Sse2.UnpackHigh(hZ1, hZ1));
+        hp0.Z2 = Vector128.ToScalar(hZ2);
+        hp1.Z2 = Vector128.ToScalar(Sse2.UnpackHigh(hZ2, hZ2));
+    }
+
+    /// <summary>
+    /// Векторизованный стерео-проход K-Weighting (базовый SSE2):
+    /// использует тождество RBJ High-Pass (<c>B2 == B0</c>, <c>B1 == -2 * B0</c>), укладываясь в 15 XMM-регистров
+    /// (0 обращений к стеку <c>[rsp + disp]</c> внутри цикла).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private unsafe void ProcessBlockStereoSse2(float* pIn, double* pOut, int frameCount)
+    {
+        if (!Sse2.IsSupported)
+            return;
+
+        ref var shelf0 = ref _shelfState[0];
+        ref var shelf1 = ref _shelfState[1];
+        ref var hp0 = ref _highPassState[0];
+        ref var hp1 = ref _highPassState[1];
+
+        var sZ1 = Vector128.Create(shelf0.Z1, shelf1.Z1);
+        var sZ2 = Vector128.Create(shelf0.Z2, shelf1.Z2);
+        var hZ1 = Vector128.Create(hp0.Z1, hp1.Z1);
+        var hZ2 = Vector128.Create(hp0.Z2, hp1.Z2);
+
+        var sB0 = Vector128.Create(_shelf.B0);
+        var sB1 = Vector128.Create(_shelf.B1);
+        var sB2 = Vector128.Create(_shelf.B2);
+        var sA1 = Vector128.Create(_shelf.A1);
+        var sA2 = Vector128.Create(_shelf.A2);
+
+        var hB0 = Vector128.Create(_highPass.B0);
+        var hA1 = Vector128.Create(_highPass.A1);
+        var hA2 = Vector128.Create(_highPass.A2);
+
+        float* ptrIn = pIn;
+        float* ptrEnd = pIn + (nuint)frameCount * 2;
+        double* ptrOut = pOut;
+
+        while (ptrIn < ptrEnd)
+        {
+            var raw64 = Sse2.LoadScalarVector128((double*)ptrIn);
+            var x = Sse2.ConvertToVector128Double(Vector128.AsSingle(raw64));
+
+            var yShelf = Sse2.Add(Sse2.Multiply(sB0, x), sZ1);
+            sZ1 = Sse2.Subtract(
+                Sse2.Add(sZ2, Sse2.Multiply(sB1, x)),
+                Sse2.Multiply(sA1, yShelf));
+            sZ2 = Sse2.Subtract(Sse2.Multiply(sB2, x), Sse2.Multiply(sA2, yShelf));
+
+            var hB0x = Sse2.Multiply(hB0, yShelf);
+            var yHp = Sse2.Add(hB0x, hZ1);
+            var negB1x = Sse2.Add(hB0x, hB0x);
+            hZ1 = Sse2.Subtract(Sse2.Subtract(hZ2, negB1x), Sse2.Multiply(hA1, yHp));
+            hZ2 = Sse2.Subtract(hB0x, Sse2.Multiply(hA2, yHp));
+
+            Vector128.Store(yHp, ptrOut);
+            ptrIn += 2;
+            ptrOut += 2;
+        }
+
+        shelf0.Z1 = Vector128.ToScalar(sZ1);
+        shelf1.Z1 = Vector128.ToScalar(Sse2.UnpackHigh(sZ1, sZ1));
+        shelf0.Z2 = Vector128.ToScalar(sZ2);
+        shelf1.Z2 = Vector128.ToScalar(Sse2.UnpackHigh(sZ2, sZ2));
+
+        hp0.Z1 = Vector128.ToScalar(hZ1);
+        hp1.Z1 = Vector128.ToScalar(Sse2.UnpackHigh(hZ1, hZ1));
+        hp0.Z2 = Vector128.ToScalar(hZ2);
+        hp1.Z2 = Vector128.ToScalar(Sse2.UnpackHigh(hZ2, hZ2));
     }
 
     public void Reset()

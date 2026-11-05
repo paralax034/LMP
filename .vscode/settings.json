@@ -59,7 +59,7 @@
     "xml.format.enabled": true,
     "xml.format.splitAttributes": "preserve",
     "xml.format.spaceBeforeEmptyCloseTag": true,
-    "terminal.integrated.defaultProfile.windows": "Command Prompt",
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
     "terminal.integrated.profiles.windows": {
         "Command Prompt": {
             "path": "C:\\Windows\\System32\\cmd.exe",

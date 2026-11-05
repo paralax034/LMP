@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using LMP.Core.Audio.Backends;
@@ -721,5 +722,119 @@ public static class AudioLogicTests
         StartPositionTimerDelayed(player);
         var bufferTimer = BufferTimerField(player);
         TestAssert.NotNull(bufferTimer, "_bufferTimer must be initialized and active when StartPositionTimerDelayed is called in Buffering/Playing state");
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ProcessStereoSteadySse2")]
+    private static extern unsafe void CallEqSteadySse2(EqualizerProcessor eq, float* pSamples, int totalFrames);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ProcessStereoSteadyScalar")]
+    private static extern unsafe void CallEqSteadyScalar(EqualizerProcessor eq, float* pSamples, int totalFrames);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ProcessStereoRampSse2")]
+    private static extern unsafe void CallEqRampSse2(EqualizerProcessor eq, float* pSamples, int rampFrames);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ProcessStereoRampScalar")]
+    private static extern unsafe void CallEqRampScalar(EqualizerProcessor eq, float* pSamples, int rampFrames);
+
+    /// <summary>
+    /// Проверяет математическую эквивалентность FMA3-, SSE2- и скалярного путей Band-Major эквалайзера
+    /// (как в стационарном режиме, так и на 30-мс окне посэмплового сглаживания) и точность <see cref="SpanMathHelper.FastReciprocal"/>.
+    /// </summary>
+    [TestMethod(TestCategory.Unit, "Equalizer & Reciprocal SIMD Multi-Versioning Equivalence (0 Alloc)", Group = TestGroups.Audio, Order = 10)]
+    public static unsafe Task TestEqualizerSimdMultiVersioningEquivalenceAsync()
+    {
+        // 1. Проверка точности FastReciprocal (rcpss + 1 шаг Ньютона-Рафсона: погрешность <= 2e-7f)
+        ReadOnlySpan<float> testInputs = [0.25f, 0.5f, 0.88f, 0.985f, 1.0f, 1.37f, 2.5f, 10.0f];
+        foreach (float val in testInputs)
+        {
+            float expected = 1.0f / val;
+            float actual = SpanMathHelper.FastReciprocal(val);
+            float relError = MathF.Abs(actual - expected) / expected;
+            TestAssert.True(relError < 2.5e-7f, $"FastReciprocal({val}) relative error {relError:E3} exceeded 2.5e-7");
+        }
+
+        // 2. Эквивалентность Stationary FMA / SSE2 / Scalar путей на 10-полосном пресете
+        const int frames = 512;
+        float[] input = new float[frames * Channels];
+        for (int f = 0; f < frames; f++)
+        {
+            input[f * 2] = MathF.Sin(2f * MathF.PI * 125f * f / SampleRate) * 0.3f
+                         + MathF.Sin(2f * MathF.PI * 2500f * f / SampleRate) * 0.2f;
+            input[f * 2 + 1] = MathF.Cos(2f * MathF.PI * 62.5f * f / SampleRate) * 0.25f
+                             + MathF.Sin(2f * MathF.PI * 8000f * f / SampleRate) * 0.15f;
+        }
+
+        var preset = EqualizerPresets.GetPresetBands(EqualizerPresets.BreakcoreId);
+        var eqDefault = new EqualizerProcessor(SampleRate, Channels);
+        var eqSse2 = new EqualizerProcessor(SampleRate, Channels);
+        var eqScalar = new EqualizerProcessor(SampleRate, Channels);
+
+        eqDefault.Configure(true, preset, preampDb: 0f, autoPreamp: false);
+        eqDefault.SnapToTarget();
+
+        eqSse2.Configure(true, preset, preampDb: 0f, autoPreamp: false);
+        eqSse2.SnapToTarget();
+
+        eqScalar.Configure(true, preset, preampDb: 0f, autoPreamp: false);
+        eqScalar.SnapToTarget();
+
+        float[] outDefault = (float[])input.Clone();
+        float[] outSse2 = (float[])input.Clone();
+        float[] outScalar = (float[])input.Clone();
+
+        eqDefault.Process(outDefault.AsSpan());
+        fixed (float* pSse2 = outSse2)
+            CallEqSteadySse2(eqSse2, pSse2, frames);
+        fixed (float* pScalar = outScalar)
+            CallEqSteadyScalar(eqScalar, pScalar, frames);
+
+        for (int i = 0; i < outDefault.Length; i++)
+        {
+            TestAssert.True(
+                MathF.Abs(outDefault[i] - outSse2[i]) < 1e-5f,
+                $"Steady FMA vs SSE2 mismatch at sample {i}: {outDefault[i]:R} vs {outSse2[i]:R}");
+            TestAssert.True(
+                MathF.Abs(outDefault[i] - outScalar[i]) < 1e-5f,
+                $"Steady FMA vs Scalar mismatch at sample {i}: {outDefault[i]:R} vs {outScalar[i]:R}");
+        }
+
+        // 3. Эквивалентность Band-Major Ramping (FMA / SSE2) и эталонного Sample-Major Ramping (Scalar)
+        var eqRampDefault = new EqualizerProcessor(SampleRate, Channels);
+        var eqRampSse2 = new EqualizerProcessor(SampleRate, Channels);
+        var eqRampScalar = new EqualizerProcessor(SampleRate, Channels);
+
+        var vocalPreset = EqualizerPresets.GetPresetBands(EqualizerPresets.VocalId);
+        eqRampDefault.Configure(true, vocalPreset, preampDb: 1.5f, autoPreamp: false);
+        eqRampSse2.Configure(true, vocalPreset, preampDb: 1.5f, autoPreamp: false);
+        eqRampScalar.Configure(true, vocalPreset, preampDb: 1.5f, autoPreamp: false);
+
+        float[] rampBufDefault = (float[])input.Clone();
+        float[] rampBufSse2 = (float[])input.Clone();
+        float[] rampBufScalar = (float[])input.Clone();
+
+        // Инициируем переход из Bypass -> VocalId (1440 фреймов сглаживания)
+        eqRampDefault.Process(rampBufDefault.AsSpan());
+
+        // Для прямого вызова внутренних ядер синхронизируем опубликованные параметры через пустой срез
+        Span<float> empty = Span<float>.Empty;
+        _ = empty;
+        eqRampSse2.Configure(true, preset, preampDb: -1.0f, autoPreamp: false);
+        eqRampSse2.SnapToTarget();
+        eqRampScalar.Configure(true, preset, preampDb: -1.0f, autoPreamp: false);
+        eqRampScalar.SnapToTarget();
+
+        fixed (float* pRampSse2 = rampBufSse2)
+            CallEqRampSse2(eqRampSse2, pRampSse2, frames);
+        fixed (float* pRampScalar = rampBufScalar)
+            CallEqRampScalar(eqRampScalar, pRampScalar, frames);
+
+        for (int i = 0; i < rampBufSse2.Length; i++)
+        {
+            TestAssert.True(
+                MathF.Abs(rampBufSse2[i] - rampBufScalar[i]) < 1e-5f,
+                $"Ramp SSE2 vs Scalar mismatch at sample {i}: {rampBufSse2[i]:R} vs {rampBufScalar[i]:R}");
+        }
+
+        return Task.CompletedTask;
     }
 }

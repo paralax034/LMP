@@ -75,7 +75,10 @@
 
     <!--   RELEASE & AOT КОНФИГУРАЦИЯ     -->
     <PropertyGroup Label="Release" Condition="'$(Configuration)' == 'Release'">
-        <DebugType>none</DebugType>
+        <DebugType Condition="'$(EmitAotPdb)' != 'true'">none</DebugType>
+        <DebugType Condition="'$(EmitAotPdb)' == 'true'">pdbonly</DebugType>
+        <DebugSymbols Condition="'$(EmitAotPdb)' == 'true'">true</DebugSymbols>
+        <StripSymbols Condition="'$(EmitAotPdb)' == 'true'">false</StripSymbols>
         <Optimize>true</Optimize>
 
         <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**</DefaultItemExcludes>
@@ -92,14 +95,11 @@
 
         <!-- Оптимизации компилятора ILC для Native AOT -->
         <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
-        <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
+        <IlcFoldIdenticalMethodBodies Condition="'$(EmitAotPdb)' != 'true'">true</IlcFoldIdenticalMethodBodies>
     </PropertyGroup>
 
     <!-- Конфигурация рантайма для Native AOT (заменяет runtimeconfig.template.json) -->
     <ItemGroup Label="Runtime Host Configuration">
-        <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true"/>
-        <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false"/>
-        <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false"/>
         <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="8"/>
     </ItemGroup>
 
