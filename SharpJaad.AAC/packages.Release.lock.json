@@ -4,31 +4,31 @@
     "net11.0": {
       "Microsoft.DotNet.ILCompiler": {
         "type": "Direct",
-        "requested": "[11.0.0-rc.1.26425.128, )",
-        "resolved": "11.0.0-rc.1.26425.128",
-        "contentHash": "q57ZvrTIRKI4s12hLMA3LN4Gh48CuiGMKGL0Pmz7YnGLIvkQVMX8T+DtI6VdqYaCnGTstiw1LdE2PRsd13WdNg=="
+        "requested": "[11.0.0-rc.3.26522.148, )",
+        "resolved": "11.0.0-rc.3.26522.148",
+        "contentHash": "kOWENZaHawMp+lsWoG6KLfyOrEtB41EJ2W+A2FXYjsU7I1UUmajht+l7+gbm/2WSePJ+npzaIDBU+kFgiD4VhQ=="
       },
       "Microsoft.NET.ILLink.Tasks": {
         "type": "Direct",
-        "requested": "[11.0.0-rc.1.26425.128, )",
-        "resolved": "11.0.0-rc.1.26425.128",
-        "contentHash": "oMgihfjNcxZpR9B/O5Ke8Qmr8CJcpdzG4PnVYtA6Ja4g41NELxLRuiqqh5ys7w+ourEBNng2IIZnrlMJXfncmQ=="
+        "requested": "[11.0.0-rc.3.26522.148, )",
+        "resolved": "11.0.0-rc.3.26522.148",
+        "contentHash": "SWnTMx96mhBr9LCOySJg1ETlEFFHVsPGdVT02JnYhtqk1+Vke1J7RU3VkKwEiErBr4FJ42Uu4k7GdOtkRuvs/Q=="
       }
     },
     "net11.0/win-x64": {
       "Microsoft.DotNet.ILCompiler": {
         "type": "Direct",
-        "requested": "[11.0.0-rc.1.26425.128, )",
-        "resolved": "11.0.0-rc.1.26425.128",
-        "contentHash": "q57ZvrTIRKI4s12hLMA3LN4Gh48CuiGMKGL0Pmz7YnGLIvkQVMX8T+DtI6VdqYaCnGTstiw1LdE2PRsd13WdNg==",
+        "requested": "[11.0.0-rc.3.26522.148, )",
+        "resolved": "11.0.0-rc.3.26522.148",
+        "contentHash": "kOWENZaHawMp+lsWoG6KLfyOrEtB41EJ2W+A2FXYjsU7I1UUmajht+l7+gbm/2WSePJ+npzaIDBU+kFgiD4VhQ==",
         "dependencies": {
-          "runtime.win-x64.Microsoft.DotNet.ILCompiler": "11.0.0-rc.1.26425.128"
+          "runtime.win-x64.Microsoft.DotNet.ILCompiler": "11.0.0-rc.3.26522.148"
         }
       },
       "runtime.win-x64.Microsoft.DotNet.ILCompiler": {
         "type": "Transitive",
-        "resolved": "11.0.0-rc.1.26425.128",
-        "contentHash": "0Frg4z5XxWgW6GxrjFX7NkROqkPbuA3f+0q9Di24jf27EOZ4KA3UaKl8QptT2XPspewfPO4buICFtFFc0ULWsA=="
+        "resolved": "11.0.0-rc.3.26522.148",
+        "contentHash": "MM76oeeNCqPw/G6Fn1FN8/OCp8u3c/5Xb/yu1Vm0ZuqLtMZjsBTXRpPEbq//Gb1QIXy9f0hWT0CiY2LWVwGvLQ=="
       }
     }
   }

@@ -50,8 +50,8 @@ public struct GainCrossfader
     private float _currentGain;
     private float _startGain;
     private float _targetGain;
+    private float _invTotalFadeSamples;
     private int _remainingSamples;
-    private int _totalFadeSamples;
 
     #endregion
 
@@ -64,8 +64,8 @@ public struct GainCrossfader
         _currentGain = initialGain;
         _startGain = initialGain;
         _targetGain = initialGain;
+        _invTotalFadeSamples = 0f;
         _remainingSamples = 0;
-        _totalFadeSamples = 0;
     }
 
     /// <summary>
@@ -100,8 +100,9 @@ public struct GainCrossfader
 
         _startGain = _currentGain;
         _targetGain = newTarget;
-        _totalFadeSamples = (int)(sampleRate * channels * fadeMs / 1000f);
-        _remainingSamples = _totalFadeSamples;
+        int totalSamples = (int)(sampleRate * channels * fadeMs / 1000f);
+        _remainingSamples = totalSamples;
+        _invTotalFadeSamples = totalSamples > 0 ? 1.0f / totalSamples : 0f;
     }
 
     /// <summary>
@@ -138,7 +139,7 @@ public struct GainCrossfader
             return _targetGain;
         }
 
-        float t = 1f - (float)_remainingSamples / _totalFadeSamples;
+        float t = 1f - _remainingSamples * _invTotalFadeSamples;
         _currentGain = _startGain + (_targetGain - _startGain) * t;
         return _currentGain;
     }
@@ -154,7 +155,7 @@ public struct GainCrossfader
         _currentGain = gain;
         _startGain = gain;
         _targetGain = gain;
+        _invTotalFadeSamples = 0f;
         _remainingSamples = 0;
-        _totalFadeSamples = 0;
     }
 }

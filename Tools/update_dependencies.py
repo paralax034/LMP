@@ -3,8 +3,8 @@
 
 """
 LMP Solution Dependency Verification & Upgrade Pipeline.
-Queries NuGet v3 Flat-Container API, inspects all solution packages,
-updates project files, and triggers a deterministic dotnet restore.
+Queries NuGet v3 Flat-Container API, inspects Central Package Management
+(Directory.Packages.props), updates versions, and synchronizes all lock files.
 """
 
 import sys
@@ -13,7 +13,7 @@ import json
 import urllib.request
 import subprocess
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict
 
 tools_dir = Path(__file__).resolve().parent
 if str(tools_dir) not in sys.path:
@@ -57,51 +57,59 @@ def get_latest_nuget_version(package_id: str, major_constraint: str = "") -> Opt
     stable_versions.sort(key=lambda x: x[0])
     return stable_versions[-1][1]
 
+def pkg_entry(pkg_id: str, major: str = "") -> Dict[str, str]:
+    escaped = re.escape(pkg_id)
+    return {
+        "id": pkg_id,
+        "major": major,
+        "pattern": rf'(<PackageVersion\s+Include="{escaped}"\s+Version=")([^"]+)(")',
+        "fmt": r'\g<1>{0}\g<3>'
+    }
+
 def main():
     dry_run = "--dry-run" in sys.argv
     root = get_project_root()
+    props_file = root / "Directory.Packages.props"
 
-    main_csproj = root / "LMP.csproj"
-    core_csproj = root / "Core" / "LMP.Core.csproj"
-
-    if not main_csproj.exists() or not core_csproj.exists():
-        print(f"{Color.RED}[ERROR] Project files not found in root: {root}{Color.RESET}")
+    if not props_file.exists():
+        print(f"{Color.RED}[ERROR] Directory.Packages.props not found in: {root}{Color.RESET}")
         sys.exit(1)
 
     print_banner(
-        "LMP Dependency Verification & Upgrade Pipeline",
+        "LMP Dependency Verification & Upgrade Pipeline (CPM)",
         {
-            "Solution Root": root,
+            "Packages File": props_file,
             "Mode": "Dry Run (Inspection Only)" if dry_run else "Active Upgrade + Restore"
         }
     )
 
     print(f"{Color.YELLOW}>>> Querying NuGet v3 Flat-Container API for all dependencies...{Color.RESET}\n")
 
-    targets: List[Dict[str, Any]] = [
-        {"id": "Avalonia", "major": "12", "target": "Both", "pattern": r'<AvaloniaVersion>([^<]+)</AvaloniaVersion>', "fmt": '<AvaloniaVersion>{0}</AvaloniaVersion>'},
-        {"id": "Xaml.Behaviors.Avalonia", "major": "12", "target": "Main", "pattern": r'<XamlBehaviorsVersion>([^<]+)</XamlBehaviorsVersion>', "fmt": '<XamlBehaviorsVersion>{0}</XamlBehaviorsVersion>'},
-        {"id": "AsyncImageLoader.Avalonia", "major": "3", "target": "Both", "pattern": r'<AsyncImageLoaderVersion>([^<]+)</AsyncImageLoaderVersion>', "fmt": '<AsyncImageLoaderVersion>{0}</AsyncImageLoaderVersion>'},
-        {"id": "SkiaSharp", "major": "4", "target": "Core", "pattern": r'<SkiaSharpVersion>([^<]+)</SkiaSharpVersion>', "fmt": '<SkiaSharpVersion>{0}</SkiaSharpVersion>'},
-
-        {"id": "CommunityToolkit.Mvvm", "major": "8", "target": "Both", "pattern": r'<CommunityToolkitMvvmVersion>([^<]+)</CommunityToolkitMvvmVersion>', "fmt": '<CommunityToolkitMvvmVersion>{0}</CommunityToolkitMvvmVersion>'},
-        {"id": "MemoryPack", "major": "1", "target": "Core", "pattern": r'Include="MemoryPack" Version="([^"]+)"', "fmt": 'Include="MemoryPack" Version="{0}"'},
-
-        {"id": "Microsoft.Extensions.DependencyInjection", "major": "10", "target": "Both", "pattern": r'<MsExtVersion>([^<]+)</MsExtVersion>', "fmt": '<MsExtVersion>{0}</MsExtVersion>'},
-        {"id": "SQLitePCLRaw.bundle_e_sqlite3", "major": "3", "target": "Core", "pattern": r'Include="SQLitePCLRaw\.bundle_e_sqlite3" Version="([^"]+)"', "fmt": 'Include="SQLitePCLRaw.bundle_e_sqlite3" Version="{0}"'},
-        {"id": "Tmds.DBus.Protocol", "major": "", "target": "Main", "pattern": r'Include="Tmds\.DBus\.Protocol" Version="([^"]+)"', "fmt": 'Include="Tmds.DBus.Protocol" Version="{0}"'},
-
-        {"id": "Concentus", "major": "2", "target": "Core", "pattern": r'Include="Concentus" Version="([^"]+)"', "fmt": 'Include="Concentus" Version="{0}"'},
-        {"id": "Concentus.Native", "major": "1", "target": "Main", "pattern": r'Include="Concentus\.Native" Version="([^"]+)"', "fmt": 'Include="Concentus.Native" Version="{0}"'},
-
-        {"id": "Acornima", "major": "1", "target": "Core", "pattern": r'Include="Acornima" Version="([^"]+)"', "fmt": 'Include="Acornima" Version="{0}"'}
+    targets: List[Dict[str, str]] = [
+        {
+            "id": "Avalonia",
+            "major": "12",
+            "pattern": r'(<AvaloniaVersion>)([^<]+)(</AvaloniaVersion>)',
+            "fmt": r'\g<1>{0}\g<3>'
+        },
+        pkg_entry("AsyncImageLoader.Avalonia", "3"),
+        pkg_entry("Xaml.Behaviors.Avalonia", "12"),
+        pkg_entry("CommunityToolkit.Mvvm", "8"),
+        pkg_entry("Microsoft.Extensions.DependencyInjection", "10"),
+        pkg_entry("Microsoft.Data.Sqlite", "10"),
+        pkg_entry("System.Security.Cryptography.ProtectedData", "10"),
+        pkg_entry("MemoryPack", "1"),
+        pkg_entry("Concentus", "2"),
+        pkg_entry("Concentus.Native", "1"),
+        pkg_entry("Acornima", "1"),
+        pkg_entry("Tmds.DBus.Protocol", ""),
+        pkg_entry("Iced", "1"),
     ]
 
-    main_text = main_csproj.read_text(encoding="utf-8")
-    core_text = core_csproj.read_text(encoding="utf-8")
+    props_text = props_file.read_text(encoding="utf-8")
 
-    print(f"  {'PACKAGE':<36} {'CURRENT':<12} {'LATEST':<12} STATUS")
-    print(f"  {'-' * 36} {'-' * 12} {'-' * 12} {'-' * 8}")
+    print(f"  {'PACKAGE':<44} {'CURRENT':<12} {'LATEST':<12} STATUS")
+    print(f"  {'-' * 44} {'-' * 12} {'-' * 12} {'-' * 9}")
 
     has_changes = False
     upgrade_count = 0
@@ -112,52 +120,58 @@ def main():
         if not latest:
             continue
 
-        src_text = core_text if t["target"] == "Core" else main_text
-        match = re.search(t["pattern"], src_text)
-        current = match.group(1) if match else "Unknown"
+        match = re.search(t["pattern"], props_text)
+        current = match.group(2).strip() if match else "Unknown"
 
         is_outdated = (current != "Unknown") and (current != latest)
         status_text = "UPGRADE" if is_outdated else "OK"
         status_color = Color.YELLOW if is_outdated else Color.GREEN
 
-        print(f"  {pkg_id:<36} {current:<12} {latest:<12} {status_color}[{status_text}]{Color.RESET}")
+        print(f"  {pkg_id:<44} {current:<12} {latest:<12} {status_color}[{status_text}]{Color.RESET}")
 
         if is_outdated:
             has_changes = True
             upgrade_count += 1
             if not dry_run:
-                replacement = t["fmt"].format(latest)
-                if t["target"] in ("Main", "Both"):
-                    main_text = re.sub(t["pattern"], replacement, main_text)
-                if t["target"] in ("Core", "Both"):
-                    core_text = re.sub(t["pattern"], replacement, core_text)
+                props_text = re.sub(t["pattern"], t["fmt"].format(latest), props_text)
 
     print()
 
     if not has_changes:
-        print(f"{Color.GREEN}✓ All solution dependencies are completely up to date!{Color.RESET}\n")
+        print(f"{Color.GREEN}✓ All solution dependencies in Directory.Packages.props are up to date!{Color.RESET}\n")
         sys.exit(0)
 
     if dry_run:
-        print(f"{Color.YELLOW}[DryRun] {upgrade_count} package(s) can be upgraded. Run 'tool: update-dependencies' to apply.{Color.RESET}\n")
+        print(f"{Color.YELLOW}[DryRun] {upgrade_count} package(s) can be upgraded. Run without --dry-run to apply.{Color.RESET}\n")
         sys.exit(0)
 
-    print(f"{Color.YELLOW}>>> Writing updated versions to project files...{Color.RESET}")
-    main_csproj.write_text(main_text, encoding="utf-8")
-    core_csproj.write_text(core_text, encoding="utf-8")
-    print(f"  {Color.GREEN}✓ Updated: LMP.csproj{Color.RESET}")
-    print(f"  {Color.GREEN}✓ Updated: Core/LMP.Core.csproj{Color.RESET}\n")
+    print(f"{Color.YELLOW}>>> Writing updated versions to Directory.Packages.props...{Color.RESET}")
+    props_file.write_text(props_text, encoding="utf-8")
+    print(f"  {Color.GREEN}✓ Updated: Directory.Packages.props{Color.RESET}\n")
 
-    print(f"{Color.YELLOW}>>> Synchronizing dependency graph and packages.lock.json...{Color.RESET}")
-    res_debug = subprocess.run(["dotnet", "restore", "LMP.sln", "-p:Configuration=Debug", "--force-evaluate"], cwd=str(root))
-    res_release = subprocess.run(["dotnet", "restore", "LMP.csproj", "-p:Configuration=Release", "-r", "win-x64", "--force-evaluate"], cwd=str(root))
-    if res_debug.returncode != 0 or res_release.returncode != 0:
-        print(f"{Color.RED}[ERROR] 'dotnet restore' failed.{Color.RESET}")
-        sys.exit(1)
+    print(f"{Color.YELLOW}>>> Synchronizing dependency graph and lock files (Debug / Release / DebugAot)...{Color.RESET}")
+    restore_steps = [
+        ["dotnet", "restore", "LMP.sln", "-p:Configuration=Debug", "--force-evaluate"],
+        ["dotnet", "restore", "LMP.csproj", "-p:Configuration=Release", "-r", "win-x64", "--force-evaluate"],
+        [
+            "dotnet", "restore", "LMP.csproj",
+            "-p:Configuration=Debug",
+            "-r", "win-x64",
+            "-p:PublishAot=true",
+            "-p:NuGetLockFilePath=packages.DebugAot.lock.json",
+            "--force-evaluate"
+        ]
+    ]
+
+    for cmd in restore_steps:
+        res = subprocess.run(cmd, cwd=str(root))
+        if res.returncode != 0:
+            print(f"{Color.RED}[ERROR] 'dotnet restore' failed on command: {' '.join(cmd)}{Color.RESET}")
+            sys.exit(1)
 
     print()
     print(f"{Color.GRAY}=============================================================={Color.RESET}")
-    print(f"{Color.GREEN} Successfully updated {upgrade_count} package(s) and synchronized lock-file!{Color.RESET}")
+    print(f"{Color.GREEN} Successfully updated {upgrade_count} package(s) and synchronized all lock files!{Color.RESET}")
     print(f"{Color.GRAY}=============================================================={Color.RESET}\n")
 
 if __name__ == "__main__":

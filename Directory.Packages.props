@@ -7,7 +7,7 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <!-- Пакеты семейства Avalonia обновляются только синхронно -->
-    <AvaloniaVersion>12.1.4</AvaloniaVersion>
+    <AvaloniaVersion>12.1.5</AvaloniaVersion>
   </PropertyGroup>
 
   <ItemGroup Label="Avalonia">
@@ -27,7 +27,7 @@
 
   <ItemGroup Label="Data &amp; Security">
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.14" />
-    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
     <PackageVersion Include="MemoryPack" Version="1.21.4" />
   </ItemGroup>
 
@@ -39,5 +39,6 @@
 
   <ItemGroup Label="Platform Interop">
     <PackageVersion Include="Tmds.DBus.Protocol" Version="0.95.2" />
+    <PackageVersion Include="Iced" Version="1.22.0" />
   </ItemGroup>
 </Project>

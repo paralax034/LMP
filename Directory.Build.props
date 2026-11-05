@@ -27,6 +27,18 @@
     <!-- Отключаем генерацию и поиск сателлитных сборок ресурсов: локализация работает через JSON -->
     <SatelliteResourceLanguages>none</SatelliteResourceLanguages>
 
+    <!--
+      КРИТИЧНО для .NET 11 RC2/RC3+ и Avalonia (AvaloniaUI/Avalonia#22465):
+      В .NET 11 SDK при PublishAot=true по умолчанию включён UseOptimizedPublish=true, который запускает
+      PrepareResources раньше ResolveReferences, из-за чего AddAvaloniaResources пропускает все .axaml и Assets.
+    -->
+    <UseOptimizedPublish>false</UseOptimizedPublish>
+
+    <!-- Вырезаем неиспользуемую телеметрию EventSource/Activity и метаданные Hot Reload из Release/AOT -->
+    <EventSourceSupport Condition="'$(Configuration)' == 'Release'">false</EventSourceSupport>
+    <HttpActivityPropagationSupport Condition="'$(Configuration)' == 'Release'">false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport Condition="'$(Configuration)' == 'Release'">false</MetadataUpdaterSupport>
+
     <!-- Низкоуровневый покадровый осциллограф склейки аудио включается ТОЛЬКО при явной сборке с -p:AudioDiag=true -->
     <DefineConstants Condition="'$(AudioDiag)' == 'true'">$(DefineConstants);AUDIO_SPLICE_AUDIT</DefineConstants>
   </PropertyGroup>

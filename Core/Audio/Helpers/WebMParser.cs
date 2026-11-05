@@ -1,5 +1,9 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using LMP.Core.Exceptions;
 
 namespace LMP.Core.Audio.Helpers;
@@ -241,17 +245,23 @@ public sealed class WebMParser : IDisposable
         return false;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int BufferedReadByte()
     {
-        if (_bufPos >= _bufLen) return -1;
-        return _readBuffer[_bufPos++];
+        int pos = _bufPos;
+        if ((uint)pos >= (uint)_bufLen) return -1;
+        _bufPos = pos + 1;
+        return Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_readBuffer), pos);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<byte> BufferedReadSpan(int count)
     {
-        var span = _readBuffer.AsSpan(_bufPos, count);
-        _bufPos += count;
-        return span;
+        int pos = _bufPos;
+        _bufPos = pos + count;
+        return MemoryMarshal.CreateReadOnlySpan(
+            ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_readBuffer), pos),
+            count);
     }
 
     /// <summary>
@@ -638,17 +648,28 @@ public sealed class WebMParser : IDisposable
     {
         result = null;
 
+        if (_lacedFrames.TryDequeue(out var initialFrame))
+        {
+            result = initialFrame;
+            return true;
+        }
+
+        int errorKind = 0;
+        long errorValue = 0;
+
         while (!ct.IsCancellationRequested)
         {
-            if (_lacedFrames.TryDequeue(out var frame))
-            {
-                result = frame;
-                return true;
-            }
-
             int savedPos = _bufPos;
-            if (!TryReadElementHeaderSync(out uint id, out long size))
+            int headerStatus = TryReadElementHeaderSync(out uint id, out long size, out int badVIntLen);
+            if (headerStatus <= 0)
             {
+                if (headerStatus < 0)
+                {
+                    errorKind = headerStatus;
+                    errorValue = badVIntLen;
+                    break;
+                }
+
                 _bufPos = savedPos;
                 return false;
             }
@@ -660,7 +681,13 @@ public sealed class WebMParser : IDisposable
                     continue;
 
                 case TIMECODE_ID:
-                    int timecodeSize = CheckedSizeToInt32(size, "Cluster Timecode");
+                    if ((ulong)size > int.MaxValue)
+                    {
+                        errorKind = 1;
+                        errorValue = size;
+                        break;
+                    }
+                    int timecodeSize = (int)size;
                     if (_bufLen - _bufPos < timecodeSize)
                     {
                         _bufPos = savedPos;
@@ -671,7 +698,13 @@ public sealed class WebMParser : IDisposable
 
                 case SIMPLE_BLOCK_ID:
                 case BLOCK_ID:
-                    int blockSize = CheckedSizeToInt32(size, "Block");
+                    if ((ulong)size > int.MaxValue)
+                    {
+                        errorKind = 2;
+                        errorValue = size;
+                        break;
+                    }
+                    int blockSize = (int)size;
                     if (_bufLen - _bufPos < blockSize)
                     {
                         _bufPos = savedPos;
@@ -700,56 +733,91 @@ public sealed class WebMParser : IDisposable
                     }
                     continue;
             }
+
+            if (errorKind != 0)
+                break;
+        }
+
+        if (errorKind != 0)
+        {
+            if (errorKind == -1)
+                ThrowInvalidIdVIntLength((int)errorValue);
+            if (errorKind == -2)
+                ThrowInvalidSizeVIntLength((int)errorValue);
+            ThrowInvalidElementSize(errorValue, errorKind == 1 ? "Cluster Timecode" : "Block");
         }
 
         return false;
     }
 
     /// <summary>
-    /// Пытается синхронно прочитать EBML заголовок элемента из буфера без асинхронных вызовов.
+    /// Пытается синхронно прочитать EBML заголовок элемента из буфера без асинхронных вызовов и проверок границ.
+    /// Возвращает: <c>1</c> — успех, <c>0</c> — мало данных в буфере, <c>-1</c> — некорректный ID VINT, <c>-2</c> — некорректный Size VINT.
     /// </summary>
-    private bool TryReadElementHeaderSync(out uint id, out long size)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int TryReadElementHeaderSync(out uint id, out long size, out int invalidVIntLen)
     {
         id = 0;
         size = 0;
+        invalidVIntLen = 0;
+
+        int pos = _bufPos;
+        int len = _bufLen;
+        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
 
         while (true)
         {
-            if (_bufPos >= _bufLen) return false;
-            byte b = _readBuffer[_bufPos];
+            if (pos >= len)
+            {
+                _bufPos = pos;
+                return 0;
+            }
+            byte b = Unsafe.Add(ref bufRef, pos);
             if (b != 0x00) break;
-            _bufPos++;
+            pos++;
         }
 
-        byte firstIdByte = _readBuffer[_bufPos++];
+        byte firstIdByte = Unsafe.Add(ref bufRef, pos++);
         int idLength = GetVIntLength(firstIdByte);
-        if (idLength == 0 || idLength > 4)
-            throw new InvalidDataException($"Invalid EBML ID VINT length: {idLength}");
+        if ((uint)(idLength - 1) > 3u)
+        {
+            invalidVIntLen = idLength;
+            return -1;
+        }
 
-        if (_bufLen - _bufPos < idLength - 1) return false;
+        if (len - pos < idLength - 1)
+            return 0;
 
         uint parsedId = firstIdByte;
         for (int i = 1; i < idLength; i++)
-            parsedId = (parsedId << 8) | _readBuffer[_bufPos++];
+            parsedId = (parsedId << 8) | Unsafe.Add(ref bufRef, pos++);
 
-        if (_bufPos >= _bufLen) return false;
-        byte firstSizeByte = _readBuffer[_bufPos++];
+        if (pos >= len)
+            return 0;
+
+        byte firstSizeByte = Unsafe.Add(ref bufRef, pos++);
         int sizeLength = GetVIntLength(firstSizeByte);
-        if (sizeLength == 0 || sizeLength > 8)
-            throw new InvalidDataException($"Invalid EBML Size VINT length: {sizeLength}");
+        if ((uint)(sizeLength - 1) > 7u)
+        {
+            invalidVIntLen = sizeLength;
+            return -2;
+        }
 
-        if (_bufLen - _bufPos < sizeLength - 1) return false;
+        if (len - pos < sizeLength - 1)
+            return 0;
 
         long parsedSize = firstSizeByte & (0xFF >> sizeLength);
         for (int i = 1; i < sizeLength; i++)
-            parsedSize = (parsedSize << 8) | _readBuffer[_bufPos++];
+            parsedSize = (parsedSize << 8) | Unsafe.Add(ref bufRef, pos++);
+
+        _bufPos = pos;
 
         long maxVal = (1L << (7 * sizeLength)) - 1;
         if (parsedSize == maxVal) parsedSize = UNKNOWN_SIZE;
 
         id = parsedId;
         size = parsedSize;
-        return true;
+        return 1;
     }
 
     /// <summary>
@@ -769,20 +837,20 @@ public sealed class WebMParser : IDisposable
         }
         else
         {
-            if (trackLen == 0 || trackLen > 8)
-                throw new ParserCorruptionException(StreamPositionWithBuffer(), $"Invalid EBML Track Number VINT length: {trackLen}");
+            if ((uint)(trackLen - 1) > 7u)
+                ThrowInvalidTrackNumberVInt(trackLen);
 
-            Span<byte> trackBytes = stackalloc byte[trackLen];
+            Span<byte> trackBytes = stackalloc byte[8];
             trackBytes[0] = (byte)trackByte;
-            BufferedReadSpan(trackLen - 1).CopyTo(trackBytes[1..]);
-            trackNum = ReadVInt(trackBytes);
+            BufferedReadSpan(trackLen - 1).CopyTo(trackBytes.Slice(1, trackLen - 1));
+            trackNum = ReadVInt(trackBytes[..trackLen]);
         }
 
         short timecodeOffset = BinaryPrimitives.ReadInt16BigEndian(BufferedReadSpan(2));
         int flags = BufferedReadByte();
 
         if (_bufPos > blockEndBufPos)
-            throw new ParserCorruptionException(StreamPositionWithBuffer(), "Block header parsing exceeded allocated element payload size.");
+            ThrowBlockHeaderExceeded();
 
         int remainingPayload = blockEndBufPos - _bufPos;
         if (trackNum != _audioTrackNumber)
@@ -818,53 +886,141 @@ public sealed class WebMParser : IDisposable
         if (frameCountByte < 0) return;
 
         int framesCount = frameCountByte + 1;
-        int[] frameSizes = _laceFrameSizes;
-
         if (lacing == LACING_XIPH)
-        {
-            int totalSizes = 0;
-            for (int i = 0; i < framesCount - 1; i++)
-            {
-                int size = 0;
-                while (true)
-                {
-                    int b = BufferedReadByte();
-                    if (b < 0) throw new EndOfStreamException("EOF in xiph lacing size");
-                    size += b;
-                    if (b < 255) break;
-                }
-                frameSizes[i] = size;
-                totalSizes += size;
-            }
-            frameSizes[framesCount - 1] = (blockEndBufPos - _bufPos) - totalSizes;
-        }
+            ComputeXiphLaceSizesSync(framesCount, blockEndBufPos);
         else if (lacing == LACING_EBML)
-        {
-            int totalSizes = 0;
-            if (framesCount > 1)
-            {
-                frameSizes[0] = (int)ReadVIntFromBufferSync();
-                totalSizes += frameSizes[0];
+            ComputeEbmlLaceSizesSync(framesCount, blockEndBufPos);
+        else if (lacing == LACING_FIXED)
+            ComputeFixedLaceSizesSync(framesCount, blockEndBufPos);
 
-                for (int i = 1; i < framesCount - 1; i++)
+        EnqueueLacedFramesSync(framesCount, blockEndBufPos, timestampMs, isKeyFrame);
+        _bufPos = blockEndBufPos;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private void ComputeXiphLaceSizesSync(int framesCount, int blockEndBufPos)
+    {
+        ref int sizesRef = ref MemoryMarshal.GetArrayDataReference(_laceFrameSizes);
+        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
+
+        int pos = _bufPos;
+        int totalSizes = 0;
+        bool eofError = false;
+
+        for (int i = 0; i < framesCount - 1; i++)
+        {
+            int size = 0;
+            while (true)
+            {
+                if (pos >= blockEndBufPos)
                 {
-                    long delta = ReadSignedVIntFromBufferSync();
-                    frameSizes[i] = frameSizes[i - 1] + (int)delta;
-                    totalSizes += frameSizes[i];
+                    eofError = true;
+                    break;
+                }
+                int b = Unsafe.Add(ref bufRef, pos++);
+                size += b;
+                if (b < 255) break;
+            }
+            if (eofError) break;
+            Unsafe.Add(ref sizesRef, i) = size;
+            totalSizes += size;
+        }
+
+        _bufPos = pos;
+        if (eofError)
+            ThrowXiphLacingEof();
+
+        Unsafe.Add(ref sizesRef, framesCount - 1) = (blockEndBufPos - pos) - totalSizes;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private void ComputeEbmlLaceSizesSync(int framesCount, int blockEndBufPos)
+    {
+        ref int sizesRef = ref MemoryMarshal.GetArrayDataReference(_laceFrameSizes);
+        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
+        int pos = _bufPos;
+        int bufLen = _bufLen;
+        int totalSizes = 0;
+        int badLen = -1;
+
+        if (framesCount > 1)
+        {
+            if ((uint)pos >= (uint)bufLen)
+            {
+                badLen = 0;
+            }
+            else
+            {
+                byte first0 = Unsafe.Add(ref bufRef, pos++);
+                int len0 = GetVIntLength(first0);
+                if ((uint)(len0 - 1) > 7u || pos + len0 - 1 > bufLen)
+                {
+                    badLen = len0;
+                }
+                else
+                {
+                    long val0 = first0 & (0xFF >> len0);
+                    for (int j = 1; j < len0; j++)
+                        val0 = (val0 << 8) | Unsafe.Add(ref bufRef, pos++);
+
+                    int firstSize = (int)val0;
+                    Unsafe.Add(ref sizesRef, 0) = firstSize;
+                    totalSizes = firstSize;
+                    int prevSize = firstSize;
+
+                    for (int i = 1; i < framesCount - 1; i++)
+                    {
+                        if ((uint)pos >= (uint)bufLen)
+                        {
+                            badLen = 0;
+                            break;
+                        }
+
+                        byte first = Unsafe.Add(ref bufRef, pos++);
+                        int len = GetVIntLength(first);
+                        if ((uint)(len - 1) > 7u || pos + len - 1 > bufLen)
+                        {
+                            badLen = len;
+                            break;
+                        }
+
+                        long val = len == 1 ? (first & 0x7F) : (first & (0xFF >> len));
+                        for (int j = 1; j < len; j++)
+                            val = (val << 8) | Unsafe.Add(ref bufRef, pos++);
+
+                        long shift = (1L << ((7 * len) - 1)) - 1;
+                        int nextSize = prevSize + (int)(val - shift);
+                        Unsafe.Add(ref sizesRef, i) = nextSize;
+                        totalSizes += nextSize;
+                        prevSize = nextSize;
+                    }
                 }
             }
-            frameSizes[framesCount - 1] = (blockEndBufPos - _bufPos) - totalSizes;
-        }
-        else if (lacing == LACING_FIXED)
-        {
-            int size = (blockEndBufPos - _bufPos) / framesCount;
-            for (int i = 0; i < framesCount; i++)
-                frameSizes[i] = size;
         }
 
+        _bufPos = pos;
+        if (badLen >= 0)
+            ThrowInvalidSignedVIntLength(badLen);
+
+        Unsafe.Add(ref sizesRef, framesCount - 1) = (blockEndBufPos - pos) - totalSizes;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private void ComputeFixedLaceSizesSync(int framesCount, int blockEndBufPos)
+    {
+        ref int sizesRef = ref MemoryMarshal.GetArrayDataReference(_laceFrameSizes);
+        int size = (blockEndBufPos - _bufPos) / framesCount;
+        for (int i = 0; i < framesCount; i++)
+            Unsafe.Add(ref sizesRef, i) = size;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EnqueueLacedFramesSync(int framesCount, int blockEndBufPos, long timestampMs, bool isKeyFrame)
+    {
+        ref int sizesRef = ref MemoryMarshal.GetArrayDataReference(_laceFrameSizes);
         for (int i = 0; i < framesCount; i++)
         {
-            int size = frameSizes[i];
+            int size = Unsafe.Add(ref sizesRef, i);
             if (size <= 0) continue;
 
             if (_bufPos + size > blockEndBufPos)
@@ -877,37 +1033,49 @@ public sealed class WebMParser : IDisposable
             BufferedReadSpan(size).CopyTo(mem.Memory.Span[..size]);
             _lacedFrames.Enqueue(new AudioBlock(mem, size, timestampMs, isKeyFrame));
         }
-
-        _bufPos = blockEndBufPos;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ReadVIntFromBufferSync()
     {
-        int first = BufferedReadByte();
-        int len = GetVIntLength((byte)first);
-        if (len == 0 || len > 8)
-            throw new InvalidDataException($"Invalid EBML VINT length: {len}");
+        int pos = _bufPos;
+        int bufLen = _bufLen;
+        if ((uint)pos >= (uint)bufLen)
+            ThrowInvalidVIntLength(0);
 
-        if (len == 1) return first & 0x7F;
+        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
+        byte first = Unsafe.Add(ref bufRef, pos++);
+        int len = GetVIntLength(first);
+        if ((uint)(len - 1) > 7u || pos + len - 1 > bufLen)
+            ThrowInvalidVIntLength(len);
 
         long val = first & (0xFF >> len);
         for (int i = 1; i < len; i++)
-            val = (val << 8) | (uint)BufferedReadByte();
+            val = (val << 8) | Unsafe.Add(ref bufRef, pos++);
 
+        _bufPos = pos;
         return val;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ReadSignedVIntFromBufferSync()
     {
-        int first = BufferedReadByte();
-        int len = GetVIntLength((byte)first);
-        if (len == 0 || len > 8)
-            throw new InvalidDataException($"Invalid EBML Signed VINT length: {len}");
+        int pos = _bufPos;
+        int bufLen = _bufLen;
+        if ((uint)pos >= (uint)bufLen)
+            ThrowInvalidSignedVIntLength(0);
+
+        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
+        byte first = Unsafe.Add(ref bufRef, pos++);
+        int len = GetVIntLength(first);
+        if ((uint)(len - 1) > 7u || pos + len - 1 > bufLen)
+            ThrowInvalidSignedVIntLength(len);
 
         long val = len == 1 ? (first & 0x7F) : (first & (0xFF >> len));
         for (int i = 1; i < len; i++)
-            val = (val << 8) | (uint)BufferedReadByte();
+            val = (val << 8) | Unsafe.Add(ref bufRef, pos++);
 
+        _bufPos = pos;
         long shift = (1L << ((7 * len) - 1)) - 1;
         return val - shift;
     }
@@ -1216,36 +1384,32 @@ public sealed class WebMParser : IDisposable
 
     private static long ReadVInt(ReadOnlySpan<byte> data)
     {
-        if (data.Length == 0) return 0;
+        if (data.IsEmpty) return 0;
 
-        int length = GetVIntLength(data[0]);
-        if (length == 0 || length > data.Length) return 0;
-        byte mask = (byte)(0xFF >> length);
+        ref byte dataRef = ref MemoryMarshal.GetReference(data);
+        byte first = dataRef;
+        int length = GetVIntLength(first);
+        if ((uint)(length - 1) > 7u || length > data.Length) return 0;
 
-        long value = data[0] & mask;
+        long value = first & (0xFF >> length);
         for (int i = 1; i < length; i++)
-            value = (value << 8) | data[i];
+            value = (value << 8) | Unsafe.Add(ref dataRef, i);
 
         return value;
     }
 
-    private static int GetVIntLength(byte b)
-    {
-        if ((b & 0x80) != 0) return 1;
-        if ((b & 0x40) != 0) return 2;
-        if ((b & 0x20) != 0) return 3;
-        if ((b & 0x10) != 0) return 4;
-        if ((b & 0x08) != 0) return 5;
-        if ((b & 0x04) != 0) return 6;
-        if ((b & 0x02) != 0) return 7;
-        if ((b & 0x01) != 0) return 8;
-        return 0; // Invalid
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GetVIntLength(byte b) =>
+        b == 0 ? 0 : BitOperations.LeadingZeroCount(b) - 23;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long ReadUnsignedInt(ReadOnlySpan<byte> data)
     {
         long value = 0;
-        foreach (byte b in data) value = (value << 8) | b;
+        ref byte dataRef = ref MemoryMarshal.GetReference(data);
+        int len = data.Length;
+        for (int i = 0; i < len; i++)
+            value = (value << 8) | Unsafe.Add(ref dataRef, i);
         return value;
     }
 
@@ -1270,14 +1434,57 @@ public sealed class WebMParser : IDisposable
         throw new EndOfStreamException($"Unexpected EOF reading {context}.");
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int CheckedSizeToInt32(long size, string context)
+    {
+        if ((ulong)size > int.MaxValue)
+            ThrowInvalidElementSize(size, context);
+        return (int)size;
+    }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInvalidElementSize(long size, string context)
     {
         if (size == UNKNOWN_SIZE)
             throw new InvalidDataException($"WebM {context} has unknown size, which is unsupported for this element.");
-        if (size is < 0 or > int.MaxValue)
-            throw new InvalidDataException($"WebM {context} size {size} is out of supported memory range.");
-        return (int)size;
+        throw new InvalidDataException($"WebM {context} size {size} is out of supported memory range.");
     }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInvalidIdVIntLength(int idLength) =>
+        throw new InvalidDataException($"Invalid EBML ID VINT length: {idLength}");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInvalidSizeVIntLength(int sizeLength) =>
+        throw new InvalidDataException($"Invalid EBML Size VINT length: {sizeLength}");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInvalidVIntLength(int len) =>
+        throw new InvalidDataException($"Invalid EBML VINT length: {len}");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInvalidSignedVIntLength(int len) =>
+        throw new InvalidDataException($"Invalid EBML Signed VINT length: {len}");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowXiphLacingEof() =>
+        throw new EndOfStreamException("EOF in xiph lacing size");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ThrowInvalidTrackNumberVInt(int trackLen) =>
+        throw new ParserCorruptionException(StreamPositionWithBuffer(), $"Invalid EBML Track Number VINT length: {trackLen}");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ThrowBlockHeaderExceeded() =>
+        throw new ParserCorruptionException(StreamPositionWithBuffer(), "Block header parsing exceeded allocated element payload size.");
 
     #endregion
 

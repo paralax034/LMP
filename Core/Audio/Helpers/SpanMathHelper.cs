@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace LMP.Core.Audio.Helpers;
 
@@ -44,5 +46,24 @@ internal static class SpanMathHelper
 
         for (; i < len; i++)
             Unsafe.Add(ref ptr, i) *= gain;
+    }
+
+    /// <summary>
+    /// Вычисляет <c>1.0f / d</c> через аппаратную инструкцию <c>rcpss</c> с одной итерацией уточнения Ньютона–Рафсона
+    /// (<c>r1 = r0 * (2 - d * r0)</c>), обеспечивая точность ~23.8 бит (~1 ULP IEEE-754 float) без генерации <c>divss</c>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float FastReciprocal(float d)
+    {
+        if (Sse.IsSupported)
+        {
+            Vector128<float> vd = Vector128.CreateScalarUnsafe(d);
+            Vector128<float> r0 = Sse.ReciprocalScalar(vd);
+            Vector128<float> two = Vector128.CreateScalarUnsafe(2.0f);
+            Vector128<float> r1 = Sse.MultiplyScalar(r0, Sse.SubtractScalar(two, Sse.MultiplyScalar(vd, r0)));
+            return Vector128.ToScalar(r1);
+        }
+
+        return 1.0f / d;
     }
 }

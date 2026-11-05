@@ -65,7 +65,8 @@ public sealed class GainProcessor
 
         float u = (abs - SoftKneeThreshold) * InvSoftKneeHeadroom;
         float u2 = u * u;
-        float compressed = SoftKneeThreshold + SoftKneeHeadroom * ((u + u2) / (1.0f + u + u2));
+        float sum = u + u2;
+        float compressed = SoftKneeThreshold + SoftKneeHeadroom * (sum * Helpers.SpanMathHelper.FastReciprocal(1.0f + sum));
         return MathF.CopySign(compressed, x);
     }
 
