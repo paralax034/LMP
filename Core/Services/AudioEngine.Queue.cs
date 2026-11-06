@@ -6,16 +6,16 @@ public sealed partial class AudioEngine
 {
     #region Granular Queue Events
 
-    /// <summary>Событие перемещения элемента в очереди. Параметры: (старый индекс, новый индекс).</summary>
+    /// <summary>Occurs when an item in the queue is moved. Parameters: (old index, new index).</summary>
     public event Action<int, int>? OnQueueItemMoved;
 
-    /// <summary>Событие вставки одиночного элемента в очередь. Параметры: (индекс вставки, вставленный трек).</summary>
+    /// <summary>Occurs when a single item is inserted into the queue. Parameters: (insertion index, inserted track).</summary>
     public event Action<int, TrackInfo>? OnQueueItemInserted;
 
-    /// <summary>Событие удаления одиночного элемента из очереди. Параметры: (индекс удаленного элемента, удаленный трек).</summary>
+    /// <summary>Occurs when a single item is removed from the queue. Parameters: (index of removed item, removed track).</summary>
     public event Action<int, TrackInfo>? OnQueueItemRemoved;
 
-    /// <summary>Событие пакетной вставки диапазона элементов. Параметры: (начальный индекс вставки, количество элементов).</summary>
+    /// <summary>Occurs when a range of items is batch-inserted into the queue. Parameters: (start insertion index, item count).</summary>
     public event Action<int, int>? OnQueueRangeInserted;
 
     #endregion
@@ -44,11 +44,11 @@ public sealed partial class AudioEngine
     #region Public API
 
     /// <summary>
-    /// Добавляет в очередь диапазон треков, отфильтровывая дубликаты.
-    /// Если очередь была пуста, автоматически запускает проигрывание первого добавленного трека.
+    /// Adds a range of tracks to the queue, filtering out duplicates.
+    /// If the queue was empty, automatically starts playback of the first added track.
     /// </summary>
-    /// <param name="tracks">Список добавляемых треков.</param>
-    /// <returns>Количество фактически добавленных уникальных треков.</returns>
+    /// <param name="tracks">The list of tracks to add.</param>
+    /// <returns>The number of unique tracks actually added.</returns>
     public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks)
     {
         int addedCount = 0;
@@ -78,7 +78,7 @@ public sealed partial class AudioEngine
 
                 if (CurrentTrack == null && !IsPlaying && !IsLoading)
                 {
-                    _currentIndex = _queue.Count - unique.Count; // Позиционируемся на первый из новых
+                    _currentIndex = _queue.Count - unique.Count; // Seek to the first newly added track
                     playbackTrack = _queue[_currentIndex];
                     shouldAutoplay = true;
                 }
@@ -190,15 +190,15 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Удаляет трек из очереди. Удалённый играющий трек сразу сменяется стоявшим следом по правилам «Далее»:
-    /// в конце очереди — круг при RepeatMode.All или остановка; на паузе следующий трек загружается без запуска.
+    /// Removes a track from the queue. A removed currently playing track is immediately replaced by the next one according to the "Next" rules:
+    /// at the end of the queue — loops if RepeatMode.All or stops; if paused, the next track is loaded without starting playback.
     /// </summary>
     public void RemoveFromQueue(TrackInfo track)
     {
         int removedIndex = -1;
         bool removedCurrent = false;
         bool canMove = false;
-        // Намерение слушать — из состояния движка: после загрузки «на паузе» плеер в Stopped, и !IsPaused запустил бы звук
+        // Intent to listen comes from engine state: after loading while paused, player is Stopped, and !IsPaused would start playback
         bool startPlaying = CurrentTrack != null && _playIntent;
         var trackId = track.Id;
 
@@ -270,7 +270,7 @@ public sealed partial class AudioEngine
     #region Pre-warm
 
     /// <summary>
-    /// Спекулятивно прогревает CDN-соединения для следующих треков в очереди.
+    /// Speculatively prewarms CDN connections for upcoming tracks in the queue.
     /// </summary>
     private void PreWarmNextTracksInQueue(int currentIndex, HttpClient httpClient, CancellationToken ct)
     {
@@ -330,7 +330,7 @@ public sealed partial class AudioEngine
         int next = ComputeNextIndex(_currentIndex, _queue.Count, RepeatMode == RepeatMode.All, userInitiated);
         if (next < 0) return false;
 
-        // Переход на новый круг при RepeatMode.All: в авто-режиме перемешивания очередь перемешивается заново
+        // Loop transition on RepeatMode.All: in auto-shuffle mode, the queue is reshuffled
         if (next <= _currentIndex && ShuffleEnabled && _queue.Count > 1)
         {
             ApplyShuffleInPlace(preserveCurrentAtStart: false);
@@ -342,8 +342,8 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Чистая арифметика шага «вперёд» по очереди без учёта RepeatMode.One.
-    /// Возвращает индекс следующего трека или -1, если очередь закончилась.
+    /// Pure arithmetic for moving one step forward in the queue, ignoring RepeatMode.One.
+    /// Returns the index of the next track, or -1 if the end of the queue is reached.
     /// </summary>
     internal static int ComputeNextIndex(int currentIndex, int count, bool repeatAll, bool userInitiated)
     {
@@ -354,8 +354,8 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Чистая арифметика индекса текущего трека после удаления элемента очереди.
-    /// Удаление самого текущего трека отводит индекс на предыдущий слот, чтобы шаг «вперёд» попал на трек, стоявший следом.
+    /// Pure arithmetic for recalculating the current track index after removing a queue item.
+    /// Removing the current track itself shifts the index to the previous slot so that the next step forward lands on the track that followed it.
     /// </summary>
     internal static int ComputeIndexAfterRemove(int removedIndex, int currentIndex)
     {
@@ -363,7 +363,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Устарел ли авто-переход по концу трека: очередь уже стоит на другом треке (удаление играющего или ручной переход).
+    /// Whether the automatic track-end transition is stale: the queue has already moved to a different track (via removal of the playing track or manual transition).
     /// </summary>
     internal static bool IsStaleTrackEnd(string? endedTrackId, string? queueTrackId)
     {

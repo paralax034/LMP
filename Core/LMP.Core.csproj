@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <!--
-      net11.0 — preview (GA ожидается ноябрь 2026).
-      Осознанный выбор: синхронизировано с корневым проектом.
+      net11.0 — preview (GA expected November 2026).
+      Deliberate choice: synchronized with the root project.
     -->
     <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -15,17 +15,17 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <!-- Отключаем рефлексию JSON в Release для Native AOT -->
+    <!-- Disable JSON reflection in Release for Native AOT -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <!-- Подавляем предупреждения анализа тримминга/AOT сторонних зависимостей синхронно с корневым проектом -->
+    <!-- Suppress trimming/AOT analyzer warnings for third-party dependencies synchronously with the root project -->
     <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
   </PropertyGroup>
 
   <ItemGroup Label="UI Core Dependencies">
     <PackageReference Include="Avalonia" />
     <PackageReference Include="AsyncImageLoader.Avalonia" />
-    <!-- SkiaSharp приходит транзитивно через Avalonia.Skia: версия Skia всегда совпадает с ожидаемой Avalonia -->
+    <!-- SkiaSharp comes transitively via Avalonia.Skia: the Skia version always matches the version expected by Avalonia -->
     <PackageReference Include="Avalonia.Skia" />
   </ItemGroup>
 
@@ -51,8 +51,8 @@
 
   <ItemGroup Label="Data &amp; Security">
     <!--
-      ADO.NET-провайдер SQLite для библиотеки и чтения баз браузеров.
-      Нативный мост SQLitePCLRaw (bundle_e_sqlite3) приходит транзитивно в версии, ожидаемой провайдером.
+      SQLite ADO.NET provider for the library and reading browser databases.
+      The native SQLitePCLRaw bridge (bundle_e_sqlite3) comes transitively in the version expected by the provider.
     -->
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />

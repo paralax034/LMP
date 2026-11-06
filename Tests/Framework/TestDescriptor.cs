@@ -1,7 +1,7 @@
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Сигнатура параметров тестового метода для эффективного вызова без рефлексивного перебора.
+/// Test method parameter signature for efficient invocation without reflection lookup.
 /// </summary>
 public enum TestParameterSignature : byte
 {
@@ -13,21 +13,21 @@ public enum TestParameterSignature : byte
 }
 
 /// <summary>
-/// Делегат вызова тестового метода с унифицированными аргументами; формируется генератором реестра,
-/// который сам раскладывает сервисы и токен в порядке параметров исходного метода.
+/// Delegate for invoking a test method with unified arguments; built by the registry generator,
+/// which packs services and the token in the order of the original method parameters.
 /// </summary>
-/// <param name="services">Контейнер сервисов приложения.</param>
-/// <param name="ct">Токен отмены с учётом таймаута теста.</param>
+/// <param name="services">Application service provider.</param>
+/// <param name="ct">Cancellation token respecting the test timeout.</param>
 public delegate Task TestInvoker(IServiceProvider services, CancellationToken ct);
 
 /// <summary>
-/// Регистрация теста, созданная генератором LMP.Tests.Generator на этапе сборки (без рефлексии).
+/// Test registration created by LMP.Tests.Generator at build time (reflection-free).
 /// </summary>
-/// <param name="ClassName">Имя содержащего класса.</param>
-/// <param name="MethodName">Имя тестового метода.</param>
-/// <param name="Attribute">Экземпляр атрибута с аргументами из исходного кода.</param>
-/// <param name="Signature">Сигнатура параметров метода.</param>
-/// <param name="Invoke">Статический делегат вызова метода.</param>
+/// <param name="ClassName">Containing class name.</param>
+/// <param name="MethodName">Test method name.</param>
+/// <param name="Attribute">Attribute instance with arguments from the source code.</param>
+/// <param name="Signature">Method parameter signature.</param>
+/// <param name="Invoke">Static delegate to invoke the method.</param>
 public readonly record struct TestRegistration(
     string ClassName,
     string MethodName,
@@ -36,48 +36,48 @@ public readonly record struct TestRegistration(
     TestInvoker Invoke);
 
 /// <summary>
-/// Дескриптор зарегистрированного теста или отладочного действия.
+/// Descriptor of a registered test or debug action.
 /// </summary>
 public sealed record TestDescriptor
 {
-    /// <summary>Уникальный идентификатор: "ClassName.MethodName".</summary>
+    /// <summary>Unique identifier: "ClassName.MethodName".</summary>
     public required string Id { get; init; }
 
-    /// <summary>Человекочитаемое имя для UI.</summary>
+    /// <summary>Human-readable name for UI.</summary>
     public required string DisplayName { get; init; }
 
-    /// <summary>Категория выполнения теста.</summary>
+    /// <summary>Test execution category.</summary>
     public required TestCategory Category { get; init; }
 
-    /// <summary>Тематическая подсистема из <see cref="TestGroups"/>.</summary>
+    /// <summary>Thematic subsystem from <see cref="TestGroups"/>.</summary>
     public required string Group { get; init; }
 
-    /// <summary>Имя содержащего класса.</summary>
+    /// <summary>Containing class name.</summary>
     public required string ClassName { get; init; }
 
-    /// <summary>Порядок сортировки.</summary>
+    /// <summary>Sort order.</summary>
     public required int Order { get; init; }
 
-    /// <summary>Требует ли тест активной сети.</summary>
+    /// <summary>Whether the test requires an active network connection.</summary>
     public required bool RequiresNetwork { get; init; }
 
-    /// <summary>Таймаут в секундах (0 = без ограничения).</summary>
+    /// <summary>Timeout in seconds (0 = no limit).</summary>
     public required int TimeoutSeconds { get; init; }
 
-    /// <summary>Является ли элемент интерактивным отладочным действием.</summary>
+    /// <summary>Whether the item is an interactive debug action.</summary>
     public bool IsAction => Category == TestCategory.Action;
 
-    /// <summary>Является ли элемент диагностическим зондом.</summary>
+    /// <summary>Whether the item is a diagnostic probe.</summary>
     public bool IsDiagnostic => Category == TestCategory.Diagnostic;
 
-    /// <summary>Сигнатура параметров метода.</summary>
+    /// <summary>Method parameter signature.</summary>
     public required TestParameterSignature Signature { get; init; }
 
-    /// <summary>Делегат вызова теста, сформированный генератором реестра.</summary>
+    /// <summary>Test invocation delegate created by the registry generator.</summary>
     public required TestInvoker Invoke { get; init; }
 }
 
-/// <summary>Состояние выполнения теста.</summary>
+/// <summary>Test execution state.</summary>
 public enum TestRunState : byte
 {
     NotRun = 0,
@@ -88,23 +88,23 @@ public enum TestRunState : byte
 }
 
 /// <summary>
-/// Результат выполнения теста или действия.
+/// Result of a test or action execution.
 /// </summary>
 public sealed record TestResult
 {
-    /// <summary>Идентификатор теста.</summary>
+    /// <summary>Test identifier.</summary>
     public required string TestId { get; init; }
 
-    /// <summary>Итоговый статус выполнения.</summary>
+    /// <summary>Final execution status.</summary>
     public required TestRunState State { get; init; }
 
-    /// <summary>Затраченное время.</summary>
+    /// <summary>Elapsed time.</summary>
     public required TimeSpan Duration { get; init; }
 
-    /// <summary>Текст ошибки или причина пропуска (null при успешном прохождении).</summary>
+    /// <summary>Error message or skip reason (null on success).</summary>
     public string? ErrorMessage { get; init; }
 
-    /// <summary>Форматированное время для отображения в UI.</summary>
+    /// <summary>Formatted duration for UI display.</summary>
     public string DurationFormatted => Duration.TotalMilliseconds < 1000
         ? $"{Duration.TotalMilliseconds:F0}ms"
         : $"{Duration.TotalSeconds:F1}s";

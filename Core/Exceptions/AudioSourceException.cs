@@ -1,7 +1,7 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Ошибка источника аудио.
+/// Audio source error.
 /// </summary>
 public class AudioSourceException : AudioException
 {

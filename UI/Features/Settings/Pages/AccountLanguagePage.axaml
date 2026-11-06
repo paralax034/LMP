@@ -6,8 +6,8 @@
     x:DataType="vm:AccountLanguageSettingsViewModel">
 
     <!--
-        DataContext = SettingsViewModel (установлен родительским DataTemplate).
-        Все биндинги — прямые, без Owner.* префикса.
+        DataContext = SettingsViewModel (set by the parent DataTemplate).
+        All bindings are direct, without the Owner.* prefix.
     -->
     <StackPanel Margin="32,24">
         <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,16">
@@ -24,7 +24,7 @@
 
                 <!-- Account info -->
                 <Panel>
-                    <!-- Отображается только в состоянии покоя -->
+                    <!-- Displayed only in idle state -->
                     <Grid ColumnDefinitions="Auto, *, Auto" IsVisible="{Binding !IsAccountLoading}">
                         <Border Width="64" Height="64" CornerRadius="32"
                             ClipToBounds="True" Margin="0,0,20,0"
@@ -47,7 +47,7 @@
                                 <TextBlock Text="{Binding AccountName}" FontWeight="Bold"
                                     FontSize="18" VerticalAlignment="Center" />
 
-                                <!-- Новая кнопка ручного обновления профиля -->
+                                <!-- New manual profile refresh button -->
                                 <Button Classes="icon-btn ghost-btn"
                                     Command="{Binding RefreshProfileCommand}"
                                     Width="28" Height="28" Padding="4"
@@ -78,7 +78,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <!-- Состояние загрузки (Background заменен на Transparent) -->
+                    <!-- Loading state (Background replaced with Transparent) -->
                     <Grid ColumnDefinitions="Auto, *" IsVisible="{Binding IsAccountLoading}"
                         Height="64">
                         <Border Width="64" Height="64" CornerRadius="32" ClipToBounds="True"

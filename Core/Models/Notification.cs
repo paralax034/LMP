@@ -5,9 +5,9 @@ using System.Windows.Input;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Уведомление или живая фоновая задача в системе.
-/// Поддерживает реактивное обновление прогресса, статуса и кнопки действия в реальном времени,
-/// а также автоматический перевод при смене языка.
+/// A notification or live background task in the system.
+/// Supports real-time reactive updates for progress, status, and action buttons,
+/// as well as automatic translation on language change.
 /// </summary>
 public sealed partial class Notification : ObservableObject
 {
@@ -15,19 +15,19 @@ public sealed partial class Notification : ObservableObject
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Уникальный ключ фоновой задачи (например, <c>outbox:pl_123</c> или <c>import:yt</c>).
-    /// Для обычных уведомлений равен <see langword="null"/>.
+    /// Unique key of the background task (e.g., <c>outbox:pl_123</c> or <c>import:yt</c>).
+    /// Equal to <see langword="null"/> for regular notifications.
     /// </summary>
     public string? TaskKey { get; init; }
 
     /// <summary>
-    /// Указывает, что элемент представляет фоновую задачу облачной очереди или синхронизации.
+    /// Indicates that the item represents a cloud queue or synchronization background task.
     /// </summary>
     public bool IsTask { get; init; }
 
     /// <summary>
-    /// Указывает, что фоновая задача в данный момент ожидает отправки или выполняется.
-    /// При завершении переходит в <see langword="false"/>, превращаясь в обычную запись хроники.
+    /// Indicates whether the background task is currently pending dispatch or executing.
+    /// Switches to <see langword="false"/> upon completion, turning into a standard history entry.
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowTaskProgress))]
@@ -38,8 +38,8 @@ public sealed partial class Notification : ObservableObject
     public partial bool IsTaskActive { get; set; }
 
     /// <summary>
-    /// Момент запланированной отправки задачи (UTC). Пока задан и нет <see cref="TaskStatusText"/>,
-    /// в строке времени отображается живой обратный отсчёт.
+    /// Scheduled task dispatch time (UTC). While set and no <see cref="TaskStatusText"/> is present,
+    /// the time string displays a live countdown.
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasTaskStatus))]
@@ -48,7 +48,7 @@ public sealed partial class Notification : ObservableObject
     public partial DateTime? TaskDeadlineUtc { get; set; }
 
     /// <summary>
-    /// Скрывает полосу прогресса задачи (ожидание отправки отображается таймером, а не анимацией).
+    /// Hides the task progress bar (dispatch countdown is displayed via timer instead of animation).
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowTaskProgress))]
@@ -56,17 +56,17 @@ public sealed partial class Notification : ObservableObject
     public partial bool IsTaskProgressHidden { get; set; }
 
     /// <summary>
-    /// Прогресс выполнения или ожидания задачи (0.0 .. 1.0).
+    /// Task execution or pending progress (0.0 .. 1.0).
     /// </summary>
     [ObservableProperty] public partial double TaskProgress { get; set; }
 
     /// <summary>
-    /// Флаг неопределенного прогресса (пульсация при отправке в сеть).
+    /// Indeterminate progress flag (pulsing during network dispatch).
     /// </summary>
     [ObservableProperty] public partial bool IsTaskIndeterminate { get; set; }
 
     /// <summary>
-    /// Дополнительный статус задачи (например, таймер до отправки или состояние ретрая).
+    /// Additional task status (e.g., dispatch timer or retry state).
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasTaskStatus))]
@@ -75,7 +75,7 @@ public sealed partial class Notification : ObservableObject
     public partial string? TaskStatusText { get; set; }
 
     /// <summary>
-    /// Ключ локализации кнопки быстрого действия (например, <c>CloudTask_ForceSend</c> или <c>Button_Cancel</c>).
+    /// Localization key for the quick action button (e.g., <c>CloudTask_ForceSend</c> or <c>Button_Cancel</c>).
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TaskActionText))]
@@ -84,18 +84,18 @@ public sealed partial class Notification : ObservableObject
     public partial string? TaskActionKey { get; set; }
 
     /// <summary>
-    /// Указывает, является ли действие кнопкой отмены (отображает иконку крестика вместо облака).
+    /// Indicates whether the action is a cancel button (renders a cross icon instead of a cloud icon).
     /// </summary>
     [ObservableProperty] public partial bool IsCancelAction { get; set; }
 
     /// <summary>
-    /// Динамический генератор локализованного текста сообщения для составных задач очереди.
-    /// Перевычисляется автоматически при смене языка интерфейса.
+    /// Dynamic localized message generator for composite queue tasks.
+    /// Automatically recomputed on UI language change.
     /// </summary>
     public Func<string>? DynamicMessageFactory { get; set; }
 
     /// <summary>
-    /// Локализованный текст кнопки быстрого действия («Отправить сейчас» или «Отмена»).
+    /// Localized text for the quick action button ("Send Now" or "Cancel").
     /// </summary>
     public string? TaskActionText => !string.IsNullOrEmpty(TaskActionKey)
         ? L[TaskActionKey]
@@ -108,7 +108,7 @@ public sealed partial class Notification : ObservableObject
     public partial string? TaskActionRaw { get; set; }
 
     /// <summary>
-    /// Команда быстрого действия для активной задачи.
+    /// Quick action command for the active task.
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasTaskAction))]
@@ -116,38 +116,38 @@ public sealed partial class Notification : ObservableObject
     public partial ICommand? TaskActionCommand { get; set; }
 
     /// <summary>
-    /// Ключ локализации заголовка (например "Error_Playback_Title").
-    /// Если null — используется <see cref="TitleRaw"/>.
+    /// Title localization key (e.g., "Error_Playback_Title").
+    /// If null, <see cref="TitleRaw"/> is used.
     /// </summary>
     public string? TitleKey { get; set; }
 
     /// <summary>
-    /// Готовый текст заголовка (fallback если TitleKey не задан).
+    /// Raw title text (fallback if TitleKey is not set).
     /// </summary>
     public string? TitleRaw { get; set; }
 
     /// <summary>
-    /// Ключ локализации сообщения.
+    /// Message localization key.
     /// </summary>
     public string? MessageKey { get; set; }
 
     /// <summary>
-    /// Готовый текст сообщения (fallback).
+    /// Raw message text (fallback).
     /// </summary>
     public string? MessageRaw { get; set; }
 
     /// <summary>
-    /// Аргументы для форматирования сообщения (string.Format).
+    /// Message formatting arguments (string.Format).
     /// </summary>
     public object[]? MessageArgs { get; set; }
 
     /// <summary>
-    /// Ключ локализации рекомендации.
+    /// Recommendation localization key.
     /// </summary>
     public string? RecommendationKey { get; init; }
 
     /// <summary>
-    /// Готовый текст рекомендации (fallback).
+    /// Raw recommendation text (fallback).
     /// </summary>
     public string? RecommendationRaw { get; init; }
 
@@ -161,12 +161,12 @@ public sealed partial class Notification : ObservableObject
     #region Computed Localized Properties
 
     /// <summary>
-    /// Экземпляр сервиса локализации для прямой компилируемой привязки в шаблонах.
+    /// Localization service instance for direct compiled binding in templates.
     /// </summary>
     public LocalizationService L => LocalizationService.Instance;
 
     /// <summary>
-    /// Локализованный заголовок (автоматически переводится при смене языка).
+    /// Localized title (automatically translated on language change).
     /// </summary>
     public string Title => !string.IsNullOrEmpty(TitleKey)
         ? L[TitleKey]
@@ -175,7 +175,7 @@ public sealed partial class Notification : ObservableObject
     public string TrackUrl => !string.IsNullOrEmpty(TrackId) ? $"https://www.youtube.com/watch?v={TrackId}" : "";
 
     /// <summary>
-    /// Локализованное сообщение.
+    /// Localized message.
     /// </summary>
     public string Message
     {
@@ -209,7 +209,7 @@ public sealed partial class Notification : ObservableObject
     }
 
     /// <summary>
-    /// Локализованная рекомендация.
+    /// Localized recommendation.
     /// </summary>
     public string? Recommendation => !string.IsNullOrEmpty(RecommendationKey)
         ? L[RecommendationKey]
@@ -224,12 +224,12 @@ public sealed partial class Notification : ObservableObject
     public bool HasTaskStatus => IsTaskActive && (!string.IsNullOrEmpty(TaskStatusText) || TaskDeadlineUtc.HasValue);
 
     /// <summary>
-    /// Нижняя панель карточки задачи (прогресс и/или кнопка действия) нужна, только если в ней есть что показать.
+    /// The task card bottom panel (progress and/or action button) is required only if there is content to show.
     /// </summary>
     public bool ShowTaskFooter => IsTaskActive && (ShowTaskProgress || HasTaskAction);
 
     /// <summary>
-    /// Активна ли живая строка обратного отсчёта (требует периодического <see cref="RefreshCountdown"/>).
+    /// Indicates whether the live countdown line is active (requires periodic <see cref="RefreshCountdown"/>).
     /// </summary>
     public bool HasTaskCountdown => IsTaskActive && TaskDeadlineUtc.HasValue && string.IsNullOrEmpty(TaskStatusText);
 
@@ -246,8 +246,8 @@ public sealed partial class Notification : ObservableObject
 
             if (IsTaskActive && TaskDeadlineUtc is { } deadlineUtc)
             {
-                // Срок вышел, а воркер ещё не забрал задачу (нет сети, авторизации или идёт кулдаун):
-                // вместо застывшего «0:00» показываем, что изменения ждут отправки
+                // Expired, but worker hasn't picked up the task yet (no network, auth issues, or active cooldown):
+                // display that changes are pending dispatch instead of stuck "0:00"
                 var remaining = deadlineUtc - DateTime.UtcNow;
                 return remaining > TimeSpan.Zero ? FormatCountdown(remaining) : L["CloudTask_Overdue"];
             }
@@ -276,7 +276,7 @@ public sealed partial class Notification : ObservableObject
         };
 
     /// <summary>
-    /// Семантический HEX-цвет для индикатора серьезности уведомления.
+    /// Semantic HEX color for the notification severity indicator.
     /// </summary>
     public string SeverityColorHex => IsTaskActive
         ? "#8BE9FD"
@@ -289,13 +289,13 @@ public sealed partial class Notification : ObservableObject
         };
 
     /// <summary>
-    /// Перерисовывает строку обратного отсчёта задачи (вызывается таймером открытой панели).
+    /// Redraws the task countdown string (called by the open panel timer).
     /// </summary>
     public void RefreshCountdown() => OnPropertyChanged(nameof(TimeAgo));
 
     private static string FormatCountdown(TimeSpan remaining)
     {
-        // Округление вверх: «0:00» появляется только в момент отправки
+        // Ceiling rounding: "0:00" appears only at the moment of dispatch
         long totalSeconds = (long)Math.Ceiling(remaining.TotalSeconds);
         long hours = totalSeconds / 3600;
         long minutes = totalSeconds % 3600 / 60;
@@ -307,7 +307,7 @@ public sealed partial class Notification : ObservableObject
     }
 
     /// <summary>
-    /// Уведомляет UI об изменении текста, иконки и статуса задачи на месте.
+    /// Notifies the UI to update task text, icon, and status in place.
     /// </summary>
     public void NotifyVisualStateChanged()
     {

@@ -9,11 +9,11 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Стандартно-совместимый парсер контейнеров WebM/Matroska (EBML) для извлечения пакетов OPUS.
-/// Оптимизирован для потокового чтения без аллокаций, с защитой от десинхронизации (desync) и пропуска нулевых байтов (EBML Padding).
+/// Standard-compliant WebM/Matroska (EBML) container parser for extracting OPUS packets.
+/// Optimized for zero-allocation streaming read, featuring desync protection and EBML padding skip.
 /// </summary>
 /// <remarks>
-/// <para>Соответствует спецификациям RFC 8794 (EBML) и RFC 9559 (Matroska).</para>
+/// <para>Complies with RFC 8794 (EBML) and RFC 9559 (Matroska) specifications.</para>
 /// </remarks>
 public sealed class WebMParser : IDisposable
 {
@@ -45,17 +45,17 @@ public sealed class WebMParser : IDisposable
     private const uint CUE_CLUSTER_POSITION_ID = 0xF1;
 
     //
-    // Константы Lacing и EBML
+    // Lacing and EBML constants
     //
     private const int LACING_NONE = 0;
     private const int LACING_XIPH = 1;
     private const int LACING_FIXED = 2;
     private const int LACING_EBML = 3;
 
-    /// <summary>Маркер EBML VINT, обозначающий неизвестный размер.</summary>
+    /// <summary>EBML VINT marker indicating unknown size.</summary>
     public const long UNKNOWN_SIZE = -1;
 
-    private const long DEFAULT_TIMECODE_SCALE = 1_000_000; // 1ms в наносекундах
+    private const long DEFAULT_TIMECODE_SCALE = 1_000_000; // 1ms in nanoseconds
     private const int ReadBufferSize = 64 * 1024;
     private const int MaxResyncScanBytes = 256 * 1024;
 
@@ -67,8 +67,8 @@ public sealed class WebMParser : IDisposable
     private readonly List<CuePoint> _cuePoints = [];
 
     /// <summary>
-    /// Очередь для распакованных фреймов из Laced-блоков.
-    /// Гарантирует извлечение всех аудиокадров из одного SimpleBlock без потери данных.
+    /// Queue for unpacked frames from Laced blocks.
+    /// Guarantees extraction of all audio frames from a single SimpleBlock without data loss.
     /// </summary>
     private readonly Queue<AudioBlock> _lacedFrames = new();
     private readonly int[] _laceFrameSizes = new int[256];
@@ -82,30 +82,30 @@ public sealed class WebMParser : IDisposable
     private bool _headersParsed;
     private bool _requiresResync;
 
-    /// <summary>Байтовая позиция начала содержимого последнего распознанного Cluster.</summary>
+    /// <summary>Byte position of the start of content in the last recognized Cluster.</summary>
     public long LastClusterBytePosition { get; private set; }
 
-    /// <summary>Флаг успешного восстановления синхронизации (используется для диагностики усечённых файлов).</summary>
+    /// <summary>Flag indicating successful resynchronization (used for diagnosing truncated files).</summary>
     public bool ResyncOccurred { get; private set; }
 
-    /// <summary>Длительность медиа в миллисекундах.</summary>
+    /// <summary>Media duration in milliseconds.</summary>
     public long DurationMs => _duration * _timecodeScale / 1_000_000;
 
-    /// <summary>Коллекция точек быстрого поиска.</summary>
+    /// <summary>Collection of seek points.</summary>
     public IReadOnlyList<CuePoint> CuePoints => _cuePoints;
 
-    /// <summary>Конфигурация декодера (CodecPrivate).</summary>
+    /// <summary>Decoder configuration (CodecPrivate).</summary>
     public byte[]? CodecPrivate { get; private set; }
 
-    /// <summary>Частота дискретизации аудио.</summary>
+    /// <summary>Audio sampling rate.</summary>
     public int SampleRate { get; private set; }
 
-    /// <summary>Количество каналов.</summary>
+    /// <summary>Number of channels.</summary>
     public int Channels { get; private set; } = 2;
 
     /// <summary>
-    /// Переиспользуемая обёртка <see cref="IMemoryOwner{T}"/> поверх <see cref="ArrayPool{T}.Shared"/>.
-    /// Устраняет 24-байтную аллокацию стандартного <c>ArrayMemoryPoolBuffer</c> на каждый аудио-фрейм.
+    /// Reusable <see cref="IMemoryOwner{T}"/> wrapper over <see cref="ArrayPool{T}.Shared"/>.
+    /// Eliminates the 24-byte allocation of the standard <c>ArrayMemoryPoolBuffer</c> per audio frame.
     /// </summary>
     private sealed class PooledFrameOwner(Stack<PooledFrameOwner> pool) : IMemoryOwner<byte>
     {
@@ -139,10 +139,10 @@ public sealed class WebMParser : IDisposable
     }
 
 
-    /// <summary>Представляет точку быстрого перехода (Cue).</summary>
+    /// <summary>Represents a seek point (Cue).</summary>
     public readonly record struct CuePoint(long TimeMs, long ClusterOffset);
 
-    /// <summary>Представляет извлечённый аудио-блок.</summary>
+    /// <summary>Represents an extracted audio block.</summary>
     public readonly record struct AudioBlock(
         IMemoryOwner<byte> Owner,
         int Length,
@@ -151,21 +151,21 @@ public sealed class WebMParser : IDisposable
     );
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="WebMParser"/>.
+    /// Initializes a new instance of the <see cref="WebMParser"/> class.
     /// </summary>
-    /// <param name="stream">Входной аудио-поток.</param>
-    /// <param name="bufferSize">Размер промежуточного буфера чтения.</param>
+    /// <param name="stream">Input audio stream.</param>
+    /// <param name="bufferSize">Intermediate read buffer size.</param>
     public WebMParser(Stream stream, int bufferSize = ReadBufferSize)
     {
         _stream = stream;
         _readBuffer = new byte[bufferSize];
     }
 
-    #region Буферизованное Чтение (Zero-Alloc)
+    #region Buffered Reading (Zero-Alloc)
 
     /// <summary>
-    /// Проверяет наличие <paramref name="needed"/> байт в буфере синхронно.
-    /// Если данных недостаточно — переходит на асинхронное чтение крупным блоком.
+    /// Checks for the availability of <paramref name="needed"/> bytes in the buffer synchronously.
+    /// If data is insufficient, falls back to asynchronous bulk reading.
     /// </summary>
     private ValueTask<bool> EnsureBufferedAsync(int needed, CancellationToken ct)
     {
@@ -212,9 +212,9 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Пытается синхронно пополнить внутренний буфер, если входной поток хранит данные в памяти
-    /// (<see cref="MemoryStream"/>, <see cref="FileStream"/> или <c>AsyncCachingReadStream</c> при RAM-хите).
-    /// Исключает аллокацию async state machine при перезагрузке буфера.
+    /// Tries to synchronously refill the internal buffer if the input stream backs data in memory
+    /// (<see cref="MemoryStream"/>, <see cref="FileStream"/>, or <c>AsyncCachingReadStream</c> on RAM hit).
+    /// Eliminates async state machine allocation during buffer reloading.
     /// </summary>
     private bool TryFillBufferSync()
     {
@@ -265,7 +265,7 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Читает точное количество байт. Если данные уже в буфере — копирует синхронно без аллокации state machine.
+    /// Reads an exact number of bytes. If data is already in the buffer, copies synchronously without state machine allocation.
     /// </summary>
     private ValueTask ReadExactAsync(Memory<byte> buffer, CancellationToken ct)
     {
@@ -364,10 +364,10 @@ public sealed class WebMParser : IDisposable
 
     #endregion
 
-    #region Парсинг Заголовков
+    #region Header Parsing
 
     /// <summary>
-    /// Парсит заголовки контейнера до начала первого Cluster.
+    /// Parses container headers up to the start of the first Cluster.
     /// </summary>
     public async ValueTask<bool> ParseHeadersAsync(CancellationToken ct = default)
     {
@@ -397,7 +397,7 @@ public sealed class WebMParser : IDisposable
                         break;
 
                     case CLUSTER_ID:
-                        // Нашли аудиоданные. Откатываемся, чтобы ReadNextBlockAsync сам вошел в кластер.
+                        // Audio data found. Rolling back so ReadNextBlockAsync enters the cluster itself.
                         if (_stream.CanSeek)
                         {
                             _stream.Position = elementStart;
@@ -604,10 +604,10 @@ public sealed class WebMParser : IDisposable
 
     #endregion
 
-    #region Чтение Блоков (Streaming Flat-Loop)
+    #region Block Reading (Streaming Flat-Loop)
 
     /// <summary>
-    /// Сбрасывает состояние парсера и подготавливает его к поиску нового синхромаркера.
+    /// Resets parser state and prepares it to scan for a new sync marker.
     /// </summary>
     public void RequireResync()
     {
@@ -620,8 +620,8 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Читает следующий аудиоблок. Использует синхронный fast-path при наличии данных во внутреннем буфере,
-    /// полностью исключая аллокации async state machine в горячем цикле декодирования.
+    /// Reads the next audio block. Uses a synchronous fast-path when data is available in the internal buffer,
+    /// completely eliminating async state machine allocations in the hot decoding loop.
     /// </summary>
     public ValueTask<AudioBlock?> ReadNextBlockAsync(CancellationToken ct = default)
     {
@@ -641,8 +641,8 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Синхронный быстрый путь парсинга элементов Cluster/SimpleBlock из уже заполненного <see cref="_readBuffer"/>.
-    /// Не делает ни одной аллокации в куче (даже в Debug-сборке).
+    /// Synchronous fast-path for parsing Cluster/SimpleBlock elements from an already filled <see cref="_readBuffer"/>.
+    /// Performs zero heap allocations (even in Debug builds).
     /// </summary>
     private bool TryReadNextBlockFromBufferSync(CancellationToken ct, out AudioBlock? result)
     {
@@ -751,8 +751,8 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Пытается синхронно прочитать EBML заголовок элемента из буфера без асинхронных вызовов и проверок границ.
-    /// Возвращает: <c>1</c> — успех, <c>0</c> — мало данных в буфере, <c>-1</c> — некорректный ID VINT, <c>-2</c> — некорректный Size VINT.
+    /// Tries to synchronously read the EBML element header from the buffer without async calls or bounds checks.
+    /// Returns: <c>1</c> — success, <c>0</c> — insufficient data in buffer, <c>-1</c> — invalid ID VINT, <c>-2</c> — invalid Size VINT.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int TryReadElementHeaderSync(out uint id, out long size, out int invalidVIntLen)
@@ -821,7 +821,7 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Синхронно разбирает содержимое SimpleBlock/Block, когда весь блок гарантированно находится в <see cref="_readBuffer"/>.
+    /// Synchronously parses the contents of SimpleBlock/Block when the entire block is guaranteed to reside in <see cref="_readBuffer"/>.
     /// </summary>
     private void ParseBlockPayloadSync(int payloadSize, bool isSimpleBlock)
     {
@@ -878,7 +878,7 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Синхронно распаковывает Laced-фреймы (Xiph, EBML, Fixed) из <see cref="_readBuffer"/> без аллокаций массивов.
+    /// Synchronously unpacks Laced frames (Xiph, EBML, Fixed) from <see cref="_readBuffer"/> without array allocations.
     /// </summary>
     private void ParseLacingSync(int blockEndBufPos, int lacing, long timestampMs, bool isKeyFrame)
     {
@@ -1035,51 +1035,6 @@ public sealed class WebMParser : IDisposable
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long ReadVIntFromBufferSync()
-    {
-        int pos = _bufPos;
-        int bufLen = _bufLen;
-        if ((uint)pos >= (uint)bufLen)
-            ThrowInvalidVIntLength(0);
-
-        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
-        byte first = Unsafe.Add(ref bufRef, pos++);
-        int len = GetVIntLength(first);
-        if ((uint)(len - 1) > 7u || pos + len - 1 > bufLen)
-            ThrowInvalidVIntLength(len);
-
-        long val = first & (0xFF >> len);
-        for (int i = 1; i < len; i++)
-            val = (val << 8) | Unsafe.Add(ref bufRef, pos++);
-
-        _bufPos = pos;
-        return val;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long ReadSignedVIntFromBufferSync()
-    {
-        int pos = _bufPos;
-        int bufLen = _bufLen;
-        if ((uint)pos >= (uint)bufLen)
-            ThrowInvalidSignedVIntLength(0);
-
-        ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
-        byte first = Unsafe.Add(ref bufRef, pos++);
-        int len = GetVIntLength(first);
-        if ((uint)(len - 1) > 7u || pos + len - 1 > bufLen)
-            ThrowInvalidSignedVIntLength(len);
-
-        long val = len == 1 ? (first & 0x7F) : (first & (0xFF >> len));
-        for (int i = 1; i < len; i++)
-            val = (val << 8) | Unsafe.Add(ref bufRef, pos++);
-
-        _bufPos = pos;
-        long shift = (1L << ((7 * len) - 1)) - 1;
-        return val - shift;
-    }
-
     private async ValueTask<AudioBlock?> ReadNextBlockSlowAsync(CancellationToken ct)
     {
         if (_requiresResync)
@@ -1133,7 +1088,7 @@ public sealed class WebMParser : IDisposable
                         continue;
                 }
             }
-            // null только при отмене токена вызывающего; отмена эпохи чтения пробрасывается (иначе ложный EOF)
+            // null only on caller token cancellation; read epoch cancellation is rethrown (otherwise false EOF)
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return null;
@@ -1296,7 +1251,7 @@ public sealed class WebMParser : IDisposable
 
     #endregion
 
-    #region Вспомогательные функции EBML VINT (Safe Bitwise)
+    #region EBML VINT Helpers (Safe Bitwise)
 
     private async ValueTask<(uint Id, long Size)> ReadElementHeaderAsync(CancellationToken ct)
     {
@@ -1463,11 +1418,6 @@ public sealed class WebMParser : IDisposable
 
     [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowInvalidVIntLength(int len) =>
-        throw new InvalidDataException($"Invalid EBML VINT length: {len}");
-
-    [DoesNotReturn]
-    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowInvalidSignedVIntLength(int len) =>
         throw new InvalidDataException($"Invalid EBML Signed VINT length: {len}");
 
@@ -1488,7 +1438,7 @@ public sealed class WebMParser : IDisposable
 
     #endregion
 
-    #region Инструменты и Сброс
+    #region Resync & Reset Utilities
 
     private async ValueTask<bool> TryResyncToNextClusterAsync(CancellationToken ct)
     {
@@ -1525,7 +1475,7 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Находит позицию перехода для указанного времени в миллисекундах.
+    /// Finds the seek position for the specified time in milliseconds.
     /// </summary>
     public long? FindSeekPosition(long targetMs)
     {
@@ -1541,7 +1491,7 @@ public sealed class WebMParser : IDisposable
     }
 
     /// <summary>
-    /// Сбрасывает состояние буферов парсера.
+    /// Resets parser buffer state.
     /// </summary>
     public void Reset()
     {

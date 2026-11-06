@@ -3,7 +3,7 @@
 
     <!-- 
          GLOBAL TOOLTIP THEME
-         Использует динамические ресурсы темы
+         Uses dynamic theme resources
     -->
 
     <Style Selector="ToolTip">

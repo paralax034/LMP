@@ -4,14 +4,14 @@ using System.Text.Json;
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Методы расширения для низкоаллокационного разбора <see cref="JsonElement"/>.
+/// Extension methods for low-allocation parsing of <see cref="JsonElement"/>.
 /// </summary>
 internal static class JsonExtensions
 {
     extension(JsonElement element)
     {
         /// <summary>
-        /// Извлекает VisitorData из структуры <c>responseContext</c>.
+        /// Extracts VisitorData from the <c>responseContext</c> structure.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public string? GetVisitorData() =>
@@ -20,7 +20,7 @@ internal static class JsonExtensions
                    ?.GetStringOrNull();
 
         /// <summary>
-        /// Возвращает свойство по строковому имени или <see langword="null"/>, если оно отсутствует или равно null.
+        /// Returns a property by string name, or <see langword="null"/> if it is missing or null.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public JsonElement? GetPropertyOrNull(string propertyName)
@@ -38,7 +38,7 @@ internal static class JsonExtensions
         }
 
         /// <summary>
-        /// Возвращает свойство по UTF-8 имени без аллокаций или <see langword="null"/>.
+        /// Returns a property by UTF-8 name without allocations, or <see langword="null"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public JsonElement? GetPropertyOrNull(ReadOnlySpan<byte> utf8PropertyName)
@@ -95,7 +95,7 @@ internal static class JsonExtensions
             element.EnumerateArrayOrNull() ?? default;
 
         /// <summary>
-        /// Возвращает элемент массива по индексу за O(1) или <see langword="null"/>.
+        /// Returns an array element by index in O(1), or <see langword="null"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public JsonElement? GetArrayElementOrNull(int index)
@@ -111,7 +111,7 @@ internal static class JsonExtensions
         }
 
         /// <summary>
-        /// Возвращает первый элемент массива или <see langword="null"/>, если массив пуст.
+        /// Returns the first element of the array, or <see langword="null"/> if the array is empty.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public JsonElement? GetFirstArrayElementOrNull()
@@ -123,7 +123,7 @@ internal static class JsonExtensions
         }
 
         /// <summary>
-        /// Рекурсивно собирает все вложенные свойства с именем <paramref name="propertyName"/> в список <paramref name="results"/>.
+        /// Recursively collects all nested properties named <paramref name="propertyName"/> into the <paramref name="results"/> list.
         /// </summary>
         public void EnumerateDescendantProperties(string propertyName, List<JsonElement> results)
         {
@@ -144,7 +144,7 @@ internal static class JsonExtensions
         }
 
         /// <summary>
-        /// Ищет первое вхождение свойства <paramref name="propertyName"/> в дереве с ранним выходом.
+        /// Searches for the first occurrence of property <paramref name="propertyName"/> in the tree with early exit.
         /// </summary>
         public JsonElement? FindFirstDescendantProperty(string propertyName)
         {
@@ -173,7 +173,7 @@ internal static class JsonExtensions
         }
 
         /// <summary>
-        /// Ищет первое вхождение UTF-8 свойства <paramref name="utf8PropertyName"/> в дереве с ранним выходом.
+        /// Searches for the first occurrence of UTF-8 property <paramref name="utf8PropertyName"/> in the tree with early exit.
         /// </summary>
         public JsonElement? FindFirstDescendantProperty(ReadOnlySpan<byte> utf8PropertyName)
         {

@@ -13,8 +13,8 @@ using LMP.UI.Features.Shared;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Высокопроизводительный виртуализированный элемент управления списком музыкальных треков.
-/// Координирует ввод пользователя, Drag-and-Drop, плавный скроллинг и единый контракт выбора.
+/// High-performance virtualized control for a list of music tracks.
+/// Coordinates user input, Drag-and-Drop, smooth scrolling, and a unified selection contract.
 /// </summary>
 public partial class TrackListControl : UserControl
 {
@@ -26,12 +26,12 @@ public partial class TrackListControl : UserControl
         DataFormat.CreateInProcessFormat<string>(DragFormatTrackIndex);
 
     /// <summary>
-    /// Фиксированная высота строки трека с учетом внешних отступов (60px + 2px).
+    /// Fixed track row height including margins (60px + 2px).
     /// </summary>
     private const double ItemHeight = 62.0;
 
     /// <summary>
-    /// Порог смещения курсора в пикселях для активации операции перетаскивания.
+    /// Cursor displacement threshold in pixels to activate a drag operation.
     /// </summary>
     private const double DragThreshold = 6.0;
 
@@ -75,7 +75,7 @@ public partial class TrackListControl : UserControl
         AvaloniaProperty.Register<TrackListControl, bool>(nameof(EnableSnapScroll), true);
 
     /// <summary>
-    /// Включает выравнивание позиции скролла по сетке высоты трека для устранения субпиксельного размытия.
+    /// Enables scroll position alignment to the track height grid to eliminate subpixel blurring.
     /// </summary>
     public bool EnableSnapScroll
     {
@@ -87,7 +87,7 @@ public partial class TrackListControl : UserControl
         AvaloniaProperty.Register<TrackListControl, IEnumerable?>(nameof(Items));
 
     /// <summary>
-    /// Источник данных элементов списка, реализующий <see cref="IVirtualTrackList"/>.
+    /// Item data source implementing <see cref="IVirtualTrackList"/>.
     /// </summary>
     public IEnumerable? Items
     {
@@ -180,7 +180,7 @@ public partial class TrackListControl : UserControl
         AvaloniaProperty.Register<TrackListControl, string?>(nameof(FilterText));
 
     /// <summary>
-    /// Текст поискового фильтра. При изменении сбрасывает вертикальный скролл в начало.
+    /// Search filter text. Resets vertical scroll to top on change.
     /// </summary>
     public string? FilterText
     {

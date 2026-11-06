@@ -14,17 +14,17 @@ namespace LMP.Core.Audio.Cache;
 public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 {
     /// <summary>
-    /// Текущая версия схемы metadata кэша.
+    /// Current cache metadata schema version.
     /// </summary>
     private const int CurrentSchemaVersion = 4;
 
     /// <summary>
-    /// Имя бинарного файла индекса кэша.
+    /// Binary cache index file name.
     /// </summary>
     private const string CacheMetadataBinFileName = "cache_index.bin";
 
     /// <summary>
-    /// Известные стандартные комбинации форматов и битрейтов YouTube для восстановления файлов-сирот.
+    /// Known standard YouTube format and bitrate combinations for orphan file recovery.
     /// </summary>
     private static readonly (AudioFormat Format, int Bitrate, AudioCodec Codec)[] KnownFormatProfiles =
      [
@@ -36,15 +36,15 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
      ];
 
     /// <summary>
-    /// Обёртка индекса кэша с версионированием схемы.
+    /// Cache index wrapper with schema versioning.
     /// </summary>
     [MemoryPackable]
     public sealed partial class AudioCacheIndexEnvelope
     {
-        /// <summary>Версия схемы metadata.</summary>
+        /// <summary>Metadata schema version.</summary>
         public int SchemaVersion { get; set; }
 
-        /// <summary>Записи кэша.</summary>
+        /// <summary>Cache entries.</summary>
         public List<AudioCacheEntry> Entries { get; set; } = [];
     }
 
@@ -82,9 +82,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     public AudioCacheEntry? FindBestCacheByTrackId(string trackId) => FindBestCache(trackId);
 
     /// <summary>
-    /// Динамически обновляет лимит дискового аудиокэша в мегабайтах и инициирует проверку квоты.
+    /// Dynamically updates the disk audio cache limit in megabytes and triggers a quota check.
     /// </summary>
-    /// <param name="limitMb">Новый лимит в мегабайтах.</param>
+    /// <param name="limitMb">New limit in megabytes.</param>
     public void UpdateMaxCacheSizeMb(int limitMb)
     {
         if (limitMb <= 0) return;
@@ -93,9 +93,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Гидрирует статус кэширования для переданного списка треков.
+    /// Hydrates the caching status for the specified list of tracks.
     /// </summary>
-    /// <param name="tracks">Список треков для проверки кэша.</param>
+    /// <param name="tracks">List of tracks for cache validation.</param>
     public void HydrateCacheStatus(IEnumerable<TrackInfo> tracks)
     {
         var trackMap = new Dictionary<string, List<TrackInfo>>(StringComparer.Ordinal);
@@ -119,7 +119,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
         if (trackMap.Count == 0) return;
 
-        // Self-Healing: Проверяем наличие файлов-сирот с верификацией размера
+        // Self-Healing: Check for orphan files with size verification
         bool orphansRecovered = RecoverOrphansForTracks(trackMap.Keys, durationMap);
 
         foreach (var (trackId, tracksList) in trackMap)
@@ -151,12 +151,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Сканирует диск на наличие файлов-сирот для переданных trackId и восстанавливает их в индекс,
-    /// проверяя размер на соответствие битрейту и длительности трека.
+    /// Scans the disk for orphan files matching the provided trackIds and restores them into the index,
+    /// validating their size against bitrate and track duration.
     /// </summary>
-    /// <param name="trackIds">Список идентификаторов треков.</param>
-    /// <param name="trackDurations">Опциональный словарь длительностей треков для sanity check.</param>
-    /// <returns><c>true</c>, если была восстановлена хотя бы одна валидная запись.</returns>
+    /// <param name="trackIds">List of track identifiers.</param>
+    /// <param name="trackDurations">Optional dictionary of track durations for sanity check.</param>
+    /// <returns><c>true</c> if at least one valid entry was restored.</returns>
     public bool RecoverOrphansForTracks(
          IEnumerable<string> trackIds,
          IReadOnlyDictionary<string, TimeSpan>? trackDurations = null)
@@ -199,8 +199,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             {
                 string cacheKey = AudioSourceFactory.BuildCacheKey(trackId, format, bitrate);
 
-                // КРИТИЧНО: если запись УЖЕ известна в индексе (даже как IsComplete == false, т.е. partial-кэш с дырами от Seek),
-                // это НЕ файл-сирота! Никогда не повышаем partial-запись до IsComplete по fi.Length (в NTFS fi.Length равен максимальному смещению записи!).
+                // CRITICAL: If the entry is ALREADY known in the index (even with IsComplete == false, i.e., partial cache with holes from Seek),
+                // it is NOT an orphan file! Never promote a partial entry to IsComplete based on fi.Length (in NTFS fi.Length equals the maximum write offset!).
                 if (_entries.ContainsKey(cacheKey))
                     continue;
 
@@ -221,7 +221,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
                     if (duration > TimeSpan.FromSeconds(5))
                     {
-                        // 65% от номинала с учетом VBR кодирования
+                        // 65% of nominal value accounting for VBR encoding
                         minExpectedBytes = (long)(duration.TotalSeconds * bitrate * 1000.0 / 8.0 * 0.65);
                     }
                     else
@@ -229,8 +229,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                         minExpectedBytes = FallbackCompleteMinBytes;
                     }
 
-                    // Если файл меньше порога полноценного трека или содержит нескачанные нулевые дыры посередине —
-                    // удаляем такой бесхозный фрагмент без индексной карты диапазонов.
+                    // If the file is smaller than a full track threshold or contains undownloaded zero-byte holes in the middle —
+                    // delete such an unowned fragment that lacks an index range map.
                     if (fileLength < minExpectedBytes || !VerifyOrphanFileNoZeroHoles(filePath, fileLength))
                     {
                         filesOnDisk.Remove(filePath);
@@ -283,8 +283,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Проверяет, что файл-сирота без индексной записи не содержит нескачанных нулевых дыр (от random-access Seek записи)
-    /// в начале, на 25%, 50%, 75% и в конце файла.
+    /// Verifies that an orphan file without an index entry contains no undownloaded zero-byte holes (from random-access Seek writes)
+    /// at the start, 25%, 50%, 75%, and end of the file.
     /// </summary>
     private static bool VerifyOrphanFileNoZeroHoles(string filePath, long fileLength)
     {
@@ -318,19 +318,19 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         && EnsureCacheFileIntegrity(entry);
 
     /// <summary>
-    /// Возвращает лучший локальный кэш для быстрого старта partially cached трека.
+    /// Returns the best local cache for fast startup of a partially cached track.
     /// </summary>
     public AudioCacheEntry? FindBestStartupCache(string trackId, int minContiguousBytes) =>
         TryWithIdVariants(trackId, id => FindBestStartupCacheCore(id, minContiguousBytes));
 
     /// <summary>
-    /// Возвращает лучший полностью закэшированный вариант трека.
+    /// Returns the best fully cached version of a track.
     /// </summary>
     public AudioCacheEntry? FindBestCache(string trackId) =>
         TryWithIdVariants(trackId, FindBestCacheCore);
 
     /// <summary>
-    /// Обновляет integrated loudness во ВСЕХ cache entries данного трека.
+    /// Updates integrated loudness across ALL cache entries for the given track.
     /// </summary>
     public bool TryUpdateIntegratedLufs(string trackId, float integratedLufs, LoudnessSource source)
     {
@@ -374,7 +374,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Собирает все cacheKey для трека, включая варианты ID с/без доменного префикса.
+    /// Collects all cacheKeys for a track, including ID variants with and without domain prefixes.
     /// </summary>
     private List<string> CollectAllCacheKeysForTrack(string trackId)
     {
@@ -390,7 +390,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Добавляет cacheKey из trackIndex в список.
+    /// Adds cacheKey from trackIndex to the list.
     /// </summary>
     private void AppendKeysFromIndex(string trackId, List<string> target)
     {
@@ -462,18 +462,18 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Применяет поиск <paramref name="find"/> к прямому trackId, raw ID и yt_-prefixed ID
-    /// и возвращает первый не-null результат.
+    /// Applies the search function <paramref name="find"/> to direct trackId, raw ID, and yt_-prefixed ID,
+    /// returning the first non-null result.
     /// </summary>
     /// <remarks>
-    /// Устраняет дублирование паттерна «direct → raw → yt_ prefix» из
-    /// <see cref="FindBestCache"/>, <see cref="FindBestStartupCache"/>
-    /// и <see cref="CollectAllCacheKeysForTrack"/>.
+    /// Eliminates duplication of the "direct → raw → yt_ prefix" pattern from
+    /// <see cref="FindBestCache"/>, <see cref="FindBestStartupCache"/>,
+    /// and <see cref="CollectAllCacheKeysForTrack"/>.
     /// </remarks>
-    /// <typeparam name="T">Тип результата.</typeparam>
-    /// <param name="trackId">Исходный идентификатор трека.</param>
-    /// <param name="find">Функция поиска по конкретному ID.</param>
-    /// <returns>Первый не-null результат или <c>null</c>.</returns>
+    /// <typeparam name="T">Result type.</typeparam>
+    /// <param name="trackId">Source track identifier.</param>
+    /// <param name="find">Search function for a specific ID.</param>
+    /// <returns>First non-null result or <c>null</c>.</returns>
     private static T? TryWithIdVariants<T>(string trackId, Func<string, T?> find) where T : class
     {
         var result = find(trackId);
@@ -493,7 +493,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Определяет, содержит ли идентификатор доменный префикс трека.
+    /// Determines whether the identifier contains a domain prefix.
     /// </summary>
     private static bool IsPrefixedTrackId(string trackId)
     {
@@ -505,7 +505,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает raw YouTube ID без доменного префикса, если он присутствует.
+    /// Returns the raw YouTube ID without the domain prefix, if present.
     /// </summary>
     private static string? TryGetRawTrackId(string trackId)
     {
@@ -542,7 +542,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Создаёт или обновляет metadata-запись range-based кэша.
+    /// Creates or updates a range-based cache metadata entry.
     /// </summary>
     public AudioCacheEntry CreateOrUpdate(
         string cacheKey,
@@ -624,7 +624,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Записывает произвольный диапазон байт в файл кэша.
+    /// Writes an arbitrary byte range to a cache file.
     /// </summary>
     public async ValueTask WriteRangeAsync(
         string cacheKey,
@@ -687,16 +687,16 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Читает диапазон байт из файла кэша напрямую в буфер вызывающего кода,
-    /// без промежуточной аренды и повторного копирования.
+    /// Reads a byte range from a cache file directly into the caller's buffer,
+    /// bypassing intermediate renting and re-copying.
     /// </summary>
-    /// <param name="cacheKey">Ключ записи кэша.</param>
-    /// <param name="offset">Абсолютное смещение начала диапазона.</param>
-    /// <param name="destination">Буфер назначения; его длина задаёт объём чтения.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="cacheKey">Cache entry key.</param>
+    /// <param name="offset">Absolute start offset of the range.</param>
+    /// <param name="destination">Destination buffer; its length defines the read length.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// Число прочитанных байт (длина буфера, усечённая по концу файла);
-    /// <c>0</c>, если диапазон не скачан, файл недоступен или прочитан не полностью.
+    /// Number of bytes read (buffer length truncated at end-of-file);
+    /// <c>0</c> if the range is not cached, the file is unavailable, or read incomplete.
     /// </returns>
     public async ValueTask<int> ReadRangeIntoAsync(
         string cacheKey,
@@ -759,83 +759,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
     }
 
-    /// <summary>
-    /// Читает произвольный диапазон байт из файла кэша.
-    /// </summary>
-    public async ValueTask<(IMemoryOwner<byte> Owner, int Length)?> ReadRangeAsync(
-        string cacheKey,
-        long offset,
-        int length,
-        CancellationToken ct = default)
-    {
-        if (!_entries.TryGetValue(cacheKey, out var entry)) return null;
-        if (length <= 0) return null;
-        if (!entry.IsRangeDownloaded(offset, length)) return null;
-
-        long remaining = entry.TotalSize - offset;
-        if (offset < 0 || remaining <= 0) return null;
-
-        int expectedLength = length;
-        if (expectedLength > remaining)
-            expectedLength = (int)remaining;
-        if (expectedLength <= 0) return null;
-
-        var fileHandle = TryGetFileHandle(cacheKey);
-        if (fileHandle == null) return null;
-
-        fileHandle.BeginIo();
-        var memoryOwner = MemoryPool<byte>.Shared.Rent(expectedLength);
-
-        try
-        {
-            var handle = fileHandle.GetOrOpen(FileMode.Open);
-            int totalRead = 0;
-            var buffer = memoryOwner.Memory[..expectedLength];
-
-            while (totalRead < expectedLength)
-            {
-                int read = await RandomAccess.ReadAsync(
-                    handle, buffer[totalRead..expectedLength],
-                    offset + totalRead, ct).ConfigureAwait(false);
-                if (read == 0) break;
-                totalRead += read;
-            }
-
-            if (totalRead != expectedLength)
-            {
-                memoryOwner.Dispose();
-                entry.InvalidateRange(offset, expectedLength);
-                MarkDirty();
-                Log.Warn($"[AudioCache] Short read range of {cacheKey}: " +
-                         $"offset={offset}, expected={expectedLength}, got={totalRead}. Range invalidated.");
-                return null;
-            }
-
-            entry.LastAccessedAt = DateTime.UtcNow;
-            return (memoryOwner, expectedLength);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            memoryOwner.Dispose();
-            throw;
-        }
-        catch
-        {
-            memoryOwner.Dispose();
-            return null;
-        }
-        finally
-        {
-            fileHandle.EndIo();
-        }
-    }
-
     #endregion
 
     #region Lease API
 
     /// <summary>
-    /// Регистрирует lifetime lease на cache-файл.
+    /// Registers a lifetime lease on a cache file.
     /// </summary>
     public void AcquireLease(string cacheKey)
     {
@@ -845,7 +774,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Освобождает lifetime lease на cache-файл.
+    /// Releases a lifetime lease on a cache file.
     /// </summary>
     public void ReleaseLease(string cacheKey)
     {
@@ -858,7 +787,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     #region Statistics
 
     /// <summary>
-    /// Перечисляет все complete и физически валидные записи кэша.
+    /// Enumerates all complete and physically valid cache entries.
     /// </summary>
     internal IEnumerable<AudioCacheEntry> GetAllCompleteEntries()
     {
@@ -870,7 +799,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает компактную статистику кэша.
+    /// Returns compact cache statistics.
     /// </summary>
     public (int FileCount, int SizeMb) GetStatsCompact()
     {
@@ -880,7 +809,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Собирает полную статистику использования дискового пространства кэша.
+    /// Gathers complete cache disk space usage statistics.
     /// </summary>
     public CacheStats GetStats()
     {
@@ -1069,12 +998,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     #region Clear & Maintenance
 
     /// <summary>
-    /// Выполняет вытеснение файлов кэша по алгоритму LRU до достижения допустимого лимита диска.
-    /// Не удаляет файлы с активными Lease или in-flight операциями ввода-вывода.
+    /// Performs LRU cache file eviction until the allowed disk limit is satisfied.
+    /// Does not delete files with active Leases or in-flight I/O operations.
     /// </summary>
-    /// <param name="targetLimitBytes">Опциональный целевой размер кэша. Если не указан, берется <see cref="_maxCacheSize"/>.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Количество вытесненных записей кэша.</returns>
+    /// <param name="targetLimitBytes">Optional target cache size. Defaults to <see cref="_maxCacheSize"/> if omitted.</param>
+    /// <param name="ct">Operation cancellation token.</param>
+    /// <returns>Number of evicted cache entries.</returns>
     public async Task<int> EnforceLimitsAsync(long? targetLimitBytes = null, CancellationToken ct = default)
     {
         if (_disposed) return 0;
@@ -1101,9 +1030,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             if (currentTotalSize <= limit)
                 return 0;
 
-            // Приоритет вытеснения:
-            // 1. Неполные (IsComplete == false) записи, упорядоченные по времени последнего доступа (старые первыми).
-            // 2. Полные записи, упорядоченные по времени последнего доступа (LRU).
+            // Eviction priority:
+            // 1. Incomplete (IsComplete == false) entries, ordered by last access time (oldest first).
+            // 2. Complete entries, ordered by last access time (LRU).
             var candidates = entriesSnapshot
                 .OrderBy(e => e.IsComplete ? 1 : 0)
                 .ThenBy(e => e.LastAccessedAt)
@@ -1210,10 +1139,10 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Удаляет все файлы в директории с логированием ошибок.
+    /// Deletes all files in the directory with error logging.
     /// </summary>
-    /// <param name="dir">Директория.</param>
-    /// <param name="logTag">Тег для лога ошибок.</param>
+    /// <param name="dir">Directory.</param>
+    /// <param name="logTag">Tag for the error log.</param>
     private static void DeleteFilesInDirectory(DirectoryInfo dir, string logTag)
     {
         if (!dir.Exists) return;
@@ -1237,10 +1166,10 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Проверяет физическую целостность и правдоподобность complete-кэша.
+    /// Validates the physical integrity and plausibility of a complete cache.
     /// </summary>
-    /// <param name="entry">Запись кэша для проверки.</param>
-    /// <returns><c>true</c> если файл существует и его размер правдоподобен.</returns>
+    /// <param name="entry">Cache entry to validate.</param>
+    /// <returns><c>true</c> if the file exists and its size is plausible.</returns>
     private bool EnsureCacheFileIntegrity(AudioCacheEntry entry)
     {
         if (!entry.IsComplete) return false;
@@ -1267,7 +1196,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 return false;
             }
 
-            // Sanity check: размер файла не может быть абсурдно мал относительно длительности
+            // Sanity check: file size cannot be absurdly small relative to duration
             if (entry.DurationMs > 10_000 && entry.Bitrate > 0)
             {
                 long minPlausibleBytes = (long)(entry.DurationMs / 1000.0 * entry.Bitrate * 1000.0 / 8.0 * 0.50);
@@ -1284,8 +1213,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 }
             }
 
-            // Проверяем физическое отсутствие 4KB нулевых дыр ТОЛЬКО для старых записей-сирот
-            // (у которых пуст OriginalUrl или DownloadedBytes < TotalSize), не замедляя старт для обычных треков!
+            // Verify physical absence of 4KB zero holes ONLY for old orphan entries
+            // (which have empty OriginalUrl or DownloadedBytes < TotalSize), without slowing down startup for regular tracks!
             if ((string.IsNullOrEmpty(entry.OriginalUrl) || entry.DownloadedBytes < entry.TotalSize)
                 && !VerifyOrphanFileNoZeroHoles(filePath, actualLength))
             {
@@ -1298,7 +1227,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 return false;
             }
 
-            // Файл физически валиден — self-heal range-state при необходимости
+            // File is physically valid — self-heal range-state if necessary
             if (entry.DownloadedBytes < entry.TotalSize && entry.TotalSize > 0)
             {
                 entry.MarkFullyDownloaded();
@@ -1318,7 +1247,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Инвалидирует диапазон байт в кэше.
+    /// Invalidates a byte range in the cache.
     /// </summary>
     public void InvalidateRange(string cacheKey, long offset, int length)
     {
@@ -1338,7 +1267,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Инвалидирует диапазон байт во всех закэшированных профилях указанного трека.
+    /// Invalidates a byte range in all cached profiles for the specified track.
     /// </summary>
     public void InvalidateRangeByTrackId(string trackId, long offset, int length)
     {
@@ -1372,22 +1301,22 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             _trackIndex.TryRemove(trackId, out _);
     }
 
-    /// <summary>Возвращает или создаёт <see cref="CacheFileHandle"/> для cacheKey.</summary>
+    /// <summary>Returns or creates a <see cref="CacheFileHandle"/> for cacheKey.</summary>
     private CacheFileHandle GetFileHandle(string cacheKey) =>
         _fileHandles.GetOrAdd(cacheKey, key => new CacheFileHandle(GetCachePath(key)));
 
-    /// <summary>Возвращает <see cref="CacheFileHandle"/> если существует.</summary>
+    /// <summary>Returns <see cref="CacheFileHandle"/> if it exists.</summary>
     private CacheFileHandle? TryGetFileHandle(string cacheKey) =>
         _fileHandles.TryGetValue(cacheKey, out var entry) ? entry : null;
 
-    /// <summary>Принудительно закрывает дескриптор cache-файла.</summary>
+    /// <summary>Forcibly closes the cache file handle.</summary>
     private void ForceCloseHandle(string cacheKey)
     {
         if (_fileHandles.TryGetValue(cacheKey, out var entry))
             entry.ForceClose();
     }
 
-    /// <summary>Принудительно закрывает все дескрипторы.</summary>
+    /// <summary>Forcibly closes all handles.</summary>
     private void ForceCloseAllHandles()
     {
         foreach (var entry in _fileHandles.Values)
@@ -1436,12 +1365,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Проверяет, что файл существует и его размер не меньше ожидаемого.
+    /// Checks that the file exists and its size is not less than expected.
     /// </summary>
-    /// <param name="filePath">Путь к файлу.</param>
-    /// <param name="minSize">Минимально ожидаемый размер в байтах.</param>
-    /// <param name="fileLength">Фактическая длина файла на диске; 0 если не существует.</param>
-    /// <returns><c>true</c> если файл существует и <c>Length &gt;= minSize</c>.</returns>
+    /// <param name="filePath">Path to the file.</param>
+    /// <param name="minSize">Minimum expected size in bytes.</param>
+    /// <param name="fileLength">Actual length of the file on disk; 0 if it does not exist.</param>
+    /// <returns><c>true</c> if the file exists and <c>Length &gt;= minSize</c>.</returns>
     private static bool IsFilePhysicallyComplete(string filePath, long minSize, out long fileLength)
     {
         try
@@ -1512,7 +1441,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Изолированная миграция схемы индексов со старого JSON в бинарный MemoryPack.
+    /// Isolated index schema migration from legacy JSON to binary MemoryPack.
     /// </summary>
     private void MigrateLegacyJsonIndex(string indexPath)
     {
@@ -1576,7 +1505,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                             catch (Exception ex) { Log.Warn($"[AudioCache] Bitrate bucket migration move failed: {ex.Message}"); }
                         }
 
-                        // Переиндексация: удаляем старый ключ, entry перезагрузится с новым
+                        // Reindexing: remove the old key, entry will be reloaded with the new one
                         RemoveFromTrackIndex(entry.TrackId, entry.CacheKey);
                         entry = new AudioCacheEntry
                         {
@@ -1648,7 +1577,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Атомарно сохраняет индекс кэша на диск в бинарном формате.
+    /// Atomically saves the cache index to disk in binary format.
     /// </summary>
     private async Task SaveIndexAsync()
     {
@@ -1678,7 +1607,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Синхронное атомарное сохранение индекса кэша для shutdown-path.
+    /// Synchronous atomic cache index save for the shutdown path.
     /// </summary>
     private void SaveIndexSync()
     {
@@ -1708,7 +1637,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Мигрирует запись со старой chunk-based схемы на текущую range-based.
+    /// Migrates an entry from the legacy chunk-based schema to the current range-based schema.
     /// </summary>
     private static void MigrateEntry(
         AudioCacheEntry entry,
@@ -1744,7 +1673,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Строит объект конверта индекса кэша из текущего состояния _entries.
+    /// Builds a cache index envelope object from the current state of _entries.
     /// </summary>
     private AudioCacheIndexEnvelope BuildIndexEnvelope()
     {
@@ -1873,8 +1802,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     #endregion
 
     /// <summary>
-    /// Владеющая запись файлового дескриптора cache-файла.
-    /// Обеспечивает lease-based ownership и in-flight I/O tracking.
+    /// Owning record for a cache file handle.
+    /// Provides lease-based ownership and in-flight I/O tracking.
     /// </summary>
     private sealed class CacheFileHandle : IDisposable
     {

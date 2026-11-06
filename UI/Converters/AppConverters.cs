@@ -10,13 +10,13 @@ using Avalonia;
 namespace LMP.UI.Converters;
 
 /// <summary>
-/// Конвертер bool → StreamGeometry для PathIcon в виртуализованных списках.
-/// Устраняет повторный парсинг SVG path при рециклировании контейнеров ItemsRepeater.
+/// Converts bool → StreamGeometry for PathIcon in virtualized lists.
+/// Prevents SVG path re-parsing when recycling ItemsRepeater containers.
 /// 
-/// <para>ConverterParameter формат: "TrueKey|FalseKey" 
-/// (ключи из Icons.axaml без префикса "Icon.").</para>
+/// <para>ConverterParameter format: "TrueKey|FalseKey" 
+/// (keys from Icons.axaml without the "Icon." prefix).</para>
 /// 
-/// <para>Пример: ConverterParameter='Pause|Play' → Icon.Pause / Icon.Play</para>
+/// <para>Example: ConverterParameter='Pause|Play' → Icon.Pause / Icon.Play</para>
 /// </summary>
 public sealed class BoolToGeometryConverter : IValueConverter
 {
@@ -79,8 +79,8 @@ public sealed class InverseBoolConverter : IValueConverter
 }
 
 /// <summary>
-/// Конвертер volume → ключ ресурса геометрии иконки для PathIcon.
-/// Возвращает строку вида "Icon.*" для поиска в Application.Resources.
+/// Converts volume → geometry icon resource key for PathIcon.
+/// Returns a string formatted as "Icon.*" for Application.Resources lookup.
 /// </summary>
 public sealed class VolumeToIconConverter : IValueConverter
 {
@@ -104,9 +104,9 @@ public sealed class VolumeToIconConverter : IValueConverter
 }
 
 /// <summary>
-/// Конвертирует bool в одно из двух значений по параметру "TrueValue|FalseValue".
-/// Поддерживает: IBrush (по ключу ресурса), string.
-/// MaterialIconKind-ветка удалена — используйте BoolToGeometryConverter для PathIcon.
+/// Converts bool to one of two values based on the "TrueValue|FalseValue" parameter.
+/// Supports: IBrush (by resource key), string.
+/// MaterialIconKind branch removed — use BoolToGeometryConverter for PathIcon.
 /// </summary>
 public sealed class BoolToSelectorConverter : IValueConverter
 {
@@ -125,14 +125,14 @@ public sealed class BoolToSelectorConverter : IValueConverter
 
         var chosen = b ? pair.TrueVal : pair.FalseVal;
 
-        // IBrush по ключу ресурса
+        // IBrush by resource key
         if (Application.Current?.TryFindResource(chosen, out var res) == true)
         {
             if (res is IBrush brush) return brush;
             if (res is Color color) return new SolidColorBrush(color);
         }
 
-        // Попытка парсинга как цвет
+        // Attempt to parse as color
         try { return SolidColorBrush.Parse(chosen); }
         catch { return chosen; }
     }
@@ -166,13 +166,13 @@ public sealed class BitmapAssetValueConverter : IValueConverter
     {
         if (value is string uriStr && !string.IsNullOrEmpty(uriStr))
         {
-            // 1. HTTP/HTTPS — пропускаем (обрабатывается AsyncImageLoader)
+            // 1. HTTP/HTTPS — skip (handled by AsyncImageLoader)
             if (uriStr.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 return null;
 
             try
             {
-                // 2. avares:// — ресурсы Avalonia
+                // 2. avares:// — Avalonia resources
                 if (uriStr.StartsWith("avares://"))
                 {
                     var uri = new Uri(uriStr);
@@ -184,7 +184,7 @@ public sealed class BitmapAssetValueConverter : IValueConverter
                     return null;
                 }
 
-                // 3. file:// URI — конвертируем в локальный путь
+                // 3. file:// URI — convert to local path
                 if (uriStr.StartsWith(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
                 {
                     if (Uri.TryCreate(uriStr, UriKind.Absolute, out var fileUri))
@@ -193,10 +193,10 @@ public sealed class BitmapAssetValueConverter : IValueConverter
                     }
                 }
 
-                // 4. Локальный путь к файлу
+                // 4. Local file path
                 if (Path.IsPathRooted(uriStr) && File.Exists(uriStr))
                 {
-                    // ВАЖНО: Используем FileStream с FileShare.Read чтобы не блокировать файл
+                    // IMPORTANT: Use FileStream with FileShare.Read to prevent file locking
                     using var stream = new FileStream(uriStr, FileMode.Open, FileAccess.Read, FileShare.Read);
                     return new Bitmap(stream);
                 }
@@ -276,7 +276,7 @@ public sealed class GreaterThanConverter : IValueConverter
 {
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        // Проверяет, больше ли значение (value) чем параметр (parameter)
+        // Checks whether value is greater than parameter
         if (value is double d && double.TryParse(parameter?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out double threshold))
         {
             return d > threshold;
@@ -295,8 +295,8 @@ public sealed class GreaterThanConverter : IValueConverter
 }
 
 /// <summary>
-/// Сравнивает Enum значение с параметром. Возвращает true, если совпадают.
-/// Используется для RadioButton GroupBinding.
+/// Compares an Enum value with a parameter. Returns true if they match.
+/// Used for RadioButton GroupBinding.
 /// </summary>
 public sealed class EnumToBoolConverter : IValueConverter
 {
@@ -312,14 +312,14 @@ public sealed class EnumToBoolConverter : IValueConverter
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        // OneWay binding обычно достаточно для RadioButton + Command, 
-        // но если нужно TwoWay, здесь можно возвращать Enum.Parse
+        // OneWay binding is usually sufficient for RadioButton + Command, 
+        // but if TwoWay is required, Enum.Parse can be returned here
         return value is bool b && b ? parameter : BindingOperations.DoNothing;
     }
 }
 
 /// <summary>
-/// Конвертирует bool в FontWeight (true = Bold, false = Normal)
+/// Converts bool to FontWeight (true = Bold, false = Normal)
 /// </summary>
 public sealed class BoolToFontWeightConverter : IValueConverter
 {
@@ -335,7 +335,7 @@ public sealed class BoolToFontWeightConverter : IValueConverter
 }
 
 /// <summary>
-/// Конвертирует NotificationSeverity в Color из текущей темы.
+/// Converts NotificationSeverity to Color from the current theme.
 /// Error → SystemError, Warning → SystemWarnOrange, Info → SystemInfoBlue, Success → Accent.
 /// </summary>
 public sealed class SeverityToColorConverter : IValueConverter

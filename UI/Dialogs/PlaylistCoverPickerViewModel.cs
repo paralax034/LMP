@@ -4,7 +4,7 @@ using Avalonia.Media.Imaging;
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// ViewModel выбора обложки плейлиста из треков с автоматической реактивной генерацией мозаики.
+/// ViewModel for selecting playlist cover artwork from tracks with automatic reactive mosaic generation.
 /// </summary>
 public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
 {
@@ -18,31 +18,31 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     private CancellationTokenSource? _previewCts;
     private RenderTargetBitmap? _currentPreview;
 
-    /// <summary>Все обложки треков для выбора.</summary>
+    /// <summary>All track cover artworks available for selection.</summary>
     public ObservableCollection<TrackCoverItemViewModel> TrackCovers { get; } = [];
 
-    /// <summary>Текущее превью мозаики.</summary>
+    /// <summary>Current mosaic preview.</summary>
     [ObservableProperty]
     public partial Bitmap? MosaicPreview { get; set; }
 
-    /// <summary>Флаг наличия готового превью.</summary>
+    /// <summary>Flag indicating whether a generated preview is available.</summary>
     [ObservableProperty]
     public partial bool HasPreview { get; set; }
 
-    /// <summary>Статус количества выбранных обложек.</summary>
+    /// <summary>Status text showing the count of selected artworks.</summary>
     [ObservableProperty]
     public partial string SelectionStatus { get; set; } = "";
 
     /// <summary>
-    /// Событие генерации нового снимка мозаики для моментального связывания с родительским редактором.
+    /// Event raised when a new mosaic snapshot is generated for immediate binding to the parent editor.
     /// </summary>
     public event Action<Bitmap?>? OnPreviewUpdated;
 
     /// <summary>
-    /// Инициализирует модель выбора треков для мозаики.
+    /// Initializes the track selection model for the mosaic.
     /// </summary>
-    /// <param name="tracks">Список доступных треков.</param>
-    /// <param name="networkManager">Сетевой менеджер загрузки миниатюр.</param>
+    /// <param name="tracks">List of available tracks.</param>
+    /// <param name="networkManager">Network manager for thumbnail downloading.</param>
     public PlaylistCoverPickerViewModel(IReadOnlyList<TrackInfo> tracks, NetworkManager networkManager)
     {
         _networkManager = networkManager;
@@ -63,7 +63,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Возвращает идентификаторы треков, выбранных в текущую мозаику.
+    /// Returns the track IDs selected for the current mosaic.
     /// </summary>
     public List<string> GetSelectedTrackIds()
     {
@@ -74,7 +74,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Переключает выбор элемента обложки.
+    /// Toggles the selection state of a cover artwork item.
     /// </summary>
     private void ToggleSelection(TrackCoverItemViewModel item)
     {
@@ -207,7 +207,7 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Сохраняет сгенерированную мозаику в дисковый файл и возвращает путь.
+    /// Saves the generated mosaic to a disk file and returns its path.
     /// </summary>
     public async Task<string?> PersistMosaicAsync(CancellationToken ct = default)
     {
@@ -252,28 +252,28 @@ public sealed partial class PlaylistCoverPickerViewModel : ViewModelBase
 }
 
 /// <summary>
-/// ViewModel одной обложки трека в сетке выбора.
+/// ViewModel for an individual track cover artwork item in the selection grid.
 /// </summary>
 public sealed partial class TrackCoverItemViewModel : ObservableObject
 {
-    /// <summary>ID трека (для генерации имени файла мозаики).</summary>
+    /// <summary>Track ID (used for generating mosaic filenames).</summary>
     public string TrackId { get; }
 
-    /// <summary>URL обложки трека.</summary>
+    /// <summary>Track cover artwork URL.</summary>
     public string ThumbnailUrl { get; }
 
-    /// <summary>Название трека (для tooltip).</summary>
+    /// <summary>Track title (used for tooltips).</summary>
     public string TrackTitle { get; }
 
-    /// <summary>Выбран ли трек для мозаики.</summary>
+    /// <summary>Indicates whether the track is selected for the mosaic.</summary>
     [ObservableProperty]
     public partial bool IsSelected { get; set; }
 
-    /// <summary>Порядковый номер выбора (1-4). 0 = не выбран.</summary>
+    /// <summary>1-based selection order index (1-4). 0 = not selected.</summary>
     [ObservableProperty]
     public partial int SelectionOrder { get; set; }
 
-    /// <summary>Команда переключения выбора. Устанавливается parent VM.</summary>
+    /// <summary>Selection toggle command. Set by the parent VM.</summary>
     public IRelayCommand? ToggleCommand { get; set; }
 
     public TrackCoverItemViewModel(string trackId, string thumbnailUrl, string trackTitle)

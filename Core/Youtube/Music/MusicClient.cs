@@ -57,7 +57,7 @@ public sealed class MusicClient(HttpClient http)
                         Id = string.Concat("yt_", item.Id),
                         YoutubeId = item.Id,
                         StoredName = item.Title,
-                        // Используем локализацию
+                        // Use localization
                         Author = item.Author ?? LocalizationService.Instance["Track_UnknownAuthor"],
                         ThumbnailUrl = bestThumb,
                         SyncMode = PlaylistSyncMode.TwoWaySync
@@ -84,8 +84,8 @@ public sealed class MusicClient(HttpClient http)
 
                 targetList.Add(new TrackInfo
                 {
-                    // Идентификатор передается без ручного добавления префикса "yt_",
-                    // так как свойство Id класса TrackInfo гарантирует его автоматическое добавление.
+                    // The identifier is passed without manually adding the "yt_" prefix,
+                    // since the Id property of the TrackInfo class guarantees its automatic addition.
                     Id = item.Id,
                     Title = item.Title,
                     Author = item.Author ?? item.Album ?? LocalizationService.Instance["Track_UnknownAuthor"],
@@ -113,7 +113,7 @@ public sealed class MusicClient(HttpClient http)
     #region Account
 
     /// <summary>
-    /// Получает структуру переключателя аккаунтов со списком всех каналов бренда.
+    /// Gets the account switcher structure containing a list of all brand channels.
     /// </summary>
     public async Task<JsonElement> GetAccountSwitcherAsync(
         CancellationToken cancellationToken = default) =>

@@ -25,7 +25,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP;
 
 /// <summary>
-/// Точка входа в приложение Lite Music Player.
+/// Entry point for the Lite Music Player application.
 /// </summary>
 public sealed class AppEntry
 {
@@ -35,43 +35,43 @@ public sealed class AppEntry
 #endif
 
     /// <summary>
-    /// Глобальный провайдер служб внедрения зависимостей.
+    /// Global dependency injection service provider.
     /// </summary>
     public static IServiceProvider Services { get; private set; } = null!;
 
     /// <summary>
-    /// Флаг, указывающий, была ли выполнена инкрементальная миграция схемы с версии ниже v3 на старте этого запуска.
+    /// Flag indicating whether an incremental schema migration from a version prior to v3 was performed at startup during this run.
     /// </summary>
     public static bool WasMigratedFromLegacy { get; private set; }
 
     /// <summary>
-    /// Флаг быстрого запуска (<c>--fast</c>): пропускает Splash, прогрев YouTube/PoToken/CDN и предзагрузку неактивных страниц.
-    /// Все тяжёлые сервисы инициализируются строго по требованию.
+    /// Fast startup flag (<c>--fast</c>): skips Splash, YouTube/PoToken/CDN warmup, and inactive page preloading.
+    /// All heavy services are initialized strictly on demand.
     /// </summary>
     public static bool IsFastStartup { get; private set; }
 
     /// <summary>
-    /// Аргументы командной строки текущего процесса.
+    /// Command-line arguments for the current process.
     /// </summary>
     public static string[] CommandLineArgs { get; private set; } = [];
 
 #if DEBUG
     /// <summary>
-    /// Флаг запуска непосредственно в окно <see cref="UI.Features.Debug.DebugWindow"/> (<c>--test-ui</c> / <c>--debug-ui</c>)
-    /// без инициализации главного окна плеера.
+    /// Flag to launch directly into the <see cref="UI.Features.Debug.DebugWindow"/> (<c>--test-ui</c> / <c>--debug-ui</c>)
+    /// without initializing the main player window.
     /// </summary>
     public static bool IsTestUiMode { get; private set; }
 #endif
 
     /// <summary>
-    /// Главный метод запуска приложения.
+    /// Main application entry point method.
     /// </summary>
-    /// <param name="args">Аргументы командной строки.</param>
+    /// <param name="args">Command-line arguments.</param>
     [STAThread]
     public static void Main(string[] args)
     {
-        // 1. Инициализация нативного моста SQLite для Native AOT (критично перед любым вызовом к БД).
-        // Логгер еще не инициализирован: ошибка сохраняется и пробрасывается как фатальная сразу после Log.Initialize().
+        // 1. Initialize SQLite native bridge for Native AOT (critical before any database calls).
+        // Logger is not initialized yet: the error is saved and rethrown as fatal immediately after Log.Initialize().
         Exception? sqliteInitError = null;
         try
         {
@@ -82,7 +82,7 @@ public sealed class AppEntry
             sqliteInitError = ex;
         }
 
-        // 2. Ожидание завершения родительского процесса при обновлении и безопасная очистка .old файлов
+        // 2. Wait for parent process completion during updates and safely clean up .old files
         int waitPid = 0;
         for (int i = 0; i < args.Length; i++)
         {
@@ -152,7 +152,7 @@ public sealed class AppEntry
             }
         }
 
-        // 2. Защита от параллельного запуска: удерживает мьютекс на всё время жизни процесса (в headless тестах и --test-ui не блокирует основной экземпляр)
+        // 2. Single instance protection: holds a mutex for the entire process lifetime (does not block the main instance in headless tests and --test-ui)
         bool bypassSingleInstance = isHeadlessTest
 #if DEBUG
             || IsTestUiMode
@@ -174,7 +174,7 @@ public sealed class AppEntry
         bool enableTelemetry = false;
 #endif
 
-        // Низкоаллокационный, быстрый парсинг аргументов командной строки без LINQ
+        // Low-allocation, fast command-line argument parsing without LINQ
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
@@ -222,7 +222,7 @@ public sealed class AppEntry
             Log.Initialize();
             Log.Info($"{G.AppId} starting...");
 
-            // Без нативного моста любая операция с БД невозможна: запуск прерывается через общий фатальный обработчик ниже.
+            // Without the native bridge, any database operation is impossible: startup is aborted via the common fatal handler below.
             if (sqliteInitError is not null)
             {
                 throw new InvalidOperationException(
@@ -263,14 +263,14 @@ public sealed class AppEntry
             }
 #endif
 
-            // Безопасная инициализация и автоматическая миграция БД
+            // Safe initialization and automatic database migration
             MigrateDatabaseSync(fastMode: IsFastStartup);
 
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
         {
-            // Ненулевой код возврата обязателен: иначе headless-запуск (verify, CI) считает фатальный сбой успехом.
+            // Non-zero return code is mandatory: otherwise headless execution (verify, CI) treats a fatal crash as success.
             Environment.ExitCode = 1;
             Log.Fatal($"Global crash: {ex}");
             if (!isHeadlessTest)
@@ -300,7 +300,7 @@ public sealed class AppEntry
     }
 
     /// <summary>
-    /// Настраивает конфигурацию сборщика приложения Avalonia.
+    /// Configures the Avalonia application builder configuration.
     /// </summary>
     public static AppBuilder BuildAvaloniaApp()
     {
@@ -348,9 +348,9 @@ public sealed class AppEntry
     private const int MigrationRetryDelayMs = 250;
 
     /// <summary>
-    /// Проверяет и обновляет схему базы. При повреждении (SQLITE_CORRUPT, SQLITE_NOTADB) пересоздает базу,
-    /// при блокировке (SQLITE_BUSY, SQLITE_LOCKED) повторяет попытку, а любую другую ошибку считает фатальной
-    /// и оставляет файл нетронутым.
+    /// Validates and updates the database schema. Recreates the database on corruption (SQLITE_CORRUPT, SQLITE_NOTADB),
+    /// retries on lock (SQLITE_BUSY, SQLITE_LOCKED), and treats any other error as fatal,
+    /// leaving the file untouched.
     /// </summary>
     private static void MigrateDatabaseSync(bool fastMode = false)
     {
@@ -363,7 +363,7 @@ public sealed class AppEntry
 
         if (!fastMode)
         {
-            // Страховочный бэкап базы данных перед проверкой и обновлением схемы
+            // Safety backup of the database before validating and updating the schema
             try
             {
                 var bakPath = dbPath + ".bak";
@@ -403,7 +403,7 @@ public sealed class AppEntry
     }
 
     /// <summary>
-    /// Открывает существующую базу и при устаревшей версии выполняет транзакционную миграцию схемы.
+    /// Opens an existing database and performs a transactional schema migration if the version is outdated.
     /// </summary>
     private static void MigrateExistingDatabase(bool fastMode)
     {
@@ -418,7 +418,7 @@ public sealed class AppEntry
             connection.ApplySchemaMigrationAsync(DatabaseExtensions.CurrentDbVersion, CancellationToken.None)
                 .GetAwaiter().GetResult();
 
-            // Флаг выставляется только после COMMIT: при откате миграции наследие v1–v2 остается нетронутым.
+            // Flag is set only after COMMIT: on migration rollback, legacy v1–v2 data remains untouched.
             if (dbVersion < 3)
                 WasMigratedFromLegacy = true;
 
@@ -453,7 +453,7 @@ public sealed class AppEntry
     }
 
     /// <summary>
-    /// Переносит файл, если он существует, с заменой файла назначения.
+    /// Moves a file if it exists, replacing the destination file.
     /// </summary>
     private static void MoveIfExists(string source, string destination)
     {
@@ -462,8 +462,8 @@ public sealed class AppEntry
     }
 
     /// <summary>
-    /// Восстанавливает работоспособность при поврежденной базе (SQLITE_CORRUPT, SQLITE_NOTADB): пытается снять
-    /// согласованную копию, переносит исходные файлы вместе с журналами в карантин и создает чистую базу.
+    /// Restores functionality on database corruption (SQLITE_CORRUPT, SQLITE_NOTADB): attempts to create
+    /// a consistent copy, moves source files along with WAL/journals to quarantine, and creates a clean database.
     /// </summary>
     private static void BackupAndRecreateDatabase(string dbPath)
     {
@@ -473,7 +473,7 @@ public sealed class AppEntry
 
         var stamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
 
-        // Поврежденный файл часто не читается целиком, поэтому согласованная копия — попытка, а не условие восстановления.
+        // Corrupted files often cannot be read entirely, so making a consistent copy is a best-effort attempt, not a recovery requirement.
         try
         {
             var backupPath = dbPath + ".backup." + stamp;
@@ -485,8 +485,8 @@ public sealed class AppEntry
             Log.Warn($"[DB] Consistent backup of damaged database failed, keeping raw files only: {ex.Message}");
         }
 
-        // Журналы переносятся первыми: оставленный -wal применился бы к новой базе.
-        // Сбой переноса фатален, пересоздавать базу поверх неперенесенных файлов нельзя.
+        // Journal files are moved first: a leftover -wal file would be applied to the new database.
+        // Move failure is fatal; recreating the database on top of un-moved files is not allowed.
         var quarantinePath = dbPath + ".corrupt." + stamp;
         MoveIfExists(dbPath + "-wal", quarantinePath + "-wal");
         MoveIfExists(dbPath + "-shm", quarantinePath + "-shm");
@@ -674,7 +674,7 @@ public sealed class AppEntry
         services.AddSingleton<ISettingsRepository, SettingsRepository>();
         services.AddSingleton<INotificationRepository, NotificationRepository>();
 
-        // 1. Централизованный сетевой менеджер (Singleton, автоматически инициализирует SharedHttpClient при первом разрешении)
+        // 1. Centralized network manager (Singleton, automatically initializes SharedHttpClient on first resolution)
         services.AddSingleton(_ =>
         {
             var net = new NetworkManager();
@@ -721,7 +721,7 @@ public sealed class AppEntry
             return new DialogService(auth, userData, localServer, GetDialogHost);
         });
 
-        // 2. PlayerContextManager с динамическим разрешением HttpClient через NetworkManager
+        // 2. PlayerContextManager with dynamic HttpClient resolution via NetworkManager
         services.AddSingleton(sp =>
         {
             var net = sp.GetRequiredService<NetworkManager>();

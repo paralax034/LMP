@@ -99,7 +99,7 @@
         </Style>
     </Window.Styles>
 
-    <!-- Корневая карточка -->
+    <!-- Root card -->
     <Border CornerRadius="8"
         Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"

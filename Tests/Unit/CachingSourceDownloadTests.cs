@@ -10,15 +10,15 @@ using SlotWaitOutcome = LMP.Core.Audio.Sources.CachingStreamSource.SlotWaitOutco
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Регрессионные тесты загрузочного конвейера <see cref="CachingStreamSource"/>: повышение приоритета вместо
-/// ожидания слота, окно чтения с диска без пересечения RAM-блоков, чтение кэша в буфер вызывающего кода,
-/// idle-дедлайн тела HTTP-ответа и линейное слияние буферизованных диапазонов.
+/// Regression tests for the <see cref="CachingStreamSource"/> download pipeline: priority boost instead of
+/// waiting for a slot, disk read window without RAM block overlap, cache reading directly into the caller's buffer,
+/// HTTP response body idle deadline, and linear merging of buffered ranges.
 /// </summary>
 public static class CachingSourceDownloadTests
 {
     /// <summary>
-    /// Критический читатель не ждёт слот за фоновой загрузкой: повышение приоритета завершает ожидание сразу,
-    /// брошенное ожидание возвращает слот в семафор, таймаут и отмена обходятся без исключений.
+    /// Critical reader does not wait for a slot behind background download: priority boost completes the wait immediately,
+    /// abandoned wait returns the slot to the semaphore, timeout and cancellation complete without exceptions.
     /// </summary>
     [TestMethod(TestCategory.Unit, "Download Slot Wait: Promotion Skips Queue & Returns Slot", Group = TestGroups.Audio, Order = 26)]
     public static async Task TestSlotWaitPromotionAsync()
@@ -26,13 +26,13 @@ public static class CachingSourceDownloadTests
         using var slots = new SemaphoreSlim(1, 1);
         Task never = new TaskCompletionSource().Task;
 
-        // 1. Свободный слот выдаётся сразу
+        // 1. An available slot is granted immediately
         var acquired = await CachingStreamSource
             .WaitForSlotOrPromotionAsync(slots, 1_000, never, CancellationToken.None)
             .ConfigureAwait(false);
         TestAssert.Equal(SlotWaitOutcome.Acquired, acquired);
 
-        // 2. Единственный слот занят: повышение приоритета завершает ожидание задолго до таймаута
+        // 2. The only slot is occupied: priority boost completes the wait well before the timeout
         var promotion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         long start = Stopwatch.GetTimestamp();
         Task<SlotWaitOutcome> queued = CachingStreamSource
@@ -46,19 +46,19 @@ public static class CachingSourceDownloadTests
         TestAssert.True(elapsed < TimeSpan.FromSeconds(5),
             $"Promotion must end the slot wait promptly, took {elapsed.TotalMilliseconds:F0}ms");
 
-        // 3. Брошенное ожидание получает освобождённый слот и сразу возвращает его в семафор
+        // 3. Abandoned wait gets the released slot and immediately returns it to the semaphore
         slots.Release();
         bool slotReturned = SpinWait.SpinUntil(() => slots.CurrentCount == 1, TimeSpan.FromSeconds(5));
         TestAssert.True(slotReturned, $"Abandoned slot wait must hand the slot back, CurrentCount={slots.CurrentCount}");
 
-        // 4. Без повышения занятый слот даёт TimedOut
+        // 4. Without priority boost, an occupied slot results in TimedOut
         await slots.WaitAsync().ConfigureAwait(false);
         var timedOut = await CachingStreamSource
             .WaitForSlotOrPromotionAsync(slots, 50, never, CancellationToken.None)
             .ConfigureAwait(false);
         TestAssert.Equal(SlotWaitOutcome.TimedOut, timedOut);
 
-        // 5. Отмена завершает ожидание штатным исходом
+        // 5. Cancellation completes the wait cleanly
         using var cts = new CancellationTokenSource();
         Task<SlotWaitOutcome> canceled = CachingStreamSource
             .WaitForSlotOrPromotionAsync(slots, 30_000, never, cts.Token);
@@ -68,8 +68,8 @@ public static class CachingSourceDownloadTests
     }
 
     /// <summary>
-    /// Окно чтения с диска начинается после левого RAM-соседа и заканчивается перед правым,
-    /// поэтому загруженный блок принимается <see cref="SlidingRamCache.TryAdd"/>, а не выбрасывается.
+    /// Disk read window starts after the left RAM neighbor and ends before the right one,
+    /// so the loaded block is accepted by <see cref="SlidingRamCache.TryAdd"/> rather than discarded.
     /// </summary>
     [TestMethod(TestCategory.Unit, "Disk Load Window Never Overlaps RAM Neighbors", Group = TestGroups.Audio, Order = 27)]
     public static Task TestDiskLoadWindowRespectsRamNeighborsAsync()
@@ -78,29 +78,29 @@ public static class CachingSourceDownloadTests
         const int desiredLength = 65_536;
 
         using var cache = new SlidingRamCache();
-        AddBlock(cache, 0, 1_000);       // левый сосед заканчивается не на границе выравнивания
-        AddBlock(cache, 8_192, 4_096);   // правый сосед внутри желаемого окна
+        AddBlock(cache, 0, 1_000);       // left neighbor does not end on an alignment boundary
+        AddBlock(cache, 8_192, 4_096);   // right neighbor is inside the desired window
 
-        // 1. Позиция внутри блока: свободного окна нет
+        // 1. Position inside a block: no free window
         TestAssert.False(cache.TryGetFreeWindow(500, out _, out _), "Covered position must not report a free window");
 
-        // 2. Свободный промежуток между соседями
+        // 2. Free gap between neighbors
         TestAssert.True(cache.TryGetFreeWindow(1_500, out long freeStart, out long freeEnd), "Gap position must report a free window");
         TestAssert.Equal(1_000L, freeStart);
         TestAssert.Equal(8_192L, freeEnd);
 
-        // 3. Диск покрывает [0, 100 000), но окно ограничено промежутком [1000, 8192)
+        // 3. Disk covers [0, 100 000), but the window is restricted to the gap [1000, 8192)
         TestAssert.True(CachingStreamSource.TryComputeDiskLoadWindow(
             1_500, desiredLength, alignment, 0, 100_000, freeStart, freeEnd,
             out long loadStart, out int loadLength), "Window must contain the miss position");
         TestAssert.Equal(1_000L, loadStart);
         TestAssert.Equal(7_192, loadLength);
 
-        // 4. Прежнее окно AlignDown + desiredLength пересекает обоих соседей и отвергается кэшем — корень повторных чтений
+        // 4. Legacy window AlignDown + desiredLength overlaps both neighbors and is rejected by cache — root cause of re-reads
         TestAssert.False(TryAddBlock(cache, 0, desiredLength), "Legacy aligned window must collide with RAM neighbors");
         TestAssert.True(TryAddBlock(cache, loadStart, loadLength), "Window computed from the free gap must be committed to RAM");
 
-        // 5. Без соседей: выравнивание вниз и усечение по концу дискового диапазона
+        // 5. No neighbors: align down and truncate at the end of the disk range
         TestAssert.True(CachingStreamSource.TryComputeDiskLoadWindow(
             5_000, desiredLength, alignment, 4_096, 6_000, 0, long.MaxValue,
             out long tailStart, out int tailLength), "Tail window must contain the miss position");
@@ -111,8 +111,8 @@ public static class CachingSourceDownloadTests
     }
 
     /// <summary>
-    /// <see cref="Core.Audio.Cache.AudioCacheManager.ReadRangeIntoAsync"/> читает скачанный диапазон прямо в буфер
-    /// вызывающего кода и возвращает 0 для нескачанных, частично скачанных диапазонов и неизвестного ключа.
+    /// <see cref="Core.Audio.Cache.AudioCacheManager.ReadRangeIntoAsync"/> reads the downloaded range directly into
+    /// the caller's buffer and returns 0 for undownloaded, partially downloaded ranges, or an unknown key.
     /// </summary>
     [TestMethod(TestCategory.Unit, "AudioCacheManager ReadRangeIntoAsync Fills Caller Buffer", Group = TestGroups.Storage, Order = 28)]
     public static async Task TestReadRangeIntoCallerBufferAsync()
@@ -135,15 +135,15 @@ public static class CachingSourceDownloadTests
 
             byte[] destination = new byte[1_024];
 
-            // 1. Скачанный диапазон читается целиком
+            // 1. Downloaded range is read completely
             int read = await cacheManager.ReadRangeIntoAsync(cacheKey, 1_000, destination).ConfigureAwait(false);
             TestAssert.Equal(1_024, read);
             TestAssert.True(destination.AsSpan().SequenceEqual(payload.AsSpan(1_000, 1_024)), "Bytes must match the written payload");
 
-            // 2. Диапазон на границе скачанной части — промах без частичных данных
+            // 2. Range on the boundary of the downloaded part — cache miss without partial data
             TestAssert.Equal(0, await cacheManager.ReadRangeIntoAsync(cacheKey, 3_584, destination).ConfigureAwait(false));
 
-            // 3. Нескачанный диапазон и неизвестный ключ — промах
+            // 3. Undownloaded range and unknown key — cache miss
             TestAssert.Equal(0, await cacheManager.ReadRangeIntoAsync(cacheKey, 4_096, destination).ConfigureAwait(false));
             TestAssert.Equal(0, await cacheManager.ReadRangeIntoAsync("missing_key", 0, destination).ConfigureAwait(false));
         }
@@ -154,15 +154,15 @@ public static class CachingSourceDownloadTests
     }
 
     /// <summary>
-    /// Idle-дедлайн тела HTTP-ответа: зависшее соединение прерывается, а медленная, но живая передача
-    /// длиннее дедлайна доходит до конца, потому что каждая порция перезапускает таймер.
+    /// HTTP response body idle deadline: a hung connection is aborted, while a slow but active transfer
+    /// longer than the deadline finishes successfully because each chunk resets the timer.
     /// </summary>
     [TestMethod(TestCategory.Unit, "HTTP Body Idle Deadline: Stall Aborts, Slow Transfer Survives", Group = TestGroups.Audio, Order = 29)]
     public static async Task TestReadStreamFullyIdleDeadlineAsync()
     {
         byte[] buffer = new byte[8 * 1_024];
 
-        // 1. Две порции и тишина: чтение завершается по дедлайну, а не висит бесконечно
+        // 1. Two chunks then silence: read completes on deadline rather than hanging indefinitely
         using (var stalled = new ScriptedBodyStream(chunkSize: 1_024, chunksBeforeStall: 2, chunkDelayMs: 0))
         using (var idleCts = new CancellationTokenSource())
         {
@@ -177,7 +177,7 @@ public static class CachingSourceDownloadTests
             TestAssert.True(elapsed < TimeSpan.FromSeconds(5), $"Stalled body must abort promptly, took {elapsed.TotalMilliseconds:F0}ms");
         }
 
-        // 2. Восемь порций по 150 мс (около 1,2 с) при дедлайне 600 мс
+        // 2. Eight chunks at 150 ms each (around 1.2 s) with a 600 ms deadline
         using (var slow = new ScriptedBodyStream(chunkSize: 1_024, chunksBeforeStall: int.MaxValue, chunkDelayMs: 150))
         using (var idleCts = new CancellationTokenSource())
         {
@@ -191,8 +191,8 @@ public static class CachingSourceDownloadTests
     }
 
     /// <summary>
-    /// Линейное слияние дисковых диапазонов и RAM-блоков: перекрытие, смежность и разрывы,
-    /// а подсчёт и заполнение результата не аллоцируют.
+    /// Linear merging of disk ranges and RAM blocks: overlapping, adjacency, and gaps,
+    /// with zero-allocation result counting and population.
     /// </summary>
     [TestMethod(TestCategory.Unit, "MergeBufferedRanges Linear Disk+RAM Merge (0 Alloc)", Group = TestGroups.Audio, Order = 30)]
     public static Task TestMergeBufferedRangesAsync()
@@ -201,9 +201,9 @@ public static class CachingSourceDownloadTests
         CacheByteRange[] disk = [new(0, 1_000), new(3_000, 4_000), new(8_000, 9_000)];
 
         using var cache = new SlidingRamCache();
-        AddBlock(cache, 900, 600);     // перекрывает [0, 1000)  -> [0, 1500)
-        AddBlock(cache, 4_000, 500);   // смежен с [3000, 4000)  -> [3000, 4500)
-        AddBlock(cache, 6_000, 500);   // самостоятельный отрезок
+        AddBlock(cache, 900, 600);     // overlaps [0, 1000)  -> [0, 1500)
+        AddBlock(cache, 4_000, 500);   // adjacent to [3000, 4000)  -> [3000, 4500)
+        AddBlock(cache, 6_000, 500);   // standalone segment
         RamRangeBlock[] ram = cache.GetRangesSnapshot();
 
         int count = CachingStreamSource.MergeBufferedRanges(disk, ram, contentLength, []);
@@ -227,8 +227,8 @@ public static class CachingSourceDownloadTests
     }
 
     /// <summary>
-    /// Критический запрос от выровненного вниз начала покрывает всё окно читателя от невыровненной позиции seek
-    /// и не выходит за конец контента.
+    /// A critical request from an aligned-down start covers the entire reader window from an unaligned seek position
+    /// and does not exceed the end of the content.
     /// </summary>
     [TestMethod(TestCategory.Unit, "Critical Download Span Covers Unaligned Seek Head", Group = TestGroups.Audio, Order = 31)]
     public static Task TestCriticalSpanCoversUnalignedRequestAsync()
@@ -237,20 +237,20 @@ public static class CachingSourceDownloadTests
         const int minimumLength = 49_152;
         const long contentLength = 3_657_225;
         const long requested = 1_090_059;
-        const long planStart = requested - requested % alignment; // 1_081_344: голова 8_715 байт до позиции
+        const long planStart = requested - requested % alignment; // 1_081_344: head of 8_715 bytes before position
 
-        // 1. Невыровненная позиция: длина растёт на голову, план заканчивается ровно там, где окно читателя
+        // 1. Unaligned position: length increases by the head, plan ends exactly where the reader window ends
         int span = CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart, contentLength);
         TestAssert.Equal(57_867, span);
         TestAssert.Equal(requested + minimumLength, planStart + span, "Critical plan must end exactly where the reader window ends");
 
-        // 2. Выровненная позиция: ровно минимум
+        // 2. Aligned position: exactly the minimum
         TestAssert.Equal(minimumLength, CachingStreamSource.ComputeCriticalSpan(planStart, minimumLength, planStart, contentLength));
 
-        // 3. Начало сдвинуто за локально доступные данные: минимум отсчитывается от начала плана
+        // 3. Start shifted past locally available data: minimum is calculated from the plan start
         TestAssert.Equal(minimumLength, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart + 3 * alignment, contentLength));
 
-        // 4. Хвост файла: длина обрезается концом контента, за концом план пуст
+        // 4. File tail: length is truncated by the end of content, plan is empty past the end
         TestAssert.Equal(18_656, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart, 1_100_000));
         TestAssert.Equal(0, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, contentLength, contentLength));
 
@@ -275,7 +275,7 @@ public static class CachingSourceDownloadTests
     }
 
     /// <summary>
-    /// Сценарий тела HTTP-ответа: порции с задержкой, затем «зависание» до отмены токена.
+    /// HTTP response body scenario: delayed chunks, then hanging until token cancellation.
     /// </summary>
     private sealed class ScriptedBodyStream(int chunkSize, int chunksBeforeStall, int chunkDelayMs) : Stream
     {
@@ -294,7 +294,7 @@ public static class CachingSourceDownloadTests
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            // Зависшее соединение: новых данных нет, ожидание завершает только отмена, как у сокета
+            // Hung connection: no new data, waiting completes only via cancellation, like a socket
             if (_served >= chunksBeforeStall)
                 await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
 

@@ -17,12 +17,12 @@ public partial class SplashWindow : Window
         _showStopwatch = Stopwatch.StartNew();
         _progressBarMaxWidth = Width - 96;
         
-        // Версия
+        // Version
         var info = G.Build.Info;
         VersionText.Text = info.DisplayVersion;
         GitHashText.Text = info.GitHash;
         
-        // Локализованная строка коммитов
+        // Localized commit string
         var L = LocalizationService.Instance;
         BuildInfoText.Text = $"{string.Format(L["Splash_Commits"], info.CommitCount)} • {info.BuildDate:yyyy-MM-dd}";
         

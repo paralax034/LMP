@@ -1,32 +1,32 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Фатальная ошибка загрузки чанков — стрим безвозвратно недоступен.
+/// Fatal chunk loading error — stream is permanently unavailable.
 /// </summary>
 public class ChunkDownloadFatalException : AudioSourceException
 {
     /// <summary>
-    /// Индекс чанка, на котором произошла ошибка.
+    /// Chunk index where the error occurred.
     /// </summary>
     public int ChunkIndex { get; }
 
     /// <summary>
-    /// Количество последовательных неудачных попыток.
+    /// Number of consecutive failed attempts.
     /// </summary>
     public int ConsecutiveFailures { get; }
 
     /// <summary>
-    /// Причина ошибки.
+    /// Cause of the error.
     /// </summary>
     public ChunkDownloadFailureReason Reason { get; }
 
     /// <summary>
-    /// ID трека (для диагностики).
+    /// Track ID (for diagnostics).
     /// </summary>
     public string? TrackId { get; }
 
     /// <summary>
-    /// HTTP статус код последнего неудачного запроса (если применимо).
+    /// HTTP status code of the last failed request (if applicable).
     /// </summary>
     public int? HttpStatusCode { get; }
 
@@ -64,7 +64,7 @@ public class ChunkDownloadFatalException : AudioSourceException
     }
 
     /// <summary>
-    /// Возвращает ключ локализации для пользовательского сообщения.
+    /// Returns the localization key for the user-facing message.
     /// </summary>
     public string GetLocalizationKey() => Reason switch
     {
@@ -77,22 +77,22 @@ public class ChunkDownloadFatalException : AudioSourceException
 }
 
 /// <summary>
-/// Причина фатальной ошибки загрузки чанков.
+/// Cause of the fatal chunk loading error.
 /// </summary>
 public enum ChunkDownloadFailureReason
 {
-    /// <summary>Превышен лимит HTTP 403 Forbidden ответов.</summary>
+    /// <summary>HTTP 403 Forbidden response limit exceeded.</summary>
     Forbidden403,
 
-    /// <summary>YouTube вернул UMP (encrypted) формат вместо raw audio.</summary>
+    /// <summary>YouTube returned UMP (encrypted) format instead of raw audio.</summary>
     UmpFormat,
 
-    /// <summary>Превышен лимит retry-попыток.</summary>
+    /// <summary>Retry attempt limit exceeded.</summary>
     MaxRetriesExceeded,
 
-    /// <summary>Сетевая ошибка (timeout, connection reset).</summary>
+    /// <summary>Network error (timeout, connection reset).</summary>
     NetworkError,
 
-    /// <summary>Неизвестная ошибка.</summary>
+    /// <summary>Unknown error.</summary>
     Unknown
 }

@@ -6,7 +6,7 @@ using Notification = LMP.Core.Models.Notification;
 namespace LMP.UI.Features.Notifications;
 
 /// <summary>
-/// Режим фильтрации элементов в центре уведомлений и фоновых задач.
+/// Item filtering mode in the notification center and background tasks.
 /// </summary>
 public enum NotificationFilterMode
 {
@@ -20,7 +20,7 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
     private readonly NotificationService _notificationService;
     private readonly PlaylistSyncService? _playlistSync;
 
-    // Секундный таймер обратного отсчёта работает только при открытой панели и наличии ожидающих задач
+    // The 1-second countdown timer runs only when the panel is open and pending tasks exist
     private DispatcherTimer? _countdownTimer;
     private bool _isPanelVisible;
 
@@ -28,7 +28,7 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
         => _notificationService.Notifications;
 
     /// <summary>
-    /// Отфильтрованная коллекция, привязанная к виртуализованному списку.
+    /// Filtered collection bound to the virtualized list.
     /// </summary>
     public ObservableCollection<Notification> DisplayedNotifications { get; } = [];
 
@@ -108,7 +108,7 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
 
     private void OnSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        // Инкрементальное обновление без полного Clear() предотвращает пересоздание контейнеров ListBox и UI-спайки
+        // Incremental updates without full Clear() prevent ListBox container recreation and UI spikes
         if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems is { Count: 1 } added && added[0] is Notification newItem)
         {
             if (!MatchesCurrentFilter(newItem))
@@ -151,7 +151,7 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Сообщает о видимости панели: живой обратный отсчёт задач тикает только пока панель открыта.
+    /// Reports panel visibility: live task countdown ticks only while the panel is open.
     /// </summary>
     public void SetPanelVisible(bool isVisible)
     {
@@ -235,7 +235,7 @@ public sealed partial class NotificationPanelViewModel : ViewModelBase
     {
         IsLoading = false;
 
-        // Без пересоздания коллекции (Clear) мягко обновляем только относительные метки времени TimeAgo
+        // Smoothly update only the relative TimeAgo timestamps without recreating the collection (Clear)
         for (int i = 0; i < DisplayedNotifications.Count; i++)
         {
             DisplayedNotifications[i].NotifyVisualStateChanged();

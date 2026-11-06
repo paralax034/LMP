@@ -15,32 +15,32 @@ public sealed partial class AudioPlayer
     private const int ReSeekDecoderStopTimeoutMs = 200;
     private const int DeferredSeekResumeTimeoutMs = 30_000;
 
-    /// <summary>Порог эскалации deferred warmup: UI-сигнал + повторный rebuild (мс).</summary>
+    /// <summary>Deferred warmup escalation threshold: UI signal + re-build (ms).</summary>
     private const int DeferredWarmupEscalationMs = 60_000;
 
-    /// <summary>Hard cap deferred warmup: прекращение ожидания, error event (мс).</summary>
+    /// <summary>Hard cap deferred warmup: stop waiting, error event (ms).</summary>
     private const int DeferredWarmupHardCapMs = 180_000;
 
     #endregion
 
     #region Seek State
 
-    /// <summary>CTS для прерывания текущей итерации coalescing loop (сетевого запроса).</summary>
+    /// <summary>CTS to interrupt the current coalescing loop iteration (network request).</summary>
     private volatile CancellationTokenSource? _seekIterationInterruptCts;
 
-    /// <summary>CTS текущего seek.</summary>
+    /// <summary>CTS for the current seek.</summary>
     private CancellationTokenSource? _activeSeekCts;
 
-    /// <summary>CTS текущего deferred-resume после seek.</summary>
+    /// <summary>CTS for the current deferred-resume after seek.</summary>
     private CancellationTokenSource? _deferredResumeCts;
 
-    /// <summary>Pending seek position для latest-wins coalescing.</summary>
+    /// <summary>Pending seek position for latest-wins coalescing.</summary>
     private long _pendingSeekMs = -1;
 
-    /// <summary>Признак активного seek.</summary>
+    /// <summary>Indicates whether seek is active.</summary>
     private volatile bool _backgroundSeekActive;
 
-    /// <summary>Pipeline, связанный с текущим seek.</summary>
+    /// <summary>Pipeline associated with the current seek.</summary>
     private AudioPipeline? _backgroundSeekPipeline;
 
 #if AUDIO_SPLICE_AUDIT
@@ -52,7 +52,7 @@ public sealed partial class AudioPlayer
     #region Public Seek API
 
     /// <summary>
-    /// Инициирует seek с latest-wins coalescing.
+    /// Initiates a seek with latest-wins coalescing.
     /// </summary>
     public ValueTask SeekAsync(TimeSpan position, CancellationToken ct = default)
     {
@@ -69,8 +69,8 @@ public sealed partial class AudioPlayer
         {
             Volatile.Write(ref _pendingSeekMs, targetMs);
 
-            // Немедленно отменяем текущую итерацию (сетевой запрос),
-            // чтобы coalescing loop сразу перешел к новой позиции.
+            // Immediately cancel the current iteration (network request)
+            // so that the coalescing loop instantly moves to the new position.
             var iterCts = Interlocked.Exchange(ref _seekIterationInterruptCts, null);
             CancelCtsAsync(iterCts);
 
@@ -91,7 +91,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Асинхронно отменяет текущий seek и deferred-resume.
+    /// Asynchronously cancels the current seek and deferred-resume.
     /// </summary>
     private void CancelActiveSeek()
     {
@@ -125,7 +125,7 @@ public sealed partial class AudioPlayer
         }, cts);
     }
 
-    /// <summary>Сбрасывает seek observability counters.</summary>
+    /// <summary>Resets seek observability counters.</summary>
     [Conditional("AUDIO_SPLICE_AUDIT")]
     internal void ResetPerTrackCounters()
     {
@@ -139,7 +139,7 @@ public sealed partial class AudioPlayer
     #region Seek Command Handler
 
     /// <summary>
-    /// Обрабатывает seek-команду с бесшовным сохранением хвоста старой волны для кроссфейда.
+    /// Handles a seek command with seamless preservation of the old wave's tail for crossfade.
     /// </summary>
     private async Task HandleSeekAsync(SeekCommand cmd)
     {
@@ -182,8 +182,8 @@ public sealed partial class AudioPlayer
                 return;
             }
 
-            // Вызываем Flush() РОВНО ОДИН РАЗ после остановки декодера:
-            // это гарантирует отсутствие двойного захвата хвоста и гонок с декодером.
+            // Call Flush() EXACTLY ONCE after stopping the decoder:
+            // this guarantees no duplicate tail capture and no race conditions with the decoder.
             pipeline.Flush();
             pipeline.PrepareForSeek(posMs);
 
@@ -239,7 +239,7 @@ public sealed partial class AudioPlayer
     #region Seek Coalescing Loop
 
     /// <summary>
-    /// Выполняет background-фазу seek с coalescing.
+    /// Performs the background phase of seek with coalescing.
     /// </summary>
     private async Task CompleteSeekWithCoalescingAsync(
         AudioPipeline pipeline,
@@ -291,8 +291,8 @@ public sealed partial class AudioPlayer
                     Interlocked.CompareExchange(ref _seekIterationInterruptCts, null, iterInterruptCts);
                 }
 
-                // Если CachingStreamSource.SeekAsync перехватил отмену iterCt и вернул false без исключения,
-                // проверяем наличие нового coalesced-запроса до валидации состояния!
+                // If CachingStreamSource.SeekAsync intercepted iterCt cancellation and returned false without an exception,
+                // check for a new coalesced request before state validation!
                 long drainedAfterPhaseA = DrainPendingSeekMs();
                 if (drainedAfterPhaseA >= 0 && !seekCt.IsCancellationRequested)
                 {
@@ -441,8 +441,8 @@ public sealed partial class AudioPlayer
     #region Deferred Seek Resume
 
     /// <summary>
-    /// Фоново ждёт готовности PCM и source-ahead после deferred seek/rebuffer.
-    /// Эскалация: 60s → UI-сигнал + rebuild. 180s → stop.
+    /// Background-waits for PCM and source-ahead readiness after deferred seek/rebuffer.
+    /// Escalation: 60s → UI signal + rebuild. 180s → stop.
     /// </summary>
     private async Task AwaitDeferredSeekBufferAndResumeAsync(
         AudioPipeline pipeline,
@@ -564,7 +564,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Возобновляет воспроизведение после deferred buffering внутри actor loop.
+    /// Resumes playback after deferred buffering inside the actor loop.
     /// </summary>
     private Task HandleDeferredResumeAsync(DeferredResumeCommand cmd)
     {
@@ -623,12 +623,12 @@ public sealed partial class AudioPlayer
 
     #region Seek Helpers
 
-    /// <summary>Атомарно забирает pending seek позицию.</summary>
+    /// <summary>Atomically consumes the pending seek position.</summary>
     private long DrainPendingSeekMs() =>
         Interlocked.Exchange(ref _pendingSeekMs, -1);
 
     /// <summary>
-    /// Останавливает decoder и очищает буферы перед re-seek.
+    /// Stops the decoder and clears buffers before re-seek.
     /// </summary>
     private static async Task StopDecoderForReseekAsync(AudioPipeline pipeline, CancellationToken ct)
     {
@@ -640,7 +640,7 @@ public sealed partial class AudioPlayer
         pipeline.Flush();
     }
 
-    /// <summary>Проверяет валидность seek-контекста.</summary>
+    /// <summary>Validates the seek context.</summary>
     private bool ValidateSeekState(CancellationToken ct, AudioPipeline pipeline, int sessionId)
     {
         return !ct.IsCancellationRequested
@@ -649,14 +649,14 @@ public sealed partial class AudioPlayer
             && !_session.IsStale(sessionId);
     }
 
-    /// <summary>Обновляет позицию decoded samples после seek.</summary>
+    /// <summary>Updates the decoded samples position after seek.</summary>
     private static void UpdateDecodedPosition(AudioPipeline pipeline, long posMs)
     {
         long targetSamples = (long)(posMs / 1000.0 * pipeline.SampleRate * pipeline.Channels);
         pipeline.SetDecodedSamplesPosition(targetSamples);
     }
 
-    /// <summary>Сбрасывает состояние coalescing seek.</summary>
+    /// <summary>Resets coalescing seek state.</summary>
     private void ResetSeekState()
     {
         Volatile.Write(ref _pendingSeekMs, -1);
@@ -665,7 +665,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Проверяет, доступны ли данные для seek-позиции локально (RAM/диск).
+    /// Checks whether data for the seek position is available locally (RAM/disk).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsSeekDataLocallyAvailable(AudioPipeline pipeline, long positionMs)
@@ -683,7 +683,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Восстанавливает playback gate после завершения/отмены seek.
+    /// Restores the playback gate after seek completion/cancellation.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void RestorePlaybackActiveState(AudioPipeline pipeline)

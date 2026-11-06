@@ -7,10 +7,10 @@ public sealed partial class AudioPlayer
     private volatile bool _uiTimersSuspended;
 
     /// <summary>
-    /// Приостанавливает или возобновляет работу таймеров оповещения UI-потока в фоновом режиме.
-    /// При выходе из режима приостановки во время воспроизведения немедленно публикует актуальные позицию и состояние буфера.
+    /// Suspends or resumes UI thread notification timers in background mode.
+    /// Upon exiting suspended mode during playback, immediately publishes current position and buffer state.
     /// </summary>
-    /// <param name="suspended">Признак перевода UI в фоновый режим.</param>
+    /// <param name="suspended">Indicates whether the UI is moved to background mode.</param>
     public void SetUiTimersSuspended(bool suspended)
     {
         if (_disposed || _uiTimersSuspended == suspended) return;
@@ -37,7 +37,7 @@ public sealed partial class AudioPlayer
         }
     }
 
-    /// <summary>Запускает таймеры позиции и буфера.</summary>
+    /// <summary>Starts position and buffer timers.</summary>
     private void StartTimers()
     {
         if (_uiTimersSuspended || _disposed) return;
@@ -52,7 +52,7 @@ public sealed partial class AudioPlayer
         StartBufferTimer();
     }
 
-    /// <summary>Запускает или перезапускает только таймер состояния буфера.</summary>
+    /// <summary>Starts or restarts the buffer state timer only.</summary>
     private void StartBufferTimer()
     {
         if (_uiTimersSuspended || _disposed) return;
@@ -63,14 +63,14 @@ public sealed partial class AudioPlayer
             _bufferTimer.Change(0, AudioConstants.BufferStateUpdateIntervalMs);
     }
 
-    /// <summary>Останавливает таймеры без dispose.</summary>
+    /// <summary>Stops timers without dispose.</summary>
     private void StopTimers()
     {
         _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
         _bufferTimer?.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
-    /// <summary>Запускает position timer с задержкой первого tick (после seek) и гарантирует работу таймера буфера.</summary>
+    /// <summary>Starts the position timer with a delayed first tick (post-seek) and ensures the buffer timer is running.</summary>
     private void StartPositionTimerDelayed()
     {
         if (_uiTimersSuspended || _disposed) return;
@@ -92,13 +92,13 @@ public sealed partial class AudioPlayer
         }
     }
 
-    /// <summary>Останавливает только position timer.</summary>
+    /// <summary>Stops the position timer only.</summary>
     private void StopPositionTimer()
     {
         _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
-    /// <summary>Полная финализация таймеров. Только при Dispose.</summary>
+    /// <summary>Full timer finalization. Dispose only.</summary>
     private void DisposeTimers()
     {
         _positionTimer?.Dispose();
@@ -108,13 +108,13 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Публикует текущее состояние буфера и сетевые метрики источника.
+    /// Publishes the current buffer state and source network metrics.
     /// </summary>
     /// <remarks>
-    /// <para>Авто-resume после deferred seek выполняется НЕ здесь,
-    /// а через <see cref="AwaitDeferredSeekBufferAndResumeAsync"/>,
-    /// потому что backend buffer не отражает реальную готовность
-    /// decoder/ring buffer при закрытом gate.</para>
+    /// <para>Auto-resume after deferred seek is NOT executed here,
+    /// but via <see cref="AwaitDeferredSeekBufferAndResumeAsync"/>,
+    /// because the backend buffer does not reflect the actual readiness of the
+    /// decoder/ring buffer when the gate is closed.</para>
     /// </remarks>
     private void RaiseBufferState()
     {

@@ -5,8 +5,8 @@ using MemoryPack;
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Обеспечивает высокопроизводительное и потокобезопасное кэширование дешифрованных значений (string -> string)
-/// с автоматическим сохранением и фоновой очисткой устаревших записей на диске.
+/// Provides high-performance and thread-safe caching of decrypted values (string -> string)
+/// with automatic persistence and background cleanup of expired entries on disk.
 /// </summary>
 public sealed partial class DecryptorCache
 {
@@ -21,10 +21,10 @@ public sealed partial class DecryptorCache
 
     private const int SaveIntervalMs = 60_000;
 
-    /// <summary>Путь к файлу кэша на диске.</summary>
+    /// <summary>Path to the cache file on disk.</summary>
     public string DiskPath { get; }
 
-    /// <summary>Папка, в которой лежит файл кэша.</summary>
+    /// <summary>Folder containing the cache file.</summary>
     public string CacheFolder => Path.GetDirectoryName(DiskPath)!;
 
     public DecryptorCache(string diskPath, int maxMemory = 2000, int maxDisk = 500)
@@ -64,7 +64,7 @@ public sealed partial class DecryptorCache
     }
 
     /// <summary>
-    /// Точечно удаляет запись по ключу.
+    /// Removes an entry by key.
     /// </summary>
     public bool Remove(string key)
     {
@@ -123,10 +123,10 @@ public sealed partial class DecryptorCache
     }
 
     /// <summary>
-    /// Выполняет единоразовую миграцию устаревшего JSON кэша в бинарный MemoryPack формат.
+    /// Performs a one-time migration of the legacy JSON cache to the binary MemoryPack format.
     /// </summary>
-    /// <param name="legacyJsonPath">Путь к старому JSON-файлу.</param>
-    /// <param name="playerVersion">Целевая версия плеера.</param>
+    /// <param name="legacyJsonPath">Path to the old JSON file.</param>
+    /// <param name="playerVersion">Target player version.</param>
     private async Task MigrateLegacyJsonIfPresentAsync(string legacyJsonPath, string playerVersion)
     {
         var (json, jsonRecovered) = await AtomicFile.ReadTextWithFallbackAsync(legacyJsonPath).ConfigureAwait(false);

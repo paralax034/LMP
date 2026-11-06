@@ -8,7 +8,7 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.UI.Features.Player;
 
 /// <summary>
-/// ViewModel для нижней панели управления плеером (Player Bar).
+/// ViewModel for the bottom player control bar (Player Bar).
 /// </summary>
 public sealed partial class PlayerBarViewModel : ViewModelBase
 {
@@ -20,17 +20,17 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private const int ShuffleAnimationDurationMs = 500;
 
     /// <summary>
-    /// Максимальная допустимая разница битрейтов (kbps) для сопоставления
-    /// скачанного формата с записью в кэше.
-    /// Исключает ложные совпадения в пределах одного нормализованного bucket'а
-    /// (например, 55 и 69 kbps → оба попадают в bucket 64, delta = 14 > 10).
+    /// Maximum allowed bitrate difference (kbps) for matching
+    /// a downloaded format with a cache record.
+    /// Prevents false matches within the same normalized bucket
+    /// (e.g., 55 and 69 kbps → both fall into bucket 64, delta = 14 > 10).
     /// </summary>
     private const int BitrateMatchEpsilonKbps = 10;
 
-    /// <summary>Таймаут, после которого состояние Reset считается зависшим (сек).</summary>
+    /// <summary>Timeout after which the Reset state is considered hung (sec).</summary>
     private const int StaleResetTimeoutSec = 3;
 
-    /// <summary>Порог времени воспроизведения для определения активности аудио (сек).</summary>
+    /// <summary>Audio playback time threshold for determining activity (sec).</summary>
     private const double AudioIsPlayingThresholdSec = 0.5;
 
     #endregion
@@ -57,9 +57,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private readonly NotificationService _notificationService = null!;
 
     /// <summary>
-    /// Кэш треков, для которых получение форматов невозможно из-за контентных ограничений.
-    /// Ключ = trackId, значение = причина ограничения.
-    /// Не включает сетевые ошибки — они транзиентны и не кэшируются.
+    /// Cache of tracks for which fetching formats is impossible due to content restrictions.
+    /// Key = trackId, value = restriction reason.
+    /// Excludes network errors as they are transient and not cached.
     /// </summary>
     private readonly Dictionary<string, LoginRequiredReason> _restrictedTracks = [];
 
@@ -405,7 +405,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
         _youtube.AuthService.OnAuthStateChanged += ClearRestrictedTracksCache;
 
-        // Команды должны быть созданы ДО инициализации настроек и подписки на события
+        // Commands must be created BEFORE initializing settings and subscribing to events
         SetupCommands();
         InitializeFromSettings();
         SubscribeEvents();
@@ -446,7 +446,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         AutoShuffleEnabled = _playerControl.ShuffleEnabled;
         RepeatMode = _playerControl.RepeatMode;
 
-        // Синхронизируем громкость только при реальном расхождении, чтобы не инициировать холостую запись в БД на старте
+        // Synchronize volume only on actual mismatch to prevent no-op DB writes during startup
         if (_playerControl.CurrentVolume != Volume)
         {
             _playerControl.SetVolume(Volume);
@@ -810,7 +810,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         Position = pos;
         SyncBufferState();
 
-        // Детерминированный сброс состояния занятости по факту физического завершения
+        // Deterministic reset of busy state upon actual physical completion
         IsSeekBusy = false;
     }
 
@@ -853,7 +853,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (isPlayingLocalFile)
         {
             SetFullyBuffered();
-            UpdateNetworkStats(0, 0); // Отключаем статы сети только если АКТИВНЫЙ поток действительно локальный
+            UpdateNetworkStats(0, 0); // Disable network stats only if the ACTIVE stream is indeed local
             return;
         }
 
@@ -867,7 +867,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             IsFullyBuffered = state.IsFullyBuffered;
             rawRanges = state.Ranges;
 
-            // Обновляем UI телеметрию из движка
+            // Update UI telemetry from the engine
             UpdateNetworkStats(state.SpeedBytesPerSec, state.AveragePingMs);
         }
         else
@@ -941,7 +941,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         ShowNetworkStats = true;
 
-        // Локализованное форматирование скорости
+        // Localized speed formatting
         if (speedBytesPerSec > 1024 * 1024)
         {
             double speedMb = speedBytesPerSec / (1024.0 * 1024.0);
@@ -957,14 +957,14 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             NetworkSpeedText = string.Format(LocalizationService.Instance["Stream_Speed_Kb"], 0);
         }
 
-        // Локализованный пинг
+        // Localized ping
         PingText = string.Format(LocalizationService.Instance["Stream_Ping_Ms"], pingMs);
 
-        // Динамическая адаптивная стилизация задержки сети
+        // Dynamic adaptive styling for network latency
         var app = Application.Current;
         if (pingMs < 200)
         {
-            // Стабильный пинг: обычный цвет как у формата (TextMutedBrush), начертание по умолчанию
+            // Stable ping: default format color (TextMutedBrush), default font weight
             if (app?.Resources.TryGetResource("TextMutedBrush", app.ActualThemeVariant, out var b) == true &&
                 b is IBrush brush)
                 PingBrush = brush;
@@ -975,7 +975,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         }
         else if (pingMs < 500)
         {
-            // Менее стабильный: акцентный цвет плеера, начертание по умолчанию
+            // Less stable: player accent color, default font weight
             if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true &&
                 b is IBrush brush)
                 PingBrush = brush;
@@ -986,7 +986,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         }
         else
         {
-            // Критическая задержка: системный красный цвет и сверхжирное начертание (Heavy)
+            // Critical latency: system red color and extra bold font weight (Heavy)
             if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true &&
                 b is IBrush brush)
                 PingBrush = brush;
@@ -1070,7 +1070,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         CurrentTrack = track;
         HasTrack = track != null;
 
-        // Сбрасываем флаг занятости перемотки при смене трека
+        // Reset seeking busy flag when switching tracks
         IsSeekBusy = false;
 
         RaiseTrackInfoChanged();
@@ -1167,7 +1167,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Принудительно синхронизирует состояние отображения панели с низкоуровневым движком.
+    /// Forces synchronization of the panel display state with the low-level engine.
     /// </summary>
     private void HandleForceSync()
     {
@@ -1218,7 +1218,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Обновляет текстовую плашку информации о потоке и синхронизирует состояние кнопок качества.
+    /// Updates the stream info text badge and synchronizes the quality buttons state.
     /// </summary>
     private void UpdateStreamInfo(AudioStreamInfo info)
     {
@@ -1279,7 +1279,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             var elapsed = DateTime.UtcNow - _trackResetStartTime;
             bool audioIsPlaying = IsPlaying || _audio.CurrentPosition.TotalSeconds > AudioIsPlayingThresholdSec;
 
-            // Защита от зависания состояния сброса: если звук играет дольше таймаута — принудительно сбрасываем флаг
+            // Protection against stuck reset state: if audio plays longer than the timeout, force reset the flag
             if (audioIsPlaying && elapsed > TimeSpan.FromSeconds(StaleResetTimeoutSec))
             {
                 Log.Warn(
@@ -1296,7 +1296,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             }
             else if (!IsLoading && elapsed > TimeSpan.FromSeconds(StaleResetTimeoutSec * 2))
             {
-                // Если устройство на паузе или в процессе восстановления, но загрузка не активна — снимаем зависший визуальный флаг
+                // If the device is paused or restoring, but loading is not active, clear the hung visual flag
                 Log.Debug($"[PlayerBar] TrackReset cleared in paused/idle state ({elapsed.TotalSeconds:F1}s)");
                 IsTrackResetting = false;
                 SyncPositionFromEngine();
@@ -1343,7 +1343,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Инициирует перемотку. Состояние IsSeekBusy сбрасывается по событию OnSeekCompleted.
+    /// Initiates seeking. The IsSeekBusy state is reset on the OnSeekCompleted event.
     /// </summary>
     public async void EndSeek()
     {
@@ -1404,20 +1404,20 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #region Private Helpers
 
     /// <summary>
-    /// Устанавливает <see cref="StreamOption.IsActive"/> ровно у одного формата —
-    /// ближайшего по битрейту среди совпадающих по контейнеру.
-    /// Решает проблему когда NormalizeBitrate(70) == NormalizeBitrate(55) == 64
-    /// и оба формата ложно получают IsActive = true.
+    /// Sets <see cref="StreamOption.IsActive"/> on exactly one format —
+    /// the closest by bitrate among those matching the container.
+    /// Resolves the issue where NormalizeBitrate(70) == NormalizeBitrate(55) == 64
+    /// and both formats incorrectly get IsActive = true.
     /// </summary>
     private void UpdateActiveFormat(AudioFormat format, int infoBitrate)
     {
-        // Сброс всех флагов
+        // Reset all flags
         foreach (var f in AvailableFormats)
             f.IsActive = false;
 
         if (AvailableFormats.Count == 0) return;
 
-        // Ищем единственный ближайший по raw-битрейту формат того же контейнера
+        // Find the single closest format by raw bitrate for the same container
         StreamOption? bestMatch = null;
         int bestDelta = int.MaxValue;
 
@@ -1473,10 +1473,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #region Format Loading
 
     /// <summary>
-    /// Синхронизирует <see cref="StreamOption.IsDownloaded"/> для каждого элемента
-    /// <see cref="AvailableFormats"/> на основе текущего состояния кэша и явного скачивания.
-    /// Использует аддитивную логику: только устанавливает <c>true</c>, никогда не сбрасывает.
-    /// Полный сброс происходит только при пересоздании списка в <see cref="LoadFormatsAsync"/>.
+    /// Synchronizes <see cref="StreamOption.IsDownloaded"/> for each item in
+    /// <see cref="AvailableFormats"/> based on current cache state and explicit downloads.
+    /// Uses additive logic: only sets <c>true</c>, never resets.
+    /// A full reset occurs only when recreating the list in <see cref="LoadFormatsAsync"/>.
     /// </summary>
     private void SyncFormatDownloadStatus()
     {
@@ -1507,7 +1507,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             }
         }
 
-        // Phase 2: Explicit download — closest match по контейнеру
+        // Phase 2: Explicit download — closest match by container
         bool isExplicitDownload = CurrentTrack.IsDownloaded
                                   && !string.IsNullOrEmpty(CurrentTrack.LocalPath)
                                   && File.Exists(CurrentTrack.LocalPath);
@@ -1539,8 +1539,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Оценивает сырой (ненормализованный) битрейт скачанного файла.
-    /// Используется для fuzzy-matching при неизвестном <c>PreferredBitrate</c>.
+    /// Estimates the raw (unnormalized) bitrate of a downloaded file.
+    /// Used for fuzzy matching when <c>PreferredBitrate</c> is unknown.
     /// </summary>
     private static int EstimateRawBitrateFromFile(TrackInfo track)
     {
@@ -1596,8 +1596,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         }
         catch (YoutubeNetworkException ex)
         {
-            // Сетевые ошибки НЕ кэшируются — трек может быть доступен при
-            // восстановлении соединения
+            // Network errors are NOT cached — the track may become available upon
+            // connection recovery
             Log.Warn($"LoadFormatsAsync network error: {ex.ErrorType} — {ex.Message}");
             caughtException = ex;
             hasError = true;
@@ -1611,7 +1611,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             hasError = true;
             errorMessage = ex.Message;
 
-            // Кэшируем ТОЛЬКО контентные ограничения, НЕ бот-детекцию (она транзиентна)
+            // Cache ONLY content restrictions, NOT bot detection (it is transient)
             if (ex.Reason != LoginRequiredReason.BotDetection)
             {
                 _restrictedTracks[CurrentTrack.Id] = ex.Reason;
@@ -1654,13 +1654,13 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             AvailableFormats.Add(f);
         }
 
-        // Единый источник правды для IsActive
+        // Single source of truth for IsActive
         UpdateActiveFormat(currentFormat, currentBitrate);
 
-        // Аддитивно устанавливает IsDownloaded=true для кэшированных
+        // Additively sets IsDownloaded=true for cached items
         SyncFormatDownloadStatus();
 
-        // Проверка наличия физических форматов (без LINQ)
+        // Check for physical formats presence (allocation-free, without LINQ)
         bool hasValidPhysicalFormats = false;
         foreach (var f in formats)
         {
@@ -2033,7 +2033,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         if (_isSyncingEq || newBands10.Length < EqualizerProcessor.BandCount) return;
 
-        // 1. Мгновенно обновляем состояние в памяти и аудио-движок (0 мс задержки, ровно 1 вызов без дубля из OnIsEqualizerEnabledChanged)
+        // 1. Instantly update in-memory state and audio engine (0 ms latency, exactly 1 call without duplicate from OnIsEqualizerEnabledChanged)
         var audioSettings = _library.Settings.Audio;
         audioSettings.EqualizerEnabled = true;
         audioSettings.CustomEqualizerBands = newBands10;
@@ -2075,7 +2075,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         _audio.UpdateEqualizerSettings();
 
-        // 2. Откладываем физическую запись JSON в SQLite и обновление массива биндинга на 350 мс после отпускания ползунка
+        // 2. Defer the physical JSON write to SQLite and the binding array update for 350 ms after slider release
         _eqSaveDebounceTimer?.Stop();
         _eqSaveDebounceTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(350),
@@ -2158,7 +2158,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #region LifeCycle
 
     /// <summary>
-    /// Вызывается при сворачивании или приостановке работы интерфейса.
+    /// Called when the UI is minimized or suspended.
     /// </summary>
     protected override void OnSuspend(SuspendLevel level)
     {
@@ -2199,7 +2199,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Освобождает ресурсы, используемые ViewModel.
+    /// Releases resources used by the ViewModel.
     /// </summary>
     protected override void Dispose(bool disposing)
     {

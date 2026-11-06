@@ -8,8 +8,8 @@ using Avalonia.Xaml.Interactivity;
 namespace LMP.UI.Behaviors;
 
 /// <summary>
-/// Поведение автоматической постраничной подгрузки списка при приближении к границе скролла.
-/// Исключает race conditions и паразитные циклы за счёт синхронизации с состоянием команд и фазами отрисовки.
+/// Behavior for automatic pagination loading of a list when approaching the scroll boundary.
+/// Prevents race conditions and spurious loops by synchronizing with command states and render phases.
 /// </summary>
 public sealed class InfiniteScrollBehavior : Behavior<Control>
 {
@@ -128,7 +128,7 @@ public sealed class InfiniteScrollBehavior : Behavior<Control>
 
     private void OnCommandCanExecuteChanged(object? sender, EventArgs e)
     {
-        // Проверяем скролл только после того, как Avalonia завершит фазу Layout для новых элементов
+        // Check scroll only after Avalonia completes the Layout phase for new items
         Dispatcher.UIThread.Post(CheckAndTrigger, DispatcherPriority.Loaded);
     }
 
@@ -144,7 +144,7 @@ public sealed class InfiniteScrollBehavior : Behavior<Control>
 
         double scrollableHeight = sv.Extent.Height - sv.Viewport.Height;
 
-        // Если элементы физически не заполнили даже один экран — скролла нет
+        // If items do not physically fill even a single screen, there is no scroll
         if (scrollableHeight <= 0)
             return;
 
@@ -169,7 +169,7 @@ public sealed class InfiniteScrollBehavior : Behavior<Control>
         }
         finally
         {
-            // Сбрасываем флаг только на следующем тике, давая RelayCommand обновить IsExecuting
+            // Reset the flag only on the next tick, allowing RelayCommand to update IsExecuting
             Dispatcher.UIThread.Post(() => _isExecuting = false, DispatcherPriority.Normal);
         }
     }

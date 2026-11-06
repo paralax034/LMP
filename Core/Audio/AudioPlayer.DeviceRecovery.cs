@@ -4,14 +4,14 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Восстановление playback после потери аудиоустройства.
+/// Playback recovery after audio device loss.
 /// </summary>
 public sealed partial class AudioPlayer
 {
     private const int PostDeviceRecoveryStabilizationMs = 100;
 
     /// <summary>
-    /// Callback потери устройства от pipeline.
+    /// Pipeline device loss callback.
     /// </summary>
     private void OnPipelineDeviceLost(AudioPipeline pipeline, int sessionId)
     {
@@ -23,7 +23,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Callback появления устройства от pipeline.
+    /// Pipeline device arrival callback.
     /// </summary>
     private void OnPipelineDeviceAvailable(AudioPipeline pipeline, int sessionId)
     {
@@ -34,7 +34,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Обрабатывает потерю устройства в actor loop.
+    /// Handles device loss in the actor loop.
     /// </summary>
     private Task HandleDeviceLostAsync(DeviceLostCommand cmd)
     {
@@ -52,7 +52,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Обрабатывает появление устройства в actor loop.
+    /// Handles device arrival in the actor loop.
     /// </summary>
     private async Task HandleDeviceAvailableAsync(DeviceAvailableCommand cmd)
     {
@@ -75,7 +75,7 @@ public sealed partial class AudioPlayer
     }
 
     /// <summary>
-    /// Восстанавливает playback после потери устройства.
+    /// Restores playback after device loss.
     /// </summary>
     private async Task HandleDeviceRecoveryAsync(DeviceRecoveryCommand cmd)
     {

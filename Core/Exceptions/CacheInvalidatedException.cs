@@ -1,34 +1,34 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Бросается когда файл кэша удалён, усечён или содержит повреждённые чанки.
+/// Thrown when the cache file is deleted, truncated, or contains corrupted chunks.
 /// </summary>
 /// <remarks>
 /// <para><b>Recoverable vs Fatal:</b></para>
-/// <para>Если <see cref="IsRecoverable"/> = true, <c>AudioEngine</c> выполняет
-/// автоматический retry (не более <c>MaxAutoRetries</c>) с сохранением позиции.
-/// При <c>IsRecoverable</c> = false или исчерпании retry — ошибка поднимается в UI.</para>
+/// <para>If <see cref="IsRecoverable"/> = true, <c>AudioEngine</c> performs an
+/// automatic retry (up to <c>MaxAutoRetries</c>) while preserving the position.
+/// If <c>IsRecoverable</c> = false or retries are exhausted, the error is bubbled up to the UI.</para>
 /// </remarks>
 public sealed class CacheInvalidatedException : Exception
 {
-    /// <summary>ID трека, для которого произошла ошибка.</summary>
+    /// <summary>ID of the track for which the error occurred.</summary>
     public string? TrackId { get; init; }
 
     /// <summary>
-    /// Индекс повреждённого чанка. Null если ошибка затрагивает весь файл
-    /// (например <see cref="CacheInvalidationKind.FileDeleted"/>).
+    /// Index of the corrupted chunk. Null if the error affects the entire file
+    /// (e.g. <see cref="CacheInvalidationKind.FileDeleted"/>).
     /// </summary>
     public int? ChunkIndex { get; init; }
 
-    /// <summary>Можно ли восстановиться без участия пользователя.</summary>
+    /// <summary>Indicates whether recovery is possible without user intervention.</summary>
     public bool IsRecoverable { get; init; }
 
-    /// <summary>Классификация причины инвалидации.</summary>
+    /// <summary>Classification of the invalidation cause.</summary>
     public CacheInvalidationKind Kind { get; init; }
 
     /// <summary>
-    /// Количество уже выполненных попыток auto-retry для этого трека.
-    /// Инкрементируется в <c>AudioEngine</c> перед каждым повторным запуском.
+    /// Number of auto-retry attempts already performed for this track.
+    /// Incremented in <c>AudioEngine</c> before each re-run.
     /// </summary>
     public int RetryCount { get; init; }
 
@@ -54,21 +54,21 @@ public sealed class CacheInvalidatedException : Exception
     }
 }
 
-/// <summary>Классификация причины инвалидации кэша.</summary>
+/// <summary>Classification of the cache invalidation cause.</summary>
 public enum CacheInvalidationKind
 {
-    /// <summary>Файл удалён с диска во время воспроизведения.</summary>
+    /// <summary>File was deleted from disk during playback.</summary>
     FileDeleted,
 
-    /// <summary>Файл усечён: объявленная длина больше реального размера.</summary>
+    /// <summary>File is truncated: declared length exceeds actual size.</summary>
     Truncated,
 
-    /// <summary>Short read одного чанка: данные на диске неполные.</summary>
+    /// <summary>Short read of a single chunk: data on disk is incomplete.</summary>
     ShortRead,
 
-    /// <summary>Парсер контейнера выполнял resync и достиг EOF раньше времени.</summary>
+    /// <summary>Container parser performed a resync and reached EOF prematurely.</summary>
     ParserResync,
 
-    /// <summary>Неизвестная причина.</summary>
+    /// <summary>Unknown cause.</summary>
     Unknown
 }

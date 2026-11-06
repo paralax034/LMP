@@ -19,7 +19,7 @@ public sealed class LegacyPlaylist
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     
-    // НЕТ [JsonIgnore] - будет десериализовано!
+    // NO [JsonIgnore] - will be deserialized!
     public List<string> TrackIds { get; set; } = [];
     
     /// <summary>
@@ -37,7 +37,7 @@ public sealed class LegacyPlaylist
         ETag = ETag,
         CreatedAt = CreatedAt,
         UpdatedAt = UpdatedAt
-        // ComputedColor = null — будет вычислен при первом открытии
+        // ComputedColor = null — will be calculated on first open
     };
 }
 

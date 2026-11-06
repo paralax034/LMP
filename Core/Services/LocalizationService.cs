@@ -8,10 +8,10 @@ using Avalonia.Platform;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Сервис локализации и многоязыковой поддержки приложения.
+/// Application localization and multilingual support service.
 /// <para>
-/// Оптимизирован для AOT и zero-allocation в горячих путях за счет использования <see cref="FrozenDictionary{TKey, TValue}"/>
-/// и пула кэширования отсутствующих ключей.
+/// Optimized for AOT and zero-allocation in hot paths using <see cref="FrozenDictionary{TKey, TValue}"/>
+/// and missing key caching pool.
 /// </para>
 /// </summary>
 public sealed class LocalizationService : INotifyPropertyChanged
@@ -19,12 +19,12 @@ public sealed class LocalizationService : INotifyPropertyChanged
     public static readonly LocalizationService Instance = new();
 
     /// <summary>
-    /// Неизменяемый FrozenDictionary для O(1) поиска ключей без накладных расходов синхронизации и проверок коллизий.
+    /// Immutable FrozenDictionary for O(1) key lookups without synchronization overhead or collision checks.
     /// </summary>
     private FrozenDictionary<string, string> _resources = FrozenDictionary<string, string>.Empty;
 
     /// <summary>
-    /// Пул отсутствующих маркеров ключей вида [key] для предотвращения GC-аллокаций при повторных запросах.
+    /// Pool of missing key markers formatted as [key] to prevent GC allocations on repeated requests.
     /// </summary>
     private readonly ConcurrentDictionary<string, string> _missingMarkerCache = new(StringComparer.Ordinal);
 
@@ -34,7 +34,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
     public event EventHandler<string>? LanguageChanged;
 
     /// <summary>
-    /// Возвращает список поддерживаемых языков интерфейса.
+    /// Gets the list of supported UI languages.
     /// </summary>
     public List<LanguageItem> AvailableLanguages { get; } =
     [
@@ -43,12 +43,12 @@ public sealed class LocalizationService : INotifyPropertyChanged
     ];
 
     /// <summary>
-    /// Возвращает код текущего языка интерфейса.
+    /// Gets the current UI language code.
     /// </summary>
     public string CurrentLanguageCode { get; private set; } = "en";
 
     /// <summary>
-    /// Получает или задает текущий язык приложения. При изменении триггерит перезагрузку ресурсов и событие смены языка.
+    /// Gets or sets the current application language. Triggers resource reload and language changed event on update.
     /// </summary>
     public string CurrentLanguage
     {
@@ -61,7 +61,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
                 CurrentLanguageCode = value;
                 LoadLanguage(value);
 
-                // Обновить bootstrap для быстрого старта
+                // Update bootstrap for fast startup
                 BootstrapSettings.Current.LanguageCode = value;
                 BootstrapSettings.Current.Save();
 
@@ -77,12 +77,12 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Инициализирует службу локализации выбранным кодом языка.
+    /// Initializes the localization service with the specified language code.
     /// </summary>
-    /// <param name="langCode">Код языка (например, "en" или "ru").</param>
+    /// <param name="langCode">Language code (e.g., "en" or "ru").</param>
     public void Initialize(string? langCode)
     {
-        // Не блокируем повторную инициализацию, если предыдущая попытка (например, на раннем старте) завершилась с пустым словарем
+        // Do not block re-initialization if a previous attempt (e.g., during early startup) resulted in an empty dictionary
         if (_isInitialized && _resources.Count > 0)
         {
             Log.Warn("LocalizationService already initialized");
@@ -108,7 +108,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Загружает файл локализации для указанного языка в память.
+    /// Loads the localization file for the specified language into memory.
     /// </summary>
     private void LoadLanguage(string langCode)
     {
@@ -128,11 +128,11 @@ public sealed class LocalizationService : INotifyPropertyChanged
             var rawDictionary = JsonSerializer.Deserialize(json, AppJsonContext.Default.DictionaryStringString)
                 ?? throw new InvalidOperationException("Deserialization returned null");
 
-            // Замена изменяемого Dictionary на легковесный, оптимизированный FrozenDictionary
+            // Replace mutable Dictionary with lightweight, optimized FrozenDictionary
             _resources = rawDictionary.ToFrozenDictionary(StringComparer.Ordinal);
             _missingMarkerCache.Clear();
 
-            // Синхронизация глобальных строковых ресурсов для DynamicResource в стилях и контекстных меню (AOT)
+            // Synchronize global string resources for DynamicResource in styles and context menus (AOT)
             UpdateApplicationResources();
 
             Log.Info($"✓ Loaded {langCode}.json ({_resources.Count} keys into FrozenDictionary)");
@@ -154,8 +154,8 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Экспортирует строковые ключи меню и базового интерфейса в ресурсы Application для поддержки DynamicResource.
-    /// Выполняется синхронно на UI-потоке, гарантируя доступность ключей при первичной отрисовке стилей.
+    /// Exports menu and base UI string keys to Application resources to support DynamicResource.
+    /// Runs synchronously on the UI thread, ensuring key availability during initial style rendering.
     /// </summary>
     public void UpdateApplicationResources()
     {
@@ -176,14 +176,14 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Безопасно открывает поток файла локализации.
-    /// Работает как через Avalonia AssetLoader (если фреймворк загружен), так и напрямую через файловую систему на этапе раннего запуска.
+    /// Safely opens a stream to the localization file.
+    /// Works via Avalonia AssetLoader (if framework is loaded) or directly via the file system during early startup.
     /// </summary>
     private static Stream? OpenLocalizationStream(string langCode)
     {
         var relativePath = Path.Combine("Assets", "Localization", $"{langCode}.json");
 
-        // Попытка через стандартный AssetLoader Avalonia
+        // Attempt via standard Avalonia AssetLoader
         try
         {
             var uri = new Uri($"avares://LMP/Assets/Localization/{langCode}.json");
@@ -192,16 +192,16 @@ public sealed class LocalizationService : INotifyPropertyChanged
         }
         catch
         {
-            // Avalonia ещё не сконфигурирована в Main — переходим к файловому fallback
+            // Avalonia is not yet configured in Main — falling back to file fallback
         }
 
-        // Fallback: прямой поиск файла рядом с исполняемым файлом приложения
+        // Fallback: direct file search adjacent to the application executable
         var appDir = AppContext.BaseDirectory;
         var filePath = Path.Combine(appDir, relativePath);
         if (File.Exists(filePath))
             return File.OpenRead(filePath);
 
-        // Fallback: поиск вверх по дереву папок (для режима отладки dotnet run / IDE)
+        // Fallback: search up the directory tree (for dotnet run / IDE debug mode)
         var dir = new DirectoryInfo(appDir);
         for (int i = 0; i < 4 && dir != null; i++)
         {
@@ -216,7 +216,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Получает локализованную строку по ключу. Гарантирует O(1) доступ и zero-allocation на кэшированных промахах.
+    /// Gets a localized string by key. Guarantees O(1) access and zero-allocation on cached misses.
     /// </summary>
     public string this[string key]
     {
@@ -243,15 +243,15 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Метод Get() полностью упразднён. Используйте прямой индексатор сервиса: L[key] или SL[key].
+    /// Get() method is completely deprecated. Use the service's direct indexer: L[key] or SL[key].
     /// </summary>
     [Obsolete("Метод Get() упразднён. Используйте индексатор L[key] или SL[key]. Fallbacks запрещены.", error: true)]
     [EditorBrowsable(EditorBrowsableState.Never)]
     public string Get(string key) => this[key];
 
     /// <summary>
-    /// Использование fallback-значений строго запрещено для исключения скрытого отображения неверного языка.
-    /// Добавляйте недостающие ключи напрямую в файлы локализации en.json и ru.json.
+    /// Fallback values are strictly prohibited to prevent silent display of incorrect language.
+    /// Add missing keys directly to localization files en.json and ru.json.
     /// </summary>
     [Obsolete("Fallback values are strictly forbidden to ensure missing localization keys are immediately visible.", error: true)]
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -259,7 +259,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
         throw new NotSupportedException("Fallbacks are disabled. Add the key to JSON dictionaries.");
 
     /// <summary>
-    /// Возвращает плюрализованную строку. Поддерживает CLDR категории (_one, _few, _many) и числовые суффиксы (_1, _2, _5).
+    /// Returns a pluralized string. Supports CLDR categories (_one, _few, _many) and numeric suffixes (_1, _2, _5).
     /// </summary>
     public string GetPlural(string key, int count)
     {
@@ -332,7 +332,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
 }
 
 /// <summary>
-/// Представляет элемент поддерживаемого языка в выпадающем списке.
+/// Represents a supported language item in a dropdown list.
 /// </summary>
 public sealed class LanguageItem
 {

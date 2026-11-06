@@ -16,12 +16,12 @@ public sealed partial class ToastOverlayViewModel : ViewModelBase
     public string ToastIcon => CurrentToast?.Icon ?? string.Empty;
 
     /// <summary>
-    /// Severity для конвертера в XAML.
+    /// Severity for XAML converter.
     /// </summary>
     public NotificationSeverity ToastSeverity => CurrentToast?.Severity ?? NotificationSeverity.Info;
 
     /// <summary>
-    /// Семантический цвет для акцентного значка серьезности тоста.
+    /// Semantic color for the toast severity accent badge.
     /// </summary>
     public string ToastSeverityColorHex => CurrentToast?.SeverityColorHex ?? "#8BE9FD";
 

@@ -9,16 +9,16 @@ using Avalonia.Threading;
 namespace LMP.Core.Diagnostics;
 
 /// <summary>
-/// Высокопроизводительный низкоуровневый рекордер телеметрии процесса в стиле System Informer.
-/// Использует source-generated <see cref="LibraryImportAttribute"/>, разрешает реальные Win32 стартовые адреса
-/// и имена потоков, выводит чистый ASCII-лог без спецсимволов и локализационного мусора.
+/// High-performance low-level process telemetry recorder in the style of System Informer.
+/// Uses source-generated <see cref="LibraryImportAttribute"/>, resolves real Win32 start addresses
+/// and thread names, and outputs a clean ASCII log without special characters or localization bloat.
 /// </summary>
 public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 {
     private const int PollIntervalMs = 1_000;
     private const int HeartbeatEveryTicks = 15;
 
-    // Пороги срабатывания детектора аномалий (Spike Detector)
+    // Spike Detector threshold triggers
     private const double SpikeCpuPercentThreshold = 15.0;
     private const double SpikeUiLatencyMsThreshold = 35.0;
     private const double SpikeAllocMbPerSecThreshold = 12.0;
@@ -40,7 +40,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     private readonly int _processorCount;
     private volatile bool _disposed;
 
-    // Кэш состояния предыдущего тика для расчёта дельт (Zero-Alloc)
+    // Previous tick state cache for delta calculations (Zero-Alloc)
     private const int MaxTrackedThreads = 256;
     private readonly uint[] _prevThreadIds = new uint[MaxTrackedThreads];
     private readonly ulong[] _prevThreadCycles = new ulong[MaxTrackedThreads];
@@ -51,7 +51,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
     private readonly ThreadDeltaEntry[] _threadSortBuffer = new ThreadDeltaEntry[MaxTrackedThreads];
 
-    // Кэш загруженных модулей (DLL/EXE) для мгновенного маппинга адреса в Module+0xOffset
+    // Loaded modules cache (DLL/EXE) for instant mapping of addresses to Module+0xOffset
     private const int MaxCachedModules = 160;
     private readonly nuint[] _moduleBases = new nuint[MaxCachedModules];
     private readonly uint[] _moduleSizes = new uint[MaxCachedModules];
@@ -59,12 +59,12 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     private int _moduleCount;
     private long _lastModuleRefreshTick;
 
-    // Кэш разрешенных имен и стартовых адресов потоков (TID -> строка "Module+0xOffset (ThreadName)")
+    // Cache of resolved thread names and start addresses (TID -> string "Module+0xOffset (ThreadName)")
     private readonly uint[] _threadIdentityTids = new uint[MaxTrackedThreads];
     private readonly string[] _threadIdentityLabels = new string[MaxTrackedThreads];
     private int _threadIdentityCount;
 
-    // Предыдущие метрики уровня процесса
+    // Previous process-level metrics
     private long _prevSampleTimestamp;
     private long _prevKernelTime100Ns;
     private long _prevUserTime100Ns;
@@ -89,26 +89,26 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     private long _uiPingEndTimestamp;
 
     /// <summary>
-    /// Глобальный флаг активности рекордера телеметрии.
+    /// Global activity flag for the telemetry recorder.
     /// </summary>
     public static bool IsEnabled { get; private set; }
 
-    // Avalonia привязывает Dispatcher.UIThread к первому обратившемуся потоку: пинг из рекордера до AppBuilder.Setup
-    // присвоил бы диспетчер ему, и Win32Platform.Initialize на STA-потоке Main упал бы в VerifyAccess
+    // Avalonia binds Dispatcher.UIThread to the first calling thread: pinging from the recorder before AppBuilder.Setup
+    // would assign the dispatcher to it, causing Win32Platform.Initialize on the STA Main thread to fail in VerifyAccess
     private static volatile bool _uiDispatcherReady;
 
     /// <summary>
-    /// Разрешает замер отклика UI. Вызывается из запущенного цикла UI-потока после инициализации платформы Avalonia.
+    /// Enables UI responsiveness measurement. Called from the running UI thread loop after Avalonia platform initialization.
     /// </summary>
     public static void MarkUiDispatcherReady() => _uiDispatcherReady = true;
 
     /// <summary>
-    /// Путь к текущему файлу детальной телеметрии.
+    /// Path to the current detailed telemetry file.
     /// </summary>
     public string TelemetryFilePath => _telemetryFilePath;
 
     /// <summary>
-    /// Включает или выключает глобальный экземпляр рекордера телеметрии.
+    /// Enables or disables the global telemetry recorder instance.
     /// </summary>
     public static void SetEnabled(bool enabled, string? logDirectory = null)
     {
@@ -134,12 +134,12 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     }
 
     /// <summary>
-    /// Останавливает глобальный экземпляр при завершении приложения.
+    /// Stops the global instance upon application shutdown.
     /// </summary>
     public static void ShutdownGlobal() => SetEnabled(false);
 
     /// <summary>
-    /// Инициализирует новый экземпляр <see cref="ProcessFlightRecorder"/>.
+    /// Initializes a new instance of <see cref="ProcessFlightRecorder"/>.
     /// </summary>
     public ProcessFlightRecorder(string? dumpDirectory = null)
     {
@@ -160,7 +160,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     }
 
     /// <summary>
-    /// Запускает фоновый поток сбора телеметрии.
+    /// Starts the background telemetry collection thread.
     /// </summary>
     public void Start()
     {
@@ -225,7 +225,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
     private double MeasureUiPingLatencyMs()
     {
-        // Флаг читается без обращения к Dispatcher.UIThread: даже CheckAccess() создал бы диспетчер на этом потоке
+        // Flag is read without accessing Dispatcher.UIThread: even calling CheckAccess() would create a dispatcher on this thread
         if (!_hasBaseline || !_uiDispatcherReady)
             return 0.0;
 
@@ -378,7 +378,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         ulong totalCtxSwitches = 0;
         int activeDeltaThreadsCount = 0;
 
-        // Временный стек-буфер под текущие циклы потоков, чтобы не вызывать OpenThread дважды за тик
+        // Temporary stack buffer for current thread cycles to avoid calling OpenThread twice per tick
         ulong* currentThreadCycles = stackalloc ulong[threadCount];
 
         for (int i = 0; i < threadCount; i++)
@@ -430,7 +430,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             }
         }
 
-        // Обновляем baseline потоков без повторных системных вызовов
+        // Update thread baselines without repeated system calls
         _prevThreadCount = threadCount;
         for (int i = 0; i < threadCount; i++)
         {
@@ -762,8 +762,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     }
 
     /// <summary>
-    /// Разрешает реальный Win32 стартовый адрес потока через <c>NtQueryInformationThread(ThreadQuerySetWin32StartAddress)</c>
-    /// и имя потока через <c>GetThreadDescription</c> (как делает System Informer). Кэширует результат по TID.
+    /// Resolves the actual Win32 thread start address via <c>NtQueryInformationThread(ThreadQuerySetWin32StartAddress)</c>
+    /// and thread name via <c>GetThreadDescription</c> (similar to System Informer). Caches the result by TID.
     /// </summary>
     private string ResolveThreadIdentity(uint tid, nuint fallbackAddress)
     {
@@ -838,7 +838,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     }
 
     /// <summary>
-    /// Форматирует большое целое число с разделителем '_' (например, 3_029_007_875) без пробелов и локалей.
+    /// Formats a large integer using '_' as a separator (e.g., 3_029_007_875) without spaces or locale-specific formatting.
     /// </summary>
     private static string FormatGrouped(ulong value)
     {

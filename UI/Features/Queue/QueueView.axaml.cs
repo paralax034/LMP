@@ -21,8 +21,8 @@ public partial class QueueView : UserControl
     {
         base.OnPropertyChanged(change);
 
-        // В PersistentPageHost страницы постоянно смонтированы с IsVisible=true.
-        // Переход на страницу детектируется по активации IsHitTestVisible (свойство InputElement).
+        // In PersistentPageHost, pages are permanently mounted with IsVisible=true.
+        // Page navigation is detected by the activation of IsHitTestVisible (an InputElement property).
         if ((change.Property == IsHitTestVisibleProperty || change.Property == IsVisibleProperty)
             && change.GetNewValue<bool>())
         {

@@ -6,7 +6,7 @@ using System.Text.Json;
 using LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Обеспечивает централизованный высокопроизводительный парсинг данных YouTube.
+/// Provides centralized high-performance parsing of YouTube data.
 /// </summary>
 internal static class YoutubeParsingHelpers
 {
@@ -27,11 +27,11 @@ internal static class YoutubeParsingHelpers
     public static readonly CultureInfo EnCulture = CultureInfo.GetCultureInfo("en-US");
 
     /// <summary>
-    /// Склеивает текст из массива runs без LINQ и без промежуточных коллекций в куче.
-    /// Использует string.Create для прямой записи в память строки и пул массивов для ссылок.
+    /// Concatenates text from a runs array without LINQ or intermediate heap collections.
+    /// Uses string.Create for direct memory writing and ArrayPool for references.
     /// </summary>
-    /// <param name="runsElement">JSON-элемент массива runs или null.</param>
-    /// <returns>Склеенный текст или null.</returns>
+    /// <param name="runsElement">JSON element of the runs array or null.</param>
+    /// <returns>Concatenated text or null.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string? ConcatTextRuns(JsonElement? runsElement)
     {
@@ -79,7 +79,7 @@ internal static class YoutubeParsingHelpers
     }
 
     /// <summary>
-    /// Проверяет, представляет ли переданная строка относительную дату английского API InnerTube.
+    /// Determines whether the specified string represents a relative date from the English InnerTube API.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsRelativeDate(ReadOnlySpan<char> span)
@@ -94,14 +94,14 @@ internal static class YoutubeParsingHelpers
     }
 
     /// <summary>
-    /// Проверяет, представляет ли переданная строка относительную дату английского API InnerTube.
+    /// Determines whether the specified string represents a relative date from the English InnerTube API.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsRelativeDate(string? text) =>
         !string.IsNullOrEmpty(text) && IsRelativeDate(text.AsSpan());
 
     /// <summary>
-    /// Выполняет детерминированный разбор английской относительной даты InnerTube без выделения памяти в куче.
+    /// Performs deterministic allocation-free parsing of an English InnerTube relative date.
     /// </summary>
     public static DateOnly? ParseRelativeDate(ReadOnlySpan<char> span, DateTime nowUtc)
     {

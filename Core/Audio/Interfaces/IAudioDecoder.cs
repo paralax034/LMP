@@ -1,54 +1,54 @@
 namespace LMP.Core.Audio.Interfaces;
 
 /// <summary>
-/// Декодер сжатого аудио в PCM.
+/// Compressed audio to PCM decoder.
 /// </summary>
 public interface IAudioDecoder : IDisposable
 {
     /// <summary>
-    /// Декодирует сжатый фрейм в PCM float32.
+    /// Decodes a compressed frame to float32 PCM.
     /// </summary>
-    /// <param name="encodedData">Сжатые данные (один фрейм)</param>
-    /// <param name="outputBuffer">Выходной буфер (float32, interleaved)</param>
-    /// <returns>Количество семплов на канал</returns>
+    /// <param name="encodedData">Compressed data (single frame)</param>
+    /// <param name="outputBuffer">Output buffer (float32, interleaved)</param>
+    /// <returns>Number of samples per channel</returns>
     int Decode(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer);
 
     /// <summary>
-    /// Декодирует со сбросом состояния (после seek).
+    /// Decodes with a state reset (after a seek operation).
     /// </summary>
     /// <remarks>
-    /// <para>Сохранён как совместимый high-level API для прямого использования декодера.</para>
-    /// <para>В основном playback pipeline предпочтителен одноразовый вызов
-    /// <see cref="FlushState"/> перед декодированием warm-up skip-фреймов и
-    /// последующие вызовы <see cref="Decode"/>, чтобы не выполнять специальный
-    /// seek-reset path на горячем участке первого пропускаемого фрейма.</para>
+    /// <para>Retained as a compatible high-level API for direct decoder usage.</para>
+    /// <para>In the main playback pipeline, a single call to
+    /// <see cref="FlushState"/> prior to decoding warm-up skip frames and
+    /// subsequent calls to <see cref="Decode"/> are preferred to avoid executing
+    /// the special seek-reset path on the hot path of the first skipped frame.</para>
     /// </remarks>
     int DecodeWithReset(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer);
 
     /// <summary>
-    /// Выполняет лёгкий сброс внутреннего состояния декодера без полного пересоздания.
+    /// Performs a light reset of the internal decoder state without full recreation.
     /// </summary>
     /// <remarks>
-    /// <para>Метод используется при seek для одноразовой очистки decoder state
-    /// перед декодированием и отбрасыванием warm-up skip-фреймов.</para>
-    /// <para>Реализация зависит от кодека: AAC делает реальный soft flush внутренних
-    /// буферов, Opus может быть intentional no-op, если библиотека декодирования
-    /// не предоставляет безопасного промежуточного flush без hard reset.</para>
+    /// <para>This method is used during seek operations for a one-time clear of the decoder state
+    /// prior to decoding and discarding warm-up skip frames.</para>
+    /// <para>The implementation depends on the codec: AAC performs an actual soft flush of internal
+    /// buffers, while Opus may be an intentional no-op if the decoding library
+    /// does not provide a safe intermediate flush without a hard reset.</para>
     /// </remarks>
     void FlushState();
 
-    /// <summary>Частота дискретизации</summary>
+    /// <summary>Sample rate</summary>
     int SampleRate { get; }
 
-    /// <summary>Количество каналов</summary>
+    /// <summary>Channel count</summary>
     int Channels { get; }
 
-    /// <summary>Максимальный размер выходного буфера в семплах на канал</summary>
+    /// <summary>Maximum output buffer size in samples per channel</summary>
     int MaxFrameSize { get; }
 
-    /// <summary>Тип кодека</summary>
+    /// <summary>Codec type</summary>
     AudioCodec Codec { get; }
 
-    /// <summary>Инициализирован ли декодер</summary>
+    /// <summary>Indicates whether the decoder is initialized</summary>
     bool IsInitialized { get; }
 }

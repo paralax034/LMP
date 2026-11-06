@@ -3,9 +3,9 @@ using System.Buffers;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Непрерывный буфер чтения сетевых потоков на базе <see cref="ArrayPool{T}"/>.
-/// Позволяет выкачивать ответ сетевого сокета целиком в пул памяти без аллокаций в LOH (Large Object Heap)
-/// и обеспечивает непрерывный буфер для <see cref="System.Text.Json.Utf8JsonReader"/> с флагом isFinalBlock: true.
+/// Contiguous network stream read buffer backed by <see cref="ArrayPool{T}"/>.
+/// Allows dumping an entire network socket response into a memory pool without LOH (Large Object Heap) allocations
+/// and provides a contiguous buffer for <see cref="System.Text.Json.Utf8JsonReader"/> with isFinalBlock: true.
 /// </summary>
 internal sealed class InnerTubeStreamBuffer : IDisposable
 {
@@ -17,9 +17,9 @@ internal sealed class InnerTubeStreamBuffer : IDisposable
     private bool _isDisposed;
 
     /// <summary>
-    /// Инициализирует буфер с арендой начального сегмента памяти из <see cref="ArrayPool{T}.Shared"/>.
+    /// Initializes the buffer by renting an initial memory segment from <see cref="ArrayPool{T}.Shared"/>.
     /// </summary>
-    /// <param name="initialCapacity">Начальная ёмкость буфера в байтах.</param>
+    /// <param name="initialCapacity">Initial buffer capacity in bytes.</param>
     public InnerTubeStreamBuffer(int initialCapacity = DefaultInitialCapacity)
     {
         _buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
@@ -27,22 +27,22 @@ internal sealed class InnerTubeStreamBuffer : IDisposable
     }
 
     /// <summary>
-    /// Непрерывный срез валидных байт, вычитанных из сетевого потока.
+    /// Contiguous slice of valid bytes read from the network stream.
     /// </summary>
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _validBytes);
 
     /// <summary>
-    /// Непрерывный сегмент памяти валидных байт, вычитанных из сетевого потока.
+    /// Contiguous memory segment of valid bytes read from the network stream.
     /// </summary>
     public ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, _validBytes);
 
     /// <summary>
-    /// Считывает весь сетевой поток в арендованный буфер из пула памяти.
-    /// При необходимости буфер динамически расширяется с переарендой из пула.
+    /// Reads the entire network stream into a rented buffer from the memory pool.
+    /// Expands the buffer dynamically via re-renting from the pool if necessary.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <exception cref="InvalidOperationException">Выбрасывается, если размер ответа превышает максимально допустимый предел.</exception>
+    /// <param name="stream">HTTP response network stream.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <exception cref="InvalidOperationException">Thrown if the response size exceeds the maximum allowed limit.</exception>
     public async ValueTask ReadAllAsync(Stream stream, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);

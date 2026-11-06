@@ -7,24 +7,24 @@ using TokenExtensions = LMP.Core.Helpers.Extensions.CancellationTokenExtensions;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Бенчмарки пропускной способности аудио-тракта с обязательной проверкой 0 B аллокаций
-/// и многопоточный стресс-тест целостности кольцевого буфера.
+/// Audio pipeline throughput benchmarks with mandatory zero-allocation verification (0 B)
+/// and a multithreaded ring buffer integrity stress test.
 /// </summary>
 public static class AudioHotPathBenchmarks
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
-    private const int BufferSamples = SampleRate / 10 * Channels; // 100 мс stereo
+    private const int BufferSamples = SampleRate / 10 * Channels; // 100 ms stereo
     private const int WarmupIterations = 50;
     private const int MeasureIterations = 20_000;
     private const int AllocCheckIterations = 200;
 
-    /// <summary>Число раундов замера; нечётное, чтобы медиана была ровно средним элементом.</summary>
+    /// <summary>Number of measurement rounds; odd so that the median is exactly the middle element.</summary>
     private const int MeasureRounds = 5;
 
     /// <summary>
-    /// Минимальная длительность прогрева. Счёт вызовов для перехода на оптимизированный уровень JIT стартует
-    /// лишь после 100 мс без новой компиляции, затем код пересобирается в фоне: 50 вызовов не успевают дойти до Tier1.
+    /// Minimum warmup duration. Call count tracking for Tier 1 JIT optimization starts
+    /// only after 100 ms with no new compilation, after which the code is recompiled in the background: 50 calls cannot reach Tier 1.
     /// </summary>
     private static readonly TimeSpan WarmupDuration = TimeSpan.FromMilliseconds(250);
 
@@ -36,7 +36,7 @@ public static class AudioHotPathBenchmarks
 
     private static BenchmarkResult RunBenchmark(string name, Action action, int iterations = MeasureIterations)
     {
-        // Прогрев по времени, а не по числу вызовов: замер обязан начаться уже на оптимизированном коде
+        // Warmup by time, not call count: measurement must start on optimized code
         long warmupStart = Stopwatch.GetTimestamp();
         int warmed = 0;
         while (warmed < WarmupIterations || Stopwatch.GetElapsedTime(warmupStart) < WarmupDuration)
@@ -62,9 +62,9 @@ public static class AudioHotPathBenchmarks
     }
 
     /// <summary>
-    /// Измеряет операцию, публикует результат в лог и проверяет отсутствие управляемых аллокаций.
-    /// Тайминги только логируются: пороги по времени нестабильны на общем десктопе.
-    /// В лог идёт медиана раундов и их разброс: большой разброс помечает замер как недостоверный.
+    /// Measures an operation, logs the result, and verifies zero managed allocations.
+    /// Timings are only logged: time thresholds are unstable on shared desktop environments.
+    /// Logs the median of rounds and their variance: high variance flags the measurement as inconclusive.
     /// </summary>
     private static void MeasureZeroAlloc(string name, Action action, int iterations = MeasureIterations)
     {
@@ -82,11 +82,11 @@ public static class AudioHotPathBenchmarks
     }
 
     /// <summary>
-    /// Помечает бенчмарк неубедительным (Skipped), если тайминги процесса не отражают релизный кодоген.
+    /// Marks the benchmark as inconclusive (Skipped) if process timings do not reflect release codegen.
     /// </summary>
     internal static void SkipIfUnoptimizedCodegen()
     {
-        // Инкрементальная сборка не перекомпилирует сборку при смене одного Optimize, отсюда --no-incremental
+        // Incremental build does not recompile the assembly when changing Optimize alone, hence --no-incremental
         string? reason = DescribeUnoptimizedCodegen();
         if (reason != null)
             TestAssert.Skip($"Inconclusive: {reason}. Re-run after 'dotnet build -c Debug -p:Optimize=true --no-incremental' without a debugger.");
@@ -112,7 +112,7 @@ public static class AudioHotPathBenchmarks
         Attribute.GetCustomAttribute(assembly, typeof(DebuggableAttribute)) is DebuggableAttribute { IsJITOptimizerDisabled: true };
 
     /// <summary>
-    /// Шапка прогона бенчмарков: записывает в лог среду измерений и помечает прогон неубедительным, если кодоген не релизный.
+    /// Benchmark run header: logs the measurement environment and marks the run as inconclusive if codegen is non-release.
     /// </summary>
     [TestMethod(TestCategory.Benchmark, "Benchmark Environment Header",
         Group = TestGroups.Audio, Order = 0)]
@@ -136,7 +136,7 @@ public static class AudioHotPathBenchmarks
     }
 
     /// <summary>
-    /// Пропускная способность DSP-цепочки на реальном (не затухающем) сигнале с гарантией 0 B на каждую операцию.
+    /// DSP pipeline throughput on a real (non-decaying) signal with a guaranteed 0 B per operation.
     /// </summary>
     [TestMethod(TestCategory.Benchmark, "DSP & RingBuffer Throughput Suite",
         Group = TestGroups.Audio, Order = 1, TimeoutSeconds = 60)]
@@ -145,8 +145,8 @@ public static class AudioHotPathBenchmarks
         float[] sourceData = CreateSineBuffer(BufferSamples);
         float[] workBuffer = new float[BufferSamples];
 
-        // In-place обработка одного буфера с gain 0.75 за ~360 итераций уводит сигнал в денормалы и ноль,
-        // поэтому каждая итерация начинается с копии исходного синуса
+        // In-place processing of a single buffer with 0.75 gain causes signal denormalization and zeroing within ~360 iterations,
+        // so each iteration starts with a copy of the original sine wave
         var gainProcessor = new GainProcessor();
         gainProcessor.SetVolumeGain(0.75f);
         for (int i = 0; i < 3000; i++)
@@ -199,14 +199,14 @@ public static class AudioHotPathBenchmarks
     }
 
     /// <summary>
-    /// SPSC-стресс: производитель пишет монотонную последовательность, потребитель проверяет порядок и отсутствие потерь.
+    /// SPSC stress test: producer writes a monotonic sequence, consumer verifies ordering and zero data loss.
     /// </summary>
     [TestMethod(TestCategory.Integration, "RingBuffer SPSC Concurrency Stress",
         Group = TestGroups.Audio, Order = 2, TimeoutSeconds = 30)]
     public static async Task TestRingBufferContentionStressAsync()
     {
-        const int totalSamples = SampleRate * Channels; // 1 секунда stereo; значения < 2^24 точно представимы во float
-        const int chunkSize = SampleRate * Channels * 20 / 1000; // 20 мс чанк
+        const int totalSamples = SampleRate * Channels; // 1 second stereo; values < 2^24 are exactly representable in float
+        const int chunkSize = SampleRate * Channels * 20 / 1000; // 20 ms chunk
 
         using var ring = new LockFreeRingBuffer<float>(chunkSize * 16);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -249,7 +249,7 @@ public static class AudioHotPathBenchmarks
             {
                 if (consumerChunk[i] != expected)
                 {
-                    // Останавливаем производителя до выхода из теста, чтобы он не пережил using cts/ring
+                    // Stop the producer before exiting the test so it does not outlive using cts/ring
                     cts.Cancel();
                     TestAssert.Fail($"SPSC order violated at sample {expected}: got {consumerChunk[i]}");
                 }

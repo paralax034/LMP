@@ -11,123 +11,123 @@ namespace LMP.Core.Audio.Http;
 // Public Models
 
 /// <summary>
-/// Один вариант аудиопотока внутри закэшированного манифеста.
+/// A single audio stream variant inside a cached manifest.
 /// </summary>
 [MemoryPackable]
 public sealed partial class VariantEntry
 {
-    /// <summary>YouTube itag потока.</summary>
+    /// <summary>YouTube stream itag.</summary>
     public int Itag { get; set; }
 
-    /// <summary>Полный videoplayback URL.</summary>
+    /// <summary>Full videoplayback URL.</summary>
     public required string Url { get; set; }
 
-    /// <summary>Контейнер (webm, mp4).</summary>
+    /// <summary>Container (webm, mp4).</summary>
     public string Container { get; set; } = "";
 
-    /// <summary>Кодек (opus, aac).</summary>
+    /// <summary>Codec (opus, aac).</summary>
     public string Codec { get; set; } = "";
 
-    /// <summary>Битрейт в bps.</summary>
+    /// <summary>Bitrate in bps.</summary>
     public int Bitrate { get; set; }
 
-    /// <summary>Размер контента в байтах.</summary>
+    /// <summary>Content length in bytes.</summary>
     public long Clen { get; set; }
 
     /// <summary>
-    /// Типизированный формат контейнера.
-    /// Не сериализуется и вычисляется из <see cref="Container"/>.
+    /// Typed container format.
+    /// Not serialized and computed from <see cref="Container"/>.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public AudioFormat Format => YoutubeIdHelper.MapContainerToFormat(Container);
 
     /// <summary>
-    /// Типизированный аудиокодек.
-    /// Не сериализуется и вычисляется из <see cref="Codec"/>.
+    /// Typed audio codec.
+    /// Not serialized and computed from <see cref="Codec"/>.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public AudioCodec CodecType => Codec.ToAudioCodec(Format);
 
-    /// <summary>Код языка аудиодорожки.</summary>
+    /// <summary>Audio track language code.</summary>
     public string? LanguageCode { get; set; }
 
-    /// <summary>Язык по умолчанию.</summary>
+    /// <summary>Default language flag.</summary>
     public bool IsDefaultLanguage { get; set; }
 }
 
 /// <summary>
-/// Закэшированный полный манифест для одного трека.
-/// Содержит все доступные аудио-варианты с живыми URL.
+/// A cached full manifest for a single track.
+/// Contains all available audio variants with live URLs.
 /// </summary>
 [MemoryPackable]
 public sealed partial class TrackManifestEntry
 {
-    /// <summary>Идентификатор трека (с префиксом yt_).</summary>
+    /// <summary>Track identifier (with yt_ prefix).</summary>
     public required string TrackId { get; set; }
 
-    /// <summary>CDN hostname первого варианта.</summary>
+    /// <summary>CDN hostname of the first variant.</summary>
     public string CdnHost { get; set; } = "";
 
     /// <summary>
-    /// Время истечения URL (из &amp;expire= первого варианта, UTC).
-    /// Используется как hint для probe-bypass, но НЕ как жёсткий TTL.
-    /// Реальная инвалидация — по HTTP 403/410 при probe.
+    /// URL expiration time (from &amp;expire= of the first variant, UTC).
+    /// Used as a hint for probe-bypass, but NOT as a hard TTL.
+    /// Real invalidation occurs on HTTP 403/410 during probe.
     /// </summary>
     public DateTime ExpireUtc { get; set; }
 
     /// <summary>
-    /// Track-level integrated loudness в LUFS из YouTube <c>perceptualLoudnessDb</c>.
+    /// Track-level integrated loudness in LUFS from YouTube <c>perceptualLoudnessDb</c>.
     /// </summary>
     [JsonConverter(typeof(NaNFloatJsonConverter))]
     public float IntegratedLufs { get; set; } = float.NaN;
 
-    /// <summary>Все доступные аудио-варианты.</summary>
+    /// <summary>All available audio variants.</summary>
     public List<VariantEntry> Variants { get; set; } = [];
 
-    /// <summary>Время записи в кэш (UTC).</summary>
+    /// <summary>Time recorded to cache (UTC).</summary>
     public DateTime SavedAtUtc { get; set; }
 }
 
 /// <summary>
-/// Конверт JSON-файла session-кэша.
+/// Wrapper envelope for the session cache JSON file.
 /// </summary>
 [MemoryPackable]
 public sealed partial class SessionCacheEnvelope
 {
-    /// <summary>Закэшированные манифесты (LRU, max записей).</summary>
+    /// <summary>Cached manifests (LRU, max entries).</summary>
     public List<TrackManifestEntry> Manifests { get; set; } = [];
 
-    /// <summary>Время последней очистки (UTC).</summary>
+    /// <summary>Last cleanup time (UTC).</summary>
     public DateTime LastCleanupUtc { get; set; }
 }
 
 // Store
 
 /// <summary>
-/// Персистентный дисковый кэш полных YouTube аудио-манифестов.
+/// Persistent disk cache for full YouTube audio manifests.
 /// <para>
-/// <b>Архитектура «храним пока работает»:</b>
+/// <b>"Keep while it works" architecture:</b>
 /// </para>
 /// <list type="number">
 ///   <item>
-///     После каждого успешного YouTube API resolve вызывается <see cref="RecordManifest"/>
-///     для сохранения <b>всех</b> аудио-вариантов (URL, itag, codec, bitrate, loudness).
+///     After every successful YouTube API resolve, <see cref="RecordManifest"/> is called
+///     to persist <b>all</b> audio variants (URL, itag, codec, bitrate, loudness).
 ///   </item>
 ///   <item>
-///     При следующем воспроизведении <see cref="TryGetManifestAndProbeAsync"/>
-///     проверяет наличие записи и делает HTTP HEAD к одному из URL.
-///     Если CDN отвечает 200/206 — YouTube API call пропускается полностью.
+///     On subsequent playback, <see cref="TryGetManifestAndProbeAsync"/>
+///     checks for entry existence and issues an HTTP HEAD to one of the URLs.
+///     If the CDN responds with 200/206, the YouTube API call is bypassed completely.
 ///   </item>
 ///   <item>
-///     При HTTP 403/410 запись инвалидируется целиком — все варианты
-///     получены в одном API call и протухают одновременно.
+///     On HTTP 403/410, the entry is invalidated entirely — all variants
+///     were fetched in a single API call and expire simultaneously.
 ///   </item>
 /// </list>
 /// <para>
-/// <b>Экономия сети:</b> Один manifest fetch обслуживает playback, quality switch
-/// И UI quality menu без дополнительных запросов — как в RAM, так и после рестарта приложения.
+/// <b>Network savings:</b> A single manifest fetch serves playback, quality switch,
+/// AND the UI quality menu without extra requests — both in RAM and after app restart.
 /// </para>
 /// </summary>
 internal static class SessionCacheStore
@@ -151,7 +151,7 @@ internal static class SessionCacheStore
     // Load / Save
 
     /// <summary>
-    /// Загружает session-кэш с диска. Вызывается однократно при старте.
+    /// Loads the session cache from disk. Called once at startup.
     /// </summary>
     public static void Load()
     {
@@ -200,7 +200,7 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Изолированная миграция манифестов из legacy JSON в бинарный MemoryPack.
+    /// Isolated migration of manifests from legacy JSON to binary MemoryPack.
     /// </summary>
     private static void MigrateLegacyJsonIfPresent(string legacyJsonPath)
     {
@@ -242,7 +242,7 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Сохраняет session-кэш на диск.
+    /// Saves the session cache to disk.
     /// </summary>
     public static void Save()
     {
@@ -283,11 +283,11 @@ internal static class SessionCacheStore
     // Record
 
     /// <summary>
-    /// Сохраняет полный манифест после успешного YouTube API resolve.
-    /// Заменяет предыдущую запись для этого трека целиком.
+    /// Saves a full manifest after a successful YouTube API resolve.
+    /// Replaces the previous entry for this track entirely.
     /// </summary>
-    /// <param name="trackId">ID трека (с префиксом yt_).</param>
-    /// <param name="streams">Все аудио-варианты из манифеста.</param>
+    /// <param name="trackId">Track ID (with yt_ prefix).</param>
+    /// <param name="streams">All audio variants from the manifest.</param>
     public static void RecordManifest(
          string trackId,
          IReadOnlyList<AudioOnlyStreamInfo> streams,
@@ -298,7 +298,7 @@ internal static class SessionCacheStore
 
         string firstUrl = streams[0].Url;
 
-        // Свежий ответ player API: параметр ip его URL — внешний адрес, с которого YouTube видит клиента.
+        // Fresh player API response: the ip parameter of its URL is the public address YouTube sees the client from.
         StreamUrlEgressGuard.Shared.ObserveFreshUrl(firstUrl);
 
         if (!TryExtractCdnHost(firstUrl, out var cdnHost))
@@ -366,22 +366,22 @@ internal static class SessionCacheStore
     // Probe
 
     /// <summary>
-    /// Пытается получить и проверить закэшированный манифест для трека.
+    /// Tries to get and validate a cached manifest for a track.
     /// <para>
-    /// Алгоритм:
+    /// Algorithm:
     /// </para>
     /// <list type="number">
-    ///   <item>Поиск записи по <paramref name="trackId"/>.</item>
-    ///   <item>Проверка отметки <see cref="TrackManifestEntry.ExpireUtc"/> (мгновенный сброс без сетевого вызова).</item>
-    ///   <item>Если запись свежая (saved &lt; 10 мин назад) — bypass без probe.</item>
-    ///   <item>HTTP HEAD к первому URL с адаптивным timeout.</item>
-    ///   <item>200/206 → возвращает entry. 403/404/410 → дропает запись.</item>
+    ///   <item>Find entry by <paramref name="trackId"/>.</item>
+    ///   <item>Check <see cref="TrackManifestEntry.ExpireUtc"/> timestamp (instant purge without a network call).</item>
+    ///   <item>If the entry is fresh (saved &lt; 10 min ago) — bypass without probe.</item>
+    ///   <item>HTTP HEAD to the first URL with adaptive timeout.</item>
+    ///   <item>200/206 → returns entry. 403/404/410 → drops entry.</item>
     /// </list>
     /// </summary>
-    /// <param name="trackId">ID трека.</param>
-    /// <param name="httpClient">HTTP-клиент.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Валидная запись или null.</returns>
+    /// <param name="trackId">Track ID.</param>
+    /// <param name="httpClient">HTTP client.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A valid entry or null.</returns>
     public static async ValueTask<TrackManifestEntry?> TryGetManifestAndProbeAsync(
         string trackId,
         HttpClient httpClient,
@@ -398,8 +398,8 @@ internal static class SessionCacheStore
             if (entry is null || entry.Variants.Count == 0)
                 return null;
 
-            // Если CDN-хост манифеста уже заблокирован ТСПУ (в CdnBlacklist),
-            // немедленно сбрасываем кэш и не делаем bypass — нужен свежий API resolve с другим хостом
+            // If the manifest's CDN host is already blocked by TSPU (in CdnBlacklist),
+            // drop the cache immediately and do not bypass — a fresh API resolve with a different host is required
             if (!string.IsNullOrEmpty(entry.CdnHost) && AudioSourceFactory.CdnBlacklist.IsBlocked(entry.CdnHost))
             {
                 Log.Warn($"[SessionCache] Manifest CDN host '{entry.CdnHost}' is blacklisted. Dropping cached manifest for {trackId}.");
@@ -407,7 +407,7 @@ internal static class SessionCacheStore
                 return null;
             }
 
-            // Мгновенная инвалидация без выполнения сетевого зонда, если срок жизни ссылки истек
+            // Instant invalidation without performing a network probe if the link has expired
             if (entry.ExpireUtc <= DateTime.UtcNow)
             {
                 Log.Debug($"[SessionCache] ExpireUtc passed for {trackId}, dropping manifest without probe");
@@ -474,10 +474,10 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Удаляет запись, чьи URL выданы для другого внешнего IP (смена узла VPN или сети). Вызывается под lock.
+    /// Removes an entry whose URLs were issued for a different public IP (VPN node or network change). Called under lock.
     /// </summary>
-    /// <param name="entry">Проверяемая запись.</param>
-    /// <returns><c>true</c>, если запись удалена.</returns>
+    /// <param name="entry">The entry to check.</param>
+    /// <returns><c>true</c> if the entry was removed.</returns>
     private static bool DropIfForeignEgressMustHoldLock(TrackManifestEntry entry)
     {
         if (entry.Variants.Count == 0)
@@ -495,8 +495,8 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Возвращает закэшированную запись манифеста без probe (для локального чтения).
-    /// Запись с URL, выданными для другого внешнего IP, удаляется: CDN отверг бы их с HTTP 403.
+    /// Returns a cached manifest entry without probing (for local reads).
+    /// An entry with URLs issued for a different public IP is removed: the CDN would reject them with HTTP 403.
     /// </summary>
     public static TrackManifestEntry? GetManifest(string trackId)
     {
@@ -508,8 +508,8 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Возвращает снимок всех trackId из текущего кэша.
-    /// Используется диагностическими тестами для probe всех известных стримов.
+    /// Returns a snapshot of all trackIds in the current cache.
+    /// Used by diagnostic tests to probe all known streams.
     /// </summary>
     internal static IReadOnlyList<string> GetAllCachedTrackIds()
     {
@@ -527,7 +527,7 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Инвалидирует запись для трека (после фатальной 403 или force refresh).
+    /// Invalidates an entry for a track (after fatal 403 or force refresh).
     /// </summary>
     public static void Invalidate(string trackId)
     {
@@ -541,9 +541,9 @@ internal static class SessionCacheStore
     // Private Helpers
 
     /// <summary>
-    /// Возвращает индекс записи по trackId. Вызывается под lock.
+    /// Returns the record index by trackId. Called under lock.
     /// </summary>
-    /// <returns>Индекс или -1 если не найдено.</returns>
+    /// <returns>Index or -1 if not found.</returns>
     private static int FindIndexMustHoldLock(string trackId)
     {
         for (int i = 0; i < _data.Manifests.Count; i++)
@@ -570,7 +570,7 @@ internal static class SessionCacheStore
     }
 
     /// <summary>
-    /// Суммирует количество вариантов по всем манифестам. Вызывается под lock.
+    /// Sums the number of variants across all manifests. Called under lock.
     /// </summary>
     private static int CountTotalVariants()
     {

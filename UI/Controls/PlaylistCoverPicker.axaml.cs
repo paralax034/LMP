@@ -3,8 +3,8 @@ using Avalonia.Controls;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Контрол выбора обложки плейлиста из обложек треков.
-/// Показывает виртуализированную сетку и превью мозаики.
+/// A control for selecting a playlist cover from track covers.
+/// Displays a virtualized grid and a mosaic preview.
 /// </summary>
 public partial class PlaylistCoverPicker : UserControl
 {

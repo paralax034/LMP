@@ -9,8 +9,8 @@ using LMP.UI.Features.Shared;
 using LMP.UI.Services;
 
 /// <summary>
-/// Адаптер виртуализированного списка с поддержкой кольцевого пула ViewModel
-/// и хранением состояния выбора по стабильным идентификаторам треков (исключает фантомы).
+/// Virtualized list adapter with ViewModel ring pool support
+/// and selection state retention by stable track IDs (prevents phantom items).
 /// </summary>
 public sealed class VirtualTrackList : IVirtualTrackList
 {
@@ -61,7 +61,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
     }
 
     /// <summary>
-    /// Возвращает или материализует модель представления трека для указанного визуального индекса из пула.
+    /// Returns or materializes the track view model for the specified visual index from the pool.
     /// </summary>
     public TrackItemViewModel this[int visualIndex]
     {
@@ -127,7 +127,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
     }
 
     /// <summary>
-    /// Инициализирует список новой коллекцией с сохранением выбранных треков за O(S).
+    /// Initializes the list with a new collection, preserving selected tracks in O(S) time.
     /// </summary>
     public void SetTracks(IEnumerable<TrackInfo> tracks, IReadOnlyList<string>? explicitOrder = null,
         bool preserveSelection = false)
@@ -194,7 +194,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
     }
 
     /// <summary>
-    /// Перемещает элемент визуального порядка с биективным сохранением ключей активных ViewModel.
+    /// Moves a visual order item with bijective key preservation for active ViewModels.
     /// </summary>
     public void MoveTrack(int oldVisualIndex, int newVisualIndex)
     {
@@ -291,7 +291,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
     }
 
     /// <summary>
-    /// Удаляет трек из мастер-индекса со сдвигом ключей пула активных моделей.
+    /// Removes a track from the master index while shifting keys in the active model pool.
     /// </summary>
     public bool RemoveTrack(string trackId)
     {

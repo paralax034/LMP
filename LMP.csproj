@@ -1,16 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <!-- Версии пакетов задаются централизованно в Directory.Packages.props -->
+    <!-- Package versions are specified centrally in Directory.Packages.props -->
 
-    <!--   ОСНОВНЫЕ НАСТРОЙКИ       -->
+    <!--   MAIN SETTINGS            -->
     <PropertyGroup Label="Core Settings">
-        <!-- В Release — без консольного окна, в Debug — с консолью для логов -->
+        <!-- In Release — no console window; in Debug — with console for logs -->
         <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
         <OutputType Condition="'$(Configuration)' == 'Debug'">Exe</OutputType>
 
         <!--
-          net11.0 — preview (GA ожидается ноябрь 2026).
-          Осознанный выбор: Runtime Async без EnablePreviewFeatures, JIT-улучшения.
+          net11.0 — preview (GA expected November 2026).
+          Conscious choice: Runtime Async without EnablePreviewFeatures, JIT improvements.
         -->
         <TargetFramework>net11.0</TargetFramework>
         <Nullable>enable</Nullable>
@@ -20,60 +20,60 @@
         <RootNamespace>LMP</RootNamespace>
         <AssemblyName>LMP</AssemblyName>
 
-        <!-- Исключаем папки субпроектов из корневого проекта на уровне файловой системы .NET -->
+        <!-- Exclude subproject folders from the root project at the .NET file system level -->
         <DefaultItemExcludes>$(DefaultItemExcludes);Core/**;SharpJaad.AAC/**;Tools/**</DefaultItemExcludes>
 
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <ApplicationIcon>Assets/app.ico</ApplicationIcon>
 
-        <!-- Компилируемые биндинги по умолчанию: быстрее + проверка типов на этапе сборки -->
+        <!-- Compiled bindings by default: faster + compile-time type checking -->
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 
-        <!-- Нужно для низкоуровневых аудио-операций (PCM-буферы, нативный interop) -->
+        <!-- Required for low-level audio operations (PCM buffers, native interop) -->
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-        <!-- Подавляет IL20xx/IL30xx ошибки при AOT-анализе -->
+        <!-- Suppresses IL20xx/IL30xx warnings/errors during AOT analysis -->
         <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
         <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
         <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
     </PropertyGroup>
 
-    <!--   ОПТИМИЗАЦИЯ ПАМЯТИ / JIT -->
+    <!--   MEMORY / JIT OPTIMIZATION -->
     <PropertyGroup Label="Runtime Tuning">
         <!--
-          Workstation GC: меньше потребление RAM, лучше отзывчивость UI.
-          Server GC предназначен для серверных сценариев — нам не нужен.
+          Workstation GC: lower RAM consumption, better UI responsiveness.
+          Server GC is intended for server scenarios — not needed here.
         -->
         <ServerGarbageCollection>false</ServerGarbageCollection>
 
-        <!-- Background (Concurrent) GC: сборка мусора не блокирует UI-поток -->
+        <!-- Background (Concurrent) GC: garbage collection does not block the UI thread -->
         <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
 
         <!--
-          Отдаём память ОС после GC-цикла.
-          Для медиа-приложений с большими кэшами изображений/аудио — правильный выбор.
+          Return memory to the OS after a GC cycle.
+          Correct choice for media apps with large image/audio caches.
         -->
         <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
 
         <!--
           Tiered Compilation + Dynamic PGO:
-          - Быстрый старт (QuickJit для "холодного" кода)
-          - Авто-оптимизация горячих путей на лету (TieredPGO)
+          - Fast startup (QuickJit for "cold" code)
+          - On-the-fly auto-optimization of hot paths (TieredPGO)
         -->
         <TieredCompilation>true</TieredCompilation>
         <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
         <TieredPGO>true</TieredPGO>
     </PropertyGroup>
 
-    <!--   DEBUG КОНФИГУРАЦИЯ       -->
+    <!--   DEBUG CONFIGURATION      -->
     <PropertyGroup Label="Debug" Condition="'$(Configuration)' == 'Debug'">
-        <!-- Встроенные PDB + исходники: шаговая отладка без внешних файлов -->
+        <!-- Embedded PDBs + sources: step-by-step debugging without external files -->
         <DebugType>embedded</DebugType>
         <EmbedAllSources>true</EmbedAllSources>
         <Optimize>false</Optimize>
     </PropertyGroup>
 
-    <!--   RELEASE & AOT КОНФИГУРАЦИЯ     -->
+    <!--   RELEASE & AOT CONFIGURATION    -->
     <PropertyGroup Label="Release" Condition="'$(Configuration)' == 'Release'">
         <DebugType Condition="'$(EmitAotPdb)' != 'true'">none</DebugType>
         <DebugType Condition="'$(EmitAotPdb)' == 'true'">pdbonly</DebugType>
@@ -83,22 +83,22 @@
 
         <DefaultItemExcludes>$(DefaultItemExcludes);UI/Features/Debug/**;Tests/**</DefaultItemExcludes>
 
-        <!-- Native AOT и полный тримминг скомпилированного машинного кода -->
+        <!-- Native AOT and full trimming of compiled machine code -->
         <PublishAot>true</PublishAot>
         <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
         <PublishTrimmed>true</PublishTrimmed>
         <TrimMode>full</TrimMode>
         <TrimmerRootDescriptor>trimming.xml</TrimmerRootDescriptor>
 
-        <!-- Строго отключаем рефлексивный fallback для System.Text.Json -->
+        <!-- Strictly disable reflection fallback for System.Text.Json -->
         <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
 
-        <!-- Оптимизации компилятора ILC для Native AOT -->
+        <!-- ILC compiler optimizations for Native AOT -->
         <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
         <IlcFoldIdenticalMethodBodies Condition="'$(EmitAotPdb)' != 'true'">true</IlcFoldIdenticalMethodBodies>
     </PropertyGroup>
 
-    <!-- Конфигурация рантайма для Native AOT (заменяет runtimeconfig.template.json) -->
+    <!-- Runtime configuration for Native AOT (replaces runtimeconfig.template.json) -->
     <ItemGroup Label="Runtime Host Configuration">
         <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="8"/>
     </ItemGroup>
@@ -154,7 +154,7 @@
         <ProjectReference Include="Core/LMP.Core.csproj"/>
     </ItemGroup>
 
-    <!-- Генератор реестра тестов: только анализатор, в выходную сборку не попадает. Release тесты не собирает -->
+    <!-- Test registry generator: analyzer only, not included in the output assembly. Does not build Release tests -->
     <ItemGroup Label="Test Registry Generator" Condition="'$(Configuration)' != 'Release'">
         <ProjectReference Include="Tools/LMP.Tests.Generator/LMP.Tests.Generator.csproj"
                           OutputItemType="Analyzer"

@@ -7,18 +7,18 @@ using static LMP.Core.Audio.AudioConstants;
 namespace LMP.Core.Audio.Sources;
 
 /// <summary>
-/// Источник для локальных аудио файлов (полностью закэшированных или скачанных).
+/// Source for local audio files (fully cached or downloaded).
 /// 
-/// <para><b>Характеристики:</b></para>
+/// <para><b>Characteristics:</b></para>
 /// <list type="bullet">
-///   <item>Всегда fully buffered (BufferProgress = 100%)</item>
-///   <item>Seek через точки контейнера (Cluster/moof), без линейной интерполяции</item>
-///   <item>Поддерживает WebM/Opus, MP4/AAC, Ogg/Opus</item>
+///   <item>Always fully buffered (BufferProgress = 100%)</item>
+///   <item>Seek via container points (Cluster/moof), without linear interpolation</item>
+///   <item>Supports WebM/Opus, MP4/AAC, Ogg/Opus</item>
 /// </list>
 /// 
-/// <para><b>Потокобезопасность:</b></para>
-/// <c>ReadFrameAsync</c> и <c>SeekAsync</c> НЕ потокобезопасны между собой.
-/// Вызывающий код (<see cref="AudioPipeline"/>) гарантирует последовательный доступ:
+/// <para><b>Thread Safety:</b></para>
+/// <c>ReadFrameAsync</c> and <c>SeekAsync</c> are NOT thread-safe with respect to each other.
+/// The calling code (<see cref="AudioPipeline"/>) guarantees sequential access:
 /// <c>StopDecoding → Seek → StartDecoding</c>.
 /// </summary>
 public sealed class LocalFileSource : IAudioSource
@@ -39,17 +39,17 @@ public sealed class LocalFileSource : IAudioSource
     private bool _leaseAcquired;
 
     /// <summary>
-    /// Создаёт источник из локального файла.
+    /// Creates a source from a local file.
     /// </summary>
-    /// <param name="filePath">Путь к аудио файлу.</param>
-    /// <param name="expectedSize">Ожидаемый размер файла в байтах.</param>
-    /// <param name="trackId">Идентификатор трека (если файл открыт из кэша).</param>
+    /// <param name="filePath">Path to the audio file.</param>
+    /// <param name="expectedSize">Expected file size in bytes.</param>
+    /// <param name="trackId">Track identifier (if the file is opened from cache).</param>
     /// <param name="cacheManager">
-    /// Менеджер кэша для lease tracking.
-    /// <c>null</c> для файлов вне cache (пользовательские downloads).
+    /// Cache manager for lease tracking.
+    /// <c>null</c> for files outside cache (user downloads).
     /// </param>
     /// <param name="cacheKey">
-    /// Ключ кэша для lease. Обязателен если <paramref name="cacheManager"/> не <c>null</c>.
+    /// Cache key for lease. Required if <paramref name="cacheManager"/> is not <c>null</c>.
     /// </param>
     public LocalFileSource(
         string filePath,
@@ -83,11 +83,11 @@ public sealed class LocalFileSource : IAudioSource
     public AudioCodec Codec { get; private set; } = AudioCodec.Unknown;
 
     /// <inheritdoc/>
-    /// <remarks>Всегда 100% — файл полностью доступен.</remarks>
+    /// <remarks>Always 100% — the file is fully available.</remarks>
     public double BufferProgress => FullBufferProgressPercent;
 
     /// <inheritdoc/>
-    /// <remarks>Всегда true — файл полностью доступен.</remarks>
+    /// <remarks>Always true — the file is fully available.</remarks>
     public bool IsFullyBuffered => true;
 
     /// <inheritdoc/>
@@ -100,11 +100,11 @@ public sealed class LocalFileSource : IAudioSource
     public int Channels => _parser?.Channels ?? UnknownChannels;
 
     /// <summary>
-    /// Парсер контейнера. Доступен для диагностики (resync detection).
+    /// Container parser. Exposed for diagnostics (resync detection).
     /// </summary>
     internal IContainerParser? Parser => _parser;
 
-    /// <summary>Абсолютный путь к файлу на диске.</summary>
+    /// <summary>Absolute path to the file on disk.</summary>
     public string FilePath => _filePath;
 
     #endregion
@@ -165,9 +165,9 @@ public sealed class LocalFileSource : IAudioSource
     }
 
     /// <summary>
-    /// Определяет формат контейнера по magic bytes, с fallback на расширение файла.
-    /// Буфер арендуется из <see cref="System.Buffers.ArrayPool{T}.Shared"/>
-    /// для избежания heap-аллокации при инициализации.
+    /// Detects the container format by magic bytes, falling back to file extension.
+    /// The buffer is rented from <see cref="System.Buffers.ArrayPool{T}.Shared"/>
+    /// to avoid heap allocations during initialization.
     /// </summary>
     private async Task<AudioFormat> DetectFormatAsync(CancellationToken ct)
     {
@@ -196,7 +196,7 @@ public sealed class LocalFileSource : IAudioSource
             System.Buffers.ArrayPool<byte>.Shared.Return(header);
         }
 
-        // Fallback на расширение
+        // Fallback to extension
         return Path.GetExtension(_filePath).ToLowerInvariant() switch
         {
             ".webm" => AudioFormat.WebM,
@@ -208,7 +208,7 @@ public sealed class LocalFileSource : IAudioSource
     }
 
     /// <summary>
-    /// Создаёт парсер контейнера.
+    /// Creates a container parser.
     /// </summary>
     private IContainerParser CreateParser(AudioFormat format) => format switch
     {
@@ -223,8 +223,8 @@ public sealed class LocalFileSource : IAudioSource
 
     /// <inheritdoc/>
     /// <remarks>
-    /// <para><b>Surgical Cache Repair:</b> при обнаружении коррупции в файле кэша
-    /// выполняется точечная range-based инвалидация повреждённого сегмента на диске.</para>
+    /// <para><b>Surgical Cache Repair:</b> when corruption is detected in a cache file,
+    /// precise range-based invalidation of the damaged on-disk segment is executed.</para>
     /// </remarks>
     public ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default)
     {
@@ -257,7 +257,7 @@ public sealed class LocalFileSource : IAudioSource
     }
 
     /// <summary>
-    /// Асинхронный путь чтения фрейма при промахе синхронного буфера парсера.
+    /// Async frame reading path on parser synchronous buffer miss.
     /// </summary>
     private async ValueTask<AudioFrame?> ReadFrameSlowAsync(
         ValueTask<AudioFrame?> pendingRead,
@@ -277,7 +277,7 @@ public sealed class LocalFileSource : IAudioSource
     }
 
     /// <summary>
-    /// Медленный путь восстановления после ошибки структуры контейнера (Surgical Cache Repair / Resync).
+    /// Slow recovery path after container structure error (Surgical Cache Repair / Resync).
     /// </summary>
     private async ValueTask<AudioFrame?> HealAndReadFrameSlowAsync(
         ParserCorruptionException initialEx,
@@ -345,9 +345,9 @@ public sealed class LocalFileSource : IAudioSource
     }
 
     /// <summary>
-    /// Определяет байтовое выравнивание для точечной инвалидации и resync fallback.
+    /// Determines byte alignment for fine-grained invalidation and resync fallback.
     /// </summary>
-    /// <returns>Размер выровненного диапазона в байтах.</returns>
+    /// <returns>Aligned range size in bytes.</returns>
     private int ResolveRepairAlignmentBytes()
     {
         if (!string.IsNullOrEmpty(_trackId))
@@ -391,15 +391,15 @@ public sealed class LocalFileSource : IAudioSource
     #region Buffer Info (No-op for local files)
 
     /// <inheritdoc/>
-    /// <remarks>Всегда возвращает полный диапазон [0, 1].</remarks>
+    /// <remarks>Always returns the full range [0, 1].</remarks>
     public IReadOnlyList<(double Start, double End)> GetBufferedRanges() => FullBufferedRanges;
 
     /// <inheritdoc/>
-    /// <remarks>No-op — нет RAM буферов для локальных файлов.</remarks>
+    /// <remarks>No-op — no RAM buffers for local files.</remarks>
     public void ReleaseRamBuffers() { }
 
     /// <inheritdoc/>
-    /// <remarks>No-op — нет фоновых операций для локальных файлов.</remarks>
+    /// <remarks>No-op — no background operations for local files.</remarks>
     public void CancelPendingOperations() { }
 
     /// <inheritdoc/>

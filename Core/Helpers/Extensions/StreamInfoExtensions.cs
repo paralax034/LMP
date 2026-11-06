@@ -3,16 +3,16 @@ using LMP.Core.Youtube.Videos.Streams;
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Методы расширения для метаданных медиапотоков <see cref="IStreamInfo"/>.
+/// Extension methods for <see cref="IStreamInfo"/> media stream metadata.
 /// </summary>
 public static class StreamInfoExtensions
 {
     extension<T>(IEnumerable<T> streamInfos) where T : IStreamInfo
     {
         /// <summary>
-        /// Возвращает поток с максимальным битрейтом или <see langword="null"/>, если коллекция пуста.
+        /// Returns the stream with the highest bitrate, or <see langword="null"/> if the collection is empty.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="streamInfos"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="streamInfos"/> is null.</exception>
         public T? TryGetWithHighestBitrate()
         {
             ArgumentNullException.ThrowIfNull(streamInfos);
@@ -20,10 +20,10 @@ public static class StreamInfoExtensions
         }
 
         /// <summary>
-        /// Возвращает поток с максимальным битрейтом.
+        /// Returns the stream with the highest bitrate.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="streamInfos"/> равен null.</exception>
-        /// <exception cref="InvalidOperationException">Если коллекция пуста.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="streamInfos"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">If the collection is empty.</exception>
         public T GetWithHighestBitrate()
         {
             ArgumentNullException.ThrowIfNull(streamInfos);

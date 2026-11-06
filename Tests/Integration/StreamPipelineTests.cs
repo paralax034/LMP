@@ -9,8 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Интеграционные тесты конвейера потокового аудио: получение манифеста, дешифрация ссылок,
-/// скачивание чанков данных и валидация сроков жизни URL.
+/// Integration tests for the streaming audio pipeline: manifest retrieval, link decryption,
+/// downloading data chunks, and URL lifetime validation.
 /// </summary>
 public static class StreamPipelineTests
 {
@@ -175,7 +175,7 @@ public static class StreamPipelineTests
     }
 
     /// <summary>
-    /// Внутренняя проверка всех аудио-потоков манифеста для заданного <paramref name="videoId"/>.
+    /// Internal check of all manifest audio streams for the specified <paramref name="videoId"/>.
     /// </summary>
     public static async Task TestFullPipelineInternalAsync(
         IServiceProvider services, string videoId = "dQw4w9WgXcQ", CancellationToken ct = default)

@@ -1,12 +1,12 @@
 <Project>
   <!--
-    Central Package Management: единый источник версий пакетов для всех проектов решения.
-    SkiaSharp и SQLitePCLRaw намеренно не перечислены: их версии приходят транзитивно
-    (через Avalonia.Skia и Microsoft.Data.Sqlite) и остаются согласованными с этими пакетами.
+    Central Package Management: single source of truth for package versions across all solution projects.
+    SkiaSharp and SQLitePCLRaw are intentionally omitted: their versions are transitively restored
+    (via Avalonia.Skia and Microsoft.Data.Sqlite) and remain synchronized with these packages.
   -->
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <!-- Пакеты семейства Avalonia обновляются только синхронно -->
+    <!-- Avalonia packages must only be updated synchronously -->
     <AvaloniaVersion>12.1.5</AvaloniaVersion>
   </PropertyGroup>
 

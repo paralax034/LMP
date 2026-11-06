@@ -33,7 +33,7 @@
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
-        <!-- Статусные интерактивные чипсы -->
+        <!-- Interactive status chips -->
         <Style Selector="Button.status-chip">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="1" />
@@ -68,8 +68,8 @@
             <Setter Property="FontWeight" Value="Bold" />
         </Style>
 
-        <!-- Строка теста: полное отключение BrushTransition для исключения грязного мигания цветов
-        через альфа-канал -->
+        <!-- Test row: complete disable of BrushTransition to prevent dirty color flashing
+        via the alpha channel -->
         <Style Selector="Button.test-item-row">
             <Setter Property="Height" Value="32" />
             <Setter Property="Background" Value="Transparent" />
@@ -137,7 +137,7 @@
             <Grid RowDefinitions="Auto,Auto,Auto,2,*,Auto" DataContext="{Binding TestRunner}"
                 x:DataType="vm:TestRunnerViewModel">
 
-                <!-- Row 0: Главная панель запуска и категории -->
+                <!-- Row 0: Main launcher panel and categories -->
                 <Border Grid.Row="0"
                     BorderBrush="{DynamicResource BgHighlightBrush}"
                     BorderThickness="0,0,0,1"
@@ -219,7 +219,7 @@
                             </Button>
                         </StackPanel>
 
-                        <!-- Поиск и конфигурация -->
+                        <!-- Search and configuration -->
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
                             <Border BorderBrush="{DynamicResource BgHighlightBrush}"
                                 BorderThickness="1"
@@ -255,7 +255,7 @@
                     </Grid>
                 </Border>
 
-                <!-- Row 1: Группы с динамическими счётчиками -->
+                <!-- Row 1: Groups with dynamic counters -->
                 <Border Grid.Row="1"
                     BorderBrush="{DynamicResource BgHighlightBrush}"
                     BorderThickness="0,0,0,1"
@@ -299,7 +299,7 @@
                     </ScrollViewer>
                 </Border>
 
-                <!-- Row 2: Быстрые интерактивные фильтры по статусу -->
+                <!-- Row 2: Quick interactive status filters -->
                 <Border Grid.Row="2"
                     BorderBrush="{DynamicResource BgHighlightBrush}"
                     BorderThickness="0,0,0,1"
@@ -361,7 +361,7 @@
                     </Grid>
                 </Border>
 
-                <!-- Row 3: Прогресс -->
+                <!-- Row 3: Progress -->
                 <ProgressBar Grid.Row="3"
                     Value="{Binding Progress}"
                     Maximum="100"
@@ -371,7 +371,7 @@
                     Background="Transparent"
                     Foreground="{DynamicResource AccentBrush}" />
 
-                <!-- Row 4: Список тестов на всю ширину рабочей области -->
+                <!-- Row 4: Test list spanning full width of workspace -->
                 <Border Grid.Row="4" Margin="12,8"
                     BorderBrush="{DynamicResource BgHighlightBrush}"
                     BorderThickness="1"
@@ -387,8 +387,8 @@
                             </ir:ItemsRepeater.Layout>
                             <ir:ItemsRepeater.ItemTemplate>
                                 <DataTemplate x:DataType="vm:TestItemViewModel">
-                                    <!-- Строка теста без дублирующей иконки Play (треугольника)
-                                    слева -->
+                                    <!-- Test row without a duplicate Play icon (triangle)
+                                    on the left -->
                                     <Button Classes="test-item-row"
                                         Classes.is-passed="{Binding IsPassed}"
                                         Classes.is-failed="{Binding IsFailed}"
@@ -464,7 +464,7 @@
                     </ScrollViewer>
                 </Border>
 
-                <!-- Row 5: Статус-бар -->
+                <!-- Row 5: Status bar -->
                 <Border Grid.Row="5"
                     BorderBrush="{DynamicResource BgHighlightBrush}"
                     BorderThickness="0,1,0,0"

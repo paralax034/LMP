@@ -4,8 +4,8 @@ using System.Threading.Channels;
 namespace LMP.Core.Logger;
 
 /// <summary>
-/// Асинхронный процессор логов с буферизацией и batch-записью.
-/// Использует bounded channel для back-pressure при высокой нагрузке.
+/// Asynchronous log processor with buffering and batch writing.
+/// Uses a bounded channel for back-pressure under heavy load.
 /// </summary>
 public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
 {
@@ -16,22 +16,22 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
     private readonly string _currentLogFile;
 
     /// <summary>
-    /// Максимальный размер очереди. При переполнении старые сообщения отбрасываются.
-    /// 5000 сообщений ≈ 500KB в памяти при среднем размере 100 байт.
+    /// Maximum queue size. When full, oldest messages are dropped.
+    /// 5000 messages ≈ 500KB in memory at an average size of 100 bytes.
     /// </summary>
     private const int MAX_BUFFER_SIZE = 5000;
     
     /// <summary>
-    /// Размер batch для записи. Снижает количество syscall'ов.
+    /// Batch size for writing. Reduces the number of syscalls.
     /// </summary>
     private const int BATCH_SIZE = 50;
 
     /// <summary>
-    /// Создаёт процессор логов с указанной папкой для хранения.
+    /// Creates a log processor with the specified storage directory.
     /// </summary>
     /// <param name="logDirectory">
-    /// Полный путь к папке логов. Папка будет создана если не существует.
-    /// Если null — используется fallback в папку приложения.
+    /// Full path to the log directory. The directory will be created if it does not exist.
+    /// If null, falls back to the application directory.
     /// </param>
     public AsyncLogProcessor(string? logDirectory = null)
     {
@@ -65,13 +65,13 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
     }
 
 #if DEBUG
-    /// <summary>Полный путь к файлу лога текущего запуска.</summary>
+    /// <summary>Full path to the current run's log file.</summary>
     public string LogFilePath => _currentLogFile;
 #endif
 
     /// <summary>
-    /// Добавляет сообщение в очередь. Неблокирующий вызов.
-    /// При переполнении очереди старые сообщения отбрасываются.
+    /// Enqueues a message. Non-blocking call.
+    /// When the queue overflows, oldest messages are dropped.
     /// </summary>
     public void Enqueue(LogMessage message)
     {
@@ -79,7 +79,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Основной worker loop. Читает batch сообщений и пишет в файл.
+    /// Main worker loop. Reads a batch of messages and writes them to the file.
     /// </summary>
     private async Task ProcessQueueAsync()
     {
@@ -95,7 +95,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
 
         var buffer = new List<LogMessage>(BATCH_SIZE);
         
-        // Единственный переиспользуемый StringBuilder для сборки всей строки лога (Zero-Alloc в steady state)
+        // Single reusable StringBuilder for assembling the entire log line (zero-alloc in steady state)
         var sb = new StringBuilder(512);
 
         while (!_cts.Token.IsCancellationRequested)
@@ -116,13 +116,13 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
                         FormatLog(sb, log);
 
 #if DEBUG
-                        // В Debug выводим в консоль с цветами, если зеркалирование не отключено headless-раннером тестов
+                        // In Debug, output to console with colors unless mirroring is disabled by a headless test runner
                         if (Log.ConsoleOutputEnabled)
                         {
                             WriteToConsole(log, sb.ToString());
                         }
 #endif
-                        // Запись StringBuilder напрямую в StreamWriter без промежуточной аллокации ToString()
+                        // Writing StringBuilder directly to StreamWriter without intermediate ToString() allocation
                         await sw.WriteAsync(sb).ConfigureAwait(false);
                     }
 
@@ -140,7 +140,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
             }
         }
 
-        // Финальный drain — записываем всё что осталось в очереди
+        // Final drain — write everything remaining in the queue
         while (_channel.Reader.TryRead(out var msg))
         {
             sb.Clear();
@@ -159,7 +159,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
 
 #if DEBUG
     /// <summary>
-    /// Цветной вывод в консоль для Debug-сборок.
+    /// Colored console output for Debug builds.
     /// </summary>
     private static void WriteToConsole(LogMessage log, string formattedLine)
     {
@@ -182,13 +182,13 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
 #endif
 
     /// <summary>
-    /// Форматирует лог-сообщение в StringBuilder без аллокаций.
+    /// Formats a log message into a StringBuilder without allocations.
     /// </summary>
     private static void FormatLog(StringBuilder sb, LogMessage log)
     {
         sb.Append('[');
         
-        // Zero-alloc форматирование даты на стеке
+        // Zero-alloc stack-based date formatting
         Span<char> timeBuffer = stackalloc char[12];
         if (log.Timestamp.ToLocalTime().TryFormat(timeBuffer, out int charsWritten, "HH:mm:ss.fff"))
         {
@@ -215,7 +215,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Короткие строки уровней для компактности лога.
+    /// Short level strings for compact log output.
     /// </summary>
     private static string GetLevelString(LogLevel level) => level switch
     {
@@ -229,7 +229,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
     };
 
     /// <summary>
-    /// Асинхронное освобождение ресурсов. Дожидается записи всех сообщений.
+    /// Asynchronous resource disposal. Waits for all pending messages to be written.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -242,14 +242,14 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
         } 
         catch (OperationCanceledException) 
         { 
-            // Ожидаемо при отмене
+            // Expected on cancellation
         }
         
         _cts.Dispose();
     }
 
     /// <summary>
-    /// Синхронное освобождение. Блокирует до завершения записи без риска взаимной блокировки.
+    /// Synchronous disposal. Blocks until writing completes without deadlock risk.
     /// </summary>
     public void Dispose()
     {
@@ -262,7 +262,7 @@ public sealed class AsyncLogProcessor : IDisposable, IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            // Ожидаемо
+            // Expected
         }
 
         _cts.Dispose();

@@ -6,14 +6,14 @@ using SlidingRamCache = LMP.Core.Audio.Sources.CachingStreamSource.SlidingRamCac
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Контрактные тесты <see cref="CachingStreamSource.AsyncCachingReadStream"/> и <see cref="SlidingRamCache"/>:
-/// отмена и утилизация не маскируются под EOF, RAM-хит не аллоцирует.
+/// Contract tests for <see cref="CachingStreamSource.AsyncCachingReadStream"/> and <see cref="SlidingRamCache"/>:
+/// cancellation and disposal are not masked as EOF, RAM hit does not allocate.
 /// </summary>
 public static class CachingReadStreamContractTests
 {
     private const int ContentLength = 4096;
 
-    /// <summary>Прямой доступ к RAM-кэшу источника без рефлексии, совместимый с AOT.</summary>
+    /// <summary>Direct access to the source's RAM cache without reflection, compatible with AOT.</summary>
     [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_ramCache")]
     private static extern ref SlidingRamCache SourceRamCache(CachingStreamSource source);
 
@@ -26,11 +26,11 @@ public static class CachingReadStreamContractTests
     }
 
     /// <summary>
-    /// Доказывает P1: ReadAsync возвращает 0 (EOF по контракту Stream) при отмене и утилизации источника,
-    /// хотя позиция далека от конца; Mp4BinaryReader превращает это в пустой заголовок,
-    /// а Fragment.cs — в ParserCorruptionException.
-    /// Синхронный Read подчиняется тому же контракту: RAM-хит отдаёт данные и продвигает позицию,
-    /// а утилизация бросает ObjectDisposedException вместо ложного EOF.
+    /// Proves P1: ReadAsync returns 0 (EOF per Stream contract) upon cancellation and source disposal,
+    /// even though position is far from the end; Mp4BinaryReader turns this into an empty header,
+    /// and Fragment.cs into a ParserCorruptionException.
+    /// Synchronous Read follows the same contract: RAM hit returns data and advances position,
+    /// while disposal throws ObjectDisposedException instead of false EOF.
     /// </summary>
     [TestMethod(TestCategory.Unit, "AsyncCachingReadStream Cancel & Dispose Are Not EOF", Group = TestGroups.Audio, Order = 24)]
     public static async Task TestReadAsyncCancellationIsNotEndOfStreamAsync()
@@ -41,7 +41,7 @@ public static class CachingReadStreamContractTests
             Directory.CreateDirectory(tempDir);
             using var cacheManager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 16);
 
-            // Конструктор без побочных эффектов: Init/Preload не запускаются, сеть не используется
+            // Side-effect-free constructor: Init/Preload are not executed, network is not used
             var source = new CachingStreamSource(
                 cacheKey: "test_read_contract",
                 trackId: "yt_read_contract",
@@ -57,7 +57,7 @@ public static class CachingReadStreamContractTests
 
             try
             {
-                // 1. Отменённый внешний токен на позиции 0 из 4096: ожидается OperationCanceledException, а не EOF
+                // 1. Canceled outer token at position 0 of 4096: OperationCanceledException expected, not EOF
                 using (var cts = new CancellationTokenSource())
                 {
                     cts.Cancel();
@@ -67,7 +67,7 @@ public static class CachingReadStreamContractTests
                     TestAssert.Equal(0L, stream.Position, "Canceled read must not advance position");
                 }
 
-                // 2. Синхронный RAM-хит отдаёт данные и продвигает позицию через CAS
+                // 2. Synchronous RAM hit yields data and advances position via CAS
                 byte[] payload = new byte[2048];
                 for (int i = 0; i < payload.Length; i++)
                     payload[i] = (byte)(i * 3);
@@ -79,13 +79,13 @@ public static class CachingReadStreamContractTests
                 TestAssert.True(buffer.AsSpan().SequenceEqual(payload.AsSpan(0, buffer.Length)),
                     "Sync RAM hit must copy bytes from position 0");
 
-                // 3. Утилизированный источник: ожидается ObjectDisposedException, а не EOF
+                // 3. Disposed source: ObjectDisposedException expected, not EOF
                 source.Dispose();
                 var disposedOutcome = await ReadOutcomeAsync(stream, buffer, CancellationToken.None).ConfigureAwait(false);
                 TestAssert.Equal(ReadOutcome.Disposed, disposedOutcome,
                     $"ReadAsync on a disposed source must throw ObjectDisposedException, got {disposedOutcome}");
 
-                // 4. Синхронный Read на утилизированном источнике подчиняется тому же контракту
+                // 4. Synchronous Read on a disposed source follows the same contract
                 var syncDisposedOutcome = SyncReadOutcome(stream, buffer);
                 TestAssert.Equal(ReadOutcome.Disposed, syncDisposedOutcome,
                     $"Sync Read on a disposed source must throw ObjectDisposedException, got {syncDisposedOutcome}");
@@ -103,8 +103,8 @@ public static class CachingReadStreamContractTests
     }
 
     /// <summary>
-    /// Честное покрытие горячего пути RAM-хита (взамен HotPathAllocationTests Order 13):
-    /// TryRead и TryReadSpan внутри блока и на стыке блоков — 0 B.
+    /// Proper coverage for the RAM hit hot path (replacing HotPathAllocationTests Order 13):
+    /// TryRead and TryReadSpan inside a block and across block boundaries — 0 B.
     /// </summary>
     [TestMethod(TestCategory.Unit, "SlidingRamCache RAM Hit TryRead/TryReadSpan (0 Alloc)", Group = TestGroups.Audio, Order = 25)]
     public static Task TestSlidingRamCacheHitZeroAllocAsync()
@@ -125,7 +125,7 @@ public static class CachingReadStreamContractTests
 
         TestAssert.ZeroAlloc(() =>
         {
-            // Чтение внутри блока и на стыке: второе ограничено остатком первого блока
+            // Intra-block and cross-boundary read: the second is constrained by the remainder of the first block
             if (!cache.TryRead(0, destinationMemory, out int inside) || inside != destination.Length)
                 TestAssert.Fail("TryRead must serve a full in-block read");
             if (!cache.TryReadSpan(edgeOffset, destination, out int edge) || edge != 6)

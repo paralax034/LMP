@@ -33,7 +33,7 @@
                     FontWeight="SemiBold" FontSize="14"
                     Foreground="{DynamicResource TextSecondaryBrush}" />
 
-                <!-- Реакция на критические ошибки -->
+                <!-- Reaction to critical errors -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
                         <TextBlock Classes="label" Text="{Binding L[Settings_ErrorBehavior]}" />
@@ -45,7 +45,7 @@
                         MinWidth="280" />
                 </Grid>
 
-                <!-- Автоматическое действие после ошибки -->
+                <!-- Automatic post-error action -->
                 <Grid ColumnDefinitions="*, Auto"
                     IsEnabled="{Binding IsPlaybackFailureActionEnabled}">
                     <StackPanel>
@@ -60,7 +60,7 @@
                         MinWidth="280" />
                 </Grid>
 
-                <!-- Звуковой сигнал ошибки -->
+                <!-- Error sound signal -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
                         <TextBlock Classes="label" Text="{Binding L[Settings_PlayErrorSound]}" />
@@ -69,7 +69,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding PlayErrorSound}" />
                 </Grid>
 
-                <!-- Предупреждение о дешифровке n-токена -->
+                <!-- Warning about n-token decryption -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
                         <TextBlock Classes="label"
@@ -83,7 +83,7 @@
                         MinWidth="280" />
                 </Grid>
 
-                <!-- Пропуск треков со сложным n-токеном -->
+                <!-- Skip tracks with complex n-token -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
                         <TextBlock Classes="label" Text="{Binding L[Settings_SkipNToken]}" />

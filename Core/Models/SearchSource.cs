@@ -1,22 +1,22 @@
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Источник поиска контента.
+/// Content search source.
 /// </summary>
 public enum SearchSource
 {
     /// <summary>
-    /// Стандартный YouTube (видео, все типы контента).
+    /// Standard YouTube (videos, all content types).
     /// </summary>
     YouTube,
 
     /// <summary>
-    /// YouTube Music (песни, альбомы, музыкальный контент).
+    /// YouTube Music (songs, albums, music content).
     /// </summary>
     YouTubeMusic,
 
     /// <summary>
-    /// Только плейлисты.
+    /// Playlists only.
     /// </summary>
     Playlists
 }
@@ -24,7 +24,7 @@ public enum SearchSource
 public static class SearchSourceExtensions
 {
     /// <summary>
-    /// Ключ для кэша.
+    /// Cache key.
     /// </summary>
     public static string ToCacheKey(this SearchSource source) => source switch
     {
@@ -35,7 +35,7 @@ public static class SearchSourceExtensions
     };
 
     /// <summary>
-    /// Контекст YouTube Music (WEB_REMIX)?
+    /// YouTube Music context (WEB_REMIX)?
     /// </summary>
     public static bool IsMusicContext(this SearchSource source) =>
         source == SearchSource.YouTubeMusic;

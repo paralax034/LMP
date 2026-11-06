@@ -7,8 +7,8 @@ using LMP.Core.Data.Repositories;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Реестр треков (Identity Map / L1 Cache) для управления экземплярами <see cref="TrackInfo"/> в памяти.
-/// Гарантирует уникальность ссылки на объект трека при параллельных запросах.
+/// Track registry (Identity Map / L1 Cache) for managing in-memory <see cref="TrackInfo"/> instances.
+/// Guarantees track object reference uniqueness during concurrent requests.
 /// </summary>
 public sealed class TrackRegistry
 {
@@ -28,11 +28,11 @@ public sealed class TrackRegistry
     private int _cleanupCounter;
 
     /// <summary>
-    /// Инициализирует новый экземпляр реестра треков.
+    /// Initializes a new instance of the track registry.
     /// </summary>
-    /// <param name="repository">Репозиторий метаданных треков.</param>
-    /// <param name="playlists">Репозиторий управления связями плейлистов.</param>
-    /// <param name="auth">Служба аутентификации для извлечения контекста активного пользователя</param>
+    /// <param name="repository">Track metadata repository.</param>
+    /// <param name="playlists">Playlist relation management repository.</param>
+    /// <param name="auth">Authentication service for extracting active user context.</param>
     public TrackRegistry(
         ITrackRepository? repository = null,
         IPlaylistRepository? playlists = null,
@@ -44,28 +44,28 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Идентификатор активного аккаунта для сквозного контекстного маппинга данных
+    /// Active account identifier for end-to-end contextual data mapping.
     /// </summary>
     private string CurrentOwnerId => _auth?.State?.DisplayId ?? "guest";
 
     /// <summary>
-    /// Регистрирует новый трек в кэше или обновляет метаданные существующего канонического экземпляра.
+    /// Registers a new track in the cache or updates metadata of an existing canonical instance.
     /// </summary>
-    /// <param name="incoming">Входящий экземпляр трека с новыми метаданными.</param>
-    /// <returns>Канонический (уникальный) экземпляр трека из кэша памяти.</returns>
+    /// <param name="incoming">Incoming track instance with updated metadata.</param>
+    /// <returns>Canonical (unique) track instance from the memory cache.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TrackInfo RegisterOrUpdate(TrackInfo incoming) =>
         RegisterOrUpdate(incoming, hasUserContext: false);
 
     /// <summary>
-    /// Регистрирует новый трек в кэше или обновляет метаданные существующего канонического экземпляра с учетом контекста пользователя.
+    /// Registers a new track in the cache or updates metadata of an existing canonical instance taking into account user context.
     /// </summary>
-    /// <param name="incoming">Входящий экземпляр трека с новыми метаданными.</param>
-    /// <param name="hasUserContext">Указывает, получены ли данные из доверенного источника с авторизованным контекстом пользователя (БД, синхронизация лайков).</param>
-    /// <returns>Канонический (уникальный) экземпляр трека из кэша памяти.</returns>
+    /// <param name="incoming">Incoming track instance with updated metadata.</param>
+    /// <param name="hasUserContext">Indicates whether data originated from a trusted source with authorized user context (DB, likes sync).</param>
+    /// <returns>Canonical (unique) track instance from the memory cache.</returns>
     /// <remarks>
-    /// Выполняет синхронизацию закрепления трека в сильной памяти: если трек теряет статус лайкнутого, скачанного или добавленного в плейлист,
-    /// он автоматически исключается из словаря сильных ссылок и переходит в weak-кэш для своевременной сборки мусора.
+    /// Performs track pinning synchronization in strong memory: if a track loses its status as liked, downloaded, or added to a playlist,
+    /// it is automatically evicted from the strong reference dictionary and moves to the weak cache for timely garbage collection.
     /// </remarks>
     public TrackInfo RegisterOrUpdate(TrackInfo incoming, bool hasUserContext)
     {
@@ -104,11 +104,11 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Дополняет рантайм-модель трека статусом локального кэша и metadata нормализации.
-    /// В LUFS-модели source of truth — только <see cref="TrackInfo.IntegratedLufs"/>.
+    /// Enriches the runtime track model with local cache status and metadata normalization.
+    /// In the LUFS model, the source of truth is strictly <see cref="TrackInfo.IntegratedLufs"/>.
     /// </summary>
-    /// <param name="track">Канонический экземпляр трека.</param>
-    /// <param name="audioCache">Менеджер аудио-кэша.</param>
+    /// <param name="track">Canonical track instance.</param>
+    /// <param name="audioCache">Audio cache manager.</param>
     private static void HydrateTrackFromAudioCache(TrackInfo track, AudioCacheManager? audioCache)
     {
         if (audioCache == null || string.IsNullOrEmpty(track.Id))
@@ -137,10 +137,10 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Выполняет быструю попытку извлечь трек из кэша первого уровня в памяти без обращений к базе данных.
+    /// Performs a fast attempt to retrieve a track from the in-memory L1 cache without database calls.
     /// </summary>
-    /// <param name="id">Уникальный идентификатор трека.</param>
-    /// <returns>Канонический экземпляр трека или <c>null</c>, если он вытеснен сборщиком мусора.</returns>
+    /// <param name="id">Unique track identifier.</param>
+    /// <returns>Canonical track instance, or <c>null</c> if it was collected by GC.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TrackInfo? TryGet(string id)
     {
@@ -153,11 +153,11 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Возвращает канонический экземпляр трека, загружая его из базы данных при промахе кэша.
+    /// Returns the canonical track instance, fetching it from the database on cache miss.
     /// </summary>
-    /// <param name="id">Идентификатор трека.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Экземпляр трека или <c>null</c>, если трек отсутствует в БД.</returns>
+    /// <param name="id">Track identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>Track instance, or <c>null</c> if the track does not exist in the DB.</returns>
     public async ValueTask<TrackInfo?> GetOrLoadAsync(string id, CancellationToken ct = default)
     {
         var cached = TryGet(id);
@@ -180,17 +180,17 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Загружает треки из БД, регистрирует в кэше и возвращает загруженные экземпляры напрямую,
-    /// сохраняя порядок входного списка идентификаторов.
+    /// Loads tracks from the DB, registers them in the cache, and returns the loaded instances directly,
+    /// preserving the order of the input identifier list.
     /// <para>
-    /// В отличие от <see cref="PreloadAsync"/> + <see cref="TryGet"/>, результат
-    /// не зависит от параллельного <see cref="Clear"/> — все треки возвращаются
-    /// как локальная коллекция, а не извлекаются из кэша после <c>await</c>-границы.
+    /// Unlike <see cref="PreloadAsync"/> + <see cref="TryGet"/>, the result
+    /// is unaffected by concurrent <see cref="Clear"/> operations — all tracks are returned
+    /// as a local collection rather than retrieved from the cache after an <c>await</c> boundary.
     /// </para>
     /// </summary>
-    /// <param name="ids">Упорядоченный список идентификаторов треков.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список треков в порядке <paramref name="ids"/>. Отсутствующие в БД пропускаются.</returns>
+    /// <param name="ids">Ordered list of track identifiers.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>List of tracks matching the order of <paramref name="ids"/>. Identifiers missing from the DB are omitted.</returns>
     public async Task<List<TrackInfo>> PreloadAndReturnAsync(
         IReadOnlyList<string> ids, CancellationToken ct = default)
     {
@@ -248,8 +248,8 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Внутренний метод обновления закрепления трека в сильной памяти.
-    /// Закрепляет трек в сильных ссылках, если он лайкнут, скачан или привязан к плейлистам пользователя.
+    /// Internal method for updating strong memory pinning of a track.
+    /// Pins a track in strong references if it is liked, downloaded, or linked to user playlists.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool UpdatePinStatusInternal(TrackInfo track)
@@ -272,9 +272,9 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Обновляет статус сильного закрепления трека в оперативной памяти.
+    /// Updates the strong pin status of a track in RAM.
     /// </summary>
-    /// <param name="track">Экземпляр трека.</param>
+    /// <param name="track">Track instance.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void UpdatePinStatus(TrackInfo track)
     {
@@ -282,10 +282,10 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Наполняет кэш первого уровня при инициализации библиотеки или смене аккаунта.
-    /// Оптимизировано для предотвращения утечек памяти при работе со списками недавних треков.
+    /// Warmup/populates the L1 cache during library initialization or account switching.
+    /// Optimized to prevent memory leaks when dealing with recent track lists.
     /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     public async Task HydrateAsync(CancellationToken ct = default)
     {
         if (_repository == null) return;
@@ -373,9 +373,9 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Сбрасывает измененные метаданные закрепленных в памяти треков в локальное хранилище.
+    /// Flushes modified metadata of memory-pinned tracks to persistent storage.
     /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     public async Task FlushAsync(CancellationToken ct = default)
     {
         if (_repository == null) return;
@@ -395,15 +395,15 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Возвращает все треки, удерживаемые в памяти сильной ссылкой.
+    /// Returns all tracks currently held in memory by strong references.
     /// </summary>
-    /// <returns>Перечисление закрепленных треков.</returns>
+    /// <returns>An enumerable of pinned tracks.</returns>
     public IEnumerable<TrackInfo> GetPinnedTracks() => _pinned.Values;
 
     /// <summary>
-    /// Очищает слабые ссылки на треки, которые уже были собраны сборщиком мусора.
+    /// Cleans up weak references to tracks that have already been collected by garbage collection.
     /// </summary>
-    /// <returns>Количество успешно выгруженных из реестра ключей.</returns>
+    /// <returns>The number of keys successfully purged from the registry.</returns>
     public int CleanupDeadReferences()
     {
         var maxDeadCount = _cache.Count;
@@ -439,8 +439,8 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Полностью очищает все уровни кэша в оперативной памяти.
-    /// Вызывается при переключении пользовательских аккаунтов.
+    /// Completely purges all in-memory cache levels.
+    /// Invoked when switching user accounts.
     /// </summary>
     public void Clear()
     {
@@ -453,12 +453,12 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Подписывается на глобальные события изменений кэша аудиофайлов на устройстве.
+    /// Subscribes to global audio cache change events on the device.
     /// </summary>
     private int _isSubscribedToCacheEvents;
 
     /// <summary>
-    /// Подписывается на глобальные события изменений кэша аудиофайлов на устройстве.
+    /// Subscribes to global audio cache change events on the device.
     /// </summary>
     public void SubscribeToCacheEvents()
     {
@@ -476,7 +476,7 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Сбрасывает статус IsCached трека при его вытеснении из LRU-кэша.
+    /// Resets the IsCached track status upon eviction from the LRU cache.
     /// </summary>
     private void HandleEntryEvicted(string trackId)
     {
@@ -489,7 +489,7 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Сбрасывает флаг локального кэша при очистке дисковой папки Cache.
+    /// Resets the local cache flag when the disk Cache directory is cleared.
     /// </summary>
     private void HandleCacheCleared()
     {
@@ -520,7 +520,7 @@ public sealed class TrackRegistry
     }
 
     /// <summary>
-    /// Реагирует на успешное завершение локального кэширования трека, обновляя его рантайм-свойства.
+    /// Handles successful completion of local track caching by updating its runtime properties.
     /// </summary>
     private void HandleFormatCached(string trackId, AudioFormat format, int bitrate, bool isDownloaded)
     {

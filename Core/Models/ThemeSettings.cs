@@ -3,76 +3,76 @@ using System.Text.Json.Serialization;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Настройки темы приложения.
-/// Все цвета хранятся в HEX-формате (#RRGGBB или #AARRGGBB).
+/// Application theme settings.
+/// All colors are stored in HEX format (#RRGGBB or #AARRGGBB).
 /// </summary>
 public sealed class ThemeSettings : IEquatable<ThemeSettings>
 {
-    /// <summary>Имя темы для отображения</summary>
+    /// <summary>Display name of the theme</summary>
     public string Name { get; set; } = "Paralax Purple";
 
-    // BACKGROUNDS - Фоновые цвета
+    // BACKGROUNDS
 
-    /// <summary>Основной фон окна</summary>
+    /// <summary>Main window background</summary>
     public string BgPrimary { get; set; } = "#0F0B15";
 
-    /// <summary>Фон карточек и сайдбара</summary>
+    /// <summary>Card and sidebar background</summary>
     public string BgSecondary { get; set; } = "#1A1625";
 
-    /// <summary>Фон диалогов и меню</summary>
+    /// <summary>Dialog and menu background</summary>
     public string BgElevated { get; set; } = "#252033";
 
-    /// <summary>Разделители и границы</summary>
+    /// <summary>Separators and borders</summary>
     public string BgHighlight { get; set; } = "#322A45";
 
-    /// <summary>Hover-состояние</summary>
+    /// <summary>Hover state</summary>
     public string BgHover { get; set; } = "#3E3456";
 
-    // SKELETON / LOADING - Цвета загрузки
+    // SKELETON / LOADING - Loading colors
 
-    /// <summary>Скелетон светлый</summary>
+    /// <summary>Light skeleton</summary>
     public string BgSkeleton { get; set; } = "#2A2438";
 
-    /// <summary>Скелетон темный</summary>
+    /// <summary>Dark skeleton</summary>
     public string BgSkeletonDeep { get; set; } = "#15121C";
 
-    /// <summary>Оверлей (полупрозрачный)</summary>
+    /// <summary>Overlay (semi-transparent)</summary>
     public string BgOverlay { get; set; } = "#CC0A080F";
 
-    // ACCENT - Акцентные цвета бренда
+    // ACCENT - Brand accent colors
 
-    /// <summary>Основной акцентный цвет (кнопки, ссылки)</summary>
+    /// <summary>Primary accent color (buttons, links)</summary>
     public string AccentColor { get; set; } = "#8A2BE2";
 
-    /// <summary>Акцент при наведении</summary>
+    /// <summary>Accent on hover</summary>
     public string AccentHover { get; set; } = "#A560F0";
 
-    // SEMANTIC - Системные цвета
+    // SEMANTIC - System colors
 
-    /// <summary>Цвет ошибки</summary>
+    /// <summary>Error color</summary>
     public string SystemError { get; set; } = "#FF5555";
 
-    /// <summary>Фон ошибки</summary>
+    /// <summary>Error background</summary>
     public string SystemErrorBg { get; set; } = "#331010";
 
-    /// <summary>Информационный цвет</summary>
+    /// <summary>Info color</summary>
     public string SystemInfoBlue { get; set; } = "#8BE9FD";
 
-    /// <summary>Предупреждение</summary>
+    /// <summary>Warning color</summary>
     public string SystemWarnOrange { get; set; } = "#FFB86C";
 
-    // TEXT - Цвета текста
+    // TEXT - Text colors
 
-    /// <summary>Основной текст</summary>
+    /// <summary>Primary text</summary>
     public string TextPrimary { get; set; } = "#F8F8F2";
 
-    /// <summary>Вторичный текст (подзаголовки)</summary>
+    /// <summary>Secondary text (subtitles)</summary>
     public string TextSecondary { get; set; } = "#BFB6D3";
 
-    /// <summary>Приглушенный текст</summary>
+    /// <summary>Muted text</summary>
     public string TextMuted { get; set; } = "#6272A4";
 
-    /// <summary>Темный текст (на светлом фоне)</summary>
+    /// <summary>Dark text (on light background)</summary>
     public string TextDark { get; set; } = "#0F0B15";
 
     // SERIALIZATION
@@ -83,10 +83,10 @@ public sealed class ThemeSettings : IEquatable<ThemeSettings>
     public override string ToString() => Name;
 
     /// <summary>
-    /// Определяет эквивалентность двух тем по их имени.
+    /// Determines equality of two themes by their name.
     /// </summary>
-    /// <param name="other">Экземпляр темы для сравнения.</param>
-    /// <returns><c>true</c>, если имена тем совпадают без учёта регистра.</returns>
+    /// <param name="other">Theme instance to compare.</param>
+    /// <returns><c>true</c> if theme names match, case-insensitively.</returns>
     public bool Equals(ThemeSettings? other)
     {
         if (other is null) return false;

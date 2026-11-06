@@ -12,23 +12,23 @@ using LMP.UI.Features.Shell;
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Централизованный сервис для показа диалоговых окон.
+/// Centralized service for displaying dialog windows.
 /// 
-/// <para><b>Архитектура:</b></para>
+/// <para><b>Architecture:</b></para>
 /// <list type="bullet">
-///   <item><b>Overlay-диалоги</b> — рендерятся через DialogHost поверх контента,
-///     но ПОД TopBar и PlayerBar. TopBar, уведомления и кнопки окна остаются активными.
-///     Навигация блокируется автоматически.</item>
-///   <item><b>Модальные окна</b> — BotDetection и StreamUnavailable.
-///     Блокируют ВСЁ приложение. Используются только для критичных ошибок.</item>
+///   <item><b>Overlay dialogs</b> — rendered via DialogHost on top of content,
+///     but UNDER TopBar and PlayerBar. TopBar, notifications, and window controls remain active.
+///     Navigation is locked automatically.</item>
+///   <item><b>Modal windows</b> — BotDetection and StreamUnavailable.
+///     Block the ENTIRE application. Used only for critical errors.</item>
 /// </list>
 /// 
-/// <para><b>Паттерн для overlay-диалогов:</b></para>
+/// <para><b>Pattern for overlay dialogs:</b></para>
 /// <code>
-/// 1. Создать Content/ViewModel с callback'ом (OnResult / OnClose)
-/// 2. Установить callback → tcs.TrySetResult() + dialogHost.CloseDialog()
-/// 3. Вызвать dialogHost.ShowAsync() (fire-and-forget)
-/// 4. await tcs.Task для получения результата
+/// 1. Create Content/ViewModel with a callback (OnResult / OnClose)
+/// 2. Set callback → tcs.TrySetResult() + dialogHost.CloseDialog()
+/// 3. Call dialogHost.ShowAsync() (fire-and-forget)
+/// 4. await tcs.Task to receive the result
 /// </code>
 /// </summary>
 public sealed class DialogService
@@ -40,11 +40,11 @@ public sealed class DialogService
     private readonly LocalAuthServer _localAuthServer;
     private readonly Func<DialogHostViewModel> _getDialogHost;
 
-    /// <param name="authService">Сервис авторизации — для проверки состояния входа в YouTube.</param>
+    /// <param name="authService">Authentication service — for checking YouTube login state.</param>
     /// <param name="getDialogHost">
-    /// Lazy accessor для DialogHostViewModel.
-    /// Используется <c>Func</c> вместо прямой инъекции из-за циклической зависимости:
-    /// DialogService создаётся раньше MainWindowViewModel.
+    /// Lazy accessor for DialogHostViewModel.
+    /// Uses <c>Func</c> instead of direct injection due to a circular dependency:
+    /// DialogService is created before MainWindowViewModel.
     /// </param>
     public DialogService(
         CookieAuthService authService,
@@ -61,8 +61,8 @@ public sealed class DialogService
     #region Helpers
 
     /// <summary>
-    /// Получает главное окно если оно загружено и видимо.
-    /// Используется только для модальных диалогов (BotDetection, StreamUnavailable).
+    /// Gets the main window if it is loaded and visible.
+    /// Used only for modal dialogs (BotDetection, StreamUnavailable).
     /// </summary>
     private static Window? GetMainWindow()
     {
@@ -80,7 +80,7 @@ public sealed class DialogService
     #region Generic Choice Dialog (Overlay)
 
     /// <summary>
-    /// Универсальный диалог выбора с произвольным набором кнопок и опциональным чекбоксом.
+    /// Universal choice dialog with a custom set of buttons and an optional checkbox.
     /// </summary>
     public async Task<ChoiceResult<T>?> ShowChoiceAsync<T>(
         string title,
@@ -98,7 +98,7 @@ public sealed class DialogService
             options: options,
             onResult: (value, isChecked) =>
             {
-                // Сначала инициируем закрытие диалога, предотвращая наложение на новые TCS сессии
+                // Initiate dialog closure first, preventing overlap with new TCS sessions
                 host.CloseDialog(value);
                 tcs.TrySetResult(new ChoiceResult<T>(value, isChecked));
             },
@@ -119,7 +119,7 @@ public sealed class DialogService
     #region Basic Dialogs (Overlay)
 
     /// <summary>
-    /// Диалог выбора YouTube аккаунта (основной/бренд).
+    /// YouTube account selection dialog (main/brand).
     /// </summary>
     public async Task<YoutubeAccountItem?> ShowAccountSelectionDialogAsync(IEnumerable<YoutubeAccountItem> accounts)
     {
@@ -140,7 +140,7 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Показывает диалог автоматического скачивания, распаковки и ручной активации расширения LMP Auth.
+    /// Shows a dialog for automated downloading, extraction, and manual activation of the LMP Auth extension.
     /// </summary>
     public async Task<bool> ShowExtensionInstallDialogAsync()
     {
@@ -161,7 +161,7 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Показывает диалог подтверждения (Yes/No, OK/Cancel).
+    /// Shows a confirmation dialog (Yes/No, OK/Cancel).
     /// </summary>
     public async Task<bool> ConfirmAsync(
         string title, string message,
@@ -183,13 +183,13 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Показывает диалог подтверждения со стандартными кнопками OK / Cancel.
+    /// Shows a confirmation dialog with standard OK / Cancel buttons.
     /// </summary>
     public Task<bool> ConfirmAsync(string title, string message) =>
         ConfirmAsync(title, message, L["Common_OK"], L["Common_Cancel"]);
 
     /// <summary>
-    /// Показывает информационный диалог с одной кнопкой.
+    /// Shows an informational dialog with a single button.
     /// </summary>
     public async Task ShowInfoAsync(string title, string message, string buttonText)
     {
@@ -209,13 +209,13 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Показывает информационный диалог со стандартной кнопкой OK.
+    /// Shows an informational dialog with a standard OK button.
     /// </summary>
     public Task ShowInfoAsync(string title, string message) =>
         ShowInfoAsync(title, message, L["Common_OK"]);
 
     /// <summary>
-    /// Показывает диалог ввода текста.
+    /// Shows a text input dialog.
     /// </summary>
     public async Task<string?> ShowInputAsync(
         string title, string prompt, string? watermark = null)
@@ -237,8 +237,8 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Показывает системный диалог выбора папки.
-    /// Это единственный диалог использующий нативный OS picker.
+    /// Shows a system folder picker dialog.
+    /// This is the only dialog using the native OS picker.
     /// </summary>
     public static async Task<string?> SelectFolderAsync(string? startPath = null)
     {
@@ -269,9 +269,9 @@ public sealed class DialogService
     #region Close Action Dialog
 
     /// <summary>
-    /// Показывает диалог "Что сделать при закрытии?" через универсальный ChoiceDialog.
+    /// Shows a "What to do on close?" dialog using the universal ChoiceDialog.
     /// </summary>
-    /// <returns>Результат выбора или null если отменено.</returns>
+    /// <returns>Selected result or null if canceled.</returns>
     public async Task<ChoiceResult<CloseAction>?> ShowCloseActionDialogAsync()
     {
         return await ShowChoiceAsync(
@@ -300,7 +300,7 @@ public sealed class DialogService
     #region Playlist Dialogs (Overlay)
 
     /// <summary>
-    /// Диалог создания нового плейлиста.
+    /// Create new playlist dialog.
     /// </summary>
     public async Task<CreatePlaylistResult?> ShowCreatePlaylistDialogAsync()
     {
@@ -321,7 +321,7 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Диалог удаления плейлиста.
+    /// Delete playlist dialog.
     /// </summary>
     public async Task<DeletePlaylistResult?> ShowDeletePlaylistDialogAsync(
         Playlist playlist, bool isAuthenticated)
@@ -343,7 +343,7 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Диалог «Добавить трек в плейлист» — список плейлистов с чекбоксами.
+    /// "Add track to playlist" dialog — list of playlists with checkboxes.
     /// </summary>
     public async Task<List<string>> ShowAddToPlaylistDialogAsync(TrackInfo track)
     {
@@ -369,8 +369,8 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Диалог редактирования плейлиста.
-    /// Автоматически загружает треки плейлиста и разрешает зависимости для генератора мозаики и палитры цветов.
+    /// Edit playlist dialog.
+    /// Automatically loads playlist tracks and resolves dependencies for the mosaic generator and color palette.
     /// </summary>
     public async Task<EditPlaylistResult?> ShowEditPlaylistDialogAsync(
         Playlist playlist,
@@ -417,7 +417,7 @@ public sealed class DialogService
     #region Sync Dialogs (Overlay)
 
     /// <summary>
-    /// Диалог массовой синхронизации.
+    /// Bulk synchronization dialog.
     /// </summary>
     public async Task<List<SyncDecision>> ShowSyncSelectionAsync(
         IEnumerable<PlaylistSearchResult> items,
@@ -442,7 +442,7 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// Диалог синхронизации одного плейлиста.
+    /// Single playlist synchronization dialog.
     /// </summary>
     public async Task<PlaylistSyncOptions?> ShowPlaylistSyncDialogAsync(
         PlaylistSyncPreview preview)
@@ -468,7 +468,7 @@ public sealed class DialogService
     #region Critical Dialogs (Modal Windows)
 
     /// <summary>
-    /// Диалог требования авторизации.
+    /// Authentication required dialog.
     /// </summary>
     public Task ShowLoginRequiredAsync(LoginRequiredException exception) =>
         ShowInfoAsync(
@@ -477,8 +477,8 @@ public sealed class DialogService
             L["Common_OK"]);
 
     /// <summary>
-    /// Показывает модальное оверлей-предупреждение о необходимости повторной синхронизации плейлистов после миграции БД.
-    /// Полностью блокирует интерфейс на указанное время (обратный отсчет) с помощью DialogHost.
+    /// Shows a modal overlay warning indicating the need to re-sync playlists after a DB migration.
+    /// Completely blocks the UI for the specified duration (countdown) using DialogHost.
     /// </summary>
     public async Task ShowLegacyMigrationAlertAsync(int countdownSeconds)
     {
@@ -503,9 +503,9 @@ public sealed class DialogService
 }
 
 /// <summary>
-/// Результат диалога выбора: выбранное значение + состояние чекбокса.
+/// Choice dialog result: selected value + checkbox state.
 /// </summary>
-/// <typeparam name="T">Тип выбранного значения.</typeparam>
+/// <typeparam name="T">Type of the selected value.</typeparam>
 public sealed record ChoiceResult<T>(T Value, bool IsChecked)
 {
     public override string ToString()

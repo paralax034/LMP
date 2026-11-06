@@ -6,16 +6,16 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Features.Shell;
 
 /// <summary>
-/// Главное окно приложения.
+/// Main application window.
 /// </summary>
 public partial class MainWindow : Window
 {
     #region Constants
 
     /// <summary>
-    /// Минимальный интервал между toggle-ами окна из трея (мс).
-    /// На Windows debounce в <see cref="TrayManager.TryInvokeToggle"/>.
-    /// На non-Windows — в <see cref="ToggleTrayWindow"/>.
+    /// Minimum interval between window toggles from the tray (ms).
+    /// On Windows, debouncing is handled in <see cref="TrayManager.TryInvokeToggle"/>.
+    /// On non-Windows — in <see cref="ToggleTrayWindow"/>.
     /// </summary>
     public const int ToggleCooldownMs = 1000;
 
@@ -23,29 +23,29 @@ public partial class MainWindow : Window
 
     #region Fields — Window State
 
-    /// <summary>Окно свёрнуто в системный трей (Hard Suspend).</summary>
+    /// <summary>Window is minimized to the system tray (Hard Suspend).</summary>
     private volatile bool _isInTray;
 
-    /// <summary>Окно свёрнуто в панель задач (Soft Suspend).</summary>
+    /// <summary>Window is minimized to the taskbar (Soft Suspend).</summary>
     private volatile bool _isMinimized;
 
-    /// <summary>Окно потеряло фокус (Soft Suspend после debounce).</summary>
+    /// <summary>Window lost focus (Soft Suspend after debounce).</summary>
     private volatile bool _isDeactivated;
 
     /// <summary>
-    /// Guard: окно восстанавливается из трея.
+    /// Guard: window is being restored from the tray.
     ///
-    /// <para>Предотвращает re-suspend от Deactivated race condition на Windows:
-    /// <c>Show()</c> + <c>Activate()</c> может вызвать Deactivated до того
-    /// как окно получит foreground focus. Без guard'а это приводило к
-    /// resume → 500мс → re-suspend.</para>
+    /// <para>Prevents re-suspend from Deactivated race condition on Windows:
+    /// <c>Show()</c> + <c>Activate()</c> can trigger Deactivated before
+    /// the window receives foreground focus. Without the guard, this resulted in
+    /// resume → 500ms → re-suspend.</para>
     ///
-    /// <para>Сбрасывается в <see cref="OnWindowActivated"/> (нормальный путь)
-    /// или через fallback таймер 1.5с (если фокус не пришёл).</para>
+    /// <para>Reset in <see cref="OnWindowActivated"/> (normal path)
+    /// or via a 1.5s fallback timer (if focus was not received).</para>
     /// </summary>
     private volatile bool _isRestoringFromTray;
 
-    /// <summary>Принудительное закрытие (минуя диалог подтверждения).</summary>
+    /// <summary>Forced close (bypassing the confirmation dialog).</summary>
     private bool _forceClose;
 
     #endregion

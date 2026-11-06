@@ -6,7 +6,7 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// P/Invoke обёртка над нативным QuickJS-NG мостом.
+/// P/Invoke wrapper over native QuickJS-NG bridge.
 /// </summary>
 internal static unsafe partial class QuickJsNative
 {
@@ -24,7 +24,7 @@ internal static unsafe partial class QuickJsNative
 #endif
 
     /// <summary>
-    /// Версия ABI моста. Используется для инвалидации кэша байткода при обновлениях.
+    /// Bridge ABI version. Used to invalidate bytecode cache on updates.
     /// </summary>
     public static string BridgeAbi { get; } = ExtractAbi();
 
@@ -40,12 +40,12 @@ internal static unsafe partial class QuickJsNative
                 string extension = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".dll" :
                                    RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? ".dylib" : ".so";
 
-                // Ищем напрямую рядом с приложением (без подпапки "Native")
+                // Look directly next to the app (without "Native" subfolder)
                 var localPath = Path.Combine(
                     AppDomain.CurrentDomain.BaseDirectory,
                     $"{LibName}{extension}");
 
-                // Для Debug/Release сборок файл будет лежать рядом с EXE
+                // For Debug/Release builds, the file will be located next to the EXE
                 if (File.Exists(localPath) && NativeLibrary.TryLoad(localPath, out var handle))
                 {
 #if DEBUG
@@ -54,9 +54,9 @@ internal static unsafe partial class QuickJsNative
                     return handle;
                 }
 
-                // В Single File Publish файла физически нет в BaseDirectory.
-                // Возвращаем IntPtr.Zero, чтобы позволить стандартному механизму .NET
-                // загрузить библиотеку из кэша извлечения бандла (%TEMP%).
+                // In Single File Publish, the file does not physically exist in BaseDirectory.
+                // Return IntPtr.Zero to allow the standard .NET mechanism
+                // to load the library from the bundle extraction cache (%TEMP%).
                 return IntPtr.Zero;
             });
     }
@@ -158,7 +158,7 @@ internal static unsafe partial class QuickJsNative
     // --- Public managed API ---
 
     /// <summary>
-    /// Создаёт persistent QuickJS context, выполняя скрипт ровно один раз.
+    /// Creates a persistent QuickJS context, executing the script exactly once.
     /// </summary>
     public static IntPtr CreateContext(string script)
     {
@@ -182,11 +182,11 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Создаёт контекст QuickJS из исходного скрипта и одновременно возвращает скомпилированный байткод.
-    /// Выполняет парсинг и компиляцию строго один раз в рамках одного экземпляра JSRuntime.
+    /// Creates a QuickJS context from a source script and simultaneously returns compiled bytecode.
+    /// Performs parsing and compilation strictly once per JSRuntime instance.
     /// </summary>
-    /// <param name="script">Исходный код JavaScript.</param>
-    /// <returns>Кортеж из указателя на нативный контекст и сериализованного массива байткода.</returns>
+    /// <param name="script">JavaScript source code.</param>
+    /// <returns>A tuple containing a handle to the native context and a serialized bytecode byte array.</returns>
     public static unsafe (IntPtr Handle, byte[]? Bytecode) CreateContextWithBytecode(string script)
     {
         if (string.IsNullOrEmpty(script)) return (IntPtr.Zero, null);
@@ -230,10 +230,10 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Создаёт persistent QuickJS context напрямую из скомпилированного байткода.
+    /// Creates a persistent QuickJS context directly from compiled bytecode.
     /// </summary>
-    /// <param name="bytecode">Скомпилированный байткод QuickJS.</param>
-    /// <returns>Указатель на нативный контекст или IntPtr.Zero.</returns>
+    /// <param name="bytecode">Compiled QuickJS bytecode.</param>
+    /// <returns>Handle to the native context or IntPtr.Zero.</returns>
     public static IntPtr CreateContextFromBytecode(byte[] bytecode)
     {
         if (bytecode == null || bytecode.Length == 0) return IntPtr.Zero;
@@ -259,12 +259,12 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Инициализирует нативный бутстрап-слой BotGuard (VM Verification, State, doSnapshot, doMint, activateToken)
+    /// Initializes native BotGuard bootstrap layer (VM Verification, State, doSnapshot, doMint, activateToken).
     /// </summary>
-    /// <param name="handle">Нативный указатель на QuickJS-контекст.</param>
-    /// <param name="globalName">Название глобальной переменной VM.</param>
-    /// <param name="program">Программа испытания из challenge.</param>
-    /// <returns>Значение true, если инициализация прошла успешно.</returns>
+    /// <param name="handle">Native handle to the QuickJS context.</param>
+    /// <param name="globalName">VM global variable name.</param>
+    /// <param name="program">Challenge program script.</param>
+    /// <returns>True if initialization succeeded.</returns>
     public static bool InitBotGuardBootstrap(IntPtr handle, string globalName, string program)
     {
         if (handle == IntPtr.Zero) return false;
@@ -281,7 +281,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Вызывает <c>globalThis._result.{functionName}(challenge)</c> через прямой JS API.
+    /// Invokes <c>globalThis._result.{functionName}(challenge)</c> via direct JS API.
     /// </summary>
     public static string? CallFunction(IntPtr handle, string functionName, string challenge)
     {
@@ -306,7 +306,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Выполняет произвольный JavaScript-код в существующем persistent context.
+    /// Executes arbitrary JavaScript code in an existing persistent context.
     /// </summary>
     public static string? Eval(IntPtr handle, string code)
     {
@@ -331,7 +331,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Прокачивает event loop (microtasks + expired timers) до <paramref name="maxMs"/> мс.
+    /// Pumps event loop (microtasks + expired timers) up to <paramref name="maxMs"/> ms.
     /// </summary>
     public static int PumpEventLoop(IntPtr handle, int maxMs)
     {
@@ -349,7 +349,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Возвращает последнюю JS-ошибку (message + stack trace).
+    /// Returns the last JS error (message + stack trace).
     /// </summary>
     public static string? GetLastError(IntPtr handle)
     {
@@ -368,7 +368,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Уничтожает persistent context и освобождает все ресурсы QuickJS.
+    /// Destroys persistent context and releases all QuickJS resources.
     /// </summary>
     public static void DestroyContext(IntPtr handle)
     {
@@ -385,9 +385,9 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Возвращает захваченный console output из нативного буфера.
-    /// В Release вызовы этого метода компилятор убирает через [Conditional("DEBUG")]
-    /// на стороне вызывающего кода (DumpDiagnosticConsole).
+    /// Returns captured console output from the native buffer.
+    /// In Release builds, calls to this method are stripped by the compiler via [Conditional("DEBUG")]
+    /// on the caller side (DumpDiagnosticConsole).
     /// </summary>
     public static string? GetConsoleOutput(IntPtr handle)
     {
@@ -397,7 +397,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Очищает захваченный console output в нативном буфере.
+    /// Clears captured console output in the native buffer.
     /// </summary>
     public static void ClearConsoleOutput(IntPtr handle)
     {
@@ -407,8 +407,8 @@ internal static unsafe partial class QuickJsNative
 #if DEBUG
 
     /// <summary>
-    /// Включает или выключает трассировку строковых сравнений (<c>===</c>)
-    /// в QuickJS. При первом включении аллоцирует ring buffer (~2.7 MB).
+    /// Enables or disables string comparison (<c>===</c>) tracing
+    /// in QuickJS. On first enable, allocates ring buffer (~2.7 MB).
     /// </summary>
     public static void TraceEnable(IntPtr handle, bool enabled)
     {
@@ -417,19 +417,19 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Абсолютное количество строковых сравнений с момента включения трейса.
+    /// Absolute count of string comparisons since trace was enabled.
     /// </summary>
     public static int TraceGetTotal(IntPtr handle)
         => handle != IntPtr.Zero ? qjs_trace_get_total(handle) : 0;
 
     /// <summary>
-    /// Количество записей, доступных в ring buffer (≤ 16384).
+    /// Number of records available in ring buffer (≤ 16384).
     /// </summary>
     public static int TraceGetCount(IntPtr handle)
         => handle != IntPtr.Zero ? qjs_trace_get_count(handle) : 0;
 
     /// <summary>
-    /// Дамп <paramref name="count"/> записей трейса начиная с <paramref name="offset"/>.
+    /// Dumps <paramref name="count"/> trace records starting from <paramref name="offset"/>.
     /// </summary>
     public static string? TraceDump(IntPtr handle, int offset, int count)
     {
@@ -448,8 +448,8 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Дамп записей трейса, где left или right операнд содержит <paramref name="substring"/>.
-    /// Фильтрация на C-стороне — минимум маршалинга через P/Invoke.
+    /// Dumps trace records where left or right operand contains <paramref name="substring"/>.
+    /// Filtered on the C side — minimal P/Invoke marshaling overhead.
     /// </summary>
     public static string? TraceDumpFiltered(IntPtr handle, string substring, int maxCount)
     {
@@ -468,7 +468,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Сбрасывает ring buffer и счётчики трейса.
+    /// Resets ring buffer and trace counters.
     /// </summary>
     public static void TraceReset(IntPtr handle)
     {
@@ -477,8 +477,8 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// DEBUG-only fail-fast проверка, что загружена ожидаемая quickjs_bridge.dll,
-    /// а не старая/чужая копия без native browser environment.
+    /// DEBUG-only fail-fast check ensuring the expected quickjs_bridge.dll is loaded,
+    /// and not an outdated/foreign copy missing native browser environment.
     /// </summary>
     public static void VerifyExpectedBridgeLoaded()
     {
@@ -550,7 +550,7 @@ internal static unsafe partial class QuickJsNative
     }
 
     /// <summary>
-    /// Маршалирует нуль-терминированную UTF-8 строку из нативной памяти.
+    /// Marshals a null-terminated UTF-8 string from native memory.
     /// </summary>
     private static string? MarshalNativeString(byte* ptr)
     {

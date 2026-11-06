@@ -1,7 +1,7 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Ошибка декодирования аудио.
+/// Audio decoding error.
 /// </summary>
 public class AudioDecoderException(string message, int errorCode = 0) : AudioException(message)
 {

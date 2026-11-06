@@ -1,25 +1,25 @@
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Состояние воспроизведения аудио
+/// Audio playback state
 /// </summary>
 public enum PlaybackState
 {
-    /// <summary>Остановлен, ничего не загружено</summary>
+    /// <summary>Stopped, nothing loaded</summary>
     Stopped,
     
-    /// <summary>Загрузка и инициализация</summary>
+    /// <summary>Loading and initialization</summary>
     Loading,
     
-    /// <summary>Буферизация данных</summary>
+    /// <summary>Buffering data</summary>
     Buffering,
     
-    /// <summary>Активное воспроизведение</summary>
+    /// <summary>Active playback</summary>
     Playing,
     
-    /// <summary>Пауза</summary>
+    /// <summary>Paused</summary>
     Paused,
     
-    /// <summary>Ошибка воспроизведения</summary>
+    /// <summary>Playback error</summary>
     Error
 }

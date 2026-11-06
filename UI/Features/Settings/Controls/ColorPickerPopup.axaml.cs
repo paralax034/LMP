@@ -10,7 +10,7 @@ using Avalonia.Media.Immutable;
 namespace LMP.UI.Features.Settings.Controls;
 
 /// <summary>
-/// Popup-контент для выбора цвета с RGB-слайдерами и HEX-вводом.
+/// Popup content for color selection with RGB sliders and HEX input.
 /// </summary>
 public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
 {
@@ -259,7 +259,7 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
 }
 
 /// <summary>
-/// Пресет цвета для быстрого выбора с неизменяемой кэшированной кистью.
+/// Color preset for quick selection with an immutable cached brush.
 /// </summary>
 public sealed class ColorPreset
 {

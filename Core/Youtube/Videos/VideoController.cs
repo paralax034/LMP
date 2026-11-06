@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Youtube.Videos;
 
 /// <summary>
-/// Единый контроллер для взаимодействия с API YouTube (получение данных о видео, PlayerResponse, DASH/HLS манифестов).
+/// Unified controller for interacting with the YouTube API (retrieving video metadata, PlayerResponse, DASH/HLS manifests).
 /// </summary>
 internal partial class VideoController(HttpClient http, PlayerContextManager playerManager)
 {
@@ -19,33 +19,33 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     private static readonly Lock _stateLock = new();
 
     /// <summary>
-    /// Количество BotDetection-сбоев ANDROID_VR в текущей сессии.
-    /// Используется для пропуска клиента, стабильно блокируемого сервером,
-    /// без потери времени на roundtrip (~700 мс) при каждом force-refresh.
-    /// Сбрасывается при успешном ответе ANDROID_VR или явном <see cref="ResetBotDetectionState"/>.
+    /// Number of ANDROID_VR BotDetection failures in the current session.
+    /// Used to skip a client consistently blocked by the server,
+    /// avoiding lost time on a roundtrip (~700 ms) during each force-refresh.
+    /// Reset on a successful ANDROID_VR response or explicit call to <see cref="ResetBotDetectionState"/>.
     /// </summary>
     private static volatile int _androidVrSessionBotDetections;
     private static DateTime _androidVrLastBotDetection = DateTime.MinValue;
 
-    /// <summary>Длительность карантина клиента ANDROID_VR после BotDetection (2 часа, сбрасывается при смене сети/аккаунта).</summary>
+    /// <summary>Quarantine duration for the ANDROID_VR client after BotDetection (2 hours, reset on network/account change).</summary>
     private const int AndroidVrCooldownSeconds = 7_200;
 
-    /// <summary>Порог последовательных ошибок BotDetection для активации глобального кулдауна.</summary>
+    /// <summary>Consecutive BotDetection error threshold to trigger a global cooldown.</summary>
     private const int BotDetectionCooldownThreshold = 3;
 
-    /// <summary>Максимальное число попыток загрузки HTML-страницы просмотра видео.</summary>
+    /// <summary>Maximum number of attempts to fetch the HTML video watch page.</summary>
     private const int WatchPageMaxRetries = 5;
 
-    /// <summary>Задержка троттлинга после 1-го сбоя BotDetection.</summary>
+    /// <summary>Throttling delay after the 1st BotDetection failure.</summary>
     private static readonly TimeSpan ThrottleDelayLevel1 = TimeSpan.FromMilliseconds(300);
 
-    /// <summary>Задержка троттлинга после 2-го сбоя BotDetection.</summary>
+    /// <summary>Throttling delay after the 2nd BotDetection failure.</summary>
     private static readonly TimeSpan ThrottleDelayLevel2 = TimeSpan.FromMilliseconds(600);
 
-    /// <summary>Максимальная задержка троттлинга при множественных сбоях BotDetection.</summary>
+    /// <summary>Maximum throttling delay on multiple BotDetection failures.</summary>
     private static readonly TimeSpan ThrottleDelayMax = TimeSpan.FromSeconds(1);
 
-    /// <summary>Длительность глобального карантина после серии BotDetection.</summary>
+    /// <summary>Duration of global quarantine following a series of BotDetection failures.</summary>
     public static readonly TimeSpan CooldownDuration = TimeSpan.FromMinutes(2);
 
     public static bool IsInCooldown
@@ -121,7 +121,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     protected HttpClient Http { get; } = http;
 
     /// <summary>
-    /// Получает HTML страницу просмотра видеоролика с поддержкой повторных попыток при сетевых сбоях.
+    /// Fetches the video watch HTML page supporting retries on network failures.
     /// </summary>
     public async ValueTask<VideoWatchPage> GetVideoWatchPageAsync(
         VideoId videoId,
@@ -184,8 +184,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         using var request = new HttpRequestMessage(HttpMethod.Post, playerUrl);
         YoutubeClientUtils.ConfigurePlayerRequest(request, clientName);
 
-        // Плееру строго необходим инвариантный английский язык для детерминированного парсинга
-        // дат публикации ("3 days ago") и текстовых причин блокировок (Bot Detection / Age Gate).
+        // The player strictly requires invariant English for deterministic parsing
+        // of publish dates ("3 days ago") and textual block reasons (Bot Detection / Age Gate).
         request.Headers.AcceptLanguage.Clear();
         request.Headers.AcceptLanguage.ParseAdd(YoutubeHttpHandler.InvariantAcceptLanguage);
 
@@ -228,8 +228,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
         var playerResponse = PlayerResponse.Parse(content);
 
-        // Bot detection tracking ПЕРЕД LoginRequired
-        // Обеспечивает инкремент _consecutiveFailures для LOGIN_REQUIRED + "bot"
+        // Bot detection tracking BEFORE LoginRequired
+        // Ensures _consecutiveFailures is incremented for LOGIN_REQUIRED + "bot"
         TrackBotDetection(playerResponse, clientName);
 
         if (playerResponse.IsLoginRequired)
@@ -249,16 +249,16 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     }
 
     /// <summary>
-    /// Извлекает signatureTimestamp из единого кэша <see cref="PlayerContextManager"/>.
-    /// При сетевом таймауте делает fallback на дисковый кэш, если он доступен.
-    /// Пробрасывает сетевые ошибки и отмены, чтобы вызывающий код
-    /// мог корректно определить причину сбоя.
+    /// Extracts signatureTimestamp from the shared <see cref="PlayerContextManager"/> cache.
+    /// Falls back to the disk cache on network timeout if available.
+    /// Re-throws network errors and cancellations so the caller
+    /// can correctly determine the cause of failure.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Строка signatureTimestamp или <c>null</c> при некритичной ошибке.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The signatureTimestamp string or <c>null</c> on a non-critical error.</returns>
     private async ValueTask<string?> ResolveSignatureTimestampAsync(CancellationToken ct)
     {
-        // 1. Быстрый путь: in-memory кэш
+        // 1. Fast path: in-memory cache
         var cached = _playerManager.GetCachedSignatureTimestamp();
         if (!string.IsNullOrEmpty(cached)) return cached;
 
@@ -283,14 +283,14 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // Внутренний таймаут GetOrLoadAsync (не отмена вызывающего кода) —
-            // пробуем дисковый кэш, который мог остаться от предыдущей сессии
+            // Internal GetOrLoadAsync timeout (not caller cancellation) —
+            // try the disk cache that might remain from a previous session
             Log.Warn("[VideoController] GetOrLoadAsync timed out internally, trying disk cache fallback");
             return TryFallbackSignatureTimestamp();
         }
         catch (OperationCanceledException)
         {
-            // Отмена вызывающего кода — пробрасываем
+            // Caller cancellation — re-throw
             throw;
         }
         catch (Exception ex)
@@ -301,12 +301,12 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     }
 
     /// <summary>
-    /// Пытается извлечь signatureTimestamp из дискового кэша PlayerContext
-    /// без обращения к сети. Возвращает <c>null</c> если кэш отсутствует.
+    /// Attempts to extract signatureTimestamp from the PlayerContext disk cache
+    /// without making network requests. Returns <c>null</c> if cache is missing.
     /// </summary>
     private string? TryFallbackSignatureTimestamp()
     {
-        // Повторная проверка in-memory — мог быть заполнен параллельным потоком
+        // Re-check in-memory — could have been populated by a concurrent thread
         var cached = _playerManager.GetCachedSignatureTimestamp();
         if (!string.IsNullOrEmpty(cached))
         {
@@ -314,7 +314,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             return cached;
         }
 
-        // Пробуем загрузить из дискового кэша без сети
+        // Try loading from disk cache without network access
         var diskContext = PlayerContextManager.TryLoadFromDiskCache();
         if (diskContext != null)
         {
@@ -342,7 +342,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     #region Bot Detection Tracking
 
     /// <summary>
-    /// Проверяет, указывает ли сообщение об ошибке плейера на Bot Detection.
+    /// Checks whether a player error message indicates Bot Detection.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsBotDetectionError(string? error)
@@ -358,8 +358,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
     private static void TrackBotDetection(PlayerResponse response, string clientName)
     {
-        // ANDROID_VR изолирован собственным 300-секундным кулдауном.
-        // Не раздуваем глобальный троттлинг из-за него, иначе WEB_REMIX будет искусственно тормозить на 1-5 сек.
+        // ANDROID_VR is isolated with its own 300-second cooldown.
+        // We do not inflate global throttling because of it, otherwise WEB_REMIX will artificially delay by 1-5 sec.
         if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.OrdinalIgnoreCase))
             return;
 
@@ -404,16 +404,16 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     #region Fallback & DASH Methods
 
     /// <summary>
-    /// Запрашивает player response, перебирая fallback-цепочку клиентов до первого воспроизводимого ответа.
+    /// Requests a player response, iterating through the client fallback chain until the first playable response.
     /// </summary>
-    /// <param name="videoId">Идентификатор видео.</param>
-    /// <param name="cancellationToken">Токен отмены.</param>
-    /// <param name="isAuthenticated">Есть ли авторизованная сессия.</param>
-    /// <param name="preferWebRemix">Поставить WEB_REMIX первым (VPN + прогретый BotGuard).</param>
-    /// <param name="forceMobilePriority">Принудительный refresh: отключает WEB_REMIX-приоритет.</param>
+    /// <param name="videoId">Video identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="isAuthenticated">Whether an authenticated session exists.</param>
+    /// <param name="preferWebRemix">Place WEB_REMIX first (VPN + warmed-up BotGuard).</param>
+    /// <param name="forceMobilePriority">Forced refresh: disables WEB_REMIX priority.</param>
     /// <param name="excludedClients">
-    /// Клиенты, чьи URL для этого видео отвергнуты CDN с HTTP 403. Любое не-<c>null</c> значение (в том числе пустое)
-    /// включает порядок <see cref="YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden"/>.
+    /// Clients whose URLs for this video were rejected by CDN with HTTP 403. Any non-<c>null</c> value (including empty)
+    /// enables the <see cref="YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden"/> order.
     /// </param>
     public async ValueTask<(PlayerResponse Response, string ClientName)> GetPlayerResponseWithFallbackAsync(
         VideoId videoId,
@@ -423,13 +423,13 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         bool forceMobilePriority = false,
         IReadOnlyList<string>? excludedClients = null)
     {
-        // Если активен VPN и есть авторизация (либо BotGuard уже прогрет до 2мс fast-mint),
-        // сразу идём через WEB_REMIX, кроме случаев принудительного рефреша после серии 403 от CDN.
+        // If VPN is active and authenticated (or BotGuard is already warmed up to 2ms fast-mint),
+        // route immediately through WEB_REMIX, except during forced refresh after a series of CDN 403s.
         bool useWebPriority = !forceMobilePriority && (preferWebRemix || (isAuthenticated && YoutubeClientUtils.IsVpnActive));
 
-        // После CDN 403 клиенты с отвергнутыми URL исключаются, ANDROID_VR уходит в конец цепочки.
-        // excludedClients != null — запрос после CDN 403. Даже при пустом списке (клиент URL не распознан)
-        // используется CDN-403 порядок: ANDROID_VR первым почти гарантированно ловит bot detection.
+        // After CDN 403, clients with rejected URLs are excluded, ANDROID_VR moves to the end of the chain.
+        // excludedClients != null indicates a request after CDN 403. Even if empty (URL client unrecognised),
+        // the CDN-403 order is used: ANDROID_VR as first almost guaranteed triggers bot detection.
         bool hasExcludedClients = excludedClients is not null;
         var clients = hasExcludedClients
             ? YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden(excludedClients!)
@@ -457,8 +457,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
         foreach (var clientName in clients)
         {
-            // Пропускаем клиент, если он уже давал BotDetection в текущей сессии.
-            // Предотвращает ~700 мс задержку перед переходом на WEB_REMIX.
+            // Skip client if it has already triggered BotDetection in the current session.
+            // Prevents ~700 ms delay before falling back to WEB_REMIX.
             bool skipAndroidVr = false;
             if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal)
                 && _androidVrSessionBotDetections > 0)
@@ -489,7 +489,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
                 if (response.IsPlayable && HasPlayableAudioStream(response))
                 {
-                    // Успешный ответ ANDROID_VR — блокировка снята, СБРАСЫВАЕМ счётчик
+                    // Successful ANDROID_VR response — block lifted, RESET counter
                     if (string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal)
                         && _androidVrSessionBotDetections > 0)
                     {
@@ -562,8 +562,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
-                // Пытаемся классифицировать как сетевую ошибку (на случай
-                // если YoutubeHttpHandler не обернул — например, ошибка до SendAsync или внутренний таймаут)
+                // Attempt to classify as a network error (in case of
+                // If YoutubeHttpHandler did not wrap it (e.g., an error before SendAsync or an internal timeout)
                 var classified = YoutubeNetworkException.TryClassify(ex, cancellationToken);
                 if (classified is not null)
                 {
@@ -581,16 +581,16 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             }
         }
 
-        // Приоритет финальных ошибок
+        // Final error priority
 
-        // 1. Все клиенты упали из-за сети — пользователь должен увидеть "проблема с сетью"
+        // 1. All clients failed due to network issues — the user should see "network problem"
         if (firstNetworkException is not null && !hasNonNetworkFailure)
         {
             Log.Error($"[VideoController] [{videoId}] All clients failed due to network: {firstNetworkException.ErrorType}");
             throw firstNetworkException;
         }
 
-        // 2. Все клиенты потребовали логин (не бот)
+        // 2. All clients required login (not a bot)
         if (hasLoginRequired && loginException != null)
         {
             Log.Error($"[VideoController] [{videoId}] All clients require login: {loginException.Reason}");
@@ -599,7 +599,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
 
         var allErrors = string.Join("; ", errors);
 
-        // 3. Все клиенты заблокированы ботодетекцией
+        // 3. All clients are blocked by bot detection
         if (allBotDetection)
         {
             throw new BotDetectionException(
@@ -607,7 +607,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
                 GetRemainingCooldown());
         }
 
-        // 4. Смешанные ошибки, но есть сетевая — упоминаем в сообщении
+        // 4. Mixed errors, but network error present — mention it in the message
         if (firstNetworkException is not null)
         {
             Log.Error($"[VideoController] [{videoId}] Mixed failures (including network: {firstNetworkException.ErrorType}). Errors: {allErrors}");
@@ -630,11 +630,11 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
             if (string.IsNullOrEmpty(mime))
                 continue;
 
-            // Чистые аудио-потоки
+            // Audio-only streams
             if (mime.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            // Совмещённые потоки (видео + аудио, например itag 18 при SABR)
+            // Muxed streams (video + audio, e.g., itag 18 with SABR)
             if (mime.StartsWith("video/", StringComparison.OrdinalIgnoreCase) && s.AudioChannels > 0)
                 return true;
         }
@@ -652,8 +652,8 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     }
 
     /// <summary>
-    /// Сбрасывает закэшированный signatureTimestamp через <see cref="PlayerContextManager"/>.
-    /// Затрагивает все экземпляры <see cref="VideoController"/>, использующие тот же менеджер.
+    /// Resets the cached signatureTimestamp via <see cref="PlayerContextManager"/>.
+    /// Affects all <see cref="VideoController"/> instances using the same manager.
     /// </summary>
     internal void InvalidateSignatureTimestamp()
     {

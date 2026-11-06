@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Централизованные строковые идентификаторы клиентов InnerTube API.
+/// Centralized string identifiers for InnerTube API clients.
 /// </summary>
 public static class YoutubeClientNames
 {
@@ -25,13 +25,13 @@ public static class YoutubeClientUtils
 	private const string DefaultVisitorData = "CgtsZG1ySnZiQUkSbyiMjuGSBg%3D%3D";
 
 	/// <summary>
-	/// Время подавления повторных запросов к <c>sw.js_data</c> после сетевого сбоя (мс),
-	/// в течение которого используется резервный <see cref="DefaultVisitorData"/>.
+	/// Suppression time for repeated requests to <c>sw.js_data</c> after a network failure (ms),
+	/// during which the fallback <see cref="DefaultVisitorData"/> is used.
 	/// </summary>
 	private const long VisitorDataFailureCooldownMs = 60_000;
 
 	/// <summary>
-	/// Максимальное время ожидания ответа от <c>sw.js_data</c> при разрешении VisitorData.
+	/// Maximum time to wait for a response from <c>sw.js_data</c> when resolving VisitorData.
 	/// </summary>
 	private static readonly TimeSpan SwDataFetchTimeout = TimeSpan.FromSeconds(5);
 
@@ -47,12 +47,12 @@ public static class YoutubeClientUtils
 	private const string InvariantGlJson = "\"US\"";
 
 	/// <summary>
-	/// Указывает, активен ли VPN/TUN-маршрут по данным сетевого менеджера.
+	/// Indicates whether a VPN/TUN route is active according to the network manager.
 	/// </summary>
 	public static bool IsVpnActive => _vpnActiveCheck?.Invoke() ?? false;
 
 	/// <summary>
-	/// Инициализирует статический провайдер кук авторизации, HTTP-клиента и детектора VPN для VisitorData и выбора клиента.
+	/// Initializes the static provider of auth cookies, HTTP client, and VPN detector for VisitorData and client selection.
 	/// </summary>
 	public static void Initialize(
 		CookieAuthService authService,
@@ -65,8 +65,8 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Единый, глобально синхронизированный токен VisitorData для всех клиентов YouTube.
-	/// Предотвращает дублирующие сетевые запросы к sw.js_data на горячих путях воспроизведения.
+	/// Unified, globally synchronized VisitorData token for all YouTube clients.
+	/// Prevents duplicate network requests to sw.js_data on hot playback paths.
 	/// </summary>
 	public static string VisitorData
 	{
@@ -83,17 +83,17 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Гарантирует наличие свежего VisitorData.
+	/// Ensures the presence of fresh VisitorData.
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// <paramref name="ct"/> используется для отмены <b>ожидания</b> результата,
-	/// но не отменяет сам сетевой запрос — fetch живёт независимо от вызывающей операции.
-	/// Это предотвращает ситуацию когда отмена одного трека портит глобальный кэш VisitorData.
+	/// <paramref name="ct"/> is used to cancel **waiting** for the result,
+	/// but does not cancel the network request itself — the fetch lives independently of the calling operation.
+	/// This prevents a situation where cancelling a single track corrupts the global VisitorData cache.
 	/// </para>
 	/// </remarks>
-	/// <param name="forceRefresh">Принудительное обновление даже при наличии актуального значения.</param>
-	/// <param name="ct">Токен отмены ожидания.</param>
+	/// <param name="forceRefresh">Forces a refresh even if an up-to-date value exists.</param>
+	/// <param name="ct">Cancellation token for waiting.</param>
 	public static Task<string> EnsureVisitorDataAsync(bool forceRefresh = false, CancellationToken ct = default)
 	{
 		lock (_visitorDataLock)
@@ -101,25 +101,25 @@ public static class YoutubeClientUtils
 			if (!forceRefresh && !string.Equals(_visitorData, DefaultVisitorData, StringComparison.Ordinal))
 				return Task.FromResult(_visitorData);
 
-			// Если недавно уже была ошибка сети при получении sw.js_data — мгновенно отдаём DefaultVisitorData,
-			// не блокируя каждый запрос /player на лишние 5-10 секунд таймаута.
+			// If there was a recent network error fetching sw.js_data, immediately return DefaultVisitorData,
+			// without blocking each /player request for an extra 5-10 second timeout.
 			long now = Environment.TickCount64;
 			if (!forceRefresh && _lastFailedFetchTick != 0 && (now - _lastFailedFetchTick) < VisitorDataFailureCooldownMs)
 				return Task.FromResult(_visitorData);
 
-			// Переиспользуем активный незавершённый таск — deduplication параллельных вызовов
+			// Reuse active pending task — deduplication of concurrent calls
 			if (!forceRefresh && _fetchTask is { IsCompleted: false } activeTask)
 				return ct.CanBeCanceled ? activeTask.WaitAsync(ct) : activeTask;
 
-			// Завершённый (в т.ч. faulted/cancelled) таск заменяем новым
+			// Replace completed task (including faulted/cancelled) with a new one
 			_fetchTask = FetchVisitorDataInternalAsync(CancellationToken.None);
 			return ct.CanBeCanceled ? _fetchTask.WaitAsync(ct) : _fetchTask;
 		}
 	}
 
 	/// <summary>
-	/// Централизованный метод выполнения сетевых запросов к sw.js_data.
-	/// Возвращает VisitorData и новые заголовки кук для сессии.
+	/// Centralized method for executing network requests to sw.js_data.
+	/// Returns VisitorData and new cookie headers for the session.
 	/// </summary>
 	public static async Task<(string? VisitorData, IEnumerable<string>? SetCookieHeaders, bool IsSuccess)> FetchSwDataAsync(
 		string? cookiesHeader, CancellationToken ct)
@@ -128,7 +128,7 @@ public static class YoutubeClientUtils
 		{
 			using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.youtube.com/sw.js_data")
 			{
-				Version = System.Net.HttpVersion.Version11 // Исключаем медленные UDP-согласования HTTP/3 при старте
+				Version = System.Net.HttpVersion.Version11 // Exclude slow HTTP/3 UDP handshakes at startup
 			};
 			request.Headers.UserAgent.ParseAdd(UaWeb);
 			request.Headers.Add("Referer", YoutubeHttpHandler.YoutubeOrigin + "/");
@@ -222,10 +222,10 @@ public static class YoutubeClientUtils
 	public static bool RequiresAuth => CurrentProfile is YoutubeClientProfile.Web or YoutubeClientProfile.WebRemix;
 
 	/// <summary>
-	/// Клиенты для получения stream URLs по умолчанию (гостевой режим).
-	/// ANDROID_VR идёт первым для мгновенного старта (fast path без n-token/cipher),
-	/// WEB_REMIX выступает прозрачным fallback при bot challenge / age restriction,
-	/// WEB выступает стабильным веб-резервом с поддержкой совмещённого MP4 AAC без ограничений по длительности.
+	/// Default clients for retrieving stream URLs (guest mode).
+	/// ANDROID_VR comes first for instant startup (fast path without n-token/cipher),
+	/// WEB_REMIX acts as a transparent fallback on bot challenge / age restriction,
+	/// WEB acts as a stable web fallback with combined MP4 AAC support without duration limits.
 	/// </summary>
 	public static readonly string[] StreamFallbackClientsDefault =
 	[
@@ -235,11 +235,11 @@ public static class YoutubeClientUtils
 	];
 
 	/// <summary>
-	/// Stream fallback для авторизованных пользователей.
+	/// Stream fallback for authorized users.
 	/// </summary>
 	/// <summary>
-	/// Stream fallback для авторизованных пользователей или при активном BotGuard + VPN,
-	/// где WEB_REMIX с fast-mint PoToken (2 мс) проходит с первой попытки без BotDetection-отлупа на ANDROID_VR.
+	/// Stream fallback for authorized users or when BotGuard + VPN is active,
+	/// where WEB_REMIX with fast-mint PoToken (2 ms) passes on the first attempt without BotDetection rejection on ANDROID_VR.
 	/// </summary>
 	public static readonly string[] StreamFallbackClientsWebPriority =
 	[
@@ -256,7 +256,7 @@ public static class YoutubeClientUtils
 	];
 
 	/// <summary>
-	/// Возвращает список клиентов для получения stream URLs с учётом состояния прогрева BotGuard и VPN.
+	/// Returns a list of clients for retrieving stream URLs taking into account BotGuard warmup state and VPN.
 	/// </summary>
 	public static string[] GetStreamFallbackClients(bool isAuthenticated, bool preferWebRemix = false)
 	{
@@ -266,15 +266,15 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Обратная совместимость — без контекста авторизации.
+	/// Backward compatibility — without authorization context.
 	/// </summary>
 	public static string[] StreamFallbackClients => StreamFallbackClientsDefault;
 
 	/// <summary>
-	/// Порядок клиентов после HTTP 403 от CDN на уже выданных URL.
-	/// WEB идёт первым (браузерный профиль: именно он воспроизводит трек в браузере),
-	/// ANDROID_VR — последним: после серии 403 он почти гарантированно получает bot detection
-	/// и уходит в двухчасовой карантин.
+	/// Client ordering after CDN HTTP 403 on previously issued URLs.
+	/// WEB comes first (browser profile: it is what plays the track in a browser),
+	/// ANDROID_VR comes last: after a series of 403s it almost guaranteed gets bot detection
+	/// and goes into a two-hour quarantine.
 	/// </summary>
 	public static readonly string[] StreamFallbackClientsAfterCdnForbidden =
 	[
@@ -284,10 +284,10 @@ public static class YoutubeClientUtils
 	];
 
 	/// <summary>
-	/// Возвращает fallback-цепочку после CDN 403 без клиентов, чьи URL этого трека уже отвергнуты CDN.
+	/// Returns the fallback chain after CDN 403 excluding clients whose URLs for this track have already been rejected by the CDN.
 	/// </summary>
-	/// <param name="excludedClients">API-имена клиентов (значение параметра <c>c</c> в stream URL), получивших CDN 403.</param>
-	/// <returns>Новый массив клиентов в порядке приоритета; пустой, если исключены все.</returns>
+	/// <param name="excludedClients">API names of clients (<c>c</c> parameter value in stream URL) that received CDN 403.</param>
+	/// <returns>A new array of clients in order of priority; empty if all are excluded.</returns>
 	public static string[] GetStreamFallbackClientsAfterCdnForbidden(IReadOnlyList<string> excludedClients)
 	{
 		ArgumentNullException.ThrowIfNull(excludedClients);
@@ -313,9 +313,9 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Возвращает строковый идентификатор клиента для YouTube API.
-	/// Enum.ToString() даёт "AndroidVR", а API ожидает "ANDROID_VR" — прямое
-	/// преобразование через switch исключает ошибки при добавлении новых клиентов.
+	/// Returns the string identifier of the client for YouTube API.
+	/// Enum.ToString() yields "AndroidVR", whereas the API expects "ANDROID_VR" — direct
+	/// conversion via switch prevents errors when adding new clients.
 	/// </summary>
 	public static string GetClientApiName(YoutubeClientProfile profile) => profile switch
 	{
@@ -329,7 +329,7 @@ public static class YoutubeClientUtils
 	};
 
 	/// <summary>
-	/// Настраивает специфичные заголовки InnerTube API для исходящего запроса плеера.
+	/// Configures specific InnerTube API headers for the outgoing player request.
 	/// </summary>
 	public static void ConfigurePlayerRequest(HttpRequestMessage request, string clientName)
 	{
@@ -352,7 +352,7 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Возвращает URL конечной точки плеера для указанного клиента.
+	/// Returns the player endpoint URL for the specified client.
 	/// </summary>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static string GetPlayerEndpoint(string clientName)
@@ -365,7 +365,7 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Генерирует контекст плеера для текущего профиля клиента.
+	/// Generates the player context for the current client profile.
 	/// </summary>
 	public static string GeneratePlayerContext(string videoId, string? visitorData)
 	{
@@ -376,7 +376,7 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Генерирует контекст для конкретного клиента с минимальным числом строковых аллокаций.
+	/// Generates context for a specific client with minimal string allocations.
 	/// </summary>
 	public static string GeneratePlayerContextForClient(string clientName, string videoId, string? visitorData, string? signatureTimestamp = null)
 	{
@@ -519,7 +519,7 @@ public static class YoutubeClientUtils
 	}
 
 	/// <summary>
-	/// Возвращает User-Agent для конкретного клиента.
+	/// Returns the User-Agent for a specific client.
 	/// </summary>
 	public static string GetUserAgentForClient(string clientName) => clientName switch
 	{
@@ -533,8 +533,8 @@ public static class YoutubeClientUtils
 	};
 
 	/// <summary>
-	/// Высокопроизводительный парсер длительности медиафайлов YouTube.
-	/// Исключает аллокации строк и оптимизирован под частые форматы времени.
+	/// High-performance duration parser for YouTube media files.
+	/// Eliminates string allocations and is optimized for common time formats.
 	/// </summary>
 	public static class DurationParser
 	{
@@ -542,10 +542,10 @@ public static class YoutubeClientUtils
 			[@"m\:ss", @"mm\:ss", @"h\:mm\:ss", @"hh\:mm\:ss"];
 
 		/// <summary>
-		/// Выполняет быстрое Span-based чтение и парсинг формата времени.
+		/// Performs fast Span-based reading and parsing of the time format.
 		/// </summary>
-		/// <param name="text">Строка времени из API InnerTube.</param>
-		/// <returns>Разобранный интервал времени, либо null.</returns>
+		/// <param name="text">Time string from the InnerTube API.</param>
+		/// <returns>Parsed time span, or null.</returns>
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static TimeSpan? Parse(string? text)
 		{

@@ -9,7 +9,7 @@ using LMP.Tests.Framework;
 namespace LMP.UI.Features.Debug;
 
 /// <summary>
-/// Статусный фильтр для быстрого отбора тестов по результату выполнения.
+/// Status filter for quick selection of tests by execution result.
 /// </summary>
 public enum TestStateFilter : byte
 {
@@ -21,7 +21,7 @@ public enum TestStateFilter : byte
 }
 
 /// <summary>
-/// Структура отложенного обновления состояния теста для исключения блокировок UI-потока.
+/// Deferred test state update structure to prevent UI thread lockups.
 /// </summary>
 internal readonly struct TestStateUpdate
 {
@@ -42,8 +42,8 @@ internal readonly struct TestStateUpdate
 }
 
 /// <summary>
-/// ViewModel вкладки тестов с пакетным обновлением состояния UI, полным отсутствием
-/// фризов диспетчера и выводом результатов исключительно в централизованный системный лог.
+/// ViewModel for the tests tab with batch UI state updates, zero dispatcher
+/// freezes, and outputting results exclusively to the centralized system log.
 /// </summary>
 public sealed partial class TestRunnerViewModel : ViewModelBase
 {
@@ -200,7 +200,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Применяет фильтры командной строки к UI-раннеру и при наличии флага <c>--autorun</c> автоматически запускает отфильтрованные тесты.
+    /// Applies command-line filters to the UI runner and automatically runs filtered tests if the <c>--autorun</c> flag is present.
     /// </summary>
     public void ApplyCliArguments(string[] args)
     {
@@ -478,7 +478,7 @@ public sealed partial class TestRunnerViewModel : ViewModelBase
                 item.ErrorMessage = update.ErrorMessage;
                 stateChanged = true;
 
-                // Автоскролл активен исключительно при пакетном прогоне, исключая смещение при ручном клике
+                // Autoscroll is active exclusively during batch runs, preventing displacement on manual clicks
                 if (update.IsStarting && _isBatchRunning)
                 {
                     double elapsedMs = (now - _lastScrollTicks) * 1000.0 / Stopwatch.Frequency;

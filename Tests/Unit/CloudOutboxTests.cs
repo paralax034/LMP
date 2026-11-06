@@ -9,8 +9,8 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Тесты очереди облачных мутаций: коалесценция с операциями «в полёте», слияние при гидратации,
-/// классификация сбоев, выравнивание ответа YouTube, насос персистентности и точечные SQL-обновления.
+/// Tests for the cloud mutation queue: in-flight operation coalescing, hydration merging,
+/// failure classification, YouTube response alignment, persistence pump, and targeted SQL updates.
 /// </summary>
 public static class CloudOutboxTests
 {
@@ -25,13 +25,13 @@ public static class CloudOutboxTests
 
         CloudOutboxCoalescer.ApplyLike(state, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
 
-        // Лайк уже отправляется: возврат к исходному значению не должен аннигилировать запись
+        // Like is already in-flight: reverting to the original value must not annihilate the record
         bool annihilated = CloudOutboxCoalescer.ApplyLike(state, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: true);
         TestAssert.False(annihilated);
         TestAssert.True(CloudOutboxCoalescer.TryGetLikeTarget(state, "yt_a", out bool target));
         TestAssert.False(target);
 
-        // Отправка «true» завершилась: запись остаётся с базой true и целью false
+        // In-flight "true" succeeded: record remains with base true and target false
         CloudOutboxCoalescer.CommitLike(state, "yt_a", syncedLiked: true);
         TestAssert.Equal(1, state.PendingLikes.Count);
         TestAssert.True(state.PendingLikes[0].BaselineLiked);
@@ -52,7 +52,7 @@ public static class CloudOutboxTests
         TestAssert.True(annihilated);
         TestAssert.True(state.IsEmpty);
 
-        // Намерение, совпадающее с базой, не создаёт запись
+        // Intent matching the base value does not create a record
         CloudOutboxCoalescer.ApplyLike(state, "yt_b", targetLiked: true, baselineLiked: true, isInFlight: false);
         TestAssert.True(state.IsEmpty);
         return Task.CompletedTask;
@@ -70,7 +70,7 @@ public static class CloudOutboxTests
         CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a", "yt_b"], inFlightRemoves: null);
         var sentAdds = new HashSet<string>(state.PendingAddTrackIds, StringComparer.Ordinal);
 
-        // Пользователь удалил трек, пока добавление отправляется: удаление сохраняется как компенсация
+        // User deleted the track while add is in-flight: deletion is preserved as a compensating mutation
         CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", null)], sentAdds);
         TestAssert.Equal(2, state.PendingAddTrackIds.Count);
         TestAssert.Equal(1, state.PendingRemoveTracks.Count);
@@ -92,7 +92,7 @@ public static class CloudOutboxTests
 
         CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", null)], sentAdds);
 
-        // Добавление упало: итоговое намерение «трека нет», повторное добавление не отправляется
+        // Add failed: final intent is "no track", retry of add is not sent
         bool changed = CloudOutboxCoalescer.ResolveInFlightCompensations(state, sentAdds, new HashSet<string>(StringComparer.Ordinal));
         TestAssert.True(changed);
         TestAssert.Equal(0, state.PendingAddTrackIds.Count);
@@ -108,13 +108,13 @@ public static class CloudOutboxTests
         CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", "SV_A")], inFlightAdds: null);
         var sentRemoves = new HashSet<string>(StringComparer.Ordinal) { "yt_a" };
 
-        // Удаление в полёте: повторное добавление не аннигилирует его, а ставится компенсацией
+        // Deletion in-flight: re-adding does not annihilate it, but queues as a compensating mutation
         var restored = CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a"], sentRemoves);
         TestAssert.Null(restored);
         TestAssert.Equal(1, state.PendingAddTrackIds.Count);
         TestAssert.Equal(1, state.PendingRemoveTracks.Count);
 
-        // Удаление упало: трек остался в облаке, обе операции снимаются
+        // Deletion failed: track remains in the cloud, both operations are cleared
         bool changed = CloudOutboxCoalescer.ResolveInFlightCompensations(state, new HashSet<string>(StringComparer.Ordinal), sentRemoves);
         TestAssert.True(changed);
         TestAssert.True(state.IsEmpty);
@@ -146,7 +146,7 @@ public static class CloudOutboxTests
         CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_b", null)], inFlightAdds: null);
         CloudOutboxCoalescer.ApplyReorder(state, ["yt_a", "yt_c"], ["yt_c", "yt_a"], isTargetInFlight: false);
 
-        // До создания плейлиста перестановка применяется к порядку добавлений без move-операций
+        // Prior to playlist creation, reordering applies directly to the order of adds without move operations
         TestAssert.Equal(2, state.PendingAddTrackIds.Count);
         TestAssert.Equal("yt_c", state.PendingAddTrackIds[0]);
         TestAssert.Equal("yt_a", state.PendingAddTrackIds[1]);
@@ -165,7 +165,7 @@ public static class CloudOutboxTests
         state.HasPendingDescription = true;
         state.TargetDescription = "draft desc";
 
-        // Пока создание не отправлено, название и описание уходят в сам запрос создания
+        // While creation is not yet in-flight, title and description changes are merged into the creation request itself
         TestAssert.True(CloudOutboxCoalescer.IsUnsentCreate(state, isTargetInFlight: false));
         TestAssert.False(CloudOutboxCoalescer.IsUnsentCreate(state, isTargetInFlight: true));
         CloudOutboxCoalescer.DropMetadataAbsorbedByCreate(state);
@@ -173,7 +173,7 @@ public static class CloudOutboxTests
         TestAssert.False(state.HasPendingDescription);
         TestAssert.False(state.IsEmpty);
 
-        // Правки во время Фазы 0: совпавшее с отправленным снимается, более новое остаётся с новой базой
+        // Edits during Phase 0: changes matching the sent payload are cleared, newer changes remain with updated base
         state.HasPendingName = true;
         state.TargetName = "Sent";
         state.HasPendingDescription = true;
@@ -200,7 +200,7 @@ public static class CloudOutboxTests
         var restored = NewState("__likes__");
         CloudOutboxCoalescer.ApplyLike(restored, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
 
-        // До гидратации пользователь снял лайк с yt_a и поставил на yt_b
+        // Prior to hydration, the user unliked yt_a and liked yt_b
         var live = NewState("__likes__");
         CloudOutboxCoalescer.ApplyLike(live, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: false);
         CloudOutboxCoalescer.ApplyLike(live, "yt_b", targetLiked: true, baselineLiked: false, isInFlight: false);
@@ -254,7 +254,7 @@ public static class CloudOutboxTests
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(new HttpRequestException("socket reset"), ct));
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(new TimeoutException(), ct));
 
-        // Таймаут HttpClient приходит как TaskCanceledException при неотменённом токене
+        // HttpClient timeout arrives as TaskCanceledException with an uncancelled token
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(new TaskCanceledException(), ct));
         TestAssert.Equal(CloudOutboxFailureKind.Permanent, CloudOutboxCoalescer.ClassifyFailure(new FormatException("bad payload"), ct));
 
@@ -298,7 +298,7 @@ public static class CloudOutboxTests
         TestAssert.Equal("yt_a", mappings[0].TrackId);
         TestAssert.Equal("SV_A", mappings[0].SetVideoId);
 
-        // Несовпадение длины ответа: сопоставление по индексам запрещено
+        // Response length mismatch: index-based matching is forbidden
         TestAssert.Equal(0, CloudOutboxCoalescer.MapAddedSetVideoIds(["yt_a", "yt_b"], ["SV_A"]).Count);
         return Task.CompletedTask;
     }
@@ -306,7 +306,7 @@ public static class CloudOutboxTests
     [TestMethod(TestCategory.Unit, "Outbox: Edit Result Alignment", Group = TestGroups.Playlists, Order = 32)]
     public static Task TestEditResultAlignmentAsync()
     {
-        // Сервер пропустил средний трек: сдвиг индексов не должен приписать SV_C треку v2
+        // Server omitted the middle track: index shifting must not assign SV_C to track v2
         var aligned = PlaylistEditResultAligner.Align(["v1", "v2", "v3"], [("v1", "SV_A"), ("v3", "SV_C")]);
         TestAssert.Equal(3, aligned.Count);
         TestAssert.Equal("SV_A", aligned[0]);
@@ -442,7 +442,7 @@ public static class CloudOutboxTests
                 [new CloudOutboxRowChange(Owner, "pl_a", a), new CloudOutboxRowChange(Owner, "pl_b", b)]).ConfigureAwait(false);
             await store.WriteBatchAsync([new CloudOutboxRowChange(Owner, "pl_a", null)]).ConfigureAwait(false);
 
-            // Повреждённая строка пропускается, не прерывая гидратацию
+            // Corrupted row is skipped without interrupting hydration
             await InsertBrokenOutboxRowAsync(factory).ConfigureAwait(false);
 
             var rows = await store.LoadAllAsync().ConfigureAwait(false);
@@ -468,7 +468,7 @@ public static class CloudOutboxTests
             await CreateSchemaAsync(factory).ConfigureAwait(false);
             var repo = new PlaylistRepository(factory);
 
-            // Строка удалена во время создания: обновление не воскрешает её
+            // Row was deleted during creation: update does not resurrect it
             TestAssert.False(await repo.UpdateCloudLinkStateAsync("pl_missing", "PL_X", null, false).ConfigureAwait(false));
 
             await repo.UpsertAsync(new Playlist
@@ -480,7 +480,7 @@ public static class CloudOutboxTests
                 Ownership = PlaylistOwnership.Unknown
             }).ConfigureAwait(false);
 
-            // Параллельное переименование не должно затираться фиксацией привязки
+            // Concurrent renaming must not be overwritten by binding commitment
             await repo.RenameAsync("pl_sync", "Renamed").ConfigureAwait(false);
             TestAssert.True(await repo.UpdateCloudLinkStateAsync("pl_sync", "PL_NEW", null, false).ConfigureAwait(false));
 
@@ -490,7 +490,7 @@ public static class CloudOutboxTests
             TestAssert.Equal("Renamed", linked.Name);
             TestAssert.Equal(PlaylistOwnership.Mine, linked.Ownership);
 
-            // Привязка к другому облачному плейлисту не перезаписывается
+            // Binding to another cloud playlist is not overwritten
             TestAssert.False(await repo.UpdateCloudLinkStateAsync("pl_sync", "PL_OTHER", null, false).ConfigureAwait(false));
 
             await repo.UpsertAsync(new Playlist
@@ -501,7 +501,7 @@ public static class CloudOutboxTests
                 SyncMode = PlaylistSyncMode.LocalOnly
             }).ConfigureAwait(false);
 
-            // Плейлист отвязан от облака во время создания: результат false, вызывающий удалит облачную копию
+            // Playlist unbound from cloud during creation: result is false, caller will delete the cloud copy
             TestAssert.False(await repo.UpdateCloudLinkStateAsync("pl_local", "PL_Y", null, false).ConfigureAwait(false));
         }
         finally
@@ -556,7 +556,7 @@ public static class CloudOutboxTests
         TestAssert.True(CloudOutboxCoalescer.IsRejectedEdit(
             new YoutubeExplodeException("Playlist operation failed with status: STATUS_FAILED")));
 
-        // Транспортные и авторизационные сбои не являются отказом правки и не запускают перебазирование
+        // Transport and auth failures are not edit rejections and do not trigger rebasing
         TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.ServiceUnavailable)));
         TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.Unauthorized)));
         TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(new HttpRequestException("socket reset")));
@@ -583,7 +583,7 @@ public static class CloudOutboxTests
 
         var rebased = CloudOutboxCoalescer.SelectRemovalsStillInCloud(removals, cloud);
 
-        // SV_B удалён на другом устройстве: не отправляется; дубликат SV_A не повторяется; yt_c разрешён по вхождениям
+        // SV_B deleted on another device: not sent; duplicate SV_A not repeated; yt_c resolved by occurrences
         TestAssert.Equal(3, rebased.Count);
         TestAssert.Equal("SV_A", rebased[0].SetVideoId);
         TestAssert.Equal("SV_C", rebased[1].SetVideoId);
@@ -595,7 +595,7 @@ public static class CloudOutboxTests
     [TestMethod(TestCategory.Unit, "Outbox: Reorder Rebase Skips Deleted", Group = TestGroups.Playlists, Order = 41)]
     public static Task TestReorderRebaseAsync()
     {
-        // Локально: d перемещён в начало. В облаке b уже удалён, e добавлен, a продублирован
+        // Locally: d moved to start. In cloud: b already deleted, e added, a duplicated
         List<(string TrackId, string SetVideoId)> cloud =
         [
             ("yt_a", "SV_A"), ("yt_c", "SV_C"), ("yt_d", "SV_D"), ("yt_e", "SV_E"), ("yt_a", "SV_A2")
@@ -619,7 +619,7 @@ public static class CloudOutboxTests
         {
             var (setVideoId, predecessor, successor) = moves[i];
 
-            // Ни один ход не ссылается на удалённый в облаке SetVideoId (иначе YouTube вернёт 400)
+            // No move operation references a SetVideoId deleted in the cloud (otherwise YouTube returns 400)
             TestAssert.True(simulated.Contains(setVideoId), $"Stale move target {setVideoId}");
             simulated.Remove(setVideoId);
 
@@ -646,13 +646,13 @@ public static class CloudOutboxTests
         ];
         var cloud = new HashSet<string>(StringComparer.Ordinal) { "yt_a", "yt_c", "yt_x" };
 
-        // Только связанный с облаком трек считается удалённым; новые и плейсхолдеры ещё не выгружены
+        // Only cloud-bound tracks are considered deleted; new ones and placeholders are not yet uploaded
         var deleted = CloudOutboxCoalescer.SelectCloudDeletedTrackIds(local, cloud);
         TestAssert.NotNull(deleted);
         TestAssert.Equal(1, deleted.Count);
         TestAssert.True(deleted.Contains("yt_b"));
 
-        // Пустой ответ облака не должен опустошить локальный плейлист
+        // Empty cloud response must not wipe out local playlist
         var emptyCloud = new HashSet<string>(StringComparer.Ordinal);
         TestAssert.Null(CloudOutboxCoalescer.SelectCloudDeletedTrackIds(local, emptyCloud));
 
@@ -684,7 +684,7 @@ public static class CloudOutboxTests
             TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(64.5)
         };
 
-        // Секунды округляются вверх, чтобы «0:00» не висело раньше фактической отправки
+        // Seconds are rounded up to prevent lingering at "0:00" prior to actual sending
         TestAssert.Equal("1:05", card.TimeAgo);
         TestAssert.True(card.HasTaskCountdown);
         TestAssert.False(card.ShowTaskProgress);
@@ -693,11 +693,11 @@ public static class CloudOutboxTests
         card.TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(3599.5);
         TestAssert.Equal("1:00:00", card.TimeAgo);
 
-        // Просроченный дедлайн (воркер ждёт сеть/авторизацию) не должен застывать на «0:00»
+        // Overdue deadline (worker waiting for network/auth) must not freeze at "0:00"
         card.TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(-1);
         TestAssert.Equal(LocalizationService.Instance["CloudTask_Overdue"], card.TimeAgo);
 
-        // Явный статус задачи важнее отсчёта, и таймер для него не нужен
+        // Explicit task status takes precedence over countdown, and no timer is needed for it
         card.TaskStatusText = "sending";
         TestAssert.Equal("sending", card.TimeAgo);
         TestAssert.False(card.HasTaskCountdown);
@@ -720,7 +720,7 @@ public static class CloudOutboxTests
 
     private static HttpRequestException Http(HttpStatusCode status) => new($"HTTP {(int)status}", null, status);
 
-    // Делегат скрывает конкретный тип: тесты работают через контракт, как DI в AppEntry (CA1859)
+    // Delegate hides concrete type: tests operate via contract, mirroring DI in AppEntry (CA1859)
     private static readonly Func<string, ISqliteConnectionFactory> CreateFactory =
         static path => new LowMemorySqliteConnectionFactory(path);
 
@@ -765,7 +765,7 @@ public static class CloudOutboxTests
         }
         catch (IOException)
         {
-            // Временный файл удалит ОС: тест не должен падать из-за блокировки антивирусом
+            // Temp file will be deleted by the OS: test must not fail due to antivirus locks
         }
     }
 

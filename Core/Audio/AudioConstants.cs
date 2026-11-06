@@ -1,31 +1,31 @@
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Централизованные константы аудио системы.
-/// Единственный источник истины для всех числовых параметров.
+/// Centralized audio system constants.
+/// The single source of truth for all numeric parameters.
 /// </summary>
 public static class AudioConstants
 {
     // ═══════════════════════════════════════════════════════
-    // SOURCE STATE — Общие значения для источников аудио
+    // SOURCE STATE — Common values for audio sources
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Неизвестная длительность трека в миллисекундах.</summary>
+    /// <summary>Unknown track duration in milliseconds.</summary>
     public const long UnknownDurationMs = -1;
 
-    /// <summary>Неизвестная sample rate из контейнера.</summary>
+    /// <summary>Unknown sample rate from container.</summary>
     public const int UnknownSampleRate = 0;
 
-    /// <summary>Неизвестное количество каналов из контейнера.</summary>
+    /// <summary>Unknown channel count from container.</summary>
     public const int UnknownChannels = 0;
 
-    /// <summary>Полный прогресс буферизации в процентах.</summary>
+    /// <summary>Complete buffering progress in percent.</summary>
     public const double FullBufferProgressPercent = 100.0;
 
-    /// <summary>Начало полного диапазона буферизации.</summary>
+    /// <summary>Start of full buffering range.</summary>
     public const double BufferedRangeStart = 0.0;
 
-    /// <summary>Конец полного диапазона буферизации.</summary>
+    /// <summary>End of full buffering range.</summary>
     public const double BufferedRangeEnd = 1.0;
 
     /// <summary>
@@ -36,120 +36,120 @@ public static class AudioConstants
         [(BufferedRangeStart, BufferedRangeEnd)];
 
     // ═══════════════════════════════════════════════════════
-    // CHUNK SETTINGS — Управление сегментацией данных
+    // CHUNK SETTINGS — Data segmentation management
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Размер чанка для кэширования (64KB = оптимум для HTTP Range + минимум аллокаций).</summary>
+    /// <summary>Chunk size for caching (64KB = optimal for HTTP Range + minimal allocations).</summary>
     public const int ChunkSize = 64 * 1024;
 
     // ═══════════════════════════════════════════════════════
-    // PRELOAD SETTINGS — Стратегия упреждающей загрузки
+    // PRELOAD SETTINGS — Preload strategy
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Интервал проверки preload loop (мс).</summary>
+    /// <summary>Preload loop check interval (ms).</summary>
     public const int PreloadIntervalMs = 500;
 
-    /// <summary>Максимум параллельных загрузок чанков (баланс скорость/RAM).</summary>
+    /// <summary>Maximum parallel chunk downloads (speed/RAM balance).</summary>
     public const int MaxConcurrentDownloads = 3;
 
     // ═══════════════════════════════════════════════════════
-    // DOWNLOAD TIMEOUTS — HTTP операции
+    // DOWNLOAD TIMEOUTS — HTTP operations
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Таймаут ожидания слота загрузки (мс).</summary>
+    /// <summary>Download slot wait timeout (ms).</summary>
     public const int DownloadSlotTimeoutMs = 300;
 
     // ═══════════════════════════════════════════════════════
-    // BACKGROUND DOWNLOAD LIMITS — Экономия сети
+    // BACKGROUND DOWNLOAD LIMITS — Network saving
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Циклов простоя перед фоновой докачкой (5 × 1s = 5s idle).</summary>
+    /// <summary>Idle cycles before background download (5 × 1s = 5s idle).</summary>
     public const int BackgroundFillIdleCycles = 5;
 
-    /// <summary>Пауза между фоновыми загрузками (5s = gentle network usage).</summary>
+    /// <summary>Pause between background downloads (5s = gentle network usage).</summary>
     public const int BackgroundFillIntervalMs = 5_000;
 
     // ═══════════════════════════════════════════════════════
-    // DECODER SETTINGS — Параметры декодирования
+    // DECODER SETTINGS — Decoding parameters
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Sample rate по умолчанию (48kHz = industry standard).</summary>
+    /// <summary>Default sample rate (48kHz = industry standard).</summary>
     public const int DefaultSampleRate = 48_000;
 
-    /// <summary>Количество каналов по умолчанию (stereo).</summary>
+    /// <summary>Default channel count (stereo).</summary>
     public const int DefaultChannels = 2;
 
-    /// <summary>Буфер декодирования (сэмплы на канал, не байты).</summary>
+    /// <summary>Decoding buffer (samples per channel, not bytes).</summary>
     public const int DecoderBufferFrames = 8192;
 
-    /// <summary>Кадров пропустить после seek для Opus (pre-skip compensation).</summary>
+    /// <summary>Frames to skip after seek for Opus (pre-skip compensation).</summary>
     public const int SkipFramesAfterSeekOpus = 2;
 
-    /// <summary>Кадров пропустить после seek для AAC (encoder delay).</summary>
+    /// <summary>Frames to skip after seek for AAC (encoder delay).</summary>
     public const int SkipFramesAfterSeekAac = 5;
 
-    /// <summary>Таймаут graceful shutdown декодера (мс).</summary>
+    /// <summary>Decoder graceful shutdown timeout (ms).</summary>
     public const int DecoderStopTimeoutMs = 500;
 
     /// <summary>
-    /// Таймаут остановки декодера при seek (мс).
+    /// Decoder stop timeout during seek (ms).
     /// </summary>
     /// <remarks>
-    /// <para>Увеличенный таймаут гарантирует, что старый декодер полностью прекратит работу 
-    /// и освободит порт ДО старта нового декодера, предотвращая утечки потоков и SocketException.</para>
+    /// <para>An increased timeout ensures that the old decoder fully stops operation 
+    /// and releases the port BEFORE starting the new decoder, preventing thread leaks and SocketException.</para>
     /// </remarks>
     public const int DecoderStopTimeoutSeekMs = 600;
 
     // ═══════════════════════════════════════════════════════
-    // PLAYBACK BUFFER SETTINGS — PCM циклический буфер
+    // PLAYBACK BUFFER SETTINGS — PCM ring buffer
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Максимально допустимое усиление громкости плеера (Gain).</summary>
+    /// <summary>Maximum allowed player volume gain (Gain).</summary>
     public const float MaxVolumeGain = 4.0f;
 
-    /// <summary>Размер PCM буфера в секундах (2s = smooth playback).</summary>
+    /// <summary>PCM buffer size in seconds (2s = smooth playback).</summary>
     public const int BufferSizeSeconds = 2;
 
     // ═══════════════════════════════════════════════════════
-    // POSITION REPORTING — UI обновления
+    // POSITION REPORTING — UI updates
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Интервал обновления позиции по умолчанию (мс).</summary>
+    /// <summary>Default position update interval (ms).</summary>
     public const int DefaultPositionUpdateIntervalMs = 250;
 
-    /// <summary>Интервал проверки состояния буфера (мс).</summary>
+    /// <summary>Buffer state check interval (ms).</summary>
     public const int BufferStateUpdateIntervalMs = 500;
 
     // ═══════════════════════════════════════════════════════
-    // RETRY POLICY — Обработка ошибок
+    // RETRY POLICY — Error handling
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Максимум попыток повтора операций.</summary>
+    /// <summary>Maximum operation retry attempts.</summary>
     public const int MaxRetryAttempts = 3;
 
-    /// <summary>Задержка между попытками (мс).</summary>
+    /// <summary>Delay between attempts (ms).</summary>
     public const int RetryDelayMs = 1_000;
 
     // ═══════════════════════════════════════════════════════
-    // CACHE MANAGEMENT — Дисковый кэш
+    // CACHE MANAGEMENT — Disk cache
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Имя файла метаданных кэша.</summary>
+    /// <summary>Cache metadata file name.</summary>
     public const string CacheMetadataFileName = "cache_index.json";
 
-    /// <summary>Расширение файлов аудио кэша.</summary>
+    /// <summary>Audio cache file extension.</summary>
     public const string CacheFileExtension = ".audio";
 
-    /// <summary>Интервал автосохранения индекса кэша (мс).</summary>
+    /// <summary>Cache index auto-save interval (ms).</summary>
     public const int CacheAutoSaveIntervalMs = 30_000;
 
-    /// <summary>Таймаут блокировки при сохранении индекса (мс).</summary>
+    /// <summary>Lock timeout for index saving (ms).</summary>
     public const int CacheSaveLockTimeoutMs = 100;
 
-    /// <summary>Размер буфера для файловых операций (64KB).</summary>
+    /// <summary>Buffer size for file operations (64KB).</summary>
     public const int CacheFileBufferSize = 65_536;
 
-    /// <summary>Количество байт в одном килобайте.</summary>
+    /// <summary>Number of bytes per kilobyte.</summary>
     public const int BytesPerKilobyte = 1024;
 
     // ═══════════════════════════════════════════════════════
@@ -180,8 +180,8 @@ public static class AudioConstants
     public const int BitrateNormMax = 320;
 
     /// <summary>
-    /// Нормализация битрейта для кэш-ключей.
-    /// Группирует близкие битрейты в стандартные bucket'ы.
+    /// Normalizes bitrate for cache keys.
+    /// Groups close bitrates into standard buckets.
     /// </summary>
     public static int NormalizeBitrate(int bitrate) => bitrate switch
     {
@@ -197,10 +197,10 @@ public static class AudioConstants
     };
 
     // ═══════════════════════════════════════════════════════
-    // FORMAT DETECTION — Magic bytes для форматов
+    // FORMAT DETECTION — Magic bytes for formats
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Размер заголовка для определения формата (в байтах).</summary>
+    /// <summary>Header size for format detection (in bytes).</summary>
     public const int FormatDetectionHeaderSize = 12;
 
     /// <summary>WebM: EBML header magic bytes.</summary>
@@ -213,19 +213,19 @@ public static class AudioConstants
     public static ReadOnlySpan<byte> OggMagic => "OggS"u8;
 
     // ═══════════════════════════════════════════════════════
-    // AAC DECODER TABLES — Единственный источник истины
+    // AAC DECODER TABLES — Single source of truth
     // ═══════════════════════════════════════════════════════
 
     /// <summary>
-    /// Полная таблица sample rates по индексу из AAC Audio Specific Config (ISO 14496-3).
-    /// 16 элементов: индексы 0–11 = стандартные частоты, 12 = 7350 Hz (редкая),
-    /// 13–15 = зарезервированы (0).
+    /// Complete table of sample rates by index from AAC Audio Specific Config (ISO 14496-3).
+    /// 16 elements: indices 0–11 = standard frequencies, 12 = 7350 Hz (rare),
+    /// 13–15 = reserved (0).
     /// </summary>
     /// <remarks>
-    /// <para><b>Единственный источник истины.</b> Используется в Mp4ContainerParser,
-    /// AacDecoder и любом коде, работающем с AAC Audio Specific Config.</para>
-    /// <para>Предыдущая версия содержала 12 элементов (без 7350) — это приводило
-    /// к IndexOutOfRange при парсинге редких AAC-LC профилей.</para>
+    /// <para><b>Single source of truth.</b> Used in Mp4ContainerParser,
+    /// AacDecoder, and any code dealing with AAC Audio Specific Config.</para>
+    /// <para>The previous version contained 12 elements (without 7350), which caused
+    /// IndexOutOfRange when parsing rare AAC-LC profiles.</para>
     /// </remarks>
     private static readonly int[] AacSampleRates =
     [
@@ -235,10 +235,10 @@ public static class AudioConstants
     ];
 
     /// <summary>
-    /// Получить sample rate по индексу из AAC Audio Specific Config.
+    /// Gets the sample rate by index from AAC Audio Specific Config.
     /// </summary>
-    /// <param name="index">Индекс частоты (0–15) из ASC.</param>
-    /// <returns>Sample rate в Hz; <see cref="DefaultSampleRate"/> для невалидных/зарезервированных индексов.</returns>
+    /// <param name="index">Frequency index (0–15) from ASC.</param>
+    /// <returns>Sample rate in Hz; <see cref="DefaultSampleRate"/> for invalid/reserved indices.</returns>
     public static int GetAacSampleRate(int index)
     {
         if ((uint)index >= (uint)AacSampleRates.Length)
@@ -249,19 +249,19 @@ public static class AudioConstants
     }
 
     /// <summary>
-    /// Полная таблица channel count по channel configuration из AAC ASC (ISO 14496-3 §1.6.5.1).
+    /// Complete table of channel count by channel configuration from AAC ASC (ISO 14496-3 §1.6.5.1).
     /// </summary>
     /// <remarks>
-    /// <para>Индекс 0 = определяется отдельно (program_config_element), здесь → <see cref="DefaultChannels"/>.</para>
-    /// <para>Индекс 7 = 7.1 surround (8 каналов), индексы 8–15 = зарезервированы.</para>
+    /// <para>Index 0 = defined separately (program_config_element), maps to <see cref="DefaultChannels"/> here.</para>
+    /// <para>Index 7 = 7.1 surround (8 channels), indices 8–15 = reserved.</para>
     /// </remarks>
     private static readonly int[] AacChannelCounts = [0, 1, 2, 3, 4, 5, 6, 8];
 
     /// <summary>
-    /// Получить количество каналов по channel configuration из AAC Audio Specific Config.
+    /// Gets the channel count by channel configuration from AAC Audio Specific Config.
     /// </summary>
-    /// <param name="channelConfig">Channel configuration (0–7) из ASC.</param>
-    /// <returns>Количество каналов; <see cref="DefaultChannels"/> для невалидных значений.</returns>
+    /// <param name="channelConfig">Channel configuration (0–7) from ASC.</param>
+    /// <returns>Channel count; <see cref="DefaultChannels"/> for invalid values.</returns>
     public static int GetAacChannels(int channelConfig)
     {
         if ((uint)channelConfig >= (uint)AacChannelCounts.Length)

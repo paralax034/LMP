@@ -3,8 +3,8 @@ using System.Text;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Обеспечивает отказоустойчивые атомарные операции записи и чтения файлов с защитой от повреждения данных
-/// при аварийном завершении процесса или отключении питания (Torn Write Protection).
+/// Provides fault-tolerant atomic file read and write operations with protection against data corruption
+/// during process crashes or power outages (Torn Write Protection).
 /// </summary>
 public static class AtomicFile
 {
@@ -14,12 +14,12 @@ public static class AtomicFile
     #region Write Synchronous
 
     /// <summary>
-    /// Атомарно записывает строковый контент в файл в кодировке UTF-8.
+    /// Atomically writes string content to a file using UTF-8 encoding.
     /// </summary>
-    /// <param name="targetPath">Целевой путь к файлу.</param>
-    /// <param name="content">Строковые данные для записи.</param>
-    /// <param name="createBackup">Флаг создания резервной копии (<c>.bak</c>) перед перезаписью.</param>
-    /// <param name="encoding">Кодировка текста (по умолчанию UTF-8 без BOM).</param>
+    /// <param name="targetPath">Target file path.</param>
+    /// <param name="content">String data to write.</param>
+    /// <param name="createBackup">Flag indicating whether to create a backup copy (<c>.bak</c>) before overwriting.</param>
+    /// <param name="encoding">Text encoding (defaults to UTF-8 without BOM).</param>
     public static void WriteText(
         string targetPath,
         string content,
@@ -35,11 +35,11 @@ public static class AtomicFile
     }
 
     /// <summary>
-    /// Атомарно записывает массив байт в целевой файл с принудительным сбросом буфера на диск.
+    /// Atomically writes a byte array to the target file with a forced buffer flush to disk.
     /// </summary>
-    /// <param name="targetPath">Целевой путь к файлу.</param>
-    /// <param name="bytes">Бинарные данные.</param>
-    /// <param name="createBackup">Флаг создания резервной копии (<c>.bak</c>).</param>
+    /// <param name="targetPath">Target file path.</param>
+    /// <param name="bytes">Binary data.</param>
+    /// <param name="createBackup">Flag indicating whether to create a backup copy (<c>.bak</c>).</param>
     public static void WriteBytes(
         string targetPath,
         ReadOnlySpan<byte> bytes,
@@ -75,14 +75,14 @@ public static class AtomicFile
     }
 
     /// <summary>
-    /// Считывает бинарные данные из целевого файла. При его повреждении, нулевом размере или отсутствии
-    /// автоматически считывает резервную копию (<c>.bak</c>) и восстанавливает основной файл.
+    /// Reads binary data from the target file. If it is corrupted, zero-sized, or missing,
+    /// automatically reads the backup copy (<c>.bak</c>) and restores the main file.
     /// </summary>
-    /// <param name="targetPath">Путь к целевому файлу.</param>
-    /// <param name="recoveredFromBackup">Возвращает <c>true</c>, если данные были успешно восстановлены из <c>.bak</c>.</param>
-    /// <returns>Массив прочитанных байт или <c>null</c>, если ни основной файл, ни бэкап прочитать не удалось.</returns>
+    /// <param name="targetPath">Path to the target file.</param>
+    /// <param name="recoveredFromBackup">Returns <c>true</c> if data was successfully recovered from <c>.bak</c>.</param>
+    /// <returns>An array of read bytes, or <c>null</c> if neither the main file nor the backup could be read.</returns>
     /// <remarks>
-    /// Обеспечивает аппаратную защиту от повреждения данных (Torn Write Protection) для бинарных MemoryPack-структур.
+    /// Provides hardware-level protection against data corruption (Torn Write Protection) for binary MemoryPack structures.
     /// </remarks>
     public static byte[]? ReadBytesWithFallback(
         string targetPath,
@@ -98,13 +98,13 @@ public static class AtomicFile
     #region Write Asynchronous
 
     /// <summary>
-    /// Асинхронно и атомарно записывает строковый контент в файл.
+    /// Asynchronously and atomically writes string content to a file.
     /// </summary>
-    /// <param name="targetPath">Целевой путь к файлу.</param>
-    /// <param name="content">Строковые данные для записи.</param>
-    /// <param name="createBackup">Флаг создания резервной копии (<c>.bak</c>).</param>
-    /// <param name="encoding">Кодировка текста (по умолчанию UTF-8 без BOM).</param>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="targetPath">Target file path.</param>
+    /// <param name="content">String data to write.</param>
+    /// <param name="createBackup">Flag indicating whether to create a backup copy (<c>.bak</c>).</param>
+    /// <param name="encoding">Text encoding (defaults to UTF-8 without BOM).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public static async Task WriteTextAsync(
         string targetPath,
         string content,
@@ -121,12 +121,12 @@ public static class AtomicFile
     }
 
     /// <summary>
-    /// Асинхронно и атомарно записывает бинарные данные в файл.
+    /// Asynchronously and atomically writes binary data to a file.
     /// </summary>
-    /// <param name="targetPath">Целевой путь к файлу.</param>
-    /// <param name="bytes">Бинарные данные для записи.</param>
-    /// <param name="createBackup">Флаг создания резервной копии (<c>.bak</c>).</param>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="targetPath">Target file path.</param>
+    /// <param name="bytes">Binary data to write.</param>
+    /// <param name="createBackup">Flag indicating whether to create a backup copy (<c>.bak</c>).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public static async Task WriteBytesAsync(
         string targetPath,
         ReadOnlyMemory<byte> bytes,
@@ -164,13 +164,13 @@ public static class AtomicFile
     }
 
     /// <summary>
-    /// Асинхронно считывает бинарные данные из целевого файла с автоматическим восстановлением из <c>.bak</c> при сбое.
+    /// Asynchronously reads binary data from the target file with automatic recovery from <c>.bak</c> on failure.
     /// </summary>
-    /// <param name="targetPath">Путь к целевому файлу.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Кортеж из массива прочитанных байт и признака восстановления из резервной копии.</returns>
+    /// <param name="targetPath">Path to the target file.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>A tuple containing the read byte array and a flag indicating whether recovery from backup occurred.</returns>
     /// <remarks>
-    /// Обеспечивает аппаратную защиту от повреждения данных (Torn Write Protection) для бинарных MemoryPack-структур.
+    /// Provides hardware-level protection against data corruption (Torn Write Protection) for binary MemoryPack structures.
     /// </remarks>
     public static Task<(byte[]? Content, bool RecoveredFromBackup)> ReadBytesWithFallbackAsync(
         string targetPath,
@@ -186,13 +186,13 @@ public static class AtomicFile
     #region Read with Fallback Synchronous
 
     /// <summary>
-    /// Считывает текст из целевого файла. При его повреждении, нулевом размере или отсутствии
-    /// автоматически считывает резервную копию (<c>.bak</c>) и восстанавливает основной файл.
+    /// Reads text from the target file. If it is corrupted, zero-sized, or missing,
+    /// automatically reads the backup copy (<c>.bak</c>) and restores the main file.
     /// </summary>
-    /// <param name="targetPath">Путь к файлу.</param>
-    /// <param name="recoveredFromBackup">Возвращает <c>true</c>, если данные были восстановлены из <c>.bak</c>.</param>
-    /// <param name="encoding">Кодировка текста.</param>
-    /// <returns>Содержимое файла или <c>null</c>, если ни основной файл, ни бэкап прочитать не удалось.</returns>
+    /// <param name="targetPath">Path to the file.</param>
+    /// <param name="recoveredFromBackup">Returns <c>true</c> if data was recovered from <c>.bak</c>.</param>
+    /// <param name="encoding">Text encoding.</param>
+    /// <returns>File content, or <c>null</c> if neither the main file nor the backup could be read.</returns>
     public static string? ReadTextWithFallback(
         string targetPath,
         out bool recoveredFromBackup,
@@ -211,12 +211,12 @@ public static class AtomicFile
     #region Read with Fallback Asynchronous
 
     /// <summary>
-    /// Асинхронно считывает текст из файла с автоматическим восстановлением из <c>.bak</c> при сбое.
+    /// Asynchronously reads text from a file with automatic recovery from <c>.bak</c> on failure.
     /// </summary>
-    /// <param name="targetPath">Путь к файлу.</param>
-    /// <param name="encoding">Кодировка текста.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Кортеж из прочитанного содержимого и флага восстановления из бэкапа.</returns>
+    /// <param name="targetPath">Path to the file.</param>
+    /// <param name="encoding">Text encoding.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A tuple containing the read content and a flag indicating recovery from backup.</returns>
     public static Task<(string? Content, bool RecoveredFromBackup)> ReadTextWithFallbackAsync(
         string targetPath,
         Encoding? encoding = null,

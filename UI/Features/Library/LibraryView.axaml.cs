@@ -11,10 +11,10 @@ public partial class LibraryView : UserControl
     }
 
     /// <summary>
-    /// Сохраняет акцентную обводку карточки плейлиста при открытии контекстного меню.
+    /// Preserves the accent border of the playlist card when opening the context menu.
     /// </summary>
     /// <summary>
-    /// Открывает общее контекстное меню для карточки плейлиста.
+    /// Opens the general context menu for the playlist card.
     /// </summary>
     private void OnCardContextRequested(object? sender, ContextRequestedEventArgs e)
     {
@@ -28,7 +28,7 @@ public partial class LibraryView : UserControl
     }
 
     /// <summary>
-    /// Сохраняет акцентную обводку карточки плейлиста при открытии общего контекстного меню.
+    /// Preserves the accent border of the playlist card when opening the general context menu.
     /// </summary>
     private void OnPlaylistFlyoutOpened(object? sender, EventArgs e)
     {
@@ -39,7 +39,7 @@ public partial class LibraryView : UserControl
     }
 
     /// <summary>
-    /// Снимает акцентную обводку после закрытия общего контекстного меню.
+    /// Removes the accent border after closing the general context menu.
     /// </summary>
     private void OnPlaylistFlyoutClosed(object? sender, EventArgs e)
     {

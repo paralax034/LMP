@@ -11,7 +11,7 @@ public static class G
     public const string GitHubUrl = "https://github.com/paralax034/LMP";
 
     /// <summary>
-    /// Slug репозитория GitHub в формате "owner/repo" для вызовов GitHub API.
+    /// GitHub repository slug in "owner/repo" format for GitHub API calls.
     /// </summary>
     public static string RepoSlug
     {
@@ -66,24 +66,24 @@ public static class G
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
                 .InformationalVersion ?? version.ToString();
 
-            // Парсим Git hash из "1.0.172+abc1234"
+            // Parse Git hash from "1.0.172+abc1234"
             var gitHash = "local";
 
             if (infoVersion.Contains('+'))
             {
                 var hashPart = infoVersion.Split('+')[1].Trim();
-                // Берём только первые 7 символов
+                // Take only the first 7 characters
                 gitHash = hashPart.Length > 7 ? hashPart[..7] : hashPart;
             }
 
-            // CommitCount = version.Build (третий компонент версии)
+            // CommitCount = version.Build (the third version component)
             var commitCount = version.Build;
 
             var buildDate = DateTime.Now;
             try
             {
-                // Использование Environment.ProcessPath гарантирует совместимость с Single-File сборками.
-                // Возвращает путь к LMP.exe, откуда извлекается реальная дата создания/публикации файла.
+                // Using Environment.ProcessPath guarantees compatibility with Single-File builds.
+                // Returns the path to LMP.exe, from which the actual file creation/publication date is extracted.
                 var location = Environment.ProcessPath;
                 if (!string.IsNullOrEmpty(location) && File.Exists(location))
                 {
@@ -164,8 +164,8 @@ public static class G
         public static readonly string StreamCache = Path.Combine(Cache, "StreamCache");
 
         /// <summary>
-        /// Папка с тестовыми данными для разных версий плеера.
-        /// Содержит JSON-файлы с парами encrypted/expected для NToken и SigCipher.
+        /// Directory containing test data for different player versions.
+        /// Contains JSON files with encrypted/expected pairs for NToken and SigCipher.
         /// </summary>
         public static readonly string TestData = Path.Combine(Cache, "TestData");
 
@@ -195,28 +195,28 @@ public static class G
         public static readonly string Cookie = Path.Combine(Folder.Data, "auth_cookies.txt");
         public static readonly string LegacyDatabase = Path.Combine(Folder.Data, "library.json");
         /// <summary>
-        /// Путь к файлу основной базы данных библиотеки.
-        /// В отладочной сборке при headless-запуске CLI-тестов перенаправляется во временный каталог процесса.
+        /// Path to the main library database file.
+        /// Redirected to the process's temporary directory in debug builds during headless CLI test runs.
         /// </summary>
         public static string Database { get; private set; } = Path.Combine(Folder.Data, "library.db");
         public static readonly string Theme = Path.Combine(Folder.Data, "theme.json");
 
 #if DEBUG
         /// <summary>
-        /// Префикс временного каталога изолированной тестовой базы данных.
+        /// Prefix for the isolated test database temporary directory.
         /// </summary>
         public const string TestDatabaseFolderPrefix = "LMP-tests-";
 
         /// <summary>
-        /// Временный каталог изолированной тестовой базы данных; <c>null</c>, если изоляция не включена.
+        /// Temporary directory of the isolated test database; <c>null</c> if isolation is disabled.
         /// </summary>
         public static string? IsolatedTestDatabaseFolder { get; private set; }
 
         /// <summary>
-        /// Перенаправляет <see cref="Database"/> во временный каталог <c>%TEMP%/LMP-tests-{pid}</c>.
-        /// Вызывается строго до регистрации служб и первого обращения к базе данных.
+        /// Redirects <see cref="Database"/> to a temporary directory <c>%TEMP%/LMP-tests-{pid}</c>.
+        /// Must be called strictly before service registration and the first database access.
         /// </summary>
-        /// <returns>Полный путь к созданному временному каталогу.</returns>
+        /// <returns>Full path to the created temporary directory.</returns>
         public static string UseIsolatedTestDatabase()
         {
             var folder = Path.Combine(
@@ -234,10 +234,10 @@ public static class G
         }
 
         /// <summary>
-        /// Сбрасывает пулы подключений SQLite и удаляет временный каталог изолированной тестовой базы данных.
+        /// Resets SQLite connection pools and deletes the isolated test database temporary directory.
         /// </summary>
         /// <remarks>
-        /// Исключения файловой системы пробрасываются вызывающему коду для журналирования.
+        /// File system exceptions are rethrown to the caller for logging.
         /// </remarks>
         public static void CleanupIsolatedTestDatabase()
         {
@@ -254,8 +254,8 @@ public static class G
 #endif
 
         /// <summary>
-        /// Файл состояния авторизации (профиль пользователя, кэш данных).
-        /// Хранится в %APPDATA%/LMP/auth.json
+        /// Authentication state file (user profile, data cache).
+        /// Stored in %APPDATA%/LMP/auth.json
         /// </summary>
         public static readonly string AuthData = Path.Combine(Folder.Data, "auth.json");
 
@@ -263,9 +263,9 @@ public static class G
         public static readonly string SigCipherCache = Path.Combine(Folder.SigCipherCache, "sigcache.bin");
 
         /// <summary>
-        /// Конфигурация параметров тестов.
-        /// Позволяет менять videoId, tokens, iterations без перекомпиляции.
-        /// Хранится в %LOCALAPPDATA%/LMP/test-config.json
+        /// Test parameters configuration.
+        /// Allows changing videoId, tokens, iterations without recompilation.
+        /// Stored in %LOCALAPPDATA%/LMP/test-config.json
         /// </summary>
         public static readonly string TestConfig = Path.Combine(Folder.Cache, "test-config.json");
 

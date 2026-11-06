@@ -1,7 +1,7 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Базовое исключение для аудио операций.
+/// Base exception for audio operations.
 /// </summary>
 public class AudioException : Exception
 {

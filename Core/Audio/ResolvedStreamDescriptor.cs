@@ -3,36 +3,36 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Единый immutable дескриптор resolved аудио потока.
-/// Передаётся от resolve-слоя до audio source без потерь метаданных.
+/// Unified immutable descriptor of a resolved audio stream.
+/// Passed from the resolve layer to the audio source without metadata loss.
 /// </summary>
 public readonly record struct ResolvedStreamDescriptor()
 {
-    /// <summary>Идентификатор трека (с префиксом <c>yt_</c>).</summary>
+    /// <summary>Track identifier (prefixed with <c>yt_</c>).</summary>
     public required string TrackId { get; init; }
 
-    /// <summary>YouTube itag потока. 0 = неизвестен (cache-only path).</summary>
+    /// <summary>YouTube stream itag. 0 = unknown (cache-only path).</summary>
     public int Itag { get; init; }
 
-    /// <summary>Формат контейнера (WebM, Mp4, Ogg).</summary>
+    /// <summary>Container format (WebM, Mp4, Ogg).</summary>
     public required AudioFormat Format { get; init; }
 
-    /// <summary>Аудио кодек (Opus, Aac).</summary>
+    /// <summary>Audio codec (Opus, Aac).</summary>
     public required AudioCodec Codec { get; init; }
 
-    /// <summary>Битрейт в kbps.</summary>
+    /// <summary>Bitrate in kbps.</summary>
     public required int BitrateKbps { get; init; }
 
-    /// <summary>Полный размер контента в байтах. 0 = неизвестен.</summary>
+    /// <summary>Total content size in bytes. 0 = unknown.</summary>
     public long ContentLengthBytes { get; init; }
 
     /// <summary>
-    /// Полный videoplayback URL. Пустая строка для cache-only воспроизведения.
+    /// Full videoplayback URL. Empty string for cache-only playback.
     /// </summary>
     public string Url { get; init; } = "";
 
     /// <summary>
-    /// Время истечения URL (UTC). <see cref="DateTime.MaxValue"/> если expire отсутствует.
+    /// URL expiration time (UTC). <see cref="DateTime.MaxValue"/> if no expiration.
     /// </summary>
     public DateTime ExpireUtc { get; init; } = DateTime.MaxValue;
 
@@ -40,35 +40,35 @@ public readonly record struct ResolvedStreamDescriptor()
     public string CdnHost { get; init; } = "";
 
     /// <summary>
-    /// Track-level integrated loudness в LUFS из YouTube <c>perceptualLoudnessDb</c>.
-    /// <see cref="float.NaN"/> = значение отсутствует.
+    /// Track-level integrated loudness in LUFS from YouTube <c>perceptualLoudnessDb</c>.
+    /// <see cref="float.NaN"/> = value missing.
     /// </summary>
     public float IntegratedLufs { get; init; } = float.NaN;
 
-    /// <summary>Код языка аудиодорожки.</summary>
+    /// <summary>Audio track language code.</summary>
     public string? LanguageCode { get; init; }
 
-    /// <summary>Является ли аудиодорожка языком по умолчанию.</summary>
+    /// <summary>Whether the audio track is the default language.</summary>
     public bool IsDefaultLanguage { get; init; }
 
-    /// <summary>Источник, из которого был получен дескриптор.</summary>
+    /// <summary>Source from which the descriptor was obtained.</summary>
     public required StreamSource Origin { get; init; }
 
-    /// <summary><c>true</c> если <see cref="Url"/> непустой и пригоден для HTTP-запросов.</summary>
+    /// <summary><c>true</c> if <see cref="Url"/> is non-empty and valid for HTTP requests.</summary>
     public bool HasLiveUrl => !string.IsNullOrEmpty(Url);
 
-    /// <summary><c>true</c> если URL протух.</summary>
+    /// <summary><c>true</c> if the URL has expired.</summary>
     public bool IsExpired => ExpireUtc != DateTime.MaxValue
         && DateTime.UtcNow >= ExpireUtc.AddMinutes(-30);
 
-    /// <summary><c>true</c> если значение perceptual LUFS присутствует.</summary>
+    /// <summary><c>true</c> if the perceptual LUFS value is present.</summary>
     public bool HasPerceptualLufs => !float.IsNaN(IntegratedLufs) && float.IsFinite(IntegratedLufs);
 
-    /// <summary><c>true</c> если дескриптор содержит информацию об истечении URL.</summary>
+    /// <summary><c>true</c> if the descriptor contains URL expiration information.</summary>
     public bool HasExpiry => ExpireUtc != DateTime.MaxValue;
 
     /// <summary>
-    /// Возвращает текстовое представление дескриптора.
+    /// Returns a string representation of the descriptor.
     /// </summary>
     public override string ToString()
     {
@@ -81,22 +81,22 @@ public readonly record struct ResolvedStreamDescriptor()
 }
 
 /// <summary>
-/// Источник, из которого был получен <see cref="ResolvedStreamDescriptor"/>.
+/// Source from which the <see cref="ResolvedStreamDescriptor"/> was obtained.
 /// </summary>
 public enum StreamSource
 {
-    /// <summary>Свежий ответ YouTube InnerTube API.</summary>
+    /// <summary>Fresh YouTube InnerTube API response.</summary>
     YouTubeApi = 0,
 
-    /// <summary>Персистентный session cache (probe-validated URL).</summary>
+    /// <summary>Persistent session cache (probe-validated URL).</summary>
     SessionCache = 1,
 
-    /// <summary>Полностью закэшированный трек на диске.</summary>
+    /// <summary>Fully cached track on disk.</summary>
     DiskCacheFull = 2,
 
-    /// <summary>Частичный дисковый кэш (partial cache fast start).</summary>
+    /// <summary>Partial disk cache (partial cache fast start).</summary>
     DiskCachePartial = 3,
 
-    /// <summary>In-memory кэш YoutubeProvider.</summary>
+    /// <summary>YoutubeProvider in-memory cache.</summary>
     ProviderMemoryCache = 4
 }

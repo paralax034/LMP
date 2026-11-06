@@ -2,48 +2,48 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!--
-        АРХИТЕКТУРНАЯ ФИЛОСОФИЯ ИНТЕРФЕЙСА LMP
+        LMP INTERFACE ARCHITECTURAL PHILOSOPHY
 
-        1. КОНТЕНТ — ДОМИНАНТА, UI — НЕВЕСОМЫЙ КАРКАС:
-            - Запрещены монолитные заливки (BgElevatedBrush) и навязчивые плашки.
-            - Элементы управления в состоянии покоя полностью прозрачны (Background="Transparent",
-             BorderThickness="0"), не создавая визуального мусора вокруг иконок.
-            - Глубина формируется исключительно тонкими 1px разделителями (BgHighlightBrush).
+        1. CONTENT IS KING, UI IS A WEIGHTLESS FRAMEWORK:
+            - Solid fills (BgElevatedBrush) and intrusive cards are forbidden.
+            - Controls in idle state are completely transparent (Background="Transparent",
+             BorderThickness="0"), creating no visual clutter around icons.
+            - Depth is formed exclusively by thin 1px dividers (BgHighlightBrush).
 
-        2. НУЛЕВОЙ СДВИГ КОМПОНОВКИ:
-            - Категорически запрещено изменять BorderThickness, Margin или Padding
-             в динамических псевдоклассах (:pointerover, :pressed). Любое изменение
-             геометрии границ вызывает инвалидацию прохода компоновки (Measure/Arrange)
-             и приводит к физическому дерганию соседних элементов интерфейса.
-            - Запрещены искусственные трансформации масштаба (scale) на интерактивных
-             кнопках списков во избежание субпиксельного размытия векторных шрифтов.
-            - Тактильный отклик строится на кинетике кистей (BrushTransition 0:0:0.15)
-             и безопасном переключении начертания шрифта (FontWeight="Bold").
+        2. ZERO LAYOUT SHIFT:
+            - Modifying BorderThickness, Margin, or Padding in dynamic pseudoclasses
+             (:pointerover, :pressed) is strictly prohibited. Any border geometry
+             changes trigger a layout pass invalidation (Measure/Arrange) and lead to
+             physical jittering of adjacent UI elements.
+            - Artificial scale transformations on interactive list buttons are forbidden
+             to prevent subpixel blur of vector fonts.
+            - Tactile feedback relies on brush kinetics (BrushTransition 0:0:0.15)
+             and safe font weight toggling (FontWeight="Bold").
 
-        3. ХРОМАТИЧЕСКАЯ ЧИСТОТА ПЕРЕХОДОВ:
-            - Анимированные переходы границ (BorderBrush) и фонов выполняются строго
-             между кистями с идентичной RGB-базой (например, AccentTransparentBrush -> AccentBrush).
-            - Запрещены переходы между разнородными спектрами (Accent -> Gray), так как
-             интерполяция альфа-канала с промежуточными цветами создает эффект грязного мигания.
+        3. CHROMATIC PURITY OF TRANSITIONS:
+            - Animated transitions of borders (BorderBrush) and backgrounds are performed strictly
+             between brushes sharing the identical RGB base (e.g., AccentTransparentBrush -> AccentBrush).
+            - Transitions between heterogeneous spectra (Accent -> Gray) are forbidden,
+             as alpha channel interpolation with intermediate colors produces a dirty flicker effect.
 
-        4. ЦВЕТОВАЯ СИСТЕМА И СЕМАНТИКА:
-            - BgPrimaryBrush: базовый фон приложения и диалогов.
-            - BgHighlightBrush: тонкие разделители шапок и списков (1px).
-            - AccentBrush / AccentHoverBrush: векторное свечение иконок при ховере,
-             активные состояния, фокус ввода.
-            - SystemErrorBrush: деструктивные действия и фатальные ошибки.
-            - SystemWarnOrangeBrush: предупреждения и нестандартные режимы.
+        4. COLOR SYSTEM AND SEMANTICS:
+            - BgPrimaryBrush: base background for application and dialogs.
+            - BgHighlightBrush: thin dividers for headers and lists (1px).
+            - AccentBrush / AccentHoverBrush: vector icon glow on hover,
+             active states, input focus.
+            - SystemErrorBrush: destructive actions and fatal errors.
+            - SystemWarnOrangeBrush: warnings and non-standard modes.
 
-        5. ГЕОМЕТРИЯ И СКРУГЛЕНИЯ:
-            - 12px: модальные диалоги и окна верхнего уровня.
-            - 8px: карточки плейлистов, обложки треков, всплывающие меню.
-            - 6px: инпуты, чипы, кнопки выбора потока.
-            - 0px / Круг (999px): бесфреймовые медиа-кнопки управления и навигации.
+        5. GEOMETRY AND CORNER RADII:
+            - 12px: modal dialogs and top-level windows.
+            - 8px: playlist cards, track covers, popup menus.
+            - 6px: inputs, chips, stream selection buttons.
+            - 0px / Circle (999px): frameless media control and navigation buttons.
 
-        6. ВЫСОКОПРОИЗВОДИТЕЛЬНАЯ ТИПОГРАФИКА:
-            - Иерархия: 28/22 (Заголовки), 14/13 (Тело, инпуты, названия), 12/11 (Метаданные).
-            - Обязательное использование TextTrimming="CharacterEllipsis" на всех
-             однострочных строках данных с поддержкой полных подсказок (ToolTip.Tip).
+        6. HIGH-PERFORMANCE TYPOGRAPHY:
+            - Hierarchy: 28/22 (Headers), 14/13 (Body, inputs, titles), 12/11 (Metadata).
+            - Mandatory use of TextTrimming="CharacterEllipsis" on all
+             single-line data strings with support for full tooltips (ToolTip.Tip).
     -->
 
     <Style>
@@ -52,13 +52,13 @@
         </Style.Resources>
     </Style>
 
-    <!-- ПОДКЛЮЧАЕМ РАЗДЕЛЕННЫЕ ТЕМЫ -->
+    <!-- IMPORT SPLIT THEMES -->
     <StyleInclude Source="avares://LMP/UI/Theme/Typography.axaml" />
     <StyleInclude Source="avares://LMP/UI/Theme/Buttons.axaml" />
     <StyleInclude Source="avares://LMP/UI/Theme/Controls.axaml" />
     <StyleInclude Source="avares://LMP/UI/Theme/AppComponents.axaml" />
     <StyleInclude Source="avares://LMP/UI/Theme/LoadingSkeletons.axaml" />
-    <!-- PlayerBarStyles ПОСЛЕ AppComponents — переопределяет vol-* стили -->
+    <!-- PlayerBarStyles AFTER AppComponents — overrides vol-* styles -->
     <StyleInclude Source="avares://LMP/UI/Features/Player/PlayerBarStyles.axaml" />
 
     <Style Selector="Window">

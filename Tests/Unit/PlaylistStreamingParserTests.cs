@@ -6,8 +6,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты потокового парсера плейлистов PlaylistStreamingParser.
-/// Проверяют разбор структуры, фрагментированное чтение чанками по 17 байт и отсутствие аллокаций LOH.
+/// Unit tests for the PlaylistStreamingParser streaming playlist parser.
+/// Verifies structure parsing, fragmented reading in 17-byte chunks, and no LOH allocations.
 /// </summary>
 public static class PlaylistStreamingParserTests
 {
@@ -600,7 +600,7 @@ public static class PlaylistStreamingParserTests
     TestAssert.True(capturedRequests[^1].Body.Contains("\"title\":\"My Rock\"", StringComparison.Ordinal));
     TestAssert.True(capturedRequests[^1].Body.Contains("\"videoIds\":[\"v1\",\"v2\"]", StringComparison.Ordinal));
 
-    // 2. AddTracksAsync (с нормализацией префикса VL)
+    // 2. AddTracksAsync (with VL prefix normalization)
     var addedSetIds = await mutations.AddTracksAsync("VLPL_NEW_CLOUD_1", ["v1", "v2"]).ConfigureAwait(false);
     TestAssert.Equal(2, addedSetIds.Count);
     TestAssert.Equal("NEW_SET_1", addedSetIds[0]);
@@ -615,7 +615,7 @@ public static class PlaylistStreamingParserTests
     TestAssert.True(capturedRequests[^1].Body.Contains("ACTION_MOVE_VIDEO_BEFORE", StringComparison.Ordinal));
     TestAssert.True(capturedRequests[^1].Body.Contains("ACTION_MOVE_VIDEO_AFTER", StringComparison.Ordinal));
 
-    // 4. RemoveTracksAsync (с фильтрацией to_be_updated_by_client)
+    // 4. RemoveTracksAsync (with to_be_updated_by_client filtering)
     await mutations.RemoveTracksAsync("PL_NEW_CLOUD_1", ["to_be_updated_by_client", "NEW_SET_1"]).ConfigureAwait(false);
     TestAssert.False(capturedRequests[^1].Body.Contains("to_be_updated_by_client", StringComparison.Ordinal));
     TestAssert.True(capturedRequests[^1].Body.Contains("ACTION_REMOVE_VIDEO", StringComparison.Ordinal));
@@ -626,7 +626,7 @@ public static class PlaylistStreamingParserTests
     TestAssert.True(capturedRequests[^1].Body.Contains("ACTION_SET_CUSTOM_THUMBNAIL", StringComparison.Ordinal));
     TestAssert.True(capturedRequests[^1].Body.Contains("BLOB_SECRET_999", StringComparison.Ordinal));
 
-    // 6. STATUS_FAILED -> YoutubeExplodeException с текстом из confirmDialogRenderer
+    // 6. STATUS_FAILED -> YoutubeExplodeException with text from confirmDialogRenderer
     bool threwExpected = false;
     try
     {
@@ -653,7 +653,7 @@ public static class PlaylistStreamingParserTests
     TestAssert.True(ThumbnailComparer.AreEquivalent(googleContent576, googleContent1200, playlistId),
         "googleusercontent.com URLs with different =s576/=s1200 size suffixes must be equivalent");
 
-    // Проверка компактных суффиксов K/M/B и разделителей тысяч в ParseLongFromText
+    // Check compact suffixes K/M/B and thousands separators in ParseLongFromText
     TestAssert.Equal(31_000L, YoutubeParsingHelpers.ParseLongFromText("31K views".AsSpan()));
     TestAssert.Equal(31_500L, YoutubeParsingHelpers.ParseLongFromText("31.5K views".AsSpan()));
     TestAssert.Equal(1_250_000L, YoutubeParsingHelpers.ParseLongFromText("1.25M views".AsSpan()));

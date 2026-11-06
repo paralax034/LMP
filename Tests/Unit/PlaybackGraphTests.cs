@@ -9,8 +9,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Порядок узлов графа воспроизведения: лимитер работает на частоте декодера, а ресемплер WASAPI приводит поток к 48 кГц
-/// уже после него. Тест измеряет межотсчётные пики, которые интерполяция создаёт поверх гарантии потолка лимитера.
+/// Playback graph node order: the limiter operates at the decoder sample rate, while the WASAPI resampler converts the stream to 48 kHz
+/// after it. The test measures inter-sample peaks created by interpolation on top of the limiter ceiling guarantee.
 /// </summary>
 public static class PlaybackGraphTests
 {
@@ -18,10 +18,10 @@ public static class PlaybackGraphTests
     private const int DeviceRate = 48_000;
     private const int Channels = 2;
 
-    /// <summary>Потолок <c>TruePeakLimiter</c> (константа <c>Ceiling</c>).</summary>
+    /// <summary>Ceiling of <c>TruePeakLimiter</c> (constant <c>Ceiling</c>).</summary>
     private const float LimiterCeiling = 0.985f;
 
-    /// <summary>Колено мягкого потолка <c>TruePeakLimiter</c> (константа <c>KneeStart</c>).</summary>
+    /// <summary>Soft ceiling knee of <c>TruePeakLimiter</c> (constant <c>KneeStart</c>).</summary>
     private const float LimiterKnee = 0.88f;
 
     [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "SoftCeilingScale")]
@@ -42,7 +42,7 @@ public static class PlaybackGraphTests
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ReadCallbackWithResamplingUnderLock")]
     private static extern int ReadResampled(WinAudioBackend backend, Span<float> target, int requestedOutFrames);
 
-    /// <summary>Сигнал после ресемплера 44.1 → 48 кГц не превышает потолок лимитера, стоящего до него.</summary>
+    /// <summary>Signal after 44.1 → 48 kHz resampler does not exceed the ceiling of the preceding limiter.</summary>
     [TestMethod(TestCategory.Unit, "Resampled Device Output Stays Under Limiter Ceiling (44.1 -> 48 kHz)", Group = TestGroups.Audio, Order = 19)]
     [SupportedOSPlatform("windows")]
     public static async Task TestResampledOutputRespectsLimiterCeilingAsync()
@@ -55,7 +55,7 @@ public static class PlaybackGraphTests
         const int ticks = 12;
         const int warmupTicks = 2;
 
-        // fs/4 с фазой π/4: отсчёты равны ±0.99, а непрерывная волна между ними достигает 1.4 — лимитер видит только отсчёты
+        // fs/4 with phase π/4: samples equal ±0.99, while the continuous waveform between them reaches 1.4 — limiter sees only samples
         float[] tone = new float[toneFrames * Channels];
         for (int n = 0; n < toneFrames; n++)
         {
@@ -74,7 +74,7 @@ public static class PlaybackGraphTests
             backend,
             ring);
 
-        // Контрольная точка: пик того, что лимитер отдаёт на частоте источника
+        // Control point: peak of what the limiter outputs at the source sample rate
         float maxSource = 0f;
         CallbackField(backend) = buffer =>
         {
@@ -99,7 +99,7 @@ public static class PlaybackGraphTests
                 int produced = ReadResampled(backend, device, deviceFrames);
                 TestAssert.Equal(deviceFrames, produced, $"Resampler must fill device tick {tick}");
 
-                // Первые тики история ресемплера заполнена повтором первого отсчёта и форма волны не показательна
+                // During initial ticks, the resampler history is filled with the first sample repeat, making waveform unrepresentative
                 if (tick < warmupTicks)
                     continue;
 
@@ -119,15 +119,15 @@ public static class PlaybackGraphTests
         }
     }
 
-    /// <summary>Защитная кривая ресемплера прозрачна ниже колена, монотонна и асимптотически держит потолок лимитера.</summary>
+    /// <summary>Resampler protective curve is transparent below knee, monotonic, and asymptotically holds limiter ceiling.</summary>
     [TestMethod(TestCategory.Unit, "Resampler Soft Ceiling Guard Is Transparent Below Knee & Bounded Above", Group = TestGroups.Audio, Order = 19)]
     public static Task TestResamplerSoftCeilingGuardAsync()
     {
-        // Ниже колена множитель обязан быть ровно единицей, иначе защита окрасит обычный сигнал
+        // Below knee, multiplier must be exactly one, otherwise protection colors regular signal
         foreach (float peak in (ReadOnlySpan<float>)[0f, 0.25f, 0.5f, 0.75f, LimiterKnee])
             TestAssert.Equal(1.0f, SoftCeilingScale(null, peak), $"Guard must be identity at peak {peak:F3}");
 
-        // Сразу за коленом кривая продолжает прямую y = x без излома
+        // Immediately after knee, curve continues straight line y = x smoothly without a kink
         float nearKnee = LimiterKnee + 0.001f;
         float nearOut = nearKnee * SoftCeilingScale(null, nearKnee);
         TestAssert.True(MathF.Abs(nearOut - nearKnee) < 1e-5f, $"Guard must join y = x smoothly at the knee, got {nearOut:F6} for {nearKnee:F6}");
@@ -139,7 +139,7 @@ public static class PlaybackGraphTests
             float output = peak * SoftCeilingScale(null, peak);
 
             TestAssert.True(output <= LimiterCeiling, $"Guard output {output:F5} exceeds ceiling at peak {peak:F3}");
-            // Допуск 1e-6 поглощает округление float у асимптоты, где прирост кривой меньше ulp
+            // Tolerance of 1e-6 absorbs float rounding near asymptote where curve increment is smaller than ulp
             TestAssert.True(output >= previous - 1e-6f, $"Guard curve must be monotonic: {output:F6} < {previous:F6} at peak {peak:F3}");
             previous = output;
         }

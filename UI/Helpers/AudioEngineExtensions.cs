@@ -1,16 +1,16 @@
 namespace LMP.UI.Helpers;
 
 /// <summary>
-/// Расширения для интеграции AudioEngine с UI-слоем уведомлений.
+/// Extensions for integrating AudioEngine with the notification UI layer.
 /// </summary>
 public static class AudioEngineExtensions
 {
     /// <summary>
-    /// Безопасно добавляет список треков в очередь с фильтрацией дубликатов и выводом всплывающего хинта.
+    /// Safely adds a list of tracks to the queue with duplicate filtering and displays a toast hint.
     /// </summary>
-    /// <param name="audio">Экземпляр аудио-движка.</param>
-    /// <param name="tracks">Список треков для добавления.</param>
-    /// <param name="playlistName">Название источника (плейлиста) для логов.</param>
+    /// <param name="audio">The audio engine instance.</param>
+    /// <param name="tracks">The list of tracks to add.</param>
+    /// <param name="playlistName">The source (playlist) name for logging.</param>
     public static void EnqueuePlaylistWithNotification(
         this AudioEngine audio,
         IEnumerable<TrackInfo> tracks,

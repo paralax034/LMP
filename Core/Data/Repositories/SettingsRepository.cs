@@ -6,9 +6,9 @@ using MemoryPack;
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
-/// Репозиторий настроек на базе SQLite.
-/// Реализован на прямом ADO.NET для полной совместимости с Native AOT без использования LINQ-деревьев.
-/// JSON идёт только через метаданные <see cref="AppJsonContext"/>, поэтому Debug и Release ведут себя одинаково.
+/// SQLite-based settings repository.
+/// Implemented using raw ADO.NET for full Native AOT compatibility without LINQ trees.
+/// JSON processing strictly uses <see cref="AppJsonContext"/> metadata, ensuring identical behavior in Debug and Release.
 /// </summary>
 public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISettingsRepository
 {
@@ -37,25 +37,25 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
         if (rawValue is null or DBNull)
             return null;
 
-        // 1. Основной путь: персистентный JSON (согласно схеме Value TEXT)
+        // 1. Primary path: persistent JSON (according to Value TEXT schema)
         if (rawValue is string jsonValue)
         {
             return DeserializeJson<T>(jsonValue);
         }
 
-        // 2. Двусторонний мост миграции: бинарный BLOB (legacy MemoryPack или UTF-8 JSON)
+        // 2. Two-way migration bridge: binary BLOB (legacy MemoryPack or UTF-8 JSON)
         if (rawValue is byte[] binaryData)
         {
             T? result = null;
             bool shouldMigrateToJson = false;
 
-            // Проверяем, не является ли BLOB сохранённым UTF-8 JSON
+            // Check if BLOB is a stored UTF-8 JSON
             if (binaryData.Length > 0 && (binaryData[0] == (byte)'{' || binaryData[0] == (byte)'['))
             {
                 result = DeserializeJsonBytes<T>(binaryData);
             }
 
-            // Если не JSON — десериализуем через MemoryPack (точная схема для миграции в JSON)
+            // If not JSON — deserialize via MemoryPack (exact schema for migration to JSON)
             if (result == null)
             {
                 try
@@ -76,7 +76,7 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
                 }
             }
 
-            // Автоматически фиксируем данные в надёжном JSON, освобождая SQLite от бинарной привязки
+            // Automatically persist data as reliable JSON, decoupling SQLite from binary dependencies
             if (shouldMigrateToJson && result != null)
             {
                 Log.Info($"[SettingsRepository] Auto-migrating setting '{key}' from binary BLOB to resilient JSON format...");
@@ -179,8 +179,8 @@ public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISett
 
     #region Serialization Helpers
 
-    // Тип без [JsonSerializable] в AppJsonContext — ошибка регистрации, а не повод молча уйти в рефлексию:
-    // в Release рефлексивный путь отключён, и Debug обязан падать так же.
+    // A type missing [JsonSerializable] in AppJsonContext is a registration bug, not a reason to silently fall back to reflection:
+    // reflection fallback is disabled in Release, so Debug must fail the same way.
     private static JsonTypeInfo<T> ResolveTypeInfo<T>() =>
         AppJsonContext.DefaultCompact.GetTypeInfo(typeof(T)) as JsonTypeInfo<T>
         ?? throw new NotSupportedException(

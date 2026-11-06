@@ -6,8 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Набор тестов и диагностических зондов порядка следования треков в плейлистах,
-/// целостности идентификаторов SetVideoId и CRUD-операций.
+/// A set of tests and diagnostic probes for track ordering in playlists,
+/// SetVideoId identifier integrity, and CRUD operations.
 /// </summary>
 public static class PlaylistOrderTests
 {
@@ -132,7 +132,7 @@ public static class PlaylistOrderTests
             {
                 await playlistService.RemoveTrackFromPlaylistAsync(LibraryService.LikedPlaylistId, testTracks[i].Id).ConfigureAwait(false);
 
-                // Тестовые строки не должны оставаться в Tracks и попадать в библиотеку пользователя
+                // Test rows must not remain in Tracks or leak into the user's library
                 await trackRepository.DeleteAsync(testTracks[i].Id).ConfigureAwait(false);
             }
         }
@@ -190,20 +190,20 @@ public static class PlaylistOrderTests
         Group = TestGroups.Playlists, Order = 6, RequiresNetwork = false, TimeoutSeconds = 10)]
     public static Task TestLisMinimalReorderCompressionAsync()
     {
-        // 1. Идентичные списки -> 0 перемещений
+        // 1. Identical lists -> 0 moves
         var baseList = new List<string> { "sv_0", "sv_1", "sv_2", "sv_3", "sv_4", "sv_5" };
         var sameMoves = PlaylistSyncService.BuildMinimalReorderMoves(baseList, baseList);
         TestAssert.Equal(0, sameMoves.Count, "Identical order must produce 0 moves");
 
-        // 2. Перенос первого элемента в самый конец списка из 6 элементов:
-        // LIS находит {sv_1, sv_2, sv_3, sv_4, sv_5} длиной 5 и генерирует ровно 1 команду вместо 5!
+        // 2. Moving the first element to the very end of a 6-element list:
+        // LIS finds {sv_1, sv_2, sv_3, sv_4, sv_5} of length 5 and generates exactly 1 command instead of 5!
         var movedFirstToLast = new List<string> { "sv_1", "sv_2", "sv_3", "sv_4", "sv_5", "sv_0" };
         var singleMove = PlaylistSyncService.BuildMinimalReorderMoves(baseList, movedFirstToLast);
         TestAssert.Equal(1, singleMove.Count, "Moving 1st track to end must require exactly 1 LIS move");
         TestAssert.Equal("sv_0", singleMove[0].SetVideoId);
         TestAssert.Equal("sv_5", singleMove[0].Predecessor);
 
-        // 3. Проверка точной сходимости сложной перестановки к целевому порядку
+        // 3. Verification of exact convergence of a complex permutation to the target order
         var complexTarget = new List<string> { "sv_4", "sv_1", "sv_0", "sv_5", "sv_2", "sv_3" };
         var complexMoves = PlaylistSyncService.BuildMinimalReorderMoves(baseList, complexTarget);
         TestAssert.True(complexMoves.Count <= 3, $"Expected <= 3 moves via LIS, got {complexMoves.Count}");
@@ -260,7 +260,7 @@ public static class PlaylistOrderTests
                 testPlaylist.Id,
                 [(t1.Id, "SV_TEST_001"), (t2.Id, "SV_TEST_002")]).ConfigureAwait(false);
 
-            // Проверяем пакетное чтение SetVideoId до удаления строк из PlaylistTracks
+            // Verify batch reading of SetVideoId before removing rows from PlaylistTracks
             var preDeleteMap = await playlistRepo.GetSetVideoIdsAsync(testPlaylist.Id, [t1.Id, t2.Id]).ConfigureAwait(false);
             TestAssert.Equal(2, preDeleteMap.Count);
             TestAssert.Equal("SV_TEST_001", preDeleteMap[t1.Id]);
@@ -271,7 +271,7 @@ public static class PlaylistOrderTests
             TestAssert.Equal("SV_TEST_001", orderedWithSv[0].SetVideoId);
             TestAssert.Equal("SV_TEST_002", orderedWithSv[1].SetVideoId);
 
-            // Проверяем реактивное создание, перевод при смене языка и аннигиляцию живой задачи в NotificationService
+            // Verify reactive creation, localization on language change, and annihilation of a live task in NotificationService
             var notifications = services.GetRequiredService<NotificationService>();
             const string testTaskKey = "outbox:test_live_task";
             notifications.UpsertTaskNotification(
@@ -292,7 +292,7 @@ public static class PlaylistOrderTests
             notifications.CompleteTaskNotification(testTaskKey, removeIfAnnihilated: true);
             TestAssert.False(notifications.HasActiveTasks, "NotificationService must report HasActiveTasks=false after annihilation");
 
-            // Проверяем защиту от зомби-плейлистов при отложенном удалении (GetPendingDeletedYoutubeIds & CancelPendingDeleteByYoutubeId)
+            // Verify protection against zombie playlists during deferred deletion (GetPendingDeletedYoutubeIds & CancelPendingDeleteByYoutubeId)
             var syncService = services.GetRequiredService<PlaylistSyncService>();
             var auth = services.GetRequiredService<CookieAuthService>();
             if (auth.IsAuthenticated)

@@ -3,16 +3,16 @@ namespace LMP.Core.Audio.Sources;
 public sealed partial class CachingStreamSource
 {
     /// <summary>
-    /// Stream-обёртка над <see cref="CachingStreamSource"/> для парсеров контейнеров (WebM/MP4).
+    /// Stream wrapper over <see cref="CachingStreamSource"/> for container parsers (WebM/MP4).
     ///
-    /// <para><b>Оптимизация Position setter:</b></para>
+    /// <para><b>Position setter optimization:</b></para>
     /// <list type="bullet">
-    ///   <item><c>Position setter</c> — лёгкий <c>Volatile.Write</c>, без CTS-аллокаций</item>
-    ///   <item><see cref="SeekAndCancelPendingReads"/> — явный cancel для внешнего seek</item>
+    ///   <item><c>Position setter</c> — lightweight <c>Volatile.Write</c>, without CTS allocations</item>
+    ///   <item><see cref="SeekAndCancelPendingReads"/> — explicit cancel for external seek</item>
     /// </list>
     ///
-    /// <para><b>Контракт ReadAsync:</b> <c>0</c> возвращается только при достижении конца контента.
-    /// Отмена бросает <see cref="OperationCanceledException"/>, утилизация — <see cref="ObjectDisposedException"/>.</para>
+    /// <para><b>ReadAsync contract:</b> Returns <c>0</c> only when reaching end of content.
+    /// Cancellation throws <see cref="OperationCanceledException"/>, disposal throws <see cref="ObjectDisposedException"/>.</para>
     /// </summary>
     internal sealed class AsyncCachingReadStream : Stream
     {
@@ -20,15 +20,15 @@ public sealed partial class CachingStreamSource
         private long _position;
 
         /// <summary>
-        /// CTS, привязанный к текущей логической позиции потока.
-        /// Заменяется только через <see cref="SwapReadEpoch"/>; <see langword="null"/> означает утилизированный поток.
+        /// CTS bound to the current logical stream position.
+        /// Replaced only via <see cref="SwapReadEpoch"/>; <see langword="null"/> indicates a disposed stream.
         /// </summary>
         private CancellationTokenSource? _readCts = new();
 
-        /// <summary>Создаёт Stream-обёртку над источником.</summary>
+        /// <summary>Creates a Stream wrapper over the source.</summary>
         public AsyncCachingReadStream(CachingStreamSource source) => _source = source;
 
-        /// <summary>Источник или сам поток уже утилизированы.</summary>
+        /// <summary>The source or the stream itself is already disposed.</summary>
         private bool IsDisposed => _source._disposed || Volatile.Read(ref _readCts) is null;
 
         #region Stream Properties
@@ -57,10 +57,10 @@ public sealed partial class CachingStreamSource
         #region Seek & Cancel
 
         /// <summary>
-        /// Устанавливает позицию потока И отменяет все pending ReadAsync.
-        /// Вызывается ТОЛЬКО из <see cref="SeekAsync"/> при внешнем seek.
+        /// Sets the stream position AND cancels all pending ReadAsync operations.
+        /// Called ONLY from <see cref="SeekAsync"/> on an external seek.
         /// </summary>
-        /// <param name="position">Новая абсолютная позиция в байтах.</param>
+        /// <param name="position">New absolute position in bytes.</param>
         internal void SeekAndCancelPendingReads(long position)
         {
             var oldCts = SwapReadEpoch();
@@ -76,7 +76,7 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Мгновенно отменяет активные операции чтения синхронно.
+        /// Instantly cancels active read operations synchronously.
         /// </summary>
         internal void CancelActiveReads()
         {
@@ -85,19 +85,19 @@ public sealed partial class CachingStreamSource
 
             try
             {
-                // Синхронная отмена немедленно прерывает блокирующий Read() в DecoderLoop
+                // Synchronous cancellation immediately interrupts blocking Read() in DecoderLoop
                 oldCts.Cancel();
             }
             catch (ObjectDisposedException) { }
 
-            // Dispose откладываем, чтобы избежать ObjectDisposedException в других потоках
+            // Defer Dispose to avoid ObjectDisposedException in other threads
             DeferDisposeCancellationTokenSource(oldCts, 500);
         }
 
         /// <summary>
-        /// Атомарно заменяет CTS текущей эпохи чтения новым и возвращает прежний.
-        /// Возвращает <see langword="null"/>, если поток уже утилизирован: эпоха не воскрешается,
-        /// а <see cref="SeekAndCancelPendingReads"/> не падает с NullReferenceException после Dispose.
+        /// Atomically replaces the current read epoch's CTS with a new one and returns the previous one.
+        /// Returns <see langword="null"/> if the stream is already disposed: the epoch is not resurrected,
+        /// and <see cref="SeekAndCancelPendingReads"/> does not throw NullReferenceException after Dispose.
         /// </summary>
         private CancellationTokenSource? SwapReadEpoch()
         {
@@ -115,14 +115,14 @@ public sealed partial class CachingStreamSource
                 current = observed;
             }
 
-            // Поток утилизирован конкурентно: новый CTS никому не достался
+            // Stream disposed concurrently: the new CTS was acquired by nobody
             fresh.Dispose();
             return null;
         }
 
         /// <summary>
-        /// Безопасно извлекает <see cref="CancellationToken"/> из текущего <see cref="_readCts"/>.
-        /// Для утилизированного потока возвращает отменённый токен.
+        /// Safely retrieves the <see cref="CancellationToken"/> from the current <see cref="_readCts"/>.
+        /// Returns a canceled token for a disposed stream.
         /// </summary>
         private CancellationToken GetCurrentReadToken()
         {
@@ -144,12 +144,12 @@ public sealed partial class CachingStreamSource
         #region Read
 
         /// <summary>
-        /// Пытается синхронно прочитать данные исключительно из RAM-кэша без блокировки потока и сетевого I/O.
-        /// Возвращает 0 при промахе RAM-кэша, позволяя вызывающему коду перейти на асинхронный путь без аллокаций в случае RAM-хита.
+        /// Tries to synchronously read data exclusively from the RAM cache without blocking the thread or performing network I/O.
+        /// Returns 0 on RAM cache miss, allowing the caller to transition to the async path allocation-free on a RAM hit.
         /// </summary>
         internal int TryReadFromRamSync(Span<byte> destination)
         {
-            // Внутренний контракт: 0 = промах; асинхронный путь затем сообщит об утилизации исключением
+            // Internal contract: 0 = miss; the async path will subsequently report disposal via exception
             if (IsDisposed) return 0;
 
             long posBefore = Volatile.Read(ref _position);
@@ -166,11 +166,11 @@ public sealed partial class CachingStreamSource
 
         /// <inheritdoc/>
         /// <remarks>
-        /// Горячий путь: если данные в RAM — синхронное копирование без планировщика.
-        /// Холодный путь: sync-over-async fallback для внешних потребителей <see cref="Stream"/>; парсеры Core его не используют.
-        /// Контракт совпадает с <see cref="ReadAsync(Memory{byte}, CancellationToken)"/>: <c>0</c> означает только конец контента,
-        /// отмена бросает <see cref="OperationCanceledException"/>, утилизация — <see cref="ObjectDisposedException"/>,
-        /// а RAM-хит продвигает позицию через CAS и не затирает конкурентный seek.
+        /// Hot path: if data is in RAM — synchronous copy without scheduler overhead.
+        /// Cold path: sync-over-async fallback for external <see cref="Stream"/> consumers; Core parsers do not use it.
+        /// The contract matches <see cref="ReadAsync(Memory{byte}, CancellationToken)"/>: <c>0</c> means end of content only,
+        /// cancellation throws <see cref="OperationCanceledException"/>, disposal throws <see cref="ObjectDisposedException"/>,
+        /// and a RAM hit advances position via CAS without overwriting a concurrent seek.
         /// </remarks>
         public override int Read(byte[] buffer, int offset, int count)
         {
@@ -180,12 +180,12 @@ public sealed partial class CachingStreamSource
             long posBefore = Volatile.Read(ref _position);
             if (posBefore >= _source._contentLength) return 0;
 
-            // Быстрый путь: данные уже в RAM; проигранный CAS означает seek, и чтение уходит в медленный путь с новой позиции
+            // Fast path: data is already in RAM; a lost CAS indicates a seek, routing the read to the slow path from the new position
             if (_source._ramCache.TryRead(posBefore, buffer.AsMemory(offset, count), out int ramRead)
                 && Interlocked.CompareExchange(ref _position, posBefore + ramRead, posBefore) == posBefore)
                 return ramRead;
 
-            // Медленный путь: sync-over-async; отмена, утилизация и ошибки I/O пробрасываются без маскировки под EOF
+            // Slow path: sync-over-async; cancellation, disposal, and I/O errors are propagated without masking as EOF
             return ReadAsyncCore(buffer.AsMemory(offset, count), GetCurrentReadToken())
                 .AsTask()
                 .ConfigureAwait(false)
@@ -199,9 +199,9 @@ public sealed partial class CachingStreamSource
 
         /// <inheritdoc/>
         /// <remarks>
-        /// Отмена и утилизация не маскируются под EOF: по контракту <see cref="Stream"/> 0 означает только конец данных.
-        /// Иначе <c>Mp4BinaryReader</c> получает пустой заголовок, а парсер — ложный <c>ParserCorruptionException</c>.
-        /// Исключения создаются только на путях ошибок; RAM-хит остаётся синхронным и без аллокаций.
+        /// Cancellation and disposal are not masked as EOF: by the <see cref="Stream"/> contract, 0 means end of data only.
+        /// Otherwise <c>Mp4BinaryReader</c> gets an empty header, and the parser gets a false <c>ParserCorruptionException</c>.
+        /// Exceptions are instantiated only on error paths; RAM hits remain synchronous and allocation-free.
         /// </remarks>
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
         {
@@ -238,14 +238,14 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Ядро чтения: делегирует в <see cref="ReadAtAsync"/> и
-        /// атомарно продвигает позицию только если seek не произошёл во время чтения.
+        /// Core read logic: delegates to <see cref="ReadAtAsync"/> and
+        /// atomically advances the position only if no seek occurred during the read.
         /// </summary>
-        /// <param name="buffer">Буфер для записи прочитанных байт.</param>
-        /// <param name="ct">Токен отмены операции чтения.</param>
-        /// <returns>Количество вычитанных байт; <c>0</c> только при достижении конца контента.</returns>
-        /// <exception cref="OperationCanceledException">Отмена токена или конкурентный seek во время I/O.</exception>
-        /// <exception cref="ObjectDisposedException">Источник или поток утилизированы.</exception>
+        /// <param name="buffer">Buffer to write read bytes into.</param>
+        /// <param name="ct">Cancellation token for the read operation.</param>
+        /// <returns>Number of bytes read; <c>0</c> only when reaching end of content.</returns>
+        /// <exception cref="OperationCanceledException">Token cancellation or concurrent seek during I/O.</exception>
+        /// <exception cref="ObjectDisposedException">Source or stream disposed.</exception>
         private async ValueTask<int> ReadAsyncCore(Memory<byte> buffer, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
@@ -255,8 +255,8 @@ public sealed partial class CachingStreamSource
             long posBefore = Volatile.Read(ref _position);
             int read = await _source.ReadAtAsync(posBefore, buffer, ct).ConfigureAwait(false);
 
-            // Если seek произошёл во время I/O, данные относятся к устаревшей позиции.
-            // Возвращать 0 нельзя (это EOF): сообщаем об отмене, вызывающий код повторит чтение с новой позиции.
+            // If a seek occurred during I/O, the data belongs to a stale position.
+            // Cannot return 0 (that means EOF): report cancellation so the caller retries the read from the new position.
             if (Interlocked.CompareExchange(ref _position, posBefore + read, posBefore) != posBefore)
                 throw new OperationCanceledException("Read superseded by a concurrent seek", ct);
 

@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Сервис управления глобальным кэшем треков, настройками приложения, историей и системными лайками.
+/// Service for managing the global track cache, application settings, history, and system likes.
 /// </summary>
 public sealed class LibraryService : IAsyncDisposable, IDisposable
 {
@@ -25,7 +25,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     private readonly SemaphoreSlim _settingsLock = new(1, 1);
 
-    // Сериализует запись лайков: при быстрых кликах в SQLite попадает последнее состояние, а не порядок завершения задач
+    // Serializes like operations: rapid clicks write the latest state to SQLite rather than task completion order
     private readonly SemaphoreSlim _likeWriteGate = new(1, 1);
     private readonly Timer _saveDebounceTimer;
 
@@ -188,10 +188,10 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     #region Треки
 
     /// <summary>
-    /// Добавляет или обновляет метаданные трека в L1-кэше реестра и сохраняет их в локальную базу данных.
+    /// Adds or updates track metadata in the registry L1 cache and persists it to the local database.
     /// </summary>
-    /// <param name="track">Экземпляр трека.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="track">The track instance.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     public async Task AddOrUpdateTrackAsync(TrackInfo track, CancellationToken ct = default)
     {
         track.InPlaylists = await _playlists.GetPlaylistsForTrackAsync(track.Id, CurrentOwnerId, ct).ConfigureAwait(false);
@@ -201,7 +201,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Пакетно регистрирует и сохраняет список треков за 1 транзакцию SQLite без N+1 запросов.
+    /// Batch registers and saves a list of tracks in a single SQLite transaction without N+1 queries.
     /// </summary>
     public async Task AddOrUpdateTracksBatchAsync(IReadOnlyList<TrackInfo> tracks, CancellationToken ct = default)
     {
@@ -226,23 +226,23 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Извлекает трек из оперативного L1-кэша реестра без обращения к базе данных.
+    /// Retrieves a track from the in-memory registry L1 cache without hitting the database.
     /// </summary>
-    /// <param name="id">Идентификатор трека.</param>
-    /// <returns>Экземпляр модели трека либо <c>null</c>.</returns>
+    /// <param name="id">The track identifier.</param>
+    /// <returns>The track model instance or <c>null</c>.</returns>
     public TrackInfo? GetTrack(string id) => _registry.TryGet(id);
 
     /// <summary>
-    /// Получает трек из оперативного кэша либо асинхронно загружает его из базы данных.
+    /// Retrieves a track from the in-memory cache or asynchronously loads it from the database.
     /// </summary>
-    /// <param name="id">Идентификатор трека.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Загруженный экземпляр модели трека.</returns>
+    /// <param name="id">The track identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The loaded track model instance.</returns>
     public async Task<TrackInfo?> GetTrackAsync(string id, CancellationToken ct = default) =>
         await _registry.GetOrLoadAsync(id, ct).ConfigureAwait(false);
 
     /// <summary>
-    /// Выполняет пакетную гидратацию связей с плейлистами и регистрацию треков в L1-реестре.
+    /// Performs batch hydration of playlist relationships and registers tracks in the L1 registry.
     /// </summary>
     private async Task HydrateAndRegisterTracksAsync(List<TrackInfo> tracks, CancellationToken ct)
     {
@@ -263,7 +263,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Выполняет полнотекстовый поиск треков в базе данных по имени или автору.
+    /// Performs full-text search for tracks in the database by title or artist.
     /// </summary>
     public async Task<List<TrackInfo>> SearchTracksAsync(
         string query, int limit = 50, int offset = 0, CancellationToken ct = default)
@@ -276,13 +276,13 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает суммарную продолжительность всех уникальных треков в библиотеке пользователя.
+    /// Returns the total duration of all unique tracks in the user's library.
     /// </summary>
     public async Task<long> GetTotalLibraryDurationAsync(CancellationToken ct = default) =>
         await _playlists.GetTotalLibraryDurationAsync(CurrentOwnerId, ct).ConfigureAwait(false);
 
     /// <summary>
-    /// Извлекает список всех треков базы данных с пагинацией.
+    /// Retrieves a paginated list of all tracks from the database.
     /// </summary>
     public async Task<List<TrackInfo>> GetAllTracksAsync(int limit = 10000, int offset = 0, CancellationToken ct = default)
     {
@@ -292,7 +292,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает список локальных файлов и загруженных треков.
+    /// Returns a list of local files and downloaded tracks.
     /// </summary>
     public async Task<List<TrackInfo>> GetLocalTracksAsync(int limit = 1000, int offset = 0, CancellationToken ct = default)
     {
@@ -302,7 +302,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Сбрасывает флаг локальной загрузки и путь к файлу у всех скачанных треков в L1-кэше и БД SQLite.
+    /// Resets the local download flag and file path for all downloaded tracks in the L1 cache and SQLite DB.
     /// </summary>
     public async Task ClearDownloadsMetadataAsync(CancellationToken ct = default)
     {
@@ -339,13 +339,13 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает общее количество треков в базе данных.
+    /// Returns the total number of tracks in the database.
     /// </summary>
     public async Task<int> GetTrackCountAsync(CancellationToken ct = default) =>
         await _tracks.CountAsync(ct).ConfigureAwait(false);
 
     /// <summary>
-    /// Сохраняет метаданные нормализации громкости (Integrated LUFS) для трека.
+    /// Saves loudness normalization metadata (Integrated LUFS) for a track.
     /// </summary>
     public Task SaveTrackNormalizationMetadataAsync(
         string trackId,
@@ -355,7 +355,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         _tracks.SaveNormalizationMetadataAsync(trackId, integratedLufs, source, ct);
 
     /// <summary>
-    /// Устанавливает или сбрасывает индивидуальный пресет эквалайзера для трека в L1-кэше и БД SQLite.
+    /// Sets or resets a custom equalizer preset for a track in the L1 cache and SQLite DB.
     /// </summary>
     public async Task SetTrackEqualizerPresetAsync(
         TrackInfo track,
@@ -375,23 +375,23 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     #region Лайки
 
     /// <summary>
-    /// Устанавливает статус отметки «Мне нравится» для трека с синхронизацией системного плейлиста Liked.
-    /// Является низкоуровневым методом фиксации состояния в SQLite и L1-реестре треков.
+    /// Sets the "Liked" status for a track and synchronizes the system Liked playlist.
+    /// Low-level method for persisting state in SQLite and the L1 track registry.
     /// </summary>
-    /// <param name="track">Экземпляр трека.</param>
-    /// <param name="isLiked">Устанавливаемое состояние лайка.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="track">The track instance.</param>
+    /// <param name="isLiked">The target liked state.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     public async Task SetLikeStateAsync(TrackInfo track, bool isLiked, CancellationToken ct = default)
     {
         var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
 
-        // Оптимистичное состояние в L1 ставится до ожидания гейта: UI видит клик мгновенно
+        // Optimistic L1 state is set before waiting for the gate: UI reflects the click instantly
         canonical.SetLikedState(isLiked);
 
         await _likeWriteGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // Last-Write-Wins: пишем актуальное значение, которое мог изменить более поздний клик
+            // Last-Write-Wins: write the actual current value, which may have been changed by a later click
             bool latestLiked = canonical.IsLiked;
 
             await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
@@ -415,12 +415,12 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает список понравившихся треков текущего пользователя.
+    /// Returns a list of the current user's liked tracks.
     /// </summary>
-    /// <param name="limit">Максимальное количество возвращаемых записей.</param>
-    /// <param name="offset">Смещение выборки.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список моделей треков.</returns>
+    /// <param name="limit">Maximum number of records to return.</param>
+    /// <param name="offset">Selection offset.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>List of track models.</returns>
     public async Task<List<TrackInfo>> GetLikedTracksAsync(int limit = 100, int offset = 0, CancellationToken ct = default)
     {
         var tracks = await _tracks.GetLikedAsync(CurrentOwnerId, limit, offset, ct).ConfigureAwait(false);
@@ -429,10 +429,10 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Проверяет, является ли переданный идентификатор системным плейлистом «Понравившиеся».
+    /// Checks whether the specified identifier is the system "Liked" playlist.
     /// </summary>
-    /// <param name="id">Идентификатор плейлиста.</param>
-    /// <returns><c>true</c>, если идентификатор равен <see cref="LikedPlaylistId"/>; иначе — <c>false</c>.</returns>
+    /// <param name="id">Playlist identifier.</param>
+    /// <returns><c>true</c> if the identifier equals <see cref="LikedPlaylistId"/>; otherwise, <c>false</c>.</returns>
     public static bool IsSystemPlaylist(string id) => id == LikedPlaylistId;
 
     #endregion
@@ -557,11 +557,11 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     #region Очистка и завершение
 
     /// <summary>
-    /// Полностью сбрасывает библиотеку: удаляет файл базы вместе с журналами WAL/SHM и атомарно создаёт чистую схему.
+    /// Fully resets the library: deletes the database file along with WAL/SHM logs and atomically creates a clean schema.
     /// </summary>
     /// <remarks>
-    /// Ошибки удаления не подавляются: если файл заблокирован, старая база осталась бы на месте,
-    /// а оставшийся <c>-wal</c> мог бы примениться к новой базе при открытии.
+    /// Deletion errors are not suppressed: if a file is locked, the old database would remain intact,
+    /// and any leftover <c>-wal</c> file could be applied to the new database upon opening.
     /// </remarks>
     public async Task ResetAsync(CancellationToken ct = default)
     {
@@ -569,7 +569,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         SqliteConnection.ClearAllPools();
         var dbPath = G.FilePath.Database;
-        File.Delete(dbPath + "-wal"); // журналы первыми: если файл занят, основная база останется нетронутой
+        File.Delete(dbPath + "-wal"); // Write-ahead logs first: if a file is busy, the main database remains untouched
         File.Delete(dbPath + "-shm");
         File.Delete(dbPath);
 

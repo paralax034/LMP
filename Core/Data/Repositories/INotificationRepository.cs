@@ -1,44 +1,44 @@
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
-/// Репозиторий для персистентного хранения уведомлений.
+/// Repository for persistent notification storage.
 /// </summary>
 public interface INotificationRepository
 {
     /// <summary>
-    /// Получить последние уведомления.
+    /// Gets the latest notifications.
     /// </summary>
-    /// <param name="limit">Максимальное количество возвращаемых записей.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список доменных моделей уведомлений.</returns>
+    /// <param name="limit">The maximum number of records to return.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A list of notification domain models.</returns>
     Task<List<Notification>> GetRecentAsync(int limit = 50, CancellationToken ct = default);
 
     /// <summary>
-    /// Добавить уведомление.
+    /// Adds a notification.
     /// </summary>
-    /// <param name="notification">Экземпляр доменной модели уведомления.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию записи.</returns>
+    /// <param name="notification">The notification domain model instance.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A task representing the asynchronous write operation.</returns>
     Task AddAsync(Notification notification, CancellationToken ct = default);
 
     /// <summary>
-    /// Пометить все как прочитанные.
+    /// Marks all notifications as read.
     /// </summary>
     Task MarkAllAsReadAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Удалить все уведомления.
+    /// Deletes all notifications.
     /// </summary>
     Task ClearAllAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Удалить старые уведомления, оставив не более <paramref name="keepCount"/>.
+    /// Deletes old notifications, retaining at most <paramref name="keepCount"/>.
     /// </summary>
     Task PruneAsync(int keepCount = 100, CancellationToken ct = default);
 
     /// <summary>
-    /// Удаляет уведомления, созданные до указанной даты.
-    /// Используется авто-очисткой <see cref="NotificationService"/>.
+    /// Deletes notifications created before the specified date.
+    /// Used by <see cref="NotificationService"/> auto-cleanup.
     /// </summary>
     Task DeleteOlderThanAsync(DateTime threshold, CancellationToken ct = default);
 }

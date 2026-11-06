@@ -13,8 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Features.Shell;
 
 /// <summary>
-/// Главная модель представления окна оболочки (Shell).
-/// Управляет вкладками навигации, глобальными блокировками, заголовком окна и интеграцией дочерних сервисов.
+/// Main view model for the shell window.
+/// Manages navigation tabs, global locks, window title, and child service integration.
 /// </summary>
 public partial class MainWindowViewModel : ViewModelBase
 {
@@ -41,7 +41,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] public partial DialogHostViewModel DialogHost { get; private set; }
 
     /// <summary>
-    /// Коллекция основных страниц оболочки для полной предварительной материализации визуальных деревьев.
+    /// Collection of main shell pages for full upfront visual tree materialization.
     /// </summary>
     public IReadOnlyList<ViewModelBase> PrewarmedPages { get; private set; } = [];
 
@@ -89,8 +89,8 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выполняет инициализацию всех страниц оболочки после полной готовности корневого синглтона в DI-контейнере.
-    /// Исключает циклическую блокировку конструкторов.
+    /// Initializes all shell pages after the root singleton is fully ready in the DI container.
+    /// Prevents constructor deadlock.
     /// </summary>
     public void InitializeShellPages()
     {
@@ -114,7 +114,7 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Обрабатывает изменения авторизации на глобальном уровне после полной гидрации кэшей.
+    /// Handles authorization changes at the global level after full cache hydration.
     /// </summary>
     private void HandleGlobalAccountHydrated()
     {
@@ -162,8 +162,8 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Уведомляет shell о фактическом показе главного окна.
-    /// Первая тяжёлая инициализация страницы запускается только после отображения окна.
+    /// Notifies the shell that the main window is actually shown.
+    /// The first heavy page initialization starts only after the window is displayed.
     /// </summary>
     public void NotifyWindowShown()
     {
@@ -306,7 +306,7 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выполняет инициализацию страницы без искусственных задержек таймеров.
+    /// Initializes the page without artificial timer delays.
     /// </summary>
     private async Task DeferredInitAsync(ViewModelBase page, string pageName, bool isInitialNavigation)
     {
@@ -376,9 +376,9 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выполняет фоновую валидацию сессии после готовности первой страницы приложения.
-    /// Сетевой запрос пропускается, если кэш профиля ещё свежий.
-    /// При сетевых ошибках показывает информативный toast вместо молчания.
+    /// Performs background session validation after the first application page is ready.
+    /// The network request is skipped if the profile cache is still fresh.
+    /// Displays an informative toast instead of failing silently on network errors.
     /// </summary>
     private async Task ValidateAuthOnStartupAsync(CancellationToken ct)
     {

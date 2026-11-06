@@ -9,17 +9,17 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio.Backends;
 
 /// <summary>
-/// Аппаратный бэкенд вывода аудио на базе Windows Audio Session API (WASAPI) в Shared Paced Zero-Copy режиме.
+/// Hardware audio output backend based on Windows Audio Session API (WASAPI) in Shared Paced Zero-Copy mode.
 /// </summary>
 /// <remarks>
-/// <para><b>Архитектурные инварианты:</b></para>
+/// <para><b>Architectural Invariants:</b></para>
 /// <list type="bullet">
-///   <item><b>Strict Thread Affinity (Single MTA Thread):</b> Все COM-интерфейсы (<c>IMMDeviceEnumerator</c>, <c>IAudioClient</c>, <c>IAudioRenderClient</c>) создаются, используются и освобождаются строго внутри одного выделенного потока <c>WASAPI-ProAudio</c>.</item>
-///   <item><b>Zero-Alloc COM Interop:</b> Прямые вызовы таблиц виртуальных методов (Raw VTable + <c>delegate* unmanaged[MemberFunction]</c>) без создания RCW/CCW обёрток и <c>COMException</c>.</item>
-///   <item><b>Zero-Copy Rendering:</b> Запись PCM-сэмплов из <see cref="AudioPipeline"/> и <see cref="GainProcessor"/> напрямую в память аудио-движка ОС (<c>IAudioRenderClient::GetBuffer</c> → <see cref="Span{T}"/>).</item>
-///   <item><b>Dynamic Latency Horizon (~30 CS/sec steady, ~8ms interactive):</b> В стационарном режиме буфер заполняется на 60 мс с шагом сна 30 мс. При активном вращении громкости или Seek горизонт сжимается до 24 мс с мгновенным пробуждением по <see cref="_wakeControlEvent"/>.</item>
-///   <item><b>Seamless Seek Continuity:</b> При быстром Seek не проваливает громкость в ноль, позволяя <see cref="AudioPipeline"/> выполнить 20-миллисекундный wave-to-wave кроссфейд поверх живого потока.</item>
-///   <item><b>Seamless Endpoint Routing:</b> Прозрачное переоткрытие дефолтного аудио-устройства при переключении наушников/динамиков без потери декодированных фреймов в кольцевом буфере.</item>
+///   <item><b>Strict Thread Affinity (Single MTA Thread):</b> All COM interfaces (<c>IMMDeviceEnumerator</c>, <c>IAudioClient</c>, <c>IAudioRenderClient</c>) are created, consumed, and released strictly within a single dedicated <c>WASAPI-ProAudio</c> thread.</item>
+///   <item><b>Zero-Alloc COM Interop:</b> Direct virtual method table calls (Raw VTable + <c>delegate* unmanaged[MemberFunction]</c>) without creating RCW/CCW wrappers or throwing <c>COMException</c>.</item>
+///   <item><b>Zero-Copy Rendering:</b> Writing PCM samples from <see cref="AudioPipeline"/> and <see cref="GainProcessor"/> directly into the OS audio engine memory (<c>IAudioRenderClient::GetBuffer</c> → <see cref="Span{T}"/>).</item>
+///   <item><b>Dynamic Latency Horizon (~30 CS/sec steady, ~8ms interactive):</b> In steady-state mode, the buffer fills to 60 ms with a 30 ms sleep step. During active volume changes or Seek, the horizon shrinks to 24 ms with instant wake-up via <see cref="_wakeControlEvent"/>.</item>
+///   <item><b>Seamless Seek Continuity:</b> Does not drop volume to zero during rapid Seeks, allowing <see cref="AudioPipeline"/> to perform a 20-millisecond wave-to-wave crossfade on top of the live stream.</item>
+///   <item><b>Seamless Endpoint Routing:</b> Transparently reopens the default audio device when switching headphones/speakers without losing decoded frames in the ring buffer.</item>
 /// </list>
 /// </remarks>
 [SupportedOSPlatform("windows")]
@@ -53,53 +53,53 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     #region Engine Tuning Constants
 
     /// <summary>
-    /// Ёмкость аппаратного кольцевого буфера WASAPI (100 мс).
+    /// WASAPI hardware ring buffer capacity (100 ms).
     /// </summary>
     private const int BufferDurationMs = 100;
 
-    /// <summary>Горизонт заполнения буфера в стационарном режиме (75 мс) — гарантирует запас > 40 мс даже при 2 квантах сна планировщика Windows (31.25 мс).</summary>
+    /// <summary>Buffer fill horizon in steady-state mode (75 ms) — guarantees a > 40 ms margin even with 2 Windows scheduler sleep quanta (31.25 ms).</summary>
     private const int SteadyTargetBufferMs = 75;
 
-    /// <summary>Шаг сна потока WASAPI в стационарном режиме (20 мс) — полностью исключает просадку padBefore в 0.</summary>
+    /// <summary>WASAPI thread sleep step in steady-state mode (20 ms) — completely eliminates padBefore dropping to 0.</summary>
     private const uint SteadySleepMs = 20;
 
-    /// <summary>Сжатый горизонт заполнения буфера при активном вращении громкости или микро-фейде (40 мс — исключает осушение буфера до 0 при микро-задержках ОС).</summary>
+    /// <summary>Compressed buffer fill horizon during active volume changes or micro-fade (40 ms — prevents buffer underrun to 0 during OS micro-delays).</summary>
     private const int InteractiveTargetBufferMs = 40;
 
-    /// <summary>Шаг сна потока WASAPI в интерактивном режиме (8 мс).</summary>
+    /// <summary>WASAPI thread sleep step in interactive mode (8 ms).</summary>
     private const uint InteractiveSleepMs = 8;
 
-    /// <summary>Время удержания интерактивного режима с низкой задержкой после изменения громкости или Seek (мс).</summary>
+    /// <summary>Duration to hold low-latency interactive mode after volume changes or Seek (ms).</summary>
     private const long InteractiveHoldDurationMs = 350;
 
-    /// <summary>Таймаут ожидания завершения потока воспроизведения при остановке (мс).</summary>
+    /// <summary>Timeout when waiting for the playback thread to terminate on stop (ms).</summary>
     private const int PlaybackThreadJoinTimeoutMs = 1000;
 
-    /// <summary>Длительность плавного микро-фейда при Play/Pause (960 фреймов = 20 мс при 48 кГц).</summary>
+    /// <summary>Duration of smooth micro-fade during Play/Pause (960 frames = 20 ms at 48 kHz).</summary>
     private const int FadeFrames = 960;
 
-    /// <summary>Порог подряд идущих пустых тиков для предупреждения в лог.</summary>
+    /// <summary>Threshold of consecutive empty ticks for a log warning.</summary>
     private const int UnderrunLogThreshold = 50;
 
-    /// <summary>Порог подряд идущих пустых тиков (~1.5 сек) для сигнала Starvation.</summary>
+    /// <summary>Threshold of consecutive empty ticks (~1.5 sec) to signal Starvation.</summary>
     private const int StarvationThreshold = 150;
 
-    /// <summary>Порог тиков в закрытом гейте перед остановкой аппаратного потока WASAPI (~300 мс).</summary>
+    /// <summary>Tick threshold in closed gate before stopping the WASAPI hardware thread (~300 ms).</summary>
     private const int IdleTicksBeforeHardwareStop = 15;
 
-    /// <summary>Количество быстрых попыток бесшовного переключения на новое дефолтное устройство.</summary>
+    /// <summary>Number of fast retry attempts for seamless switching to a new default device.</summary>
     private const int HotSwapMaxRetries = 3;
 
-    /// <summary>Пауза между попытками бесшовного хот-свапа (мс).</summary>
+    /// <summary>Pause between seamless hot-swap attempts (ms).</summary>
     private const int HotSwapRetryDelayMs = 60;
 
-    /// <summary>Задержка при полном восстановлении после потери всех устройств (мс).</summary>
+    /// <summary>Delay during full recovery after losing all devices (ms).</summary>
     private const int DeviceRecoveryDelayMs = 250;
 
-    /// <summary>Максимум попыток при полном пересоздании устройства.</summary>
+    /// <summary>Maximum retry attempts during full device recreation.</summary>
     private const int DeviceRecoveryMaxRetries = 3;
 
-    /// <summary>Интервал опроса готовности аудио-подсистемы после полного отключения устройств (мс).</summary>
+    /// <summary>Polling interval for audio subsystem readiness after full device disconnection (ms).</summary>
     private const int DeviceWatchIntervalMs = 1500;
 
     #endregion
@@ -107,7 +107,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     #region Nested Types
 
     /// <summary>
-    /// Состояние огибающей микро-фейда при переходах Play / Pause.
+    /// Micro-fade envelope state during Play / Pause transitions.
     /// </summary>
     internal enum FadeState : byte
     {
@@ -309,7 +309,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
     #region Fields
 
-    // COM-указатели принадлежат ИСКЛЮЧИТЕЛЬНО потоку WasapiPlaybackLoop
+    // COM pointers belong EXCLUSIVELY to the WasapiPlaybackLoop thread
     private void* _deviceEnumerator;
     private void* _device;
     private void* _audioClient;
@@ -333,29 +333,29 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private int _sourceSampleRate;
     private volatile int _bufferedSamples;
 
-    /// <summary>Сэмплы источника, забранные из <see cref="_callback"/>; изменяется только под <see cref="_stateLock"/>.</summary>
+    /// <summary>Source samples retrieved from <see cref="_callback"/>; modified only under <see cref="_stateLock"/>.</summary>
     private long _clockPulledSamples;
 
     /// <summary>
-    /// Сэмплы источника, переданные устройству (забранные минус ожидающие в ресемплере); монотонны, читаются через <see cref="Volatile"/>.
+    /// Source samples submitted to the device (retrieved minus pending in resampler); monotonic, read via <see cref="Volatile"/>.
     /// </summary>
     private long _clockRenderedSamples;
 
-    /// <summary>Часы рендера: единственный писатель — поток WASAPI после <c>ReleaseBuffer</c>.</summary>
+    /// <summary>Render clock: sole writer is the WASAPI thread after <c>ReleaseBuffer</c>.</summary>
     private readonly RenderClock _renderClock = new();
 
-    /// <summary>Фреймы, зафиксированные в буфере устройства за всё время (источник и тишина); только поток WASAPI.</summary>
+    /// <summary>Total frames committed to the device buffer over all time (source and silence); WASAPI thread only.</summary>
     private long _deviceFramesCommitted;
 
-    /// <summary>Начало последнего отрезка тишины в шкале <see cref="_deviceFramesCommitted"/>; только поток WASAPI.</summary>
+    /// <summary>Start of the last silence range on the <see cref="_deviceFramesCommitted"/> scale; WASAPI thread only.</summary>
     private long _silenceRunStart;
 
-    /// <summary>Конец последнего отрезка тишины в шкале <see cref="_deviceFramesCommitted"/>; только поток WASAPI.</summary>
+    /// <summary>End of the last silence range on the <see cref="_deviceFramesCommitted"/> scale; WASAPI thread only.</summary>
     private long _silenceRunEnd;
 
-    // Состояние 4-точечного C1 кубического ресемплера Эрмита (для бесшовного воспроизведения 44.1 кГц в 48 кГц сессии WASAPI без пересоздания IAudioClient)
+    // State of 4-point C1 Hermite cubic resampler (for seamless playback of 44.1 kHz in a 48 kHz WASAPI session without recreating IAudioClient)
     private readonly float[] _resampleSourceBuf = new float[4096 * 8];
-    private readonly float[] _resampleHistory = new float[4 * 8]; // 4 фрейма истории [y_{-1}, y_0, y_1, y_2]
+    private readonly float[] _resampleHistory = new float[4 * 8]; // 4 history frames [y_{-1}, y_0, y_1, y_2]
     private int _resampleSourceValidFrames;
     private int _resampleSourceCursor;
     private double _resampleFracPhase;
@@ -366,9 +366,9 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private volatile bool _disposed;
 
     /// <summary>
-    /// Защищает переходы состояния гейта И синхронизирует вызов <c>_callback</c> с <see cref="Flush"/>,
-    /// гарантируя, что <c>LockFreeRingBuffer.Clear()</c> в <c>AudioPipeline.Flush()</c> никогда не вызовется
-    /// параллельно с <c>LockFreeRingBuffer.Read()</c> в потоке WASAPI.
+    /// Protects gate state transitions AND synchronizes calling <c>_callback</c> with <see cref="Flush"/>,
+    /// guaranteeing that <c>LockFreeRingBuffer.Clear()</c> in <c>AudioPipeline.Flush()</c> is never invoked
+    /// concurrently with <c>LockFreeRingBuffer.Read()</c> on the WASAPI thread.
     /// </summary>
     private readonly Lock _stateLock = new();
     private FadeState _fadeState;
@@ -379,7 +379,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private float _prevWasapiL;
     private float _prevWasapiR;
 
-    private const int CrossfadeFrames = 576; // 12 мс @ 48 кГц
+    private const int CrossfadeFrames = 576; // 12 ms @ 48 kHz
     private readonly float[] _crossfadeTail = new float[CrossfadeFrames * 8];
     private int _crossfadeTailFrames;
 
@@ -462,8 +462,8 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         _callback = dataCallback;
         _channels = channels > 0 ? channels : AudioConstants.DefaultChannels;
         _sourceSampleRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
-        // Фиксируем аппаратную сессию WASAPI на канонической частоте 48000 Гц,
-        // чтобы переключение между треками 44.1 кГц (AAC) и 48 кГц (Opus) никогда не останавливало IAudioClient!
+        // Lock the WASAPI hardware session to the canonical sample rate of 48000 Hz,
+        // so that switching between 44.1 kHz (AAC) and 48 kHz (Opus) tracks never stops IAudioClient!
         _sampleRate = AudioConstants.DefaultSampleRate;
         ResetResamplerStateUnderLock();
 
@@ -523,7 +523,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
         lock (_stateLock)
         {
-            // Если Flush() ещё не захватил хвост уходящего трека, захватываем его со старым _sourceSampleRate до подмены _callback!
+            // If Flush() hasn't captured the tail of the outgoing track yet, capture it with the old _sourceSampleRate before replacing _callback!
             if (_crossfadeTailFrames == 0 && (_gateOpen || MathF.Abs(_lastWasapiL) > 0.0001f || MathF.Abs(_lastWasapiR) > 0.0001f))
             {
                 CaptureCrossfadeTailUnderLock();
@@ -710,7 +710,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             }
             catch
             {
-                // Переходное состояние аудио-графа Windows — повторяем попытку
+                // Windows audio graph transient state — retrying
             }
         }
 
@@ -763,8 +763,8 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
         if (_audioClient != null && wasapiStarted)
         {
-            // Перед остановкой аппаратного клиента (например, при смене числа каналов)
-            // плавно сводим последний сэмпл в 0 и даём буферу мягко завершиться без щелчка AudioClientStop!
+            // Before stopping the hardware client (for example, when channel count changes),
+            // smoothly fade the last sample to 0 and allow the buffer to gently drain without an AudioClientStop pop!
             if (_renderClient != null && (MathF.Abs(_lastWasapiL) > 0.0005f || MathF.Abs(_lastWasapiR) > 0.0005f))
             {
                 if (AudioClientGetCurrentPadding(_audioClient, out uint pad) >= 0)
@@ -810,13 +810,13 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         _resampleHistoryPrimed = false;
         _resampleHistory.AsSpan().Clear();
 
-        // Ожидавшие в ресемплере сэмплы отброшены и уже не прозвучат: счётчик рендера догоняет забранные
+        // Samples left in the resampler were dropped and will not play: render counter catches up with read samples
         Volatile.Write(ref _clockRenderedSamples, _clockPulledSamples);
     }
 
     /// <summary>
-    /// Пересчитывает счётчик переданных устройству сэмплов: забранные из callback минус ещё не израсходованные ресемплером.
-    /// Вызывается строго под <see cref="_stateLock"/>.
+    /// Recalculates the counter of samples passed to the device: read via callback minus those not yet consumed by the resampler.
+    /// Must be called strictly under <see cref="_stateLock"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateRenderedSamplesUnderLock(int ch)
@@ -826,11 +826,11 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     }
 
     /// <summary>
-    /// Учитывает коммит в буфер устройства. Подряд идущие коммиты без данных источника (тишина недогруза, рампа к нулю)
-    /// склеиваются в отрезок, который часы рендера не экстраполируют. Вызывается только потоком WASAPI.
+    /// Accounts for a commit to the device buffer. Consecutive commits without source data (underrun silence, ramp to zero)
+    /// are merged into a segment that render clocks do not extrapolate. Called only by the WASAPI thread.
     /// </summary>
-    /// <param name="frames">Число зафиксированных фреймов устройства.</param>
-    /// <param name="fromSource">Фреймы несут сэмплы, забранные из <see cref="_callback"/>.</param>
+    /// <param name="frames">Number of committed device frames.</param>
+    /// <param name="fromSource">Frames contain samples pulled from <see cref="_callback"/>.</param>
     private void TrackDeviceCommit(uint frames, bool fromSource)
     {
         if (frames == 0)
@@ -849,22 +849,22 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     }
 
     /// <summary>
-    /// Публикует снимок часов рендера после коммита в устройство. Вызывается только потоком WASAPI.
+    /// Publishes a render clock snapshot after committing to the device. Called only by the WASAPI thread.
     /// </summary>
-    /// <param name="queuedDeviceFrames">Фреймы устройства, ожидающие воспроизведения (padding после коммита).</param>
+    /// <param name="queuedDeviceFrames">Device frames pending playback (padding after commit).</param>
     private void PublishRenderClock(uint queuedDeviceFrames)
     {
         int ch = Math.Clamp(_channels, 1, 8);
         int srcRate = _sourceSampleRate;
         int dstRate = _sampleRate;
 
-        // Голова воспроизведения в шкале коммитов: тишина недогруза в очереди не считается звучащим источником
+        // Playback head in commit scale: queued underrun silence is not considered an active source
         long committed = _deviceFramesCommitted;
         long head = committed - queuedDeviceFrames;
         long silenceQueued = Math.Max(0L, Math.Min(committed, _silenceRunEnd) - Math.Max(head, _silenceRunStart));
         long sourceQueued = Math.Max(0L, queuedDeviceFrames - silenceQueued);
 
-        // Экстраполировать можно только отрезок источника, который устройство проиграет подряд до ближайшей тишины
+        // Extrapolation is only allowed for the source segment that the device will play continuously until the nearest silence
         long contiguous = head < _silenceRunStart
             ? Math.Min(sourceQueued, _silenceRunStart - head)
             : head < _silenceRunEnd ? 0L : sourceQueued;
@@ -879,7 +879,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             Math.Max(1, srcRate) * ch);
     }
 
-    /// <summary>Переводит фреймы устройства в сэмплы источника с учётом ресемплинга.</summary>
+    /// <summary>Converts device frames to source samples taking resampling into account.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long ToSourceSamples(long deviceFrames, int ch, int srcRate, int dstRate)
     {
@@ -888,11 +888,11 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     }
 
     /// <summary>
-    /// Читает фреймы из <see cref="_callback"/> и при несовпадении частоты источника (например, 44100 Гц AAC)
-    /// с частотой движка WASAPI (48000 Гц) выполняет 4-точечную C1 кубическую интерполяцию Эрмита за 0 B аллокаций.
-    /// Межотсчётные пики, порождённые интерполяцией поверх гарантии лимитера, кадр за кадром возвращаются
-    /// под его потолок через <see cref="TruePeakLimiter.SoftCeilingScale"/> со стерео-связкой каналов.
-    /// Вызывается строго под <see cref="_stateLock"/>.
+    /// Reads frames from <see cref="_callback"/> and, if the source sample rate (e.g., 44100 Hz AAC)
+    /// differs from the WASAPI engine sample rate (48000 Hz), performs 4-point C1 Hermite cubic interpolation with 0 B allocations.
+    /// Inter-sample peaks generated by interpolation on top of the limiter's guarantee are pushed back
+    /// under its ceiling frame-by-frame via <see cref="TruePeakLimiter.SoftCeilingScale"/> with stereo channel linking.
+    /// Must be called strictly under <see cref="_stateLock"/>.
     /// </summary>
     private int ReadCallbackWithResamplingUnderLock(Span<float> targetSpan, int requestedOutFrames)
     {
@@ -920,7 +920,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
         while (outFrame < requestedOutFrames)
         {
-            // Подкачиваем новые входные фреймы в историю [y_{-1}, y_0, y_1, y_2], пока фаза >= 1.0 или история не инициализирована
+            // Fetch new input frames into history [y_{-1}, y_0, y_1, y_2] while phase >= 1.0 or history is uninitialized
             while (!_resampleHistoryPrimed || _resampleFracPhase >= 1.0)
             {
                 if (_resampleSourceCursor >= _resampleSourceValidFrames)
@@ -971,7 +971,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 }
                 else
                 {
-                    // Сдвигаем окно на 1 входной фрейм: [y_0, y_1, y_2, newSample]
+                    // Shift window by 1 input frame: [y_0, y_1, y_2, newSample]
                     hist.Slice(ch, 3 * ch).CopyTo(hist[..(3 * ch)]);
                     int nextIdx = _resampleSourceCursor * ch;
                     for (int c = 0; c < ch; c++)
@@ -1004,7 +1004,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 framePeak = MathF.Max(framePeak, MathF.Abs(y));
             }
 
-            // Кубика выходит за отсчёты, которые видел лимитер: пик кадра возвращаем под его потолок, не трогая сигнал ниже колена
+            // Cubic interpolation exceeds samples seen by the limiter: push frame peak back under its ceiling without touching signal below the knee
             float guardScale = TruePeakLimiter.SoftCeilingScale(framePeak);
             if (guardScale < 1.0f)
             {
@@ -1693,7 +1693,7 @@ public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     }
 
     /// <summary>
-    /// Применяет C1-гладкую огибающую микро-фейда (fade-in / fade-out) напрямую к <see cref="Span{T}"/> без аллокаций и гонок.
+    /// Applies a C1-smooth micro-fade envelope (fade-in / fade-out) directly to a <see cref="Span{T}"/> without allocations or data races.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool ApplyFadeEnvelope(

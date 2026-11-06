@@ -12,17 +12,17 @@ namespace LMP.UI.Controls;
 public partial class TrackListControl
 {
     /// <summary>
-    /// Обеспечивает ультра-плавную интерполяцию прокрутки ScrollViewer.
-    /// Поддерживает как прокрутку колесиком (с накоплением), так и плавное «догоняние»
-    /// при кликах по треку скроллбара и нажатиях клавиш (PageUp/PageDown, стрелки).
-    /// Автоматически отключается при ручном перетаскивании ползунка мыши, исключая лаги.
+    /// Provides ultra-smooth interpolation for ScrollViewer scrolling.
+    /// Supports both mouse wheel scrolling (with accumulation) and smooth "catch-up"
+    /// when clicking on the scrollbar track or pressing keys (PageUp/PageDown, arrows).
+    /// Automatically disables during manual thumb dragging to prevent lag.
     /// </summary>
     private sealed class SnapScrollHelper : IDisposable
     {
         #region Constants
 
         private const double
-            ScrollStep = ItemHeight * 2; // Ровно 2 трека (124px) за щелчок мыши без накопительного сдвига
+            ScrollStep = ItemHeight * 2; // Exactly 2 tracks (124px) per mouse notch without cumulative drift
 
         private const double Smoothness = 16.0;
         private const double Epsilon = 0.5;
@@ -46,9 +46,9 @@ public partial class TrackListControl
         #endregion
 
         /// <summary>
-        /// Инициализирует новый экземпляр помощника плавной прокрутки.
+        /// Initializes a new instance of the smooth scroll helper.
         /// </summary>
-        /// <param name="sv">Целевой ScrollViewer.</param>
+        /// <param name="sv">Target ScrollViewer.</param>
         public SnapScrollHelper(ScrollViewer sv)
         {
             _sv = sv;
@@ -68,7 +68,7 @@ public partial class TrackListControl
         }
 
         /// <summary>
-        /// Запускает плавную анимацию до заданной координаты Y.
+        /// Starts smooth animation to the specified Y coordinate.
         /// </summary>
         public void AnimateTo(double targetY)
         {
@@ -78,7 +78,7 @@ public partial class TrackListControl
         }
 
         /// <summary>
-        /// Мгновенно останавливает интерполяцию скролла.
+        /// Instantly stops scroll interpolation.
         /// </summary>
         public void CancelAnimation()
         {
@@ -88,9 +88,9 @@ public partial class TrackListControl
         }
 
         /// <summary>
-        /// Выполняет мгновенный переход к заданной координате без запуска сглаживания и без отката позиции.
+        /// Performs an instant jump to the specified coordinate without triggering smoothing or position rollback.
         /// </summary>
-        /// <param name="targetY">Целевая Y-координата скролла.</param>
+        /// <param name="targetY">Target scroll Y coordinate.</param>
         public void JumpTo(double targetY)
         {
             StopAnimation();
@@ -154,7 +154,7 @@ public partial class TrackListControl
             double direction = -Math.Sign(e.Delta.Y);
             double desiredY = _targetY + direction * ScrollStep;
 
-            // Выравниваем целевую координату по сетке слотов треков, исключая субпиксельное накопление ошибки
+            // Align the target coordinate to the track slot grid to prevent subpixel error accumulation
             double snappedY = Math.Round(desiredY / ItemHeight) * ItemHeight;
             _targetY = Math.Clamp(snappedY, 0, maxScroll);
 

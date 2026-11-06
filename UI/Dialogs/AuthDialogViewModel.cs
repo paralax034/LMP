@@ -7,7 +7,7 @@ using LMP.UI.Features.Shell;
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// Модель представления для диалога авторизации через расширение браузера.
+/// View model for the browser extension authorization dialog.
 /// </summary>
 public sealed partial class AuthDialogViewModel : ViewModelBase
 {
@@ -59,7 +59,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     public partial string InstalledExtensionVersion { get; set; } = "—";
 
     /// <summary>
-    /// Возвращает текстовое представление установленной версии расширения на основе текущей локализации.
+    /// Gets a text representation of the installed extension version based on the current localization.
     /// </summary>
     public string ExtensionVersionText
     {
@@ -78,7 +78,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     public bool IsWarningVisible => !IsGuideExpanded || IsFirefoxWarningVisible;
 
     /// <summary>
-    /// Возвращает значение, указывающее, выполняется ли в данный момент сетевая операция.
+    /// Gets a value indicating whether a network operation is currently in progress.
     /// </summary>
     public bool IsSpinnerActive => IsAuthenticating || IsExtensionDownloading;
 
@@ -94,7 +94,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     private readonly CancellationTokenSource _cts = new();
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="AuthDialogViewModel"/>.
+    /// Initializes a new instance of the <see cref="AuthDialogViewModel"/> class.
     /// </summary>
     public AuthDialogViewModel(
         CookieAuthService auth,
@@ -119,7 +119,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Динамически вычисляет и извлекает текущий синглтон MainWindowViewModel для блокировок TitleBar.
+    /// Dynamically computes and retrieves the current MainWindowViewModel singleton for TitleBar locks.
     /// </summary>
     private static MainWindowViewModel? GetMainWindowViewModel()
     {
@@ -135,7 +135,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выполняет автоматическую проверку соответствия локальной и удаленной версий расширения.
+    /// Performs an automatic check to verify compatibility between local and remote extension versions.
     /// </summary>
     private async Task CheckExtensionVersionAsync(CancellationToken ct)
     {
@@ -194,7 +194,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Возвращает версию расширения, обнаруженного в локальном каталоге приложения.
+    /// Gets the version of the extension detected in the local application directory.
     /// </summary>
     private static string? GetLocalExtensionVersion()
     {
@@ -221,7 +221,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Формирует адрес для получения манифеста из удаленного репозитория.
+    /// Builds the URL for fetching the manifest from the remote repository.
     /// </summary>
     private static string GetRemoteManifestUrl()
     {
@@ -341,7 +341,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
                 IsAuthenticating = true;
                 mainWindow?.LockNavigation(SL["Splash_ConnectingYouTube"]);
 
-                // БЕРЕМ ДАННЫЕ ИЗ ВЫБРАННОГО АККАУНТА, а не запрашиваем заново
+                // GET DATA FROM THE SELECTED ACCOUNT instead of re-requesting it
                 finalName = selectedAccount.Name;
                 finalEmail = selectedAccount.Email;
                 finalAvatar = selectedAccount.AvatarUrl;
@@ -352,7 +352,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
                 var singleAccount = accounts.FirstOrDefault();
                 _auth.SetAuthUser(singleAccount?.AuthUser ?? AuthState.DefaultAuthUser);
 
-                // Если аккаунт один, пробуем взять данные сразу из него
+                // If there is only one account, try getting the data directly from it
                 if (singleAccount != null && !string.IsNullOrEmpty(singleAccount.Name))
                 {
                     finalName = singleAccount.Name;
@@ -362,7 +362,7 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
                 }
                 else
                 {
-                    // Иначе делаем запасной сетевой запрос
+                    // Otherwise fallback to a network request
                     var (Name, Email, AvatarUrl, GaiaId) = await _userData.GetAccountInfoAsync();
                     finalName = Name;
                     finalEmail = Email;

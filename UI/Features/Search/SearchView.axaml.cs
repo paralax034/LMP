@@ -9,8 +9,8 @@ using Avalonia.Media;
 namespace LMP.UI.Features.Search;
 
 /// <summary>
-/// Представление экрана поиска треков.
-/// Координирует адаптивную маску краев ленты, туннелирование клавиш автодополнения и управление скроллом.
+/// Track search screen view.
+/// Coordinates the adaptive ribbon edge mask, autocomplete key tunneling, and scroll management.
 /// </summary>
 public partial class SearchView : UserControl
 {
@@ -75,8 +75,8 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>
-    /// Перехватывает нативное событие вставки в TextBox из любого источника (клавиатура или контекстное меню)
-    /// для гарантированной санитизации строк с начальными переносами каретки.
+    /// Intercepts native paste events in TextBox from any source (keyboard or context menu)
+    /// to guarantee sanitization of strings with leading line breaks.
     /// </summary>
     private async void OnSearchBoxPastingFromClipboard(object? sender, RoutedEventArgs e)
     {
@@ -87,10 +87,10 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>
-    /// Извлекает текст из буфера обмена ОС, нормализует его в однострочный вид и вставляет в позицию выделения поля ввода.
+    /// Extracts text from the OS clipboard, normalizes it to a single-line format, and inserts it at the input field selection position.
     /// </summary>
-    /// <param name="textBox">Целевой экземпляр поля ввода.</param>
-    /// <returns>Задача асинхронного выполнения операции вставки.</returns>
+    /// <param name="textBox">The target input field instance.</param>
+    /// <returns>A task representing the asynchronous paste operation.</returns>
     private static async Task PasteCleanTextAsync(TextBox textBox)
     {
         string? raw;
@@ -202,8 +202,8 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>
-    /// Динамически вычисляет маску затухания краев ленты:
-    /// маски появляются строго при наличии доступной области прокрутки.
+    /// Dynamically calculates the ribbon edge fade mask:
+    /// masks appear strictly when a scrollable area is available.
     /// </summary>
     private static void UpdateRibbonMask(ScrollViewer sv)
     {
@@ -231,7 +231,7 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>
-    /// Обрабатывает клики по чипам: ЛКМ — моментальный поиск, ПКМ — удаление элемента.
+    /// Handles clicks on chips: LMB — instant search, RMB — item deletion.
     /// </summary>
     private void OnSuggestionPointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -253,7 +253,7 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>
-    /// Гарантированный перехват контекстного меню чипа для удаления запроса из истории.
+    /// Guaranteed interception of the chip context menu to delete a query from history.
     /// </summary>
     private void OnSuggestionContextRequested(object? sender, ContextRequestedEventArgs e)
     {

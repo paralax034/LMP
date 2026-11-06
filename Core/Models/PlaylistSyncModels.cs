@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Стратегия разрешения конфликтов при двусторонней синхронизации треков.
+/// Conflict resolution strategy for two-way track synchronization.
 /// </summary>
 public enum PlaylistSyncStrategy
 {
@@ -13,7 +13,7 @@ public enum PlaylistSyncStrategy
 }
 
 /// <summary>
-/// Набор параметров и флагов, выбранных для применения синхронизации.
+/// Set of parameters and flags selected for applying synchronization.
 /// </summary>
 public sealed class PlaylistSyncOptions
 {
@@ -25,17 +25,17 @@ public sealed class PlaylistSyncOptions
 }
 
 /// <summary>
-/// Утилита детерминированного сопоставления обложек плейлиста без ложных срабатываний на токены YouTube.
+/// Utility for deterministic playlist cover matching without false positives on YouTube tokens.
 /// </summary>
 public static class ThumbnailComparer
 {
     private const string YtEmptyStatePlaceholder = "playlist-empty-state";
 
     /// <summary>
-    /// Нормализует строковый URL обложки, отсекая динамические query-параметры.
+    /// Normalizes a string cover URL by stripping dynamic query parameters.
     /// </summary>
-    /// <param name="url">Исходный URL обложки.</param>
-    /// <returns>Нормализованный URL без параметров запроса либо <c>null</c>.</returns>
+    /// <param name="url">The source cover URL.</param>
+    /// <returns>The normalized URL without query parameters, or <c>null</c>.</returns>
     public static string? Normalize(string? url)
     {
         var span = NormalizeToSpan(url);
@@ -45,10 +45,10 @@ public static class ThumbnailComparer
     }
 
     /// <summary>
-    /// Zero-allocation нормализация URL обложки через сегмент памяти.
+    /// Zero-allocation normalization of a cover URL using a memory segment.
     /// </summary>
-    /// <param name="url">Исходный URL обложки.</param>
-    /// <returns>Сегмент символов без query-параметров либо пустой сегмент.</returns>
+    /// <param name="url">The source cover URL.</param>
+    /// <returns>A character segment without query parameters, or an empty segment.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ReadOnlySpan<char> NormalizeToSpan(string? url)
     {
@@ -64,7 +64,7 @@ public static class ThumbnailComparer
             if (qIdx >= 0)
                 span = span[..qIdx];
 
-            // Google CDN (googleusercontent.com / ggpht.com) кодирует размер через суффикс '=s1200' или '=w544-h544'
+            // Google CDN (googleusercontent.com / ggpht.com) encodes size via '=s1200' or '=w544-h544' suffix
             if (span.Contains("googleusercontent.com".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
                 span.Contains("ggpht.com".AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
@@ -84,8 +84,8 @@ public static class ThumbnailComparer
     }
 
     /// <summary>
-    /// Проверяет, размещена ли обложка на внутренних CDN-серверах YouTube / Google.
-    /// Такие обложки управляются сервером и не загружаются повторно через Scotty протокол.
+    /// Checks whether the cover is hosted on internal YouTube / Google CDN servers.
+    /// Such covers are managed by the server and are not re-uploaded via the Scotty protocol.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsYoutubeHosted(ReadOnlySpan<char> url)
@@ -98,19 +98,19 @@ public static class ThumbnailComparer
     }
 
     /// <summary>
-    /// Проверяет, размещена ли обложка на внутренних CDN-серверах YouTube / Google.
+    /// Checks whether the cover is hosted on internal YouTube / Google CDN servers.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsYoutubeHosted(string? url) =>
         !string.IsNullOrWhiteSpace(url) && IsYoutubeHosted(url.AsSpan());
 
     /// <summary>
-    /// Проверяет эквивалентность локальной и облачной обложки без аллокаций в куче.
+    /// Checks equivalence between local and cloud covers without heap allocations.
     /// </summary>
-    /// <param name="localUrl">Локальный путь или URL обложки.</param>
-    /// <param name="cloudUrl">Облачный URL обложки YouTube.</param>
-    /// <param name="youtubeId">Идентификатор плейлиста для проверки серверных коллажей.</param>
-    /// <returns><c>true</c>, если обложки эквивалентны; иначе — <c>false</c>.</returns>
+    /// <param name="localUrl">Local path or cover URL.</param>
+    /// <param name="cloudUrl">YouTube cloud cover URL.</param>
+    /// <param name="youtubeId">Playlist identifier for checking server collages.</param>
+    /// <returns><c>true</c> if covers are equivalent; otherwise, <c>false</c>.</returns>
     public static bool AreEquivalent(string? localUrl, string? cloudUrl, string? youtubeId)
     {
         var normLocal = NormalizeToSpan(localUrl);
@@ -125,8 +125,8 @@ public static class ThumbnailComparer
         if (normLocal.Equals(normCloud, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // Если обе ссылки принадлежат CDN YouTube/Google (например, i.ytimg.com и yt3.googleusercontent.com),
-        // обе являются серверными представлениями одной облачной обложки и не требуют Scotty-выгрузки
+        // If both links belong to YouTube/Google CDN (e.g., i.ytimg.com and yt3.googleusercontent.com),
+        // both are server representations of the same cloud cover and do not require a Scotty upload
         if (IsYoutubeHosted(normLocal) && IsYoutubeHosted(normCloud))
             return true;
 
@@ -153,7 +153,7 @@ public static class ThumbnailComparer
 }
 
 /// <summary>
-/// Снимок различий между локальным состоянием плейлиста и облаком YouTube.
+/// Snapshot of differences between the local playlist state and YouTube cloud.
 /// </summary>
 public sealed class PlaylistSyncPreview
 {
@@ -168,16 +168,16 @@ public sealed class PlaylistSyncPreview
     public int CommonTrackCount { get; init; }
 
     /// <summary>
-    /// Число локальных треков, уже связанных с облаком (есть <c>SetVideoId</c>), но удалённых из облачного
-    /// плейлиста на другом устройстве. Слияние удаляет их локально вместо повторной выгрузки.
+    /// Number of local tracks already linked to the cloud (having <c>SetVideoId</c>), but deleted from the cloud
+    /// playlist on another device. Merging deletes them locally instead of re-uploading.
     /// </summary>
     public int CloudRemovedTrackCount { get; init; }
 
     public string? YoutubePlaylistId { get; init; }
 
     /// <summary>
-    /// Полный снимок данных YouTube Music, использованный для построения диффа.
-    /// Исключает повторные сетевые запросы и устраняет утечки памяти в singleton-сервисах.
+    /// Full YouTube Music data snapshot used to build the diff.
+    /// Prevents redundant network requests and eliminates memory leaks in singleton services.
     /// </summary>
     public Youtube.Music.FullPlaylistSyncData? CachedCloudData { get; init; }
 
@@ -189,7 +189,7 @@ public sealed class PlaylistSyncPreview
 }
 
 /// <summary>
-/// Результат выполнения операции синхронизации плейлиста.
+/// Result of executing a playlist synchronization operation.
 /// </summary>
 public sealed class PlaylistSyncResult
 {
@@ -209,7 +209,7 @@ public sealed class PlaylistSyncResult
 }
 
 /// <summary>
-/// Запись об удаляемом из облачного плейлиста треке с сохранённым связующим идентификатором <c>SetVideoId</c>.
+/// Record of a track to be removed from the cloud playlist, preserving its binding <c>SetVideoId</c>.
 /// </summary>
 public sealed class CloudTrackRemoveEntry
 {
@@ -218,7 +218,7 @@ public sealed class CloudTrackRemoveEntry
 }
 
 /// <summary>
-/// Запись о мутации статуса «Мне нравится» для трека с сохранением базового состояния для аннигиляции пар.
+/// Record of a track's "Liked" status mutation, preserving the base state for pair annihilation.
 /// </summary>
 public sealed class CloudLikeMutationEntry
 {
@@ -228,82 +228,82 @@ public sealed class CloudLikeMutationEntry
 }
 
 /// <summary>
-/// Коалесцированное состояние ожидающих облачных мутаций для одного плейлиста или системной корзины лайков.
-/// Сериализуется через <see cref="AppJsonContext"/> в таблицу <c>CloudMutationOutbox</c>.
+/// Coalesced state of pending cloud mutations for a single playlist or system likes inbox.
+/// Serialized via <see cref="AppJsonContext"/> into the <c>CloudMutationOutbox</c> table.
 /// </summary>
 public sealed class CloudPlaylistOutboxState
 {
-    /// <summary>Идентификатор локального плейлиста или <c>__likes__</c> для системной очереди лайков.</summary>
+    /// <summary>Identifier of the local playlist or <c>__likes__</c> for the system likes queue.</summary>
     public required string TargetId { get; init; }
 
-    /// <summary>Идентификатор владельца локальной сессии (<c>OwnerId</c>).</summary>
+    /// <summary>Identifier of the local session owner (<c>OwnerId</c>).</summary>
     public required string OwnerId { get; init; }
 
-    /// <summary>Отображаемое имя плейлиста для карточки задачи в центре уведомлений.</summary>
+    /// <summary>Display name of the playlist for the task card in the notification center.</summary>
     public string? PlaylistDisplayName { get; set; }
 
-    /// <summary>Облачный идентификатор плейлиста на YouTube.</summary>
+    /// <summary>Cloud identifier of the playlist on YouTube.</summary>
     public string? YoutubePlaylistId { get; set; }
 
-    /// <summary>Флаг необходимости создания нового плейлиста в YouTube на Фазе 0 (оффлайн-оптимизм).</summary>
+    /// <summary>Flag indicating whether a new playlist needs to be created on YouTube in Phase 0 (offline-optimistic).</summary>
     public bool PendingCreatePlaylist { get; set; }
 
-    /// <summary>Флаг необходимости удаления плейлиста из YouTube (терминальная операция).</summary>
+    /// <summary>Flag indicating whether the playlist needs to be deleted from YouTube (terminal operation).</summary>
     public bool PendingDeletePlaylist { get; set; }
 
-    /// <summary>Треки, ожидающие пакетного добавления в облачный плейлист (Фаза 2).</summary>
+    /// <summary>Tracks pending batch addition to the cloud playlist (Phase 2).</summary>
     public List<string> PendingAddTrackIds { get; set; } = [];
 
-    /// <summary>Треки, ожидающие пакетного удаления из облачного плейлиста (Фаза 1).</summary>
+    /// <summary>Tracks pending batch removal from the cloud playlist (Phase 1).</summary>
     public List<CloudTrackRemoveEntry> PendingRemoveTracks { get; set; } = [];
 
-    /// <summary>Флаг наличия ожидающей синхронизации порядка треков (Фаза 3).</summary>
+    /// <summary>Flag indicating whether track order synchronization is pending (Phase 3).</summary>
     public bool HasPendingReorder { get; set; }
 
-    /// <summary>Исходный порядок треков до начала серии локальных перетаскиваний (для аннигиляции и LIS-сжатия).</summary>
+    /// <summary>Original track order prior to a series of local drag-and-drop actions (for annihilation and LIS compression).</summary>
     public List<string>? BaselineTrackOrder { get; set; }
 
-    /// <summary>Целевой локальный порядок треков после завершения перетаскиваний.</summary>
+    /// <summary>Target local track order after completing drag-and-drop actions.</summary>
     public List<string>? TargetTrackOrder { get; set; }
 
-    /// <summary>Флаг наличия ожидающего переименования плейлиста (Last-Write-Wins).</summary>
+    /// <summary>Flag indicating whether a playlist rename is pending (Last-Write-Wins).</summary>
     public bool HasPendingName { get; set; }
 
-    /// <summary>Базовое имя плейлиста до начала серии переименований.</summary>
+    /// <summary>Base playlist name prior to starting a series of renames.</summary>
     public string? BaselineName { get; set; }
 
-    /// <summary>Целевое имя плейлиста для отправки в YouTube.</summary>
+    /// <summary>Target playlist name to send to YouTube.</summary>
     public string? TargetName { get; set; }
 
-    /// <summary>Флаг наличия ожидающего изменения описания плейлиста (Last-Write-Wins).</summary>
+    /// <summary>Flag indicating whether a playlist description update is pending (Last-Write-Wins).</summary>
     public bool HasPendingDescription { get; set; }
 
-    /// <summary>Базовое описание плейлиста до начала редактирования.</summary>
+    /// <summary>Base playlist description prior to editing.</summary>
     public string? BaselineDescription { get; set; }
 
-    /// <summary>Целевое описание плейлиста для отправки в YouTube.</summary>
+    /// <summary>Target playlist description to send to YouTube.</summary>
     public string? TargetDescription { get; set; }
 
-    /// <summary>Флаг наличия ожидающей выгрузки пользовательской обложки через Scotty (Last-Write-Wins).</summary>
+    /// <summary>Indicates whether a custom cover upload via Scotty is pending (Last-Write-Wins).</summary>
     public bool HasPendingThumbnail { get; set; }
 
-    /// <summary>Целевой путь или URL обложки для выгрузки через Scotty.</summary>
+    /// <summary>Target path or URL of the cover for Scotty upload.</summary>
     public string? TargetThumbnailUrl { get; set; }
 
-    /// <summary>Коалесцированные мутации лайков (используется при <c>TargetId == "__likes__"</c>).</summary>
+    /// <summary>Coalesced like mutations (used when <c>TargetId == "__likes__"</c>).</summary>
     public List<CloudLikeMutationEntry> PendingLikes { get; set; } = [];
 
-    /// <summary>Количество неудачных сетевых попыток сброса состояния.</summary>
+    /// <summary>Number of failed network state flush attempts.</summary>
     public int RetryCount { get; set; }
 
-    /// <summary>Метка времени первой постановки в текущее окно коалесценции в UTC-тиках.</summary>
+    /// <summary>Timestamp of the initial enqueue in the current coalescing window in UTC ticks.</summary>
     public long FirstEnqueuedAtUtcTicks { get; set; }
 
-    /// <summary>Метка времени последнего изменения в UTC-тиках.</summary>
+    /// <summary>Timestamp of the last modification in UTC ticks.</summary>
     public long UpdatedAtUtcTicks { get; set; }
 
     /// <summary>
-    /// Возвращает <see langword="true"/>, если все накопленные мутации были взаимно аннигилированы или выполнены.
+    /// Returns <see langword="true"/> if all accumulated mutations have been mutually annihilated or completed.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsEmpty =>

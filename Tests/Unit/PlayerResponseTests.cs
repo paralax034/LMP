@@ -5,8 +5,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты потокового парсинга структуры ответа плеера PlayerResponse.
-/// Проверяют валидацию метаданных трека, распознавание кодеков и шифрованных стримов.
+/// Unit tests for stream parsing of the PlayerResponse structure.
+/// Validates track metadata, codec identification, and encrypted streams.
 /// </summary>
 public static class PlayerResponseTests
 {
@@ -79,14 +79,14 @@ public static class PlayerResponseTests
 
     TestAssert.Equal(3, response.Streams.Count);
 
-    // Прямой аудио-стрим Opus itag 251
+    // Direct Opus audio stream itag 251
     var s251 = response.Streams.FirstOrDefault(s => s.Itag == 251);
     TestAssert.NotNull(s251);
     TestAssert.Equal("opus", s251.AudioCodec);
     TestAssert.Equal("webm", s251.Container);
     TestAssert.True(string.IsNullOrEmpty(s251.Signature));
 
-    // Зашифрованный аудио-стрим itag 140
+    // Encrypted audio stream itag 140
     var s140 = response.Streams.FirstOrDefault(s => s.Itag == 140);
     TestAssert.NotNull(s140);
     TestAssert.Equal("SIG_TEST_ABC==", s140.Signature);
@@ -96,7 +96,7 @@ public static class PlayerResponseTests
   [TestMethod(TestCategory.Unit, "PlayabilityErrorClassifier & LOGIN_REQUIRED Edge Cases", Group = TestGroups.Youtube, Order = 2)]
   public static Task TestPlayabilityClassifierAndLoginReasonsAsync()
   {
-    // 1. CopyrightBlocked + извлечение правообладателя из обоих стандартных шаблонов YouTube (hl=en)
+    // 1. CopyrightBlocked + copyright holder extraction from both standard YouTube templates (hl=en)
     var reasonFrom = Core.Youtube.Utils.PlayabilityErrorClassifier.Classify(
         "This video contains content from WMG, who has blocked it on copyright grounds.",
         out var claimantFrom);
@@ -126,7 +126,7 @@ public static class PlayerResponseTests
         Core.Youtube.Exceptions.StreamUnavailableReason.PaymentRequired,
         Core.Youtube.Utils.PlayabilityErrorClassifier.Classify("This video is available to this channel's members-only", out _));
 
-    // 3. Разбор LOGIN_REQUIRED в PlayerResponse (BotDetection vs AgeRestricted)
+    // 3. LOGIN_REQUIRED parsing in PlayerResponse (BotDetection vs AgeRestricted)
     var botResp = PlayerResponse.Parse("""
     {
       "playabilityStatus": {
@@ -158,7 +158,7 @@ public static class PlayerResponseTests
   {
     Core.Youtube.Videos.VideoController.ResetBotDetectionState();
 
-    // Предзаполненный VisitorData исключает реальный запрос к sw.js_data: Unit-тест не должен зависеть от сети.
+    // Pre-populated VisitorData avoids an actual request to sw.js_data: Unit test must not depend on network.
     var previousVisitorData = Core.Youtube.Utils.YoutubeClientUtils.VisitorData;
     Core.Youtube.Utils.YoutubeClientUtils.VisitorData = "CgtVbml0VGVzdFZpc2l0b3I%3D";
     try
@@ -172,8 +172,8 @@ public static class PlayerResponseTests
 
         return scenario switch
         {
-          // Сценарий 0 (Кейс jNQXAC9IVRw из лога):
-          // WEB_REMIX -> Video unavailable; ANDROID_VR -> BotDetection (уходит в карантин); WEB -> muxed itag=18 (успех!)
+          // Scenario 0 (Case jNQXAC9IVRw from log):
+          // WEB_REMIX -> Video unavailable; ANDROID_VR -> BotDetection (quarantined); WEB -> muxed itag=18 (success!)
           0 => clientName switch
           {
             "WEB_REMIX" => CreateJsonResponse("""{"playabilityStatus":{"status":"ERROR","reason":"Video unavailable"}}"""),
@@ -198,7 +198,7 @@ public static class PlayerResponseTests
             _ => CreateJsonResponse("""{"playabilityStatus":{"status":"ERROR","reason":"Unknown client"}}""")
           },
 
-          // Сценарий 1: Повторный запрос после карантина ANDROID_VR + проверка forceMobilePriority
+          // Scenario 1: Retry request after ANDROID_VR quarantine + forceMobilePriority check
           1 => CreateJsonResponse("""
           {
             "playabilityStatus": { "status": "OK" },
@@ -215,7 +215,7 @@ public static class PlayerResponseTests
           }
           """),
 
-          // Сценарий 2: Hard Legal Restriction (CopyrightBlocked) на первом клиенте -> обязан сделать fast-fail без опроса остальных!
+          // Scenario 2: Hard Legal Restriction (CopyrightBlocked) on the first client -> must fast-fail without polling remaining clients!
           2 => CreateJsonResponse("""
           {
             "playabilityStatus": {
@@ -225,7 +225,7 @@ public static class PlayerResponseTests
           }
           """),
 
-          // Сценарий 3: Все клиенты падают по сети -> обязан выбросить YoutubeNetworkException, а не VideoUnplayableException
+          // Scenario 3: All clients fail due to network -> must throw YoutubeNetworkException, not VideoUnplayableException
           _ => throw new HttpRequestException(
               "Simulated network outage",
               new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.NetworkUnreachable))
@@ -238,7 +238,7 @@ public static class PlayerResponseTests
       var controller = new Core.Youtube.Videos.VideoController(http, playerManager);
       var videoId = Core.Youtube.Videos.VideoId.Parse("jNQXAC9IVRw");
 
-      // --- Проверка Сценария 0 ---
+      // --- Scenario 0 Verification ---
       scenario = 0;
       calledClients.Clear();
       var (resp0, client0) = await controller.GetPlayerResponseWithFallbackAsync(
@@ -251,7 +251,7 @@ public static class PlayerResponseTests
       TestAssert.Equal("ANDROID_VR", calledClients[1]);
       TestAssert.Equal("WEB", calledClients[2]);
 
-      // --- Проверка Сценария 1A: ANDROID_VR должен быть пропущен из-за карантина BotDetection ---
+      // --- Scenario 1A Verification: ANDROID_VR must be skipped due to BotDetection quarantine ---
       scenario = 1;
       calledClients.Clear();
       var (_, client1A) = await controller.GetPlayerResponseWithFallbackAsync(
@@ -260,7 +260,7 @@ public static class PlayerResponseTests
       TestAssert.Equal("WEB_REMIX", client1A);
       TestAssert.False(calledClients.Contains("ANDROID_VR"), "ANDROID_VR must be skipped while in BotDetection cooldown");
 
-      // --- Проверка Сценария 1B: После сброса карантина forceMobilePriority ставит ANDROID_VR первым ---
+      // --- Scenario 1B Verification: After resetting quarantine, forceMobilePriority puts ANDROID_VR first ---
       Core.Youtube.Videos.VideoController.ResetBotDetectionState();
       calledClients.Clear();
       var (_, client1B) = await controller.GetPlayerResponseWithFallbackAsync(
@@ -270,7 +270,7 @@ public static class PlayerResponseTests
       TestAssert.Equal(1, calledClients.Count);
       TestAssert.Equal("ANDROID_VR", calledClients[0]);
 
-      // --- Проверка Сценария 2: Fast-Fail при CopyrightBlocked ---
+      // --- Scenario 2 Verification: Fast-Fail on CopyrightBlocked ---
       scenario = 2;
       calledClients.Clear();
       bool caughtCopyright = false;
@@ -288,7 +288,7 @@ public static class PlayerResponseTests
       TestAssert.True(caughtCopyright, "CopyrightBlocked must throw StreamUnavailableException");
       TestAssert.Equal(1, calledClients.Count, "Hard legal restriction must fast-fail on the 1st client without querying fallbacks");
 
-      // --- Проверка Сценария 3: Полный отвал сети на всех клиентах -> YoutubeNetworkException ---
+      // --- Scenario 3 Verification: Total network failure across all clients -> YoutubeNetworkException ---
       scenario = 3;
       calledClients.Clear();
       bool caughtNetEx = false;

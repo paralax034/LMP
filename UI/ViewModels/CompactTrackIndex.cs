@@ -5,8 +5,8 @@ using System.Runtime.InteropServices;
 using LMP.Core.Models;
 
 /// <summary>
-/// Data-Oriented структура для плоского хранения и ультра-быстрой векторизованной
-/// фильтрации сотен тысяч треков в рамках строгого лимита ОЗУ.
+/// Data-Oriented structure for flat storage and ultra-fast vectorized
+/// filtering of hundreds of thousands of tracks within a strict RAM limit.
 /// </summary>
 public sealed class CompactTrackIndex
 {
@@ -35,7 +35,7 @@ public sealed class CompactTrackIndex
     private readonly Lock _lock = new();
 
     /// <summary>
-    /// Общее количество элементов, загруженных в мастер-индекс.
+    /// Total number of elements loaded into the master index.
     /// </summary>
     public int Count => _count;
 
@@ -53,7 +53,7 @@ public sealed class CompactTrackIndex
     public TrackInfo GetTrack(int index) => _entries[index].Track;
 
     /// <summary>
-    /// Возвращает мастер-индекс трека по стабильному идентификатору за O(1).
+    /// Returns the track's master index by its stable identifier in O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int FindIndexById(string id)
@@ -65,7 +65,7 @@ public sealed class CompactTrackIndex
     }
 
     /// <summary>
-    /// Пакетно инициализирует непрерывный массив индексов и нормализованный поисковый буфер.
+    /// Batch initializes the contiguous index array and the normalized search buffer.
     /// </summary>
     public void Load(IEnumerable<TrackInfo> tracks, IReadOnlyList<string>? explicitOrder = null)
     {
@@ -110,7 +110,7 @@ public sealed class CompactTrackIndex
     }
 
     /// <summary>
-    /// Добавляет трек в конец непрерывного буфера и карты соответствий.
+    /// Appends a track to the end of the contiguous buffer and mapping table.
     /// </summary>
     public void Append(TrackInfo track)
     {
@@ -122,7 +122,7 @@ public sealed class CompactTrackIndex
     }
 
     /// <summary>
-    /// Удаляет трек по идентификатору со сдвигом диапазона и гранулярной переиндексацией за O(K).
+    /// Removes a track by identifier with range shifting and granular reindexing in O(K).
     /// </summary>
     public bool Remove(string id)
     {
@@ -150,7 +150,7 @@ public sealed class CompactTrackIndex
     }
 
     /// <summary>
-    /// Перемещает элемент в буфере со сдвигом промежуточного интервала и локальным обновлением словаря за O(K).
+    /// Moves an element within the buffer by shifting the intermediate range and locally updating the dictionary in O(K).
     /// </summary>
     public void Move(int fromIndex, int toIndex)
     {
@@ -184,7 +184,7 @@ public sealed class CompactTrackIndex
     }
 
     /// <summary>
-    /// Полностью сбрасывает состояние индекса и очищает выделенные буферы.
+    /// Completely resets the index state and clears allocated buffers.
     /// </summary>
     public void Clear()
     {
@@ -198,8 +198,8 @@ public sealed class CompactTrackIndex
     }
 
     /// <summary>
-    /// Выполняет векторизованный поиск по общему нормализованному буферу.
-    /// Аллокации памяти в куче равны 0.
+    /// Performs a vectorized search over the shared normalized buffer.
+    /// Heap memory allocations are 0.
     /// </summary>
     public int Filter(string query, ref int[] destinationIndices)
     {

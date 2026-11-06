@@ -1,10 +1,10 @@
 ﻿namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Облегченный манифест плеера, содержащий временную метку подписи (STS).
+/// Lightweight player manifest containing a signature timestamp (STS).
 /// </summary>
 internal sealed class CipherManifest(string signatureTimestamp)
 {
-    /// <summary>Временная метка подписи (sts/signatureTimestamp), необходимая для обхода блокировок.</summary>
+    /// <summary>Signature timestamp (sts/signatureTimestamp) required to bypass restrictions.</summary>
     public string SignatureTimestamp { get; } = signatureTimestamp;
 }

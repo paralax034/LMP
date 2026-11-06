@@ -1,11 +1,11 @@
 <Project>
-  <!-- Таргет для сборки метаданных из Git. 
-       Выполняется как для Debug, так и для Release, но только во время РЕАЛЬНОЙ сборки (не фоновой в редакторе) -->
+  <!-- Target for assembling Git metadata. 
+       Executes for both Debug and Release, but only during a REAL build (not background build in an editor) -->
   <Target Name="SetGitVersionInfo"
     BeforeTargets="PrepareForBuild;GetAssemblyVersion;GenerateAssemblyInfo"
     Condition="Exists('$(MSBuildThisFileDirectory).git') And '$(DesignTimeBuild)' != 'true'">
 
-    <!-- Получаем количество коммитов (номер сборки) -->
+    <!-- Get the commit count (build number) -->
     <Exec Command="git rev-list --count HEAD"
       WorkingDirectory="$(MSBuildThisFileDirectory)"
       ConsoleToMSBuild="true"
@@ -16,7 +16,7 @@
       <Output TaskParameter="ExitCode" PropertyName="GitExitCode" />
     </Exec>
 
-    <!-- Получаем короткий SHA-хэш последнего коммита -->
+    <!-- Get the short SHA hash of the last commit -->
     <Exec Command="git rev-parse --short=7 HEAD"
       WorkingDirectory="$(MSBuildThisFileDirectory)"
       ConsoleToMSBuild="true"
@@ -26,19 +26,19 @@
       <Output TaskParameter="ConsoleOutput" PropertyName="GitShortHash" />
     </Exec>
 
-    <!-- Обработка резервных значений в случае сбоя Git -->
+    <!-- Fallback values handling in case Git fails -->
     <PropertyGroup Condition="'$(GitExitCode)' != '0' OR '$(GitCommitCount)' == ''">
       <GitCommitCount>0</GitCommitCount>
       <GitShortHash>local</GitShortHash>
     </PropertyGroup>
 
-    <!-- Очистка пробелов -->
+    <!-- Whitespace trimming -->
     <PropertyGroup>
       <GitCommitCount>$(GitCommitCount.Trim())</GitCommitCount>
       <GitShortHash>$(GitShortHash.Trim())</GitShortHash>
     </PropertyGroup>
 
-    <!-- Запись вычисленных версий в свойства сборки -->
+    <!-- Writing computed versions to build properties -->
     <PropertyGroup>
       <Version>$(VersionMajor).$(VersionMinor).$(GitCommitCount)</Version>
       <Version Condition="'$(VersionSuffix)' != ''">$(Version)-$(VersionSuffix)</Version>
@@ -53,7 +53,7 @@
     <Message Importance="High" Text="══════════════════════════════════════" />
   </Target>
 
-  <!-- Резервный таргет: срабатывает, если нет Git репозитория или идет фоновая (Design-Time) сборка в редакторе. -->
+  <!-- Fallback target: triggered if there is no Git repository or a background (Design-Time) build is running in the editor. -->
   <Target Name="SetFallbackVersion"
     BeforeTargets="PrepareForBuild;GetAssemblyVersion;GenerateAssemblyInfo"
     Condition="!Exists('$(MSBuildThisFileDirectory).git') Or '$(DesignTimeBuild)' == 'true'">

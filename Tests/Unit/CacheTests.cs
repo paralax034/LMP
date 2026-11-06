@@ -6,8 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты in-memory и файловых кэшей: DecryptorCache и CdnBlacklist.
-/// Выполняются полностью оффлайн без обращения к сетевым интерфейсам.
+/// Unit tests for in-memory and file-based caches: DecryptorCache and CdnBlacklist.
+/// Executed completely offline without accessing network interfaces.
 /// </summary>
 public static class CacheTests
 {
@@ -66,15 +66,15 @@ public static class CacheTests
     {
         var blacklist = new CdnBlacklist(ttl: TimeSpan.FromMilliseconds(200));
 
-        // 1. Добавление и проверка
+        // 1. Addition and verification
         blacklist.MarkBlocked("rr1---sn-blocked.googlevideo.com");
         TestAssert.True(blacklist.IsBlocked("rr1---sn-blocked.googlevideo.com"), "Blocked host should be blocked");
         TestAssert.False(blacklist.IsBlocked("rr2---sn-clean.googlevideo.com"), "Clean host should not be blocked");
 
-        // 2. Регистронезависимость
+        // 2. Case insensitivity
         TestAssert.True(blacklist.IsBlocked("RR1---SN-BLOCKED.GOOGLEVIDEO.COM"), "Host check must be case-insensitive");
 
-        // 3. Фильтрация URL
+        // 3. URL filtering
         TestAssert.True(
             blacklist.IsBlockedUrl("https://rr1---sn-blocked.googlevideo.com/videoplayback?id=1"),
             "URL with blocked host should be blocked");
@@ -83,12 +83,12 @@ public static class CacheTests
             "URL with clean host should not be blocked");
         TestAssert.False(blacklist.IsBlockedUrl(""), "Empty URL must not be blocked");
 
-        // 4. Истечение TTL
+        // 4. TTL expiration
         await Task.Delay(300).ConfigureAwait(false);
         TestAssert.False(blacklist.IsBlocked("rr1---sn-blocked.googlevideo.com"), "Host must expire after TTL");
         TestAssert.Equal(0, blacklist.Count);
 
-        // 5. Ручная разблокировка и очистка
+        // 5. Manual unblock and cleanup
         blacklist.MarkBlocked("rr3---sn-temp.googlevideo.com");
         blacklist.Unblock("rr3---sn-temp.googlevideo.com");
         TestAssert.False(blacklist.IsBlocked("rr3---sn-temp.googlevideo.com"));
@@ -115,9 +115,9 @@ public static class CacheTests
 
             using var manager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 32);
 
-            // 1. Имитируем точь-в-точь сессию из лога:
-            // открыли MP4/127kbps, скачали шапку (0..48KB) и сделали Seek на 66-ю секунду (записав чанк 1474KB..1884KB).
-            // Между 48KB и 1474KB на диске зияет огромная дыра из нулей, но физический размер файла на NTFS стал 1884KB!
+            // 1. Replicate exact session from log:
+            // opened MP4/127kbps, downloaded header (0..48KB), and executed Seek to 66th second (writing chunk 1474KB..1884KB).
+            // Between 48KB and 1474KB on disk there is a huge zero-byte hole, but physical file size on NTFS became 1884KB!
             _ = manager.CreateOrUpdate(
                 cacheKey,
                 trackId,
@@ -140,8 +140,8 @@ public static class CacheTests
             TestAssert.Equal(1_884_160L, new FileInfo(filePath).Length, "NTFS file length must equal highest written offset (1884KB)");
             TestAssert.False(manager.IsFullyCached(cacheKey), "Partial sparse entry must not report IsFullyCached");
 
-            // 2. Вызываем HydrateCacheStatus / RecoverOrphansForTracks:
-            // partial-запись в индексе НЕ должна быть повышена до IsComplete из-за того, что fi.Length == 1884KB!
+            // 2. Call HydrateCacheStatus / RecoverOrphansForTracks:
+            // partial entry in index MUST NOT be promoted to IsComplete just because fi.Length == 1884KB!
             var track = new TrackInfo
             {
                 Id = trackId,
@@ -154,7 +154,7 @@ public static class CacheTests
                 manager.IsFullyCached(cacheKey),
                 "RecoverOrphansForTracks falsely promoted a partial sparse file (with zero holes) to IsComplete!");
 
-            // 3. Имитируем ситуацию, когда процесс был убит до сохранения индекса (записи в индексе нет, а дырявый файл 1884KB остался на диске)
+            // 3. Simulate situation where process was killed before index save (no index entry, but sparse 1884KB file remained on disk)
             using var freshManager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 32);
             bool recovered = freshManager.RecoverOrphansForTracks(
                 [trackId],
@@ -177,10 +177,10 @@ public static class CacheTests
 
         try
         {
-            // Создаем кэш-менеджер с лимитом 3 MB
+            // Create cache manager with 3 MB limit
             using var manager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 3);
 
-            // 1. Создаем 3 полных трека по 1 MB каждый
+            // 1. Create 3 complete tracks of 1 MB each
             const int trackSize = 1024 * 1024;
             byte[] dummyData = new byte[trackSize];
             Array.Fill(dummyData, (byte)0x42);
@@ -205,14 +205,14 @@ public static class CacheTests
             TestAssert.True(manager.IsFullyCached(key2), "Key2 should be fully cached");
             TestAssert.True(manager.IsFullyCached(key3), "Key3 should be fully cached");
 
-            // 2. Добавляем 4-й трек (1 MB) -> суммарно 4 MB при лимите 3 MB
+            // 2. Add 4th track (1 MB) -> total 4 MB with 3 MB limit
             string key4 = AudioSourceFactory.BuildCacheKey("track4", AudioFormat.WebM, 160);
             var entry4 = manager.CreateOrUpdate(key4, "track4", "https://url4", trackSize, AudioFormat.WebM, Core.Audio.Interfaces.AudioCodec.Opus, 160);
             entry4.LastAccessedAt = DateTime.UtcNow;
             await manager.WriteRangeAsync(key4, 0, dummyData).ConfigureAwait(false);
 
-            // WriteRangeAsync триггерит EnforceLimitsAsync
-            // Самый старый по LastAccessedAt — key1 (30 минут назад). Он должен быть вытеснен!
+            // WriteRangeAsync triggers EnforceLimitsAsync
+            // Oldest by LastAccessedAt is key1 (30 minutes ago). It should be evicted!
             TestAssert.False(manager.IsFullyCached(key1), "Key1 (oldest LRU) must be evicted");
             TestAssert.False(File.Exists(manager.GetCachePath(key1)), "Key1 file must be deleted from disk");
 
@@ -220,17 +220,17 @@ public static class CacheTests
             TestAssert.True(manager.IsFullyCached(key3), "Key3 must be preserved");
             TestAssert.True(manager.IsFullyCached(key4), "Key4 must be preserved");
 
-            // 3. Проверка защиты Lease от вытеснения:
-            // Блокируем key2 через AcquireLease.
+            // 3. Lease protection test against eviction:
+            // Lock key2 via AcquireLease.
             manager.AcquireLease(key2);
             try
             {
-                // Снижаем лимит до 1 MB
+                // Lower limit to 1 MB
                 manager.UpdateMaxCacheSizeMb(1);
-                // Ожидаем завершения очистки
+                // Wait for cleanup completion
                 await manager.EnforceLimitsAsync().ConfigureAwait(false);
 
-                // key2 удерживается Lease -> не должен быть удален!
+                // key2 is held by Lease -> must not be deleted!
                 TestAssert.True(manager.IsFullyCached(key2), "Key2 with active lease must NOT be evicted");
                 TestAssert.True(File.Exists(manager.GetCachePath(key2)), "Key2 file must remain on disk while leased");
             }
@@ -292,7 +292,7 @@ public static class CacheTests
         }
     }
 
-    // Деструктивно для живого приложения: ClearMemoryCache() сбрасывает обложки работающего ImageCacheService
+    // Destructive for running app: ClearMemoryCache() resets covers of active ImageCacheService
     [TestMethod(TestCategory.Action, "ImageCache Memory LRU & Disk Stats Verification", Group = TestGroups.Storage, Order = 7)]
     public static Task TestImageCacheLimitsAndStatsAsync(IServiceProvider services)
     {
@@ -325,7 +325,7 @@ public static class CacheTests
         return Task.CompletedTask;
     }
 
-    // Деструктивно для живого приложения: подменяет DownloadPath в общих настройках на время теста
+    // Destructive for running app: temporarily overrides DownloadPath in shared settings during test
     [TestMethod(TestCategory.Action, "DownloadService Storage Limit Rejection", Group = TestGroups.Storage, Order = 8)]
     public static Task TestDownloadServiceQuotaCheckAsync(IServiceProvider services)
     {
@@ -341,7 +341,7 @@ public static class CacheTests
             byte[] dummyData = new byte[2 * 1024 * 1024];
             File.WriteAllBytes(dummyFile, dummyData);
 
-            // Меняем только in-memory поля Settings.DownloadPath и DownloadedTracksLimitMb без вызова SaveSettingsImmediate()
+            // Modify only in-memory fields Settings.DownloadPath and DownloadedTracksLimitMb without calling SaveSettingsImmediate()
             string origPath = library.Settings.DownloadPath;
             int origLimit = library.Settings.Storage.DownloadedTracksLimitMb;
 

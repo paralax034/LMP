@@ -6,8 +6,8 @@ using Avalonia.Media;
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Сервис управления темами приложения.
-/// Отвечает за загрузку, сохранение и применение тем.
+/// Application theme management service.
+/// Responsible for loading, saving, and applying themes.
 /// </summary>
 public sealed class ThemeManagerService
 {
@@ -16,7 +16,7 @@ public sealed class ThemeManagerService
     // PUBLIC API
 
     /// <summary>
-    /// Загружает и применяет тему при старте приложения
+    /// Loads and applies the theme during application startup
     /// </summary>
     public void LoadAndApplyThemeOnStartup()
     {
@@ -25,16 +25,16 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Применяет тему к ресурсам приложения
+    /// Applies the theme to application resources
     /// </summary>
-    /// <param name="theme">Настройки темы для применения</param>
+    /// <param name="theme">Theme settings to apply</param>
     public void ApplyTheme(ThemeSettings theme)
     {
-        // ЗАЩИТА: проверка готовности Application
+        // GUARD: verify Application readiness
         if (Application.Current?.Resources is not { } resources)
         {
             Log.Warn("Application.Current.Resources not available yet, deferring theme application");
-            _cachedTheme = theme; // Сохраняем для повторной попытки
+            _cachedTheme = theme; // Save for retry
             return;
         }
 
@@ -67,37 +67,37 @@ public sealed class ThemeManagerService
         SetColor(resources, "TextMuted", theme.TextMuted);
         SetColor(resources, "TextDark", theme.TextDark);
 
-        // КОНТРАСТНЫЙ ТЕКСТ ДЛЯ ACCENT КНОПОК
-        // Автоматически определяем чёрный или белый текст на акцентном фоне
+        // CONTRAST TEXT FOR ACCENT BUTTONS
+        // Automatically determine black or white text on an accent background
         _ = TryParseColor(theme.AccentColor, out var accent);
         var accentButtonText = GetContrastingTextColor(accent);
 
-        // Полный цвет
+        // Opaque color
         resources["AccentButtonText"] = accentButtonText;
         resources["AccentButtonTextBrush"] = new SolidColorBrush(accentButtonText);
 
-        // Прозрачная версия для плавных анимаций border (тот же RGB, альфа = 0)
-        // Предотвращает белые вспышки при BrushTransition от/к "невидимому" состоянию
+        // Transparent version for smooth border animations (same RGB, alpha = 0)
+        // Prevents white flashes during BrushTransition to/from the "invisible" state
         var accentButtonTextTransparent = new Color(0, accentButtonText.R, accentButtonText.G, accentButtonText.B);
         resources["AccentButtonTextTransparent"] = accentButtonTextTransparent;
         resources["AccentButtonTextTransparentBrush"] = new SolidColorBrush(accentButtonTextTransparent);
 
         // AVALONIA FLUENT THEME COMPATIBILITY
-        // Переопределяем системные ресурсы для корректной работы стандартных контролов
+        // Override system resources for standard controls to work properly
         ApplyFluentOverrides(resources, theme);
 
         Log.Info($"Theme '{theme.Name}' applied.");
     }
 
     /// <summary>
-    /// Вычисляет относительную яркость цвета по стандарту WCAG 2.0.
-    /// Используется для расчёта контрастности.
+    /// Calculates the relative luminance of a color according to WCAG 2.0.
+    /// Used for contrast calculation.
     /// </summary>
-    /// <param name="color">Цвет для анализа</param>
-    /// <returns>Значение яркости от 0.0 (чёрный) до 1.0 (белый)</returns>
+    /// <param name="color">Color to analyze</param>
+    /// <returns>Luminance value from 0.0 (black) to 1.0 (white)</returns>
     private static double GetRelativeLuminance(Color color)
     {
-        // Линеаризация sRGB канала по спецификации WCAG 2.0
+        // Linearize sRGB channel according to WCAG 2.0 specification
         static double Linearize(byte channel)
         {
             var s = channel / 255.0;
@@ -110,12 +110,12 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Вычисляет WCAG 2.0 contrast ratio между двумя цветами.
-    /// Результат от 1:1 (одинаковые) до 21:1 (чёрный/белый).
+    /// Calculates the WCAG 2.0 contrast ratio between two colors.
+    /// Result ranges from 1:1 (identical) to 21:1 (black/white).
     /// </summary>
-    /// <param name="color1">Первый цвет</param>
-    /// <param name="color2">Второй цвет</param>
-    /// <returns>Коэффициент контрастности (≥ 1.0)</returns>
+    /// <param name="color1">First color</param>
+    /// <param name="color2">Second color</param>
+    /// <returns>Contrast ratio (≥ 1.0)</returns>
     private static double GetContrastRatio(Color color1, Color color2)
     {
         var l1 = GetRelativeLuminance(color1);
@@ -126,13 +126,13 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Определяет контрастный цвет текста для данного фона.
-    /// Использует WCAG 2.0 contrast ratio для выбора между чёрным и белым.
-    /// Гарантирует читаемость текста на любом фоне, включая пограничные случаи
-    /// (AMOLED Black с белым акцентом, Classic Green с зелёным акцентом).
+    /// Determines the contrasting text color for a given background.
+    /// Uses WCAG 2.0 contrast ratio to select between black and white.
+    /// Guarantees text readability on any background, including edge cases
+    /// (AMOLED Black with white accent, Classic Green with green accent).
     /// </summary>
-    /// <param name="background">Цвет фона</param>
-    /// <returns>Чёрный или белый цвет, обеспечивающий максимальный контраст</returns>
+    /// <param name="background">Background color</param>
+    /// <returns>Black or white color providing maximum contrast</returns>
     private static Color GetContrastingTextColor(Color background)
     {
         var white = Color.FromRgb(255, 255, 255);
@@ -141,16 +141,16 @@ public sealed class ThemeManagerService
         var contrastWithWhite = GetContrastRatio(background, white);
         var contrastWithBlack = GetContrastRatio(background, black);
 
-        // Выбираем цвет с бОльшим контрастом.
-        // При равенстве предпочитаем белый (лучше читается на тёмных темах,
-        // которые составляют большинство пресетов).
+        // Select the color with higher contrast.
+        // In case of a tie, prefer white (better readability on dark themes,
+        // which make up the majority of presets).
         return contrastWithBlack > contrastWithWhite ? black : white;
     }
 
     /// <summary>
-    /// Применяет переопределения для Fluent темы Avalonia.
-    /// Необходимо для корректной работы стандартных контролов (CheckBox, ToggleSwitch, 
-    /// ComboBox, Slider, диалоговые окна и т.д.) с кастомными цветами темы.
+    /// Applies overrides for the Avalonia Fluent theme.
+    /// Required for standard controls (CheckBox, ToggleSwitch, 
+    /// ComboBox, Slider, dialog windows, etc.) to work properly with custom theme colors.
     /// </summary>
     private static void ApplyFluentOverrides(IResourceDictionary resources, ThemeSettings theme)
     {
@@ -396,7 +396,7 @@ public sealed class ThemeManagerService
         resources["SystemControlFocusVisualPrimaryBrush"] = new SolidColorBrush(accent) { Opacity = 0.85 };
         resources["SystemControlFocusVisualSecondaryBrush"] = new SolidColorBrush(transparent);
 
-        // MENU ITEM — убиваем фоновую заливку Fluent
+        // MENU ITEM — strip Fluent background fill
         resources["MenuFlyoutItemBackground"] = transparent;
         resources["MenuFlyoutItemBackgroundPointerOver"] = transparent;
         resources["MenuFlyoutItemBackgroundPressed"] = transparent;
@@ -408,7 +408,7 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Сохраняет тему на диск
+    /// Saves the theme to disk
     /// </summary>
     public void SaveTheme(ThemeSettings theme)
     {
@@ -426,7 +426,7 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Возвращает текущую загруженную тему
+    /// Returns the currently loaded theme
     /// </summary>
     public ThemeSettings GetCurrentTheme()
     {
@@ -434,12 +434,12 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Возвращает дефолтную тему (Paralax Purple)
+    /// Returns the default theme (Paralax Purple)
     /// </summary>
     public static ThemeSettings GetDefaultTheme() => new() { IsBuiltIn = true };
 
     /// <summary>
-    /// Сбрасывает тему к дефолтной
+    /// Resets the theme to default
     /// </summary>
     public void ResetToDefault()
     {
@@ -452,7 +452,7 @@ public sealed class ThemeManagerService
             if (File.Exists(backupPath))
                 File.Delete(backupPath);
         }
-        catch { /* Игнорируем ошибку удаления */ }
+        catch { /* Ignore deletion error */ }
 
         var def = GetDefaultTheme();
         SaveTheme(def);
@@ -460,7 +460,7 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
-    /// Возвращает список встроенных пресетов тем
+    /// Returns the list of built-in theme presets
     /// </summary>
     public static IReadOnlyList<ThemeSettings> GetBuiltInPresets() =>
     [
@@ -599,7 +599,7 @@ public sealed class ThemeManagerService
             Log.Error($"Failed to load theme: {ex.Message}");
         }
 
-        // Сохраняем дефолтную при первом запуске
+        // Save default on first run
         var def = GetDefaultTheme();
         SaveTheme(def);
         return def;
@@ -616,15 +616,15 @@ public sealed class ThemeManagerService
         resources[key] = color;
         resources[$"{key}Brush"] = new SolidColorBrush(color);
 
-        // Прозрачная версия для анимаций (альфа = 0, но тот же RGB)
+        // Transparent version for animations (alpha = 0, but identical RGB)
         var transparent = new Color(0, color.R, color.G, color.B);
         resources[$"{key}Transparent"] = transparent;
         resources[$"{key}TransparentBrush"] = new SolidColorBrush(transparent);
     }
 
     /// <summary>
-    /// Читает цвет из словаря ресурсов активной темы Avalonia.
-    /// При отсутствии ключа возвращает серый как безопасный fallback.
+    /// Reads a color from the resource dictionary of the active Avalonia theme.
+    /// If the key is missing, returns gray as a safe fallback.
     /// </summary>
     public static Color GetThemeColor(string key)
     {

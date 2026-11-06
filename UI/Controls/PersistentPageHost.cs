@@ -9,10 +9,10 @@ using Avalonia.VisualTree;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Высокопроизводительный хост страниц верхнего уровня с предварительной материализацией представлений.
-/// Удерживает страницы постоянно видимыми для LayoutManager (IsVisible=true), изолируя неактивные
-/// вкладки через нулевую прозрачность и отключение хит-тестов.
-/// Плавное переключение управляется нативными DoubleTransition, исключая откат приоритетов и мерцание.
+/// High-performance top-level page host with view pre-materialization.
+/// Keeps pages permanently visible to the LayoutManager (IsVisible=true), isolating inactive
+/// tabs via zero opacity and disabling hit testing.
+/// Smooth switching is managed by native DoubleTransitions, eliminating priority rollbacks and flickering.
 /// </summary>
 public sealed class PersistentPageHost : Panel
 {
@@ -27,14 +27,14 @@ public sealed class PersistentPageHost : Panel
     ];
 
     /// <summary>
-    /// Возникает синхронно при смене активной страницы в хосте.
+    /// Occurs synchronously when the active page changes in the host.
     /// </summary>
     public static event Action? ActivePageChanged;
 
     /// <summary>
-    /// Единая точка проверки (DRY/SRP), находится ли визуальный элемент на активной видимой странице
-    /// в не-свёрнутом окне без активного режима приостановки <see cref="SuspendLevel"/>.
-    /// Не отсекает элементы по промежуточному <c>Opacity == 0</c> обычных контейнеров во время fade-in анимаций.
+    /// Single point of evaluation (DRY/SRP) to check if a visual element is on the active visible page
+    /// in a non-minimized window without an active <see cref="SuspendLevel"/> mode.
+    /// Does not clip elements by intermediate <c>Opacity == 0</c> of regular containers during fade-in animations.
     /// </summary>
     public static bool CanAnimateVisual(Visual visual, TopLevel? cachedTopLevel = null)
     {

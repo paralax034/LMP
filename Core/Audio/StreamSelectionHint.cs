@@ -1,30 +1,30 @@
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Типизированная подсказка выбора аудиопотока.
-/// Объединяет желаемый формат и битрейт без строкового представления состояния.
+/// Strongly typed audio stream selection hint.
+/// Combines the desired format and bitrate without a string state representation.
 /// </summary>
-/// <param name="Format">Желаемый формат аудиоконтейнера.</param>
-/// <param name="BitrateKbps">Желаемый битрейт в kbps.</param>
+/// <param name="Format">Desired audio container format.</param>
+/// <param name="BitrateKbps">Desired bitrate in kbps.</param>
 public readonly record struct StreamSelectionHint(AudioFormat? Format, int BitrateKbps)
 {
     /// <summary>
-    /// Возвращает значение, указывающее, задан ли явно формат контейнера.
+    /// Gets a value indicating whether the container format is explicitly specified.
     /// </summary>
     public bool HasFormat => Format is { } value && value != AudioFormat.Unknown;
 
     /// <summary>
-    /// Возвращает значение, указывающее, задан ли явно битрейт потока.
+    /// Gets a value indicating whether the stream bitrate is explicitly specified.
     /// </summary>
     public bool HasBitrate => BitrateKbps > 0;
 
     /// <summary>
-    /// Создаёт типизированную подсказку выбора потока из текущего состояния трека и настроек приложения.
+    /// Creates a strongly typed stream selection hint from the current track state and application settings.
     /// </summary>
-    /// <param name="track">Рантайм-модель музыкального трека.</param>
-    /// <param name="rememberTrackFormat">Флаг из настроек приложения, указывающий, нужно ли помнить предпочтения формата пользователя.</param>
-    /// <returns>Экземпляр структуры <see cref="StreamSelectionHint"/>.</returns>
-    /// <exception cref="ArgumentNullException">Генерируется, если переданный объект трека равен null.</exception>
+    /// <param name="track">Runtime model of the music track.</param>
+    /// <param name="rememberTrackFormat">Application setting flag indicating whether user format preferences should be retained.</param>
+    /// <returns>An instance of the <see cref="StreamSelectionHint"/> struct.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when the provided track object is null.</exception>
     public static StreamSelectionHint FromTrack(TrackInfo track, bool rememberTrackFormat)
     {
         ArgumentNullException.ThrowIfNull(track);

@@ -26,7 +26,7 @@
                 </MenuItem.Icon>
             </MenuItem>
 
-            <!-- КАСКАДНОЕ ИНТЕРАКТИВНОЕ СУБМЕНЮ УПРАВЛЕНИЯ ПРИНАДЛЕЖНОСТЬЮ К ПЛЕЙЛИСТАМ -->
+            <!-- CASCADE INTERACTIVE PLAYLIST MEMBERSHIP SUBMENU -->
             <MenuItem Classes="playlist-submenu-root"
                       Header="{Binding AddToPlaylistHeader}"
                       ItemsSource="{Binding PlaylistMenuItems}">
@@ -172,7 +172,7 @@
                                 <Grid ColumnDefinitions="52, *, 44, 40, 56"
                                       Background="Transparent">
 
-                                    <!-- COL 0: ОБЛОЖКА / КНОПКА PLAY -->
+                                    <!-- COL 0: COVER ART / PLAY BUTTON -->
                                     <Button Grid.Column="0"
                                             Classes="cover-btn"
                                             Width="44" Height="44"
@@ -201,7 +201,7 @@
                                         </Panel>
                                     </Button>
 
-                                    <!-- COL 1: НАЗВАНИЕ + АВТОР -->
+                                    <!-- COL 1: TITLE + ARTIST -->
                                     <StackPanel Grid.Column="1"
                                                 Orientation="Vertical"
                                                 VerticalAlignment="Center"
@@ -226,7 +226,7 @@
                                             FontSize="12" />
                                     </StackPanel>
 
-                                    <!-- COL 2: СТАТУС КЭША / ЗАГРУЗКА -->
+                                    <!-- COL 2: CACHE STATUS / DOWNLOAD -->
                                     <Panel Grid.Column="2"
                                            Width="32" Height="16"
                                            VerticalAlignment="Center"
@@ -264,7 +264,7 @@
                                         </Border>
                                     </Panel>
 
-                                    <!-- COL 3: ЛАЙК -->
+                                    <!-- COL 3: LIKE -->
                                     <Button Grid.Column="3"
                                             Classes="like-btn"
                                             Width="28" Height="28"
@@ -278,7 +278,7 @@
                                                   IsHitTestVisible="False" />
                                     </Button>
 
-                                    <!-- COL 4: ВРЕМЯ И ОПЦИИ -->
+                                    <!-- COL 4: DURATION AND OPTIONS -->
                                     <TextBlock Grid.Column="4"
                                                Classes="duration-text"
                                                Classes.menu-open="{Binding IsMenuOpen}"
@@ -308,7 +308,7 @@
 
                                 </Grid>
 
-                                <!-- АУДИО-РЕАКТИВНАЯ ВОЛНА ПО НИЖНЕЙ ГРАНИ ТРЕКА -->
+                                <!-- AUDIO-REACTIVE WAVE ALONG THE BOTTOM EDGE OF THE TRACK -->
                                 <ctrl:AudioWaveBorder Margin="-8,-6"
                                                       IsActive="{Binding IsActive}"
                                                       IsPlaying="{Binding IsPlaying}"
@@ -320,7 +320,7 @@
                 </ir:ItemsRepeater.ItemTemplate>
             </ir:ItemsRepeater>
 
-            <!-- ЕДИНАЯ ЛИНИЯ-ИНДИКАТОР ВСТАВКИ МЕЖДУ ТРЕКАМИ -->
+            <!-- UNIFIED REORDER INSERTION INDICATOR LINE -->
             <Border x:Name="DropIndicatorLine"
                     Height="2"
                     CornerRadius="1"

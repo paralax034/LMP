@@ -3,21 +3,21 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Высокопроизводительные безысключительные методы расширения для <see cref="CancellationToken"/>.
+/// High-performance exception-free extension methods for <see cref="CancellationToken"/>.
 /// </summary>
 public static class CancellationTokenExtensions
 {
     /// <summary>
-    /// Ожидает задержку без генерации <see cref="OperationCanceledException"/>.
-    /// Возвращает <see langword="false"/> при отмене и <see langword="true"/> по истечении времени.
+    /// Waits for a delay without throwing an <see cref="OperationCanceledException"/>.
+    /// Returns <see langword="false"/> if canceled and <see langword="true"/> when the delay elapses.
     /// </summary>
     private static readonly Task<bool> TrueTask = Task.FromResult(true);
     private static readonly Task<bool> FalseTask = Task.FromResult(false);
 
     /// <summary>
-    /// Ожидает задержку без генерации <see cref="OperationCanceledException"/>.
-    /// Возвращает <see langword="false"/> при отмене и <see langword="true"/> по истечении времени.
-    /// Синхронные ветки (уже отменённый токен или нулевая задержка) не аллоцируют стейт-машину (0 B).
+    /// Waits for a delay without throwing an <see cref="OperationCanceledException"/>.
+    /// Returns <see langword="false"/> if canceled and <see langword="true"/> when the delay elapses.
+    /// Synchronous branches (already canceled token or zero delay) do not allocate a state machine (0 B).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Task<bool> DelayNoThrowAsync(
@@ -45,7 +45,7 @@ public static class CancellationTokenExtensions
     }
 
     /// <summary>
-    /// Ожидает задержку без генерации <see cref="OperationCanceledException"/>.
+    /// Waits for a delay without throwing an <see cref="OperationCanceledException"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Task<bool> DelayNoThrowAsync(
@@ -58,8 +58,8 @@ public static class CancellationTokenExtensions
     }
 
     /// <summary>
-    /// Асинхронно ожидает сигнала отмены токена без генерации исключений.
-    /// Завершает задачу штатно в момент отмены.
+    /// Asynchronously waits for a token cancellation signal without throwing exceptions.
+    /// Completes the task normally upon cancellation.
     /// </summary>
     public static Task WhenCanceledAsync(this CancellationToken token)
     {

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Воспроизводит системные звуки.
+/// Plays system sounds.
 /// </summary>
 public static partial class OsSoundPlayer
 {
@@ -16,7 +16,7 @@ public static partial class OsSoundPlayer
     private const uint MB_OK = 0x00000000;
 
     /// <summary>
-    /// Воспроизводит системный звук ошибки.
+    /// Plays the system error sound.
     /// </summary>
     public static void PlayError()
     {
@@ -28,7 +28,7 @@ public static partial class OsSoundPlayer
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                // paplay — PulseAudio, работает на большинстве дистрибутивов
+                // paplay — PulseAudio, works on most distributions
                 _ = Task.Run(() =>
                 {
                     try
@@ -71,7 +71,7 @@ public static partial class OsSoundPlayer
     }
 
     /// <summary>
-    /// Воспроизводит системный звук успеха.
+    /// Plays the system success sound.
     /// </summary>
     public static void PlaySuccess()
     {
@@ -81,7 +81,7 @@ public static partial class OsSoundPlayer
             {
                 MessageBeep(MB_OK);
             }
-            // Linux/macOS — аналогично с другими звуковыми файлами
+            // Linux/macOS — same with other audio files
         }
         catch (Exception ex)
         {

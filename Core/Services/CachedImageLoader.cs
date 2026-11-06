@@ -4,11 +4,11 @@ using Avalonia.Media.Imaging;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Адаптер для AsyncImageLoader с автоматическим управлением refCount.
+/// Adapter for AsyncImageLoader with automatic refCount management.
 /// 
-/// <para><b>ВАЖНО:</b> принимает только HTTP/HTTPS URL.
-/// Локальные пути и невалидные строки отклоняются для предотвращения
-/// мусорных сетевых запросов (например, hex-хеши парсящиеся как URI).</para>
+/// <para><b>IMPORTANT:</b> Accepts HTTP/HTTPS URLs only.
+/// Local paths and invalid strings are rejected to prevent
+/// garbage network requests (e.g., hex hashes parsed as URIs).</para>
 /// </summary>
 public sealed class CachedImageLoader : IAsyncImageLoader
 {
@@ -16,10 +16,10 @@ public sealed class CachedImageLoader : IAsyncImageLoader
     private readonly ImageQuality _defaultQuality;
 
     /// <summary>
-    /// Инициализирует адаптер загрузчика изображений с указанным качеством по умолчанию.
+    /// Initializes the image loader adapter with the specified default quality.
     /// </summary>
-    /// <param name="cache">Служба кэширования изображений.</param>
-    /// <param name="defaultQuality">Качество декодирования растровых изображений.</param>
+    /// <param name="cache">The image caching service.</param>
+    /// <param name="defaultQuality">The bitmap decoding quality.</param>
     public CachedImageLoader(ImageCacheService cache, ImageQuality defaultQuality = ImageQuality.Low)
     {
         _cache = cache;
@@ -27,23 +27,23 @@ public sealed class CachedImageLoader : IAsyncImageLoader
     }
 
     /// <summary>
-    /// Асинхронно предоставляет растровое изображение для указанного URL.
+    /// Asynchronously provides a bitmap for the specified URL.
     /// </summary>
-    /// <param name="url">Веб-адрес изображения.</param>
-    /// <returns>Экземпляр <see cref="Bitmap"/> или <see langword="null"/> в случае ошибки или отмены.</returns>
+    /// <param name="url">The web URL of the image.</param>
+    /// <returns>A <see cref="Bitmap"/> instance or <see langword="null"/> in case of error or cancellation.</returns>
     public async Task<Bitmap?> ProvideImageAsync(string url)
     {
         if (string.IsNullOrEmpty(url))
             return null;
 
-        // Строгая проверка: только http:// и https://
+        // Strict validation: http:// and https:// only
         if (!url.StartsWith(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
             !url.StartsWith(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
             return null;
 
         try
         {
-            // GetImageAsync уже вызывает AddRef() внутри
+            // GetImageAsync already calls AddRef() internally
             return await _cache.GetImageAsync(url, _defaultQuality).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -60,6 +60,6 @@ public sealed class CachedImageLoader : IAsyncImageLoader
     /// <inheritdoc/>
     public void Dispose()
     {
-        // Ничего не делаем - ImageCacheService управляет своим lifecycle
+        // Do nothing - ImageCacheService manages its own lifecycle
     }
 }

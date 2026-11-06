@@ -3,7 +3,7 @@ using Avalonia.Threading;
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// ViewModel для диалога предупреждения об обновлении базы данных с таймером удержания.
+/// ViewModel for the database update warning dialog with a hold-down timer.
 /// </summary>
 public sealed partial class MigrationWarningDialogViewModel : ViewModelBase
 {

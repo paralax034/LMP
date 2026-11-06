@@ -4,7 +4,7 @@ using Avalonia.Threading;
 
 namespace LMP.UI.Features.Home;
 /// <summary>
-/// ViewModel главного экрана. Категории + поиск через YouTube с кэшированием.
+/// Main screen ViewModel. Categories + YouTube search with caching.
 /// </summary>
 public sealed partial class HomeViewModel : TrackListBaseViewModel
 {

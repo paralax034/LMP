@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace LMP.Core.Audio.Http;
 
 /// <summary>
-/// Спекулятивный прогрев TCP+TLS-соединений к YouTube CDN нодам.
+/// Speculative pre-warming of TCP+TLS connections to YouTube CDN nodes.
 /// </summary>
 internal static class CdnConnectionPreWarmer
 {
@@ -22,19 +22,19 @@ internal static class CdnConnectionPreWarmer
     private static readonly LinkedList<(string Host, DateTime WarmTime)> _recentHosts = new();
 
     /// <summary>
-    /// Вызывается при обнаружении N последовательных таймаутов одного CDN-хоста.
-    /// AudioEngine подписывается и вызывает NotifyNetworkStarvation() — проактивно,
-    /// до того как буфер исчерпается.
+    /// Invoked when N consecutive timeouts are detected for a single CDN host.
+    /// AudioEngine subscribes and calls NotifyNetworkStarvation() proactively,
+    /// before the buffer is exhausted.
     /// </summary>
     internal static event Action? OnTunnelDeadDetected;
 
-    // Счётчик последовательных таймаутов по хосту.
-    // ConcurrentDictionary: WarmHostCoreAsync вызывается из fire-and-forget Task.
+    // Counter for consecutive timeouts per host.
+    // ConcurrentDictionary: WarmHostCoreAsync is called from a fire-and-forget Task.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int>
         _consecutiveTimeouts = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Регистрирует CDN-хост после успешного HTTP-ответа.
+    /// Registers a CDN host after a successful HTTP response.
     /// </summary>
     public static void RecordHost(string url)
     {
@@ -71,7 +71,7 @@ internal static class CdnConnectionPreWarmer
     }
 
     /// <summary>
-    /// Спекулятивный прогрев соединений к последним известным CDN-хостам.
+    /// Speculative pre-warming of connections to recent known CDN hosts.
     /// </summary>
     public static void PreWarmRecentHosts(HttpClient httpClient, CancellationToken ct)
     {
@@ -112,7 +112,7 @@ internal static class CdnConnectionPreWarmer
     }
 
     /// <summary>
-    /// Точечный прогрев соединения к конкретному CDN-хосту из URL.
+    /// Targeted connection pre-warming for a specific CDN host extracted from a URL.
     /// </summary>
     public static void PreWarmHost(HttpClient httpClient, string url, CancellationToken ct)
     {
@@ -133,8 +133,8 @@ internal static class CdnConnectionPreWarmer
                 }
             }
 
-            // Регистрируем хост немедленно ДО старта сетевого запроса (in-flight dedup),
-            // чтобы параллельные вызовы в ту же миллисекунду не открывали дублирующие TCP+TLS соединения.
+            // Register host immediately BEFORE starting network request (in-flight dedup),
+            // so concurrent calls in the same millisecond do not open duplicate TCP+TLS connections.
             TrackRecentWarmHostMustHoldLock(host, now);
         }
 
@@ -143,7 +143,7 @@ internal static class CdnConnectionPreWarmer
     }
 
     /// <summary>
-    /// Выполняет TCP+TLS прогрев CDN-ноды через <c>GET /generate_204</c>.
+    /// Performs TCP+TLS pre-warming of a CDN node via <c>GET /generate_204</c>.
     /// </summary>
     private static async Task WarmHostCoreAsync(HttpClient httpClient, string host, CancellationToken ct)
     {
@@ -179,7 +179,7 @@ internal static class CdnConnectionPreWarmer
         {
             sw.Stop();
 
-            // Пенализируем кластер в хранилище, чтобы мёртвая нода не всплывала на следующем старте
+            // Penalize cluster in storage so the dead node does not resurface on the next startup
             CdnHostStatsStore.RecordFailure(host);
 
             int count = _consecutiveTimeouts.AddOrUpdate(host, 1, (_, c) => c + 1);
@@ -204,13 +204,13 @@ internal static class CdnConnectionPreWarmer
     }
 
     /// <summary>
-    /// Прогревает один конкретный хост. Используется из <see cref="CdnHostStatsStore.PreWarmTopClustersAsync"/>.
+    /// Pre-warms a single specific host. Used by <see cref="CdnHostStatsStore.PreWarmTopClustersAsync"/>.
     /// </summary>
     internal static Task WarmSingleHostAsync(HttpClient httpClient, string host, CancellationToken ct)
         => WarmHostCoreAsync(httpClient, host, ct);
 
     /// <summary>
-    /// Извлекает hostname из URL, если это YouTube CDN.
+    /// Extracts the hostname from a URL if it belongs to YouTube CDN.
     /// </summary>
     private static bool TryExtractHost(string url, out string host)
     {
@@ -230,11 +230,11 @@ internal static class CdnConnectionPreWarmer
     }
 
     /// <summary>
-    /// Возвращает усечённый hostname для вывода в лог.
+    /// Returns a truncated hostname for logging output.
     /// </summary>
     /// <param name="host">CDN hostname.</param>
-    /// <param name="maxLength">Максимальная длина вывода (по умолчанию 40).</param>
-    /// <returns>Hostname, усечённый до <paramref name="maxLength"/> символов.</returns>
+    /// <param name="maxLength">Maximum output length (default is 40).</param>
+    /// <returns>Hostname truncated to <paramref name="maxLength"/> characters.</returns>
     private static string TruncateHost(string host, int maxLength = 40) =>
         host.Length <= maxLength ? host : host[..maxLength];
 }

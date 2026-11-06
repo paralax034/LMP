@@ -4,21 +4,21 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Audio.Parsers;
 
 /// <summary>
-/// Zero-alloc binary reader для MP4 box-level I/O.
-/// Единственная ответственность: чтение примитивов из потока без heap-аллокаций.
+/// Zero-alloc binary reader for MP4 box-level I/O.
+/// Single responsibility: reading primitives from a stream without heap allocations.
 /// </summary>
 /// <remarks>
-/// <para><b>Архитектура:</b> Один <see cref="_ioBuffer"/> на экземпляр reader'а.
-/// Вся работа идёт через stack или этот buffer — нет ArrayPool, нет <c>new byte[]</c>.</para>
-/// <para><b>FourCC:</b> Box type представлен как <see cref="uint"/> (big-endian),
-/// switch по числовым константам — нет string-аллокаций.</para>
-/// <para><b>Thread safety:</b> Не потокобезопасен. Один экземпляр на один parser.</para>
+/// <para><b>Architecture:</b> Single <see cref="_ioBuffer"/> per reader instance.
+/// All operations execute via stack or this buffer — no ArrayPool, no <c>new byte[]</c>.</para>
+/// <para><b>FourCC:</b> Box type is represented as <see cref="uint"/> (big-endian),
+/// matching via numeric constants — no string allocations.</para>
+/// <para><b>Thread safety:</b> Not thread-safe. One instance per parser.</para>
 /// </remarks>
 public sealed class Mp4BinaryReader
 {
     #region FourCC Constants
 
-    /// <summary>FourCC: "moov" — Movie box, содержит метаданные трека.</summary>
+    /// <summary>FourCC: "moov" — Movie box, contains track metadata.</summary>
     public const uint FCC_MOOV = 0x6D6F6F76;
 
     /// <summary>FourCC: "mvhd" — Movie header box.</summary>
@@ -96,24 +96,24 @@ public sealed class Mp4BinaryReader
     #endregion
 
     /// <summary>
-    /// Единый I/O буфер экземпляра — устраняет 80000+ ArrayPool Rent/Return за парсинг.
-    /// 16 байт достаточно для max read (uint64 = 8 байт), с запасом для box header (8 + 8).
+    /// Instance shared I/O buffer — eliminates 80,000+ ArrayPool Rent/Return calls per parsing run.
+    /// 16 bytes is sufficient for max read (uint64 = 8 bytes), with padding for box header (8 + 8).
     /// </summary>
     private readonly byte[] _ioBuffer = new byte[16];
 
-    /// <summary>Обёрнутый поток.</summary>
+    /// <summary>Wrapped stream.</summary>
     private readonly Stream _stream;
 
     /// <summary>
-    /// Создаёт reader для указанного потока.
+    /// Creates a reader for the specified stream.
     /// </summary>
-    /// <param name="stream">Поток для чтения. Должен поддерживать <see cref="Stream.CanRead"/>.</param>
+    /// <param name="stream">Stream to read. Must support <see cref="Stream.CanRead"/>.</param>
     public Mp4BinaryReader(Stream stream)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
     }
 
-    /// <summary>Текущая позиция потока.</summary>
+    /// <summary>Current stream position.</summary>
     public long Position
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -122,14 +122,14 @@ public sealed class Mp4BinaryReader
         set => _stream.Position = value;
     }
 
-    /// <summary>Длина потока.</summary>
+    /// <summary>Stream length.</summary>
     public long Length
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _stream.Length;
     }
 
-    /// <summary>Остаток байт от текущей позиции до конца.</summary>
+    /// <summary>Remaining bytes from current position to end.</summary>
     public long Remaining
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -139,14 +139,14 @@ public sealed class Mp4BinaryReader
     #region Box Header
 
     /// <summary>
-    /// Результат чтения заголовка MP4 box.
+    /// MP4 box header read result.
     /// </summary>
-    /// <param name="Size">Полный размер box (включая header). 0 = EOF или ошибка.</param>
-    /// <param name="Type">FourCC как uint (big-endian). 0 = EOF.</param>
-    /// <param name="HeaderSize">Размер заголовка (8 для обычного, 16 для extended).</param>
+    /// <param name="Size">Total box size (including header). 0 = EOF or error.</param>
+    /// <param name="Type">FourCC as uint (big-endian). 0 = EOF.</param>
+    /// <param name="HeaderSize">Header size (8 for standard, 16 for extended).</param>
     public readonly record struct BoxHeader(long Size, uint Type, int HeaderSize)
     {
-        /// <summary>Заголовок не прочитан (EOF, обрезанный хвост) либо size == 0 (зануленный блок).</summary>
+        /// <summary>Header not read (EOF, truncated tail) or size == 0 (zeroed block).</summary>
         public bool IsEmpty => Size == 0;
     }
 
@@ -154,12 +154,12 @@ public sealed class Mp4BinaryReader
     private const int ExtendedBoxHeaderSize = 16;
 
     /// <summary>
-    /// Читает заголовок MP4 box. Частичные ответы потока (законны для любого <see cref="Stream"/>,
-    /// в том числе на стыке RAM-блоков кэша) дочитываются; пока поток отвечает синхронно — без аллокаций.
+    /// Reads an MP4 box header. Partial stream reads (valid for any <see cref="Stream"/>,
+    /// including at RAM cache block boundaries) are fully consumed; as long as the stream responds synchronously — allocation-free.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// Заголовок box. <see cref="BoxHeader.IsEmpty"/> = true при EOF, в том числе при обрезанном хвосте короче 8 байт.
+    /// Box header. <see cref="BoxHeader.IsEmpty"/> = true on EOF, including truncated tails shorter than 8 bytes.
     /// </returns>
     public ValueTask<BoxHeader> ReadBoxHeaderAsync(CancellationToken ct)
     {
@@ -175,7 +175,7 @@ public sealed class Mp4BinaryReader
             int read = readTask.Result;
             if (read <= 0)
             {
-                // Настоящий EOF; отмена, замаскированная потоком под 0, не превращается в «пустой» заголовок
+                // Real EOF; cancellation masked by stream as 0 is not converted to an "empty" header
                 ct.ThrowIfCancellationRequested();
                 return new ValueTask<BoxHeader>(default(BoxHeader));
             }
@@ -187,7 +187,7 @@ public sealed class Mp4BinaryReader
     }
 
     /// <summary>
-    /// Разбирает собранные 8 байт заголовка; для size == 1 дочитывает 64-битный largesize.
+    /// Parses the assembled 8 header bytes; for size == 1, reads the remaining 64-bit largesize.
     /// </summary>
     private ValueTask<BoxHeader> CompleteBoxHeader(CancellationToken ct)
     {
@@ -242,7 +242,7 @@ public sealed class Mp4BinaryReader
 
     #region Primitives
 
-    /// <summary>Читает один байт. Возвращает -1 при EOF.</summary>
+    /// <summary>Reads a single byte. Returns -1 on EOF.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<int> ReadByteAsync(CancellationToken ct)
     {
@@ -250,7 +250,7 @@ public sealed class Mp4BinaryReader
         return read == 0 ? -1 : _ioBuffer[0];
     }
 
-    /// <summary>Читает uint16 big-endian.</summary>
+    /// <summary>Reads big-endian uint16.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<ushort> ReadUInt16BEAsync(CancellationToken ct)
     {
@@ -258,7 +258,7 @@ public sealed class Mp4BinaryReader
         return BinaryPrimitives.ReadUInt16BigEndian(_ioBuffer);
     }
 
-    /// <summary>Читает uint32 big-endian.</summary>
+    /// <summary>Reads big-endian uint32.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<uint> ReadUInt32BEAsync(CancellationToken ct)
     {
@@ -266,7 +266,7 @@ public sealed class Mp4BinaryReader
         return BinaryPrimitives.ReadUInt32BigEndian(_ioBuffer);
     }
 
-    /// <summary>Читает int32 big-endian.</summary>
+    /// <summary>Reads big-endian int32.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<int> ReadInt32BEAsync(CancellationToken ct)
     {
@@ -274,7 +274,7 @@ public sealed class Mp4BinaryReader
         return BinaryPrimitives.ReadInt32BigEndian(_ioBuffer);
     }
 
-    /// <summary>Читает uint64 big-endian.</summary>
+    /// <summary>Reads big-endian uint64.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<ulong> ReadUInt64BEAsync(CancellationToken ct)
     {
@@ -282,7 +282,7 @@ public sealed class Mp4BinaryReader
         return BinaryPrimitives.ReadUInt64BigEndian(_ioBuffer);
     }
 
-    /// <summary>Читает FourCC (4 байта) как uint big-endian.</summary>
+    /// <summary>Reads FourCC (4 bytes) as big-endian uint.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public async ValueTask<uint> ReadFourCCAsync(CancellationToken ct)
     {
@@ -291,8 +291,8 @@ public sealed class Mp4BinaryReader
     }
 
     /// <summary>
-    /// Читает expandable length (ISO 14496-1 descriptor length encoding).
-    /// Каждый байт: 7 бит данных + 1 бит continuation.
+    /// Reads expandable length (ISO 14496-1 descriptor length encoding).
+    /// Each byte: 7 bits data + 1 bit continuation flag.
     /// </summary>
     public async ValueTask<int> ReadExpandableLengthAsync(CancellationToken ct)
     {
@@ -315,8 +315,8 @@ public sealed class Mp4BinaryReader
     #region Bulk I/O
 
     /// <summary>
-    /// Читает ровно <paramref name="buffer"/>.Length байт.
-    /// При синхронном завершении первого чтения из потока (RAM-кэш или буфер ОС) не выделяет async state machine.
+    /// Reads exactly <paramref name="buffer"/>.Length bytes.
+    /// Does not allocate an async state machine on synchronous stream completion (RAM cache or OS buffer).
     /// </summary>
     public ValueTask ReadExactlyAsync(Memory<byte> buffer, CancellationToken ct)
     {
@@ -375,12 +375,12 @@ public sealed class Mp4BinaryReader
     }
 
     /// <summary>
-    /// Читает указанное количество байт в свежий массив.
-    /// Использовать только для малых и критичных данных (decoder config и т.п.).
+    /// Reads the specified number of bytes into a fresh array.
+    /// Use only for small and critical payload data (decoder config, etc.).
     /// </summary>
-    /// <param name="count">Количество байт.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Массив с прочитанными данными.</returns>
+    /// <param name="count">Byte count.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Array containing read data.</returns>
     public async ValueTask<byte[]> ReadBytesAsync(int count, CancellationToken ct)
     {
         var buffer = new byte[count];
@@ -388,7 +388,7 @@ public sealed class Mp4BinaryReader
         return buffer;
     }
 
-    /// <summary>Пропускает указанное количество байт.</summary>
+    /// <summary>Skips the specified number of bytes.</summary>
     public async ValueTask SkipBytesAsync(long count, CancellationToken ct)
     {
         if (_stream.CanSeek)
@@ -406,7 +406,7 @@ public sealed class Mp4BinaryReader
         }
     }
 
-    /// <summary>Перемещает позицию потока к указанной, пропуская байты если нужно.</summary>
+    /// <summary>Seeks the stream to the specified position, skipping bytes if necessary.</summary>
     public async ValueTask SkipToAsync(long position, CancellationToken ct)
     {
         if (_stream.Position < position)

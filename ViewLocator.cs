@@ -16,8 +16,8 @@ using LMP.UI.Features.Shell;
 namespace LMP;
 
 /// <summary>
-/// Статический сопоставитель моделей представления (ViewModel) и представлений (View).
-/// Работает по принципу чистого Pattern Matching без рефлексии и без избыточного глобального кэширования.
+/// Static view model to view locator.
+/// Uses pure pattern matching without reflection or redundant global caching.
 /// </summary>
 public sealed class ViewLocator : IDataTemplate
 {

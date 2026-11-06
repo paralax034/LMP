@@ -22,7 +22,7 @@
 
         <StyleInclude Source="avares://AsyncImageLoader.Avalonia/AdvancedImage.axaml" />
 
-        <!-- 1. ToolTip первым -->
+        <!-- 1. ToolTip first -->
         <StyleInclude Source="avares://LMP/UI/Theme/ToolTipTheme.axaml" />
         <!-- 2. Theme.axaml: Typography, Buttons, Controls, AppComponents, PlayerBarStyles -->
         <StyleInclude Source="avares://LMP/UI/Theme/Theme.axaml" />

@@ -5,15 +5,15 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Часы рендера с единственным писателем на базе SeqLock: поток устройства публикует, сколько сэмплов прозвучало,
-/// сколько ещё стоит в очереди устройства и когда сняты показания, а любые потоки читают снимок без блокировок и аллокаций.
+/// Single-writer render clock based on SeqLock: the device thread publishes how many samples were rendered,
+/// how many are queued in the device, and when the reading was taken, while any thread reads the snapshot lock-free and allocation-free.
 /// </summary>
 internal sealed class RenderClock
 {
-    /// <summary>Допустимое опережение переноса над измерением: период движка WASAPI (10 мс) плюс запас.</summary>
+    /// <summary>Allowed carry lead over measurement: WASAPI engine period (10 ms) plus margin.</summary>
     internal const int MaxCarryLeadMs = 12;
 
-    /// <summary>Делитель замедления хода при стягивании опережения: ход снижается на 1/64 (около 1,6 %).</summary>
+    /// <summary>Clock deceleration divisor when narrowing the lead: clock rate is reduced by 1/64 (approx. 1.6%).</summary>
     private const int SlewDivisor = 64;
 
     private long _version;
@@ -22,17 +22,17 @@ internal sealed class RenderClock
     private long _timestamp;
     private int _samplesPerSecond;
 
-    /// <summary>Последний опубликованный снимок; принадлежит потоку-писателю.</summary>
+    /// <summary>Last published snapshot; owned by the writer thread.</summary>
     private RenderClockSnapshot _lastPublished;
 
     /// <summary>
-    /// Публикует показания устройства. Вызывается только единственным писателем — потоком рендера.
-    /// При опережении переноса сверх <see cref="MaxCarryLeadMs"/> снимок получает замедленный ход.
+    /// Publishes device readings. Called exclusively by the single writer—the render thread.
+    /// If the carry lead exceeds <see cref="MaxCarryLeadMs"/>, the snapshot is assigned a decelerated rate.
     /// </summary>
-    /// <param name="renderedSamples">Счётчик сэмплов источника на конце отрезка, который устройство проиграет подряд; не убывает.</param>
-    /// <param name="queuedSamples">Сэмплы источника этого отрезка, ещё ожидающие воспроизведения в буфере устройства.</param>
-    /// <param name="timestamp">Момент снятия показаний в тиках <see cref="Stopwatch"/>.</param>
-    /// <param name="samplesPerSecond">Частота источника × число каналов.</param>
+    /// <param name="renderedSamples">Monotonically non-decreasing count of source samples at the end of the segment the device will play sequentially.</param>
+    /// <param name="queuedSamples">Source samples for this segment still awaiting playback in the device buffer.</param>
+    /// <param name="timestamp">Point in time when readings were taken, in <see cref="Stopwatch"/> ticks.</param>
+    /// <param name="samplesPerSecond">Source sample rate × channel count.</param>
     public void Publish(long renderedSamples, int queuedSamples, long timestamp, int samplesPerSecond)
     {
         RenderClockSnapshot last = _lastPublished;
@@ -41,13 +41,13 @@ internal sealed class RenderClock
         long played = measured;
         int rate = samplesPerSecond;
 
-        // Перенос хода: новый снимок не опускается ниже того, что читатели уже могли увидеть по старому
+        // Rate carry: the new snapshot never drops below what readers could have already observed from the old one
         long carried = Math.Min(Extrapolate(in last, timestamp), rendered);
         if (carried > played)
         {
             played = carried;
 
-            // Дрейф часов устройства копит опережение: сверх допуска ход замедляется, монотонность сохраняется
+            // Device clock drift accumulates lead: beyond tolerance, rate decelerates while preserving monotonicity
             long maxLead = (long)samplesPerSecond * MaxCarryLeadMs / 1000;
             if (carried - measured > maxLead)
                 rate = samplesPerSecond - samplesPerSecond / SlewDivisor;
@@ -69,7 +69,7 @@ internal sealed class RenderClock
     }
 
     /// <summary>
-    /// Возвращает согласованный снимок; при параллельной публикации повторяет чтение.
+    /// Returns a consistent snapshot; retries reading if a concurrent publish occurs.
     /// </summary>
     public RenderClockSnapshot Read()
     {
@@ -96,7 +96,7 @@ internal sealed class RenderClock
     }
 
     /// <summary>
-    /// Экстраполирует прозвучавшие сэмплы снимка на момент <paramref name="now"/>, не выходя за пределы очереди устройства.
+    /// Extrapolates rendered samples from the snapshot to <paramref name="now"/>, bounded by the device queue.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static long Extrapolate(in RenderClockSnapshot snapshot, long now)
@@ -110,7 +110,7 @@ internal sealed class RenderClock
     }
 
     /// <summary>
-    /// Переводит показания часов в позицию потока: <paramref name="baseSamples"/> плюс сэмплы, прозвучавшие после точки привязки.
+    /// Translates clock readings into stream position: <paramref name="baseSamples"/> plus samples rendered since the anchor point.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static long MapToStream(long playedSamples, long originRenderedSamples, long baseSamples) =>

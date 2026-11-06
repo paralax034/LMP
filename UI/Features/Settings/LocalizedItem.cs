@@ -1,13 +1,13 @@
 namespace LMP.UI.Features.Settings;
 
 /// <summary>
-/// Статическая фабрика для создания локализованных коллекций перечислений без избыточных generic-параметров.
+/// Static factory for creating localized enum collections without redundant generic parameters.
 /// </summary>
 public static class LocalizedItem
 {
     /// <summary>
-    /// Автоматически строит неизменяемый список локализованных элементов для указанного перечисления.
-    /// Гарантирует правильный вывод типов компилятором C#.
+    /// Automatically builds an immutable list of localized items for the specified enum.
+    /// Guarantees correct type inference by the C# compiler.
     /// </summary>
     public static IReadOnlyList<LocalizedItem<TEnum>> CreateList<TEnum>(
         string keyPrefix,
@@ -31,11 +31,11 @@ public static class LocalizedItem
 }
 
 /// <summary>
-/// Обёртка над произвольным значением с именем для отображения в ComboBox.
+/// Wrapper around an arbitrary value with a name for display in a ComboBox.
 /// <para>
-/// ToString() возвращает Name — ComboBox вызывает его напрямую,
-/// без создания DataTemplate-контейнеров. Это устраняет утечку памяти
-/// от DisplayMemberBinding → ControlTemplate binding → PointerDeferredContent.
+/// ToString() returns Name — ComboBox calls it directly,
+/// without creating DataTemplate containers. This eliminates the memory leak
+/// from DisplayMemberBinding → ControlTemplate binding → PointerDeferredContent.
 /// </para>
 /// </summary>
 public sealed class LocalizedItem<T>(T value, string name)
@@ -49,7 +49,7 @@ public sealed class LocalizedItem<T>(T value, string name)
 public static class LocalizedItemExtensions
 {
     /// <summary>
-    /// Находит элемент по значению без создания замыканий LINQ.
+    /// Finds an item by value without creating LINQ closures.
     /// </summary>
     public static LocalizedItem<T> FindByValue<T>(
         this IReadOnlyList<LocalizedItem<T>> list,

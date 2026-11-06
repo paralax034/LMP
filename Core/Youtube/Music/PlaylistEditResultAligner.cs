@@ -1,17 +1,17 @@
 namespace LMP.Core.Youtube.Music;
 
 /// <summary>
-/// Выравнивает элементы <c>playlistEditResults</c> ответа YouTube по порядку запрошенных <c>videoId</c>.
-/// Защищает от сдвига индексов, когда сервер пропускает дубликат или недоступный трек.
+/// Aligns YouTube response <c>playlistEditResults</c> items with the order of requested <c>videoId</c>s.
+/// Prevents index shifting when the server skips a duplicate or unavailable track.
 /// </summary>
 public static class PlaylistEditResultAligner
 {
     /// <summary>
-    /// Возвращает список <c>SetVideoId</c> той же длины и порядка, что и <paramref name="requestedVideoIds"/>.
-    /// Сопоставление идёт по <c>videoId</c>; позиционный fallback применяется только при точном совпадении длины ответа.
+    /// Returns a list of <c>SetVideoId</c>s with the same length and order as <paramref name="requestedVideoIds"/>.
+    /// Matching is performed by <c>videoId</c>; positional fallback is applied only on exact response length match.
     /// </summary>
-    /// <param name="requestedVideoIds">Сырые <c>videoId</c> в порядке запроса.</param>
-    /// <param name="responseItems">Пары <c>(VideoId, SetVideoId)</c> в порядке ответа.</param>
+    /// <param name="requestedVideoIds">Raw <c>videoId</c>s in the requested order.</param>
+    /// <param name="responseItems"><c>(VideoId, SetVideoId)</c> pairs in the response order.</param>
     public static List<string?> Align(
         IReadOnlyList<string> requestedVideoIds,
         IReadOnlyList<(string? VideoId, string? SetVideoId)> responseItems)

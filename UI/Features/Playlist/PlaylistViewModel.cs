@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Features.Playlist;
 
 /// <summary>
-/// ViewModel экрана плейлиста.
+/// ViewModel for the playlist screen.
 /// </summary>
 public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 {
@@ -521,7 +521,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         try
         {
-            // Подавляем повторный вызов LoadPlaylistAsync от собственного сохранения вычисленного цвета шапки
+            // Suppress recursive LoadPlaylistAsync calls triggered by saving the computed header color
             _lastLocalMutationTime = DateTime.Now;
             _currentPlaylist.ComputedColor = colorHex;
             await _playlistService.AddOrUpdatePlaylistAsync(_currentPlaylist);

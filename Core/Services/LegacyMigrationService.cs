@@ -5,11 +5,11 @@ using LMP.Core.Data.Repositories;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Сервис однократной миграции устаревших данных библиотеки из формата JSON в локальную базу данных SQLite.
+/// One-time migration service for legacy library data from JSON format to a local SQLite database.
 /// </summary>
 /// <remarks>
-/// Изолирует логику миграции устаревших структур данных, предотвращая разрастание сервисов ядра библиотеки.
-/// Вызывается исключительно на этапе инициализации приложения при обнаружении файла устаревшей БД.
+/// Isolates legacy data structure migration logic to prevent bloating library core services.
+/// Invoked exclusively during the application initialization phase when a legacy database file is detected.
 /// </remarks>
 public sealed class LegacyMigrationService
 {
@@ -19,12 +19,12 @@ public sealed class LegacyMigrationService
     private readonly CookieAuthService _auth;
 
     /// <summary>
-    /// Инициализирует новый экземпляр сервиса миграции устаревших данных.
+    /// Initializes a new instance of the legacy data migration service.
     /// </summary>
-    /// <param name="tracks">Репозиторий метаданных треков.</param>
-    /// <param name="playlists">Репозиторий управления плейлистами.</param>
-    /// <param name="settings">Репозиторий настроек приложения.</param>
-    /// <param name="auth">Сервис аутентификации для определения контекста владельца данных.</param>
+    /// <param name="tracks">Track metadata repository.</param>
+    /// <param name="playlists">Playlist management repository.</param>
+    /// <param name="settings">Application settings repository.</param>
+    /// <param name="auth">Authentication service to determine data owner context.</param>
     public LegacyMigrationService(
         ITrackRepository tracks,
         IPlaylistRepository playlists,
@@ -40,14 +40,14 @@ public sealed class LegacyMigrationService
     private string CurrentOwnerId => _auth.State.DisplayId;
 
     /// <summary>
-    /// Выполняет асинхронную миграцию данных из JSON-файла устаревшей библиотеки в базу данных SQLite.
+    /// Asynchronously migrates data from a legacy library JSON file to the SQLite database.
     /// </summary>
-    /// <param name="path">Физический путь к файлу базы данных JSON.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Экземпляр преобразованных настроек <see cref="AppSettings"/> либо <c>null</c>, если миграция не удалась.</returns>
+    /// <param name="path">Physical path to the JSON database file.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>An instance of converted <see cref="AppSettings"/>, or <c>null</c> if migration failed.</returns>
     /// <remarks>
-    /// Операция является транзакционно-безопасной на уровне файлов: при успешном завершении
-    /// исходный JSON-файл переименовывается с добавлением временной метки резервной копии.
+    /// The operation is file-level transactionally safe: upon successful completion,
+    /// the source JSON file is renamed with a backup timestamp.
     /// </remarks>
     public async Task<AppSettings?> MigrateFromJsonAsync(string path, CancellationToken ct = default)
     {
@@ -112,10 +112,10 @@ public sealed class LegacyMigrationService
     }
 
     /// <summary>
-    /// Преобразует устаревшую структуру настроек библиотеки в актуальную модель <see cref="AppSettings"/>.
+    /// Converts a legacy library settings structure into the current <see cref="AppSettings"/> model.
     /// </summary>
-    /// <param name="d">Экземпляр модели устаревших данных.</param>
-    /// <returns>Инициализированная модель настроек приложения.</returns>
+    /// <param name="d">Instance of the legacy data model.</param>
+    /// <returns>An initialized application settings model.</returns>
     private static AppSettings MapLegacySettings(LegacyLibraryData d) => new()
     {
         Volume = d.Volume > 0 && d.Volume <= 1.0f ? (int)(d.Volume * 100) : (int)d.Volume,

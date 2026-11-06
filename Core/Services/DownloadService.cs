@@ -38,14 +38,14 @@ public sealed class DownloadService
     }
 
     /// <summary>
-    /// Запускает процесс загрузки трека.
+    /// Starts the track download process.
     /// <list type="bullet">
-    ///   <item>Если трек полностью закэширован — мгновенный экспорт без сети.</item>
-    ///   <item>Если трек частично закэширован — докачивает только недостающие gaps.</item>
-    ///   <item>Если кэша нет — скачивает целиком через кэш-механизм и экспортирует.</item>
+    ///   <item>If the track is fully cached — instant export without network usage.</item>
+    ///   <item>If the track is partially cached — downloads missing gaps only.</item>
+    ///   <item>If no cache exists — downloads completely via the cache mechanism and exports.</item>
     /// </list>
     /// </summary>
-    /// <param name="track">Объект информации о треке.</param>
+    /// <param name="track">Track information object.</param>
     public void StartDownload(TrackInfo track)
     {
         lock (_lock)
@@ -54,7 +54,7 @@ public sealed class DownloadService
                 return;
         }
 
-        // Проверяем квоту папки загрузок
+        // Check the downloads folder quota
         long limitMb = _library.Settings.Storage.DownloadedTracksLimitMb;
         if (limitMb > 0)
         {
@@ -84,7 +84,7 @@ public sealed class DownloadService
     }
 
     /// <summary>
-    /// Мгновенный экспорт полностью закэшированного трека в Downloads.
+    /// Instant export of a fully cached track to Downloads.
     /// </summary>
     private async Task RunInstantExportAsync(TrackInfo track, Audio.Cache.AudioCacheManager cache)
     {
@@ -124,13 +124,13 @@ public sealed class DownloadService
             }
         }
 
-        // Если мгновенный экспорт сорвался — fallback на gap-fill
+        // If instant export fails — fallback to gap-fill
         EnqueueGapFillDownload(track);
     }
 
     /// <summary>
-    /// Помещает задачу загрузки в очередь с ограничением параллелизма.
-    /// Использует gap-fill: скачивает только недостающие ranges через HTTP range requests.
+    /// Enqueues a download task with concurrency limits.
+    /// Uses gap-fill: downloads missing ranges only via HTTP range requests.
     /// </summary>
     private void EnqueueGapFillDownload(TrackInfo track)
     {
@@ -147,7 +147,7 @@ public sealed class DownloadService
     }
 
     /// <summary>
-    /// Выполняет gap-fill загрузку: resolve URL → скачать gaps → экспорт в Downloads.
+    /// Performs gap-fill download: resolve URL → download gaps → export to Downloads.
     /// </summary>
     private async Task RunGapFillDownloadAsync(TrackInfo track)
     {

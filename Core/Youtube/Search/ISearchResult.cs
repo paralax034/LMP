@@ -1,7 +1,7 @@
 ﻿namespace LMP.Core.Youtube.Search;
 
 /// <summary>
-/// Общий интерфейс для результатов поиска (Видео, Плейлисты, Каналы)
+/// Common interface for search results (Videos, Playlists, Channels)
 /// </summary>
 public interface ISearchResult : IBatchItem
 {

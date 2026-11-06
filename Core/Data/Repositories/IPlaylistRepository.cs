@@ -1,63 +1,63 @@
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
-/// Интерфейс репозитория для управления плейлистами и их связями с музыкальными треками.
-/// Обеспечивает строгую изоляцию списков воспроизведения на уровне аккаунтов.
+/// Repository interface for managing playlists and their relationships with music tracks.
+/// Provides strict account-level isolation of playlists.
 /// </summary>
 public interface IPlaylistRepository
 {
     /// <summary>
-    /// Получает плейлист по его уникальному идентификатору с автоматической поддержкой виртуализации системного плейлиста "Liked".
+    /// Gets a playlist by its unique identifier with automatic virtualization support for the "Liked" system playlist.
     /// </summary>
-    /// <param name="id">Уникальный идентификатор плейлиста.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Модель плейлиста <see cref="Playlist"/> или <c>null</c>, если он не найден.</returns>
+    /// <param name="id">Unique playlist identifier.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The <see cref="Playlist"/> model, or <c>null</c> if not found.</returns>
     Task<Playlist?> GetByIdAsync(string id, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает список всех плейлистов текущего пользователя (включая виртуальный плейлист "Liked").
+    /// Returns a list of all playlists for the current user (including the virtual "Liked" playlist).
     /// </summary>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список доступных плейлистов.</returns>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A list of available playlists.</returns>
     Task<List<Playlist>> GetAllAsync(string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Получает упорядоченный список идентификаторов треков, входящих в указанный плейлист.
+    /// Gets an ordered list of track identifiers contained in the specified playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список идентификаторов треков.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A list of track identifiers.</returns>
     Task<List<string>> GetTrackIdsAsync(string playlistId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает общее количество треков в конкретном плейлисте.
+    /// Returns the total number of tracks in a specific playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Количество треков в плейлисте.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The number of tracks in the playlist.</returns>
     Task<int> GetTrackCountAsync(string playlistId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Добавляет или обновляет метаданные плейлиста в базе данных.
+    /// Adds or updates playlist metadata in the database.
     /// </summary>
-    /// <param name="playlist">Модель плейлиста для сохранения.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlist">Playlist model to save.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task UpsertAsync(Playlist playlist, CancellationToken ct = default);
 
     /// <summary>
-    /// Точечно обновляет облачную привязку плейлиста без перезаписи остальных колонок.
-    /// Не воскрешает удалённую строку и не затирает параллельные правки имени/описания.
+    /// Point-updates the cloud binding of a playlist without overwriting other columns.
+    /// Does not resurrect a deleted row or overwrite concurrent name/description edits.
     /// </summary>
-    /// <param name="playlistId">Идентификатор локального плейлиста.</param>
-    /// <param name="youtubeId">Новый облачный идентификатор либо <see langword="null"/>, чтобы оставить текущий.</param>
-    /// <param name="lastSyncedAtUtc">Метка успешной синхронизации либо <see langword="null"/>, чтобы оставить текущую.</param>
-    /// <param name="isCloudUnavailable">Флаг недоступности облачной копии.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns><see langword="true"/>, если строка существует, находится в режиме TwoWaySync и не привязана к другому YoutubeId.</returns>
+    /// <param name="playlistId">Local playlist identifier.</param>
+    /// <param name="youtubeId">New cloud identifier, or <see langword="null"/> to keep the current one.</param>
+    /// <param name="lastSyncedAtUtc">Successful sync timestamp, or <see langword="null"/> to keep the current one.</param>
+    /// <param name="isCloudUnavailable">Flag indicating cloud copy unavailability.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns><see langword="true"/> if the row exists, is in TwoWaySync mode, and is not bound to a different YoutubeId.</returns>
     Task<bool> UpdateCloudLinkStateAsync(
         string playlistId,
         string? youtubeId,
@@ -66,201 +66,201 @@ public interface IPlaylistRepository
         CancellationToken ct = default);
 
     /// <summary>
-    /// Удаляет плейлист по его уникальному идентификатору.
+    /// Deletes a playlist by its unique identifier.
     /// </summary>
-    /// <param name="id">Идентификатор удаляемого плейлиста.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="id">Identifier of the playlist to delete.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task DeleteAsync(string id, CancellationToken ct = default);
 
     /// <summary>
-    /// Изменяет название локального плейлиста.
+    /// Renames a local playlist.
     /// </summary>
-    /// <param name="id">Идентификатор плейлиста.</param>
-    /// <param name="newName">Новое отображаемое имя.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="id">Playlist identifier.</param>
+    /// <param name="newName">New display name.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task RenameAsync(string id, string newName, CancellationToken ct = default);
 
     /// <summary>
-    /// Добавляет трек в плейлист на указанную или автоматическую (в конец) позицию.
+    /// Adds a track to a playlist at a specified or automatic (end) position.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackId">Идентификатор добавляемого трека.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="position">Порядковый индекс в плейлисте. Если не указан, трек помещается в конец.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackId">Identifier of the track to add.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="position">Ordinal index in the playlist. If omitted, the track is appended to the end.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task AddTrackAsync(string playlistId, string trackId, string ownerId, int? position = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Пакетно добавляет коллекцию треков в плейлист в рамках единой транзакции базы данных.
+    /// Batch-adds a collection of tracks to a playlist within a single database transaction.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackIds">Коллекция идентификаторов треков.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Количество успешно связанных записей.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackIds">Collection of track identifiers.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The number of successfully linked records.</returns>
     Task<int> AddTracksAsync(string playlistId, IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Безопасно удаляет трек из плейлиста с автоматическим сдвигом позиций остальных треков.
+    /// Safely removes a track from a playlist with automatic shift of remaining track positions.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackId">Идентификатор удаляемого трека.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackId">Identifier of the track to remove.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task RemoveTrackAsync(string playlistId, string trackId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Пакетно удаляет коллекцию треков из плейлиста в рамках единой транзакции базы данных.
+    /// Batch-removes a collection of tracks from a playlist within a single database transaction.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackIds">Коллекция идентификаторов удаляемых треков.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Количество успешно удаленных записей.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackIds">Collection of track identifiers to remove.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The number of successfully deleted records.</returns>
     Task<int> RemoveTracksAsync(string playlistId, IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Изменяет порядок воспроизведения треков внутри плейлиста.
+    /// Reorders tracks within a playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="oldIndex">Текущий индекс трека.</param>
-    /// <param name="newIndex">Целевой индекс трека.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="oldIndex">Current track index.</param>
+    /// <param name="newIndex">Target track index.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task MoveTrackAsync(string playlistId, int oldIndex, int newIndex, CancellationToken ct = default);
 
     /// <summary>
-    /// Перепривязывает осиротевшие плейлисты (с пустым или гостевым <c>OwnerId</c>)
-    /// к указанному аутентифицированному владельцу.
+    /// Rebinds orphaned playlists (with empty or guest <c>OwnerId</c>)
+    /// to the specified authenticated owner.
     /// <para>
-    /// Вызывается из <see cref="LibraryService"/> при каждой смене аккаунта на аутентифицированного пользователя.
-    /// Операция идемпотентна: при отсутствии сирот выполняет no-op.
+    /// Called from <see cref="LibraryService"/> on every account switch to an authenticated user.
+    /// The operation is idempotent: performs a no-op if no orphans exist.
     /// </para>
     /// </summary>
-    /// <param name="newOwnerId">Идентификатор нового владельца (GaiaId аутентифицированного аккаунта).</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Количество перепривязанных плейлистов.</returns>
+    /// <param name="newOwnerId">Identifier of the new owner (GaiaId of the authenticated account).</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>The number of rebound playlists.</returns>
     Task<int> AdoptOrphanPlaylistsAsync(string newOwnerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Проверяет, содержится ли конкретный трек в указанном плейлисте.
+    /// Checks whether a specific track is included in the specified playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackId">Идентификатор трека.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns><c>true</c>, если трек связан с плейлистом; иначе — <c>false</c>.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackId">Track identifier.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns><c>true</c> if the track is linked to the playlist; otherwise, <c>false</c>.</returns>
     Task<bool> ContainsTrackAsync(string playlistId, string trackId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает список всех плейлистов текущего пользователя, в которые включен данный трек.
+    /// Returns a list of all playlists of the current user that contain the specified track.
     /// </summary>
-    /// <param name="trackId">Идентификатор проверяемого трека.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Набор идентификаторов плейлистов.</returns>
+    /// <param name="trackId">Identifier of the track to check.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A set of playlist identifiers.</returns>
     Task<HashSet<string>> GetPlaylistsForTrackAsync(string trackId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Пакетно извлекает вхождение набора треков во все плейлисты пользователя за один запрос.
+    /// Batch-retrieves playlist memberships for a set of tracks in a single query.
     /// </summary>
-    /// <param name="trackIds">Коллекция идентификаторов треков.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Словарь, где ключ — ID трека, а значение — набор ID плейлистов.</returns>
+    /// <param name="trackIds">Collection of track identifiers.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A dictionary where the key is the track ID and the value is a set of playlist IDs.</returns>
     Task<Dictionary<string, HashSet<string>>> GetPlaylistsForTracksAsync(IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает все плейлисты пользователя с количеством треков в них.
+    /// Returns all user playlists along with their track counts.
     /// </summary>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Список кортежей, содержащих модель плейлиста и общее количество треков в нем.</returns>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A list of tuples containing the playlist model and its total track count.</returns>
     Task<List<(Playlist Playlist, int TrackCount)>> GetAllWithCountsAsync(string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает суммарную продолжительность всех треков в конкретном плейлисте в тиках (Ticks).
+    /// Returns the total duration of all tracks in a specific playlist in Ticks.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Суммарное время воспроизведения в тиках.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>Total playback duration in Ticks.</returns>
     Task<long> GetTotalDurationTicksAsync(string playlistId, string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает общую продолжительность всех уникальных треков во всей библиотеке пользователя.
-    /// Решает проблему N+1 запросов при обновлении статистики боковой панели.
+    /// Returns the total duration of all unique tracks in the user's entire library.
+    /// Resolves the N+1 query problem when updating sidebar statistics.
     /// </summary>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Суммарное время всей библиотеки в тиках.</returns>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>Total library duration in Ticks.</returns>
     Task<long> GetTotalLibraryDurationAsync(string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает YouTube-идентификатор связи (setVideoId) для трека в облачном плейлисте.
-    /// Необходим для корректного удаления треков из облачных плейлистов через YouTube Music API.
+    /// Returns the YouTube relation identifier (setVideoId) for a track in a cloud playlist.
+    /// Required for correct track deletion from cloud playlists via the YouTube Music API.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackId">Идентификатор трека.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Уникальный setVideoId связи или <c>null</c>, если он отсутствует.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackId">Track identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>Unique relation setVideoId, or <c>null</c> if it does not exist.</returns>
     Task<string?> GetSetVideoIdAsync(string playlistId, string trackId, CancellationToken ct = default);
 
     /// <summary>
-    /// Обновляет YouTube-идентификатор связи (setVideoId) для трека в облачном плейлисте.
+    /// Updates the YouTube relation identifier (setVideoId) for a track in a cloud playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackId">Идентификатор трека.</param>
-    /// <param name="setVideoId">Новый setVideoId, полученный от YouTube API.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="trackId">Track identifier.</param>
+    /// <param name="setVideoId">New setVideoId received from YouTube API.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task UpdateSetVideoIdAsync(string playlistId, string trackId, string setVideoId, CancellationToken ct = default);
 
     /// <summary>
-    /// Выполняет пакетное обновление соответствий setVideoId для группы треков в плейлисте.
+    /// Batch updates setVideoId mappings for a group of tracks in a playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="mappings">Коллекция пар: Идентификатор трека -> setVideoId.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="mappings">Collection of Track ID -> setVideoId pairs.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     Task UpdateSetVideoIdsAsync(string playlistId, IReadOnlyList<(string TrackId, string SetVideoId)> mappings, CancellationToken ct = default);
 
     /// <summary>
-    /// Извлекает идентификаторы треков плейлиста с поддержкой SQL-лимитов (LIMIT/OFFSET) для пагинации.
+    /// Retrieves playlist track IDs supporting SQL pagination (LIMIT/OFFSET).
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="limit">Максимальное количество возвращаемых идентификаторов.</param>
-    /// <param name="offset">Смещение от начала выборки.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Страница идентификаторов треков плейлиста.</returns>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="limit">Maximum number of IDs to return.</param>
+    /// <param name="offset">Offset from the beginning of the result set.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A page of playlist track IDs.</returns>
     Task<List<string>> GetTrackIdsAsync(string playlistId, string ownerId, int limit, int offset = 0, CancellationToken ct = default);
 
     /// <summary>
-    /// Пакетно извлекает идентификаторы треков для всех плейлистов пользователя за единый SQL-запрос.
-    /// Исключает проблему N+1 запросов при инициализации обратного индекса связей.
+    /// Batch fetches track IDs for all user playlists in a single SQL query.
+    /// Eliminates the N+1 query problem when initializing the reverse relation index.
     /// </summary>
-    /// <param name="ownerId">Идентификатор активного аккаунта владельца.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Словарь, где ключ — ID плейлиста, а значение — набор ID входящих в него треков.</returns>
+    /// <param name="ownerId">Active owner account identifier.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A dictionary where the key is the playlist ID and the value is the set of contained track IDs.</returns>
     Task<Dictionary<string, HashSet<string>>> GetAllPlaylistTrackIdsAsync(string ownerId, CancellationToken ct = default);
 
     /// <summary>
-    /// Пакетно извлекает сохранённые идентификаторы связи <c>SetVideoId</c> для указанного набора треков плейлиста.
-    /// Должен вызываться до удаления строк из <c>PlaylistTracks</c>, чтобы избежать потери <c>SetVideoId</c>.
+    /// Batch retrieves stored <c>SetVideoId</c> mapping identifiers for the specified set of playlist tracks.
+    /// Must be called before deleting rows from <c>PlaylistTracks</c> to prevent losing <c>SetVideoId</c>.
     /// </summary>
-    /// <param name="playlistId">Идентификатор локального плейлиста.</param>
-    /// <param name="trackIds">Список идентификаторов треков.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Словарь соответствий <c>TrackId -&gt; SetVideoId</c>.</returns>
+    /// <param name="playlistId">Local playlist identifier.</param>
+    /// <param name="trackIds">List of track identifiers.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A dictionary of <c>TrackId -&gt; SetVideoId</c> mappings.</returns>
     Task<Dictionary<string, string?>> GetSetVideoIdsAsync(
         string playlistId,
         IReadOnlyList<string> trackIds,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Возвращает упорядоченный по позиции список пар <c>(TrackId, SetVideoId)</c> всех треков плейлиста.
+    /// Returns a position-ordered list of <c>(TrackId, SetVideoId)</c> pairs for all tracks in a playlist.
     /// </summary>
-    /// <param name="playlistId">Идентификатор локального плейлиста.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Упорядоченный список треков с их облачными связями.</returns>
+    /// <param name="playlistId">Local playlist identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>An ordered list of tracks with their cloud mappings.</returns>
     Task<List<(string TrackId, string? SetVideoId)>> GetTracksWithSetVideoIdsAsync(
         string playlistId,
         CancellationToken ct = default);

@@ -17,17 +17,17 @@
 
         <Grid RowDefinitions="Auto, Auto, Auto">
 
-            <!-- Заголовок в чистом стиле CreatePlaylist -->
+            <!-- Pure CreatePlaylist-style header -->
             <TextBlock Grid.Row="0"
                 Text="{Binding L[EditPlaylist_Title]}"
                 FontSize="18" FontWeight="Bold"
                 Margin="0,0,0,16" />
 
-            <!-- Тело редактора -->
+            <!-- Editor body -->
             <controls:PlaylistEditorControl Grid.Row="1"
                 DataContext="{Binding Editor}" />
 
-            <!-- Кнопки действий -->
+            <!-- Action buttons -->
             <StackPanel Grid.Row="2" Orientation="Horizontal"
                 HorizontalAlignment="Right" Spacing="12"
                 Margin="0,16,0,0">

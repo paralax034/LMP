@@ -6,26 +6,26 @@ using Acornima.Ast;
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Обеспечивает высокопроизводительный разбор и модификацию плеера на основе AST Acornima.
-/// Использует лексический анализатор областей видимости для достижения максимального сжатия JS кода (до 10-15 КБ).
+/// Provides high-performance player parsing and modification based on Acornima AST.
+/// Uses a lexical scope analyzer to achieve maximum JS code compression (down to 10-15 KB).
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Архитектура деобфускации YouTube:</b>
+/// <b>YouTube deobfuscation architecture:</b>
 /// <list type="bullet">
 ///   <item>
-///     <b>Конструктор URL (<c>expressionCode</c>):</b> Находится через AST-шаблон <see cref="AsdasdTemplate"/> 
-///     (маркер вызова <c>url.set("alr", "yes")</c>). Возвращает экземпляр <c>goog.Uri</c>.
+///     <b>URL constructor (<c>expressionCode</c>):</b> Located via the AST template <see cref="AsdasdTemplate"/> 
+///     (call marker <c>url.set("alr", "yes")</c>). Returns a <c>goog.Uri</c> instance.
 ///   </item>
 ///   <item>
-///     <b>Дешифрация подписи (Sig):</b> Выполняется синхронно прямо внутри вызова конструктора 
-///     при передаче зашифрованного токена третьим аргументом: <c>fn(url, "s", sig)</c>.
+///     <b>Signature (Sig) decryption:</b> Executed synchronously right inside the constructor call 
+///     when passing the encrypted token as the third argument: <c>fn(url, "s", sig)</c>.
 ///   </item>
 ///   <item>
-///     <b>Дешифрация N-Token:</b> Токен устанавливается в объект через <c>url.set("n", n)</c>. 
-///     Алгоритм деобфускации n-токена встроен в один из анонимных методов прототипа созданного объекта. 
-///     Солвер зондирует методы объекта по цепочке прототипов (<c>url[key]()</c>) до момента изменения 
-///     значения <c>url.get("n")</c>, после чего немедленно прерывает перебор.
+///     <b>N-Token decryption:</b> The token is set on the object via <c>url.set("n", n)</c>. 
+///     The n-token deobfuscation algorithm is embedded in one of the anonymous methods on the prototype of the created object. 
+///     The solver probes the object's methods along the prototype chain (<c>url[key]()</c>) until the 
+///     value of <c>url.get("n")</c> changes, after which it immediately terminates iteration.
 ///   </item>
 /// </list>
 /// </para>
@@ -205,11 +205,11 @@ public static partial class YoutubeAstSolver
     """;
 
     /// <summary>
-    /// Парсит и препроцессит JS плеер, вырезая все неиспользуемые компоненты с помощью Scope-Aware Tree Shaking.
-    /// Снижает результирующий размер кода с 2.5 МБ до ~10-15 КБ.
+    /// Parses and preprocesses the JS player, stripping all unused components using Scope-Aware Tree Shaking.
+    /// Reduces the resulting code size from 2.5 MB to ~10-15 KB.
     /// </summary>
-    /// <param name="baseJs">Полный исходный код base.js.</param>
-    /// <returns>Препроцессированный и оптимизированный код JS.</returns>
+    /// <param name="baseJs">The full source code of base.js.</param>
+    /// <returns>Preprocessed and optimized JS code.</returns>
     public static string PreprocessPlayer(string baseJs)
     {
         Log.Debug($"[AstSolver] Preprocessing player script. Length: {baseJs.Length / 1024} KB");
@@ -218,9 +218,9 @@ public static partial class YoutubeAstSolver
         string sts = stsMatch.Success ? stsMatch.Groups[1].Value : "1337";
         Log.Debug($"[AstSolver] Extracted Signature Timestamp (STS): {sts}");
 
-        // В Acornima 1.1+ и 1.6.2+ тяжелая компиляция регулярных выражений .NET по умолчанию
-        // отключена, если не задан колбэк OnRegExp. Это исключает лишние аллокации в SOH,
-        // ускоряет парсинг в два раза и избавляет от предупреждений компилятора CS0618.
+        // In Acornima 1.1+ and 1.6.2+, heavy .NET regex compilation is disabled by default
+        // unless an OnRegExp callback is provided. This eliminates unnecessary SOH allocations,
+        // doubles parsing speed, and suppresses CS0618 compiler warnings.
         var parser = new Parser(new ParserOptions
         {
             Tolerant = false
@@ -304,7 +304,7 @@ public static partial class YoutubeAstSolver
         }
 
         // #if DEBUG
-        //         // Временно
+        //         // Temporary
         //         var hubs = declaredToStmt
         //             .Where(kvp => kvp.Value.Count > 2)
         //             .OrderByDescending(kvp => kvp.Value.Count);
@@ -379,8 +379,8 @@ public static partial class YoutubeAstSolver
 
         var (nSolvers, sigSolvers) = GetSolutions(shakenStatements, baseJs);
 
-        // 32 КБ (64 КБ в байтах) гарантированно размещается в SOH (< 85 000 байт),
-        // исключая прямую аллокацию 1 МБ буфера в LOH при сборке 15 КБ скрипта.
+        // 32 KB (64 KB in bytes) is guaranteed to fit in SOH (< 85,000 bytes),
+        // avoiding direct allocation of a 1 MB buffer in LOH when building a 15 KB script.
         var sb = new StringBuilder(32 * 1024);
 
         sb.Append("globalThis.__sts = ").Append(sts).AppendLine(";");
@@ -432,8 +432,8 @@ public static partial class YoutubeAstSolver
     }
 
     /// <summary>
-    /// Рекурсивно собирает идентификаторы, объявленные или инициализированные в рамках узла.
-    /// Исключает ложный захват используемых переменных из правых частей выражений.
+    /// Recursively collects identifiers declared or initialized within the scope of a node.
+    /// Prevents false capture of used variables from right-hand side expressions.
     /// </summary>
     private static void CollectDeclaredIdentifiers(Node? node, HashSet<string> declared)
     {
@@ -465,8 +465,8 @@ public static partial class YoutubeAstSolver
             case ExpressionStatement es:
                 if (es.Expression is AssignmentExpression ae && ae.Operator == Operator.Assignment)
                 {
-                    // Было: CollectDeclaredIdentifiers(ae.Left, declared);
-                    // Это тоже сводило g.abc → "g" через MemberExpression case
+                    // Previously: CollectDeclaredIdentifiers(ae.Left, declared);
+                    // This also reduced g.abc → "g" via the MemberExpression case
 
                     if (ae.Left is MemberExpression me && !me.Computed)
                     {
@@ -486,10 +486,10 @@ public static partial class YoutubeAstSolver
             case MemberExpression me:
                 var fullPath = GetMemberPath(me);
                 if (fullPath is not null)
-                    declared.Add(fullPath);   // "g.abc" вместо "g"
+                    declared.Add(fullPath);   // "g.abc" instead of "g"
                 else
                 {
-                    // computed access: g[x] — fallback на корень
+                    // computed access: g[x] — fallback to root
                     var root = GetRootIdentifier(me);
                     if (root is not null)
                         declared.Add(root);
@@ -530,8 +530,8 @@ public static partial class YoutubeAstSolver
     }
 
     /// <summary>
-    /// Строит полный путь MemberExpression: g.abc → "g.abc", g.k.xyz → "g.k.xyz".
-    /// Возвращает null для computed доступа (g[x]) и не-идентификаторов (f().abc).
+    /// Builds the full path of a MemberExpression: g.abc → "g.abc", g.k.xyz → "g.k.xyz".
+    /// Returns null for computed access (g[x]) and non-identifiers (f().abc).
     /// </summary>
     private static string? GetMemberPath(Node? node)
     {
@@ -545,8 +545,8 @@ public static partial class YoutubeAstSolver
     }
 
     /// <summary>
-    /// Лексический Scope-анализатор для точечного исключения локальных переменных.
-    /// Предотвращает ложный захват глобальных зависимостей при совпадении коротких имён (a, b, c).
+    /// Lexical Scope Analyzer for granular exclusion of local variables.
+    /// Prevents false capture of global dependencies when short names (a, b, c) collide.
     /// </summary>
     private sealed class ScopeCollector(HashSet<string> topLevelDeclared)
     {
@@ -639,19 +639,19 @@ public static partial class YoutubeAstSolver
 
             if (node is MemberExpression me)
             {
-                // Пробуем полный путь: g.abc → "g.abc"
+                // Try full path: g.abc → "g.abc"
                 if (!me.Computed)
                 {
                     var fullPath = GetMemberPath(me);
                     if (fullPath is not null && _topLevelDeclared.Contains(fullPath))
                     {
                         _referenced.Add(fullPath);
-                        return;  // Точное попадание — не спускаемся к корню
+                        return;  // Exact hit — do not traverse down to root
                     }
                 }
 
-                // Fallback: спускаемся к объекту
-                // g.unknown (не объявлен) → Visit(g) → тянет только "var g = ..."
+                // Fallback: traverse down to object
+                // g.unknown (undeclared) → Visit(g) → pulls only "var g = ..."
                 // g[x] (computed) → Visit(g) + Visit(x)
                 Visit(me.Object);
                 if (me.Computed)
@@ -794,12 +794,12 @@ public static partial class YoutubeAstSolver
     }
 
     /// <summary>
-    /// Создает анонимную JS-функцию обхода обфускации.
-    /// Метод гарантирует немедленный выход (break) при первой успешной дешифрации, 
-    /// что предотвращает повторное искажение раскодированных токенов.
+    /// Creates an anonymous JS function for bypass deobfuscation.
+    /// The method guarantees an immediate exit (break) on the first successful decryption, 
+    /// preventing re-corruption of decoded tokens.
     /// </summary>
-    /// <param name="expressionCode">Сигнатура извлеченного метода.</param>
-    /// <returns>JS-код солвера.</returns>
+    /// <param name="expressionCode">Signature of the extracted method.</param>
+    /// <returns>JS code of the solver.</returns>
     private static string CreateSolver(string expressionCode)
     {
         return $$"""
@@ -899,7 +899,7 @@ public static partial class YoutubeAstSolver
     }
 
     /// <summary>
-    /// Извлекает SignatureTimestamp (STS) из кода плеера с использованием скомпилированного регулярного выражения.
+    /// Extracts the SignatureTimestamp (STS) from the player code using a compiled regex.
     /// </summary>
     public static string ExtractSts(string baseJs)
     {

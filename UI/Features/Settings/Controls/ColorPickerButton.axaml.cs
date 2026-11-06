@@ -7,15 +7,15 @@ using Avalonia.Media;
 namespace LMP.UI.Features.Settings.Controls;
 
 /// <summary>
-/// Кастомная кнопка выбора цвета с popup-диалогом.
-/// Заменяет нестабильный стандартный ColorPicker Avalonia.
+/// Custom color picker button with a popup dialog.
+/// Replaces the unstable standard Avalonia ColorPicker.
 /// </summary>
 public partial class ColorPickerButton : UserControl
 {
     #region Styled Properties
 
     /// <summary>
-    /// Выбранный цвет
+    /// Selected color
     /// </summary>
     public static readonly StyledProperty<Color> ColorProperty =
         AvaloniaProperty.Register<ColorPickerButton, Color>(nameof(Color), Colors.White);

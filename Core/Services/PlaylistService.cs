@@ -3,8 +3,8 @@ using LMP.Core.Data.Repositories;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Единый централизованный сервис управления жизненным циклом плейлистов.
-/// Является Single Source of Truth для CRUD-операций, связей треков и двусторонней облачной синхронизации.
+/// Unified centralized service for managing the playlist lifecycle.
+/// Serves as the Single Source of Truth for CRUD operations, track bindings, and two-way cloud synchronization.
 /// </summary>
 public sealed class PlaylistService
 {
@@ -312,7 +312,7 @@ public sealed class PlaylistService
     #region Mutation CRUD API
 
     /// <summary>
-    /// Создает новый локальный плейлист с правами текущего пользователя и полным набором метаданных.
+    /// Creates a new local playlist with the current user's permissions and full metadata.
     /// </summary>
     public async Task<Playlist> CreatePlaylistAsync(
         string name,
@@ -371,7 +371,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Создает удаленный аналог плейлиста на YouTube Music и переводит его в режим двусторонней синхронизации.
+    /// Creates a remote playlist counterpart on YouTube Music and switches it to two-way synchronization mode.
     /// </summary>
     public async Task<bool> LinkToCloudAsync(string playlistId, CancellationToken ct = default)
     {
@@ -471,7 +471,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Ставит в фоновую очередь Outbox обновление метаданных (имени, описания, обложки) облачного плейлиста по стратегии Last-Write-Wins.
+    /// Enqueues cloud playlist metadata updates (name, description, cover) into the background Outbox queue using a Last-Write-Wins strategy.
     /// </summary>
     public void EnqueueCloudMetadataUpdate(
         Playlist playlist,
@@ -493,12 +493,12 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Удаляет плейлист локально и, опционально, из облачного аккаунта YouTube Music.
+    /// Deletes a playlist locally and, optionally, from the YouTube Music cloud account.
     /// </summary>
-    /// <param name="playlistId">Идентификатор удаляемого плейлиста.</param>
-    /// <param name="deleteFromCloud">Флаг необходимости удаления плейлиста из облака YouTube Music.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию удаления.</returns>
+    /// <param name="playlistId">The identifier of the playlist to delete.</param>
+    /// <param name="deleteFromCloud">Flag indicating whether to delete the playlist from YouTube Music cloud.</param>
+    /// <param name="ct">Cancellation token to cancel the asynchronous operation.</param>
+    /// <returns>A task representing the asynchronous delete operation.</returns>
     public async Task DeletePlaylistAsync(string playlistId, bool deleteFromCloud = false, CancellationToken ct = default)
     {
         if (playlistId == LibraryService.LikedPlaylistId) return;
@@ -529,13 +529,13 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Добавляет трек в локальный плейлист с немедленной синхронизацией мутации в облако.
+    /// Adds a track to the local playlist with immediate mutation synchronization to the cloud.
     /// </summary>
     public Task AddTrackToPlaylistAsync(string playlistId, TrackInfo track, CancellationToken ct = default) =>
         AddTracksToPlaylistAsync(playlistId, [track], ct);
 
     /// <summary>
-    /// Пакетно добавляет набор треков в локальный плейлист с последующей синхронизацией мутации в облако.
+    /// Batch-adds a set of tracks to the local playlist followed by cloud mutation synchronization.
     /// </summary>
     public async Task AddTracksToPlaylistAsync(string playlistId, IReadOnlyList<TrackInfo> tracks, CancellationToken ct = default)
     {
@@ -588,7 +588,7 @@ public sealed class PlaylistService
 
         await _playlists.AddTracksAsync(playlistId, trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
 
-        // IsCloudBound вместо CanSyncToCloud: правки плейлиста, ожидающего создания, не должны теряться
+        // IsCloudBound instead of CanSyncToCloud: edits to a playlist pending creation must not be lost
         if (playlist.IsCloudBound)
         {
             _syncService.EnqueueAddTracks(playlist, trackIds);
@@ -598,12 +598,12 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Удаляет трек из локального плейлиста и ставит удаление (с сохранённым SetVideoId) в фоновую очередь Outbox.
+    /// Removes a track from the local playlist and enqueues the removal (with preserved SetVideoId) into the background Outbox queue.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="trackId">Идентификатор удаляемого трека.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Задача, представляющая асинхронную операцию удаления.</returns>
+    /// <param name="playlistId">The playlist identifier.</param>
+    /// <param name="trackId">The identifier of the track to remove.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>A task representing the asynchronous delete operation.</returns>
     public Task RemoveTrackFromPlaylistAsync(string playlistId, string trackId, CancellationToken ct = default)
     {
         var track = _registry.TryGet(trackId) ?? new TrackInfo { Id = trackId };
@@ -611,8 +611,8 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Пакетно удаляет коллекцию треков из локального плейлиста и неблокирующе ставит удаление в облачную очередь Outbox.
-    /// Извлекает сохранённые <c>SetVideoId</c> до удаления записей из таблицы <c>PlaylistTracks</c>.
+    /// Batch-removes a collection of tracks from the local playlist and non-blockingly enqueues the removal into the cloud Outbox queue.
+    /// Extracts preserved <c>SetVideoId</c> values before deleting entries from the <c>PlaylistTracks</c> table.
     /// </summary>
     public async Task RemoveTracksFromPlaylistAsync(string playlistId, IReadOnlyList<TrackInfo> tracks, CancellationToken ct = default)
     {
@@ -664,7 +664,7 @@ public sealed class PlaylistService
             }
         }
 
-        // Извлекаем SetVideoId из БД ДО удаления строк из PlaylistTracks
+        // Extract SetVideoId from the DB BEFORE deleting rows from PlaylistTracks
         bool isCloudBound = playlist.IsCloudBound;
         Dictionary<string, string?>? existingSetVideoIds = null;
         if (isCloudBound)
@@ -692,7 +692,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Изменяет индекс трека в локальном плейлисте и ставит сжатую перестановку в облачную очередь Outbox.
+    /// Changes a track index in the local playlist and enqueues the compacted reorder mutation into the cloud Outbox queue.
     /// </summary>
     public async Task MovePlaylistTrackAsync(string playlistId, int oldIndex, int newIndex, CancellationToken ct = default)
     {
@@ -725,7 +725,7 @@ public sealed class PlaylistService
     #region Delegated Cloud Operations
 
     /// <summary>
-    /// Перенаправляет запрос на формирование снимка различий в сервис синхронизации.
+    /// Forwards the diff snapshot generation request to the synchronization service.
     /// </summary>
     public async Task<PlaylistSyncPreview?> BuildPreviewAsync(string playlistId, CancellationToken ct = default)
     {
@@ -734,7 +734,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Перенаправляет запрос на применение параметров синхронизации в сервис синхронизации.
+    /// Forwards the sync settings application request to the synchronization service.
     /// </summary>
     public async Task<PlaylistSyncResult> ApplySyncAsync(
         string playlistId,
@@ -757,7 +757,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Делегирует прямую синхронизацию плейлиста в сервис синхронизации.
+    /// Delegates direct playlist synchronization to the synchronization service.
     /// </summary>
     public async Task<PlaylistSyncResult> SyncDirectAsync(
         string playlistId,
@@ -778,7 +778,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Делегирует синхронизацию понравившихся треков в сервис синхронизации.
+    /// Delegates liked tracks synchronization to the synchronization service.
     /// </summary>
     public async Task SyncLikedTracksAsync(CancellationToken ct = default)
     {
@@ -791,7 +791,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Делегирует загрузку плейлиста в облачный аккаунт YouTube.
+    /// Delegates playlist upload to the YouTube cloud account.
     /// </summary>
     public async Task UploadPlaylistToAccountAsync(string localPlaylistId, CancellationToken ct = default)
     {
@@ -804,7 +804,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Конвертирует удаленный плейлист в локальный формат со сбросом облачных параметров.
+    /// Converts a remote playlist to local format, resetting cloud parameters.
     /// </summary>
     public async Task ConvertToLocalAsync(string playlistId, CancellationToken ct = default)
     {
@@ -829,7 +829,7 @@ public sealed class PlaylistService
     }
 
     /// <summary>
-    /// Объединяет треки двух локальных плейлистов.
+    /// Merges tracks from two local playlists.
     /// </summary>
     public async Task<bool> MergePlaylistsAsync(string sourceId, string targetId, CancellationToken ct = default)
     {

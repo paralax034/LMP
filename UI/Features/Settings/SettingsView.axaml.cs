@@ -6,7 +6,7 @@ using LMP.UI.Features.Settings.Pages;
 namespace LMP.UI.Features.Settings;
 
 /// <summary>
-/// Представление страницы настроек с кэшированием секций для устранения рекурсивных проходов компоновки.
+/// Settings page view with section caching to eliminate recursive layout passes.
 /// </summary>
 public partial class SettingsView : UserControl
 {
@@ -54,7 +54,7 @@ public partial class SettingsView : UserControl
     }
 
     /// <summary>
-    /// Переключает секции настроек с нулевыми аллокациями и гарантированной изоляцией DataContext.
+    /// Switches settings sections with zero allocations and guaranteed DataContext isolation.
     /// </summary>
     private void UpdateActiveSection(SettingsSidebarItemBase? selectedItem)
     {
@@ -66,7 +66,7 @@ public partial class SettingsView : UserControl
         {
             page = CreatePageForSection(selectedItem);
 
-            // КРИТИЧНО: Присваиваем DataContext ДО вставки в дерево, чтобы не допустить наследования родителя
+            // CRITICAL: Assign DataContext BEFORE inserting into the tree to prevent parent inheritance
             page.DataContext = selectedItem.GetSection();
             _pageCache[targetType] = page;
             PageHostContainer.Children.Add(page);

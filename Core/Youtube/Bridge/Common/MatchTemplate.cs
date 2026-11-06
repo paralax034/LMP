@@ -1,67 +1,67 @@
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Представляет декларативный шаблон для сопоставления структуры узлов AST Esprima.
+/// Represents a declarative pattern for matching the structure of Esprima AST nodes.
 /// </summary>
 public sealed record MatchTemplate
 {
-    /// <summary>Ожидаемый тип узла AST.</summary>
+    /// <summary>Expected AST node type.</summary>
     public Type? NodeType { get; init; }
 
-    /// <summary>Ожидаемый оператор выражения (например, "=").</summary>
+    /// <summary>Expected expression operator (e.g., "=").</summary>
     public string? Operator { get; init; }
 
-    /// <summary>Шаблон для левой части выражения.</summary>
+    /// <summary>Pattern for the left side of the expression.</summary>
     public MatchTemplate? Left { get; init; }
 
-    /// <summary>Шаблон для правой части выражения.</summary>
+    /// <summary>Pattern for the right side of the expression.</summary>
     public MatchTemplate? Right { get; init; }
 
-    /// <summary>Шаблон для объекта в MemberExpression.</summary>
+    /// <summary>Pattern for the object in a MemberExpression.</summary>
     public MatchTemplate? Object { get; init; }
 
-    /// <summary>Шаблон для свойства в MemberExpression.</summary>
+    /// <summary>Pattern for the property in a MemberExpression.</summary>
     public MatchTemplate? Property { get; init; }
 
-    /// <summary>Шаблон для выражения в ExpressionStatement.</summary>
+    /// <summary>Pattern for the expression in an ExpressionStatement.</summary>
     public MatchTemplate? Expression { get; init; }
 
-    /// <summary>Шаблон для вызываемого объекта в CallExpression.</summary>
+    /// <summary>Pattern for the callee object in a CallExpression.</summary>
     public MatchTemplate? Callee { get; init; }
 
-    /// <summary>Шаблон для идентификатора (Id) в объявлении.</summary>
+    /// <summary>Pattern for the identifier (Id) in a declaration.</summary>
     public MatchTemplate? Id { get; init; }
 
-    /// <summary>Шаблон для инициализатора (Init) переменной.</summary>
+    /// <summary>Pattern for a variable initializer (Init).</summary>
     public MatchTemplate? Init { get; init; }
 
-    /// <summary>Набор шаблонов, хотя бы один из которых должен совпасть (логическое ИЛИ).</summary>
+    /// <summary>A set of patterns, at least one of which must match (logical OR).</summary>
     public MatchTemplate[]? Or { get; init; }
 
-    /// <summary>Набор шаблонов, каждый из которых должен совпасть хотя бы с одним элементом коллекции (anykey).</summary>
+    /// <summary>A set of patterns, each of which must match at least one element of the collection (anykey).</summary>
     public MatchTemplate[]? AnyKey { get; init; }
 
-    /// <summary>Ожидаемое значение литерала.</summary>
+    /// <summary>Expected literal value.</summary>
     public object? Value { get; init; }
 
-    /// <summary>Флаг асинхронности функции.</summary>
+    /// <summary>Flag indicating if the function is async.</summary>
     public bool? Async { get; init; }
 
-    /// <summary>Флаг вычисляемого свойства в MemberExpression.</summary>
+    /// <summary>Flag indicating if the property is computed in a MemberExpression.</summary>
     public bool? Computed { get; init; }
 
-    /// <summary>Флаг опциональности вызова или свойства.</summary>
+    /// <summary>Flag indicating if the call or property access is optional.</summary>
     public bool? Optional { get; init; }
 
-    /// <summary>Ожидаемое имя идентификатора.</summary>
+    /// <summary>Expected identifier name.</summary>
     public string? Name { get; init; }
 
-    /// <summary>Шаблон для списка деклараций (VariableDeclaration).</summary>
+    /// <summary>Pattern for the declaration list (VariableDeclaration).</summary>
     public MatchTemplate? DeclarationsTemplate { get; init; }
 
-    /// <summary>Шаблоны для списка аргументов в CallExpression.</summary>
+    /// <summary>Patterns for the argument list in a CallExpression.</summary>
     public MatchTemplate[]? Arguments { get; init; }
 
-    /// <summary>Ожидаемое количество аргументов в CallExpression.</summary>
+    /// <summary>Expected argument count in a CallExpression.</summary>
     public int? ExpectedArgumentsCount { get; init; }
 }

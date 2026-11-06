@@ -5,65 +5,65 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
-/// Плоская immutable-модель данных видеоролика внутри плейлиста YouTube.
-/// Извлекает все поля при инициализации, не удерживая ссылку на <see cref="JsonElement"/> в памяти.
+/// Flat immutable data model of a YouTube playlist video.
+/// Extracts all fields during initialization without retaining a reference to <see cref="JsonElement"/> in memory.
 /// </summary>
 internal sealed class PlaylistVideoData
 {
     /// <summary>
-    /// Порядковый номер видео в плейлисте (0-based индекс).
+    /// Sequential index of the video in the playlist (0-based index).
     /// </summary>
     public int? Index { get; init; }
 
     /// <summary>
-    /// Идентификатор видеоролика YouTube (11 символов).
+    /// YouTube video identifier (11 characters).
     /// </summary>
     public string? Id { get; init; }
 
     /// <summary>
-    /// Текст заголовка видео.
+    /// Video title text.
     /// </summary>
     public string? Title { get; init; }
 
     /// <summary>
-    /// Имя автора или канала, опубликовавшего видео.
+    /// Name of the author or channel that published the video.
     /// </summary>
     public string? Author { get; init; }
 
     /// <summary>
-    /// Идентификатор канала автора видео.
+    /// Channel identifier of the video author.
     /// </summary>
     public string? ChannelId { get; init; }
 
     /// <summary>
-    /// Длительность видеоролика.
+    /// Duration of the video.
     /// </summary>
     public TimeSpan? Duration { get; init; }
 
     /// <summary>
-    /// Флаг схемной принадлежности элемента к музыкальному контенту по строгим маркерам InnerTube API.
+    /// Flag indicating whether the element belongs to music content based on strict InnerTube API markers.
     /// </summary>
     public bool IsMusic { get; init; }
 
     /// <summary>
-    /// Идентификатор категории YouTube видеоролика (например, "10" для Music).
+    /// YouTube video category identifier (e.g., "10" for Music).
     /// </summary>
     public string? CategoryId { get; init; }
 
     /// <summary>
-    /// Список доступных миниатюр видеоролика.
+    /// List of available video thumbnails.
     /// </summary>
     public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
     /// <summary>
-    /// Уникальный идентификатор вхождения видеоролика в плейлист (для удаления и перемещения в облаке).
+    /// Unique identifier of the video entry in the playlist (for cloud deletion and reordering).
     /// </summary>
     public string? SetVideoId { get; init; }
 
     /// <summary>
-    /// Инициализирует плоскую модель трека из JSON-элемента <c>playlistVideoRenderer</c> или <c>playlistPanelVideoRenderer</c>.
+    /// Initializes the flat track model from a <c>playlistVideoRenderer</c> or <c>playlistPanelVideoRenderer</c> JSON element.
     /// </summary>
-    /// <param name="content">JSON-элемент видеоролика.</param>
+    /// <param name="content">The JSON element of the video.</param>
     public PlaylistVideoData(JsonElement content)
     {
         Index = content

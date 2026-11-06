@@ -4,50 +4,50 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Core.Data;
 
 /// <summary>
-/// Контракт фабрики подключений SQLite, оптимизированной для минимального потребления памяти и Native AOT.
+/// Contract for a SQLite connection factory optimized for minimal memory footprint and Native AOT.
 /// </summary>
 public interface ISqliteConnectionFactory
 {
     /// <summary>
-    /// Возвращает сконфигурированную строку подключения к локальной базе данных.
+    /// Returns a configured connection string to the local database.
     /// </summary>
     string ConnectionString { get; }
 
     /// <summary>
-    /// Создает закрытый экземпляр подключения <see cref="SqliteConnection"/>.
+    /// Creates a closed <see cref="SqliteConnection"/> instance.
     /// </summary>
-    /// <returns>Экземпляр подключения с настроенным пулингом и внешними ключами.</returns>
+    /// <returns>A connection instance configured with pooling and foreign keys.</returns>
     SqliteConnection CreateConnection();
 
     /// <summary>
-    /// Создает, открывает подключение и применяет сессионные ограничения памяти SQLite.
+    /// Creates, opens a connection, and applies SQLite session memory limits.
     /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Открытое и готовое к выполнению команд подключение <see cref="SqliteConnection"/>.</returns>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>An open <see cref="SqliteConnection"/> ready for command execution.</returns>
     ValueTask<SqliteConnection> OpenConnectionAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Принудительно сбрасывает страницы нативного кэша SQLite обратно в оперативную память ОС.
+    /// Forces flushing native SQLite cache pages back to OS RAM.
     /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача асинхронного сброса страниц и выполнения пассивного чекпоинта WAL.</returns>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A task representing asynchronous page flushing and passive WAL checkpoint execution.</returns>
     /// <remarks>
-    /// Вызывается при минимизации приложения в системный трей или переходе в режим простоя.
+    /// Invoked when the application is minimized to the system tray or enters idle mode.
     /// </remarks>
     ValueTask ShrinkMemoryAsync(CancellationToken ct = default);
 }
 
 /// <summary>
-/// Высокопроизводительная фабрика подключений SQLite с контролем Working Set процесса.
+/// High-performance SQLite connection factory with process Working Set control.
 /// </summary>
 public sealed class LowMemorySqliteConnectionFactory : ISqliteConnectionFactory
 {
     private readonly string _connectionString;
 
     /// <summary>
-    /// Инициализирует фабрику подключений SQLite с низкопотребляющими параметрами пулинга.
+    /// Initializes the SQLite connection factory with low-footprint pooling settings.
     /// </summary>
-    /// <param name="databaseFilePath">Путь к файлу базы данных SQLite на диске.</param>
+    /// <param name="databaseFilePath">Path to the SQLite database file on disk.</param>
     public LowMemorySqliteConnectionFactory(string databaseFilePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databaseFilePath);
@@ -99,11 +99,11 @@ public sealed class LowMemorySqliteConnectionFactory : ISqliteConnectionFactory
     }
 
     /// <summary>
-    /// Применяет легковесные PRAGMA-директивы к открытому соединению SQLite.
+    /// Applies lightweight PRAGMA directives to an open SQLite connection.
     /// </summary>
-    /// <param name="connection">Открытое соединение базы данных.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Задача применения параметров соединения.</returns>
+    /// <param name="connection">An open database connection.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A task representing the connection settings application.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static async ValueTask ApplySessionPragmasAsync(SqliteConnection connection, CancellationToken ct)
     {

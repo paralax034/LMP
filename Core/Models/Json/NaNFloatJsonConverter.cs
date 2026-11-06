@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace LMP.Core.Models.Json;
 
 /// <summary>
-/// JSON-конвертер для float, который сериализует NaN/Infinity как null,
-/// а null при десериализации интерпретирует как <see cref="float.NaN"/>.
+/// JSON converter for float that serializes NaN/Infinity as null,
+/// and interprets null as <see cref="float.NaN"/> during deserialization.
 /// </summary>
 public sealed class NaNFloatJsonConverter : JsonConverter<float>
 {

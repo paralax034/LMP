@@ -3,7 +3,7 @@ using Avalonia.Controls;
 namespace LMP.UI.Dialogs.Content;
 
 /// <summary>
-/// Контент диалога массовой синхронизации плейлистов.
+/// Content for the bulk playlist synchronization dialog.
 /// DataContext: SyncSelectionViewModel
 /// </summary>
 public partial class SyncSelectionDialogContent : UserControl

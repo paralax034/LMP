@@ -3,12 +3,12 @@ using LMP.Core.Youtube.Bridge.Common;
 namespace LMP.Core.Youtube.Bridge.SigCipher;
 
 /// <summary>
-/// Дешифратор подписей (SigCipher) YouTube.
+/// YouTube signature decipherer (SigCipher).
 /// </summary>
 public sealed class SigCipherDecryptor : BaseYoutubeDecryptor
 {
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="SigCipherDecryptor"/>.
+    /// Initializes a new instance of the <see cref="SigCipherDecryptor"/> class.
     /// </summary>
     public SigCipherDecryptor(JsDecryptionService jsService, string? cacheFilePath = null)
         : base(jsService, cacheFilePath ?? G.FilePath.SigCipherCache, maxMemory: 500, maxDisk: 100)
@@ -16,7 +16,7 @@ public sealed class SigCipherDecryptor : BaseYoutubeDecryptor
     }
 
     /// <summary>
-    /// Расшифровывает подпись (signature) YouTube.
+    /// Decrypts a YouTube signature.
     /// </summary>
     public async ValueTask<string> DecipherAsync(string signature, CancellationToken ct = default)
     {

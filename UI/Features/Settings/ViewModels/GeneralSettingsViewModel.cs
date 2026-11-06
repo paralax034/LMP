@@ -417,9 +417,9 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Запрашивает подтверждение и полностью сбрасывает библиотеку и настройки.
-    /// Сбой сброса не роняет UI: ошибка логируется и показывается пользователю с просьбой перезапустить приложение,
-    /// поскольку состояние в памяти к этому моменту уже очищено.
+    /// Requests confirmation and fully resets the library and settings.
+    /// A reset failure does not crash the UI: the error is logged and displayed to the user with a request to restart the application,
+    /// as the in-memory state has already been cleared by that point.
     /// </summary>
     private async Task ResetLibraryAsync()
     {

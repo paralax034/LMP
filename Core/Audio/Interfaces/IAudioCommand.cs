@@ -1,36 +1,35 @@
 namespace LMP.Core.Audio.Interfaces;
 
 /// <summary>
-/// Маркерный интерфейс для всех команд аудио плеера.
+/// Marker interface for all audio player commands.
 /// </summary>
 public interface IAudioCommand
 {
     /// <summary>
-    /// Уникальный ID сессии для отмены устаревших команд.
+    /// Unique session ID to cancel obsolete commands.
     /// </summary>
     int SessionId { get; }
 }
 
 /// <summary>
-/// Команда воспроизведения.
+/// Playback command.
 /// </summary>
 /// <param name="Descriptor">
-/// Единый дескриптор resolved аудио потока, содержащий URL, trackId, bitrate,
-/// format, codec, contentLength, loudnessDb и другие метаданные.
+/// Unified descriptor of a resolved audio stream containing URL, trackId, bitrate,
+/// format, codec, contentLength, loudnessDb, and other metadata.
 /// </param>
-/// <param name="SessionId">Уникальный ID сессии.</param>
+/// <param name="SessionId">Unique session ID.</param>
 /// <param name="SeekPosition">
-/// Позиция для seek ПЕРЕД стартом воспроизведения (atomic seek-before-play).
-/// null = начать с начала трека.
+/// Seek position BEFORE playback starts (atomic seek-before-play).
+/// null = start from the beginning of the track.
 /// 
-/// <para><b>Зачем:</b> При переключении качества (SwitchQualityAsync) нужно
-/// начать воспроизведение с текущей позиции, а не с начала. Без этого поля
-/// между PlayAsync и SeekAsync слышен артефакт — 16-300ms звука с позиции 0.</para>
+/// <para><b>Why:</b> When switching quality (SwitchQualityAsync), playback must
+/// start from the current position rather than from the beginning. Without this field,
+/// an audio artifact is audible between PlayAsync and SeekAsync — 16-300ms of sound from position 0.</para>
 /// </param>
 /// <param name="ExternalCancellationToken">
-/// Токен отмены пользовательской сессии воспроизведения.
-/// Позволяет мгновенно прервать запуск устаревшего трека, если пользователь уже переключился.
-/// </param>
+/// Cancellation token for the user playback session.
+/// Allows instantly aborting the launch of an obsolete track if the user has already switched.</param>
 public sealed record PlayCommand(
     ResolvedStreamDescriptor Descriptor,
     int SessionId,
@@ -38,33 +37,33 @@ public sealed record PlayCommand(
     CancellationToken ExternalCancellationToken = default) : IAudioCommand;
 
 /// <summary>
-/// Команда полной остановки воспроизведения.
+/// Command to completely stop playback.
 /// </summary>
-/// <param name="SessionId">Уникальный ID сессии.</param>
+/// <param name="SessionId">Unique session ID.</param>
 public sealed record StopCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
-/// Команда постановки воспроизведения на паузу.
+/// Command to pause playback.
 /// </summary>
-/// <param name="SessionId">Уникальный ID сессии.</param>
+/// <param name="SessionId">Unique session ID.</param>
 public sealed record PauseCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
-/// Команда возобновления воспроизведения после паузы.
+/// Command to resume playback after pause.
 /// </summary>
-/// <param name="SessionId">Уникальный ID сессии.</param>
+/// <param name="SessionId">Unique session ID.</param>
 public sealed record ResumeCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
-/// Команда seek к новой позиции внутри текущего трека.
+/// Command to seek to a new position within the current track.
 /// </summary>
-/// <param name="Position">Целевая позиция.</param>
-/// <param name="SessionId">Уникальный ID сессии.</param>
+/// <param name="Position">Target position.</param>
+/// <param name="SessionId">Unique session ID.</param>
 /// <param name="SeekGeneration">
-/// Монотонно возрастающее поколение seek-операции.
-/// Используется для отбрасывания устаревших deferred resume completion'ов.
+/// Monotonically increasing seek operation generation.
+/// Used to discard obsolete deferred resume completions.
 /// </param>
-/// <param name="Completion">Опциональный completion source для awaitable seek.</param>
+/// <param name="Completion">Optional completion source for awaitable seek.</param>
 public sealed record SeekCommand(
     TimeSpan Position,
     int SessionId,
@@ -72,16 +71,16 @@ public sealed record SeekCommand(
     TaskCompletionSource<bool>? Completion = null) : IAudioCommand;
 
 /// <summary>
-/// Команда deferred-resume после seek-buffering.
+/// Command for deferred resume after seek-buffering.
 /// </summary>
-/// <param name="SessionId">Сессия, в рамках которой был инициирован seek.</param>
-/// <param name="SeekGeneration">Поколение seek-операции.</param>
-/// <param name="Pipeline">Pipeline, для которого готовился resume.</param>
+/// <param name="SessionId">Session in which the seek was initiated.</param>
+/// <param name="SeekGeneration">Seek operation generation.</param>
+/// <param name="Pipeline">Pipeline for which the resume was prepared.</param>
 /// <param name="ThresholdReached">
-/// <c>true</c>, если ring buffer достиг seek-threshold;
-/// <c>false</c>, если ожидание завершилось по timeout и resume должен быть форсирован.
+/// <c>true</c> if the ring buffer reached the seek threshold;
+/// <c>false</c> if waiting completed due to timeout and resume must be forced.
 /// </param>
-/// <param name="BufferedSamples">Фактическое количество сэмплов в ring buffer на момент завершения ожидания.</param>
+/// <param name="BufferedSamples">Actual sample count in the ring buffer when waiting completed.</param>
 public sealed record DeferredResumeCommand(
     int SessionId,
     int SeekGeneration,
@@ -90,70 +89,70 @@ public sealed record DeferredResumeCommand(
     int BufferedSamples) : IAudioCommand;
 
 /// <summary>
-/// Команда уведомления actor loop о потере аудиоустройства.
+/// Command to notify the actor loop about audio device loss.
 /// </summary>
-/// <param name="SessionId">Сессия на момент потери устройства.</param>
-/// <param name="Pipeline">Pipeline, связанный с устройством.</param>
+/// <param name="SessionId">Session at the time of device loss.</param>
+/// <param name="Pipeline">Pipeline associated with the device.</param>
 public sealed record DeviceLostCommand(
     int SessionId,
     AudioPipeline Pipeline) : IAudioCommand;
 
 /// <summary>
-/// Команда уведомления actor loop о появлении аудиоустройства.
+/// Command to notify the actor loop about audio device arrival.
 /// </summary>
-/// <param name="SessionId">Сессия на момент появления устройства.</param>
-/// <param name="Pipeline">Pipeline, ожидающий восстановления устройства.</param>
+/// <param name="SessionId">Session at the time of device arrival.</param>
+/// <param name="Pipeline">Pipeline awaiting device recovery.</param>
 public sealed record DeviceAvailableCommand(
     int SessionId,
     AudioPipeline Pipeline) : IAudioCommand;
 
 /// <summary>
-/// Команда доставки фоновой ошибки в actor loop.
+/// Command to deliver a background error to the actor loop.
 /// </summary>
-/// <param name="SessionId">Сессия, в рамках которой произошла ошибка.</param>
-/// <param name="Pipeline">Pipeline, из которого пришла ошибка.</param>
-/// <param name="Error">Исключение-ошибка.</param>
+/// <param name="SessionId">Session in which the error occurred.</param>
+/// <param name="Pipeline">Pipeline from which the error originated.</param>
+/// <param name="Error">Error exception.</param>
 public sealed record PlayerErrorCommand(
     int SessionId,
     AudioPipeline Pipeline,
     Exception Error) : IAudioCommand;
 
 /// <summary>
-/// Команда финального уничтожения плеера и его инфраструктуры.
+/// Command for final disposal of the player and its infrastructure.
 /// </summary>
-/// <param name="SessionId">Уникальный ID сессии.</param>
+/// <param name="SessionId">Unique session ID.</param>
 public sealed record DisposeCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
-/// Команда естественного завершения текущего трека.
+/// Command for natural completion of the current track.
 /// </summary>
 /// <remarks>
-/// <para>Команда публикуется из decoder loop в actor channel вместо прямого вызова
-/// <c>AudioPlayer.OnTrackEnded()</c> из фонового потока.</para>
-/// <para>Это сохраняет single-threaded actor semantics для state machine плеера и
-/// устраняет поздние stale-callback'и, которые могли сбрасывать уже новый pipeline.</para>
+/// <para>The command is published from the decoder loop to the actor channel instead of calling
+/// <c>AudioPlayer.OnTrackEnded()</c> directly from a background thread.</para>
+/// <para>This preserves single-threaded actor semantics for the player state machine and
+/// eliminates late stale callbacks that could reset a newly created pipeline.</para>
 /// </remarks>
-/// <param name="SessionId">Сессия, в рамках которой трек завершился.</param>
+/// <param name="SessionId">Session in which the track ended.</param>
 public sealed record TrackEndedCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
-/// Команда восстановления аудиоустройства после потери (BT disconnect и т.д.).
-/// Pipeline остаётся живым, backend пересоздаётся через retry loop.
+/// Command to recover an audio device after loss (BT disconnect, etc.).
+/// The pipeline remains alive, while the backend is recreated via a retry loop.
 /// </summary>
-/// <param name="SessionId">Сессия на момент отправки команды.</param>
+/// <param name="SessionId">Session at the time the command was sent.</param>
 public sealed record DeviceRecoveryCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
-/// Команда уведомления actor loop о критическом опустошении аудиобуфера (starvation).
+/// Command to notify the actor loop about critical audio buffer underrun (starvation).
 /// </summary>
 /// <remarks>
-/// <para>Публикуется из fill thread backend'а через pipeline callback.
-/// Actor переводит плеер в Buffering и запускает deferred resume,
-/// вместо деструктивного CancelActiveReads, который убивает единственный живой HTTP-запрос
-/// на медленной сети.</para>
+/// <para>Published from the backend fill thread via pipeline callback.
+/// The actor transitions the player to Buffering state and triggers deferred resume,
+/// instead of performing destructive CancelActiveReads that kills the only active HTTP request
+/// on a slow network.</para>
 /// </remarks>
-/// <param name="SessionId">Сессия на момент обнаружения starvation.</param>
-/// <param name="Pipeline">Pipeline, в котором произошёл starvation.</param>
+/// <param name="SessionId">Session at the time starvation was detected.</param>
+/// <param name="Pipeline">Pipeline in which starvation occurred.</param>
 public sealed record StarvationCommand(
     int SessionId,
     AudioPipeline Pipeline) : IAudioCommand;

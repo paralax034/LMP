@@ -3,9 +3,9 @@ using Avalonia;
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Singleton-сервис для отображения глобального toast-уведомления.
-/// Один overlay на всё приложение — MainWindow подписывается и управляет единственным Border.
-/// Любой VM или контрол вызывает Show() без знания об UI-дереве.
+/// Singleton service for displaying global toast notifications.
+/// A single overlay across the entire application — MainWindow subscribes and manages the single Border.
+/// Any VM or control calls Show() without knowledge of the UI tree.
 /// </summary>
 public sealed class CopyHintService
 {
@@ -14,37 +14,37 @@ public sealed class CopyHintService
     private CopyHintService() { }
 
     /// <summary>
-    /// Поднимается когда нужно показать hint.
-    /// <paramref name="screenPosition"/> — позиция курсора в координатах окна,
-    /// null = нижний центр окна.
+    /// Raised when a hint needs to be shown.
+    /// <paramref name="screenPosition"/> — cursor position in window coordinates,
+    /// null = bottom center of the window.
     /// </summary>
     public event Action<string, CopyHintKind, Point?>? HintRequested;
 
     /// <summary>
-    /// Рекомендуемая длительность отображения уведомления в миллисекундах.
-    /// Увеличена до 4.5 секунд для комфортного чтения подробных инструкций пользователем.
+    /// Recommended display duration for the notification in milliseconds.
+    /// Increased to 4.5 seconds for comfortable reading of detailed instructions by the user.
     /// </summary>
     public int DisplayDurationMs { get; set; } = 4500;
 
     /// <summary>
-    /// Показать toast-уведомление.
+    /// Show a toast notification.
     /// </summary>
-    /// <param name="text">Текст hint-а.</param>
-    /// <param name="kind">Тип: Success / Warning / Error.</param>
-    /// <param name="screenPosition">Позиция курсора в координатах окна. Null = нижний центр.</param>
+    /// <param name="text">Hint text.</param>
+    /// <param name="kind">Type: Success / Warning / Error.</param>
+    /// <param name="screenPosition">Cursor position in window coordinates. Null = bottom center.</param>
     public void Show(string text, CopyHintKind kind = CopyHintKind.Success, Point? screenPosition = null)
         => HintRequested?.Invoke(text, kind, screenPosition);
 }
 
 /// <summary>
-/// Тип визуального hint-а — определяет иконку и цвет акцента.
+/// Visual hint type — determines the icon and accent color.
 /// </summary>
 public enum CopyHintKind
 {
-    /// <summary>Ссылка скопирована — зелёная галочка.</summary>
+    /// <summary>Link copied — green checkmark.</summary>
     Success,
-    /// <summary>Нет ссылки / не привязан к YouTube — оранжевый треугольник.</summary>
+    /// <summary>No link / not linked to YouTube — orange triangle.</summary>
     Warning,
-    /// <summary>Ошибка — красный крест.</summary>
+    /// <summary>Error — red cross.</summary>
     Error
 }

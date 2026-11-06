@@ -11,21 +11,21 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Автономные тесты нулевых аллокаций горячего аудио-пайплайна.
-/// Проверяют детерминированный инвариант: ровно 0 байт аллокаций в куче на критических путях воспроизведения.
-/// Содержит все сквозные проверки конвейера декодирования и аппаратный профайлер ядра NT.
+/// Zero-allocation offline unit tests for the audio hot-path pipeline.
+/// Validates the deterministic invariant: exactly 0 bytes allocated on the heap during critical playback paths.
+/// Contains all end-to-end decoding pipeline checks and the NT kernel hardware profiler.
 /// </summary>
 public static partial class HotPathAllocationTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
-    private const int BufferSamples = SampleRate / 10 * Channels; // 100 мс stereo
+    private const int BufferSamples = SampleRate / 10 * Channels; // 100 ms stereo
     private const int WarmupIterations = 5;
     private const int MeasureIterations = 1_000;
 
     /// <summary>
-    /// Штатная сборка таблицы семплов Mp4ContainerParser без рефлексии (AOT): закрытый список SampleInfo
-    /// заполняется тем же кодом, что и при разборе stbl реального файла.
+    /// Standard assembly of the Mp4ContainerParser sample table without reflection (AOT): a private list of SampleInfo
+    /// is populated by the same code used when parsing stbl of a real file.
     /// </summary>
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "BuildSampleTable")]
     private static extern void BuildMp4SampleTable(
@@ -151,7 +151,7 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    /// <summary>Публикация и чтение часов рендера на каждом тике устройства и опросе UI не аллоцируют.</summary>
+    /// <summary>Publishing and reading render clock on every device tick and UI poll do not allocate.</summary>
     [TestMethod(TestCategory.Unit, "RenderClock Publish & Read (0 Alloc)", Group = TestGroups.Audio, Order = 9)]
     public static Task TestRenderClockZeroAllocAsync()
     {
@@ -224,8 +224,8 @@ public static partial class HotPathAllocationTests
         using var ms = new MemoryStream(mdatPayload, writable: false);
         using var mp4Parser = new Core.Audio.Parsers.Mp4ContainerParser(ms);
 
-        // Каждый чанк содержит один семпл по смещению 0 размером 256 байт; stts задаёт 20 мс на семпл
-        // (timeScale = 1000), поэтому TimestampMs = i * 20 — та же раскладка, что прежнее ручное заполнение.
+        // Each chunk contains a single sample at offset 0 of size 256 bytes; stts sets 20 ms per sample
+        // (timeScale = 1000), so TimestampMs = i * 20 — identical layout to the previous manual population.
         int totalFrames = WarmupIterations + MeasureIterations;
         var sizes = new List<uint>(totalFrames);
         var chunkOffsets = new List<long>(totalFrames);
@@ -280,9 +280,9 @@ public static partial class HotPathAllocationTests
         NetworkLogicTests.TestNetworkManagerLogicZeroAllocAsync();
 
     /// <summary>
-    /// Проверяет согласованность ключа дискового кэша FNV-1a для перегрузок string/span, приоритет клиента WEB_REMIX
-    /// и детерминированное освобождение <see cref="RefCountedBitmap"/>. Проверки растровых изображений требуют
-    /// инициализированной платформы Avalonia, поэтому в headless CLI они пропускаются.
+    /// Validates consistency of the FNV-1a disk cache key for string/span overloads, WEB_REMIX client priority,
+    /// and deterministic disposal of <see cref="RefCountedBitmap"/>. Bitmap checks require an initialized
+    /// Avalonia platform, so they are skipped in headless CLI.
     /// </summary>
     [TestMethod(TestCategory.Unit, "ImageCache & DominantColor FNV-1a Key Sync & Native Dispose", Group = TestGroups.System, Order = 98)]
     public static Task TestImageCacheKeySyncAndRefCountedDisposeAsync()
@@ -299,8 +299,8 @@ public static partial class HotPathAllocationTests
             == YoutubeClientNames.WebRemix;
         TestAssert.True(preferWebOnVpn, "WEB_REMIX must be prioritized when preferWebRemix is true");
 
-        // В headless CLI (--test-category) Avalonia не инициализирована: WriteableBitmap не найдёт IPlatformRenderInterface.
-        // Платформенно-независимые проверки выше уже выполнены, поэтому пропуск не скрывает их результат.
+        // In headless CLI (--test-category), Avalonia is uninitialized: WriteableBitmap cannot find IPlatformRenderInterface.
+        // Platform-independent checks above have already executed, so skipping does not obscure their result.
         if (Avalonia.Application.Current is null)
             TestAssert.Skip("Avalonia platform is not initialized (headless CLI); bitmap dispose checks require UI test mode");
 
@@ -315,8 +315,8 @@ public static partial class HotPathAllocationTests
         refBmp.Dispose();
         TestAssert.True(refBmp.IsDisposed);
 
-        // Инвариант безопасности UI: после вытеснения из кэша (refBmp.Dispose) сам Bitmap,
-        // удерживаемый в Avalonia.Controls.Image.Source, обязан оставаться валидным при вызове bmp.Size в MeasureOverride!
+        // UI safety invariant: after eviction from cache (refBmp.Dispose), the underlying Bitmap
+        // retained in Avalonia.Controls.Image.Source must remain valid during bmp.Size calls in MeasureOverride!
         var validSize = bmp.Size;
         TestAssert.True(validSize.Width > 0 && validSize.Height > 0,
             "Bitmap.Size must remain accessible for bound Image controls after cache eviction");
@@ -327,8 +327,8 @@ public static partial class HotPathAllocationTests
     [TestMethod(TestCategory.Unit, "Cold-Only CDN PreWarm Gate & QuickJS Init State", Group = TestGroups.Youtube, Order = 97)]
     public static Task TestColdOnlyCdnPreWarmGateAndQuickJsInitStateAsync()
     {
-        // Проверяем, что пересоздание 2-мегабайтного LockFreeRingBuffer<float> (524 288 элементов)
-        // переиспользует буфер из ArrayPool<float>.Shared с 0 байт аллокаций в LOH
+        // Verify that recreating a 2 MB LockFreeRingBuffer<float> (524,288 elements)
+        // reuses the buffer from ArrayPool<float>.Shared with 0 bytes allocated in LOH
         using (var warmupRing = new LockFreeRingBuffer<float>(524_288)) { }
         long allocBefore = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 10; i++)
@@ -350,7 +350,7 @@ public static partial class HotPathAllocationTests
             TestAssert.False(sigDecryptor.IsInitialized, "Fresh SigCipherDecryptor must report IsInitialized == false");
             TestAssert.False(poProvider.HasActiveContext, "Fresh PoTokenProvider must report HasActiveContext == false");
 
-            // Проверяем non-blocking режим компактора для активного аудио
+            // Verify non-blocking compactor mode for active audio
             MemoryHelpers.CompactManagedHeapNow(nonBlockingForAudio: true);
         }
         finally
@@ -453,7 +453,7 @@ public static partial class HotPathAllocationTests
             $"AudioCache Index: {audioStats.TotalEntries} entries | TrackRegistry Pinned: {pinnedTracks} tracks | " +
             $"Shell PrewarmedPages: {prewarmedCount}");
 
-        // Проверяем эффект очистки кэша контуров Skia и принудительного GC
+        // Verify the effect of Skia path cache clear and forced GC
         SkiaSharp.SKGraphics.PurgeAllCaches();
         System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
         GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
@@ -503,7 +503,7 @@ public static partial class HotPathAllocationTests
 
         const double windowSec = 20.0;
 
-        // Даём UI-очереди успокоиться после события старта самого теста
+        // Let the UI queue settle after the test harness start event itself
         await Task.Delay(150).ConfigureAwait(false);
         Log.Info($"[CS-Diagnostic] Measuring kernel context switches and CPU time for {windowSec:F0}s (you can play/seek/equalize tracks now)...");
 
@@ -536,7 +536,7 @@ public static partial class HotPathAllocationTests
             }
             else
             {
-                // Учитываем потоки, созданные во время 20-секундного окна (например, декодер трека или ThreadPool)
+                // Account for threads created during the 20-second window (e.g., track decoder or ThreadPool)
                 deltaCs = after.ContextSwitches;
                 deltaTime100Ns = Math.Max(0L, after.KernelTime + after.UserTime);
                 isNew = true;
@@ -641,7 +641,7 @@ public static partial class HotPathAllocationTests
         var result = new Dictionary<int, ThreadKernelInfo>(64);
         int currentPid = Environment.ProcessId;
 
-        // Фиксированный буфер 2 МБ из пула покрывает до ~20 000 потоков всей ОС с 0 аллокаций в куче
+        // Fixed 2 MB buffer from the pool covers up to ~20,000 system-wide threads with 0 heap allocations
         int bufferSize = 2 * 1024 * 1024;
         byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
 
@@ -654,7 +654,7 @@ public static partial class HotPathAllocationTests
 
                 if (status != 0 && returnLength > buffer.Length)
                 {
-                    // Аварийный fallback на случай экстремального числа дескрипторов в ОС (>25 000 потоков)
+                    // Emergency fallback in case of an extreme system handle count (>25,000 threads)
                     System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                     buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(returnLength + 65536);
                     fixed (byte* pRetry = buffer)

@@ -6,8 +6,8 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Сборка <see cref="AudioPipeline"/> в обход фабрики: тест подставляет собственные источник, декодер и backend
-/// и вызывает аудио-callback напрямую, без устройства, сети и рефлексии.
+/// Assembles <see cref="AudioPipeline"/> bypassing the factory: the test injects custom source, decoder, and backend,
+/// invoking the audio callback directly without device, network, or reflection.
 /// </summary>
 internal static class AudioPipelineTestHarness
 {
@@ -21,16 +21,16 @@ internal static class AudioPipelineTestHarness
         AudioStreamInfo streamInfo,
         CancellationTokenSource lifetimeCts);
 
-    /// <summary>Вызывает приватный аудио-callback так же, как это делает поток устройства.</summary>
+    /// <summary>Invokes the private audio callback in the same manner as the device thread does.</summary>
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "AudioCallback")]
     internal static extern int AudioCallback(AudioPipeline pipeline, Span<float> buffer);
 
-    /// <summary>Счётчик сэмплов, учтённых декодирующим циклом.</summary>
+    /// <summary>Counter of samples accounted for by the decoding loop.</summary>
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_decodedSamples")]
     internal static extern ref long DecodedSamples(AudioPipeline pipeline);
 
     /// <summary>
-    /// Создаёт pipeline над переданными компонентами; источник, декодер и кольцо переходят во владение pipeline.
+    /// Creates a pipeline over the provided components; the source, decoder, and ring buffer are transferred to pipeline ownership.
     /// </summary>
     internal static AudioPipeline Create(
         IAudioSource source,
@@ -39,7 +39,7 @@ internal static class AudioPipelineTestHarness
         LockFreeRingBuffer<float> ring,
         AudioStreamInfo? streamInfo = null)
     {
-        // DisposeAsync pipeline возвращает буфер декодирования в пул
+        // DisposeAsync pipeline returns the decoding buffer to the pool
         float[] decodeBuffer = ArrayPool<float>.Shared.Rent(Math.Max(decoder.MaxFrameSize, 4_096) * decoder.Channels);
         return CreatePipeline(
             source,
@@ -51,12 +51,12 @@ internal static class AudioPipelineTestHarness
             new CancellationTokenSource());
     }
 
-    /// <summary>Сжатый фрейм-заглушка: содержимое игнорируется тестовыми декодерами.</summary>
+    /// <summary>Stub compressed frame: content is ignored by test decoders.</summary>
     internal static AudioFrame Frame(long timestampMs = 0) =>
         new() { Data = new byte[16], TimestampMs = timestampMs, DurationMs = 20 };
 
-    /// <summary>Опрашивает условие каждые 5 мс, пока оно не выполнится или не истечёт <paramref name="timeoutMs"/>.</summary>
-    /// <returns><c>true</c>, если условие выполнилось до таймаута.</returns>
+    /// <summary>Polls the condition every 5 ms until it is met or <paramref name="timeoutMs"/> expires.</summary>
+    /// <returns><c>true</c> if the condition was met before the timeout.</returns>
     internal static async Task<bool> WaitUntilAsync(Func<bool> condition, int timeoutMs)
     {
         long deadline = Environment.TickCount64 + timeoutMs;
@@ -73,8 +73,8 @@ internal static class AudioPipelineTestHarness
 }
 
 /// <summary>
-/// Источник, отдающий фреймы только по команде теста и игнорирующий токен отмены, как чтение, зависшее в сокете.
-/// Считает вызовы и одновременно незавершённые чтения.
+/// A source that yields frames only when triggered by the test and ignores the cancellation token, simulating a read hung in a socket.
+/// Tracks total calls and active pending reads concurrently.
 /// </summary>
 internal sealed class BlockingAudioSource(int sampleRate = 48_000, int channels = 2) : IAudioSource
 {
@@ -86,13 +86,13 @@ internal sealed class BlockingAudioSource(int sampleRate = 48_000, int channels 
     private int _activeReads;
     private int _maxConcurrentReads;
 
-    /// <summary>Сколько раз вызывался <see cref="ReadFrameAsync"/>.</summary>
+    /// <summary>Number of times <see cref="ReadFrameAsync"/> was invoked.</summary>
     public int ReadCalls => Volatile.Read(ref _readCalls);
 
-    /// <summary>Сколько чтений ждут фрейма прямо сейчас.</summary>
+    /// <summary>Number of reads currently awaiting a frame.</summary>
     public int ActiveReads => Volatile.Read(ref _activeReads);
 
-    /// <summary>Наибольшее число одновременно незавершённых чтений за время жизни источника.</summary>
+    /// <summary>Maximum number of concurrent pending reads over the source lifetime.</summary>
     public int MaxConcurrentReads => Volatile.Read(ref _maxConcurrentReads);
 
     public long DurationMs => 0;
@@ -131,11 +131,11 @@ internal sealed class BlockingAudioSource(int sampleRate = 48_000, int channels 
             _waiters.Enqueue(waiter);
         }
 
-        // Токен намеренно игнорируется: чтение завершают только Release или Open
+        // Token is intentionally ignored: reads are completed only by Release or Open
         return new ValueTask<AudioFrame?>(waiter.Task);
     }
 
-    /// <summary>Отдаёт фрейм старейшему ожидающему чтению или ставит его в очередь для следующего.</summary>
+    /// <summary>Delivers a frame to the oldest pending read or queues it for the next one.</summary>
     public void Release(AudioFrame frame)
     {
         TaskCompletionSource<AudioFrame?>? waiter;
@@ -152,7 +152,7 @@ internal sealed class BlockingAudioSource(int sampleRate = 48_000, int channels 
         waiter.TrySetResult(frame);
     }
 
-    /// <summary>Завершает все ожидающие и будущие чтения концом потока (после выдачи уже поставленных фреймов).</summary>
+    /// <summary>Completes all pending and future reads with end-of-stream (after serving already queued frames).</summary>
     public void Open()
     {
         TaskCompletionSource<AudioFrame?>[] waiters;
@@ -198,7 +198,7 @@ internal sealed class BlockingAudioSource(int sampleRate = 48_000, int channels 
 }
 
 /// <summary>
-/// Декодер, заполняющий выход постоянным значением: число сэмплов не зависит от кодека и содержимого фрейма.
+/// A decoder that fills the output with a constant value: the sample count does not depend on the codec or frame payload.
 /// </summary>
 internal sealed class ConstantDecoder(int sampleRate, int channels, int framesPerDecode, int maxFrameSize, float value) : IAudioDecoder
 {

@@ -3,38 +3,38 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Состояния конечного автомата плеера.
-/// Переходы строго определены в AudioPlayerStateMachine.
+/// State machine states of the player.
+/// Transitions are strictly defined in AudioPlayerStateMachine.
 /// </summary>
 public enum PlayerState
 {
-    /// <summary>Начальное состояние, ничего не загружено.</summary>
+    /// <summary>Initial state, nothing is loaded.</summary>
     Idle,
 
-    /// <summary>Загрузка источника и инициализация декодера.</summary>
+    /// <summary>Loading source and initializing decoder.</summary>
     Loading,
 
-    /// <summary>Буферизация перед стартом воспроизведения.</summary>
+    /// <summary>Buffering before playback starts.</summary>
     Buffering,
 
-    /// <summary>Активное воспроизведение.</summary>
+    /// <summary>Active playback.</summary>
     Playing,
 
-    /// <summary>Пауза.</summary>
+    /// <summary>Paused.</summary>
     Paused,
 
-    /// <summary>Выполняется seek операция.</summary>
+    /// <summary>Seek operation in progress.</summary>
     Seeking,
 
-    /// <summary>Критическая ошибка, требуется Stop.</summary>
+    /// <summary>Critical error, requires Stop.</summary>
     Error,
 
-    /// <summary>Плеер уничтожен.</summary>
+    /// <summary>Player is disposed.</summary>
     Disposed
 }
 
 /// <summary>
-/// Допустимые переходы состояний.
+/// Valid state transitions.
 /// </summary>
 public static class PlayerStateTransitions
 {
@@ -93,7 +93,7 @@ public static class PlayerStateTransitions
     }
 
     /// <summary>
-    /// Может ли команда быть принята в текущем состоянии.
+    /// Determines whether the command can be accepted in the current state.
     /// </summary>
     public static bool CanAcceptCommand(PlayerState state, IAudioCommand command)
     {

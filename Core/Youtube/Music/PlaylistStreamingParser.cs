@@ -6,8 +6,8 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube.Music;
 
 /// <summary>
-/// Высокопроизводительный однопроходный потоковый парсер структуры плейлистов YouTube Music (InnerTube).
-/// Читает ответы API напрямую из сетевого буфера пула памяти без аллокаций в LOH и без построения полного DOM дерева.
+/// High-performance single-pass streaming parser for YouTube Music playlist structure (InnerTube).
+/// Reads API responses directly from the memory pool network buffer without LOH allocations and without building a full DOM tree.
 /// </summary>
 internal static class PlaylistStreamingParser
 {
@@ -21,13 +21,13 @@ internal static class PlaylistStreamingParser
     };
 
     /// <summary>
-    /// Выполняет потоковый разбор ответа <c>browse</c> плейлиста.
-    /// Извлекает метаданные шапки, начальную партию треков и продолжение за один проход.
-    /// Треки и токен продолжения извлекаются строго из полки плейлиста, игнорируя посторонние секции страницы.
+    /// Performs streaming parsing of a playlist <c>browse</c> response.
+    /// Extracts header metadata, the initial batch of tracks, and continuation token in a single pass.
+    /// Tracks and continuation token are extracted strictly from the playlist shelf, ignoring unrelated page sections.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Полный снимок плейлиста, токен продолжения и visitorData.</returns>
+    /// <param name="stream">HTTP response network stream.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Complete playlist snapshot, continuation token, and visitorData.</returns>
     public static async ValueTask<(FullPlaylistSyncData Data, string? ContinuationToken, string? VisitorData)> ParseBrowseAsync(
         Stream stream,
         CancellationToken ct = default)
@@ -52,7 +52,7 @@ internal static class PlaylistStreamingParser
             if (reader.TokenType != JsonTokenType.PropertyName)
                 continue;
 
-            // 1. Извлечение VisitorData
+            // 1. Extracting VisitorData
             if (reader.ValueTextEquals(InnerTubeTokens.VisitorData) && visitorData is null)
             {
                 if (reader.Read() && reader.TokenType == JsonTokenType.String)
@@ -60,7 +60,7 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // 2. Изолированный парсинг шапки
+            // 2. Isolated header parsing
             if (reader.ValueTextEquals(InnerTubeTokens.MusicEditablePlaylistDetailHeaderRenderer))
             {
                 result.IsEditable = true;
@@ -77,7 +77,7 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // 3. Фиксация входа в полку треков плейлиста
+            // 3. Entering the playlist tracks shelf boundary
             if (playlistShelfDepth == -1 &&
                 (reader.ValueTextEquals(InnerTubeTokens.MusicPlaylistShelfRenderer) ||
                  reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoListRenderer)))
@@ -89,7 +89,7 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // 4. Сканирование треков строго внутри полки плейлиста
+            // 4. Scanning tracks strictly inside the playlist shelf
             if (playlistShelfDepth != -1)
             {
                 if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
@@ -125,7 +125,7 @@ internal static class PlaylistStreamingParser
                 }
             }
 
-            // Мусорные узлы телеметрии сбрасываем мгновенно без рекурсии
+            // Telemetry garbage nodes are skipped immediately without recursion
             if (reader.ValueTextEquals(InnerTubeTokens.TrackingParams) ||
                 reader.ValueTextEquals(InnerTubeTokens.ClickTrackingParams) ||
                 reader.ValueTextEquals(InnerTubeTokens.ServiceTrackingParams) ||
@@ -139,12 +139,12 @@ internal static class PlaylistStreamingParser
     }
 
     /// <summary>
-    /// Потоковый разбор ответа продолжения пагинации (<c>continuation</c>).
-    /// Парсит только элементы продолжения треков (musicPlaylistShelfContinuation), игнорируя виджеты рекомендаций.
+    /// Streaming parsing of a pagination continuation response (<c>continuation</c>).
+    /// Parses only track continuation elements (musicPlaylistShelfContinuation), ignoring recommendation widgets.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа продолжения.</param>
-    /// <param name="currentTrackCount">Текущее количество треков в плейлисте для индексации позиции.</param>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="stream">Continuation HTTP response network stream.</param>
+    /// <param name="currentTrackCount">Current track count in the playlist for position indexing.</param>
+    /// <param name="ct">Cancellation token.</param>
     public static async ValueTask<(List<RemoteTrackInfo> Tracks, string? ContinuationToken, string? VisitorData)> ParseContinuationAsync(
         Stream stream,
         int currentTrackCount,
@@ -177,7 +177,7 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // Фиксация входа в продолжение полки треков
+            // Entering the track shelf continuation boundary
             if (continuationShelfDepth == -1 &&
                 (reader.ValueTextEquals(InnerTubeTokens.MusicPlaylistShelfContinuation) ||
                  reader.ValueTextEquals(InnerTubeTokens.PlaylistVideoListContinuation)))
@@ -189,7 +189,7 @@ internal static class PlaylistStreamingParser
                 continue;
             }
 
-            // Парсим треки и continuation-токены исключительно внутри полки продолжения плейлиста
+            // Parse tracks and continuation tokens exclusively within the playlist continuation shelf
             if (continuationShelfDepth != -1)
             {
                 if (reader.ValueTextEquals(InnerTubeTokens.MusicResponsiveListItemRenderer))
@@ -457,7 +457,7 @@ internal static class PlaylistStreamingParser
             ?.GetFirstArrayElementOrNull()?.GetPropertyOrNull(InnerTubeTokens.Text)?.GetStringOrNull()
             ?? targetElement.GetPropertyOrNull(InnerTubeTokens.Title)?.GetPropertyOrNull(InnerTubeTokens.SimpleText)?.GetStringOrNull();
 
-        // Извлечение описания: поддержка прямого runs (Web) и вложенного musicDescriptionShelfRenderer (YouTube Music)
+        // Description extraction: supports direct runs (Web) and nested musicDescriptionShelfRenderer (YouTube Music)
         var descContainer = targetElement.GetPropertyOrNull(InnerTubeTokens.Description);
         if (descContainer.HasValue)
         {

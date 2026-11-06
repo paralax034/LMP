@@ -13,12 +13,12 @@
         MaxWidth="520">
 
         <StackPanel Spacing="16">
-            <!-- Заголовок -->
+            <!-- Header -->
             <TextBlock Text="{Binding Title}"
                 FontSize="18" FontWeight="Bold"
                 Foreground="{DynamicResource TextPrimaryBrush}" />
 
-            <!-- Сообщение -->
+            <!-- Message -->
             <ScrollViewer MaxHeight="200"
                 VerticalScrollBarVisibility="Auto"
                 IsVisible="{Binding Message, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
@@ -28,14 +28,14 @@
                     FontSize="14" />
             </ScrollViewer>
 
-            <!-- Опциональный чекбокс -->
+            <!-- Optional checkbox -->
             <CheckBox Content="{Binding CheckBoxText}"
                 IsChecked="{Binding IsChecked}"
                 IsVisible="{Binding HasCheckBox}"
                 Foreground="{DynamicResource TextSecondaryBrush}"
                 Margin="0,4,0,0" />
 
-            <!-- Кнопки -->
+            <!-- Buttons -->
             <ItemsControl ItemsSource="{Binding Buttons}"
                 HorizontalAlignment="Right">
                 <ItemsControl.ItemsPanel>

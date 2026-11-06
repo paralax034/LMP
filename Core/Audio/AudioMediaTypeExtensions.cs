@@ -3,15 +3,15 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Единые helper-методы для отображения и нормализации аудиоформатов и кодеков.
+/// Unified helper methods for displaying and normalizing audio formats and codecs.
 /// </summary>
 public static class AudioMediaTypeExtensions
 {
     /// <summary>
-    /// Возвращает каноническое container-имя для persistence и transport boundary.
+    /// Returns the canonical container name for persistence and transport boundary.
     /// </summary>
-    /// <param name="format">Аудиоформат.</param>
-    /// <returns>Каноническое имя контейнера в lower-case.</returns>
+    /// <param name="format">Audio format.</param>
+    /// <returns>Canonical container name in lower-case.</returns>
     public static string ToContainerName(this AudioFormat format) => format switch
     {
         AudioFormat.WebM => "webm",
@@ -22,10 +22,10 @@ public static class AudioMediaTypeExtensions
     };
 
     /// <summary>
-    /// Возвращает display-имя формата для UI.
+    /// Returns the display name of the format for UI.
     /// </summary>
-    /// <param name="format">Аудиоформат.</param>
-    /// <returns>Человекочитаемое имя формата.</returns>
+    /// <param name="format">Audio format.</param>
+    /// <returns>Human-readable format name.</returns>
     public static string ToDisplayName(this AudioFormat format) => format switch
     {
         AudioFormat.WebM => "WebM",
@@ -36,10 +36,10 @@ public static class AudioMediaTypeExtensions
     };
 
     /// <summary>
-    /// Возвращает display-имя кодека для UI.
+    /// Returns the display name of the codec for UI.
     /// </summary>
-    /// <param name="codec">Аудиокодек.</param>
-    /// <returns>Человекочитаемое имя кодека.</returns>
+    /// <param name="codec">Audio codec.</param>
+    /// <returns>Human-readable codec name.</returns>
     public static string ToDisplayName(this AudioCodec codec) => codec switch
     {
         AudioCodec.Opus => "Opus",
@@ -49,11 +49,11 @@ public static class AudioMediaTypeExtensions
     };
 
     /// <summary>
-    /// Нормализует строковое представление кодека в <see cref="AudioCodec"/>.
+    /// Normalizes the string representation of a codec to <see cref="AudioCodec"/>.
     /// </summary>
-    /// <param name="value">Строковое значение кодека.</param>
-    /// <param name="fallbackFormat">Формат для fallback-резолва кодека.</param>
-    /// <returns>Нормализованный кодек.</returns>
+    /// <param name="value">String representation of the codec.</param>
+    /// <param name="fallbackFormat">Format used for fallback codec resolution.</param>
+    /// <returns>Normalized codec.</returns>
     public static AudioCodec ToAudioCodec(this string? value, AudioFormat fallbackFormat = AudioFormat.Unknown)
     {
         if (string.IsNullOrWhiteSpace(value))

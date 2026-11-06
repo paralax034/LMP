@@ -1,12 +1,12 @@
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Реестр жизненного цикла приложения.
-/// Управляет регистрацией и безопасным оповещением компонентов о смене аккаунтов и состояниях активности.
+/// Application lifecycle registry.
+/// Manages registration and safe notification of components about account changes and activity states.
 /// </summary>
 /// <remarks>
-/// <para>Использует слабые ссылки (<see cref="WeakReference{T}"/>) для исключения утечек памяти
-/// и заменяет собой устаревшее плоское сканирование всех живых объектов в куче.</para>
+/// <para>Uses weak references (<see cref="WeakReference{T}"/>) to prevent memory leaks
+/// and replaces the legacy flat scanning of all live heap objects.</para>
 /// </remarks>
 public sealed class LifecycleRegistry
 {
@@ -15,19 +15,19 @@ public sealed class LifecycleRegistry
     private readonly Lock _lock = new();
 
     /// <summary>
-    /// Глобальный доступ к синглтону реестра для предотвращения круговых зависимостей с UI-проектом
+    /// Global access to the registry singleton to prevent circular dependencies with the UI project.
     /// </summary>
     public static LifecycleRegistry? Instance { get; internal set; }
 
     /// <summary>
-    /// Делегат для получения активной страницы UI без жесткой связи Core-проекта с UI-проектом (Dependency Inversion)
+    /// Delegate for retrieving the active UI page without tightly coupling the Core project to the UI project (Dependency Inversion).
     /// </summary>
     public static Func<ISuspendable?>? ActiveUiPageResolver { get; set; }
 
     /// <summary>
-    /// Регистрирует компонент для отслеживания событий смены учетных записей.
+    /// Registers a component to track account change events.
     /// </summary>
-    /// <param name="item">Компонент, реализующий <see cref="IAccountAware"/>.</param>
+    /// <param name="item">Component implementing <see cref="IAccountAware"/>.</param>
     public void RegisterAccountAware(IAccountAware item)
     {
         lock (_lock)
@@ -37,9 +37,9 @@ public sealed class LifecycleRegistry
     }
 
     /// <summary>
-    /// Регистрирует фоновую службу для отслеживания событий приостановки.
+    /// Registers a background service to track suspension events.
     /// </summary>
-    /// <param name="item">Служба, реализующая <see cref="ISuspendable"/>.</param>
+    /// <param name="item">Service implementing <see cref="ISuspendable"/>.</param>
     public void RegisterBackgroundSuspendable(ISuspendable item)
     {
         lock (_lock)
@@ -49,7 +49,7 @@ public sealed class LifecycleRegistry
     }
 
     /// <summary>
-    /// Рассылает уведомление о смене учетной записи всем зарегистрированным компонентам.
+    /// Broadcasts an account change notification to all registered components.
     /// </summary>
     public void BroadcastAccountChanged()
     {
@@ -77,9 +77,9 @@ public sealed class LifecycleRegistry
     }
 
     /// <summary>
-    /// Переводит зарегистрированные фоновые службы в режим приостановки.
+    /// Transitions registered background services into suspended mode.
     /// </summary>
-    /// <param name="level">Уровень приостановки.</param>
+    /// <param name="level">Suspension level.</param>
     public void BroadcastBackgroundSuspend(SuspendLevel level)
     {
         lock (_lock)
@@ -106,9 +106,9 @@ public sealed class LifecycleRegistry
     }
 
     /// <summary>
-    /// Возвращает зарегистрированные фоновые службы в активный режим.
+    /// Resumes registered background services back to active mode.
     /// </summary>
-    /// <param name="previousLevel">Предыдущий уровень приостановки.</param>
+    /// <param name="previousLevel">Previous suspension level.</param>
     public void BroadcastBackgroundResume(SuspendLevel previousLevel)
     {
         lock (_lock)

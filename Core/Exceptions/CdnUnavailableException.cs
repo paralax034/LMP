@@ -1,8 +1,8 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Выбрасывается когда CDN-хост недоступен для медиа-трафика
-/// (ТСПУ silent drop на /videoplayback).
+/// Thrown when the CDN host is unreachable for media traffic
+/// (TSPU silent drop on /videoplayback).
 /// </summary>
 public sealed class CdnUnavailableException(string host, string url)
     : Exception($"CDN host '{host}' is unavailable for media path (TSPU block?)")
@@ -10,6 +10,6 @@ public sealed class CdnUnavailableException(string host, string url)
     /// <summary>CDN hostname.</summary>
     public string Host { get; } = host;
 
-    /// <summary>Оригинальный media URL.</summary>
+    /// <summary>Original media URL.</summary>
     public string MediaUrl { get; } = url;
 }

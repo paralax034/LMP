@@ -3,7 +3,7 @@ using LMP.UI.Features.Settings.ViewModels;
 namespace LMP.UI.Features.Settings;
 
 /// <summary>
-/// Ленивый маркер элемента sidebar с фабричным разрешением секции и независимым заголовком.
+/// Lazy sidebar item marker with factory section resolution and independent title.
 /// </summary>
 public abstract class SettingsSidebarItemBase
 {

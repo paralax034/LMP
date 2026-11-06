@@ -149,10 +149,10 @@
                 </Button>
             </StackPanel>
 
-            <!-- Col 2: Drag Area (Прямой приемник кликов перетаскивания) -->
+            <!-- Col 2: Drag Area (Direct hit-test target for drag clicks) -->
             <Border Grid.Column="2" Background="Transparent" Name="DragArea" />
 
-            <!-- Col 3: Notification Button (Изолированный DataContext контейнера) -->
+            <!-- Col 3: Notification Button (Container's isolated DataContext) -->
             <Border Grid.Column="3" DataContext="{Binding NotificationButton}"
                     VerticalAlignment="Center" Margin="0,0,4,0">
                 <notifications:NotificationButton x:Name="NotificationButtonControl" />
@@ -227,20 +227,20 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Dialog Host (ZIndex: 900, Изолированный DataContext контейнера) -->
+                <!-- Dialog Host (ZIndex: 900, Container's isolated DataContext) -->
                 <Panel DataContext="{Binding DialogHost}" ZIndex="900"
                        IsVisible="{Binding HasActiveDialog}">
                     <shell:DialogHost />
                 </Panel>
 
-                <!-- Toast Overlay (ZIndex: 1000, Изолированный DataContext контейнера) -->
+                <!-- Toast Overlay (ZIndex: 1000, Container's isolated DataContext) -->
                 <Panel DataContext="{Binding ToastOverlay}" ZIndex="1000">
                     <notifications:ToastOverlay />
                 </Panel>
             </Panel>
         </Border>
 
-        <!-- PLAYER BAR (Изолированный DataContext контейнера) -->
+        <!-- PLAYER BAR (Container's isolated DataContext) -->
         <Border Grid.Row="2" DataContext="{Binding PlayerBar}">
             <playerBarV:PlayerBarView IsVisible="{Binding HasTrack}" />
         </Border>

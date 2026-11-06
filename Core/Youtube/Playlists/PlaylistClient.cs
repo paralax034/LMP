@@ -25,7 +25,7 @@ public sealed class PlaylistClient(HttpClient http)
     ];
 
     /// <summary>
-    /// Возвращает метаданные плейлиста.
+    /// Gets the playlist metadata.
     /// </summary>
     public async ValueTask<Playlist> GetAsync(
         PlaylistId playlistId,
@@ -49,15 +49,15 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Единый импорт плейлиста: метаданные и полный список треков за один начальный HTTP-запрос.
-    /// Устраняет дублирующий browse, который возникал при раздельных вызовах
-    /// <see cref="GetAsync"/> и <see cref="GetVideosAsync"/>.
-    /// При пустом browse-ответе автоматически применяет fallback на Next response.
-    /// Поддерживает пагинацию через continuation token.
+    /// Unified playlist import: metadata and full track list in a single initial HTTP request.
+    /// Eliminates the duplicate browse request caused by separate calls to
+    /// <see cref="GetAsync"/> and <see cref="GetVideosAsync"/>.
+    /// Automatically falls back to the Next response if the browse response is empty.
+    /// Supports pagination via continuation token.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="cancellationToken">Токен отмены операции.</param>
-    /// <returns>Метаданные плейлиста и полный упорядоченный список треков.</returns>
+    /// <param name="playlistId">The playlist ID.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>Playlist metadata and full ordered track list.</returns>
     public async Task<PlaylistImportResult> ImportAsync(
         PlaylistId playlistId,
         CancellationToken cancellationToken = default)
@@ -70,7 +70,7 @@ public sealed class PlaylistClient(HttpClient http)
         }
         catch (PlaylistUnavailableException)
         {
-            // Browse недоступен — полный fallback на Next для метаданных и треков
+            // Browse unavailable — complete fallback to Next for metadata and tracks
             var nextResponse = await _controller.GetPlaylistNextResponseAsync(
                 playlistId, null, 0, null, cancellationToken).ConfigureAwait(false);
 
@@ -95,7 +95,7 @@ public sealed class PlaylistClient(HttpClient http)
         string? continuationToken = browseResponse.ContinuationToken;
         string? visitorData = browseResponse.VisitorData;
 
-        // Browse вернул 0 видео — fallback на Next только для треков
+        // Browse returned 0 videos — fallback to Next for tracks only
         if (firstPage.Count == 0)
         {
             Log.Info($"[PlaylistClient] Browse returned 0 videos for '{playlistId}', attempting Next fallback");
@@ -122,7 +122,7 @@ public sealed class PlaylistClient(HttpClient http)
         var setVideoIdMappings = new List<(string TrackId, string SetVideoId)>(firstPage.Count);
         var allTracks = CollectTracks(firstPage, encounteredIds, setVideoIdMappings);
 
-        // Пагинация через continuation token
+        // Pagination via continuation token
         while (!string.IsNullOrEmpty(continuationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -155,8 +155,8 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Асинхронно получает видеоролики плейлиста батчами.
-    /// При пустом browse-результате выполняет fallback на Next response.
+    /// Asynchronously gets playlist videos in batches.
+    /// Performs fallback to Next response if browse result is empty.
     /// </summary>
     public async IAsyncEnumerable<Batch<TrackInfo>> GetVideoBatchesAsync(
         PlaylistId playlistId,
@@ -184,7 +184,7 @@ public sealed class PlaylistClient(HttpClient http)
                 Log.Debug($"[PlaylistClient] Initial browse: {videos.Count} videos, " +
                           $"has continuation: {continuationToken != null}");
 
-                // Fallback: browse вернул 0 видео — пробуем Next response
+                // Fallback: browse returned 0 videos — trying Next response
                 if (videos.Count == 0)
                 {
                     Log.Info($"[PlaylistClient] Browse returned 0 videos for '{playlistId}', " +
@@ -239,8 +239,8 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Строит модель плейлиста из данных API-ответа.
-    /// Заполняет owner metadata, cloud count и visibility для дальнейшего сохранения в БД.
+    /// Constructs a playlist model from API response data.
+    /// Populates owner metadata, cloud count, and visibility for subsequent DB persistence.
     /// </summary>
     private static Playlist BuildPlaylistFromData(PlaylistId playlistId, IPlaylistData data)
     {
@@ -281,7 +281,7 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Конвертирует страницу видео в новый список <see cref="TrackInfo"/>.
+    /// Converts a video page into a new <see cref="TrackInfo"/> list.
     /// </summary>
     private static List<TrackInfo> CollectTracks(
         IReadOnlyList<PlaylistVideoData> videos,
@@ -294,8 +294,8 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Добавляет треки из <paramref name="videos"/> в <paramref name="target"/>
-    /// с дедупликацией через <paramref name="encounteredIds"/>.
+    /// Adds tracks from <paramref name="videos"/> to <paramref name="target"/>
+    /// deduplicating via <paramref name="encounteredIds"/>.
     /// </summary>
     private static void AppendTracks(
         IReadOnlyList<PlaylistVideoData> videos,
@@ -315,8 +315,8 @@ public sealed class PlaylistClient(HttpClient http)
 
             var track = new TrackInfo
             {
-                // Идентификатор передается в сыром виде. Сеттер TrackInfo.Id автоматически
-                // применит кэшированное префиксирование "yt_", исключая лишние аллокации строк.
+                // ID is passed in raw form. TrackInfo.Id setter automatically
+                // applies cached "yt_" prefixing, eliminating unnecessary string allocations.
                 Id = videoId,
                 Title = title,
                 Author = author,
@@ -337,8 +337,8 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Выполняет детерминированную классификацию музыки на основе структурных маркеров InnerTube API
-    /// и метаданных канала/заголовка, исключая хрупкие проверки длительности.
+    /// Performs deterministic music classification based on InnerTube API structural markers
+    /// and channel/title metadata, avoiding fragile duration checks.
     /// </summary>
     private static bool DetectIfMusic(PlaylistVideoData videoData, string title, string author)
     {
@@ -372,7 +372,7 @@ public sealed class PlaylistClient(HttpClient http)
     }
 
     /// <summary>
-    /// Возвращает все видео плейлиста как плоский поток <see cref="TrackInfo"/>.
+    /// Returns all playlist videos as a flat <see cref="TrackInfo"/> stream.
     /// </summary>
     public IAsyncEnumerable<TrackInfo> GetVideosAsync(
         PlaylistId playlistId,
@@ -381,11 +381,11 @@ public sealed class PlaylistClient(HttpClient http)
 }
 
 /// <summary>
-/// Результат единого импорта плейлиста: метаданные и полный список треков
-/// без дублирующего browse-запроса.
+/// Result of unified playlist import: metadata and full track list
+/// without duplicate browse requests.
 /// </summary>
-/// <param name="Playlist">Метаданные плейлиста, полученные из API.</param>
-/// <param name="Tracks">Полный список треков со всеми страницами пагинации.</param>
+/// <param name="Playlist">Playlist metadata retrieved from API.</param>
+/// <param name="Tracks">Full track list including all pagination pages.</param>
 public sealed record PlaylistImportResult(
     Playlist Playlist,
     List<TrackInfo> Tracks,

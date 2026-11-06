@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные и интеграционные тесты подсистемы расшифровки подписей (Signature Cipher).
+/// Unit and integration tests for the Signature Cipher subsystem.
 /// </summary>
 public static class SigCipherTests
 {
@@ -45,7 +45,7 @@ public static class SigCipherTests
         int removedCount = testSig.Length - result.Length;
         TestAssert.True(removedCount is >= 0 and <= 10, $"Removed chars count out of bounds: {removedCount}");
 
-        // Проверка кэша
+        // Cache check
         sw.Restart();
         var cached = await decryptor.DecipherAsync(testSig).ConfigureAwait(false);
         sw.Stop();

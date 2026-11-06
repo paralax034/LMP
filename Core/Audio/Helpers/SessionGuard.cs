@@ -3,46 +3,46 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Единый механизм проверки актуальности сессии.
-/// Устраняет дупликацию паттерна <c>Interlocked.CompareExchange(ref _session, 0, 0)</c>
-/// и различие операторов сравнения (<c>&lt;</c> vs <c>!=</c>) между AudioEngine и AudioPlayer.
+/// Unified session validity check mechanism.
+/// Eliminates pattern duplication of <c>Interlocked.CompareExchange(ref _session, 0, 0)</c>
+/// and comparison operator discrepancies (<c>&lt;</c> vs <c>!=</c>) between AudioEngine and AudioPlayer.
 /// </summary>
 /// <remarks>
-/// <para><b>Семантика:</b> Сессия «устарела» (stale) если её ID строго меньше текущего.
-/// Оператор <c>&lt;</c> выбран вместо <c>!=</c> для корректной обработки wrap-around
-/// при длительной работе (int.MaxValue → отрицательные значения).</para>
-/// <para><b>Thread safety:</b> Все операции используют <see cref="Interlocked"/>
-/// или <see cref="Volatile"/> — безопасны без дополнительных блокировок.</para>
+/// <para><b>Semantics:</b> A session is considered "stale" if its ID is strictly less than the current one.
+/// The <c>&lt;</c> operator is chosen over <c>!=</c> to correctly handle wrap-around
+/// during long runs (int.MaxValue → negative values).</para>
+/// <para><b>Thread safety:</b> All operations use <see cref="Interlocked"/>
+/// or <see cref="Volatile"/> — safe without additional locks.</para>
 /// </remarks>
 public struct SessionGuard
 {
     private int _currentSession;
 
     /// <summary>
-    /// Текущий ID сессии (volatile read).
+    /// Current session ID (volatile read).
     /// </summary>
     public readonly int Current => Volatile.Read(ref Unsafe.AsRef(in _currentSession));
 
     /// <summary>
-    /// Начинает новую сессию. Возвращает ID новой сессии.
+    /// Starts a new session. Returns the new session ID.
     /// </summary>
-    /// <returns>ID новой сессии (строго больше предыдущей).</returns>
+    /// <returns>The new session ID (strictly greater than the previous one).</returns>
     public int BeginNew() => Interlocked.Increment(ref _currentSession);
 
     /// <summary>
-    /// Проверяет, устарела ли указанная сессия.
+    /// Checks whether the specified session is stale.
     /// </summary>
-    /// <param name="sessionId">ID сессии для проверки.</param>
-    /// <returns>true если <paramref name="sessionId"/> строго меньше текущей.</returns>
+    /// <param name="sessionId">Session ID to check.</param>
+    /// <returns>true if <paramref name="sessionId"/> is strictly less than the current one.</returns>
     public readonly bool IsStale(int sessionId) =>
         sessionId < Volatile.Read(ref Unsafe.AsRef(in _currentSession));
 
     /// <summary>
-    /// Проверяет, устарела ли сессия или токен отменён.
+    /// Checks whether the session is stale or the token has been canceled.
     /// </summary>
-    /// <param name="sessionId">ID сессии для проверки.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>true если сессия устарела или токен отменён.</returns>
+    /// <param name="sessionId">Session ID to check.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>true if the session is stale or the token is canceled.</returns>
     public readonly bool IsStaleOrCancelled(int sessionId, CancellationToken ct) =>
         ct.IsCancellationRequested || IsStale(sessionId);
 }

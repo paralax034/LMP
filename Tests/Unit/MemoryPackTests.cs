@@ -10,8 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Тесты сериализации MemoryPack для индексов аудиокэша и кэша сессий.
-/// Включает проверку миграции устаревших настроек в SQLite из JSON в бинарный BLOB.
+/// MemoryPack serialization tests for audio cache indices and session cache.
+/// Includes verification of legacy SQLite settings migration from JSON to binary BLOB.
 /// </summary>
 public static class MemoryPackTests
 {

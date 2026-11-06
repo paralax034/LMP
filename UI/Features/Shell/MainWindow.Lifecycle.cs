@@ -7,7 +7,7 @@ public partial class MainWindow
 {
     #region Constants
 
-    /// <summary>Минимальный интервал между GC-очистками (мс).</summary>
+    /// <summary>Minimum interval between GC sweeps (ms).</summary>
     private const int MinCleanupIntervalMs = 30_000;
 
     #endregion
@@ -36,20 +36,20 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Определяет текущий уровень приостановки на основе состояния окна.
+    /// Determines the current suspend level based on the window state.
     /// </summary>
     private SuspendLevel DetermineSuspendLevel()
     {
         if (_isInTray) return SuspendLevel.Hard;
         if (_isMinimized) return SuspendLevel.Soft;
-        // Пока окно открыто и видимо на экране (даже если фокус на соседнем окне или втором мониторе),
-        // не усыпляем UI и анимации. Suspend включается только при реальном сворачивании (Minimized / Tray).
+        // While the window is open and visible on screen (even if focus is on an adjacent window or a secondary monitor),
+        // do not suspend the UI and animations. Suspend is engaged only upon actual minimization (Minimized / Tray).
         return SuspendLevel.None;
     }
 
     /// <summary>
-    /// Применяет текущий уровень suspend ко всем VM через <see cref="ViewModelBase.BroadcastSuspendLevel"/>.
-    /// Планирует GC-очистку для Hard/Soft режимов.
+    /// Applies the current suspend level to all VMs via <see cref="ViewModelBase.BroadcastSuspendLevel"/>.
+    /// Schedules a GC sweep for Hard/Soft modes.
     /// </summary>
     private void ApplySuspendLevel()
     {
@@ -84,8 +84,8 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Обрабатывает смену состояния окна.
-    /// MinimizeToTray: если настройка включена, перехватывает Minimized → прячет в трей.
+    /// Handles window state changes.
+    /// MinimizeToTray: if the setting is enabled, intercepts Minimized → hides to tray.
     /// </summary>
     private void HandleWindowStateChanged(WindowState state)
     {
@@ -115,7 +115,7 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Потеря фокуса окна. Окно остаётся видимым на экране, поэтому анимации не останавливаются.
+    /// Window focus loss. The window remains visible on screen, so animations are not paused.
     /// </summary>
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
@@ -124,7 +124,7 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Возвращение фокуса. Снимает mouse hook и сбрасывает <see cref="_isRestoringFromTray"/> guard.
+    /// Regaining focus. Unhooks the mouse hook and resets the <see cref="_isRestoringFromTray"/> guard.
     /// </summary>
     private void OnWindowActivated(object? sender, EventArgs e)
     {

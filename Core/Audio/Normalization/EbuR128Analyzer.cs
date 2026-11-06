@@ -3,15 +3,15 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Audio.Normalization;
 
 /// <summary>
-/// EBU R128 / ITU-R BS.1770-4 анализатор громкости.
+/// EBU R128 / ITU-R BS.1770-4 loudness analyzer.
 ///
-/// <para><b>Алгоритм:</b></para>
+/// <para><b>Algorithm:</b></para>
 /// <list type="bullet">
-///   <item><b>Pre-scan</b> (isolated pipeline, ~50-300ms): K-weighted LUFS с relative gating.
-///     Gain фиксируется до начала воспроизведения.</item>
-///   <item><b>Fallback</b>: если pre-scan невозможен (недостаточно данных),
-///     используется carry-over gain от предыдущего трека. LUFS будет вычислен
-///     при следующем воспроизведении после кэширования.</item>
+///   <item><b>Pre-scan</b> (isolated pipeline, ~50-300ms): K-weighted LUFS with relative gating.
+///     Gain is locked prior to playback start.</item>
+///   <item><b>Fallback</b>: if pre-scan is impossible (insufficient data),
+///     a carry-over gain from the previous track is used. LUFS will be calculated
+///     on the next playback after caching.</item>
 /// </list>
 ///
 /// <para><b>Thread model:</b></para>
@@ -26,19 +26,19 @@ public sealed class EbuR128Analyzer
 {
     #region Constants (EBU R128 / ITU-R BS.1770-4)
 
-    /// <summary>Минимальный gain нормализации (защита от чрезмерного подавления).</summary>
+    /// <summary>Minimum normalization gain (protection against excessive attenuation).</summary>
     private const float MinNormalizationGain = 0.1f;
 
-    /// <summary>Максимальный gain нормализации по умолчанию.</summary>
+    /// <summary>Default maximum normalization gain.</summary>
     private const float DefaultMaxNormalizationGain = 3.0f;
 
-    /// <summary>Относительный порог гейтинга: −10 LU (ITU-R BS.1770-4 §3).</summary>
+    /// <summary>Relative gating threshold: −10 LU (ITU-R BS.1770-4 §3).</summary>
     private const double RelativeGateOffsetLu = -10.0;
 
-    /// <summary>Константа из ITU-R BS.1770-4 уравнения (2): −0.691 dBFS.</summary>
+    /// <summary>Constant from ITU-R BS.1770-4 equation (2): −0.691 dBFS.</summary>
     private const double LufsOffset = -0.691;
 
-    /// <summary>Макс. количество gating blocks для pre-scan.</summary>
+    /// <summary>Max number of gating blocks for pre-scan.</summary>
     internal const int MaxScanGatingBlocks = 512;
 
     #endregion
@@ -46,28 +46,28 @@ public sealed class EbuR128Analyzer
     #region Gain State
 
     /// <summary>
-    /// Зафиксированный gain. NaN = gain не установлен.
-    /// Единственная точка записи: <see cref="LockGain"/>, <see cref="LockResolvedGain"/>.
+    /// Locked gain. NaN = gain is not set.
+    /// Single write point: <see cref="LockGain"/>, <see cref="LockResolvedGain"/>.
     /// </summary>
     private float _lockedGain = float.NaN;
 
-    /// <summary>Начальный gain от предыдущего трека (устраняет cold-start скачок).</summary>
+    /// <summary>Initial gain from the previous track (prevents cold-start pop).</summary>
     private float _startingNormGain = 1.0f;
 
     /// <summary>
-    /// Последний измеренный integrated LUFS. Используется для пересчёта gain
-    /// при смене параметров нормализации (targetLufs, mode) без повторного scan.
+    /// Last measured integrated LUFS. Used for gain recalculation
+    /// when normalization parameters change (targetLufs, mode) without re-scanning.
     /// </summary>
     private float _lastIntegratedLufs = float.NaN;
 
     /// <summary>
-    /// Сигнал отложенного сброса. 1 = полный reset, 2 = recalc, 0 = нет.
-    /// Устанавливается из command thread, исполняется fill thread'ом.
+    /// Deferred reset signal. 1 = full reset, 2 = recalc, 0 = none.
+    /// Set from command thread, executed by fill thread.
     /// </summary>
     private volatile int _pendingNormReset;
 
     /// <summary>
-    /// Callback фиксации integrated LUFS. Вызывается максимум один раз за pipeline.
+    /// Integrated LUFS lock callback. Invoked at most once per pipeline.
     /// </summary>
     private volatile Action<float>? _onIntegratedLufsResolved;
 
@@ -92,13 +92,13 @@ public sealed class EbuR128Analyzer
 
     #region Public Properties
 
-    /// <summary>Включена ли нормализация.</summary>
+    /// <summary>Whether normalization is enabled.</summary>
     public bool IsEnabled => _enabled;
 
-    /// <summary>Зафиксирован ли gain.</summary>
+    /// <summary>Whether gain is locked.</summary>
     public bool IsGainLocked => !float.IsNaN(_lockedGain);
 
-    /// <summary>Текущая конфигурация (snapshot с учётом ожидающих применения настроек).</summary>
+    /// <summary>Current configuration (snapshot reflecting pending settings).</summary>
     public NormalizationConfig CurrentConfig =>
         _pendingConfig?.Value ?? new(_enabled, _targetLufs, _maxGain, _mode);
 
@@ -107,7 +107,7 @@ public sealed class EbuR128Analyzer
     #region Configuration API
 
     /// <summary>
-    /// Применяет конфигурацию нормализации атомарно.
+    /// Applies normalization configuration atomically.
     /// </summary>
     public void Configure(NormalizationConfig config)
     {
@@ -153,7 +153,7 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Публикует measured integrated LUFS и сохраняет для пересчёта.
+    /// Publishes measured integrated LUFS and retains it for recalculation.
     /// </summary>
     internal void NotifyIntegratedLufs(float integratedLufs)
     {
@@ -180,14 +180,14 @@ public sealed class EbuR128Analyzer
     public void SetIntegratedLufsCallback(Action<float>? callback) => _onIntegratedLufsResolved = callback;
 
     /// <summary>
-    /// Устанавливает начальный gain от предыдущего трека.
+    /// Sets initial carry-over gain from the previous track.
     /// </summary>
     public void SetInitialGain(float gain)
     {
         _startingNormGain = Math.Clamp(gain, MinNormalizationGain, DefaultMaxNormalizationGain);
     }
 
-    /// <summary>Запрашивает сброс при seek (если gain ещё не зафиксирован).</summary>
+    /// <summary>Requests reset on seek (if gain is not yet locked).</summary>
     public void PrepareForSeek()
     {
     }
@@ -197,7 +197,7 @@ public sealed class EbuR128Analyzer
     #region Gain Locking
 
     /// <summary>
-    /// Применяет вычисленный runtime-gain без дополнительных событий.
+    /// Applies calculated runtime-gain without firing additional events.
     /// </summary>
     public void LockResolvedGain(float gain)
     {
@@ -217,7 +217,7 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Фиксирует gain из EBU R128 pre-scan или метаданных с гарантированным применением актуальной конфигурации.
+    /// Locks gain from EBU R128 pre-scan or metadata with guaranteed application of the active configuration.
     /// </summary>
     public void LockGain(float gain)
     {
@@ -233,7 +233,7 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Возвращает зафиксированный gain или carry-over от предыдущего трека.
+    /// Returns locked gain or carry-over gain from the previous track.
     /// </summary>
     public float GetLockedGain()
     {
@@ -246,11 +246,11 @@ public sealed class EbuR128Analyzer
     #region Hot Path
 
     /// <summary>
-    /// Возвращает текущий gain нормализации. Обрабатывает отложенные операции
-    /// из command thread (config apply, reset, recalculate).
+    /// Returns current normalization gain. Processes pending operations
+    /// from command thread (config apply, reset, recalculate).
     /// </summary>
     /// <remarks>
-    /// <para><b>ВЫЗЫВАТЬ ТОЛЬКО ИЗ FILL THREAD.</b></para>
+    /// <para><b>CALL ONLY FROM FILL THREAD.</b></para>
     /// <para><b>Zero-alloc. O(1).</b></para>
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -272,7 +272,7 @@ public sealed class EbuR128Analyzer
     #region Internal State Management
 
     /// <summary>
-    /// Пересчитывает gain из сохранённого integrated LUFS с новыми параметрами.
+    /// Recalculates gain from stored integrated LUFS with new parameters.
     /// </summary>
     private void ExecuteRecalculate()
     {
@@ -290,7 +290,7 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Сбрасывает gain state для нового трека.
+    /// Resets gain state for a new track.
     /// </summary>
     private void ExecuteReset()
     {
@@ -308,8 +308,8 @@ public sealed class EbuR128Analyzer
     #region Static EBU R128 Computation (used by pre-scan)
 
     /// <summary>
-    /// Вычисляет integrated LUFS из массива gating block powers (EBU R128).
-    /// Применяет absolute gate (−70 LUFS) и relative gate (−10 LU).
+    /// Computes integrated LUFS from an array of gating block powers (EBU R128).
+    /// Applies absolute gate (−70 LUFS) and relative gate (−10 LU).
     /// </summary>
     internal static float ComputeIntegratedLufsFromBlocks(double[] blockPowers, int blockCount)
     {
@@ -347,7 +347,7 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Преобразует измеренный уровень громкости LUFS в линейный коэффициент усиления с ограничением по диапазону.
+    /// Converts measured LUFS loudness level into a clamped linear gain factor.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static float ComputeGainFromLufs(float integratedLufs, float targetLufs, float maxGain)
@@ -361,7 +361,7 @@ public sealed class EbuR128Analyzer
     }
 
     /// <summary>
-    /// Вычисляет raw linear gain из gating block powers без дублирования логики гейтинга.
+    /// Computes raw linear gain from gating block powers without duplicating gating logic.
     /// </summary>
     internal static float ComputeIntegratedGainFromBlocks(
         double[] blockPowers, int blockCount, float targetLufs, float maxGain)

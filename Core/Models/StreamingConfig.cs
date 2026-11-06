@@ -1,24 +1,24 @@
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Конфигурация потоковой передачи и буферизации аудио для range-based транспорта.
+/// Audio streaming and buffering configuration for range-based transport.
 /// </summary>
 public sealed record StreamingConfig
 {
     #region Range Request Settings
 
     /// <summary>
-    /// Выравнивание сетевых запросов и локального кэша в байтах.
+    /// Alignment of network requests and local cache in bytes.
     /// </summary>
     public int RequestAlignmentBytes { get; init; } = Defaults.RequestAlignmentBytes;
 
     /// <summary>
-    /// Минимальный размер одного сетевого range-запроса в байтах.
+    /// Minimum size of a single network range request in bytes.
     /// </summary>
     public int MinRequestSizeBytes { get; init; } = Defaults.MinRequestSizeBytes;
 
     /// <summary>
-    /// Максимальный размер одного сетевого range-запроса в байтах.
+    /// Maximum size of a single network range request in bytes.
     /// </summary>
     public int MaxRequestSizeBytes { get; init; } = Defaults.MaxRequestSizeBytes;
 
@@ -27,12 +27,12 @@ public sealed record StreamingConfig
     #region RAM Cache
 
     /// <summary>
-    /// Максимальный объём RAM-кэша в байтах.
+    /// Maximum RAM cache size in bytes.
     /// </summary>
     public int MaxRamBytes { get; init; } = Defaults.MaxRamBytes;
 
     /// <summary>
-    /// Окно удержания RAM-кэша вокруг текущей позиции в байтах.
+    /// RAM cache retention window around the current position in bytes.
     /// </summary>
     public int RamEvictionWindowBytes { get; init; } = Defaults.RamEvictionWindowBytes;
 
@@ -40,32 +40,32 @@ public sealed record StreamingConfig
 
     #region Download Settings
 
-    /// <summary>Максимальное количество параллельных range-загрузок.</summary>
+    /// <summary>Maximum number of parallel range downloads.</summary>
     public int MaxConcurrentDownloads { get; init; } = Defaults.MaxConcurrentDownloads;
 
-    /// <summary>Таймаут ожидания слота загрузки (мс). 0 = без ожидания.</summary>
+    /// <summary>Timeout for waiting for a download slot (ms). 0 = no wait.</summary>
     public int DownloadSlotTimeoutMs { get; init; } = Defaults.DownloadSlotTimeoutMs;
 
     #endregion
 
     #region Retry / Resilience
 
-    /// <summary>Максимум повторных попыток при сетевых ошибках.</summary>
+    /// <summary>Maximum retry count on network errors.</summary>
     public int MaxNetworkRetries { get; init; } = Defaults.MaxNetworkRetries;
 
-    /// <summary>Базовая задержка между retry (мс).</summary>
+    /// <summary>Base delay between retries (ms).</summary>
     public int NetworkRetryBaseDelayMs { get; init; } = Defaults.NetworkRetryBaseDelayMs;
 
-    /// <summary>Использовать exponential backoff при retry.</summary>
+    /// <summary>Use exponential backoff on retries.</summary>
     public bool UseExponentialBackoff { get; init; } = Defaults.UseExponentialBackoff;
 
-    /// <summary>Максимум последовательных HTTP 403 перед circuit breaker.</summary>
+    /// <summary>Maximum consecutive HTTP 403 responses before triggering the circuit breaker.</summary>
     public int Max403BeforeCircuitBreak { get; init; } = Defaults.Max403BeforeCircuitBreak;
 
-    /// <summary>Минимальный интервал между URL refresh запросами (мс).</summary>
+    /// <summary>Minimum interval between URL refresh requests (ms).</summary>
     public int RefreshCooldownMs { get; init; } = Defaults.RefreshCooldownMs;
 
-    /// <summary>Задержка после URL refresh перед retry загрузки (мс).</summary>
+    /// <summary>Delay after URL refresh before retrying download (ms).</summary>
     public int PostRefreshDelayMs { get; init; } = Defaults.PostRefreshDelayMs;
 
     #endregion
@@ -73,23 +73,23 @@ public sealed record StreamingConfig
     #region Buffer Targets
 
     /// <summary>
-    /// Целевой объём буфера вперёд от текущей позиции в миллисекундах.
-    /// Используется MAPO-планировщиком.
+    /// Target lookahead buffer size from the current position in milliseconds.
+    /// Used by the MAPO scheduler.
     /// </summary>
     public int TargetBufferMs { get; init; } = Defaults.TargetBufferMs;
 
     /// <summary>
-    /// Начальный объём данных в байтах, который желательно иметь перед стартом парсинга/декодирования.
+    /// Initial data volume in bytes preferred before starting parsing/decoding.
     /// </summary>
     public int InitialPrebufferBytes { get; init; } = Defaults.InitialPrebufferBytes;
 
     /// <summary>
-    /// Объём данных в байтах для best-effort предзагрузки вокруг seek-позиции.
+    /// Data volume in bytes for best-effort prefetching around the seek position.
     /// </summary>
     public int SeekPreloadBytes { get; init; } = Defaults.SeekPreloadBytes;
 
     /// <summary>
-    /// Минимальный объём буфера вперёд в миллисекундах перед запуском фоновой докачки.
+    /// Minimum lookahead buffer volume in milliseconds before launching background backfill.
     /// </summary>
     public int MinBufferAheadForBackgroundFillMs { get; init; } = Defaults.MinBufferAheadForBackgroundFillMs;
 
@@ -97,20 +97,20 @@ public sealed record StreamingConfig
 
     #region Background Fill
 
-    /// <summary>Циклов простоя перед фоновой докачкой.</summary>
+    /// <summary>Idle cycles before background backfill.</summary>
     public int BackgroundFillIdleCycles { get; init; } = Defaults.BackgroundFillIdleCycles;
 
-    /// <summary>Пауза между фоновыми range-загрузками (мс).</summary>
+    /// <summary>Pause between background range downloads (ms).</summary>
     public int BackgroundFillIntervalMs { get; init; } = Defaults.BackgroundFillIntervalMs;
 
-    /// <summary>Максимум фоновых range-запросов за сессию (0 = unlimited).</summary>
+    /// <summary>Maximum background range requests per session (0 = unlimited).</summary>
     public int MaxBackgroundRequestsPerSession { get; init; } = Defaults.MaxBackgroundRequestsPerSession;
 
     #endregion
 
     #region Preload Loop
 
-    /// <summary>Интервал preload loop (мс).</summary>
+    /// <summary>Preload loop interval (ms).</summary>
     public int PreloadIntervalMs { get; init; } = Defaults.PreloadIntervalMs;
 
     #endregion
@@ -118,9 +118,9 @@ public sealed record StreamingConfig
     #region Throttling
 
     /// <summary>
-    /// Множитель скорости скачивания относительно битрейта аудио.
-    /// 0 = без ограничений. 3.0 = скачиваем не быстрее 3× битрейта.
-    /// Предотвращает burst-download, из-за которого YouTube дросселирует соединение.
+    /// Download speed multiplier relative to the audio bitrate.
+    /// 0 = unlimited. 3.0 = download no faster than 3× bitrate.
+    /// Prevents burst downloading, which causes YouTube to throttle the connection.
     /// </summary>
     public double ThrottleMultiplier { get; init; } = Defaults.ThrottleMultiplier;
 
@@ -129,62 +129,62 @@ public sealed record StreamingConfig
     #region Network Assessment
 
     /// <summary>
-    /// Safety factor для throughput-based планирования размера запроса (0.0–1.0).
+    /// Safety factor for throughput-based request sizing (0.0–1.0).
     /// <para>
-    /// По модели THROUGHPUT (dash.js): запрашиваем не более этой доли оценённой
-    /// пропускной способности. Значение 0.9 означает: использовать 90% от EMA-оценки,
-    /// оставляя 10% запаса, чтобы не упираться в потолок канала и не конкурировать
-    /// за bandwidth с параллельными запросами.
+    /// Based on the THROUGHPUT model (dash.js): requests no more than this fraction of estimated
+    /// throughput. A value of 0.9 means using 90% of the EMA estimate,
+    /// leaving a 10% margin to avoid hitting the channel ceiling and competing
+    /// for bandwidth with parallel requests.
     /// </para>
     /// </summary>
     public double ThroughputSafetyFactor { get; init; } = Defaults.ThroughputSafetyFactor;
 
     /// <summary>
-    /// Абсолютный нижний порог bandwidth (байт/сек), ниже которого сеть считается
-    /// критически деградированной вне зависимости от relative ratio к битрейту.
+    /// Absolute lower bandwidth threshold (bytes/sec) below which the network is considered
+    /// critically degraded regardless of the relative ratio to the bitrate.
     /// <para>
-    /// Решает проблему: на узком канале (10 Мбит/с) с низкобитрейтным аудио (128 kbps)
-    /// relative ratio ≈ 78 — система считает сеть «нормальной», хотя канал абсолютно узкий.
+    /// Solves the issue: on a narrow channel (10 Mbps) with low-bitrate audio (128 kbps),
+    /// relative ratio ≈ 78 — the system considers the network "normal" despite the channel being strictly limited.
     /// </para>
     /// </summary>
     public int AbsoluteCriticalBandwidthBytesPerSec { get; init; } = Defaults.AbsoluteCriticalBandwidthBytesPerSec;
 
     /// <summary>
-    /// Абсолютный нижний порог bandwidth (байт/сек), ниже которого сеть считается
-    /// деградированной вне зависимости от relative ratio к битрейту.
+    /// Absolute lower bandwidth threshold (bytes/sec) below which the network is considered
+    /// degraded regardless of the relative ratio to the bitrate.
     /// </summary>
     public int AbsoluteDegradedBandwidthBytesPerSec { get; init; } = Defaults.AbsoluteDegradedBandwidthBytesPerSec;
 
     /// <summary>
-    /// Минимально жизнеспособный множитель bandwidth к битрейту аудио.
-    /// Если <c>bandwidth &lt; bitrate × multiplier</c> — канал считается критическим
-    /// (не обеспечивает даже минимального запаса над стримингом).
+    /// Minimum viable ratio of bandwidth to audio bitrate.
+    /// If <c>bandwidth &lt; bitrate × multiplier</c>, the channel is considered critical
+    /// (does not provide even a minimal margin over streaming).
     /// </summary>
     public double MinViableBandwidthMultiplier { get; init; } = Defaults.MinViableBandwidthMultiplier;
 
     /// <summary>
-    /// Максимальный уровень буфера вперёд (мс), при котором активируется BDP floor.
+    /// Maximum lookahead buffer level (ms) at which the BDP floor is activated.
     /// <para>
-    /// По BBA-принципу (Netflix/dash.js): BDP floor нужен только при пустом буфере
-    /// (startup/seek фаза). В steady state (буфер выше этого порога) оценка
-    /// пропускной способности не нужна — достаточно demand-based sizing.
+    /// Based on the BBA principle (Netflix/dash.js): BDP floor is only needed when the buffer is empty
+    /// (startup/seek phase). In steady state (buffer above this threshold), throughput estimation
+    /// is not required — demand-based sizing is sufficient.
     /// </para>
     /// </summary>
     public int BdpFloorMaxBufferMs { get; init; } = Defaults.BdpFloorMaxBufferMs;
 
     /// <summary>
-    /// Количество первых замеров bandwidth, к которым применяется повышенный bootstrap weight.
+    /// Number of initial bandwidth measurements to which an increased bootstrap weight is applied.
     /// <para>
-    /// Устраняет проблему медленной сходимости EMA на startup: первые N замеров
-    /// используют <see cref="BandwidthBootstrapWeight"/> вместо size-based веса,
-    /// что позволяет системе быстро выйти на реальную оценку канала.
+    /// Resolves the slow EMA convergence issue at startup: the first N measurements
+    /// use <see cref="BandwidthBootstrapWeight"/> instead of size-based weight,
+    /// allowing the system to quickly converge on a realistic channel estimate.
     /// </para>
     /// </summary>
     public int BandwidthBootstrapSampleCount { get; init; } = Defaults.BandwidthBootstrapSampleCount;
 
     /// <summary>
-    /// Вес EMA для bootstrap-замеров (первые <see cref="BandwidthBootstrapSampleCount"/> измерений).
-    /// Должен быть выше steady-state веса для быстрой начальной сходимости.
+    /// EMA weight for bootstrap measurements (first <see cref="BandwidthBootstrapSampleCount"/> samples).
+    /// Must be higher than the steady-state weight for fast initial convergence.
     /// </summary>
     public double BandwidthBootstrapWeight { get; init; } = Defaults.BandwidthBootstrapWeight;
 
@@ -193,16 +193,16 @@ public sealed record StreamingConfig
     #region Startup Pipeline
 
     /// <summary>
-    /// Объём данных (байт) для немедленного фонового prefetch после инициализации parser.
+    /// Data volume (bytes) for immediate background prefetch after parser initialization.
     /// <para>
-    /// Запускается параллельно с созданием decoder и warmup-проверкой,
-    /// чтобы к моменту принятия решения о старте воспроизведения буфер уже был
-    /// частично заполнен. Перекрывает задержку <see cref="PreloadIntervalMs"/>
-    /// первой итерации preload loop.
+    /// Executed in parallel with decoder creation and the warmup check,
+    /// so that by the time playback start decision is made, the buffer is already
+    /// partially populated. Covers the delay of <see cref="PreloadIntervalMs"/>
+    /// of the first preload loop iteration.
     /// </para>
     /// <para>
-    /// Рекомендуемое значение: достаточно для покрытия warmup-порога
-    /// <c>(TargetBufferMs / 2)</c> секунд аудио при целевом битрейте.
+    /// Recommended value: sufficient to cover the warmup threshold
+    /// <c>(TargetBufferMs / 2)</c> seconds of audio at the target bitrate.
     /// </para>
     /// </summary>
     public int StartupPrefetchBytes { get; init; } = Defaults.StartupPrefetchBytes;
@@ -210,7 +210,7 @@ public sealed record StreamingConfig
     #endregion
 
     /// <summary>
-    /// Значения по умолчанию.
+    /// Default values.
     /// </summary>
     public static class Defaults
     {
@@ -247,49 +247,49 @@ public sealed record StreamingConfig
         // Network Assessment
 
         /// <summary>
-        /// 90% от оценённой пропускной способности (модель THROUGHPUT, dash.js).
-        /// Оставляем 10% запаса, чтобы не упираться в потолок канала.
+        /// 90% of estimated throughput (THROUGHPUT model, dash.js).
+        /// Leaves a 10% safety margin to avoid hitting the channel ceiling.
         /// </summary>
         public const double ThroughputSafetyFactor = 0.90;
 
         /// <summary>
-        /// 128 KB/s ≈ 1 Мбит/с — абсолютный минимум для стабильного аудиостриминга.
-        /// Ниже этого порога любой relative ratio будет вводить в заблуждение.
+        /// 128 KB/s ≈ 1 Mbps — absolute minimum for stable audio streaming.
+        /// Below this threshold, any relative ratio will be misleading.
         /// </summary>
         public const int AbsoluteCriticalBandwidthBytesPerSec = 128 * 1024;
 
         /// <summary>
-        /// 512 KB/s ≈ 4 Мбит/с — нижняя граница комфортного стриминга с буферизацией.
+        /// 512 KB/s ≈ 4 Mbps — lower bound for comfortable buffered streaming.
         /// </summary>
         public const int AbsoluteDegradedBandwidthBytesPerSec = 512 * 1024;
 
         /// <summary>
-        /// Канал должен быть как минимум в 1.5× быстрее битрейта аудио, иначе
-        /// воспроизведение без буферизации невозможно.
+        /// Channel speed must be at least 1.5× the audio bitrate; otherwise,
+        /// playback without buffering is impossible.
         /// </summary>
         public const double MinViableBandwidthMultiplier = 1.5;
 
         /// <summary>
-        /// BDP floor активен только пока буфер меньше 4 секунд (startup/seek фаза).
-        /// В steady state достаточно demand-based sizing без BDP-коррекции.
+        /// The BDP floor is active only while the buffer is less than 4 seconds (startup/seek phase).
+        /// In steady state, demand-based sizing without BDP correction is sufficient.
         /// </summary>
         public const int BdpFloorMaxBufferMs = 4_000;
 
         /// <summary>
-        /// Первые 3 замера используют повышенный bootstrap weight для быстрой
-        /// начальной сходимости EMA.
+        /// The first 3 samples use an increased bootstrap weight for fast
+        /// initial EMA convergence.
         /// </summary>
         public const int BandwidthBootstrapSampleCount = 3;
 
         /// <summary>
-        /// 30% вес для bootstrap-замеров — в 6× выше минимального steady-state веса (5%),
-        /// что обеспечивает быстрое приближение к реальной скорости канала.
+        /// 30% weight for bootstrap samples — 6× higher than the minimum steady-state weight (5%),
+        /// ensuring fast convergence to the actual channel speed.
         /// </summary>
         public const double BandwidthBootstrapWeight = 0.30;
 
         /// <summary>
-        /// 128 KB — перекрывает ~5–7 секунд аудио на 128–192 kbps,
-        /// что достаточно для warmup-порога на Medium профиле.
+        /// 128 KB covers ~5–7 seconds of audio at 128–192 kbps,
+        /// which is sufficient for the warmup threshold on the Medium profile.
         /// </summary>
         public const int StartupPrefetchBytes = 128 * 1024;
     }

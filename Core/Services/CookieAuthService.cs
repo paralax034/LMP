@@ -9,7 +9,7 @@ namespace LMP.Core.Services;
 
 public partial class CookieAuthService
 {
-    // Два независимых семафора: auth.json и cookies.txt могут сохраняться параллельно
+    // Two independent semaphores: auth.json and cookies.txt can be saved in parallel
     private readonly SemaphoreSlim _authSaveSemaphore = new(1, 1);
     private readonly SemaphoreSlim _cookieSaveSemaphore = new(1, 1);
     private CancellationTokenSource? _validateCts;
@@ -36,14 +36,14 @@ public partial class CookieAuthService
     public event Action? OnAuthStateChanged;
 
     /// <summary>
-    /// Инициализирует сервис без файлового I/O.
-    /// Файловые операции выполняются в <see cref="InitializeAsync"/>.
+    /// Initializes the service without file I/O.
+    /// File operations are performed in <see cref="InitializeAsync"/>.
     /// </summary>
     public CookieAuthService() { }
 
     /// <summary>
-    /// Выполняет файловый I/O старта: загрузку кук, профиля и одноразовую миграцию.
-    /// Должен вызываться из <c>App.axaml.cs</c> до <c>LibraryService.InitializeAsync</c>.
+    /// Performs startup file I/O: loading cookies, profile, and one-time migration.
+    /// Must be called from <c>App.axaml.cs</c> before <c>LibraryService.InitializeAsync</c>.
     /// </summary>
     public async Task InitializeAsync()
     {
@@ -107,7 +107,7 @@ public partial class CookieAuthService
 
             if (!File.Exists(_authDataPath) || new FileInfo(_authDataPath).Length == 0)
             {
-                // File.Copy: BCL не предоставляет async-аналога; для <10 KB файла Task.Run избыточен
+                // File.Copy: BCL does not provide an async counterpart; Task.Run is redundant for a <10 KB file
                 File.Copy(legacyPath, _authDataPath, overwrite: true);
                 Log.Info($"[Auth] Migrated auth.json to {_authDataPath}");
                 await LoadAuthDataAsync().ConfigureAwait(false);
@@ -121,13 +121,13 @@ public partial class CookieAuthService
     }
 
     /// <summary>
-    /// Обновляет профиль пользователя и публикует событие изменения авторизации
-    /// только при фактическом изменении данных.
+    /// Updates the user profile and raises the authentication change event
+    /// only when the data actually changes.
     /// </summary>
-    /// <param name="name">Имя пользователя.</param>
-    /// <param name="email">Email пользователя.</param>
-    /// <param name="avatarUrl">URL аватара пользователя.</param>
-    /// <param name="activeGaiaId">Gaia ID активного аккаунта.</param>
+    /// <param name="name">User name.</param>
+    /// <param name="email">User email.</param>
+    /// <param name="avatarUrl">User avatar URL.</param>
+    /// <param name="activeGaiaId">Gaia ID of the active account.</param>
     public void UpdateUserProfile(string name, string email, string avatarUrl, string activeGaiaId)
     {
         bool currentAuth = IsAuthenticated;
@@ -178,20 +178,20 @@ public partial class CookieAuthService
     }
 
     /// <summary>
-    /// Универсальный извлекатель текста, поддерживающий как плоский формат simpleText,
-    /// так и сложную структуру с массивом runs.
+    /// Universal text extractor supporting both flat simpleText format
+    /// and complex structures with a runs array.
     /// </summary>
     private static string? GetStringValue(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Undefined) return null;
 
-        // 1. Проверяем наличие прямого simpleText
+        // 1. Check for direct simpleText
         if (element.TryGetProperty("simpleText", out var simpleTextProp))
         {
             return simpleTextProp.GetString();
         }
 
-        // 2. Проверяем наличие массива форматирования runs
+        // 2. Check for formatted runs array
         if (element.TryGetProperty("runs", out var runsProp) && runsProp.ValueKind == JsonValueKind.Array)
         {
             foreach (var run in runsProp.EnumerateArray())
@@ -207,12 +207,12 @@ public partial class CookieAuthService
     }
 
     /// <summary>
-    /// Проверяет валидность текущей сессии на серверах YouTube.
-    /// Парсит единый ответ switcher для одновременного извлечения текущего профиля и списка всех каналов мульти-авторизации.
-    /// Автоматически завершает сессию (Logout) при получении подтвержденного отказа от Google во избежание бесконечных 401 ошибок.
+    /// Validates the current session on YouTube servers.
+    /// Parses a single switcher response to simultaneously extract the current profile and the list of all multi-account channels.
+    /// Automatically terminates the session (Logout) upon receiving a confirmed refusal from Google to avoid infinite 401 errors.
     /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Кортеж, содержащий признак валидности сессии, строку ошибки и признак сетевой ошибки в случае неудачи.</returns>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A tuple containing session validity flag, error string, and network error flag in case of failure.</returns>
     public async Task<(bool IsValid, string? Error, bool IsNetworkError)> ValidateSessionAsync(CancellationToken ct = default)
     {
         if (!IsAuthenticated)
@@ -226,7 +226,7 @@ public partial class CookieAuthService
             var mainOrigin = "https://www.youtube.com";
             var authHeader = YoutubeHttpHandler.GetAuthHeader(sapisid, mainOrigin);
 
-            // Используем стандартный GET эндпоинт получения свичера
+            // Use the standard GET switcher endpoint
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.youtube.com/getAccountSwitcherEndpoint");
             request.Headers.UserAgent.ParseAdd(YoutubeClientUtils.UaWeb);
             request.Headers.Add("Cookie", cookiesHeader);
@@ -243,7 +243,7 @@ public partial class CookieAuthService
             using var response = await Audio.Http.SharedHttpClient.Instance.SendAsync(
                 request, HttpCompletionOption.ResponseContentRead, cts.Token).ConfigureAwait(false);
 
-            // Если пришел явный 401 — сессия гарантированно мертва. Принудительно выкидываем из аккаунта
+            // If an explicit 401 is returned, the session is guaranteed dead. Force logout from account
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
                 Log.Warn("[Auth] 401 Unauthorized received during session validation. Session expired. Automatically logging out...");
@@ -258,7 +258,7 @@ public partial class CookieAuthService
 
                 var rawJson = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
 
-                // Защита от XSSI: Отсекаем префикс )]}' перед парсингом JSON
+                // XSSI defense: Strip the )]}' prefix before parsing JSON
                 int jsonStart = rawJson.IndexOf('{');
                 if (jsonStart >= 0)
                 {
@@ -272,10 +272,10 @@ public partial class CookieAuthService
                 string? activeName = null, activeEmail = null, activeAvatar = null, activeGaiaId = null;
                 string? activeHandle = null;
 
-                // getAccountSwitcherEndpoint оборачивает весь InnerTube ответ в свойство "data"
+                // getAccountSwitcherEndpoint wraps the entire InnerTube response in the "data" property
                 var dataElement = jsonDoc.RootElement.GetPropertyOrNull("data") ?? jsonDoc.RootElement;
 
-                // Унифицированный парсинг структуры меню switcher
+                // Unified parsing of the switcher menu structure
                 var menu = dataElement.GetPropertyOrNull("actions")
                     ?.EnumerateArrayOrNull()?.FirstOrDefault()
                     .GetPropertyOrNull("getMultiPageMenuAction")?.GetPropertyOrNull("menu")?.GetPropertyOrNull("multiPageMenuRenderer")
@@ -283,7 +283,7 @@ public partial class CookieAuthService
                     ?.EnumerateArrayOrNull()?.FirstOrDefault()
                     .GetPropertyOrNull("openPopupAction")?.GetPropertyOrNull("popup")?.GetPropertyOrNull("multiPageMenuRenderer");
 
-                // Локальная функция для парсинга отдельного врапмера аккаунта во избежание дублирования
+                // Local function for parsing an individual account wrapper to avoid duplication
                 void ProcessWrap(JsonElement wrap, string sectionEmail)
                 {
                     var accountItem = wrap.GetPropertyOrNull("accountItem");
@@ -411,8 +411,8 @@ public partial class CookieAuthService
                     return (true, null, false);
                 }
 
-                // Google успешно вернул 200 OK, но в нем нет активного аккаунта (меню гостя).
-                // Это значит, что сессия аннулирована сервером. Принудительно выходим!
+                // Google successfully returned 200 OK, but it contains no active account (guest menu).
+                // This means the session was invalidated by the server. Force logout!
                 Log.Warn("[Auth] Validation returned guest configuration. Session expired. Automatically logging out...");
                 Logout();
                 return (false, "Session expired or returned guest menu configuration.", false);
@@ -422,29 +422,29 @@ public partial class CookieAuthService
         }
         catch (OperationCanceledException)
         {
-            // Внешняя отмена — пробрасываем, чтобы вызывающий код отличил
-            // user cancel от внутреннего таймаута
+            // External cancellation — rethrow so the caller can distinguish
+            // user cancel from internal timeout
             if (ct.IsCancellationRequested)
                 throw;
 
-            // Внутренний CancelAfter(8s) сработал — это сетевой таймаут, не user cancel
+            // Internal CancelAfter(8s) triggered — this is a network timeout, not a user cancel
             Log.Warn("[Auth] Session validation timed out (8s internal deadline)");
             return (false, "Connection timed out", true);
         }
         catch (Exception ex)
         {
-            // Важно: При сетевых таймаутах мы НЕ вызываем Logout(),
-            // так как куки могут быть валидными, просто временно отсутствует соединение.
+            // Important: On network timeouts we do NOT call Logout(),
+            // as cookies may still be valid, connection is just temporarily lost.
             Log.Error($"[Auth] Session validation exception: {ex.Message}");
             return (false, ex.Message, true);
         }
     }
 
     /// <summary>
-    /// Устанавливает индекс активной мульти-сессии Google.
-    /// Событие изменения публикуется только при фактическом изменении значения.
+    /// Sets the active Google multi-session index.
+    /// The change event is published only when the value actually changes.
     /// </summary>
-    /// <param name="authUser">Индекс активного authuser.</param>
+    /// <param name="authUser">Active authuser index.</param>
     public void SetAuthUser(string authUser)
     {
         bool changed;
@@ -474,13 +474,13 @@ public partial class CookieAuthService
     }
 
     /// <summary>
-    /// Сохраняет куки, полученные от браузерного расширения, и обновляет состояние авторизации.
+    /// Saves cookies received from the browser extension and updates the authentication state.
     /// <para>
-    /// При свежем логине (unauth → auth) <b>не стреляет</b> <see cref="OnAuthStateChanged"/>,
-    /// так как <see cref="AuthState.ActiveGaiaId"/> ещё не установлен и <c>CurrentOwnerId</c>
-    /// библиотеки вернёт <c>"guest"</c>. Вместо этого запускает фоновую валидацию сессии,
-    /// по завершении которой <see cref="UpdateUserProfile"/> установит корректный профиль
-    /// и выстрелит <see cref="OnAuthStateChanged"/> с правильным контекстом владельца.
+    /// On fresh login (unauth → auth), <see cref="OnAuthStateChanged"/> <b>does not fire</b>,
+    /// since <see cref="AuthState.ActiveGaiaId"/> is not set yet and the library's <c>CurrentOwnerId</c>
+    /// will return <c>"guest"</c>. Instead, it launches background session validation,
+    /// upon completion of which <see cref="UpdateUserProfile"/> sets the correct profile
+    /// and fires <see cref="OnAuthStateChanged"/> with the correct owner context.
     /// </para>
     /// </summary>
     public void SaveCookies(string cookies)
@@ -511,15 +511,15 @@ public partial class CookieAuthService
 
         if (isFreshLogin)
         {
-            // Свежий логин: ActiveGaiaId ещё не установлен → CurrentOwnerId = "guest".
-            // НЕ стреляем OnAuthStateChanged — иначе LibraryService гидрирует для "guest".
-            // Запускаем фоновую валидацию → UpdateUserProfile → OnAuthStateChanged с корректным GaiaId.
+            // Fresh login: ActiveGaiaId is not set yet → CurrentOwnerId = "guest".
+            // Do NOT fire OnAuthStateChanged — otherwise LibraryService hydrates for "guest".
+            // Launch background validation → UpdateUserProfile → OnAuthStateChanged with correct GaiaId.
             Log.Info("[Auth] Fresh authentication detected. Deferring auth state notification until profile is validated.");
             _ = ValidateAndNotifyAsync();
         }
         else
         {
-            // Обновление кук существующей сессии — профиль уже установлен
+            // Cookie update for an existing session — profile is already set
             OnAuthStateChanged?.Invoke();
         }
 
@@ -527,9 +527,9 @@ public partial class CookieAuthService
     }
 
     /// <summary>
-    /// Выполняет отложенную валидацию сессии после свежего логина.
-    /// Предыдущий незавершённый вызов отменяется через <see cref="_validateCts"/>.
-    /// При сетевой ошибке отображает пользователю информативное уведомление.
+    /// Performs deferred session validation after a fresh login.
+    /// Previous pending call is canceled via <see cref="_validateCts"/>.
+    /// On network error, displays an informative notification to the user.
     /// </summary>
     private async Task ValidateAndNotifyAsync()
     {
@@ -553,8 +553,8 @@ public partial class CookieAuthService
                 _profileLoadError = error;
                 OnAuthStateChanged?.Invoke();
             }
-            // Успех → UpdateUserProfile уже вызвал OnAuthStateChanged
-            // 401   → Logout() уже вызвал OnAuthStateChanged
+            // Success → UpdateUserProfile already raised OnAuthStateChanged
+            // 401     → Logout() already raised OnAuthStateChanged
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -629,7 +629,7 @@ public partial class CookieAuthService
 
     public void Logout()
     {
-        // Отменяем до OnAuthStateChanged — гарантируем что validate не выстрелит после выхода
+        // Cancel before OnAuthStateChanged — guarantee validate won't fire after logout
         lock (_validateLock)
         {
             _validateCts?.Cancel();
@@ -717,8 +717,8 @@ public partial class CookieAuthService
     // --- Non-blocking Save ---
 
     /// <summary>
-    /// Сериализует профиль синхронно (CPU-bound, ~0.1 мс),
-    /// запись на диск — fire-and-forget через <see cref="_authSaveSemaphore"/>.
+    /// Serializes the profile synchronously (CPU-bound, ~0.1 ms);
+    /// disk write is fire-and-forget via <see cref="_authSaveSemaphore"/>.
     /// </summary>
     public void SaveAuthData()
     {

@@ -8,7 +8,7 @@ namespace LMP.Core.Helpers;
 internal static class Json
 {
     /// <summary>
-    /// Извлекает первый JSON-объект используя Span — zero string allocation.
+    /// Extracts the first JSON object using Span — zero string allocation.
     /// </summary>
     public static ReadOnlySpan<char> ExtractSpan(ReadOnlySpan<char> source)
     {
@@ -43,7 +43,7 @@ internal static class Json
     }
 
     /// <summary>
-    /// Обратная совместимость — аллоцирует строку.
+    /// Backward compatibility — allocates a string.
     /// </summary>
     public static string Extract(string source)
     {
@@ -52,18 +52,18 @@ internal static class Json
     }
 
     /// <summary>
-    /// Парсит JSON строку. Клонирует RootElement для отвязки от документа.
+    /// Parses a JSON string. Clones RootElement to detach from the document.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static JsonElement Parse(string source)
     {
-        // Для строк используем стандартный парсер — он оптимизирован
+        // For strings, use the standard parser — it is optimized
         using var document = JsonDocument.Parse(source);
         return document.RootElement.Clone();
     }
 
     /// <summary>
-    /// парсит JSON из UTF-8 байтов — zero-copy для HTTP responses.
+    /// Parses JSON from UTF-8 bytes — zero-copy for HTTP responses.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static JsonElement Parse(ReadOnlyMemory<byte> utf8Json)
@@ -73,7 +73,7 @@ internal static class Json
     }
 
     /// <summary>
-    /// Парсит JSON из массива байтов.
+    /// Parses JSON from a byte array.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static JsonElement Parse(byte[] utf8Json)
@@ -83,7 +83,7 @@ internal static class Json
     }
 
     /// <summary>
-    /// Парсит JSON из потока — zero-copy для сетевых ответов.
+    /// Parses JSON from a stream — zero-copy for network responses.
     /// </summary>
     public static async ValueTask<JsonElement> ParseAsync(Stream stream, CancellationToken ct = default)
     {
@@ -104,7 +104,7 @@ internal static class Json
     }
 
     /// <summary>
-    /// кодирует строку для JSON используя ArrayPool.
+    /// Encodes a string for JSON using ArrayPool.
     /// </summary>
     public static string Encode(string value)
     {

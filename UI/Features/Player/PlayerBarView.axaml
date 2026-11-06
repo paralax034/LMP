@@ -37,7 +37,7 @@
                     ClipToBounds="True"
                     RenderTransformOrigin="0.5,0.0">
 
-                    <!-- Высокопроизводительный кастомный векторный прогресс-бар -->
+                    <!-- High-performance custom vector progress bar -->
                     <controls:BufferedProgressBar
                         Name="CustomProgressBar"
                         Maximum="{Binding DurationSeconds}"
@@ -47,7 +47,7 @@
                         BackgroundBrush="{DynamicResource BgHighlightBrush}"
                         BufferBrush="{DynamicResource TextSecondaryBrush}" />
 
-                    <!-- Единая сквозная искра по всему таймлайну при загрузке -->
+                    <!-- Single seamless spark across the entire timeline on load -->
                     <Border Name="SparkContainer"
                         ClipToBounds="True"
                         CornerRadius="2"
@@ -71,22 +71,22 @@
                                         <Animation Duration="0:0:1.8"
                                             IterationCount="Infinite"
                                             Easing="CubicEaseInOut">
-                                            <!-- Фаза 1: Быстрый старт -->
+                                            <!-- Phase 1: Fast start -->
                                             <KeyFrame Cue="0%">
                                                 <Setter Property="TranslateTransform.X" Value="-120" />
                                             </KeyFrame>
-                                            <!-- Фаза 2: Замедление/дрейф в центре -->
+                                            <!-- Phase 2: Deceleration/center drift -->
                                             <KeyFrame Cue="30%">
                                                 <Setter Property="TranslateTransform.X" Value="320" />
                                             </KeyFrame>
                                             <KeyFrame Cue="60%">
                                                 <Setter Property="TranslateTransform.X" Value="620" />
                                             </KeyFrame>
-                                            <!-- Фаза 3: Взрывное ускорение -->
+                                            <!-- Phase 3: Explosive acceleration -->
                                             <KeyFrame Cue="85%">
                                                 <Setter Property="TranslateTransform.X" Value="1820" />
                                             </KeyFrame>
-                                            <!-- Фаза 4: Финишный уход за экран -->
+                                            <!-- Phase 4: Final off-screen exit -->
                                             <KeyFrame Cue="100%">
                                                 <Setter Property="TranslateTransform.X" Value="2400" />
                                             </KeyFrame>
@@ -105,7 +105,7 @@
                     </Border>
                 </Grid>
 
-                <!-- Курсор предпросмотра (призрачный, следует за мышью) -->
+                <!-- Preview cursor (ghosted, follows mouse) -->
                 <Canvas
                     Name="PreviewCursorCanvas"
                     HorizontalAlignment="Stretch"
@@ -123,7 +123,7 @@
                         IsHitTestVisible="False" />
                 </Canvas>
 
-                <!-- Бегунок и основной курсор + Рельсы перемотки -->
+                <!-- Thumb and primary cursor + Seek rails -->
                 <Canvas
                     Name="ThumbCanvas"
                     HorizontalAlignment="Stretch"
@@ -132,7 +132,7 @@
                     ClipToBounds="False"
                     IsHitTestVisible="False">
 
-                    <!-- Высокопроизводительный полый мост-рельсы -->
+                    <!-- High-performance hollow rail bridge -->
                     <Grid
                         Name="SeekRangeSpan"
                         Canvas.Top="-1.5"
@@ -145,13 +145,13 @@
                             </Transitions>
                         </Grid.Transitions>
 
-                        <!-- Верхняя рельса -->
+                        <!-- Top rail -->
                         <Border
                             Height="1.5"
                             VerticalAlignment="Top"
                             Background="{DynamicResource AccentBrush}" />
 
-                        <!-- Нижняя рельса -->
+                        <!-- Bottom rail -->
                         <Border
                             Height="1.5"
                             VerticalAlignment="Bottom"
@@ -172,7 +172,7 @@
                         </Border.RenderTransform>
                     </Border>
 
-                    <!-- ПРЯМОУГОЛЬНЫЙ БЕГУНОК -->
+                    <!-- RECTANGULAR THUMB -->
                     <Border
                         Name="SeekThumb"
                         Canvas.Left="0"
@@ -188,7 +188,7 @@
                     </Border>
                 </Canvas>
 
-                <!-- ВЫСОКОПРОИЗВОДИТЕЛЬНЫЕ ВЕКТОРНЫЕ ОВЕРЛЕИ -->
+                <!-- HIGH-PERFORMANCE VECTOR OVERLAYS -->
                 <Canvas
                     Name="OverlayCanvas"
                     HorizontalAlignment="Stretch"
@@ -196,7 +196,7 @@
                     ClipToBounds="False"
                     IsHitTestVisible="False">
 
-                    <!-- ТУЛТИП ЦЕЛЕВОГО ВРЕМЕНИ -->
+                    <!-- TARGET TIME TOOLTIP -->
                     <Border
                         Name="SeekTooltip"
                         Padding="8,4"
@@ -221,7 +221,7 @@
                             Foreground="{DynamicResource AccentBrush}"
                             Text="0:00" />
                     </Border>
-                    <!-- Окно подсказки отмены Seek -->
+                    <!-- Seek cancel hint window -->
                     <Border
                         Name="SeekHint"
                         Padding="8,4"
@@ -250,7 +250,7 @@
                     </Border>
                 </Canvas>
 
-                <!-- Область обработки кликов -->
+                <!-- Click handling area -->
                 <Border
                     Name="SeekHitBox"
                     HorizontalAlignment="Stretch"
@@ -264,7 +264,7 @@
                     PointerReleased="OnSeekAreaReleased" />
             </Grid>
 
-            <!-- КНОПКИ УПРАВЛЕНИЯ -->
+            <!-- CONTROL BUTTONS -->
             <Grid Grid.Row="1" Margin="8,4,8,4" ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                 <StackPanel Grid.Column="0" VerticalAlignment="Center" Orientation="Horizontal"
                     Spacing="2">
@@ -386,11 +386,11 @@
                                 Opened="OnEqualizerFlyoutOpened"
                                 Closed="OnEqualizerFlyoutClosed">
                                 <StackPanel Width="364" Margin="4,4,4,0" Spacing="4">
-                                    <!-- Единая строка: Питание | Режимы трека | Пресеты, 5/10,
-                                    Сброс -->
+                                    <!-- Single row: Power | Track Modes | Presets, 5/10,
+                                    Reset -->
                                     <Grid ColumnDefinitions="Auto, Auto, *, Auto, Auto, Auto"
                                         VerticalAlignment="Center">
-                                        <!-- Блок 1: Питание -->
+                                        <!-- Block 1: Power -->
                                         <ToggleSwitch Grid.Column="0"
                                             IsChecked="{Binding IsEqualizerEnabled}"
                                             ToolTip.Tip="{Binding L[Eq_Title]}"
@@ -398,14 +398,14 @@
                                             ToolTip.VerticalOffset="-6"
                                             VerticalAlignment="Center" Margin="0,0,4,0" />
 
-                                        <!-- Блок 2: Режимы привязки (Нота vs Глобус) -->
+                                        <!-- Block 2: Binding modes (Note vs Globe) -->
                                         <StackPanel Grid.Column="1" Orientation="Horizontal"
                                             Spacing="4" VerticalAlignment="Center">
                                             <Border Width="1" Height="16"
                                                 Background="{DynamicResource BgHighlightBrush}"
                                                 Margin="2,0" />
 
-                                            <!-- Для текущего трека (Нота) -->
+                                            <!-- For current track (Note) -->
                                             <Button Width="28" Height="28" CornerRadius="6"
                                                 Classes="icon-btn"
                                                 IsEnabled="{Binding HasTrack}"
@@ -427,7 +427,7 @@
                                                 </Panel>
                                             </Button>
 
-                                            <!-- Единый для всех (Глобус) -->
+                                            <!-- Global for all (Globe) -->
                                             <Button Width="28" Height="28" CornerRadius="6"
                                                 Classes="icon-btn"
                                                 Command="{Binding ToggleForceGlobalEqualizerCommand}"
@@ -449,7 +449,7 @@
                                             </Button>
                                         </StackPanel>
 
-                                        <!-- Блок 3: Выпадающее меню пресетов (только по наведению) -->
+                                        <!-- Block 3: Preset dropdown menu (hover only) -->
                                         <Panel Grid.Column="3" Margin="0,0,4,0"
                                             PointerEntered="OnPresetsTriggerPointerEntered"
                                             PointerExited="OnPresetsTriggerPointerExited">
@@ -494,9 +494,9 @@
                                                                         <DataTemplate
                                                                             x:DataType="vm:EqualizerPresetChipItem">
                                                                             <Panel>
-                                                                                <!-- Обычная строка
-                                                                                пресета (в стиле
-                                                                                подменю плейлистов) -->
+                                                                                <!-- Regular preset
+                                                                                row (styled like
+                                                                                playlist submenu) -->
                                                                                 <Button
                                                                                     HorizontalAlignment="Stretch"
                                                                                     HorizontalContentAlignment="Stretch"
@@ -531,10 +531,9 @@
                                                                                     </Grid>
                                                                                 </Button>
 
-                                                                                <!-- Режим
-                                                                                переименования
-                                                                                активного пресета
-                                                                                прямо в списке -->
+                                                                                <!-- Inline renaming
+                                                                                mode for active preset
+                                                                                directly in list -->
                                                                                 <Grid
                                                                                     ColumnDefinitions="*,Auto"
                                                                                     ColumnSpacing="4"
@@ -569,8 +568,8 @@
                                                             <Separator Classes="menu-separator"
                                                                 Margin="6,3" />
 
-                                                            <!-- Строка создания нового пресета
-                                                            внизу меню -->
+                                                            <!-- Create new preset row
+                                                            at menu bottom -->
                                                             <Border Padding="8,4"
                                                                 CornerRadius="6"
                                                                 BorderBrush="{DynamicResource BgHighlightTransparentBrush}"
@@ -611,7 +610,7 @@
                                             </Popup>
                                         </Panel>
 
-                                        <!-- Блок 4: Квадратная кнопка 5 / 10 -->
+                                        <!-- Block 4: Square 5 / 10 button -->
                                         <Button Grid.Column="4" Width="28" Height="28" Padding="0"
                                             Margin="0,0,4,0" CornerRadius="6"
                                             Classes="icon-btn active"
@@ -628,7 +627,7 @@
                                                 VerticalAlignment="Center" />
                                         </Button>
 
-                                        <!-- Блок 5: Кнопка сброса (акцентная ТОЛЬКО когда
+                                        <!-- Block 5: Reset button (accented ONLY when
                                         CanResetEqualizer == true) -->
                                         <Button Grid.Column="5" Width="28" Height="28"
                                             Classes="icon-btn"
@@ -651,7 +650,7 @@
                                         </Button>
                                     </Grid>
 
-                                    <!-- Волна занимает всё пространство снизу с увеличенной высотой -->
+                                    <!-- Waveform occupies all bottom space with increased height -->
                                     <controls:EqualizerCurveControl
                                         x:Name="EqCurveControl"
                                         Height="185"
@@ -760,7 +759,7 @@
                                 <Flyout Placement="Top">
                                     <StackPanel MinWidth="250" Spacing="6" Margin="4">
 
-                                        <!-- Шапка с заголовком и кнопкой принудительного обновления -->
+                                        <!-- Header with title and force refresh button -->
                                         <Grid ColumnDefinitions="*,Auto" Margin="4,2,4,6">
                                             <TextBlock Grid.Column="0"
                                                 FontWeight="Bold"
@@ -802,7 +801,7 @@
                                                 VerticalAlignment="Center" />
                                         </StackPanel>
 
-                                        <!-- Табличная сетка на основе высокопроизводительного Grid -->
+                                        <!-- Tabular grid based on high-performance Grid -->
                                         <ItemsControl ItemsSource="{Binding AvailableFormats}"
                                             IsVisible="{Binding !IsFormatsLoading}">
                                             <ItemsControl.ItemTemplate>
@@ -817,7 +816,7 @@
                                                         <Grid
                                                             ColumnDefinitions="24, 45, 65, 45, *, 24, 45">
 
-                                                            <!-- Столбец 0: Статус скачивания -->
+                                                            <!-- Column 0: Download status -->
                                                             <Panel Grid.Column="0">
                                                                 <PathIcon Width="14" Height="14"
                                                                     Foreground="{DynamicResource AccentBrush}"
@@ -825,28 +824,28 @@
                                                                     IsVisible="{Binding IsDownloaded}" />
                                                             </Panel>
 
-                                                            <!-- Столбец 1: Кодек (Opus/AAC) -->
+                                                            <!-- Column 1: Codec (Opus/AAC) -->
                                                             <TextBlock Grid.Column="1"
                                                                 Text="{Binding Codec}"
                                                                 VerticalAlignment="Center" />
 
-                                                            <!-- Столбец 2: Битрейт с округлением на
-                                                            лету -->
+                                                            <!-- Column 2: Bitrate with on-the-fly
+                                                            rounding -->
                                                             <TextBlock Grid.Column="2"
                                                                 Text="{Binding Bitrate, StringFormat={}{0:F0} kbps}"
                                                                 VerticalAlignment="Center" />
 
-                                                            <!-- Столбец 3: Расширение в скобках -->
+                                                            <!-- Column 3: Extension in parentheses -->
                                                             <TextBlock Grid.Column="3"
                                                                 Text="{Binding Container, StringFormat=({0})}"
                                                                 FontSize="11"
                                                                 Foreground="{DynamicResource TextMutedBrush}"
                                                                 VerticalAlignment="Center" />
 
-                                                            <!-- Столбец 4: Пружина-растяжка
-                                                            (сдвигает индикатор и вес вправо) -->
+                                                            <!-- Column 4: Tension spring
+                                                            (shifts indicator and weight to the right) -->
 
-                                                            <!-- Столбец 5: Динамик активного потока -->
+                                                            <!-- Column 5: Active stream speaker -->
                                                             <Panel Grid.Column="5">
                                                                 <PathIcon Width="14" Height="14"
                                                                     Foreground="{DynamicResource AccentBrush}"
@@ -854,7 +853,7 @@
                                                                     IsVisible="{Binding IsActive}" />
                                                             </Panel>
 
-                                                            <!-- Столбец 6: Размер файла -->
+                                                            <!-- Column 6: File size -->
                                                             <TextBlock Grid.Column="6"
                                                                 HorizontalAlignment="Right"
                                                                 FontSize="11"

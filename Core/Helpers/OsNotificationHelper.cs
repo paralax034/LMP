@@ -5,8 +5,8 @@ using System.Text;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Кроссплатформенные уведомления и системные диалоговые окна ОС.
-/// Минимальная реализация без внешних зависимостей.
+/// Cross-platform OS notifications and system dialog windows.
+/// Minimal implementation without external dependencies.
 /// </summary>
 public static partial class OsNotificationHelper
 {
@@ -51,12 +51,12 @@ public static partial class OsNotificationHelper
     #endregion
 
     /// <summary>
-    /// Отображает модальное окно фатальной ошибки и автоматически копирует полный отчет в буфер обмена.
-    /// Работает даже если графическая подсистема Avalonia или среда .NET еще не успели инициализироваться.
+    /// Displays a fatal error modal window and automatically copies the full report to the clipboard.
+    /// Works even if the Avalonia graphics subsystem or .NET runtime has not initialized yet.
     /// </summary>
-    /// <param name="title">Заголовок окна ошибки.</param>
-    /// <param name="message">Краткое описание ошибки.</param>
-    /// <param name="details">Технические подробности (StackTrace, InnerException).</param>
+    /// <param name="title">The error window title.</param>
+    /// <param name="message">A brief description of the error.</param>
+    /// <param name="details">Technical details (StackTrace, InnerException).</param>
     public static void ShowFatalError(string title, string message, string? details = null)
     {
         var sb = new StringBuilder(1024);
@@ -77,10 +77,10 @@ public static partial class OsNotificationHelper
 
         string fullReport = sb.ToString();
 
-        // 1. Автоматически копируем полный стек-трейс в буфер обмена
+        // 1. Automatically copy full stack trace to the clipboard
         TryCopyTextToClipboard(fullReport);
 
-        // 2. Отображаем модальное окно пользователю
+        // 2. Display modal window to the user
         string displayMessage = OperatingSystem.IsWindows()
             ? $"[Полный текст ошибки скопирован в буфер обмена]\n\n{message}\n\n{(details != null && details.Length > 300 ? details[..300] + "..." : details)}"
             : $"{message}\n\n{details}";
@@ -138,7 +138,7 @@ public static partial class OsNotificationHelper
     }
 
     /// <summary>
-    /// Копирует текст в системный буфер обмена без сторонних зависимостей.
+    /// Copies text to the system clipboard without third-party dependencies.
     /// </summary>
     public static bool TryCopyTextToClipboard(string text)
     {
@@ -219,14 +219,14 @@ public static partial class OsNotificationHelper
         }
         catch
         {
-            // Безопасный fallback при блокировке буфера обмена
+            // Safe fallback when the clipboard is locked
         }
 
         return false;
     }
 
     /// <summary>
-    /// Показывает стандартное всплывающее уведомление ОС.
+    /// Displays a standard native OS toast notification.
     /// </summary>
     public static async Task ShowAsync(string title, string message, NotificationSeverity severity)
     {

@@ -9,15 +9,15 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Бенчмарки пропускной способности и эффективности использования памяти потоковых парсеров,
-/// AST-дешифратора YouTube и механизма пост-дешифровочной компактификации кучи (Gen 2 / LOH).
+/// Throughput and memory efficiency benchmarks for streaming parsers,
+/// YouTube AST decipherer, and post-deciphering heap compactification mechanism (Gen 2 / LOH).
 /// </summary>
 public static class StreamingMemoryBenchmarkTests
 {
   /// <summary>
-  /// P/Invoke <c>SetProcessWorkingSetSize</c> из MemoryHelpers без рефлексии: связывание идёт только с сигнатурой
-  /// <c>(nint, nint, nint) -> bool</c>, поэтому возврат к 32-битным параметрам даёт <see cref="MissingMethodException"/>.
-  /// Первый параметр задаёт статический тип-владелец и всегда <c>null</c>.
+  /// P/Invoke <c>SetProcessWorkingSetSize</c> from MemoryHelpers without reflection: bound strictly to the
+  /// <c>(nint, nint, nint) -> bool</c> signature, so falling back to 32-bit parameters causes a <see cref="MissingMethodException"/>.
+  /// The first parameter specifies the static owner type and is always <c>null</c>.
   /// </summary>
   [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "_SetProcessWorkingSetSize")]
   private static extern bool SetProcessWorkingSetSize(
@@ -54,7 +54,7 @@ public static class StreamingMemoryBenchmarkTests
     const string sapisid = "1234567890abcdef1234567890abcdef12";
     const string origin = "https://music.youtube.com";
 
-    // Прогрев JIT
+    // JIT warmup
     var warmup = YoutubeHttpHandler.GetAuthHeader(sapisid, origin);
     TestAssert.NotNull(warmup);
     TestAssert.True(warmup.StartsWith("SAPISIDHASH ", StringComparison.Ordinal));
@@ -71,7 +71,7 @@ public static class StreamingMemoryBenchmarkTests
     long totalAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeBytes;
     long bytesPerCall = totalAllocated / iterations;
 
-    // Ровно одна строка длиной 63 символа: 24 (header) + 63 * 2 = ~152 байта (выровнено до 152–160 байт).
+    // Exactly one string with a length of 63 characters: 24 (header) + 63 * 2 = ~152 bytes (aligned to 152–160 bytes).
     TestAssert.True(bytesPerCall <= 168, $"Expected single string allocation (<= 168 B), got {bytesPerCall} B/call");
     Log.Info($"[Benchmark] SAPISIDHASH allocation: {bytesPerCall} B/call ({totalAllocated / 1024.0:F2} KB for {iterations} calls)");
 
@@ -81,19 +81,19 @@ public static class StreamingMemoryBenchmarkTests
   [TestMethod(TestCategory.Benchmark, "PlayerContext ReleaseRawScripts & Post-AST Heap Compaction", Group = TestGroups.Cipher, Order = 3)]
   public static Task BenchmarkAstAndLohCompactionAsync()
   {
-    // 1. Проверяем 64-битную сигнатуру P/Invoke в MemoryHelpers. Нулевой хэндл недопустим: вызов доходит до kernel32
-    //    и возвращает false, не трогая Working Set процесса перед замером.
+    // 1. Verify the 64-bit P/Invoke signature in MemoryHelpers. Zero handle is invalid: the call reaches kernel32
+    //    and returns false without touching the process Working Set before measurement.
     if (OperatingSystem.IsWindows())
       TestAssert.False(
           SetProcessWorkingSetSize(null, nint.Zero, -1, -1),
           "SetProcessWorkingSetSize must reject a null process handle");
 
-    // 2. Замеряем baseline закоммиченной памяти до тяжелой фазы
+    // 2. Measure committed memory baseline prior to the heavy phase
     MemoryHelpers.CompactManagedHeapNow();
     var baselineInfo = GC.GetGCMemoryInfo();
     long baselineCommittedMb = baselineInfo.TotalCommittedBytes / (1024 * 1024);
 
-    // 3. Имитируем тяжелую фазу загрузки base.js (3 МБ в LOH) + препроцессированный скрипт + временный граф в Gen2/LOH
+    // 3. Simulate the heavy base.js loading phase (3 MB in LOH) + preprocessed script + temporary graph in Gen2/LOH
     var ctx = CreateSimulatedBloatedPlayerContext();
     TestAssert.Equal(16_384, ctx.PreprocessedJs!.Length);
 
@@ -104,7 +104,7 @@ public static class StreamingMemoryBenchmarkTests
         ? bloatedInfo.GenerationInfo[3].SizeBeforeBytes
         : 0;
 
-    // 4. Освобождаем скрипты контекста и замеряем время компактификации STW
+    // 4. Release context scripts and measure STW compactification time
     ctx.ReleaseRawScripts();
     TestAssert.Equal(string.Empty, ctx.BaseJs);
     TestAssert.Null(ctx.PreprocessedJs);
@@ -145,14 +145,14 @@ public static class StreamingMemoryBenchmarkTests
     var tempBuffers = new List<byte[]>(64);
     for (int i = 0; i < 64; i++)
     {
-      // 64 * 1 МБ = 64 МБ в LOH + узлы в SOH
+      // 64 * 1 MB = 64 MB in LOH + nodes in SOH
       var buf = new byte[1024 * 1024];
       buf[0] = (byte)i;
       buf[^1] = (byte)i;
       tempBuffers.Add(buf);
     }
 
-    // Промоутим буферы через Gen 0 / Gen 1 сборку, как это происходит при парсинге 2.5 МБ AST
+    // Promote buffers via Gen 0 / Gen 1 collection, matching the behavior during 2.5 MB AST parsing
     GC.Collect(1, GCCollectionMode.Forced, blocking: true);
     GC.KeepAlive(tempBuffers);
 
@@ -169,19 +169,19 @@ public static class StreamingMemoryBenchmarkTests
 
     var block = new Core.Audio.Sources.CachingStreamSource.RamRangeBlock(0, rented, chunkSize);
 
-    // 1. Захватываем вторую ссылку для имитации фоновой записи на диск
+    // 1. Acquire a second reference to simulate background disk write
     bool retained = block.TryRetainForDiskWrite(chunkSize, out var diskMemory);
     TestAssert.True(retained);
     TestAssert.Equal(chunkSize, diskMemory.Length);
 
-    // 2. Имитируем вытеснение блока из SlidingRamCache ДО завершения записи на диск
+    // 2. Simulate block eviction from SlidingRamCache BEFORE the disk write completes
     block.Dispose();
 
-    // Буфер обязан оставаться валидным и содержать наши данные, пока диск не завершил запись
+    // The buffer must remain valid and retain our data until the disk write completes
     TestAssert.Equal((byte)0xAA, diskMemory.Span[0]);
     TestAssert.Equal((byte)0x55, diskMemory.Span[chunkSize - 1]);
 
-    // 3. Завершаем запись на диск — буфер возвращается в ArrayPool, повторное удержание невозможно
+    // 3. Complete disk write — the buffer is returned to the ArrayPool, preventing re-retention
     block.ReleaseReference();
     bool retainedAfterRelease = block.TryRetainForDiskWrite(chunkSize, out _);
     TestAssert.False(retainedAfterRelease);

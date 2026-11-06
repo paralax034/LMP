@@ -13,11 +13,11 @@ trim_trailing_whitespace = true
 charset = utf-8
 
 # --- Line Ending Overrides ---
-# bash не переносит \r: скрипты оболочки только с LF в любой ОС.
+# bash scripts should always use LF line endings to avoid issues with shell interpreters on Linux and macOS.
 [*.sh]
 end_of_line = lf
 
-# Файлы локализации отформатированы с отступом в два пробела.
+# Localization files are indented with 2 spaces to reduce file size and improve readability.
 [Assets/Localization/*.json]
 indent_size = 2
 

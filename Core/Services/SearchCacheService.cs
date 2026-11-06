@@ -38,7 +38,7 @@ public sealed class SearchCacheService
     }
 
     /// <summary>
-    /// Получить из кэша.
+    /// Gets an item from the cache.
     /// </summary>
     public async Task<List<TrackInfo>?> GetAsync(string query, SearchSource source, int minCount = 10)
     {
@@ -127,7 +127,7 @@ public sealed class SearchCacheService
     }
 
     /// <summary>
-    /// Сохранить в кэш.
+    /// Stores an item in the cache.
     /// </summary>
     public async Task SetAsync(string query, SearchSource source, List<TrackInfo> tracks)
     {
@@ -267,14 +267,14 @@ public sealed class SearchCacheService
     }
 
     /// <summary>
-    /// Принудительная очистка просроченных записей.
-    /// Вызывается при изменении TTL в настройках.
+    /// Forces eviction of expired entries.
+    /// Called when the TTL setting changes.
     /// </summary>
     public async Task CleanupExpiredAsync()
     {
         await CleanupOldCacheAsync();
 
-        // Также чистим память
+        // Also clear memory
         var ttl = CacheTtl;
         var now = DateTime.UtcNow;
 

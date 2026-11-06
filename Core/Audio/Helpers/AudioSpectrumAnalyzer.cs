@@ -7,17 +7,17 @@ using System.Runtime.Intrinsics.X86;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Высокоточный 10-полосный анализатор спектра реального времени (31 Гц .. 16 кГц) + детектор вокала и транзиента бочки
-/// на базе изолированных фильтров <see cref="BiquadFilterMath"/> за 0 B аллокаций.
+/// High-precision 10-band real-time spectrum analyzer (31 Hz .. 16 kHz) + vocal and kick transient detector
+/// based on isolated <see cref="BiquadFilterMath"/> filters with 0 B allocations.
 /// </summary>
 public sealed class AudioSpectrumAnalyzer
 {
     private const int BandCount = 10;
 
-    /// <summary>Ёмкость очереди отложенных кадров уровней (не менее 320 мс при блоках по 10 мс).</summary>
+    /// <summary>Capacity of the pending level frame queue (at least 320 ms with 10 ms blocks).</summary>
     private const int PendingCapacity = 32;
 
-    /// <summary>Количество 4-полосных SIMD-групп (<c>3 * 4 = 12</c> слотов под 10 полос).</summary>
+    /// <summary>Number of 4-lane SIMD groups (<c>3 * 4 = 12</c> slots for 10 bands).</summary>
     private const int SimdGroupCount = 3;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -164,14 +164,14 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     /// <summary>
-    /// Анализирует блок PCM сэмплов (0 аллокаций) и публикует 10 полос + агрегаты в <see cref="AudioVisualizerBuffer"/>.
-    /// Вызывается только из аудио-callback'а; сначала исполняет отложенный <see cref="RequestReset"/>.
+    /// Analyzes a PCM sample block (0 allocations) and publishes 10 bands + aggregates to <see cref="AudioVisualizerBuffer"/>.
+    /// Called exclusively from the audio callback; executes a pending <see cref="RequestReset"/> first.
     /// </summary>
-    /// <param name="samples">Interleaved PCM блока, только что переданного устройству.</param>
-    /// <param name="channels">Количество каналов в <paramref name="samples"/>.</param>
+    /// <param name="samples">Interleaved PCM of the block just submitted to the device.</param>
+    /// <param name="channels">Number of channels in <paramref name="samples"/>.</param>
     /// <param name="presentationDelayTicks">
-    /// Время до фактического звучания блока в тиках <see cref="Stopwatch"/> (глубина буфера устройства);
-    /// при значении ≤ 0 уровни публикуются немедленно.
+    /// Time until the block actually plays in <see cref="Stopwatch"/> ticks (device buffer depth);
+    /// when ≤ 0, levels are published immediately.
     /// </param>
     public unsafe void ProcessBlock(ReadOnlySpan<float> samples, int channels, long presentationDelayTicks = 0)
     {
@@ -261,7 +261,7 @@ public sealed class AudioSpectrumAnalyzer
         long now = Stopwatch.GetTimestamp();
         if (_pendingCount == PendingCapacity)
         {
-            // Переполнение очереди: старейший кадр показываем досрочно, а не теряем
+            // Queue overflow: render the oldest frame early instead of dropping it
             Publish(ref _pending[_pendingHead]);
             _pendingHead = (_pendingHead + 1) % PendingCapacity;
             _pendingCount--;
@@ -282,8 +282,8 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     /// <summary>
-    /// Векторизованное накопление энергии 10 полос в 3 группах по 4 канала (<see cref="System.Runtime.Intrinsics.X86.Fma"/>):
-    /// 11 регистров XMM на проход, 0 <c>call</c>, 0 обращений к стеку внутри цикла.
+    /// Vectorized energy accumulation of 10 bands across 3 groups of 4 channels (<see cref="System.Runtime.Intrinsics.X86.Fma"/>):
+    /// 11 XMM registers per pass, 0 <c>call</c>s, 0 stack accesses inside the loop.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe float AccumulateSimdFma(float* pSamples, int frameCount, int channels, float* pSumSq12)
@@ -380,8 +380,8 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     /// <summary>
-    /// Векторизованное накопление энергии 10 полос в 3 группах по 4 канала для базового профиля SSE:
-    /// 0 <c>call</c>, 0 обращений к стеку внутри цикла.
+    /// Vectorized energy accumulation of 10 bands across 3 groups of 4 channels for the baseline SSE profile:
+    /// 0 <c>call</c>s, 0 stack accesses inside the loop.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe float AccumulateSimdSse(float* pSamples, int frameCount, int channels, float* pSumSq12)
@@ -530,7 +530,7 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     /// <summary>
-    /// Снимает с головы очереди все кадры, чьё время звучания наступило, и публикует самый свежий из них.
+    /// Dequeues all frames from the head of the queue whose presentation time has arrived and publishes the latest one.
     /// </summary>
     private void PublishDueFrames(long now)
     {
@@ -565,8 +565,8 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     /// <summary>
-    /// Потокобезопасно запрашивает сброс: фильтры обнулит ближайший <see cref="ProcessBlock"/> внутри аудио-callback'а,
-    /// а опубликованные уровни гаснут сразу.
+    /// Thread-safely requests a reset: filters are zeroed by the next <see cref="ProcessBlock"/> inside the audio callback,
+    /// while published levels are cleared immediately.
     /// </summary>
     public void RequestReset()
     {
@@ -575,8 +575,8 @@ public sealed class AudioSpectrumAnalyzer
     }
 
     /// <summary>
-    /// Сбрасывает внутренние задержки фильтров и огибающей.
-    /// Вызывается только из аудио-callback'а (или до запуска backend); остальные потоки используют <see cref="RequestReset"/>.
+    /// Resets internal filter delay lines and envelope state.
+    /// Called exclusively from the audio callback (or before starting the backend); other threads must use <see cref="RequestReset"/>.
     /// </summary>
     public void Reset()
     {

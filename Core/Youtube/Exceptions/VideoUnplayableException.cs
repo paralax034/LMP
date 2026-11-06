@@ -5,10 +5,10 @@ namespace LMP.Core.Youtube.Exceptions;
 /// </summary>
 public class VideoUnplayableException : YoutubeExplodeException
 {
-    /// <summary>Идентификатор видео (raw, без <c>yt_</c> префикса).</summary>
+    /// <summary>Video identifier (raw, without <c>yt_</c> prefix).</summary>
     public string VideoId { get; }
 
-    /// <param name="message">Описание ошибки.</param>
+    /// <param name="message">Error description.</param>
     /// <param name="videoId">Raw video ID.</param>
     public VideoUnplayableException(string message, string videoId)
         : base(message)
@@ -16,7 +16,7 @@ public class VideoUnplayableException : YoutubeExplodeException
         VideoId = videoId;
     }
 
-    /// <summary>Backward-compatible конструктор для legacy throw-sites.</summary>
+    /// <summary>Backward-compatible constructor for legacy throw-sites.</summary>
     public VideoUnplayableException(string message)
         : base(message)
     {

@@ -11,9 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Диагностические сетевые зонды доступности CDN YouTube, DNS/DoH резолвинга и сигнатур ТСПУ/DPI.
-/// Все методы принадлежат категории <see cref="TestCategory.Diagnostic"/>,
-/// что исключает ложные сбои при автоматическом тестировании ПО при проблемах у провайдера.
+/// Diagnostic network probes for YouTube CDN availability, DNS/DoH resolution, and TSPU/DPI signatures.
+/// All methods belong to the <see cref="TestCategory.Diagnostic"/> category,
+/// which prevents false test failures during automated software testing caused by ISP issues.
 /// </summary>
 public static class CdnDiagnosticTests
 {

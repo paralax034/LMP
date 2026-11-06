@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <!-- Явная конфигурация по умолчанию: свойства ниже (путь lock-файла) вычисляются раньше, чем SDK подставит Debug сам -->
+    <!-- Explicit default configuration: properties below (lock file path) are evaluated before the SDK assigns Debug by default -->
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 
     <VersionMajor>0</VersionMajor>
@@ -8,38 +8,38 @@
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
     <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
 
-    <!-- Чтобы IDE-диагностики тоже попадали в сборку (важно для CI) -->
+    <!-- Ensures IDE diagnostics are also included in the build (important for CI) -->
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
-    <!-- Любое предупреждение компилятора и анализаторов прерывает сборку -->
+    <!-- Any compiler or analyzer warning breaks the build -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!--
-      Исключение — уведомления NuGet Audit об уязвимостях (NU1901–NU1904): они остаются видимыми предупреждениями
-      и не блокируют сборку, пока исправленная версия пакета не опубликована.
+      Exception — NuGet Audit vulnerability notifications (NU1901–NU1904): they remain visible as warnings
+      and do not block the build until a patched package version is published.
     -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
 
-    <!-- Раздельные lock-файлы под каждую конфигурацию во всех проектах (устраняет взаимную перезапись Debug/Release) -->
+    <!-- Separate lock files per configuration across all projects (prevents Debug/Release cross-overwrites) -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NuGetLockFilePath>packages.$(Configuration).lock.json</NuGetLockFilePath>
 
-    <!-- Отключаем генерацию и поиск сателлитных сборок ресурсов: локализация работает через JSON -->
+    <!-- Disable generation and resolution of resource satellite assemblies: localization uses JSON -->
     <SatelliteResourceLanguages>none</SatelliteResourceLanguages>
 
     <!--
-      КРИТИЧНО для .NET 11 RC2/RC3+ и Avalonia (AvaloniaUI/Avalonia#22465):
-      В .NET 11 SDK при PublishAot=true по умолчанию включён UseOptimizedPublish=true, который запускает
-      PrepareResources раньше ResolveReferences, из-за чего AddAvaloniaResources пропускает все .axaml и Assets.
+      CRITICAL for .NET 11 RC2/RC3+ and Avalonia (AvaloniaUI/Avalonia#22465):
+      In .NET 11 SDK with PublishAot=true, UseOptimizedPublish=true is enabled by default, which triggers
+      PrepareResources before ResolveReferences, causing AddAvaloniaResources to skip all .axaml and Assets.
     -->
     <UseOptimizedPublish>false</UseOptimizedPublish>
 
-    <!-- Вырезаем неиспользуемую телеметрию EventSource/Activity и метаданные Hot Reload из Release/AOT -->
+    <!-- Strip unused EventSource/Activity telemetry and Hot Reload metadata from Release/AOT -->
     <EventSourceSupport Condition="'$(Configuration)' == 'Release'">false</EventSourceSupport>
     <HttpActivityPropagationSupport Condition="'$(Configuration)' == 'Release'">false</HttpActivityPropagationSupport>
     <MetadataUpdaterSupport Condition="'$(Configuration)' == 'Release'">false</MetadataUpdaterSupport>
 
-    <!-- Низкоуровневый покадровый осциллограф склейки аудио включается ТОЛЬКО при явной сборке с -p:AudioDiag=true -->
+    <!-- Low-level frame-by-frame audio stitching oscilloscope is enabled ONLY during explicit builds with -p:AudioDiag=true -->
     <DefineConstants Condition="'$(AudioDiag)' == 'true'">$(DefineConstants);AUDIO_SPLICE_AUDIT</DefineConstants>
   </PropertyGroup>
 </Project>

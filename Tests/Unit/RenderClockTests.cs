@@ -8,20 +8,20 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Контракты часов рендера с единственным писателем: согласованность снимков SeqLock под конкурентным чтением,
-/// монотонность, ограничение экстраполяции очередью устройства и привязка позиции потока к счётчику рендера при seek.
+/// Single-writer render clock contracts: SeqLock snapshot consistency under concurrent reads,
+/// monotonicity, device queue extrapolation limits, and stream position rebinding to the render counter on seek.
 /// </summary>
 public static class RenderClockTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
     private const int SamplesPerSecond = SampleRate * Channels;
-    private const int SamplesPerTick = SamplesPerSecond / 100; // 10 мс
+    private const int SamplesPerTick = SamplesPerSecond / 100; // 10 ms
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ConsumeTick")]
     private static extern void ConsumeTick(NullAudioBackend backend, float[] buffer, int samplesPerSecond);
 
-    /// <summary>Общее состояние писателя и читателей конкурентного теста.</summary>
+    /// <summary>Shared state of the writer and readers for the concurrency test.</summary>
     private sealed class ConcurrencyProbe
     {
         public volatile bool WriterDone;
@@ -30,7 +30,7 @@ public static class RenderClockTests
         public string? Failure;
     }
 
-    /// <summary>Читатели под непрерывной публикацией видят только целые снимки и неубывающее время.</summary>
+    /// <summary>Readers under continuous publication see only complete snapshots and non-decreasing time.</summary>
     [TestMethod(TestCategory.Unit, "RenderClock SeqLock Snapshots Stay Consistent Under Concurrent Reads", Group = TestGroups.Audio, Order = 40, TimeoutSeconds = 60)]
     public static async Task TestRenderClockConcurrentSnapshotsAsync()
     {
@@ -48,7 +48,7 @@ public static class RenderClockTests
 
         await AudioPipelineTestHarness.WaitUntilAsync(() => Volatile.Read(ref probe.StartedReaders) == readerCount, 2_000).ConfigureAwait(false);
 
-        // Снимок i: отдано i тиков, один тик ещё в очереди устройства; частота кодирует номер снимка
+        // Snapshot i: i ticks written, one tick still in the device queue; sample rate encodes the snapshot index
         workers[readerCount] = Task.Run(() =>
         {
             for (int i = 1; i <= publishes; i++)
@@ -66,7 +66,7 @@ public static class RenderClockTests
         TestAssert.Equal((long)SamplesPerTick * publishes, last.PlayedSamples + last.QueuedSamples, "Final snapshot must cover every rendered sample");
     }
 
-    /// <summary>Экстраполяция ограничена очередью устройства, голодание замораживает позицию, сбой счётчика её не откатывает.</summary>
+    /// <summary>Extrapolation is limited by the device queue; starvation freezes position; counter glitch does not roll it back.</summary>
     [TestMethod(TestCategory.Unit, "RenderClock Extrapolation Bounded By Device Queue & Never Regresses", Group = TestGroups.Audio, Order = 41)]
     public static Task TestRenderClockBoundsAsync()
     {
@@ -74,34 +74,34 @@ public static class RenderClockTests
         const long t0 = 1_000_000;
         var clock = new RenderClock();
 
-        // 1. 9600 сэмплов отдано, 4800 ещё в буфере устройства
+        // 1. 9600 samples written, 4800 still in the device buffer
         clock.Publish(9_600, 4_800, t0, SamplesPerSecond);
         RenderClockSnapshot snapshot = clock.Read();
         TestAssert.Equal(4_800L, snapshot.PlayedSamples);
         TestAssert.Equal(4_800, snapshot.QueuedSamples);
 
-        // 2. +25 мс: ровно 2400 сэмплов хода, но не дальше конца очереди
+        // 2. +25 ms: exactly 2400 samples of progress, but not beyond the end of the queue
         long after25Ms = RenderClock.Extrapolate(in snapshot, t0 + frequency / 40);
         TestAssert.True(Math.Abs(after25Ms - 7_200) <= 1, $"25 ms must advance 2400 samples, got {after25Ms - 4_800}");
         TestAssert.Equal(9_600L, RenderClock.Extrapolate(in snapshot, t0 + 10 * frequency), "Extrapolation must stop at the end of the device queue");
 
-        // 3. Голодание: очередь пуста — позиция стоит на границе отданного
+        // 3. Starvation: queue is empty — position remains at the boundary of written samples
         clock.Publish(9_600, 0, t0 + 10 * frequency, SamplesPerSecond);
         RenderClockSnapshot starved = clock.Read();
         TestAssert.Equal(9_600L, starved.PlayedSamples);
         TestAssert.Equal(9_600L, RenderClock.Extrapolate(in starved, t0 + 20 * frequency), "Starved clock must not extrapolate");
 
-        // 4. Новый блок после голодания с глубокой очередью: перенос хода не даёт позиции откатиться
+        // 4. New block after starvation with a deep queue: progress carryover prevents position rollback
         clock.Publish(10_560, 4_800, t0 + 10 * frequency + frequency / 200, SamplesPerSecond);
         RenderClockSnapshot resumed = clock.Read();
         TestAssert.Equal(9_600L, resumed.PlayedSamples, "Carry-over must keep the position reached before starvation");
         TestAssert.Equal(960, resumed.QueuedSamples);
 
-        // 5. Сбой показаний (счётчик «назад»): писатель не опускает позицию
+        // 5. Counter glitch (counter goes backwards): writer does not lower the position
         clock.Publish(5_000, 0, t0 + 11 * frequency, SamplesPerSecond);
         TestAssert.True(clock.Read().PlayedSamples >= resumed.PlayedSamples, "Render clock must never move backwards");
 
-        // 6. Неизвестная частота: экстраполяции нет
+        // 6. Unknown sample rate: no extrapolation
         var unknownRate = new RenderClock();
         unknownRate.Publish(9_600, 4_800, t0, 0);
         RenderClockSnapshot noRate = unknownRate.Read();
@@ -110,7 +110,7 @@ public static class RenderClockTests
         return Task.CompletedTask;
     }
 
-    /// <summary>Seek перепривязывает позицию к счётчику рендера: уже отданное устройству не засчитывается новой позиции.</summary>
+    /// <summary>Seek rebinds position to the render counter: audio already written to the device is not counted toward the new position.</summary>
     [TestMethod(TestCategory.Unit, "RenderClock Seek Rebases Stream Position On Rendered Counter", Group = TestGroups.Audio, Order = 42)]
     public static async Task TestRenderClockSeekRebaseAsync()
     {
@@ -136,16 +136,16 @@ public static class RenderClockTests
 
         try
         {
-            // 1. Без очереди устройства (NullBackend) прозвучало ровно отданное
+            // 1. Without a device queue (NullBackend), exactly what was written was played
             ConsumeTick(backend, block, SamplesPerSecond);
             TestAssert.Equal((long)blockSamples, pipeline.PlayedSamples);
 
-            // 2. Seek на 60 с: отданное до привязки не сдвигает новую позицию
+            // 2. Seek to 60 s: audio written before rebinding does not advance the new position
             const long seekBase = 60L * SamplesPerSecond;
             pipeline.SetDecodedSamplesPosition(seekBase);
             TestAssert.Equal(seekBase, pipeline.PlayedSamples, "Seek must rebase the clock without counting already rendered samples");
 
-            // 3. Следующий блок продвигает позицию ровно на свою длину
+            // 3. Next block advances the position by exactly its length
             ConsumeTick(backend, block, SamplesPerSecond);
             TestAssert.Equal(seekBase + blockSamples, pipeline.PlayedSamples);
 

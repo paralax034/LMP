@@ -4,20 +4,20 @@ using System.Text.Json;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Служебный класс для общих операций парсинга ответов YouTube API.
-/// Содержит оптимизированные методы для извлечения токенов продолжения.
+/// Utility class for general YouTube API response parsing operations.
+/// Contains optimized methods for extracting continuation tokens.
 /// </summary>
 internal static class BridgeUtils
 {
     /// <summary>
-    /// Пытается найти токен продолжения (Continuation Token) в различных структурах JSON-ответа.
-    /// Поддерживает форматы:
-    /// 1. commandExecutorCommand (вложенные команды, используется в "Понравившиеся").
-    /// 2. continuationCommand (прямой токен).
-    /// 3. nextContinuationData (старый формат).
+    /// Tries to find a continuation token in various JSON response structures.
+    /// Supports formats:
+    /// 1. commandExecutorCommand (nested commands, used in "Liked").
+    /// 2. continuationCommand (direct token).
+    /// 3. nextContinuationData (legacy format).
     /// </summary>
-    /// <param name="renderer">JSON-элемент, представляющий continuationItemRenderer или аналогичный объект.</param>
-    /// <returns>Строка токена или null, если токен не найден.</returns>
+    /// <param name="renderer">JSON element representing continuationItemRenderer or similar object.</param>
+    /// <returns>Token string or null if token is not found.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string? ExtractContinuationToken(JsonElement renderer)
     {
@@ -54,10 +54,10 @@ internal static class BridgeUtils
     }
 
     /// <summary>
-    /// Ищет элемент continuationItemRenderer в конце списка содержимого.
+    /// Searches for a continuationItemRenderer element at the end of the contents list.
     /// </summary>
-    /// <param name="contents">JSON-массив содержимого (contents/items).</param>
-    /// <returns>Токен продолжения, если найден последний элемент-рендерер.</returns>
+    /// <param name="contents">JSON array of contents (contents/items).</param>
+    /// <returns>Continuation token if the last renderer element is found.</returns>
     public static string? FindTokenInContents(JsonElement contents)
     {
         if (contents.ValueKind != JsonValueKind.Array)

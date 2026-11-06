@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishTrimmed;IsAotCompatible;RuntimeIdentifier;SelfContained">
 
     <!--
-      Генератор реестра тестов: на этапе сборки превращает методы с [TestMethod] в таблицу
-      дескрипторов с готовыми делегатами вызова. Заменяет рефлексивное обнаружение в TestDiscovery.
-      Анализаторы Roslyn обязаны собираться под netstandard2.0.
+      Test registry generator: transforms methods marked with [TestMethod] into a descriptor
+      table with pre-built invocation delegates at build time. Replaces reflection-based discovery in TestDiscovery.
+      Roslyn analyzers must be built targeting netstandard2.0.
     -->
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
@@ -16,9 +16,9 @@
         <IsPackable>false</IsPackable>
 
         <!--
-          Анализатор исполняется внутри компилятора и никогда не публикуется: AOT-свойства, переданные
-          в командной строке для приложения (dotnet publish -p:PublishAot=true), здесь принудительно гасятся.
-          Без этого netstandard2.0 падает с NETSDK1207.
+          The analyzer executes inside the compiler and is never published: AOT properties passed
+          via the command line for the application (dotnet publish -p:PublishAot=true) are explicitly disabled here.
+          Without this, netstandard2.0 fails with NETSDK1207.
         -->
         <PublishAot>false</PublishAot>
         <PublishTrimmed>false</PublishTrimmed>
@@ -26,10 +26,10 @@
         <RuntimeIdentifier></RuntimeIdentifier>
         <SelfContained>false</SelfContained>
 
-        <!-- RS2008: учёт релизов анализатора не нужен внутреннему генератору -->
+        <!-- RS2008: analyzer release tracking is not required for an internal generator -->
         <NoWarn>$(NoWarn);RS2008</NoWarn>
 
-        <!-- Версия Roslyn фиксируется здесь: генератор не участвует в общем графе пакетов приложения -->
+        <!-- The Roslyn version is pinned here: the generator does not participate in the main application package graph -->
         <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     </PropertyGroup>
 

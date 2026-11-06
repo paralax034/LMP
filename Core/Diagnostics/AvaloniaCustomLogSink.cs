@@ -49,8 +49,8 @@ public class AvaloniaCustomLogSink : ILogSink
     }
 
     /// <summary>
-    /// Парсит именованные шаблоны ({Property}) и превращает их в позиционные ({0})
-    /// для предотвращения System.FormatException в string.Format.
+    /// Parses named templates ({Property}) and converts them into positional ones ({0})
+    /// to prevent System.FormatException in string.Format.
     /// </summary>
     private static string FormatStructuredTemplate(string template, object?[] args)
     {
@@ -63,7 +63,7 @@ public class AvaloniaCustomLogSink : ILogSink
 
         while (i < template.Length)
         {
-            // Ищем начало плейсхолдера '{', игнорируя экранирование '{{'
+            // Look for the placeholder start '{', ignoring escaped '{{'
             if (template[i] == '{' && i + 1 < template.Length && template[i + 1] != '{')
             {
                 int closeIndex = template.IndexOf('}', i);
@@ -78,14 +78,14 @@ public class AvaloniaCustomLogSink : ILogSink
                         inside = inside.Substring(0, colonIndex);
                     }
 
-                    // Если внутри уже число (позиционный формат) — оставляем как есть
+                    // If it is already a number inside (positional format), leave it as is
                     if (int.TryParse(inside, out _))
                     {
                         sb.Append('{').Append(inside).Append(formatModifier).Append('}');
                     }
                     else
                     {
-                        // Если текст — заменяем на порядковый индекс аргумента
+                        // If it is text, replace it with the zero-based index of the argument
                         sb.Append('{').Append(argIndex++).Append(formatModifier).Append('}');
                     }
                     i = closeIndex + 1;

@@ -3,7 +3,7 @@ using Avalonia.Media.Imaging;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Обёртка над разделяемым <see cref="Avalonia.Media.Imaging.Bitmap"/> для учёта памяти в LRU-кэше.
+/// Wrapper around a shared <see cref="Avalonia.Media.Imaging.Bitmap"/> for memory tracking in the LRU cache.
 /// </summary>
 public sealed class RefCountedBitmap : IDisposable
 {
@@ -27,9 +27,9 @@ public sealed class RefCountedBitmap : IDisposable
     public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
     /// <summary>
-    /// Отвязывает ссылку кэша от <see cref="Bitmap"/>, позволяя GC собрать его,
-    /// как только ни один визуальный контрол <c>Image.Source</c> больше не ссылается на него.
-    /// Не вызывает <c>Bitmap.Dispose()</c>, чтобы не разрушить активные привязки в визуальном дереве Avalonia.
+    /// Unlinks the cache reference from the <see cref="Bitmap"/>, allowing the GC to collect it
+    /// as soon as no visual control's <c>Image.Source</c> references it anymore.
+    /// Does not call <c>Bitmap.Dispose()</c> to avoid breaking active bindings in the Avalonia visual tree.
     /// </summary>
     public void Dispose()
     {

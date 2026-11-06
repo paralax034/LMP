@@ -7,8 +7,8 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube;
 
 /// <summary>
-/// Делегирующий обработчик HTTP-запросов для интеграции с YouTube API.
-/// Настраивает заголовки авторизации, куки и контексты запросов.
+/// Delegating HTTP request handler for YouTube API integration.
+/// Configures authorization headers, cookies, and request contexts.
 /// </summary>
 public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? authService, bool disposeClient = false)
     : ClientDelegatingHandler(http, disposeClient)
@@ -19,81 +19,81 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     private static volatile string _musicClientVersion = FallbackMusicClientVersion;
     private static volatile string _webClientVersion = FallbackWebClientVersion;
 
-    /// <summary>Версия клиента YouTube Music.</summary>
+    /// <summary>YouTube Music client version.</summary>
     public static string MusicClientVersion
     {
         get => _musicClientVersion;
         set => _musicClientVersion = string.IsNullOrWhiteSpace(value) ? FallbackMusicClientVersion : value;
     }
 
-    /// <summary>Идентификатор клиента YouTube Music.</summary>
+    /// <summary>YouTube Music client ID.</summary>
     public const string MusicClientName = "67";
 
-    /// <summary>Идентификатор клиента YouTube Web.</summary>
+    /// <summary>YouTube Web client ID.</summary>
     public const string WebClientName = "1";
 
-    /// <summary>Версия формата API для заголовка X-Goog-Api-Format-Version.</summary>
+    /// <summary>API format version for the X-Goog-Api-Format-Version header.</summary>
     public const string ApiFormatVersion = "1";
 
-    /// <summary>Версия клиента YouTube Web.</summary>
+    /// <summary>YouTube Web client version.</summary>
     public static string WebClientVersion
     {
         get => _webClientVersion;
         set => _webClientVersion = string.IsNullOrWhiteSpace(value) ? FallbackWebClientVersion : value;
     }
 
-    /// <summary>Origin заголовок для YouTube Music.</summary>
+    /// <summary>Origin header for YouTube Music.</summary>
     public const string MusicOrigin = "https://music.youtube.com";
 
-    /// <summary>Origin заголовок для основного YouTube.</summary>
+    /// <summary>Origin header for main YouTube.</summary>
     public const string YoutubeOrigin = "https://www.youtube.com";
 
-    /// <summary>Инвариантная языковая локаль для всех сервисных запросов InnerTube API.</summary>
+    /// <summary>Invariant language locale for all InnerTube API service requests.</summary>
     public const string InvariantHl = "en";
 
-    /// <summary>Инвариантный ISO-код региона для всех сервисных запросов InnerTube API.</summary>
+    /// <summary>Invariant ISO region code for all InnerTube API service requests.</summary>
     public const string InvariantGl = "US";
 
-    /// <summary>Инвариантный заголовок языка для предотвращения локализации ответов API.</summary>
+    /// <summary>Invariant language header to prevent localization of API responses.</summary>
     public const string InvariantAcceptLanguage = "en-US,en;q=0.9";
 
-    /// <summary>Количество попыток отправки обычного API-запроса (Search, Browse, Playlists).</summary>
+    /// <summary>Number of retry attempts for regular API requests (Search, Browse, Playlists).</summary>
     private const int DefaultMaxAttempts = 3;
 
-    /// <summary>Количество попыток отправки запроса плеера (/player) на один клиент перед переключением на fallback-клиент.</summary>
+    /// <summary>Number of player request (/player) retry attempts per client before switching to a fallback client.</summary>
     private const int PlayerMaxAttempts = 2;
 
-    /// <summary>Базовый шаг линейного ожидания (мс) между повторными попытками при сетевом сбое.</summary>
+    /// <summary>Base step for linear backoff (ms) between retries on network failure.</summary>
     private const int RetryBackoffBaseMs = 1_000;
 
-    /// <summary>Пауза (мс) перед повтором запроса после обновления сессионных кук при HTTP 401.</summary>
+    /// <summary>Delay (ms) before retrying a request after refreshing session cookies on HTTP 401.</summary>
     private const int UnauthorizedCookieRetryDelayMs = 200;
 
-    /// <summary>Базовая пауза (мс) при получении HTTP 429 Too Many Requests.</summary>
+    /// <summary>Base delay (ms) on receiving HTTP 429 Too Many Requests.</summary>
     private const int RateLimitBaseDelayMs = 2_000;
 
-    /// <summary>Шаг увеличения паузы (мс) при повторном HTTP 429.</summary>
+    /// <summary>Delay step increment (ms) on consecutive HTTP 429 responses.</summary>
     private const int RateLimitStepDelayMs = 1_000;
 
-    /// <summary>Максимальное время ожидания ответа от сервера для обычных запросов InnerTube API.</summary>
+    /// <summary>Maximum server response timeout for regular InnerTube API requests.</summary>
     private static readonly TimeSpan DefaultAttemptTimeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>Ускоренный таймаут ожидания ответа для запросов плеера (/player), имеющих клиентский fallback.</summary>
+    /// <summary>Accelerated response timeout for player requests (/player) that have a client fallback.</summary>
     private static readonly TimeSpan PlayerAttemptTimeout = TimeSpan.FromSeconds(7);
 
-    /// <summary>Ключ параметров для передачи Visitor Data в запросе.</summary>
+    /// <summary>Options key for passing Visitor Data in a request.</summary>
     public static readonly HttpRequestOptionsKey<string> VisitorDataKey = new("VisitorData");
 
-    /// <summary>Ключ параметров, указывающий на контекст запроса плеера.</summary>
+    /// <summary>Options key indicating a player request context.</summary>
     public static readonly HttpRequestOptionsKey<bool> IsPlayerContext = new("IsPlayerContext");
 
-    /// <summary>Ключ параметров, указывающий на мобильный или ТВ клиент (без авторизации SAPISIDHASH).</summary>
+    /// <summary>Options key indicating a mobile or TV client (without SAPISIDHASH authorization).</summary>
     public static readonly HttpRequestOptionsKey<bool> IsMobileClient = new("IsMobileClient");
 
-    /// <summary>Возвращает текущую языковую локаль системы.</summary>
+    /// <summary>Returns the current system language locale.</summary>
     public static string GetHl() => LocalizationService.Instance.CurrentLanguageCode ?? "en";
 
-    /// <summary>Возвращает двухбуквенный ISO-код региона системы.</summary>
+    /// <summary>Returns the two-letter ISO region code of the system.</summary>
     public static string GetGl()
     {
         try { return RegionInfo.CurrentRegion.TwoLetterISORegionName ?? "US"; }
@@ -101,7 +101,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     }
 
     /// <summary>
-    /// Генерация заголовка авторизации SAPISIDHASH с использованием Span и stackalloc для минимизации аллокаций.
+    /// Generates the SAPISIDHASH authorization header using Span and stackalloc to minimize allocations.
     /// </summary>
     internal static string? GetAuthHeader(string? sapisid, string origin)
     {
@@ -109,7 +109,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
 
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-        // 10 цифр Unix-timestamp в 2026 году
+        // 10 digits for Unix timestamp in 2026
         Span<char> timestampChars = stackalloc char[20];
         if (!timestamp.TryFormat(timestampChars, out int tsLen, provider: CultureInfo.InvariantCulture))
             return null;
@@ -163,7 +163,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     }
 
     /// <summary>
-    /// Настраивает заголовки, куки и параметры безопасности для исходящего запроса.
+    /// Configures headers, cookies, and security options for the outgoing request.
     /// </summary>
     private HttpRequestMessage HandleRequest(HttpRequestMessage request)
     {
@@ -182,8 +182,8 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
             request.Headers.Add("User-Agent", YoutubeClientUtils.UaWeb);
         }
 
-        // Если вызывающий контроллер не установил специфичный Accept-Language,
-        // выставляем заголовок на основе текущей культуры системы пользователя.
+        // If the calling controller hasn't set a specific Accept-Language,
+        // set the header based on the user's current system culture.
         if (!request.Headers.Contains("Accept-Language"))
         {
             var hl = GetHl();
@@ -202,7 +202,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
             }
         }
 
-        // Заголовки для YouTube Music — только для НЕ-player запросов
+        // YouTube Music headers — for NON-player requests only
         if (isMusic && !isPlayerRequest)
         {
             request.Headers.Remove("X-YouTube-Client-Name");
@@ -341,7 +341,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
                     continue;
                 }
 
-                // Последняя попытка исчерпана — классифицируем сетевую ошибку
+                // Last attempt exhausted — classify the network error
                 var networkEx = YoutubeNetworkException.TryClassify(ex, cancellationToken);
                 if (networkEx is not null)
                 {
@@ -353,7 +353,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
             }
         }
 
-        // 3 итерации завершились без return (все 401 с обновлением кук / 429)
+        // 3 iterations completed without return (all were 401 with cookie refresh / 429)
         if (lastException is not null)
         {
             var networkEx = YoutubeNetworkException.TryClassify(lastException, cancellationToken);
@@ -365,7 +365,7 @@ public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? auth
     }
 
     /// <summary>
-    /// Клонирует HTTP-запрос для безопасных повторных отправлений при сбоях сети.
+    /// Clones an HTTP request for safe resending on network failures.
     /// </summary>
     private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage request)
     {

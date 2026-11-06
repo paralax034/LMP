@@ -6,40 +6,40 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio.Cache;
 
 /// <summary>
-/// Lightweight gap-fill downloader для <see cref="AudioCacheManager"/>.
-/// Скачивает только недостающие диапазоны (gaps) без создания <see cref="Sources.CachingStreamSource"/>,
-/// парсеров контейнеров и ring buffers.
+/// Lightweight gap-fill downloader for <see cref="AudioCacheManager"/>.
+/// Downloads missing ranges (gaps) only, without instantiating <see cref="Sources.CachingStreamSource"/>,
+/// container parsers, or ring buffers.
 /// </summary>
 /// <remarks>
-/// <para>Thread-safe: использует <see cref="AudioCacheManager.WriteRangeAsync"/>
-/// с внутренним file-lock и I/O tracking.</para>
-/// <para>Idempotent: повторная запись уже скачанного диапазона — safe no-op
-/// (overlap обрабатывается <see cref="AudioCacheEntry.MarkRangeDownloaded"/>).</para>
-/// <para>Safe для параллельной работы с активным <see cref="Sources.CachingStreamSource"/>:
-/// оба writer'а сериализуются через <c>_fileLocks</c> semaphore,
-/// overlap-writes не ломают данные (тот же itag = те же байты).</para>
+/// <para>Thread-safe: relies on <see cref="AudioCacheManager.WriteRangeAsync"/>
+/// with internal file locking and I/O tracking.</para>
+/// <para>Idempotent: re-writing an already downloaded range is a safe no-op
+/// (overlaps are handled by <see cref="AudioCacheEntry.MarkRangeDownloaded"/>).</para>
+/// <para>Safe for concurrent execution with an active <see cref="Sources.CachingStreamSource"/>:
+/// both writers are serialized via the <c>_fileLocks</c> semaphore;
+/// overlap writes do not corrupt data (same itag = same bytes).</para>
 /// </remarks>
 public static class CacheDownloadHelper
 {
     /// <summary>
-    /// Размер chunk для HTTP range requests.
-    /// Баланс между overhead (много requests) и loss при обрыве (большой chunk).
+    /// Chunk size for HTTP range requests.
+    /// Balances overhead (too many requests) against data loss on drop (large chunk).
     /// </summary>
     private const int ChunkSize = 512 * 1024;
 
     /// <summary>
-    /// Гарантирует полное кэширование трека, скачивая только недостающие диапазоны (gaps).
+    /// Guarantees full track caching by downloading only the missing ranges (gaps).
     /// </summary>
-    /// <param name="descriptor">Дескриптор resolved потока с live URL.</param>
-    /// <param name="httpClient">HTTP-клиент с общим connection pool.</param>
-    /// <param name="cacheManager">Менеджер дискового кэша.</param>
+    /// <param name="descriptor">Resolved stream descriptor with a live URL.</param>
+    /// <param name="httpClient">HTTP client sharing a common connection pool.</param>
+    /// <param name="cacheManager">Disk cache manager.</param>
     /// <param name="progress">
-    /// Callback прогресса (0.0–1.0) относительно gap bytes.
-    /// Если трек на 80% закэширован, progress отражает заполнение оставшихся 20%.
+    /// Progress callback (0.0–1.0) relative to gap bytes.
+    /// If the track is 80% cached, progress reflects the completion of the remaining 20%.
     /// </param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns><c>true</c>, если трек полностью закэширован; иначе <c>false</c>.</returns>
-    /// <exception cref="ArgumentException">Дескриптор не содержит live URL.</exception>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><c>true</c> if the track is fully cached; otherwise, <c>false</c>.</returns>
+    /// <exception cref="ArgumentException">Descriptor does not contain a live URL.</exception>
     public static async Task<bool> EnsureFullyCachedAsync(
         ResolvedStreamDescriptor descriptor,
         HttpClient httpClient,
@@ -73,7 +73,7 @@ public static class CacheDownloadHelper
     }
 
     /// <summary>
-    /// Core: создаёт/обновляет entry, вычисляет gaps, скачивает через HTTP range, пишет в кэш.
+    /// Core: creates/updates entry, computes gaps, downloads via HTTP range requests, and writes to cache.
     /// </summary>
     private static async Task<bool> EnsureFullyCachedCoreAsync(
         string cacheKey,
@@ -184,7 +184,7 @@ public static class CacheDownloadHelper
     }
 
     /// <summary>
-    /// Читает HTTP response stream в арендованный буфер.
+    /// Reads the HTTP response stream into a rented buffer.
     /// </summary>
     private static async ValueTask<int> ReadStreamToBufferAsync(
         HttpResponseMessage response,
@@ -207,7 +207,7 @@ public static class CacheDownloadHelper
     }
 
     /// <summary>
-    /// Вычисляет незакэшированные диапазоны (gaps) на основе snapshot скачанных ranges.
+    /// Computes uncached ranges (gaps) based on a snapshot of downloaded ranges.
     /// </summary>
     private static List<(long Start, long Length)> ComputeGaps(CacheByteRange[] ranges, long totalSize)
     {
@@ -230,7 +230,7 @@ public static class CacheDownloadHelper
     }
 
     /// <summary>
-    /// Создаёт HTTP range request с корректным User-Agent для YouTube CDN.
+    /// Creates an HTTP range request with a valid User-Agent for YouTube CDN.
     /// </summary>
     private static HttpRequestMessage CreateRangeRequest(string url, long start, long end)
     {

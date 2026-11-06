@@ -1,48 +1,48 @@
 namespace LMP.Core.Audio.Interfaces;
 
 /// <summary>
-/// Парсер контейнерного формата (WebM, MP4 и т.д.).
+/// Container format parser (WebM, MP4, etc.).
 /// </summary>
 public interface IContainerParser : IAsyncDisposable, IDisposable
 {
-    /// <summary>Длительность в миллисекундах.</summary>
+    /// <summary>Duration in milliseconds.</summary>
     long DurationMs { get; }
     
-    /// <summary>Кодек аудио данных.</summary>
+    /// <summary>Audio data codec.</summary>
     AudioCodec Codec { get; }
     
-    /// <summary>Decoder-specific config (ASC для AAC, CodecPrivate для Opus).</summary>
+    /// <summary>Decoder-specific config (ASC for AAC, CodecPrivate for Opus).</summary>
     byte[]? DecoderConfig { get; }
     
-    /// <summary>Sample rate (0 если неизвестен).</summary>
+    /// <summary>Sample rate (0 if unknown).</summary>
     int SampleRate { get; }
     
-    /// <summary>Channels (0 если неизвестно).</summary>
+    /// <summary>Channels (0 if unknown).</summary>
     int Channels { get; }
     
     /// <summary>
-    /// Парсит заголовки контейнера.
+    /// Parses container headers.
     /// </summary>
     ValueTask<bool> ParseHeadersAsync(CancellationToken ct = default);
     
     /// <summary>
-    /// Читает следующий аудио-фрейм.
+    /// Reads the next audio frame.
     /// </summary>
     ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default);
     
     /// <summary>
-    /// Находит позицию для seek.
+    /// Finds the seek position.
     /// </summary>
     (long BytePosition, long TimestampMs)? FindSeekPosition(long targetMs);
     
     /// <summary>
-    /// Сбрасывает состояние парсера после seek.
+    /// Resets parser state after seek.
     /// </summary>
     void Reset();
 
     /// <summary>
-    /// Дает команду парсеру отказаться от текущего внутреннего буфера и 
-    /// принудительно искать следующий валидный блок синхронизации при следующем чтении.
+    /// Instructs the parser to discard its current internal buffer and 
+    /// force search for the next valid sync block on the next read.
     /// </summary>
     void RequireResync();
 }

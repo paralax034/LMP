@@ -3,7 +3,7 @@ namespace LMP.Core.Services;
 public sealed partial class AudioEngine
 {
     /// <summary>
-    /// Пропускает текущий трек, требующий сложной расшифровки n-токена.
+    /// Skips the current track requiring complex n-token decryption.
     /// </summary>
     private void SkipCurrentTrackRequiringNToken(string? skippedTrackId)
     {
@@ -25,7 +25,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Обработчик начала расшифровки n-токена.
+    /// Handler for the start of n-token decryption.
     /// </summary>
     private void HandleNTokenDecryptionStarted(string rawVideoId)
     {

@@ -1,28 +1,28 @@
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Единый координатор управления воспроизведением.
-/// Предоставляет свойства и события, синхронизированные между всеми UI компонентами.
+/// Unified playback management coordinator.
+/// Provides properties and events synchronized across all UI components.
 ///
-/// <para><b>Архитектура:</b></para>
+/// <para><b>Architecture:</b></para>
 /// <list type="bullet">
-///   <item>Является единственным подписчиком на события AudioEngine для state tracking</item>
-///   <item>Предоставляет свойства на ObservableObject и типизированные события C# для PlayerBar, TrayIcon, MediaKeys</item>
-///   <item>Работает независимо от suspend/resume состояния окна</item>
-///   <item>Является единственной точкой управления громкостью — UI не обращается к AudioEngine напрямую</item>
+///   <item>Acts as the sole subscriber to AudioEngine events for state tracking</item>
+///   <item>Provides ObservableObject properties and typed C# events for PlayerBar, TrayIcon, MediaKeys</item>
+///   <item>Operates independently of the window suspend/resume state</item>
+///   <item>Serves as the single point of volume control — the UI does not access AudioEngine directly</item>
 /// </list>
 ///
 /// <para><b>ForceSync:</b></para>
-/// <para>Не генерирует повторные уведомления для CurrentTrack если объект тот же (по Id).
-/// Это предотвращает ложный TrackReset при восстановлении из трея.</para>
+/// <para>Does not re-emit notifications for CurrentTrack if the object is the same (by Id).
+/// This prevents false TrackReset signals when restoring from the tray.</para>
 ///
 /// <para><b>Shuffle:</b></para>
-/// <para>Все изменения ShuffleEnabled ДОЛЖНЫ идти через этот сервис (SetShuffleEnabled / ToggleAutoShuffle),
-/// чтобы состояние всегда было синхронизировано с AudioEngine.</para>
+/// <para>All ShuffleEnabled changes MUST go through this service (SetShuffleEnabled / ToggleAutoShuffle)
+/// to keep the state synchronized with AudioEngine at all times.</para>
 ///
 /// <para><b>N-Token Warning:</b></para>
-/// <para>Предупреждение о сложной расшифровке публикуется через <see cref="NTokenWarning"/>
-/// и одновременно показывается через <see cref="NotificationService"/> (если доступен).</para>
+/// <para>Complex decipher warning is published via <see cref="NTokenWarning"/>
+/// and simultaneously shown via <see cref="NotificationService"/> (if available).</para>
 /// </summary>
 public sealed partial class PlayerControlService : ObservableObject, IDisposable
 {
@@ -54,20 +54,20 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     [ObservableProperty] public partial int CurrentVolume { get; set; }
 
     /// <summary>
-    /// ID плейлиста, из которого была запущена текущая очередь.
-    /// Null = источник не плейлист (Home, Search, одиночный трек).
+    /// ID of the playlist from which the current queue was launched.
+    /// Null = source is not a playlist (Home, Search, single track).
     /// </summary>
     [ObservableProperty]
     public partial string? ActivePlaylistId { get; set; }
 
     /// <summary>
-    /// Указывает, совпадает ли активная очередь воспроизведения с оригинальным составом запущенного плейлиста.
+    /// Indicates whether the active playback queue matches the original composition of the launched playlist.
     /// </summary>
     [ObservableProperty]
     public partial bool IsQueuePure { get; private set; }
 
     /// <summary>
-    /// Указывает, воспроизводится ли в данный момент чистая очередь запущенного плейлиста.
+    /// Indicates whether the pristine queue of the launched playlist is currently playing.
     /// </summary>
     [ObservableProperty]
     public partial bool IsPlayingPure { get; private set; }
@@ -89,8 +89,8 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     public event Action<int>? VolumeChanged;
 
     /// <summary>
-    /// Событие изменения чистоты очереди активного плейлиста.
-    /// Аргументы: ActivePlaylistId, IsQueuePure, IsPlayingPure.
+    /// Event raised when the purity of the active playlist queue changes.
+    /// Arguments: ActivePlaylistId, IsQueuePure, IsPlayingPure.
     /// </summary>
     public event Action<string?, bool, bool>? PlaybackPurityChanged;
 
@@ -138,7 +138,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         _audio.OnLoadingStateChanged += HandleLoadingStateChanged;
         _audio.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
 
-        // Если БД уже загружена — синхронизируем UI-состояние, если нет — ждем Initialized
+        // If DB is already loaded — sync UI state, if not — wait for Initialized
         if (_library.IsInitialized)
         {
             _audio.InitializeVolumeFromSettings();
@@ -220,17 +220,17 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Переключает авто-перемешивание (toggle).
-    /// Синхронизирует AudioEngine, сохраняет в настройки, обновляет состояние.
+    /// Toggles auto-shuffle.
+    /// Synchronizes AudioEngine, persists to settings, and updates state.
     /// </summary>
     public void ToggleAutoShuffle()
     {
         bool newState = !_audio.ShuffleEnabled;
         _audio.ShuffleEnabled = newState;
 
-        // При включении shuffle — немедленно перемешать текущую очередь.
-        // Пользователь сразу видит случайный порядок в QueueView.
-        // При выключении — порядок остаётся как есть (уже перемешан).
+        // When enabling shuffle — immediately shuffle the current queue.
+        // The user immediately sees the randomized order in QueueView.
+        // When disabling — order remains as is (already shuffled).
         if (newState)
             _audio.ShuffleQueue();
 
@@ -242,14 +242,14 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Устанавливает состояние авто-перемешивания напрямую.
-    /// Используется из PlaylistViewModel и других мест, которые хотят
-    /// явно установить shuffle = false перед стартом очереди.
+    /// Directly sets the auto-shuffle state.
+    /// Used from PlaylistViewModel and other places that need
+    /// to explicitly set shuffle = false before starting a queue.
     ///
-    /// <para><b>ВАЖНО:</b> Все изменения ShuffleEnabled должны идти через этот метод
-    /// или ToggleAutoShuffle(), чтобы свойство оставалось синхронизированным.</para>
+    /// <para><b>IMPORTANT:</b> All ShuffleEnabled changes must go through this method
+    /// or ToggleAutoShuffle() to keep the property synchronized.</para>
     /// </summary>
-    /// <param name="enabled">Новое состояние авто-перемешивания.</param>
+    /// <param name="enabled">New auto-shuffle state.</param>
     public void SetShuffleEnabled(bool enabled)
     {
         if (_audio.ShuffleEnabled == enabled)
@@ -264,13 +264,13 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Запускает воспроизведение плейлиста с полной регистрацией его состава для отслеживания чистоты очереди в памяти.
-    /// Гарантирует наличие стартового трека в очереди воспроизведения даже при его внешнем удалении из источника данных.
+    /// Starts playlist playback while fully registering its track composition to track queue purity in memory.
+    /// Guarantees the presence of the start track in the playback queue even if it was deleted externally from the data source.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="tracks">Полный упорядоченный список треков плейлиста.</param>
-    /// <param name="startTrack">Трек, с которого необходимо начать воспроизведение (по умолчанию первый).</param>
-    /// <param name="enableShuffle">Включить ли режим случайного порядка.</param>
+    /// <param name="playlistId">Playlist ID.</param>
+    /// <param name="tracks">Full ordered list of playlist tracks.</param>
+    /// <param name="startTrack">Track to start playback from (defaults to the first track).</param>
+    /// <param name="enableShuffle">Whether to enable shuffle mode.</param>
     public async Task PlayPlaylistAsync(
         string playlistId,
         IReadOnlyList<TrackInfo> tracks,
@@ -313,13 +313,13 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Переключает состояние отметки "Мне нравится" для трека локально и в облаке YouTube.
+    /// Toggles the "Like" mark state for a track locally and in the YouTube cloud.
     /// </summary>
-    /// <param name="track">Экземпляр трека.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="track">Track instance.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <remarks>
-    /// Выполняет поиск канонического экземпляра в реестре, гарантируя согласованность
-    /// флага во всех представлениях и коллекциях пользовательского интерфейса.
+    /// Resolves the canonical instance in the registry, ensuring flag consistency
+    /// across all UI views and collections.
     /// </remarks>
     public async Task ToggleLikeAsync(TrackInfo track, CancellationToken ct = default)
     {
@@ -335,11 +335,11 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
         bool syncToCloud = _auth?.IsAuthenticated == true && _library.Settings.LikeSyncMode != LikeSyncMode.LocalOnly;
 
-        // Намерение ставится в Outbox синхронно, до первого await: порядок постановки совпадает с порядком кликов
+        // Intent is pushed to Outbox synchronously before the first await: enqueue order matches click order
         if (syncToCloud && _playlistSync != null)
             _playlistSync.EnqueueLikeMutation(canonical.Id, targetLikedState, previousLikedState);
 
-        // Optimistic Local-First: фиксируем состояние в SQLite и уведомляем UI
+        // Optimistic Local-First: commit state in SQLite and notify UI
         await _library.SetLikeStateAsync(canonical, targetLikedState, ct).ConfigureAwait(false);
 
         if (syncToCloud && _playlistSync == null && _youtube != null)
@@ -356,11 +356,11 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Изменяет громкость на указанный шаг (положительный или отрицательный).
-    /// Используется для колеса мыши в трее и горячих клавиш.
+    /// Changes volume by the specified step (positive or negative).
+    /// Used for tray mouse wheel and hotkeys.
     /// </summary>
-    /// <param name="delta">Величина изменения громкости.</param>
-    /// <returns>Новое значение громкости.</returns>
+    /// <param name="delta">Amount of volume change.</param>
+    /// <returns>The new volume value.</returns>
     public int AdjustVolume(int delta)
     {
         int currentVolume = (int)Math.Round(_audio.GetVolume());
@@ -373,10 +373,10 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Устанавливает громкость воспроизведения, применяет её к аудио-пайплайну и планирует фоновое сохранение.
-    /// Является единственной точкой входа для изменения громкости во всём приложении.
+    /// Sets playback volume, applies it to the audio pipeline, and schedules background persistence.
+    /// Acts as the single entry point for volume modification across the application.
     /// </summary>
-    /// <param name="volume">Новое значение громкости (0–MaxVolume).</param>
+    /// <param name="volume">New volume value (0–MaxVolume).</param>
     public void SetVolume(int volume)
     {
         int maxVolume = _library.Settings.MaxVolumeLimit;
@@ -394,13 +394,13 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Возвращает текущую громкость из AudioEngine (округлённую до int).
+    /// Returns current volume from AudioEngine (rounded to int).
     /// </summary>
     public int GetCurrentVolume() => (int)Math.Round(_audio.GetVolume());
 
     /// <summary>
-    /// Запрашивает Resume у MainWindow (через OnResumeRequested).
-    /// Вызывается когда пользователь взаимодействует с UI в suspend-режиме.
+    /// Requests Resume from MainWindow (via OnResumeRequested).
+    /// Called when the user interacts with the UI while in suspend mode.
     /// </summary>
     public void RequestResume()
     {
@@ -422,9 +422,9 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает смену трека из AudioEngine.
-    /// Не переиздаёт событие если Id трека не изменился,
-    /// чтобы предотвратить ложные TrackReset при восстановлении из трея.
+    /// Handles track change from AudioEngine.
+    /// Does not re-emit the event if track Id hasn't changed,
+    /// preventing false TrackReset calls when restoring from tray.
     /// </summary>
     private void HandleTrackChanged(TrackInfo? track)
     {
@@ -436,9 +436,9 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
         CurrentTrackChanged?.Invoke(track);
 
-        // Сбрасываем источник только при реальной остановке (track → null).
-        // При переходе между треками (prev != null → new != null) источник сохраняется —
-        // это нормально: пользователь слушает тот же плейлист.
+        // Reset source only on actual stop (track → null).
+        // During track transitions (prev != null → new != null) source is retained —
+        // this is expected: user is listening to the same playlist.
         if (track == null && ActivePlaylistId != null)
         {
             ActivePlaylistId = null;
@@ -498,9 +498,9 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Публикует предупреждение о сложной расшифровке n-токена
-    /// и, если это разрешено настройками, либо добавляет его в центр уведомлений,
-    /// либо показывает toast.
+    /// Publishes a complex n-token deciphering warning
+    /// and, if permitted by settings, either adds it to the notification center
+    /// or shows a toast.
     /// </summary>
     private void HandleNTokenDecryptionWarning(AudioEngine.NTokenWarningInfo warning)
     {
@@ -525,8 +525,8 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Публикует уведомление о сложной расшифровке n-токена
-    /// либо как toast, либо только в центр уведомлений.
+    /// Publishes a complex n-token deciphering notification
+    /// either as a toast or strictly in the notification center.
     /// </summary>
     private static async Task PublishNTokenWarningAsync(
         NotificationService notificationService,
@@ -574,16 +574,16 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     #region Sync
 
     /// <summary>
-    /// Принудительная синхронизация всех состояний при восстановлении из трея.
+    /// Forces synchronization of all states when restoring from tray.
     ///
-    /// <para><b>ВАЖНО:</b> НЕ переиздаёт CurrentTrack если трек тот же самый (по Id).
-    /// Это предотвращает ложный TrackReset при восстановлении из трея.</para>
+    /// <para><b>IMPORTANT:</b> Does NOT re-emit CurrentTrack if the track is the same (by Id).
+    /// This prevents false TrackReset signals when restoring from tray.</para>
     ///
-    /// <para>Вместо этого вызывает ForceSync, на который PlayerBarViewModel
-    /// подписывается для мягкого обновления (позиция, буфер, стрим-инфо).</para>
+    /// <para>Instead, calls ForceSync, which PlayerBarViewModel
+    /// subscribes to for soft updates (position, buffer, stream info).</para>
     ///
-    /// <para>Если реальный трек в AudioEngine отличается от кэшированного (по Id),
-    /// публикует новый трек через CurrentTrack.</para>
+    /// <para>If the actual track in AudioEngine differs from cached (by Id),
+    /// publishes the new track via CurrentTrack.</para>
     /// </summary>
     public void ForceSync()
     {
@@ -603,7 +603,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         }
         else
         {
-            // Обновляем ссылку без переиздания события
+            // Update reference without re-emitting event
             CurrentTrack = actualTrack;
         }
 

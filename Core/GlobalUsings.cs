@@ -1,13 +1,13 @@
-// Системные пространства
+// System namespaces
 global using System;
 global using System.Collections.Generic;
 global using System.Threading;
 global using System.Threading.Tasks;
 
-// MVVM генераторы (CommunityToolkit.Mvvm)
+// MVVM generators (CommunityToolkit.Mvvm)
 global using CommunityToolkit.Mvvm.ComponentModel;
 
-// Пространства имен Ядра (LMP.Core)
+// Core namespaces (LMP.Core)
 global using LMP.Core.Models;
 global using LMP.Core.Services;
 global using LMP.Core.ViewModels;

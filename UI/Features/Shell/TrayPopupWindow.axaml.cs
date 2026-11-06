@@ -9,7 +9,7 @@ using Avalonia.Threading;
 namespace LMP.UI.Features.Shell;
 
 /// <summary>
-/// Кастомное всплывающее окно контекстного меню трея.
+/// Custom tray context menu popup window.
 /// </summary>
 public partial class TrayPopupWindow : Window
 {
@@ -23,18 +23,18 @@ public partial class TrayPopupWindow : Window
     private Action<int>? _onVolumeChanged;
 
     /// <summary>
-    /// Последнее известное состояние видимости главного окна.
-    /// Обновляется через <see cref="UpdateState(bool)"/> перед каждым показом popup.
-    /// Используется для корректного текста/иконки кнопки Show/Hide.
+    /// Last known visibility state of the main window.
+    /// Updated via <see cref="UpdateState(bool)"/> before each popup display.
+    /// Used for correct Show/Hide button text/icon.
     /// </summary>
     private bool _lastKnownWindowVisible;
 
     /// <summary>
-    /// Флаг активности подписок на события сервиса плеера.
+    /// Flag indicating whether player service event subscriptions are active.
     /// </summary>
     private bool _isSubscribed;
 
-    // UI контролы
+    // UI controls
     private Border? _trackInfoSection;
     private TextBlock? _trackTitleText;
     private TextBlock? _trackAuthorText;
@@ -61,13 +61,13 @@ public partial class TrayPopupWindow : Window
     private Button? _exitButton;
     private TextBlock? _exitText;
 
-    /// <summary>Шаг изменения громкости при скролле в popup.</summary>
+    /// <summary>Volume step when scrolling in popup.</summary>
     private const int VolumeStep = 2;
 
-    /// <summary>Точная фиксированная ширина popup для расчёта позиции (DIP).</summary>
+    /// <summary>Exact fixed width of the popup for position calculation (DIP).</summary>
     private const int PopupWidth = 260;
 
-    /// <summary>Примерная высота popup для расчёта позиции (DIP).</summary>
+    /// <summary>Approximate height of the popup for position calculation (DIP).</summary>
     private const int EstimatedHeight = 390;
 
     #endregion
@@ -75,8 +75,8 @@ public partial class TrayPopupWindow : Window
     #region Constructor & Init
 
     /// <summary>
-    /// Публичный безпараметрический конструктор — необходим для Avalonia XAML loader (AVLN3001).
-    /// Не используется напрямую — вызывайте <see cref="Initialize"/> после создания.
+    /// Public parameterless constructor — required for Avalonia XAML loader (AVLN3001).
+    /// Not used directly — call <see cref="Initialize"/> after instantiation.
     /// </summary>
     public TrayPopupWindow()
     {
@@ -84,15 +84,15 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Инициализирует popup с зависимостями и подписками.
-    /// Вызывается один раз после создания через безпараметрический конструктор.
+    /// Initializes the popup with dependencies and subscriptions.
+    /// Called once after instantiation via parameterless constructor.
     /// </summary>
-    /// <param name="playerControl">Сервис управления плеером</param>
-    /// <param name="onShowWindow">Toggle show/hide главного окна</param>
-    /// <param name="onExit">Закрыть приложение</param>
-    /// <param name="onOpenQueue">Открыть очередь</param>
-    /// <param name="onCleanMemory">Очистить память</param>
-    /// <param name="onVolumeChanged">Callback при изменении громкости скроллом</param>
+    /// <param name="playerControl">Player control service</param>
+    /// <param name="onShowWindow">Toggle show/hide main window</param>
+    /// <param name="onExit">Exit application</param>
+    /// <param name="onOpenQueue">Open queue</param>
+    /// <param name="onCleanMemory">Clean memory</param>
+    /// <param name="onVolumeChanged">Callback on volume change via scroll</param>
     public void Initialize(
         PlayerControlService playerControl,
         Action? onShowWindow,
@@ -111,16 +111,16 @@ public partial class TrayPopupWindow : Window
         ResolveControls();
         BindClickHandlers();
 
-        // Скролл громкости на volume section
+        // Volume scroll on volume section
         _volumeSection?.PointerWheelChanged += OnVolumeScroll;
 
-        // Light-dismiss: закрыть popup при потере фокуса
+        // Light-dismiss: close popup on focus loss
         Deactivated += (_, _) => HidePopup();
     }
 
     /// <summary>
-    /// Получает ссылки на все именованные контролы из XAML-дерева.
-    /// Вызывается один раз из <see cref="Initialize"/>.
+    /// Retrieves references to all named controls from the XAML tree.
+    /// Called once from <see cref="Initialize"/>.
     /// </summary>
     private void ResolveControls()
     {
@@ -152,8 +152,8 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Привязывает обработчики кликов ко всем кнопкам меню.
-    /// Вызывается один раз из <see cref="Initialize"/>.
+    /// Binds click handlers to all menu buttons.
+    /// Called once from <see cref="Initialize"/>.
     /// </summary>
     private void BindClickHandlers()
     {
@@ -172,11 +172,11 @@ public partial class TrayPopupWindow : Window
     #region State Update
 
     /// <summary>
-    /// Обновляет состояние всех элементов popup перед показом.
+    /// Updates the state of all popup elements before showing.
     /// </summary>
     /// <param name="isWindowVisible">
-    /// <c>true</c> — главное окно видимо (кнопка показывает "Hide / Свернуть").
-    /// <c>false</c> — окно скрыто/в трее (кнопка показывает "Show / Показать").
+    /// <c>true</c> — main window is visible (button shows "Hide").
+    /// <c>false</c> — window is hidden/in tray (button shows "Show").
     /// </param>
     public void UpdateState(bool isWindowVisible = false)
     {
@@ -191,7 +191,7 @@ public partial class TrayPopupWindow : Window
         // Track info
         UpdateTrackInfo(track, hasTrack);
 
-        // Show / Hide — текст и иконка зависят от состояния окна
+        // Show / Hide — text and icon depend on window state
         UpdateShowHideButton(isWindowVisible, L);
 
         // Play/Pause
@@ -223,7 +223,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Обновляет секцию информации о треке.
+    /// Updates track info section.
     /// </summary>
     private void UpdateTrackInfo(TrackInfo? track, bool hasTrack)
     {
@@ -237,7 +237,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Обновляет кнопку Show/Hide: текст и иконку в зависимости от видимости окна.
+    /// Updates the Show/Hide button: text and icon based on window visibility.
     /// </summary>
     private void UpdateShowHideButton(bool isWindowVisible, LocalizationService L)
     {
@@ -254,7 +254,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Обновляет кнопку Play/Pause: текст и иконку в зависимости от состояния воспроизведения.
+    /// Updates the Play/Pause button: text and icon based on playback state.
     /// </summary>
     private void UpdatePlayPauseButton(bool isPlaying, LocalizationService L)
     {
@@ -271,7 +271,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Обновляет кнопку Repeat: текст и иконку в зависимости от режима повтора.
+    /// Updates the Repeat button: text and icon based on repeat mode.
     /// </summary>
     private void UpdateRepeatButton(RepeatMode repeatMode, LocalizationService L)
     {
@@ -289,7 +289,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Обновляет отображение громкости (иконка + текст).
+    /// Updates volume display (icon + text).
     /// </summary>
     private void UpdateVolumeDisplay()
     {
@@ -314,8 +314,8 @@ public partial class TrayPopupWindow : Window
     #region Subscriptions
 
     /// <summary>
-    /// Подписывается на события изменения состояния плеера.
-    /// Запускается только во время видимости всплывающего окна.
+    /// Subscribes to player state change events.
+    /// Active only while the popup is visible.
     /// </summary>
     private void SubscribeToPlayerChanges()
     {
@@ -329,8 +329,8 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Отписывается от изменений состояния плеера для предотвращения утечек памяти 
-    /// и исключения лишней нагрузки на CPU при скрытом окне.
+    /// Unsubscribes from player state changes to prevent memory leaks 
+    /// and avoid unnecessary CPU load when the window is hidden.
     /// </summary>
     private void UnsubscribeFromPlayerChanges()
     {
@@ -377,11 +377,11 @@ public partial class TrayPopupWindow : Window
     #region Show / Position
 
     /// <summary>
-    /// Показывает popup рядом с курсором, корректируя позицию для рабочей области экрана.
+    /// Displays the popup near the cursor, adjusting position for the screen work area.
     /// </summary>
-    /// <param name="x">X-координата курсора в пикселях экрана</param>
-    /// <param name="y">Y-координата курсора в пикселях экрана</param>
-    /// <param name="isWindowVisible">Текущее состояние видимости главного окна. Если null, используется последнее кэшированное значение.</param>
+    /// <param name="x">Cursor X coordinate in screen pixels</param>
+    /// <param name="y">Cursor Y coordinate in screen pixels</param>
+    /// <param name="isWindowVisible">Current main window visibility state. If null, the last cached value is used.</param>
     public void ShowAt(int x, int y, bool? isWindowVisible = null)
     {
         UpdateState(isWindowVisible ?? _lastKnownWindowVisible);
@@ -399,7 +399,7 @@ public partial class TrayPopupWindow : Window
             double workLeft = workArea.X / scaling;
             double workTop = workArea.Y / scaling;
 
-            // Корректируем позицию чтобы окно фиксированной ширины не вылетало за границы монитора
+            // Adjust position so the fixed-width window does not exceed monitor bounds
             if (dipX + PopupWidth > workRight)
                 dipX = workRight - PopupWidth;
 
@@ -419,14 +419,14 @@ public partial class TrayPopupWindow : Window
         Show();
         Activate();
 
-        // Активируем подписки в момент реального открытия окна
+        // Activate subscriptions upon actual window opening
         SubscribeToPlayerChanges();
     }
 
-    /// <summary>Скрывает popup (light-dismiss).</summary>
+    /// <summary>Hides the popup (light-dismiss).</summary>
     private void HidePopup()
     {
-        // Отписываемся от событий сразу при скрытии окна для экономии ресурсов
+        // Unsubscribe from events immediately upon hiding the window to save resources
         UnsubscribeFromPlayerChanges();
         Hide();
     }
@@ -487,7 +487,7 @@ public partial class TrayPopupWindow : Window
     #region Volume Scroll
 
     /// <summary>
-    /// Скролл колесиком на секции громкости — меняет громкость на ±<see cref="VolumeStep"/>.
+    /// Mouse wheel scroll on volume section — changes volume by ±<see cref="VolumeStep"/>.
     /// </summary>
     private void OnVolumeScroll(object? sender, PointerWheelEventArgs e)
     {
@@ -507,7 +507,7 @@ public partial class TrayPopupWindow : Window
     #region Keyboard
 
     /// <summary>
-    /// Escape → закрыть popup.
+    /// Escape → close popup.
     /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
@@ -525,7 +525,7 @@ public partial class TrayPopupWindow : Window
     #region Window Lifecycle
 
     /// <summary>
-    /// Гарантирует отписку от всех событий при физическом закрытии/уничтожении окна.
+    /// Guarantees unsubscription from all events upon physical window closing/destruction.
     /// </summary>
     protected override void OnClosed(EventArgs e)
     {
@@ -538,10 +538,10 @@ public partial class TrayPopupWindow : Window
     #region Helpers — Null-safe Property Setters
 
     /// <summary>
-    /// Null-safe установка Data для PathIcon через именованный ресурс StreamGeometry.
+    /// Null-safe Data assignment for PathIcon via StreamGeometry named resource.
     /// </summary>
-    /// <param name="control">Контрол PathIcon</param>
-    /// <param name="resourceKey">Ключ из Icons.axaml</param>
+    /// <param name="control">PathIcon control</param>
+    /// <param name="resourceKey">Key from Icons.axaml</param>
     private static void SetIcon(PathIcon? control, string resourceKey)
     {
         if (control == null) return;
@@ -557,7 +557,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Null-safe установка текста TextBlock.
+    /// Null-safe Text assignment for TextBlock.
     /// </summary>
     private static void SetText(TextBlock? control, string? text)
     {
@@ -565,7 +565,7 @@ public partial class TrayPopupWindow : Window
     }
 
     /// <summary>
-    /// Null-safe установка IsEnabled для Control.
+    /// Null-safe IsEnabled assignment for Control.
     /// </summary>
     private static void SetEnabled(Control? control, bool enabled)
     {

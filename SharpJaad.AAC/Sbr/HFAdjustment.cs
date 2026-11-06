@@ -213,7 +213,7 @@ namespace SharpJaad.AAC.Sbr
                 {
                     for (n = 0; n < 4; n++)
                     {
-                        // СТАЛО: Ручное копирование в 3D массив
+                        // AFTER: Manual copy into a 3D array
                         for (int k = 0; k < sbr._M; k++)
                         {
                             sbr._G_temp_prev[ch, n, k] = adj.G_lim_boost[l][k];
@@ -227,7 +227,7 @@ namespace SharpJaad.AAC.Sbr
 
                 for (i = sbr._t_E[ch, l]; i < sbr._t_E[ch, l + 1]; i++)
                 {
-                    // СТАЛО:
+                    // AFTER:
                     int ri = sbr._GQ_ringbuf_index[ch];
                     for (int k = 0; k < sbr._M; k++)
                     {

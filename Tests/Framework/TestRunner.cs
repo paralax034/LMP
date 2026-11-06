@@ -3,16 +3,16 @@ using System.Diagnostics;
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Движок выполнения тестов с изоляцией от UI-потока, поддержкой CancellationToken и статуса Skipped.
+/// Test execution engine with UI thread isolation, CancellationToken support, and Skipped status handling.
 /// </summary>
 public sealed class TestRunner
 {
     private readonly IServiceProvider _services;
 
-    /// <summary>Вызывается перед началом выполнения каждого теста.</summary>
+    /// <summary>Invoked before executing each test.</summary>
     public event Action<TestDescriptor>? TestStarting;
 
-    /// <summary>Вызывается по завершении выполнения каждого теста.</summary>
+    /// <summary>Invoked upon completion of each test.</summary>
     public event Action<TestDescriptor, TestResult>? TestCompleted;
 
     public TestRunner(IServiceProvider services)
@@ -20,7 +20,7 @@ public sealed class TestRunner
         _services = services;
     }
 
-    /// <summary>Запускает один тест.</summary>
+    /// <summary>Runs a single test.</summary>
     public async Task<TestResult> RunAsync(TestDescriptor descriptor, CancellationToken ct = default)
     {
         TestStarting?.Invoke(descriptor);
@@ -31,7 +31,7 @@ public sealed class TestRunner
         return result;
     }
 
-    /// <summary>Запускает список тестов последовательно.</summary>
+    /// <summary>Runs a list of tests sequentially.</summary>
     public async Task<IReadOnlyList<TestResult>> RunBatchAsync(
         IReadOnlyList<TestDescriptor> tests,
         CancellationToken ct = default)
@@ -62,8 +62,8 @@ public sealed class TestRunner
     }
 
     /// <summary>
-    /// Запускает все автоматические тесты (Unit, Integration, Benchmark, E2E).
-    /// Исключает деструктивные и ручные действия (<see cref="TestCategory.Action"/>).
+    /// Runs all automated tests (Unit, Integration, Benchmark, E2E).
+    /// Excludes destructive and manual actions (<see cref="TestCategory.Action"/>).
     /// </summary>
     public Task<IReadOnlyList<TestResult>> RunAllAsync(CancellationToken ct = default)
     {
@@ -95,7 +95,7 @@ public sealed class TestRunner
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
                 externalCt, timeoutCts.Token);
 
-            // Вызов метода ВСЕГДА выносится на пул потоков во избежание блокировки UI-диспетчера Avalonia
+            // The method call is ALWAYS offloaded to the thread pool to avoid blocking the Avalonia UI dispatcher
             var task = Task.Run(() => descriptor.Invoke(_services, linkedCts.Token), linkedCts.Token);
             try
             {
@@ -105,7 +105,7 @@ public sealed class TestRunner
                 && !externalCt.IsCancellationRequested
                 && (ex is OperationCanceledException || ex.InnerException is OperationCanceledException))
             {
-                // OCE из самого теста без таймаута и без отмены пользователем — это падение теста, а не Timeout
+                // OCE from the test itself without a timeout and without user cancellation is a test failure, not a Timeout
                 throw new InvalidOperationException(
                     $"Test threw OperationCanceledException without timeout or user cancellation: {(ex.InnerException ?? ex).Message}", ex);
             }

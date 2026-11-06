@@ -7,13 +7,13 @@ using SkiaSharp;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Smoke-тесты инфраструктуры данных и нативных зависимостей: мост SQLite, согласованный бэкап,
-/// изоляция тестовой базы, атомарный откат миграции схемы и совместимость Skia 3.x.
+/// Smoke tests for data infrastructure and native dependencies: SQLite bridge, consistent backup,
+/// test database isolation, atomic schema migration rollback, and Skia 3.x compatibility.
 /// </summary>
 public static class DataSmokeTests
 {
     /// <summary>
-    /// Минимальная версия SQLite с поддержкой <c>VACUUM INTO</c> (3.27.0).
+    /// Minimum SQLite version with <c>VACUUM INTO</c> support (3.27.0).
     /// </summary>
     private const int MinimumSqliteVersion = 3_027_000;
 
@@ -41,7 +41,7 @@ public static class DataSmokeTests
             string dbPath = Path.Combine(scratch, "source.db");
             string backupPath = Path.Combine(scratch, "source.db.bak");
 
-            // Писатель остается открытым: закрытие последнего соединения выполнило бы checkpoint и опустошило -wal.
+            // The writer remains open: closing the last connection would execute a checkpoint and truncate -wal.
             await using var writer = CreateScratchConnection(dbPath);
             await writer.OpenAsync();
             await ExecuteAsync(writer, """
@@ -84,9 +84,9 @@ public static class DataSmokeTests
     }
 
     /// <summary>
-    /// Предусловие для тестов, которые работают с базой через рабочие сервисы.
-    /// Без изолированной временной базы тест пропускается, чтобы прогон из GUI-хоста не оставлял
-    /// тестовых строк в библиотеке пользователя.
+    /// Precondition for tests operating on the database via production services.
+    /// Without an isolated temporary database, the test is skipped so that running from the GUI host
+    /// does not leave test rows in the user's library.
     /// </summary>
     internal static void RequireIsolatedDatabase()
     {
@@ -107,8 +107,8 @@ public static class DataSmokeTests
             await using var connection = CreateScratchConnection(dbPath);
             await connection.OpenAsync();
 
-            // Представление с именем таблицы: CREATE TABLE IF NOT EXISTS его пропускает, а индекс по нему падает
-            // с "views may not be indexed" уже после создания остальных таблиц внутри транзакции миграции.
+            // View with a table name: CREATE TABLE IF NOT EXISTS skips it, but an index on it fails
+            // with "views may not be indexed" after other tables have already been created inside the migration transaction.
             await ExecuteAsync(connection, """CREATE VIEW "Notifications" AS SELECT 1 AS "Id";""");
 
             SqliteException? failure = null;
@@ -128,7 +128,7 @@ public static class DataSmokeTests
             TestAssert.True(SQLitePCL.raw.sqlite3_get_autocommit(connection.Handle!) != 0,
                 "Failed migration must not leave an open transaction");
 
-            // Контроль: после устранения причины та же база мигрирует штатно.
+            // Check: after resolving the cause, the same database migrates normally.
             await ExecuteAsync(connection, """DROP VIEW "Notifications";""");
             await connection.ApplySchemaMigrationAsync(DatabaseExtensions.CurrentDbVersion);
             TestAssert.Equal(DatabaseExtensions.CurrentDbVersion, await connection.GetDatabaseVersionAsync());
@@ -140,8 +140,8 @@ public static class DataSmokeTests
     }
 
     /// <summary>
-    /// Вердикт проверки изоляции согласован с хостом: где изолированная база не включена (GUI-хост),
-    /// проверка обязана пропускаться, а не падать ложным красным.
+    /// Isolation check result is consistent with the host: where an isolated database is not enabled (GUI host),
+    /// the check must be skipped rather than failing with a false red.
     /// </summary>
     [TestMethod(TestCategory.Unit, "Test Database Isolation Verdict Matches Host", Group = TestGroups.Storage, Order = 44)]
     public static async Task TestDatabaseIsolationVerdictAsync()
@@ -194,7 +194,7 @@ public static class DataSmokeTests
     }
 
     /// <summary>
-    /// Создает уникальную временную папку для файлов базы, не пересекающуюся с изолированной тестовой БД.
+    /// Creates a unique temporary folder for database files that does not collide with the isolated test DB.
     /// </summary>
     private static string CreateScratchDirectory()
     {
@@ -204,7 +204,7 @@ public static class DataSmokeTests
     }
 
     /// <summary>
-    /// Создает соединение без пула: файл освобождается сразу после закрытия, и папку можно удалить.
+    /// Creates an unpooled connection: the file is released immediately upon closing, allowing the folder to be deleted.
     /// </summary>
     private static SqliteConnection CreateScratchConnection(string dbPath)
     {

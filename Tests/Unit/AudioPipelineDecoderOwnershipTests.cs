@@ -5,16 +5,16 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Владение декодирующим циклом <see cref="AudioPipeline"/>: таймаут остановки не порождает второго продюсера SPSC-кольца,
-/// фрейм, прочитанный после отмены, не попадает в кольцо, а счётчик декодированных сэмплов равен фактически записанным.
-/// Источник игнорирует отмену, как чтение, зависшее в сокете.
+/// Ownership of the <see cref="AudioPipeline"/> decoding loop: a stop timeout does not spawn a second SPSC ring producer,
+/// a frame read after cancellation does not enter the ring, and the decoded samples counter matches the actual written amount.
+/// The source ignores cancellation, simulating a read hung in a socket.
 /// </summary>
 public static class AudioPipelineDecoderOwnershipTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
 
-    /// <summary>После таймаута остановки повторный старт не запускает второй цикл поверх ещё живого первого.</summary>
+    /// <summary>After a stop timeout, a restart does not launch a second loop on top of the still-alive first loop.</summary>
     [TestMethod(TestCategory.Unit, "Decoder Stop Timeout Never Spawns A Second Loop", Group = TestGroups.Audio, Order = 16, TimeoutSeconds = 10)]
     public static async Task TestStopTimeoutKeepsSingleDecoderLoopAsync()
     {
@@ -27,7 +27,7 @@ public static class AudioPipelineDecoderOwnershipTests
             pipeline.StartDecoding(options, null, null);
             TestAssert.True(await AudioPipelineTestHarness.WaitUntilAsync(() => source.ReadCalls >= 1, 2_000).ConfigureAwait(false), "Decoder loop must start reading");
 
-            // Чтение висит и игнорирует отмену: остановка обязана упереться в таймаут
+            // Read hangs and ignores cancellation: stopping must hit the timeout
             await pipeline.StopDecodingAsync(TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
 
             try
@@ -36,7 +36,7 @@ public static class AudioPipelineDecoderOwnershipTests
             }
             catch (InvalidOperationException)
             {
-                // Явный отказ, пока прежний цикл жив, тоже соблюдает контракт единственного продюсера
+                // Explicit rejection while the previous loop is still alive also respects the single-producer contract
             }
 
             await AudioPipelineTestHarness.WaitUntilAsync(() => source.ReadCalls >= 2, 300).ConfigureAwait(false);
@@ -48,7 +48,7 @@ public static class AudioPipelineDecoderOwnershipTests
         }
     }
 
-    /// <summary>Фрейм, который зависшее чтение вернуло уже после отмены, отбрасывается.</summary>
+    /// <summary>A frame returned by a hung read after cancellation has been requested is discarded.</summary>
     [TestMethod(TestCategory.Unit, "Frame Read After Cancellation Never Reaches The Ring", Group = TestGroups.Audio, Order = 17, TimeoutSeconds = 10)]
     public static async Task TestFrameAfterCancellationIsDroppedAsync()
     {
@@ -61,7 +61,7 @@ public static class AudioPipelineDecoderOwnershipTests
             pipeline.StartDecoding(new AudioPlayerOptions(), null, null);
             TestAssert.True(await AudioPipelineTestHarness.WaitUntilAsync(() => source.ReadCalls >= 1, 2_000).ConfigureAwait(false), "Decoder loop must start reading");
 
-            // Отмена уже выставлена, когда зависшее чтение наконец возвращает фрейм
+            // Cancellation is already signaled when the hung read finally returns a frame
             Task stop = pipeline.StopDecodingAsync(TimeSpan.FromSeconds(2));
             source.Release(AudioPipelineTestHarness.Frame());
             await stop.ConfigureAwait(false);
@@ -74,7 +74,7 @@ public static class AudioPipelineDecoderOwnershipTests
         }
     }
 
-    /// <summary>При частичной записи в кольцо счётчик декодированных сэмплов растёт ровно на принятое кольцом.</summary>
+    /// <summary>On partial ring writes, the decoded samples counter increments strictly by the amount accepted by the ring.</summary>
     [TestMethod(TestCategory.Unit, "Decoded Sample Counter Matches Ring Writes On Partial Write", Group = TestGroups.Audio, Order = 18, TimeoutSeconds = 10)]
     public static async Task TestDecodedCounterMatchesPartialWriteAsync()
     {
@@ -83,7 +83,7 @@ public static class AudioPipelineDecoderOwnershipTests
         var source = new BlockingAudioSource(SampleRate, Channels);
         var backend = new NullAudioBackend();
 
-        // Кольцо вмещает 1023 сэмпла, а декодер отдаёт 8192 при заявленном MaxFrameSize 64: Write примет лишь часть
+        // Ring capacity is 1023 samples, while the decoder yields 8192 with declared MaxFrameSize 64: Write will accept only a portion
         var ring = new LockFreeRingBuffer<float>(1_024);
         var pipeline = AudioPipelineTestHarness.Create(
             source,
@@ -121,7 +121,7 @@ public static class AudioPipelineDecoderOwnershipTests
 
     private static async Task ShutdownAsync(AudioPipeline pipeline, BlockingAudioSource source, NullAudioBackend backend)
     {
-        // Отпускаем зависшие чтения, чтобы осиротевший цикл завершился до освобождения кольца
+        // Unblock hung reads so the orphaned loop terminates before the ring is disposed
         source.Open();
         await AudioPipelineTestHarness.WaitUntilAsync(() => source.ActiveReads == 0, 1_000).ConfigureAwait(false);
         await pipeline.StopDecodingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);

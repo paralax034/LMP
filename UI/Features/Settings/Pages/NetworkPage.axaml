@@ -18,7 +18,7 @@
                 Margin="8,0,0,0" />
         </Grid>
 
-        <!-- Статус подключения -->
+        <!-- Connection status -->
         <Border Classes="card">
             <StackPanel Spacing="12">
                 <TextBlock Classes="label"
@@ -26,8 +26,8 @@
 
                 <Grid ColumnDefinitions="Auto,*,Auto">
 
-                    <!-- Цветной индикатор — цвет приходит из VM как HEX-строка.
-                         Avalonia парсит строку в Color через встроенный TypeConverter. -->
+                    <!-- Color indicator — color comes from VM as a HEX string.
+                         Avalonia parses the string into Color via the built-in TypeConverter. -->
                     <Ellipse Grid.Column="0"
                         Width="10" Height="10"
                         VerticalAlignment="Center"
@@ -47,7 +47,7 @@
                             IsVisible="{Binding NetworkStatusText,
                                 Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                        <!-- Задержка — скрыт пока не получен первый результат -->
+                        <!-- Latency — hidden until the first result is received -->
                         <TextBlock
                             VerticalAlignment="Center"
                             Foreground="{DynamicResource TextSecondaryBrush}"
@@ -99,7 +99,7 @@
             </StackPanel>
         </Border>
 
-        <!-- Профиль и клиент -->
+        <!-- Profile and client -->
         <Border Classes="card">
             <StackPanel Spacing="20">
 

@@ -144,28 +144,28 @@ namespace SharpJaad.AAC
         }
 
         /// <summary>
-        /// Сбрасывает внутреннее состояние декодера для seek без пересоздания.
+        /// Resets the internal state of the decoder for seeking without recreation.
         /// </summary>
         /// <remarks>
-        /// <para><b>Аналог FFmpeg <c>avcodec_flush_buffers</c>.</b></para>
-        /// <para>Сбрасывает <see cref="SyntacticElements"/> (prediction/LTP/coupling state)
-        /// и <see cref="BitStream"/>. <see cref="FilterBank"/> не трогается —
-        /// overlap-add state очищается естественно через skip-frames.</para>
+        /// <para><b>FFmpeg equivalent of <c>avcodec_flush_buffers</c>.</b></para>
+        /// <para>Resets <see cref="SyntacticElements"/> (prediction/LTP/coupling state)
+        /// and <see cref="BitStream"/>. <see cref="FilterBank"/> is left untouched —
+        /// the overlap-add state is cleared naturally via skip-frames.</para>
         ///
-        /// <para><b>Что сохраняется:</b></para>
+        /// <para><b>What is preserved:</b></para>
         /// <list type="bullet">
-        ///   <item><see cref="DecoderConfig"/> — profile, sample rate, channels неизменны.</item>
-        ///   <item><see cref="FilterBank"/> — MDCT таблицы, FFT таблицы.
-        ///     Overlap буферы вытесняются skip-frames за ~2ms.</item>
+        ///   <item><see cref="DecoderConfig"/> — profile, sample rate, channels remain unchanged.</item>
+        ///   <item><see cref="FilterBank"/> — MDCT tables, FFT tables.
+        ///     Overlap buffers are flushed by skip-frames in ~2ms.</item>
         /// </list>
         ///
-        /// <para><b>Стоимость vs recreate:</b></para>
+        /// <para><b>Cost vs recreate:</b></para>
         /// <list type="bullet">
-        ///   <item>Flush: ~4 <c>Array.Clear</c> + lazy recreate 1 Element = ~0.1ms, 1 аллокация</item>
-        ///   <item>Recreate: <c>new Decoder(config)</c> = ~0.3ms, 5+ аллокаций
+        ///   <item>Flush: ~4 <c>Array.Clear</c> + lazy recreate 1 Element = ~0.1ms, 1 allocation</item>
+        ///   <item>Recreate: <c>new Decoder(config)</c> = ~0.3ms, 5+ allocations
         ///     (SyntacticElements, FilterBank, BitStream, Element arrays, MDCT tables)</item>
         ///   <item>Full recreate: <c>ParseMP4DecoderSpecificInfo</c> + <c>new Decoder</c>
-        ///     + <c>new SampleBuffer</c> = ~2ms, 10+ аллокаций</item>
+        ///     + <c>new SampleBuffer</c> = ~2ms, 10+ allocations</item>
         /// </list>
         /// </remarks>
         public void Flush()

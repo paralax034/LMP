@@ -5,10 +5,10 @@ using LMP.Core.Data.Repositories;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Сервис уведомлений: история, toast-очередь, авто-очистка.
+/// Notification service: history, toast queue, auto-cleanup.
 /// <para>
-/// Счётчик непрочитанных — O(1) через <see cref="_unreadCount"/>,
-/// авто-очистка — <see cref="PeriodicTimer"/> в фоновом потоке.
+/// Unread count is O(1) via <see cref="_unreadCount"/>,
+/// auto-cleanup runs via <see cref="PeriodicTimer"/> in a background thread.
 /// </para>
 /// </summary>
 public sealed partial class NotificationService : ObservableObject, IDisposable
@@ -18,7 +18,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
     private const int DefaultToastDuration = 4000;
 
-    // O(1) счётчик, обновляется при каждой мутации коллекции
+    // O(1) counter, updated on every collection mutation
     private int _unreadCount;
     private int _activeTaskCount;
     private readonly HashSet<string> _activeTaskKeys = new(StringComparer.Ordinal);
@@ -31,13 +31,13 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     public bool HasUnread => _unreadCount > 0;
 
     /// <summary>
-    /// Количество активных фоновых задач облака в панели уведомлений (потокобезопасно).
+    /// Number of active cloud background tasks in the notification panel (thread-safe).
     /// </summary>
     public int ActiveTaskCount => Volatile.Read(ref _activeTaskCount);
     public bool HasActiveTasks => Volatile.Read(ref _activeTaskCount) > 0;
 
     /// <summary>
-    /// Событие, вызываемое при изменении состояния любой фоновой задачи.
+    /// Event raised when the state of any background task changes.
     /// </summary>
     public event Action? OnTasksChanged;
 
@@ -55,7 +55,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     private bool _isInitialized;
 
     /// <summary>
-    /// Максимум уведомлений в памяти. Ограничен 100 для сохранения максимальной отзывчивости интерфейса.
+    /// Maximum notifications in memory. Limited to 100 to preserve maximum UI responsiveness.
     /// </summary>
     private int MaxNotifications => Math.Clamp(_libraryService.Settings.Notifications.MaxInPanelCount, 10, 100);
 
@@ -70,7 +70,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     #region Initialization
 
     /// <summary>
-    /// Загружает историю из БД и запускает фоновую авто-очистку.
+    /// Loads history from the DB and starts background auto-cleanup.
     /// </summary>
     public async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -109,7 +109,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     #region Public API
 
     /// <summary>
-    /// Показывает toast-уведомление и добавляет его в историю.
+    /// Displays a toast notification and adds it to the history.
     /// </summary>
     public async Task ShowToastAsync(
         string titleKey,
@@ -167,7 +167,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Показывает детализированный toast об ошибке воспроизведения с попытками.
+    /// Displays a detailed playback error toast with attempt information.
     /// </summary>
     public async Task ShowPlaybackErrorAsync(
         string titleKey,
@@ -217,7 +217,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     public static void PlaySuccessSound() => OsSoundPlayer.PlaySuccess();
 
     /// <summary>
-    /// Создаёт или реактивно обновляет на месте карточку активной фоновой задачи в панели уведомлений.
+    /// Creates or reactively in-place updates an active background task card in the notification panel.
     /// </summary>
     public void UpsertTaskNotification(
         string taskKey,
@@ -324,8 +324,8 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Завершает активную фоновую задачу на месте (превращая её в запись истории с галочкой)
-    /// либо удаляет её без следа, если операция была взаимно аннигилирована (<paramref name="removeIfAnnihilated"/>).
+    /// Completes an active background task in place (converting it into a history entry with a checkmark)
+    /// or removes it without a trace if the operation was mutually annihilated (<paramref name="removeIfAnnihilated"/>).
     /// </summary>
     public void CompleteTaskNotification(
         string taskKey,
@@ -466,8 +466,8 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     #region Auto-Cleanup
 
     /// <summary>
-    /// Запускает фоновый таймер авто-очистки уведомлений.
-    /// Работает в <see cref="ThreadPool"/>, не блокирует UI.
+    /// Starts the background notification auto-cleanup timer.
+    /// Runs on the <see cref="ThreadPool"/> without blocking the UI.
     /// </summary>
     private void StartAutoCleanup()
     {
@@ -487,7 +487,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
         try
         {
-            // Первый прогон — сразу при старте
+            // First run — immediately on startup
             await CleanupOldNotificationsAsync(settings, ct);
 
             while (await timer.WaitForNextTickAsync(ct))
@@ -501,14 +501,14 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Удаляет уведомления старше <see cref="NotificationSettings.AutoCleanupAfterHours"/> часов.
-    /// UI-операции выполняются через <see cref="Dispatcher.UIThread"/>.
+    /// Removes notifications older than <see cref="NotificationSettings.AutoCleanupAfterHours"/> hours.
+    /// UI operations are executed via <see cref="Dispatcher.UIThread"/>.
     /// </summary>
     private async Task CleanupOldNotificationsAsync(NotificationSettings settings, CancellationToken ct)
     {
         var threshold = DateTime.UtcNow - TimeSpan.FromHours(settings.AutoCleanupAfterHours);
 
-        // Собираем кандидатов вне UI-потока
+        // Collect candidates off the UI thread
         List<Notification>? toRemove = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -570,10 +570,10 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
         {
             Notifications.Insert(0, notification);
 
-            // Поддерживаем O(1) счётчик
+            // Maintain O(1) counter
             if (!notification.IsRead) _unreadCount++;
 
-            // Вытесняем самые старые, поддерживая счётчик
+            // Evict the oldest items while maintaining the counter
             while (Notifications.Count > MaxNotifications)
             {
                 var last = Notifications[^1];
@@ -624,7 +624,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     #region UI Commands
 
     /// <summary>
-    /// Отмечает все уведомления как прочитанные и сохраняет в БД.
+    /// Marks all notifications as read and saves changes to the DB.
     /// </summary>
     public void MarkAllAsRead()
     {
@@ -645,13 +645,13 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Удаляет все уведомления из памяти и БД.
+    /// Removes all notifications from memory and the DB.
     /// </summary>
     public void ClearAll()
     {
         Dispatcher.UIThread.Post(() =>
         {
-            // Сохраняем активные невыполненные задачи, очищая только завершённую историю уведомлений
+            // Preserve active pending tasks, clearing only completed notification history
             for (int i = Notifications.Count - 1; i >= 0; i--)
             {
                 if (!Notifications[i].IsTaskActive)
@@ -694,8 +694,8 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Поднимает PropertyChanged для счётчика непрочитанных.
-    /// Вызывается только после мутаций — не в горячем пути биндинга.
+    /// Raises PropertyChanged for the unread counter.
+    /// Called only after mutations — not in the hot binding path.
     /// </summary>
     private void RaiseUnreadProperties()
     {
@@ -704,10 +704,10 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Генерирует набор тестовых уведомлений для проверки производительности UI-панели.
+    /// Generates a set of test notifications to benchmark UI panel performance.
     /// </summary>
-    /// <param name="count">Количество создаваемых уведомлений.</param>
-    /// <param name="clearExisting">Флаг предварительной очистки существующей истории.</param>
+    /// <param name="count">Number of notifications to create.</param>
+    /// <param name="clearExisting">Flag to clear existing history first.</param>
     public async Task SeedDebugNotificationsAsync(int count = 100, bool clearExisting = true)
     {
         if (Dispatcher.UIThread.CheckAccess())

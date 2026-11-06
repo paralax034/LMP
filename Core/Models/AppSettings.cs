@@ -4,169 +4,169 @@ namespace LMP.Core.Models;
 
 public enum YoutubeClientProfile
 {
-    WebRemix,    // n + sig (Работают все ролики)
-    AndroidVR,   // большинство роликов работают
+    WebRemix,    // n + sig (All videos work)
+    AndroidVR,   // Most videos work
     Web,         // n + sig
-    TV,          // не работает
-    Ios,         // HLS в основном
-    AndroidMusic // требует доп. действий
+    TV,          // Not working
+    Ios,         // Mostly HLS
+    AndroidMusic // Requires additional actions
 }
 
 public enum InternetProfile
 {
-    Low,    // Экономия трафика / Медленный интернет
-    Medium, // Баланс (по умолчанию)
-    High,   // Высокое качество / Быстрый интернет
-    Ultra   // Максимальное кэширование / Локальная сеть
+    Low,    // Traffic saving / Slow internet
+    Medium, // Balanced (default)
+    High,   // High quality / Fast internet
+    Ultra   // Maximum caching / Local network
 }
 
 /// <summary>
-/// Интервал пакетного накопления (коалесценции) облачных мутаций перед отправкой в YouTube.
-/// Значение перечисления соответствует длительности окна в секундах (от 10 секунд до 3 часов).
+/// Batching (coalescence) interval for cloud mutations before sending to YouTube.
+/// The enum value corresponds to the window duration in seconds (from 10 seconds to 3 hours).
 /// </summary>
 public enum CloudSyncBatchInterval
 {
-    /// <summary>10 секунд (быстрая коалесценция серий кликов).</summary>
+    /// <summary>10 seconds (fast click series coalescence).</summary>
     Sec10 = 10,
 
-    /// <summary>30 секунд.</summary>
+    /// <summary>30 seconds.</summary>
     Sec30 = 30,
 
-    /// <summary>1 минута (по умолчанию — баланс между отзывчивостью и числом запросов).</summary>
+    /// <summary>1 minute (default — balance between responsiveness and request count).</summary>
     Min1 = 60,
 
-    /// <summary>5 минут.</summary>
+    /// <summary>5 minutes.</summary>
     Min5 = 300,
 
-    /// <summary>15 минут.</summary>
+    /// <summary>15 minutes.</summary>
     Min15 = 900,
 
-    /// <summary>30 минут.</summary>
+    /// <summary>30 minutes.</summary>
     Min30 = 1800,
 
-    /// <summary>1 час.</summary>
+    /// <summary>1 hour.</summary>
     Hour1 = 3600,
 
-    /// <summary>3 часа.</summary>
+    /// <summary>3 hours.</summary>
     Hour3 = 10800
 }
 
 /// <summary>
-/// Тип кривой интерполяции громкости.
+/// Volume interpolation curve type.
 /// </summary>
 public enum VolumeCurveType
 {
-    /// <summary>Линейная: volume = t</summary>
+    /// <summary>Linear: volume = t</summary>
     Linear,
 
-    /// <summary>Квадратичная: volume = t² (по умолчанию, перцептивно линейная)</summary>
+    /// <summary>Quadratic: volume = t² (default, perceptually linear)</summary>
     Quadratic,
 
-    /// <summary>Логарифмическая: volume = log2(1 + t) / log2(2)</summary>
+    /// <summary>Logarithmic: volume = log2(1 + t) / log2(2)</summary>
     Logarithmic,
 
-    /// <summary>Кубическая: volume = t³</summary>
+    /// <summary>Cubic: volume = t³</summary>
     Cubic,
 
     /// <summary>
-    /// "Скорость света": экспоненциальный рост в конце.
-    /// Формула: volume = (e^(t*2) - 1) / (e² - 1)
+    /// "Speed of light": exponential growth at the end.
+    /// Formula: volume = (e^(t*2) - 1) / (e² - 1)
     /// </summary>
     SpeedOfLight
 }
 
 /// <summary>
-/// Скорость анимации активного играющего трека в списке треков.
+/// Animation speed of the active playing track in the track list.
 /// </summary>
 public enum TrackAnimationSpeed
 {
-    /// <summary>Очень медленная плавная анимация.</summary>
+    /// <summary>Very slow smooth animation.</summary>
     VerySlow,
 
-    /// <summary>Медленная плавная анимация.</summary>
+    /// <summary>Slow smooth animation.</summary>
     Slow,
 
-    /// <summary>Сбалансированная стандартная скорость (по умолчанию).</summary>
+    /// <summary>Balanced standard speed (default).</summary>
     Medium,
 
-    /// <summary>Быстрая динамичная анимация.</summary>
+    /// <summary>Fast dynamic animation.</summary>
     Fast,
 
-    /// <summary>Экстремально быстрая анимация высокой частоты.</summary>
+    /// <summary>Extremely fast high-frequency animation.</summary>
     Epileptic
 }
 
 /// <summary>
-/// Стратегия обработки критических ошибок воспроизведения.
+/// Critical playback failure handling strategy.
 /// </summary>
 /// <remarks>
-/// <para>Определяет, требуется ли ручное действие пользователя или можно восстановиться автоматически.</para>
-/// <para>Если выбран автоматический режим, конкретное действие с очередью определяется <see cref="PlaybackFailureBehavior"/>.</para>
-/// <para>Используется в <see cref="UI.Services.PlaybackErrorOrchestrator"/>.</para>
+/// <para>Determines whether manual user action is required or if recovery can be automatic.</para>
+/// <para>If automatic mode is selected, the specific queue action is defined by <see cref="PlaybackFailureBehavior"/>.</para>
+/// <para>Used in <see cref="UI.Services.PlaybackErrorOrchestrator"/>.</para>
 /// </remarks>
 public enum PlaybackErrorBehavior
 {
     /// <summary>
-    /// Остановить автоматическое восстановление и ждать явного действия пользователя.
-    /// Если в очереди есть следующий трек — воспроизведение приостанавливается на текущем состоянии.
-    /// Если трек последний — активный трек завершается полной остановкой.
+    /// Stop automatic recovery and wait for explicit user action.
+    /// If there is a next track in the queue, playback pauses at the current state.
+    /// If it is the last track, the active track finishes with a complete stop.
     /// </summary>
     Dialog,
 
     /// <summary>
-    /// Восстановиться автоматически и показать уведомление об ошибке.
-    /// Конкретное действие после ошибки определяется <see cref="PlaybackFailureBehavior"/>.
+    /// Recover automatically and display an error notification.
+    /// The specific action after an error is defined by <see cref="PlaybackFailureBehavior"/>.
     /// </summary>
     ToastAndSkip,
 
     /// <summary>
-    /// Восстановиться автоматически без показа уведомления.
-    /// Конкретное действие после ошибки определяется <see cref="PlaybackFailureBehavior"/>.
+    /// Recover automatically without displaying a notification.
+    /// The specific action after an error is defined by <see cref="PlaybackFailureBehavior"/>.
     /// </summary>
     Ignore
 }
 
 /// <summary>
-/// Режим отображения уведомлений при сложной дешифровке n-токена.
+/// Notification display mode during complex n-token deciphering.
 /// </summary>
 public enum NTokenNotificationMode
 {
     /// <summary>
-    /// Не создавать уведомление вовсе.
+    /// Do not create a notification at all.
     /// </summary>
     Disabled = 0,
 
     /// <summary>
-    /// Показывать всплывающее toast-уведомление и сохранять запись в центре уведомлений.
+    /// Show a popup toast notification and save the entry to the notification center.
     /// </summary>
     Toast = 1,
 
     /// <summary>
-    /// Сохранять запись только в центре уведомлений без toast.
+    /// Save the entry only to the notification center without showing a toast.
     /// </summary>
     PanelOnly = 2
 }
 
 /// <summary>
-/// Поведение автоматического восстановления после критической ошибки воспроизведения.
+/// Behavior for automatic recovery after a critical playback error.
 /// </summary>
 /// <remarks>
-/// Применяется только если <see cref="AudioSettings.CriticalErrorBehavior"/> допускает автоматическое восстановление.
+/// Applies only if <see cref="AudioSettings.CriticalErrorBehavior"/> allows automatic recovery.
 /// </remarks>
 public enum PlaybackFailureBehavior
 {
     /// <summary>
-    /// Автоматически переключиться на следующий трек и продолжить воспроизведение.
+    /// Automatically switch to the next track and continue playback.
     /// </summary>
     SkipAndPlay,
 
     /// <summary>
-    /// Автоматически переключиться на следующий трек и приостановить воспроизведение.
+    /// Automatically switch to the next track and pause playback.
     /// </summary>
     SkipAndPause,
 
     /// <summary>
-    /// Выйти из текущего трека и полностью остановить воспроизведение без перехода к следующему.
+    /// Exit the current track and completely stop playback without advancing to the next track.
     /// </summary>
     Stop
 }
@@ -195,223 +195,223 @@ public sealed class ProxySettings
 }
 
 /// <summary>
-/// Настройки хранения данных.
+/// Data storage settings.
 /// </summary>
 public sealed class StorageSettings
 {
     /// <summary>
-    /// Лимит кэша изображений в МБ.
+    /// Image cache limit in MB.
     /// </summary>
     public int ImageCacheLimitMb { get; set; } = 500;
 
     /// <summary>
-    /// Лимит кэша аудио (StreamCache) в МБ.
-    /// Старые файлы удаляются автоматически при превышении.
+    /// Audio cache (StreamCache) limit in MB.
+    /// Old files are automatically purged when exceeded.
     /// </summary>
     public int AudioCacheLimitMb { get; set; } = 2048;
 
     public int DownloadedTracksLimitMb { get; set; } = 5000;
 
     /// <summary>
-    /// Максимальное количество изображений в RAM-кэше.
+    /// Maximum number of images in RAM cache.
     /// </summary>
     public int MaxBitmapCacheItems { get; set; } = 25;
 
     /// <summary>
-    /// Автоматически сохранять полностью закэшированные треки в папку Downloads.
-    /// По умолчанию выключено для экономии места (файл дублируется).
+    /// Automatically save fully cached tracks to the Downloads folder.
+    /// Disabled by default to save disk space (prevents file duplication).
     /// </summary>
     public bool AutoSaveToDownloads { get; set; } = false;
 }
 
 /// <summary>
-/// Настройки аудио системы.
+/// Audio system settings.
 /// </summary>
 public sealed class AudioSettings
 {
     /// <summary>
-    /// Включить boost громкости выше 100%.
-    /// Если false — MaxVolume просто увеличивает точность (больше шагов).
+    /// Enable volume boost above 100%.
+    /// If false, MaxVolume simply increases granularity (more steps).
     /// </summary>
     public bool VolumeBoostEnabled { get; set; } = true;
 
     /// <summary>
-    /// Кривая интерполяции громкости.
+    /// Volume interpolation curve.
     /// </summary>
     public VolumeCurveType VolumeCurve { get; set; } = VolumeCurveType.Quadratic;
 
     /// <summary>
-    /// Нормализация громкости (статическое выравнивание уровней, аналог Spotify/YouTube Music).
+    /// Volume normalization (static level matching, similar to Spotify/YouTube Music).
     /// </summary>
     public bool NormalizationEnabled { get; set; } = true;
 
     /// <summary>
-    /// Целевой уровень нормализации в LUFS.
-    /// Диапазон: -24 (тише) .. -6 (громче). По умолчанию -14 (стандарт Spotify/YouTube Music).
+    /// Target normalization level in LUFS.
+    /// Range: -24 (quieter) .. -6 (louder). Default is -14 (Spotify/YouTube Music standard).
     /// </summary>
     public float NormalizationTargetLufs { get; set; } = -14f;
 
     /// <summary>
-    /// Максимальный gain нормализации. Ограничивает усиление тихих треков.
-    /// Диапазон: 1.0 (без усиления) .. 6.0. По умолчанию 3.0.
+    /// Maximum normalization gain. Limits amplification for quiet tracks.
+    /// Range: 1.0 (no gain) .. 6.0. Default is 3.0.
     /// </summary>
     public float NormalizationMaxGain { get; set; } = 3.0f;
 
     /// <summary>
-    /// Режим нормализации громкости.
-    /// <para><b>Bidirectional</b> (по умолчанию): усиливает тихие и понижает громкие треки.
-    /// Обеспечивает одинаковую громкость при любом контенте.</para>
-    /// <para><b>DownwardOnly</b>: только понижение громких треков, как на YouTube.
-    /// Тихие треки воспроизводятся на исходном уровне.</para>
+    /// Volume normalization mode.
+    /// <para><b>Bidirectional</b> (default): boosts quiet tracks and reduces loud tracks.
+    /// Ensures consistent loudness across all content.</para>
+    /// <para><b>DownwardOnly</b>: reduces loud tracks only, similar to YouTube.
+    /// Quiet tracks play at their original level.</para>
     /// </summary>
     public NormalizationMode NormalizationMode { get; set; } = NormalizationMode.Bidirectional;
 
     /// <summary>
-    /// Стратегия обработки критических ошибок воспроизведения.
+    /// Strategy for handling critical playback errors.
     /// </summary>
     /// <remarks>
-    /// <para>Определяет, требуется ли ручное действие пользователя или можно восстановиться автоматически.</para>
-    /// <para>Если выбран автоматический режим, конкретное действие с очередью задаётся свойством <see cref="PlaybackFailureBehavior"/>.</para>
-    /// <para>НЕ применяется к:</para>
+    /// <para>Determines whether manual user action is required or if automatic recovery is allowed.</para>
+    /// <para>If automatic mode is selected, the specific queue action is specified by the <see cref="PlaybackFailureBehavior"/> property.</para>
+    /// <para>Does NOT apply to:</para>
     /// <list type="bullet">
-    ///   <item>BotDetectionException — всегда показывает диалог с таймером</item>
-    ///   <item>LoginRequiredException — всегда показывает диалог/уведомление, требующее внимания пользователя</item>
+    ///   <item>BotDetectionException — always displays a dialog with a timer</item>
+    ///   <item>LoginRequiredException — always displays a dialog/notification requiring user attention</item>
     /// </list>
     /// </remarks>
     public PlaybackErrorBehavior CriticalErrorBehavior { get; set; } = PlaybackErrorBehavior.ToastAndSkip;
 
     /// <summary>
-    /// Режим отображения уведомлений при сложной расшифровке n-токена.
+    /// Notification display mode during complex n-token deciphering.
     /// </summary>
     public NTokenNotificationMode NTokenNotificationMode { get; set; } = NTokenNotificationMode.PanelOnly;
 
     /// <summary>
-    /// Действие автоматического восстановления после критической ошибки воспроизведения.
+    /// Automatic recovery action after a critical playback error.
     /// </summary>
     /// <remarks>
-    /// Применяется только если <see cref="CriticalErrorBehavior"/> допускает автоматическое восстановление.
+    /// Applies only if <see cref="CriticalErrorBehavior"/> allows automatic recovery.
     /// </remarks>
     public PlaybackFailureBehavior PlaybackFailureBehavior { get; set; } = PlaybackFailureBehavior.SkipAndPause;
 
     /// <summary>
-    /// Воспроизводить звук при ошибке воспроизведения.
+    /// Play a sound on playback error.
     /// </summary>
     public bool PlayErrorSound { get; set; } = true;
 
     /// <summary>
-    /// Пропускать треки, требующие сложной расшифровки n-токена.
+    /// Skip tracks that require complex n-token deciphering.
     /// </summary>
     public bool SkipNTokenTracks { get; set; } = false;
 
     /// <summary>
-    /// Включён ли встроенный параметрический/графический эквалайзер.
+    /// Gets or sets whether the built-in parametric/graphic equalizer is enabled.
     /// </summary>
     public bool EqualizerEnabled { get; set; } = false;
 
     /// <summary>
-    /// Принудительно применять глобальный профиль эквалайзера ко всем трекам,
-    /// игнорируя индивидуальные профили <see cref="TrackInfo.EqualizerPresetId"/>.
+    /// Force apply the global equalizer profile to all tracks,
+    /// ignoring individual <see cref="TrackInfo.EqualizerPresetId"/> profiles.
     /// </summary>
     public bool ForceGlobalEqualizer { get; set; } = false;
 
     /// <summary>
-    /// Ручное предусиление эквалайзера в дБ (-12..+12).
+    /// Manual equalizer preamp gain in dB (-12..+12).
     /// </summary>
     public float EqualizerPreampDb { get; set; } = 0f;
 
     /// <summary>
-    /// Использовать упрощённый 5-полосный режим настройки в UI вместо 10-полосного.
+    /// Use simplified 5-band UI configuration mode instead of 10-band.
     /// </summary>
     public bool UseSimple5BandMode { get; set; } = true;
 
     /// <summary>
-    /// Идентификатор активного глобального пресета эквалайзера.
+    /// Identifier of the active global equalizer preset.
     /// </summary>
     public string GlobalEqualizerPresetId { get; set; } = Audio.Helpers.EqualizerPresets.FlatId;
 
     /// <summary>
-    /// Значения 10 ISO-полос для пользовательского режима <c>custom</c> (в дБ).
+    /// Values of the 10 ISO bands for <c>custom</c> user mode (in dB).
     /// </summary>
     public float[] CustomEqualizerBands { get; set; } = new float[Audio.Helpers.EqualizerProcessor.BandCount];
 
     /// <summary>
-    /// Список сохранённых пользователем кастомных пресетов эквалайзера.
+    /// List of user-saved custom equalizer presets.
     /// </summary>
     public List<LMP.Core.Audio.Helpers.EqualizerPreset> UserEqualizerPresets { get; set; } = [];
 }
 
 /// <summary>
-/// Настройки панели уведомлений: поведение, отображение и авто-очистка.
+/// Notification center settings: behavior, layout, and auto-cleanup.
 /// <para>
-/// Единая точка конфигурации всего, что связано с уведомлениями.
-/// <see cref="NotificationService"/> читает эти значения напрямую,
-/// что устраняет жёсткие константы в коде сервиса.
+/// A single point of configuration for everything related to notifications.
+/// <see cref="NotificationService"/> reads these values directly,
+/// eliminating hardcoded constants in the service code.
 /// </para>
 /// </summary>
 public sealed class NotificationSettings
 {
     /// <summary>
-    /// Ширина панели уведомлений в пикселях.
+    /// Notification panel width in pixels.
     /// </summary>
     public int PanelWidth { get; set; } = 360;
 
     /// <summary>
-    /// Максимум уведомлений в памяти и в панели.
-    /// При превышении вытесняются самые старые.
+    /// Maximum number of notifications kept in memory and in the panel.
+    /// Oldest notifications are evicted when exceeded.
     /// </summary>
     public int MaxInPanelCount { get; set; } = 50;
 
     /// <summary>
-    /// Включить авто-очистку уведомлений по возрасту.
+    /// Enable auto-cleanup of notifications by age.
     /// </summary>
     public bool AutoCleanupEnabled { get; set; } = true;
 
     /// <summary>
-    /// Возраст уведомления в часах, после которого оно удаляется автоматически.
-    /// По умолчанию 48 ч (2 дня).
+    /// Notification age in hours after which it is automatically deleted.
+    /// Default is 48 hours (2 days).
     /// </summary>
     public int AutoCleanupAfterHours { get; set; } = 48;
 
     /// <summary>
-    /// Интервал фоновой проверки авто-очистки в минутах.
+    /// Background auto-cleanup check interval in minutes.
     /// </summary>
     public int CleanupCheckIntervalMinutes { get; set; } = 30;
 }
 
 /// <summary>
-/// Настройки автоматической очистки памяти.
+/// Automatic memory cleanup settings.
 /// </summary>
 public sealed class MemorySettings
 {
     /// <summary>
-    /// Включить автоматическую очистку памяти по таймеру.
+    /// Enable timer-based automatic memory cleanup.
     /// </summary>
     public bool AutoCleanupEnabled { get; set; } = true;
 
     /// <summary>
-    /// Интервал автоочистки в минутах.
+    /// Auto-cleanup interval in minutes.
     /// </summary>
     public int AutoCleanupIntervalMinutes { get; set; } = 30;
 
     /// <summary>
-    /// Порог памяти (MB) при превышении которого запускается агрессивная очистка.
-    /// 0 = отключено.
+    /// Memory threshold (MB) exceeding which triggers aggressive cleanup.
+    /// 0 = disabled.
     /// </summary>
     public int PressureThresholdMb { get; set; } = 400;
 }
 
 /// <summary>
-/// Настройки автоматического обновления приложения.
+/// Automatic application update settings.
 /// </summary>
 public sealed class UpdateSettings
 {
-    /// <summary>Включить автоматическую проверку обновлений.</summary>
+    /// <summary>Enable automatic update checks.</summary>
     public bool AutoCheckUpdates { get; set; } = true;
 
-    /// <summary>Интервал проверки обновлений в часах.</summary>
+    /// <summary>Update check interval in hours.</summary>
     public int UpdateCheckIntervalHours { get; set; } = 2;
 
-    /// <summary>Время последней проверки обновлений в UTC.</summary>
+    /// <summary>Timestamp of the last update check in UTC.</summary>
     public DateTime? LastUpdateCheckUtc { get; set; }
 }
 
@@ -423,7 +423,7 @@ public sealed class AppSettings
     // === Audio (1-7) ===
 
     /// <summary>
-    /// Текущий уровень громкости плеера в процентах (0–100).
+    /// Current player volume level in percent (0–100).
     /// </summary>
     public int Volume { get; set; } = 50;
 
@@ -434,7 +434,7 @@ public sealed class AppSettings
     public bool RememberTrackFormat { get; set; } = true;
 
     /// <summary>
-    /// Расширенные настройки аудио (8).
+    /// Advanced audio settings (8).
     /// </summary>
     public AudioSettings Audio { get; set; } = new();
 
@@ -456,64 +456,64 @@ public sealed class AppSettings
     public int SearchCacheTtlMinutes { get; set; } = 120;
 
     /// <summary>
-    /// Максимальное количество отображаемых подсказок в строке поиска и ленте чипов (3–15).
-    /// По умолчанию: 8.
+    /// Maximum number of displayed suggestions in the search bar and chip bar (3–15).
+    /// Default: 8.
     /// </summary>
     public int MaxSuggestionsCount { get; set; } = 8;
 
     /// <summary>
-    /// Оптимизировать UI при потере фокуса окна.
+    /// Optimize UI when the window loses focus.
     ///
-    /// <para><b>true:</b> При сворачивании или потере фокуса приостанавливаются
-    /// тяжёлые UI-обновления (позиция, буфер, анимации). Экономит CPU.</para>
+    /// <para><b>true:</b> Pauses heavy UI updates (position, buffer, animations)
+    /// on minimize or focus loss. Saves CPU.</para>
     ///
-    /// <para><b>false:</b> UI работает штатно даже без фокуса.
-    /// Полезно для пользователей со вторым монитором.</para>
+    /// <para><b>false:</b> UI operates normally even without focus.
+    /// Useful for dual-monitor setups.</para>
     ///
-    /// <para>Настройка НЕ влияет на сворачивание в tray — там всегда оптимизация.</para>
+    /// <para>This setting does NOT affect tray minimization — optimization is always active there.</para>
     /// </summary>
     public bool OptimizeWhenInactive { get; set; } = true;
 
     /// <summary>
-    /// Действие при нажатии кнопки закрытия окна.
-    /// По умолчанию — спрашивать.
+    /// Action when clicking the window close button.
+    /// Default is to ask.
     /// </summary>
     public CloseAction CloseAction { get; set; } = CloseAction.Ask;
 
     /// <summary>
-    /// Сворачивать в системный трей при нажатии кнопки минимизации.
-    /// По умолчанию false — обычное сворачивание в панель задач.
+    /// Minimize to system tray on minimize button click.
+    /// Default is false — standard taskbar minimization.
     /// </summary>
     public bool MinimizeToTray { get; set; } = false;
 
     /// <summary>
-    /// Настройки панели уведомлений и авто-очистки (25).
+    /// Notification panel and auto-cleanup settings (25).
     /// </summary>
     public NotificationSettings Notifications { get; set; } = new();
 
     /// <summary>
-    /// Режим синхронизации лайков с YouTube (26).
+    /// YouTube likes synchronization mode (26).
     /// </summary>
     public LikeSyncMode LikeSyncMode { get; set; } = LikeSyncMode.MusicOnly;
 
     /// <summary>
-    /// Настройки управления памятью (27).
+    /// Memory management settings (27).
     /// </summary>
     public MemorySettings Memory { get; set; } = new();
 
     /// <summary>
-    /// Настройки обновлений приложения (28).
+    /// Application update settings (28).
     /// </summary>
     public UpdateSettings Updates { get; set; } = new();
 
     /// <summary>
-    /// Использовать живую волновую анимацию для активного играющего трека.
-    /// false = классическая пульсирующая подсветка.
+    /// Use live waveform animation for the currently playing track.
+    /// false = classic pulsing highlight.
     /// </summary>
     public bool UseWaveAnimation { get; set; } = true;
 
     /// <summary>
-    /// Скорость анимации играющего трека в списке.
+    /// Animation speed of the playing track in the list.
     /// </summary>
     public TrackAnimationSpeed TrackAnimationSpeed { get; set; } = TrackAnimationSpeed.Medium;
 }

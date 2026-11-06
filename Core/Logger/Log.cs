@@ -3,8 +3,8 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Logger;
 
 /// <summary>
-/// Глобальная статическая точка доступа к логгеру.
-/// Thread-safe, поддерживает вызовы до Initialize (будут проигнорированы).
+/// Global static access point for the logger.
+/// Thread-safe, supports calls prior to Initialize (will be ignored).
 /// </summary>
 public static class Log
 {
@@ -12,9 +12,9 @@ public static class Log
     private static volatile bool _isInitialized;
 
     /// <summary>
-    /// Минимальный уровень логирования. Сообщения ниже этого уровня
-    /// отбрасываются до создания строки — интерполяция не вычисляется.
-    /// По умолчанию: Debug в Debug-сборке, Info в Release.
+    /// Minimum logging level. Messages below this level
+    /// are discarded before string creation — interpolation is not evaluated.
+    /// Default: Debug in Debug builds, Info in Release.
     /// </summary>
 #if DEBUG
     public static LogLevel MinLevel { get; set; } = LogLevel.Debug;
@@ -26,8 +26,8 @@ public static class Log
     private static volatile bool _consoleOutputEnabled = true;
 
     /// <summary>
-    /// Зеркалирование логов в консоль (только Debug). Headless-прогон тестов отключает его,
-    /// чтобы вывод раннера не тонул в диагностике; файл лога пишется всегда.
+    /// Mirrors logs to the console (Debug build only). Headless test runs disable it
+    /// so the runner output is not drowned in diagnostics; the log file is always written.
     /// </summary>
     public static bool ConsoleOutputEnabled
     {
@@ -35,21 +35,21 @@ public static class Log
         set => _consoleOutputEnabled = value;
     }
 
-    /// <summary>Полный путь к файлу лога текущего запуска или <c>null</c> до инициализации.</summary>
+    /// <summary>Full path to the current run log file, or <c>null</c> prior to initialization.</summary>
     public static string? CurrentLogFile => _processor?.LogFilePath;
 #endif
 
     /// <summary>
-    /// Проверка активности уровня. Используется InterpolatedStringHandler-ами
-    /// для short-circuit вычисления интерполированных строк.
+    /// Checks if a log level is active. Used by InterpolatedStringHandlers
+    /// for short-circuit evaluation of interpolated strings.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsLevelEnabled(LogLevel level) =>
         _isInitialized && level >= MinLevel;
 
     /// <summary>
-    /// Инициализация системы логгирования.
-    /// Должна вызываться в начале Main, ПОСЛЕ создания папок (G.Folder.Create).
+    /// Initializes the logging system.
+    /// Must be called at the start of Main, AFTER creating folders (G.Folder.Create).
     /// </summary>
     public static void Initialize(string? logDirectory = null)
     {
@@ -75,8 +75,8 @@ public static class Log
     }
 
     /// <summary>
-    /// Корректное завершение работы. Записывает все буферизованные сообщения.
-    /// Должна вызываться в finally блока Main.
+    /// Performs graceful shutdown. Flushes all buffered messages.
+    /// Must be called in the finally block of Main.
     /// </summary>
     public static void Shutdown()
     {
@@ -94,68 +94,68 @@ public static class Log
         _processor.Enqueue(new LogMessage(level, message, ex));
     }
 
-    // String overloads — для литералов и уже готовых строк
+    // String overloads — for literals and pre-constructed strings
 
-    /// <summary>Самый детальный уровень. Для трассировки потока выполнения.</summary>
+    /// <summary>Most detailed level. Used for execution flow tracing.</summary>
     public static void Trace(string message) => Enqueue(LogLevel.Trace, message);
 
-    /// <summary>Отладочная информация.</summary>
+    /// <summary>Debugging information.</summary>
     public static void Debug(string message) => Enqueue(LogLevel.Debug, message);
 
-    /// <summary>Информационные сообщения. Основной уровень.</summary>
+    /// <summary>Informational messages. Main level.</summary>
     public static void Info(string message) => Enqueue(LogLevel.Info, message);
 
-    /// <summary>Предупреждения.</summary>
+    /// <summary>Warnings.</summary>
     public static void Warn(string message) => Enqueue(LogLevel.Warning, message);
 
-    /// <summary>Ошибки.</summary>
+    /// <summary>Errors.</summary>
     public static void Error(string message, Exception? ex = null) => Enqueue(LogLevel.Error, message, ex);
 
-    /// <summary>Фатальные ошибки.</summary>
+    /// <summary>Fatal errors.</summary>
     public static void Fatal(string message, Exception? ex = null) => Enqueue(LogLevel.Fatal, message, ex);
 
-    // InterpolatedStringHandler overloads — zero-alloc при отключённом уровне
+    // InterpolatedStringHandler overloads — zero-alloc when the log level is disabled
 
-    /// <summary>Trace с zero-alloc интерполяцией.</summary>
+    /// <summary>Trace with zero-alloc interpolation.</summary>
     public static void Trace(TraceInterpolatedStringHandler handler)
     {
         if (handler.IsEnabled) Enqueue(LogLevel.Trace, handler.ToStringAndClear());
     }
 
-    /// <summary>Debug с zero-alloc интерполяцией.</summary>
+    /// <summary>Debug with zero-alloc interpolation.</summary>
     public static void Debug(DebugInterpolatedStringHandler handler)
     {
         if (handler.IsEnabled) Enqueue(LogLevel.Debug, handler.ToStringAndClear());
     }
 
-    /// <summary>Info с zero-alloc интерполяцией.</summary>
+    /// <summary>Info with zero-alloc interpolation.</summary>
     public static void Info(InfoInterpolatedStringHandler handler)
     {
         if (handler.IsEnabled) Enqueue(LogLevel.Info, handler.ToStringAndClear());
     }
 
-    /// <summary>Warn с zero-alloc интерполяцией.</summary>
+    /// <summary>Warn with zero-alloc interpolation.</summary>
     public static void Warn(WarnInterpolatedStringHandler handler)
     {
         if (handler.IsEnabled) Enqueue(LogLevel.Warning, handler.ToStringAndClear());
     }
 
-    /// <summary>Error с zero-alloc интерполяцией.</summary>
+    /// <summary>Error with zero-alloc interpolation.</summary>
     public static void Error(ErrorInterpolatedStringHandler handler, Exception? ex = null)
     {
         if (handler.IsEnabled) Enqueue(LogLevel.Error, handler.ToStringAndClear(), ex);
     }
 
-    /// <summary>Fatal с zero-alloc интерполяцией.</summary>
+    /// <summary>Fatal with zero-alloc interpolation.</summary>
     public static void Fatal(FatalInterpolatedStringHandler handler, Exception? ex = null)
     {
         if (handler.IsEnabled) Enqueue(LogLevel.Fatal, handler.ToStringAndClear(), ex);
     }
 
-    /// <summary>Перегрузка для объектов (как Console.WriteLine).</summary>
+    /// <summary>Overload for objects (like Console.WriteLine).</summary>
     public static void Info(object? obj) => Info(obj?.ToString() ?? "null");
 
-    /// <summary>Перегрузка для объектов.</summary>
+    /// <summary>Overload for objects.</summary>
     public static void Debug(object? obj) => Debug(obj?.ToString() ?? "null");
 
     // InterpolatedStringHandler per level
@@ -317,7 +317,7 @@ public static class Log
     }
 
     /// <summary>
-    /// Общая реализация строителя интерполированной строки для всех уровней логов.
+    /// Shared implementation of the interpolated string builder for all log levels.
     /// </summary>
     public ref struct LogInterpolatedStringHandlerBase
     {
@@ -336,27 +336,27 @@ public static class Log
                 : default;
         }
 
-        /// <summary>Добавляет строковый литерал. No-op если уровень отключён.</summary>
+        /// <summary>Appends a string literal. No-op if the level is disabled.</summary>
         public void AppendLiteral(string s)
         {
             if (_enabled) _inner.AppendLiteral(s);
         }
 
-        /// <summary>Добавляет форматируемое значение. No-op если уровень отключён.</summary>
+        /// <summary>Appends a formattable value. No-op if the level is disabled.</summary>
         public void AppendFormatted<T>(T value)
         {
             if (_enabled) _inner.AppendFormatted(value);
         }
 
-        /// <summary>Добавляет форматируемое значение с format-строкой. No-op если уровень отключён.</summary>
+        /// <summary>Appends a formattable value with a format string. No-op if the level is disabled.</summary>
         public void AppendFormatted<T>(T value, string? format)
         {
             if (_enabled) _inner.AppendFormatted(value, format);
         }
 
         /// <summary>
-        /// Добавляет форматируемое значение с выравниванием: <c>{x,-45}</c>, <c>{x,15}</c>.
-        /// No-op если уровень отключён.
+        /// Appends a formattable value with alignment: <c>{x,-45}</c>, <c>{x,15}</c>.
+        /// No-op if the level is disabled.
         /// </summary>
         public void AppendFormatted<T>(T value, int alignment)
         {
@@ -364,8 +364,8 @@ public static class Log
         }
 
         /// <summary>
-        /// Добавляет форматируемое значение с выравниванием и format-строкой: <c>{x,15:F2}</c>.
-        /// No-op если уровень отключён.
+        /// Appends a formattable value with alignment and a format string: <c>{x,15:F2}</c>.
+        /// No-op if the level is disabled.
         /// </summary>
         public void AppendFormatted<T>(T value, int alignment, string? format)
         {

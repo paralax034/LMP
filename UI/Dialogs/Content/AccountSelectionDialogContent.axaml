@@ -16,7 +16,7 @@
             <Setter Property="TextAlignment" Value="Center" />
         </Style>
 
-        <!-- Сброс стандартных стилей ListBoxItem и фоновых заливок -->
+        <!-- Reset standard ListBoxItem styles and background fills -->
         <Style Selector="ListBoxItem">
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0,0,0,8" />
@@ -30,7 +30,7 @@
             <Setter Property="Background" Value="Transparent" />
         </Style>
 
-        <!-- Hover состояния (Исключительно на BorderBrush и цвете текста) -->
+        <!-- Hover states (Exclusively on BorderBrush and text color) -->
         <Style Selector="ListBoxItem:pointerover Border#CardBorder">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
@@ -38,7 +38,7 @@
             <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         </Style>
 
-        <!-- Selected состояния (Утолщение рамки + фиолетовый цвет, БЕЗ заливки фона) -->
+        <!-- Selected states (Thicker border + purple color, NO background fill) -->
         <Style Selector="ListBoxItem:selected Border#CardBorder">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
             <Setter Property="BorderThickness" Value="2" />
@@ -49,7 +49,7 @@
         </Style>
     </UserControl.Styles>
 
-    <!-- Фон изменен строго на BgPrimaryBrush -->
+    <!-- Background explicitly changed to BgPrimaryBrush -->
     <Border Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
         BorderThickness="1"
@@ -68,7 +68,7 @@
                 Classes="dialog-subtitle"
                 HorizontalAlignment="Center" />
 
-            <!-- Accounts List (Двусторонняя строгая привязка) -->
+            <!-- Accounts List (Two-way strict binding) -->
             <ScrollViewer MaxHeight="320" HorizontalScrollBarVisibility="Disabled" Margin="0,4">
                 <ListBox ItemsSource="{Binding Accounts}"
                     SelectedItem="{Binding SelectedAccount, Mode=TwoWay}"
@@ -78,7 +78,7 @@
                     Padding="0">
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="models:YoutubeAccountItem">
-                            <!-- Background убран на Transparent для плоского дизайна на рамках -->
+                            <!-- Background set to Transparent for a flat border-based design -->
                             <Border Name="CardBorder"
                                 CornerRadius="6"
                                 BorderThickness="1"
@@ -87,10 +87,10 @@
                                 BorderBrush="{DynamicResource BgHighlightBrush}"
                                 Cursor="Hand">
 
-                                <!-- Сетка уменьшена до 3 колонок (Индикатор убран) -->
+                                <!-- Grid reduced to 3 columns (Indicator removed) -->
                                 <Grid ColumnDefinitions="Auto, Auto, *">
 
-                                    <!-- Колонка 0: Номер аккаунта (Без круглой рамки) -->
+                                    <!-- Column 0: Account index (Without rounded border) -->
                                     <TextBlock Name="AccountIndexText" Grid.Column="0"
                                         Text="{Binding Index}"
                                         FontWeight="SemiBold"
@@ -98,7 +98,7 @@
                                         Foreground="{DynamicResource TextMutedBrush}"
                                         VerticalAlignment="Center" Margin="0,0,12,0" />
 
-                                    <!-- Колонка 1: Аватарка -->
+                                    <!-- Column 1: Avatar -->
                                     <Border Grid.Column="1" Width="36" Height="36" CornerRadius="18"
                                         ClipToBounds="True" Margin="0,0,12,0"
                                         Background="Transparent"
@@ -108,15 +108,15 @@
                                             Stretch="UniformToFill" />
                                     </Border>
 
-                                    <!-- Колонка 2: Информация об аккаунте (Имя, @тег и числовой ID) -->
+                                    <!-- Column 2: Account information (Name, @tag, and numerical ID) -->
                                     <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
                                             FontSize="14"
                                             Foreground="{DynamicResource TextPrimaryBrush}"
                                             TextTrimming="CharacterEllipsis" />
 
-                                        <!-- Вывод тега и ID бок о бок. Если тег пустой, ID
-                                        аккуратно прижмется влево -->
+                                        <!-- Side-by-side output of tag and ID. If tag is empty, ID
+                                        will cleanly align to the left -->
                                         <StackPanel Orientation="Horizontal" Spacing="6"
                                             Margin="0,2,0,0">
                                             <TextBlock Text="{Binding Handle}" FontSize="12"

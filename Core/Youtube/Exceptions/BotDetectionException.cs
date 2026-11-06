@@ -1,18 +1,18 @@
 namespace LMP.Core.Youtube.Exceptions;
 
 /// <summary>
-/// Выбрасывается когда операция заблокирована из-за bot detection cooldown от YouTube.
-/// Содержит информацию об оставшемся времени ожидания.
+/// Thrown when an operation is blocked due to YouTube bot detection cooldown.
+/// Contains information about the remaining wait time.
 /// </summary>
 public sealed class BotDetectionException(string message, TimeSpan remaining) : YoutubeExplodeException(message)
 {
     /// <summary>
-    /// Оставшееся время cooldown.
+    /// Remaining cooldown duration.
     /// </summary>
     public TimeSpan RemainingCooldown { get; } = remaining;
 
     /// <summary>
-    /// Время когда cooldown закончится.
+    /// Time when the cooldown expires.
     /// </summary>
     public DateTime CooldownEndsAt { get; } = DateTime.UtcNow + remaining;
 }

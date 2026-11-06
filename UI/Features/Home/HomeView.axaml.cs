@@ -9,5 +9,5 @@ public partial class HomeView : UserControl
         InitializeComponent();
     }
 
-    // Весь code-behind удалён! Логика теперь в Behavior
+    // All code-behind removed! Logic is now in Behavior
 }

@@ -26,16 +26,16 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         Log.Info("Framework initialization completed.");
-        // Флаг поднимается уже из цикла: синхронные тема, локализация и splash не дают ложных SPIKE-пингов по 400 мс
+        // The flag is raised from within the loop: synchronous theme, localization, and splash prevent false 400ms SPIKE pings
         Dispatcher.UIThread.Post(LMP.Core.Diagnostics.ProcessFlightRecorder.MarkUiDispatcherReady, DispatcherPriority.Background);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Тема
+            // Theme
             var themeManager = AppEntry.Services.GetRequiredService<ThemeManagerService>();
             themeManager.LoadAndApplyThemeOnStartup();
 
-            // Локализация
+            // Localization
             var bootstrap = AppEntry.Services.GetRequiredService<BootstrapSettings>();
             LocalizationService.Instance.Initialize(bootstrap.LanguageCode);
             LocalizationService.Instance.UpdateApplicationResources();
@@ -61,7 +61,7 @@ public partial class App : Application
                 _splash.Show();
             }
 
-            // Даём UI-потоку отрисовать splash (или сразу запускаем инициализацию в --fast режиме)
+            // Allow the UI thread to render the splash (or start initialization immediately in --fast mode)
             Dispatcher.UIThread.Post(() => { _ = InitializeAppAsync(desktop); }, DispatcherPriority.Background);
         }
 
@@ -77,7 +77,7 @@ public partial class App : Application
     {
         var trayIcon = new TrayIcon
         {
-            // В Avalonia 11+ иконки загружаются через AssetLoader
+            // In Avalonia 11+, icons are loaded via AssetLoader
             Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://LMP/Assets/app.ico"))),
             ToolTipText = LocalizationService.Instance["Common_AppName"],
             IsVisible = false
@@ -98,14 +98,14 @@ public partial class App : Application
 
             if (!isFast)
             {
-                // Отдаем приоритет UI, чтобы Splash мгновенно отрисовался
+                // Prioritize UI so the Splash renders instantly
                 await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             }
 
             _splash?.SetProgress(5);
             _splash?.UpdateStatus(L["Splash_Initializing"]);
 
-            // Auth init первым: LibraryService.InitializeAsync зависит от CurrentOwnerId
+            // Auth init first: LibraryService.InitializeAsync depends on CurrentOwnerId
             var auth = AppEntry.Services.GetRequiredService<CookieAuthService>();
             await auth.InitializeAsync().ConfigureAwait(false);
             _splash?.SetProgress(10);
@@ -114,7 +114,7 @@ public partial class App : Application
 
             if (!isFast)
             {
-                // Привязываем статический SharedHttpClient к синглтону NetworkManager
+                // Bind static SharedHttpClient to NetworkManager singleton
                 var networkManager = AppEntry.Services.GetRequiredService<NetworkManager>();
                 SharedHttpClient.Initialize(networkManager);
 
@@ -134,7 +134,7 @@ public partial class App : Application
                 audioCacheManager = audioCacheTask.Result;
                 AudioSourceFactory.InitializeGlobalCache(audioCacheManager);
 
-                // Fire-and-forget: прогрев top CDN-кластеров пока UI продолжает инициализацию
+                // Fire-and-forget: warm up top CDN clusters while UI continues initialization
                 _ = CdnHostStatsStore.PreWarmTopClustersAsync(
                     networkManager.AudioClient,
                     _appLifetimeCts.Token);
@@ -181,11 +181,11 @@ public partial class App : Application
             await library.InitializeAsync().ConfigureAwait(false);
             _splash?.SetProgress(45);
 
-            // Применяем загруженные из БД настройки к аудио-движку
+            // Apply settings loaded from DB to the audio engine
             var audioEngine = AppEntry.Services.GetRequiredService<AudioEngine>();
             audioEngine.InitializeVolumeFromSettings();
 
-            // СИНХРОНИЗАЦИЯ ЯЗЫКА
+            // LANGUAGE SYNCHRONIZATION
             var savedLang = library.Settings.LanguageCode;
             var currentLang = L.CurrentLanguageCode;
 
@@ -205,13 +205,13 @@ public partial class App : Application
 
             _splash?.SetProgress(50);
 
-            // КРИТИЧНО: NotificationService после LibraryService
+            // CRITICAL: NotificationService after LibraryService
             var notifications = AppEntry.Services.GetRequiredService<NotificationService>();
             await notifications.InitializeAsync();
             Log.Info("[Startup] NotificationService history loaded");
             _splash?.SetProgress(55);
 
-            // PlaybackErrorOrchestrator после NotificationService
+            // PlaybackErrorOrchestrator after NotificationService
             _ = AppEntry.Services.GetRequiredService<PlaybackErrorOrchestrator>();
             Log.Info("[Startup] PlaybackErrorOrchestrator ready");
             _splash?.SetProgress(60);
@@ -229,7 +229,7 @@ public partial class App : Application
 
             if (!isFast)
             {
-                // YouTube Provider (в --fast режиме инициализируется лениво только при первом реальном запросе)
+                // YouTube Provider (in --fast mode initialized lazily only on the first actual request)
                 _splash?.UpdateStatus(L["Splash_ConnectingYouTube"]);
                 var youtube = AppEntry.Services.GetRequiredService<YoutubeProvider>();
 
@@ -275,7 +275,7 @@ public partial class App : Application
             _splash?.UpdateStatus(L["Splash_Ready"]);
             _splash?.SetProgress(100);
 
-            // Switch Windows - Без искусственной паузы MinSplashTimeMs!
+            // Switch Windows - Without artificial MinSplashTimeMs delay!
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
                 desktop.MainWindow = mainWindow;
@@ -284,21 +284,21 @@ public partial class App : Application
                 _splash?.Close();
                 _splash = null;
 
-                // Если произошла миграция со старой версии (v1/v2) на v3
+                // If migrated from an older version (v1/v2) to v3
                 if (AppEntry.WasMigratedFromLegacy)
                 {
                     try
                     {
                         var dialogService = AppEntry.Services.GetRequiredService<DialogService>();
 
-                        // Отправляем предупреждающий Toast через уже объявленный экземпляр notifications
+                        // Send a warning Toast via the already declared notifications instance
                         await notifications.ShowToastAsync(
                             "Dialog_Warning_Title",
                             "Library_LegacyPlaylists_Message",
                             NotificationSeverity.Warning,
                             durationMs: 12000);
 
-                        // Блокируем интерфейс модальным оверлеем
+                        // Block the UI with a modal overlay
                         await dialogService.ShowLegacyMigrationAlertAsync(30);
                     }
                     catch (Exception ex)
@@ -310,7 +310,7 @@ public partial class App : Application
 
             Log.Info($"Main window ready. Total splash time: {stopwatch.ElapsedMilliseconds}ms");
 
-            // Проверка и уведомление об обновлении
+            // Update check and notification
             if (BootstrapSettings.Current.AppUpdatedThisRun)
             {
                 Log.Info(
@@ -326,7 +326,7 @@ public partial class App : Application
             {
                 var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
 
-                // Фоновая проверка при старте без ожидания кулдауна (с таймаутом 15с во избежание зависания)
+                // Background startup check without waiting for cooldown (15s timeout to prevent hanging)
                 _ = Task.Run(async () =>
                 {
                     try
@@ -358,7 +358,7 @@ public partial class App : Application
                     }
                 });
 
-                // Периодическая проверка обновлений в фоне с соблюдением пользовательского интервала
+                // Periodic background update check respecting the user interval
                 _ = Task.Run(async () =>
                 {
                     try
@@ -409,23 +409,23 @@ public partial class App : Application
             {
                 if (isCleaningUp) return;
 
-                // Отменяем немедленное синхронное завершение процесса ОС
+                // Cancel immediate synchronous OS process termination
                 e.Cancel = true;
                 isCleaningUp = true;
 
-                // Перенаправляем выполнение очистки в очередь UI-потока с отслеживанием Task (без async void)
+                // Redirect cleanup execution to the UI thread queue tracking the Task (without async void)
                 _ = Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     try
                     {
                         Log.Info("Starting graceful shutdown...");
 
-                        // СНАЧАЛА сохраняем статистику до освобождения ресурсов
+                        // FIRST save statistics before releasing resources
                         CdnHostStatsStore.Save();
                         SessionCacheStore.Save();
 
-                        // МЯГКО высвобождаем аудиодвижок и кэш.
-                        // Делаем это ДО отмены токена, чтобы потоки завершились штатно, без выброса IOException
+                        // GRACEFULLY release the audio engine and cache.
+                        // Do this BEFORE canceling the token so threads terminate normally without throwing IOException
                         await audioEngine.DisposeAsync().ConfigureAwait(false);
                         var cacheToDispose = audioCacheManager ?? AudioSourceFactory.GlobalCache;
                         if (cacheToDispose != null)
@@ -436,7 +436,7 @@ public partial class App : Application
                         LocalAuthServer.DisposeIfCreated();
                         MemoryCleanupHelper.Dispose();
 
-                        // Отменяем глобальный токен только когда активные сетевые операции уже мягко завершены
+                        // Cancel the global token only when active network operations are gracefully completed
                         _appLifetimeCts.Cancel();
                     }
                     catch (Exception ex)
@@ -448,8 +448,8 @@ public partial class App : Application
                         _appLifetimeCts.Dispose();
                         Log.Info("Shutdown complete. Exiting with code 0.");
 
-                        // Гарантированный чистый выход с кодом 0.
-                        // Использование desktop.Shutdown() после отмены e.Cancel часто приводит к коду -1 в Avalonia.
+                        // Guaranteed clean exit with code 0.
+                        // Using desktop.Shutdown() after canceling e.Cancel often leads to exit code -1 in Avalonia.
                         Environment.Exit(0);
                     }
                 }, DispatcherPriority.Normal);

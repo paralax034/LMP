@@ -15,14 +15,14 @@
                 VerticalAlignment="Center" Margin="8,0,0,0" />
         </Grid>
 
-        <!-- Блок «О программе и обновления» с нулевым сдвигом компоновки -->
+        <!-- "About and Updates" block with zero layout shift -->
         <Border Classes="card">
             <StackPanel Spacing="14">
 
-                <!-- Верхняя сетка с фиксированными высотами -->
+                <!-- Top grid with fixed heights -->
                 <Grid ColumnDefinitions="*, Auto" RowDefinitions="Auto, Auto">
 
-                    <!-- Строка 0, Левая колонка: Заголовок и профиль JIT / AOT -->
+                    <!-- Row 0, Left column: Title and JIT / AOT profile -->
                     <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="8"
                         VerticalAlignment="Center">
                         <TextBlock Classes="label" Text="{Binding L[Settings_About_Section]}"
@@ -37,10 +37,10 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- Строка 0, Правая колонка: Все элементы управления в одну стабильную линию -->
+                    <!-- Row 0, Right column: All controls in a single stable line -->
                     <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8"
                         VerticalAlignment="Center">
-                        <!-- Кнопка симуляции загрузки (активна только в Debug) -->
+                        <!-- Load simulation button (active in Debug only) -->
                         <Button Classes="ghost-btn"
                             Command="{Binding SimulateUpdateFlowCommand}"
                             IsVisible="{Binding IsDebug}"
@@ -58,7 +58,7 @@
                             </StackPanel>
                         </Button>
 
-                        <!-- Ссылка на репозиторий GitHub -->
+                        <!-- GitHub repository link -->
                         <Button Classes="icon-btn ghost-btn"
                             Command="{Binding OpenGitHubRepoCommand}"
                             Width="28" Height="28" Padding="6"
@@ -67,20 +67,20 @@
                                 VerticalAlignment="Center" HorizontalAlignment="Center" />
                         </Button>
 
-                        <!-- Кнопка Проверить обновления / Скачивание -->
+                        <!-- Check for updates / Download button -->
                         <Button Command="{Binding CheckUpdatesCommand}"
                             IsEnabled="{Binding CanCheckForUpdates}"
                             Height="28" Padding="12,0"
                             MinWidth="170">
                             <StackPanel Orientation="Horizontal" Spacing="8"
                                 VerticalAlignment="Center">
-                                <!-- Иконка в покое -->
+                                <!-- Idle icon -->
                                 <PathIcon Data="{StaticResource Icon.Refresh}"
                                     Width="12" Height="12"
                                     VerticalAlignment="Center"
                                     IsVisible="{Binding IsUpdateActionIdle}" />
 
-                                <!-- Иконка при проверке или скачивании (вращается) -->
+                                <!-- Checking or downloading icon (rotating) -->
                                 <PathIcon Data="{StaticResource Icon.Refresh}"
                                     Width="12" Height="12"
                                     Classes="spinning"
@@ -94,33 +94,33 @@
                                     </PathIcon.IsVisible>
                                 </PathIcon>
 
-                                <!-- Текст в покое -->
+                                <!-- Idle text -->
                                 <TextBlock Text="{Binding L[Settings_CheckUpdates]}"
                                     IsVisible="{Binding IsUpdateActionIdle}" FontSize="12"
                                     VerticalAlignment="Center" />
 
-                                <!-- Текст при проверке -->
+                                <!-- Checking text -->
                                 <TextBlock Text="{Binding L[Settings_CheckingUpdates]}"
                                     IsVisible="{Binding IsCheckingUpdates}" FontSize="12"
                                     VerticalAlignment="Center" />
 
-                                <!-- Текст при скачивании -->
+                                <!-- Downloading text -->
                                 <TextBlock Text="{Binding DownloadProgressText}"
                                     IsVisible="{Binding IsDownloadingUpdate}" FontSize="12"
                                     VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
 
-                        <!-- Кнопка Скачать обновление (показывается только когда архив еще не
-                        загружен) -->
+                        <!-- Download update button (shown only when the archive is not yet
+                        downloaded) -->
                         <Button Classes="primary-btn"
                             Content="{Binding L[Settings_DownloadUpdate]}"
                             Command="{Binding DownloadUpdateCommand}"
                             IsVisible="{Binding CanDownloadUpdate}"
                             Height="28" Padding="12,0" />
 
-                        <!-- Кнопка Перезапустить и применить (показывается взамен кнопки
-                        скачивания) -->
+                        <!-- Restart and apply button (shown instead of the download
+                        button) -->
                         <Button Classes="primary-btn"
                             Content="{Binding L[Settings_RestartToApply]}"
                             Command="{Binding ApplyUpdateCommand}"
@@ -128,13 +128,13 @@
                             Height="28" Padding="12,0" />
                     </StackPanel>
 
-                    <!-- Строка 1: Метаданные слева и статус справа -->
+                    <!-- Row 1: Metadata on the left and status on the right -->
                     <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                         ColumnDefinitions="Auto, *, Auto" Height="24" Margin="0,8,0,0">
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6"
                             VerticalAlignment="Center">
 
-                            <!-- Номер коммита -->
+                            <!-- Commit count -->
                             <Border Classes="meta-chip"
                                 ToolTip.Tip="{Binding L[Metadata_Tooltip_Commit]}">
                                 <TextBlock Text="{Binding GitCommitCount}" FontSize="11"
@@ -143,7 +143,7 @@
                                     VerticalAlignment="Center" />
                             </Border>
 
-                            <!-- Хэш коммита -->
+                            <!-- Commit hash -->
                             <Border Classes="meta-chip"
                                 ToolTip.Tip="{Binding L[Metadata_Tooltip_Hash]}">
                                 <TextBlock Text="{Binding GitCommitHash}" FontSize="11"
@@ -152,7 +152,7 @@
                                     VerticalAlignment="Center" />
                             </Border>
 
-                            <!-- Дата сборки -->
+                            <!-- Build date -->
                             <Border Classes="meta-chip"
                                 ToolTip.Tip="{Binding L[Metadata_Tooltip_BuildDate]}">
                                 <TextBlock Text="{Binding BuildDateString}" FontSize="11"
@@ -161,12 +161,12 @@
                                     VerticalAlignment="Center" />
                             </Border>
 
-                            <!-- Метаданные репозитория GitHub -->
+                            <!-- GitHub repository metadata -->
                             <StackPanel Orientation="Horizontal" Spacing="6"
                                 IsVisible="{Binding HasRepoInfo}"
                                 VerticalAlignment="Center">
 
-                                <!-- Звёзды -->
+                                <!-- Stars -->
                                 <Border Classes="meta-chip"
                                     ToolTip.Tip="{Binding L[Metadata_Tooltip_Stars]}">
                                     <StackPanel Orientation="Horizontal" Spacing="4"
@@ -180,7 +180,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Открытые задачи (Issues) -->
+                                <!-- Open Issues -->
                                 <Border Classes="meta-chip"
                                     ToolTip.Tip="{Binding L[Metadata_Tooltip_Issues]}">
                                     <StackPanel Orientation="Horizontal" Spacing="4"
@@ -196,7 +196,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Ветка Git -->
+                                <!-- Git branch -->
                                 <Border Classes="meta-chip"
                                     ToolTip.Tip="{Binding L[Metadata_Tooltip_Branch]}">
                                     <TextBlock Text="{Binding RepoBranch, StringFormat='git:{0}'}"
@@ -206,7 +206,7 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- Статус обновления с плавной прозрачностью при появлении -->
+                        <!-- Update status with smooth fade-in opacity -->
                         <TextBlock Grid.Column="2"
                             Text="{Binding UpdateStatusText}"
                             FontSize="11"
@@ -217,7 +217,7 @@
 
                 </Grid>
 
-                <!-- Композитный разделитель с нулевым сдвигом (высота ВСЕГДА ровно 2px) -->
+                <!-- Composite divider with zero shift (height is ALWAYS exactly 2px) -->
                 <Panel Height="2" Margin="0,2,0,2">
                     <Border Height="1" Background="{DynamicResource BgHighlightBrush}"
                         VerticalAlignment="Center" />
@@ -229,7 +229,7 @@
                         VerticalAlignment="Center" />
                 </Panel>
 
-                <!--  Настройки автопроверки  -->
+                <!--  Auto-check settings  -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Classes="label" Text="{Binding L[Settings_AutoCheckUpdates]}" />
@@ -239,7 +239,7 @@
                         VerticalAlignment="Center" />
                 </Grid>
 
-                <!--  Интервал автопроверки  -->
+                <!--  Auto-check interval  -->
                 <Grid ColumnDefinitions="*, 200, 70"
                     IsEnabled="{Binding AutoCheckUpdates}">
                     <StackPanel VerticalAlignment="Center">
@@ -261,7 +261,7 @@
             </StackPanel>
         </Border>
 
-        <!-- Общие параметры -->
+        <!-- General parameters -->
         <Border Classes="card">
             <StackPanel Spacing="16">
 
@@ -312,7 +312,7 @@
                         TextAlignment="Right" />
                 </Grid>
 
-                <!-- Максимальное количество подсказок поиска -->
+                <!-- Maximum number of search suggestions -->
                 <Grid ColumnDefinitions="*, 200, 70" Margin="0,8,0,0">
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Classes="label" Text="{Binding L[Settings_MaxSuggestions]}" />

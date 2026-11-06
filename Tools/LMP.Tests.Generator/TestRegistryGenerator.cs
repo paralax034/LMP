@@ -10,10 +10,10 @@ using Microsoft.CodeAnalysis.Text;
 namespace LMP.Tests.Generator;
 
 /// <summary>
-/// Инкрементальный генератор реестра тестов. Собирает статические методы с <c>[TestMethod]</c>
-/// из пространств имён <c>LMP.Tests*</c> и порождает <c>GeneratedTestRegistry.Create()</c>:
-/// массив регистраций с атрибутом, сигнатурой и статическим делегатом вызова без рефлексии.
-/// Неподдерживаемая сигнатура — ошибка сборки (LMPT001), недоступный для вызова метод — предупреждение (LMPT002).
+/// Incremental generator for the test registry. Collects static methods with <c>[TestMethod]</c>
+/// from <c>LMP.Tests*</c> namespaces and generates <c>GeneratedTestRegistry.Create()</c>:
+/// an array of registrations with attribute, signature, and reflectionless static invocation delegate.
+/// An unsupported signature causes a build error (LMPT001); an inaccessible method triggers a warning (LMPT002).
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class TestRegistryGenerator : IIncrementalGenerator
@@ -84,7 +84,7 @@ public sealed class TestRegistryGenerator : IIncrementalGenerator
         var type = method.ContainingType;
         string ns = type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
 
-        // Область обнаружения прежняя: только пространства имён LMP.Tests*, остальное молча пропускается.
+        // Discovery scope remains the same: only LMP.Tests* namespaces, everything else is silently skipped.
         if (!ns.StartsWith(RequiredNamespacePrefix, StringComparison.Ordinal))
             return default;
 
@@ -231,7 +231,7 @@ public sealed class TestRegistryGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    /// <summary>Неизменяемая модель одного теста; равенство по значению сохраняет кэш инкрементального конвейера.</summary>
+    /// <summary>Immutable model of a single test; value equality preserves the incremental pipeline cache.</summary>
     private readonly record struct TestModel(
         string SortKey,
         string ClassName,
@@ -242,7 +242,7 @@ public sealed class TestRegistryGenerator : IIncrementalGenerator
         string NamedArguments,
         string Signature);
 
-    /// <summary>Сериализуемое описание диагностики без ссылок на синтаксические деревья.</summary>
+    /// <summary>Serializable diagnostic description without references to syntax trees.</summary>
     private readonly record struct DiagnosticInfo(
         DiagnosticDescriptor Descriptor,
         string? FilePath,
@@ -258,7 +258,7 @@ public sealed class TestRegistryGenerator : IIncrementalGenerator
             Arg1);
     }
 
-    /// <summary>Результат анализа метода: модель для реестра либо диагностика.</summary>
+    /// <summary>Method analysis result: registry model or diagnostic.</summary>
     private readonly record struct Candidate(TestModel? Model, DiagnosticInfo? Diagnostic)
     {
         public static Candidate Fail(DiagnosticDescriptor descriptor, Location location, string member, string reason)

@@ -4,41 +4,41 @@ using System.Runtime.Versioning;
 namespace LMP.UI.Features.Shell;
 
 /// <summary>
-/// Нативный менеджер системного трея для Windows.
+/// Native Windows system tray manager.
 /// 
-/// <para><b>Архитектура:</b></para>
+/// <para><b>Architecture:</b></para>
 /// <list type="bullet">
-///   <item>Нативная иконка через Shell_NotifyIcon V4 (tooltip, icon, hover events)</item>
-///   <item>Lazy Low-Level Mouse Hook на <b>выделенном потоке</b> с собственным message pump:
-///         устанавливается ТОЛЬКО при hover над иконкой,
-///         снимается через 2 секунды после ухода курсора ИЛИ при активации главного окна</item>
-///   <item>Shell_NotifyIconGetRect для определения позиции иконки (Windows 7+)</item>
-///   <item>Кастомный Avalonia Popup вместо нативного Win32 контекстного меню</item>
+///   <item>Native icon via Shell_NotifyIcon V4 (tooltip, icon, hover events)</item>
+///   <item>Lazy Low-Level Mouse Hook on a <b>dedicated thread</b> with its own message pump:
+///         installed ONLY on icon hover,
+///         removed 2 seconds after the cursor leaves OR when the main window activates</item>
+///   <item>Shell_NotifyIconGetRect to determine icon position (Windows 7+)</item>
+///   <item>Custom Avalonia Popup instead of a native Win32 context menu</item>
 /// </list>
 /// 
-/// <para><b>Почему Dedicated Hook Thread:</b>
-/// WH_MOUSE_LL callback вызывается на потоке, который установил hook, через его message pump.
-/// Если hook установлен на UI-потоке Avalonia, то во время layout/render/GC message pump
-/// тормозит, и ВСЯ система получает mouse lag. Выделенный поток с легковесным
-/// GetMessage/DispatchMessage loop не зависит от Avalonia — мышь всегда отзывчива.
-/// См. MSDN LowLevelMouseProc: "it should run the hooks on a dedicated thread
+/// <para><b>Why Dedicated Hook Thread:</b>
+/// A WH_MOUSE_LL callback is invoked on the thread that installed the hook via its message pump.
+/// If the hook is installed on the Avalonia UI thread, the message pump stalls
+/// during layout/render/GC, causing system-wide mouse lag. A dedicated thread with a lightweight
+/// GetMessage/DispatchMessage loop is independent of Avalonia, keeping mouse input responsive.
+/// See MSDN LowLevelMouseProc: "it should run the hooks on a dedicated thread
 /// that passes the work off to a worker thread and then immediately returns."</para>
 /// 
-/// <para><b>Почему Lazy Hook:</b> Даже на выделенном потоке, постоянный WH_MOUSE_LL hook
-/// обрабатывает КАЖДОЕ mouse event системы. Lazy hook минимизирует время активности:
-/// WM_MOUSEMOVE от Shell_NotifyIcon V4 → install hook → wheel scroll → 
-/// uninstall через 2с неактивности ИЛИ при активации главного окна.</para>
+/// <para><b>Why Lazy Hook:</b> Even on a dedicated thread, a permanent WH_MOUSE_LL hook
+/// processes EVERY mouse event in the system. The lazy hook minimizes active time:
+/// WM_MOUSEMOVE from Shell_NotifyIcon V4 → install hook → wheel scroll → 
+/// uninstall after 2s of inactivity OR on main window activation.</para>
 /// 
-/// <para><b>Громкость:</b> При скролле колесом мыши вызывается единый метод
-/// <see cref="PlayerControlService.AdjustVolume"/>, а сохранение на диск
-/// автоматически дебаунсится сервисом библиотеки без задержек в hook-потоке.</para>
+/// <para><b>Volume:</b> On mouse wheel scroll, a single method
+/// <see cref="PlayerControlService.AdjustVolume"/> is called, while persistence to disk
+/// is automatically debounced by the library service without blocking the hook thread.</para>
 /// 
-/// <para><b>Toggle debounce:</b> NIN_SELECT и WM_LBUTTONDBLCLK могут приходить оба
-/// при быстром клике. <see cref="TryInvokeToggle"/> использует cooldown
-/// <see cref="MainWindow.ToggleCooldownMs"/> для предотвращения двойного toggle.</para>
+/// <para><b>Toggle debounce:</b> NIN_SELECT and WM_LBUTTONDBLCLK can both be fired
+/// on a fast click. <see cref="TryInvokeToggle"/> uses a cooldown
+/// <see cref="MainWindow.ToggleCooldownMs"/> to prevent double toggling.</para>
 /// 
-/// <para><b>Tooltip формат:</b> <c>{AppName}: {TrackTitle} ({Volume}{VolumeEmoji})</c></para>
-/// <para>Форматируется через <see cref="TrayTooltipHelper"/> (DRY).</para>
+/// <para><b>Tooltip format:</b> <c>{AppName}: {TrackTitle} ({Volume}{VolumeEmoji})</c></para>
+/// <para>Formatted via <see cref="TrayTooltipHelper"/> (DRY).</para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed partial class TrayManager : IDisposable
@@ -48,26 +48,26 @@ internal sealed partial class TrayManager : IDisposable
     private const int WM_USER = 0x0400;
     private const int WM_TRAYICON = WM_USER + 1;
 
-    // Mouse message IDs (V4: приходят как LOWORD(lParam))
+    // Mouse message IDs (V4: received as LOWORD(lParam))
     private const int WM_MOUSEMOVE = 0x0200;
     private const int WM_LBUTTONDBLCLK = 0x0203;
     private const int WM_DESTROY = 0x0002;
 
     /// <summary>
-    /// V4 посылает WM_CONTEXTMENU вместе с WM_RBUTTONUP при правом клике.
-    /// Обрабатываем ТОЛЬКО WM_CONTEXTMENU для ПКМ, чтобы избежать двойного срабатывания popup.
+    /// V4 sends WM_CONTEXTMENU along with WM_RBUTTONUP on right-click.
+    /// Process ONLY WM_CONTEXTMENU for RMB to avoid triggering the popup twice.
     /// </summary>
     private const int WM_CONTEXTMENU = 0x007B;
 
-    // NIN_ notifications (V4: приходят как LOWORD(lParam))
-    /// <summary>Курсор вошёл в область иконки (Shell_NotifyIcon V4).</summary>
+    // NIN_ notifications (V4: received as LOWORD(lParam))
+    /// <summary>Cursor entered icon bounding area (Shell_NotifyIcon V4).</summary>
     private const int NIN_POPUPOPEN = 0x0406;
-    /// <summary>Курсор покинул область иконки (Shell_NotifyIcon V4).</summary>
+    /// <summary>Cursor left icon bounding area (Shell_NotifyIcon V4).</summary>
     private const int NIN_POPUPCLOSE = 0x0407;
 
     /// <summary>
-    /// V4: Пользователь кликнул (select) по иконке. Предпочтительнее WM_LBUTTONUP.
-    /// См. MSDN: "for NOTIFYICON_VERSION_4 clients, NIN_SELECT is preferable".
+    /// V4: User clicked (select) the icon. Preferred over WM_LBUTTONUP.
+    /// See MSDN: "for NOTIFYICON_VERSION_4 clients, NIN_SELECT is preferable".
     /// </summary>
     private const int NIN_SELECT = 0x0400;
 
@@ -87,37 +87,37 @@ internal sealed partial class TrayManager : IDisposable
     private const int NIF_TIP = 0x04;
 
     /// <summary>
-    /// Windows Vista+. Указывает Shell показывать стандартный tooltip при NOTIFYICON_VERSION_4.
+    /// Windows Vista+. Instructs the Shell to show the standard tooltip when using NOTIFYICON_VERSION_4.
     /// 
-    /// <para><b>КРИТИЧНО:</b> Без этого флага при V4 tooltip подавляется (shell ожидает,
-    /// что приложение рисует собственный popup по NIN_POPUPOPEN).
-    /// Флаг действует только до следующего вызова Shell_NotifyIcon —
-    /// поэтому ОБЯЗАТЕЛЬНО передавать при каждом NIM_MODIFY.</para>
+    /// <para><b>CRITICAL:</b> Without this flag under V4, tooltips are suppressed (the shell expects
+    /// the application to render its own popup on NIN_POPUPOPEN).
+    /// The flag remains effective only until the next Shell_NotifyIcon call —
+    /// therefore it MUST be passed on every NIM_MODIFY.</para>
     /// </summary>
     private const int NIF_SHOWTIP = 0x80;
 
     /// <summary>
-    /// V4 нужен для получения NIN_POPUPOPEN/NIN_POPUPCLOSE/NIN_SELECT/WM_CONTEXTMENU.
-    /// WM_MOUSEWHEEL перехватывается через lazy Mouse Hook на выделенном потоке.
+    /// V4 is required to receive NIN_POPUPOPEN/NIN_POPUPCLOSE/NIN_SELECT/WM_CONTEXTMENU.
+    /// WM_MOUSEWHEEL is intercepted via a lazy Mouse Hook on a dedicated thread.
     /// </summary>
     private const int NOTIFYICON_VERSION_4 = 4;
 
-    /// <summary>Шаг изменения громкости при скролле колесиком.</summary>
+    /// <summary>Volume adjustment step per mouse wheel scroll click.</summary>
     private const int VolumeStep = 2;
 
-    /// <summary>Минимальный интервал обновления tooltip при hover (мс).</summary>
+    /// <summary>Minimum interval for updating tooltips on hover (ms).</summary>
     private const int TooltipRefreshIntervalMs = 2000;
 
     /// <summary>
-    /// Таймаут автоматического снятия mouse hook после последнего hover/wheel (мс).
-    /// 2 секунды достаточно для комфортного скролла с паузами.
+    /// Auto-removal timeout for the mouse hook after the last hover/wheel event (ms).
+    /// 2 seconds is sufficient for comfortable scrolling with pauses.
     /// </summary>
     private const int HookAutoUninstallMs = 2000;
 
-    /// <summary>Время жизни кеша RECT иконки трея (мс).</summary>
+    /// <summary>Lifetime of the tray icon RECT cache (ms).</summary>
     private const int IconRectCacheTtlMs = 5000;
 
-    /// <summary>Custom message для управления hook из UI-потока → hook thread.</summary>
+    /// <summary>Custom message to control the hook from the UI thread → hook thread.</summary>
     private const int WM_APP_INSTALL_HOOK = WM_USER + 100;
     private const int WM_APP_UNINSTALL_HOOK = WM_USER + 101;
     private const int WM_APP_SHUTDOWN = WM_USER + 102;
@@ -159,8 +159,8 @@ internal sealed partial class TrayManager : IDisposable
     private static partial bool GetCursorPos(out POINT lpPoint);
 
     /// <summary>
-    /// PostThreadMessage — реальный DLL-экспорт: PostThreadMessageW.
-    /// LibraryImport НЕ добавляет суффикс W автоматически — EntryPoint обязателен.
+    /// PostThreadMessage — actual DLL export: PostThreadMessageW.
+    /// LibraryImport does NOT automatically append the W suffix — EntryPoint is required.
     /// </summary>
     [LibraryImport("user32.dll", EntryPoint = "PostThreadMessageW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -170,8 +170,8 @@ internal sealed partial class TrayManager : IDisposable
     private static partial uint GetCurrentThreadId();
 
     /// <summary>
-    /// GetMessage возвращает int: -1 (ошибка), 0 (WM_QUIT), >0 (обычное сообщение).
-    /// Маршаллинг как bool некорректен: -1 → true = бесконечный цикл при ошибке.
+    /// GetMessage returns int: -1 (error), 0 (WM_QUIT), >0 (regular message).
+    /// Marshalling as bool is incorrect: -1 → true results in an infinite loop on error.
     /// </summary>
     [LibraryImport("user32.dll", EntryPoint = "GetMessageW", SetLastError = true)]
     private static partial int GetMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
@@ -184,9 +184,9 @@ internal sealed partial class TrayManager : IDisposable
     private static partial IntPtr DispatchMessageW(ref MSG lpMsg);
 
     /// <summary>
-    /// PeekMessage — принудительно создаёт Win32 message queue на текущем потоке.
-    /// Необходимо вызвать ДО Set() на ManualResetEvent, чтобы PostThreadMessage
-    /// от UI-потока не упал с ERROR_INVALID_THREAD_ID.
+    /// PeekMessage — forcibly creates a Win32 message queue on the current thread.
+    /// Must be called BEFORE Set() on ManualResetEvent so PostThreadMessage
+    /// from the UI thread doesn't fail with ERROR_INVALID_THREAD_ID.
     /// </summary>
     [LibraryImport("user32.dll", EntryPoint = "PeekMessageW")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -315,68 +315,68 @@ internal sealed partial class TrayManager : IDisposable
     private bool _disposed;
     private string _tooltip = "Lite Music Player";
 
-    /// <summary>Кастомное Avalonia-окно контекстного меню трея. Создаётся лениво.</summary>
+    /// <summary>Custom Avalonia window for the tray context menu. Created lazily.</summary>
     private TrayPopupWindow? _popupWindow;
 
     // Dedicated Hook Thread
 
     /// <summary>
-    /// Выделенный поток для WH_MOUSE_LL hook.
-    /// Имеет собственный Win32 message loop (GetMessage/DispatchMessage),
-    /// полностью независимый от Avalonia UI thread.
+    /// Dedicated thread for the WH_MOUSE_LL hook.
+    /// Runs its own Win32 message loop (GetMessage/DispatchMessage),
+    /// fully independent of the Avalonia UI thread.
     /// </summary>
     private Thread? _hookThread;
 
-    /// <summary>Thread ID выделенного потока — для PostThreadMessage.</summary>
+    /// <summary>Thread ID of the dedicated thread — used for PostThreadMessage.</summary>
     private volatile uint _hookThreadId;
 
     /// <summary>
-    /// Сигнал готовности hook thread (message loop запущен).
-    /// Install/Uninstall запросы через PostThreadMessage валидны только после Set().
+    /// Readiness signal for the hook thread (message loop is running).
+    /// Install/Uninstall requests via PostThreadMessage are valid only after Set().
     /// </summary>
     private readonly ManualResetEventSlim _hookThreadReady = new(false);
 
-    /// <summary>Handle low-level mouse hook. Доступ ТОЛЬКО из hook thread.</summary>
+    /// <summary>Low-level mouse hook handle. Access ONLY from the hook thread.</summary>
     private IntPtr _mouseHookHandle;
 
     /// <summary>
-    /// Делегат mouse hook callback — ОБЯЗАТЕЛЬНО хранить ссылку, иначе GC соберёт.
+    /// Delegate for the mouse hook callback — MUST keep a reference to prevent GC collection.
     /// </summary>
     private LowLevelMouseProc? _mouseHookDelegate;
 
     /// <summary>
-    /// Timestamp последнего hover/wheel события (Environment.TickCount64).
+    /// Timestamp of the last hover/wheel event (Environment.TickCount64).
     /// </summary>
     private long _lastHookActivityTime;
 
-    /// <summary>Таймер автоснятия hook. Runs on UI thread.</summary>
+    /// <summary>Timer for auto-uninstalling the hook. Runs on UI thread.</summary>
     private Avalonia.Threading.DispatcherTimer? _hookTimeoutTimer;
 
-    /// <summary>Флаг видимости popup — volatile для lock-free чтения из hook thread.</summary>
+    /// <summary>Popup visibility flag — volatile for lock-free reads from the hook thread.</summary>
     private volatile bool _isPopupVisible;
 
-    /// <summary>Флаг: hook сейчас установлен. Volatile для чтения из UI thread.</summary>
+    /// <summary>Flag indicating whether the hook is currently installed. Volatile for reads from the UI thread.</summary>
     private volatile bool _isHookInstalled;
 
-    // Кеш RECT иконки
+    // Tray icon RECT cache
     private RECT _cachedIconRect;
     private long _iconRectCacheTime;
     private volatile bool _iconRectCacheValid;
 
-    /// <summary>Timestamp последнего обновления tooltip при hover.</summary>
+    /// <summary>Timestamp of the last tooltip update on hover.</summary>
     private DateTime _lastTooltipRefresh = DateTime.MinValue;
 
     /// <summary>
-    /// Timestamp последнего toggle окна (Environment.TickCount64).
-    /// Используется для debounce NIN_SELECT / WM_LBUTTONDBLCLK.
+    /// Timestamp of the last window toggle (Environment.TickCount64).
+    /// Used for debouncing NIN_SELECT / WM_LBUTTONDBLCLK.
     /// </summary>
     private long _lastToggleTime;
 
     private const string WindowClassName = "LMPTrayWindow";
 
     /// <summary>
-    /// Возвращает актуальное состояние видимости главного окна.
-    /// Func вместо bool — актуальное значение на момент открытия popup.
+    /// Returns the current visibility state of the main window.
+    /// Func instead of bool — captures the actual value at the moment the popup opens.
     /// </summary>
     private readonly Func<bool>? _isWindowVisible;
 
@@ -385,18 +385,18 @@ internal sealed partial class TrayManager : IDisposable
     #region Constructor
 
     /// <summary>
-    /// Создаёт менеджер трея с нативной иконкой и кастомным Avalonia Popup.
-    /// Mouse hook НЕ устанавливается сразу — только при hover над иконкой.
-    /// Hook работает на выделенном потоке для устранения mouse lag.
+    /// Creates a tray manager with a native icon and a custom Avalonia Popup.
+    /// Mouse hook is NOT installed immediately — only on icon hover.
+    /// The hook operates on a dedicated thread to eliminate mouse lag.
     /// </summary>
-    /// <param name="playerControl">Сервис управления плеером</param>
-    /// <param name="onToggleWindow">Toggle show/hide главного окна (ЛКМ по иконке)</param>
-    /// <param name="onExit">Закрыть приложение</param>
-    /// <param name="onOpenQueue">Открыть очередь</param>
-    /// <param name="onVolumeChanged">Callback при изменении громкости скроллом</param>
+    /// <param name="playerControl">Player control service</param>
+    /// <param name="onToggleWindow">Toggle show/hide main window (LMB on icon)</param>
+    /// <param name="onExit">Exit application</param>
+    /// <param name="onOpenQueue">Open queue</param>
+    /// <param name="onVolumeChanged">Callback triggered on scroll volume changes</param>
     /// <param name="isWindowVisible">
-    /// Функция, возвращающая текущую видимость главного окна.
-    /// Вызывается при каждом открытии popup для актуального состояния кнопки Show/Hide.
+    /// Function returning the current main window visibility.
+    /// Invoked every time the popup opens to get the current Show/Hide button state.
     /// </param>
     public TrayManager(
         PlayerControlService playerControl,
@@ -454,8 +454,8 @@ internal sealed partial class TrayManager : IDisposable
     #region Icon Management
 
     /// <summary>
-    /// Показывает иконку в системном трее.
-    /// Mouse hook НЕ устанавливается — будет установлен лениво при hover.
+    /// Shows the icon in the system tray.
+    /// The mouse hook is NOT installed — it will be installed lazily on hover.
     /// </summary>
     public void Show(IntPtr? iconHandle = null)
     {
@@ -491,7 +491,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Скрывает иконку из системного трея и снимает hook если был установлен.
+    /// Hides the icon from the system tray and uninstalls the hook if it was installed.
     /// </summary>
     public void Hide()
     {
@@ -508,12 +508,12 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Обновляет текст tooltip иконки трея.
+    /// Updates the tray icon tooltip text.
     /// 
-    /// <para><b>NIF_SHOWTIP:</b> Передаётся при КАЖДОМ NIM_MODIFY — иначе tooltip сбрасывается при V4.</para>
+    /// <para><b>NIF_SHOWTIP:</b> Passed on EVERY NIM_MODIFY — otherwise tooltip is reset under V4.</para>
     /// 
-    /// <para><b>forceRefresh:</b> При <c>true</c> сначала выставляет пустой szTip, затем реальный.
-    /// Форсирует немедленное обновление tooltip window shell'ом.</para>
+    /// <para><b>forceRefresh:</b> When <c>true</c>, sets szTip to empty first, then to the actual string.
+    /// Forces the shell to immediately refresh the tooltip window.</para>
     /// </summary>
     public void SetTooltip(string text, bool forceRefresh = false)
     {
@@ -536,8 +536,8 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Обновляет иконку в системном трее.
-    /// NIF_SHOWTIP передаётся чтобы не сбросить отображение tooltip.
+    /// Updates the system tray icon.
+    /// NIF_SHOWTIP is passed to avoid resetting the tooltip display.
     /// </summary>
     public void SetIcon(IntPtr iconHandle)
     {
@@ -553,7 +553,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Обновляет tooltip используя текущее состояние плеера.
+    /// Updates the tooltip using the current player state.
     /// </summary>
     public void UpdateTooltipFromPlayerState()
     {
@@ -562,8 +562,8 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Обновляет tooltip с акцентом на громкости (для scroll events).
-    /// Использует <c>forceRefresh: true</c> для мгновенного отображения.
+    /// Updates the tooltip with an emphasis on volume (for scroll events).
+    /// Uses <c>forceRefresh: true</c> for immediate rendering.
     /// </summary>
     public void UpdateTooltipWithVolumeAccent()
     {
@@ -574,8 +574,8 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Немедленно снимает hook и коммитит громкость.
-    /// Вызывается из MainWindow при активации окна.
+    /// Immediately unhooks and commits volume.
+    /// Called from MainWindow on window activation.
     /// </summary>
     public void ForceUninstallHook()
     {
@@ -611,7 +611,7 @@ internal sealed partial class TrayManager : IDisposable
     #region Icon RECT Cache
 
     /// <summary>
-    /// Обновляет кешированный RECT иконки трея через P/Invoke.
+    /// Updates the cached tray icon RECT via P/Invoke.
     /// </summary>
     private void RefreshIconRectCache()
     {
@@ -638,8 +638,8 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Проверяет позицию курсора относительно кешированного RECT.
-    /// Обновляет кеш если TTL истёк.
+    /// Checks cursor position relative to the cached RECT.
+    /// Updates the cache if TTL has expired.
     /// </summary>
     private bool IsCursorOverTrayIconCached(int cursorX, int cursorY)
     {
@@ -659,7 +659,7 @@ internal sealed partial class TrayManager : IDisposable
     #region Dedicated Hook Thread
 
     /// <summary>
-    /// Запускает выделенный фоновый поток с Win32 message loop для mouse hook.
+    /// Starts a dedicated background thread with a Win32 message loop for the mouse hook.
     /// </summary>
     private void StartHookThread()
     {
@@ -674,7 +674,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Entry point выделенного hook thread.
+    /// Entry point for the dedicated hook thread.
     /// </summary>
     private void HookThreadProc()
     {
@@ -718,8 +718,8 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Устанавливает hook на текущем (hook) потоке.
-    /// Вызывается ТОЛЬКО из HookThreadProc по WM_APP_INSTALL_HOOK.
+    /// Installs the hook on the current (hook) thread.
+    /// MUST be called from HookThreadProc on WM_APP_INSTALL_HOOK.
     /// </summary>
     private void InstallHookOnThread()
     {
@@ -745,8 +745,8 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Снимает hook на текущем (hook) потоке.
-    /// Вызывается ТОЛЬКО из HookThreadProc.
+    /// Uninstalls the hook on the current (hook) thread.
+    /// MUST be called from HookThreadProc.
     /// </summary>
     private void UninstallHookOnThread()
     {
@@ -764,8 +764,8 @@ internal sealed partial class TrayManager : IDisposable
     #region Lazy Mouse Hook — UI Thread Side
 
     /// <summary>
-    /// Запрашивает установку hook через PostThreadMessage на hook thread.
-    /// Вызывается из UI-потока (WndProc) при hover над иконкой.
+    /// Requests hook installation via PostThreadMessage to the hook thread.
+    /// Called from the UI thread (WndProc) when hovering over the icon.
     /// </summary>
     private void RequestInstallHook()
     {
@@ -781,7 +781,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Запрашивает снятие mouse hook в выделенном потоке.
+    /// Requests mouse hook uninstallation on the dedicated thread.
     /// </summary>
     private void RequestUninstallHook()
     {
@@ -795,7 +795,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Запускает DispatcherTimer для проверки таймаута hook.
+    /// Starts DispatcherTimer to monitor hook timeout.
     /// </summary>
     private void StartHookTimeoutTimer()
     {
@@ -818,7 +818,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Tick handler: проверяет прошло ли достаточно времени с последней активности.
+    /// Tick handler: checks if enough time has elapsed since the last activity.
     /// </summary>
     private void OnHookTimeoutTick(object? sender, EventArgs e)
     {
@@ -856,7 +856,7 @@ internal sealed partial class TrayManager : IDisposable
         if (!IsCursorOverTrayIconCached(cursorX, cursorY))
             return CallNextHookEx(_mouseHookHandle, nCode, wParam, lParam);
 
-        // Wheel event над иконкой
+        // Wheel event over icon
         Volatile.Write(ref _lastHookActivityTime, Environment.TickCount64);
 
         int mouseData = Marshal.ReadInt32(lParam, 8);
@@ -877,7 +877,7 @@ internal sealed partial class TrayManager : IDisposable
     #region Window Procedure & Toggle Debounce
 
     /// <summary>
-    /// Обработчик оконных сообщений от Shell_NotifyIcon V4.
+    /// Window message handler for Shell_NotifyIcon V4.
     /// </summary>
     private IntPtr WndProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam)
     {
@@ -928,7 +928,7 @@ internal sealed partial class TrayManager : IDisposable
     }
 
     /// <summary>
-    /// Вызывает toggle окна с debounce-защитой.
+    /// Triggers window toggle with debounce protection.
     /// </summary>
     private void TryInvokeToggle()
     {
@@ -950,8 +950,8 @@ internal sealed partial class TrayManager : IDisposable
     #region Popup Menu (Avalonia)
 
     /// <summary>
-    /// Показывает кастомное Avalonia-окно контекстного меню.
-    /// Передаёт актуальное состояние видимости окна для корректного текста Show/Hide.
+    /// Shows a custom Avalonia context menu window.
+    /// Passes the current window visibility state for correct Show/Hide text.
     /// </summary>
     private void ShowPopupMenu()
     {

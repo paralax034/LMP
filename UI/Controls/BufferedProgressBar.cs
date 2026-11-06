@@ -5,8 +5,8 @@ using Avalonia.Media;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Высокопроизводительный прогресс-бар с поддержкой отображения сегментов буферизации,
-/// двухцветной проигранной частью (кэшированная vs потоковая) и плавной LERP-интерполяцией буфера.
+/// High-performance progress bar supporting buffering segment rendering,
+/// a two-tone played section (cached vs streamed), and smooth LERP buffer interpolation.
 /// </summary>
 public sealed class BufferedProgressBar : Control
 {
@@ -144,7 +144,7 @@ public sealed class BufferedProgressBar : Control
             double newVal = Math.Clamp(change.GetNewValue<double>(), 0.0, max);
             double playedWidth = newVal / max * width;
 
-            // Перерисовываем полосу прогресс-бара только когда ширина заполнения реально изменилась >= 0.2 пикселя
+            // Redraw the progress bar strip only when the fill width actually changes by >= 0.2 pixels
             if (Math.Abs(playedWidth - _lastRenderedPlayedWidth) >= ProgressConstants.MinPixelDeltaForRedraw || newVal <= 0.0 || newVal >= max)
             {
                 _lastRenderedPlayedWidth = playedWidth;
@@ -157,7 +157,7 @@ public sealed class BufferedProgressBar : Control
         {
             if (IsFullyBuffered)
             {
-                // Для полностью буферизованного трека устанавливаем (0.0, 1.0) мгновенно без раскрутки VSync-цикла
+                // For a fully buffered track, set (0.0, 1.0) instantly without spinning up the VSync loop
                 _smoothRanges.Clear();
                 _smoothRanges.Add((0.0, 1.0));
                 _isInterpolating = false;

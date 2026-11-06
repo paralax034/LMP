@@ -7,8 +7,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Гейт спектра в аудио-callback'е: анализ идёт только при живой аренде читателя и сам возобновляется опросом UI,
-/// сброс из чужого потока откладывается до аудио-потока, а уровни публикуются к моменту фактического звучания блока.
+/// Spectrum gate in the audio callback: analysis runs only with an active reader lease and self-resumes via UI polling,
+/// resets from another thread are deferred to the audio thread, and levels are published when the block actually plays.
 /// </summary>
 public static class VisualizerSpectrumGateTests
 {
@@ -24,11 +24,11 @@ public static class VisualizerSpectrumGateTests
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_beatFollowerSlow")]
     private static extern ref float BeatFollowerSlow(AudioSpectrumAnalyzer analyzer);
 
-    /// <summary>Без читателей callback отдаёт PCM, но не считает спектр; первый же опрос UI возобновляет анализ.</summary>
+    /// <summary>Without readers, the callback outputs PCM without calculating the spectrum; the very first UI poll resumes analysis.</summary>
     [TestMethod(TestCategory.Unit, "Spectrum Analysis Suspends Without Readers & Resumes On Poll", Group = TestGroups.Audio, Order = 13)]
     public static async Task TestSpectrumGateFollowsReaderLeaseAsync()
     {
-        // Аренда читателя глобальна: ждём её истечения; живой UI, опрашивающий уровни, делает проверку невозможной
+        // Reader lease is global: waiting for its expiration; active UI polling levels makes verification impossible
         await Task.Delay(AudioVisualizerBuffer.ReaderLeaseMs + 100).ConfigureAwait(false);
         if (AudioVisualizerBuffer.HasActiveReaders)
             TestAssert.Skip("AudioVisualizerBuffer is polled by a live UI reader; the reader lease cannot expire");
@@ -42,7 +42,7 @@ public static class VisualizerSpectrumGateTests
             TestAssert.Equal(1_024, frames, "Callback must deliver PCM regardless of the spectrum gate");
             TestAssert.False(AudioVisualizerBuffer.HasRecentActivity, "Spectrum must not be computed while nobody reads it");
 
-            // Чтение выше продлило аренду: следующий блок снова попадает в анализатор
+            // The read above extended the lease: the next block enters the analyzer again
             AudioPipelineTestHarness.AudioCallback(pipeline, block);
             TestAssert.True(AudioVisualizerBuffer.HasRecentActivity, "A UI poll must resume spectrum analysis on the next callback");
 
@@ -56,7 +56,7 @@ public static class VisualizerSpectrumGateTests
         }
     }
 
-    /// <summary>Stop из чужого потока не трогает фильтры анализатора: сброс исполняет ближайший аудио-callback.</summary>
+    /// <summary>Stop from another thread does not touch analyzer filters: the reset is performed by the next audio callback.</summary>
     [TestMethod(TestCategory.Unit, "Pipeline Stop Defers Spectrum Reset To The Audio Thread", Group = TestGroups.Audio, Order = 14)]
     public static async Task TestStopDefersSpectrumResetAsync()
     {
@@ -68,7 +68,7 @@ public static class VisualizerSpectrumGateTests
             AudioSpectrumAnalyzer analyzer = SpectrumAnalyzer(pipeline);
             float[] block = new float[2_048];
 
-            // Чтение уровней продлевает аренду: анализ включён
+            // Reading levels extends the lease: analysis is enabled
             _ = AudioVisualizerBuffer.OverallLevel;
             AudioPipelineTestHarness.AudioCallback(pipeline, block);
 
@@ -76,13 +76,13 @@ public static class VisualizerSpectrumGateTests
             float slow = BeatFollowerSlow(analyzer);
             TestAssert.True(fast > 0f && slow > 0f, $"60 Hz tone must charge beat followers: fast={fast}, slow={slow}");
 
-            // Stop из потока теста: опубликованные уровни гаснут сразу, а состояние фильтров принадлежит аудио-потоку
+            // Stop from the test thread: published levels clear immediately, while filter state belongs to the audio thread
             pipeline.Stop();
             TestAssert.Equal(fast, BeatFollowerFast(analyzer), "Stop must not mutate analyzer state outside the audio callback");
             TestAssert.Equal(slow, BeatFollowerSlow(analyzer), "Stop must not mutate analyzer state outside the audio callback");
             TestAssert.False(AudioVisualizerBuffer.HasRecentActivity, "Stop must clear published levels immediately");
 
-            // Ближайший callback исполняет отложенный сброс и анализирует свой блок с нулевого состояния
+            // The next callback performs the deferred reset and analyzes its block from a clean state
             AudioPipelineTestHarness.AudioCallback(pipeline, block);
 
             var fresh = new AudioSpectrumAnalyzer(SampleRate, Channels);
@@ -97,7 +97,7 @@ public static class VisualizerSpectrumGateTests
         }
     }
 
-    /// <summary>Уровни блока появляются, когда блок звучит, а не когда он передан в буфер устройства.</summary>
+    /// <summary>Block levels appear when the block plays, not when it is submitted to the device buffer.</summary>
     [TestMethod(TestCategory.Unit, "Spectrum Levels Are Published At Presentation Time", Group = TestGroups.Audio, Order = 15)]
     public static async Task TestSpectrumPresentationDelayAsync()
     {
@@ -107,27 +107,27 @@ public static class VisualizerSpectrumGateTests
         var analyzer = new AudioSpectrumAnalyzer(SampleRate, Channels);
         float[] loud = CreateTone(2_048, 1_000f, 0.8f);
         float[] silence = new float[2_048 * Channels];
-        long delayTicks = Stopwatch.Frequency / 5; // 200 мс в буфере устройства
+        long delayTicks = Stopwatch.Frequency / 5; // 200 ms in the device buffer
 
-        // 1. Громкий блок ещё ждёт в очереди устройства: показывать его рано
+        // 1. The loud block is still queued in the device buffer: too early to display it
         analyzer.ProcessBlock(loud, Channels, delayTicks);
         TestAssert.False(AudioVisualizerBuffer.HasRecentActivity, "Levels must not lead the audible output");
 
-        // 2. Срок звучания прошёл: следующий блок публикует громкий кадр, а свой тихий ставит в очередь
+        // 2. Playback time has passed: the next block publishes the loud frame and queues its silent one
         await Task.Delay(260).ConfigureAwait(false);
         analyzer.ProcessBlock(silence, Channels, delayTicks);
 
         float level = AudioVisualizerBuffer.OverallLevel;
         TestAssert.True(level > 0.5f, $"Due loud frame must be published once its presentation time passes, got {level:F3}");
 
-        // 3. Без задержки текущий блок публикуется сразу, а очередь сбрасывается
+        // 3. Without delay, the current block is published immediately, and the queue is flushed
         analyzer.ProcessBlock(silence, Channels);
         TestAssert.True(AudioVisualizerBuffer.OverallLevel < 0.01f, "Zero delay must publish the current block immediately");
     }
 
     private static async Task SkipIfForeignPublisherAsync()
     {
-        // Буфер визуализатора глобален: живое воспроизведение перезаписало бы уровни посреди проверки
+        // Visualizer buffer is global: live playback would overwrite levels during verification
         await Task.Delay(60).ConfigureAwait(false);
         if (AudioVisualizerBuffer.HasRecentActivity)
             TestAssert.Skip("AudioVisualizerBuffer is being fed by active playback; global state would corrupt assertions");

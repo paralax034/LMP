@@ -5,11 +5,11 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio.Backends;
 
 /// <summary>
-/// Заглушка backend для тестирования без реального аудио вывода.
+/// Stub backend for testing without real audio output.
 ///
-/// <para>Симулирует потребление PCM данных через внутренний consume loop.
-/// Все device-loss callbacks являются no-op: NullBackend никогда не теряет
-/// «устройство» и не генерирует starvation события.</para>
+/// <para>Simulates PCM data consumption via an internal consume loop.
+/// All device-loss callbacks are no-ops: NullBackend never loses
+/// a "device" and does not generate starvation events.</para>
 /// </summary>
 public sealed class NullAudioBackend : IPlaybackBackend
 {
@@ -26,7 +26,7 @@ public sealed class NullAudioBackend : IPlaybackBackend
     private CancellationTokenSource? _cts;
 
     /// <summary>
-    /// Сериализует вызов callback и публикацию часов: у <see cref="RenderClock"/> допускается только один писатель.
+    /// Serializes callback invocation and clock publication: <see cref="RenderClock"/> allows only a single writer.
     /// </summary>
     private readonly Lock _pullLock = new();
     private readonly RenderClock _renderClock = new();
@@ -52,11 +52,11 @@ public sealed class NullAudioBackend : IPlaybackBackend
     public int BufferedBytes => 0;
 
     /// <inheritdoc/>
-    /// <remarks>NullBackend никогда не теряет устройство — всегда <c>false</c>.</remarks>
+    /// <remarks>NullBackend never loses a device — always <c>false</c>.</remarks>
     public bool IsDeviceLost => false;
 
     /// <inheritdoc/>
-    /// <remarks>У NullBackend нет очереди устройства: сэмпл считается воспроизведённым в момент выдачи callback'ом.</remarks>
+    /// <remarks>NullBackend has no device queue: a sample is considered played the moment it is produced by the callback.</remarks>
     public long RenderedSamples => Volatile.Read(ref _renderedSamples);
 
     /// <inheritdoc/>
@@ -88,7 +88,7 @@ public sealed class NullAudioBackend : IPlaybackBackend
     public void ActivateFillLoop() { }
 
     /// <inheritdoc/>
-    /// <remarks>NullBackend всегда «прогрет» — немедленно возвращает <c>true</c>.</remarks>
+    /// <remarks>NullBackend is always "warmed up" — immediately returns <c>true</c>.</remarks>
     public bool WaitForWarmup(int timeoutMs = 3000) => true;
 
     #endregion
@@ -141,7 +141,7 @@ public sealed class NullAudioBackend : IPlaybackBackend
     }
 
     /// <summary>
-    /// Забирает один блок у callback и публикует часы рендера под <see cref="_pullLock"/>.
+    /// Fetches one block from the callback and publishes the render clock under <see cref="_pullLock"/>.
     /// </summary>
     private void ConsumeTick(float[] buffer, int samplesPerSecond)
     {
@@ -165,22 +165,22 @@ public sealed class NullAudioBackend : IPlaybackBackend
 
     /// <inheritdoc/>
     /// <remarks>
-    /// NullBackend не имеет реального устройства — callback никогда не будет вызван.
-    /// Stub реализует контракт интерфейса без side effects.
+    /// NullBackend has no real device — the callback will never be invoked.
+    /// The stub implements the interface contract without side effects.
     /// </remarks>
     public void SetDeviceLostCallback(Action? callback) { }
 
     /// <inheritdoc/>
     /// <remarks>
-    /// NullBackend не запускает device watcher — устройство никогда не теряется.
-    /// Stub реализует контракт интерфейса без side effects.
+    /// NullBackend does not run a device watcher — the device is never lost.
+    /// The stub implements the interface contract without side effects.
     /// </remarks>
     public void SetDeviceAvailableCallback(Action? callback) { }
 
     /// <inheritdoc/>
     /// <remarks>
-    /// NullBackend не генерирует starvation события — consume loop всегда дренирует данные.
-    /// Stub реализует контракт интерфейса без side effects.
+    /// NullBackend does not generate starvation events — the consume loop always drains data.
+    /// The stub implements the interface contract without side effects.
     /// </remarks>
     public void SetStarvationCallback(Action? callback) { }
 

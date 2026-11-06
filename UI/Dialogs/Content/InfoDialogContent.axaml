@@ -13,12 +13,12 @@
             MaxWidth="500">
 
         <StackPanel Spacing="16">
-            <!-- Заголовок -->
+            <!-- Header -->
             <TextBlock Text="{Binding Title}"
                        FontSize="18" FontWeight="Bold"
                        Foreground="{DynamicResource TextPrimaryBrush}" />
 
-            <!-- Сообщение -->
+            <!-- Message -->
             <ScrollViewer MaxHeight="500"
                           VerticalScrollBarVisibility="Auto">
                 <TextBlock Text="{Binding Message}"
@@ -26,7 +26,7 @@
                            Foreground="{DynamicResource TextSecondaryBrush}" />
             </ScrollViewer>
 
-            <!-- Кнопка -->
+            <!-- Button -->
             <Button Content="{Binding ButtonText}"
                     Command="{Binding CloseCommand}"
                     HorizontalAlignment="Right"

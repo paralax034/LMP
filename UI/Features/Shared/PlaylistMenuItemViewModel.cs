@@ -4,7 +4,7 @@ using Avalonia.Media;
 namespace LMP.UI.Features.Shared;
 
 /// <summary>
-/// Представляет интерактивный элемент плейлиста внутри каскадного подменю добавления треков.
+/// Represents an interactive playlist item inside the cascading track addition submenu.
 /// </summary>
 public sealed partial class PlaylistMenuItemViewModel : ObservableObject
 {

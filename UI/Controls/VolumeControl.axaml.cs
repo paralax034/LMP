@@ -188,7 +188,7 @@ public partial class VolumeControl : UserControl
         VolumeThumb.Classes.Set("boosted", isVolumeBoosted);
         VolumeBar.Classes.Set("boosted", isVolumeBoosted);
 
-        // Прямое и безопасное получение системных ресурсов темы
+        // Direct and safe retrieval of system theme resources
         var accentBrush = (IBrush)(Application.Current?.Resources["AccentBrush"] ?? Brushes.Purple);
         var textMutedBrush = (IBrush)(Application.Current?.Resources["TextMutedBrush"] ?? Brushes.Gray);
         var textSecondaryBrush = (IBrush)(Application.Current?.Resources["TextSecondaryBrush"] ?? Brushes.LightGray);
@@ -198,7 +198,7 @@ public partial class VolumeControl : UserControl
 
         bool isPopupOpen = VolumePopup != null && VolumePopup.IsOpen;
 
-        // ПРЯМОЕ УПРАВЛЕНИЕ СВОЙСТВАМИ КНОПКИ (100% надежность отрисовки без участия биндингов)
+        // DIRECT MANAGEMENT OF BUTTON PROPERTIES (100% rendering reliability without bindings)
         if (isPopupOpen)
         {
             VolumeButton.Background = transparent70PercentBg;

@@ -6,8 +6,8 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
-/// Представляет ответ API YouTube на запрос страницы просмотра плейлиста (Browse).
-/// Чистая легковесная DTO-модель: извлекает данные при разборе и не удерживает <see cref="JsonDocument"/> в памяти.
+/// Represents a YouTube API response for a playlist browse page request.
+/// Pure lightweight DTO model: extracts data during parsing and does not hold <see cref="JsonDocument"/> in memory.
 /// </summary>
 internal partial class PlaylistBrowseResponse : IPlaylistData
 {
@@ -21,52 +21,52 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     public int? Count { get; init; }
 
     /// <summary>
-    /// Количество просмотров плейлиста.
-    /// Поддерживает новый UI-отрендеренный объект заголовка (frameworkUpdates) и классический сайдбар.
+    /// View count of the playlist.
+    /// Supports the new UI-rendered header object (frameworkUpdates) and the classic sidebar.
     /// </summary>
     public long? ViewCount { get; init; }
 
     /// <summary>
-    /// Дата создания или последнего обновления плейлиста (в строковом представлении).
-    /// Извлекает чистое значение даты без локализованных префиксов («Updated»).
-    /// Поддерживает новый UI заголовка (frameworkUpdates) и парсинг третьего элемента
-    /// статистики классического сайдбара.
+    /// Playlist creation or last update date (string representation).
+    /// Extracts a clean date value without localized prefixes ("Updated").
+    /// Supports the new header UI (frameworkUpdates) and parsing of the third sidebar
+    /// stat element in the classic sidebar.
     /// </summary>
     public DateOnly? ReleaseDate { get; init; }
 
     /// <summary>
-    /// Вычисленный уровень доступа к плейлисту.
-    /// Для owned playlists берётся из privacy dropdown, для остальных остаётся Unknown.
+    /// Calculated playlist access level.
+    /// For owned playlists, it is obtained from the privacy dropdown; for others, it remains Unknown.
     /// </summary>
     public PlaylistVisibility Visibility { get; init; } = PlaylistVisibility.Unknown;
 
     /// <summary>
-    /// Признак того, что плейлист принадлежит текущему аккаунту и доступен для редактирования
-    /// (наличие форм редактирования приватности, названия или описания в сайдбаре).
+    /// Indicates whether the playlist belongs to the current account and is editable
+    /// (presence of privacy, title, or description edit forms in the sidebar).
     /// </summary>
     public bool IsEditable { get; init; }
 
     public IReadOnlyList<ThumbnailData> Thumbnails { get; init; } = [];
 
     /// <summary>
-    /// Список видео в текущей партии плейлиста.
+    /// List of videos in the current playlist batch.
     /// </summary>
     public IReadOnlyList<PlaylistVideoData> Videos { get; init; } = [];
 
     /// <summary>
-    /// Токен пагинации для получения следующей страницы списка видео.
+    /// Pagination token for fetching the next page of the video list.
     /// </summary>
     public string? ContinuationToken { get; init; }
 
     /// <summary>
-    /// Данные о сессии пользователя для отслеживания контекста.
+    /// User session data for context tracking.
     /// </summary>
     public string? VisitorData { get; init; }
 
     /// <summary>
-    /// Инициализирует DTO-модель, извлекая все свойства из корневого элемента JSON за один проход.
+    /// Initializes the DTO model by extracting all properties from the root JSON element in a single pass.
     /// </summary>
-    /// <param name="content">Корневой JSON-элемент ответа Browse.</param>
+    /// <param name="content">Root JSON element of the Browse response.</param>
     public PlaylistBrowseResponse(JsonElement content)
     {
         var sidebar = content
@@ -85,8 +85,8 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
             ?.GetPropertyOrNull("playlistSidebarSecondaryInfoRenderer");
 
         /// <summary>
-        /// Renderer формы приватности плейлиста. Доступен, как правило, для плейлистов,
-        /// принадлежащих текущему аутентифицированному пользователю.
+        /// Playlist privacy form renderer. Typically available for playlists
+        /// belonging to the currently authenticated user.
         /// </summary>
         var privacyDropdownRenderer = sidebarPrimary
             ?.GetPropertyOrNull("privacyForm")
@@ -209,8 +209,8 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Выполняет структурный поиск <c>playlistVideoListRenderer</c> по всем вкладкам,
-    /// секциям и элементам browse-ответа.
+    /// Performs a structural search for <c>playlistVideoListRenderer</c> across all tabs,
+    /// sections, and items of the browse response.
     /// </summary>
     private static JsonElement? ResolvePlaylistContents(JsonElement content)
     {
@@ -238,7 +238,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Ищет <c>playlistVideoListRenderer</c> внутри содержимого одной вкладки.
+    /// Searches for <c>playlistVideoListRenderer</c> inside the contents of a single tab.
     /// </summary>
     private static JsonElement? FindRendererInTabContent(JsonElement tabContent)
     {
@@ -279,7 +279,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Пытается определить visibility плейлиста из privacy dropdown.
+    /// Tries to determine playlist visibility from the privacy dropdown.
     /// </summary>
     private static bool TryParseVisibility(JsonElement? root, out PlaylistVisibility visibility)
     {
@@ -298,7 +298,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Рекурсивно ищет объект-элемент dropdown, у которого <c>isSelected = true</c>.
+    /// Recursively searches for a dropdown item object that has <c>isSelected = true</c>.
     /// </summary>
     private static bool TryFindSelectedPrivacyEntry(JsonElement element, out JsonElement selectedEntry)
     {
@@ -340,7 +340,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Пытается извлечь visibility из конкретного элемента dropdown.
+    /// Tries to extract visibility from a specific dropdown item.
     /// </summary>
     private static bool TryParseVisibilityFromEntry(JsonElement element, out PlaylistVisibility visibility)
     {
@@ -404,7 +404,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     {
         long? sidebarViews = null;
 
-        // 1. Классический Sidebar stats[1] всегда содержит точное несокращённое число просмотров (например, "53,412 views")
+        // 1. Classic Sidebar stats[1] always contains the exact unshortened view count (e.g., "53,412 views")
         var stats = sidebarPrimary?.GetPropertyOrNull("stats");
         if (stats?.ValueKind == JsonValueKind.Array && stats.Value.GetArrayLength() > 1)
         {
@@ -414,7 +414,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
                 return sidebarViews;
         }
 
-        // 2. Новый UI (frameworkUpdates / pageHeaderViewModel)
+        // 2. New UI (frameworkUpdates / pageHeaderViewModel)
         long? headerViews = null;
         var mutations = content
             .GetPropertyOrNull("frameworkUpdates")
@@ -469,7 +469,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 
     private static DateOnly? ExtractReleaseDate(JsonElement content, JsonElement? sidebarPrimary)
     {
-        // 1. Попытка через новый UI (frameworkUpdates)
+        // 1. Attempt via the new UI (frameworkUpdates)
         var mutations = content
             .GetPropertyOrNull("frameworkUpdates")
             ?.GetPropertyOrNull("entityBatchUpdate")
@@ -513,7 +513,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
             }
         }
 
-        // 2. Попытка через классический Sidebar stats[2] (третий элемент массива)
+        // 2. Attempt via classic Sidebar stats[2] (third element of the array)
         var stats = sidebarPrimary?.GetPropertyOrNull("stats");
         if (stats?.ValueKind == JsonValueKind.Array)
         {
@@ -536,7 +536,7 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
     }
 
     /// <summary>
-    /// Выполняет детерминированное преобразование английской строки даты YouTube в <see cref="DateOnly"/>.
+    /// Performs deterministic conversion of an English YouTube date string to <see cref="DateOnly"/>.
     /// </summary>
     private static DateOnly? TryParseDate(string? text)
     {
@@ -740,8 +740,8 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
 internal partial class PlaylistBrowseResponse
 {
     /// <summary>
-    /// Парсит ответ Browse плейлиста из сырой JSON-строки.
-    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// Parses a playlist Browse response from a raw JSON string.
+    /// Disposes <see cref="JsonDocument"/> immediately after constructing the model.
     /// </summary>
     public static PlaylistBrowseResponse Parse(string raw)
     {
@@ -750,12 +750,12 @@ internal partial class PlaylistBrowseResponse
     }
 
     /// <summary>
-    /// Парсит ответ Browse плейлиста напрямую из сетевого потока без промежуточных строк в LOH.
-    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// Parses a playlist Browse response directly from a network stream without intermediate strings in LOH.
+    /// Disposes <see cref="JsonDocument"/> immediately after constructing the model.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Экземпляр плоского ответа плейлиста.</returns>
+    /// <param name="stream">HTTP response network stream.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>An instance of the flat playlist response.</returns>
     public static async ValueTask<PlaylistBrowseResponse> ParseAsync(Stream stream, CancellationToken ct = default)
     {
         using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);

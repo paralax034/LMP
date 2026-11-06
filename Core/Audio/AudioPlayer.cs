@@ -7,15 +7,15 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Аудио плеер с акторной моделью обработки команд.
+/// Audio player utilizing an actor model for command processing.
 /// </summary>
 /// <remarks>
-/// <para><b>Декомпозиция (partial classes):</b></para>
+/// <para><b>Decomposition (partial classes):</b></para>
 /// <list type="bullet">
-///   <item><c>AudioPlayer.cs</c> — ядро: command loop, state machine, play/stop/resume.</item>
-///   <item><c>AudioPlayer.Seek.cs</c> — двухфазный seek.</item>
-///   <item><c>AudioPlayer.DeviceRecovery.cs</c> — восстановление после потери устройства.</item>
-///   <item><c>AudioPlayer.Timers.cs</c> — управление таймерами UI-обновлений.</item>
+///   <item><c>AudioPlayer.cs</c> — core: command loop, state machine, play/stop/resume.</item>
+///   <item><c>AudioPlayer.Seek.cs</c> — two-phase seek.</item>
+///   <item><c>AudioPlayer.DeviceRecovery.cs</c> — recovery after device loss.</item>
+///   <item><c>AudioPlayer.Timers.cs</c> — management of UI update timers.</item>
 /// </list>
 /// </remarks>
 public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
@@ -27,7 +27,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private const int DisposeTaskTimeoutSec = 2;
     private const int ResumeMinBufferMs = 100;
     private const int ResumeWarmupTimeoutMs = 500;
-    /// <summary>Таймаут остановки decoder при fast-rewind (мс).</summary>
+    /// <summary>Decoder stop timeout during fast-rewind (ms).</summary>
     private const int RewindDecoderStopTimeoutMs = 300;
     private const int BitsPerByte = 8;
 
@@ -36,19 +36,19 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     #region Nested Types
 
     /// <summary>
-    /// План прогрева перед открытием playback gate.
+    /// Warmup plan before opening the playback gate.
     /// </summary>
-    /// <param name="PcmThresholdSamples">Минимальный объём PCM в ring buffer.</param>
-    /// <param name="SourceAheadMs">Минимальный непрерывный запас данных вперёд в source.</param>
-    /// <param name="WarmupTimeoutMs">Таймаут активного ожидания прогрева.</param>
+    /// <param name="PcmThresholdSamples">Minimum PCM volume in ring buffer.</param>
+    /// <param name="SourceAheadMs">Minimum continuous data headroom in source.</param>
+    /// <param name="WarmupTimeoutMs">Active warmup wait timeout.</param>
     private readonly record struct PlaybackWarmupPlan(
         int PcmThresholdSamples,
         int SourceAheadMs,
         int WarmupTimeoutMs);
 
     /// <summary>
-    /// Пользовательское намерение относительно playback lifecycle.
-    /// Отделено от operational state machine.
+    /// User intent regarding the playback lifecycle.
+    /// Separated from the operational state machine.
     /// </summary>
     private enum PlaybackIntent
     {
@@ -82,7 +82,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private int _seekGeneration;
 
     /// <summary>
-    /// Task dispose'а предыдущего pipeline.
+    /// Task for disposing the previous pipeline.
     /// </summary>
     private Task? _oldPipelineDisposeTask;
 
@@ -92,33 +92,33 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     #region Properties
 
-    /// <summary>События плеера.</summary>
+    /// <summary>Player events.</summary>
     public AudioPlayerEvents Events => _events;
 
-    /// <summary>Текущее детальное состояние.</summary>
+    /// <summary>Current detailed state.</summary>
     public PlayerState DetailedState => _state;
 
     /// <summary>
-    /// Текущая позиция воспроизведения по часам рендера активного pipeline: чистое чтение без блокировок, мутаций и аллокаций.
+    /// Current playback position according to the active pipeline render clock: clean read without locks, mutations, or allocations.
     /// </summary>
     public TimeSpan Position => _activePipeline?.GetPlaybackPosition() ?? TimeSpan.Zero;
 
-    /// <summary>Длительность текущего трека.</summary>
+    /// <summary>Duration of the current track.</summary>
     public TimeSpan Duration => _activePipeline != null
         ? TimeSpan.FromMilliseconds(_activePipeline.StreamInfo.DurationMs)
         : TimeSpan.Zero;
 
-    /// <summary>Текущее публичное состояние playback.</summary>
+    /// <summary>Current public playback state.</summary>
     public PlaybackState State => MapState(_state);
 
-    /// <summary>Текущая информация о потоке.</summary>
+    /// <summary>Current stream information.</summary>
     public AudioStreamInfo StreamInfo => _activePipeline?.StreamInfo ?? AudioStreamInfo.Empty;
 
     #endregion
 
     #region Constructor
 
-    /// <summary>Создаёт плеер.</summary>
+    /// <summary>Creates a new player instance.</summary>
     public AudioPlayer(AudioPlayerOptions? options = null)
     {
         _options = options ?? new AudioPlayerOptions();
@@ -139,7 +139,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         if (options.UseNullBackend)
             return new Backends.NullAudioBackend();
 
-        // Проверка платформы в рантайме (при сборке Native AOT под win-x64 сворачивается в true)
+        // Runtime platform check (folds to true when building Native AOT for win-x64)
         if (OperatingSystem.IsWindows())
         {
             try
@@ -162,7 +162,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     #region Public API
 
     /// <summary>
-    /// Инициирует запуск воспроизведения.
+    /// Initiates playback start.
     /// </summary>
     private void Play(
         ResolvedStreamDescriptor descriptor,
@@ -181,7 +181,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Запускает воспроизведение и ожидает Playing.
+    /// Starts playback and awaits Playing state.
     /// </summary>
     public Task PlayAsync(
         ResolvedStreamDescriptor descriptor,
@@ -226,7 +226,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         return tcs.Task;
     }
 
-    /// <summary>Ставит воспроизведение на паузу.</summary>
+    /// <summary>Pauses playback.</summary>
     public void Pause()
     {
         if (_disposed) return;
@@ -236,7 +236,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         _commandChannel.Writer.TryWrite(new PauseCommand(_session.Current));
     }
 
-    /// <summary>Возобновляет воспроизведение.</summary>
+    /// <summary>Resumes playback.</summary>
     public void Resume()
     {
         if (_disposed) return;
@@ -245,7 +245,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         _commandChannel.Writer.TryWrite(new ResumeCommand(_session.Current));
     }
 
-    /// <summary>Останавливает воспроизведение.</summary>
+    /// <summary>Stops playback.</summary>
     public void Stop()
     {
         if (_state is PlayerState.Idle or PlayerState.Disposed) return;
@@ -256,7 +256,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         _commandChannel.Writer.TryWrite(new StopCommand(_session.BeginNew()));
     }
 
-    /// <summary>Асинхронный stop.</summary>
+    /// <summary>Asynchronous stop.</summary>
     public async Task StopAsync()
     {
         if (_state is PlayerState.Idle or PlayerState.Disposed) return;
@@ -286,7 +286,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         }
     }
 
-    /// <summary>Немедленно применяет volume gain.</summary>
+    /// <summary>Immediately applies volume gain.</summary>
     public void SetVolumeGain(float gain) => _sharedBackend.SetVolumeGain(gain);
 
     #endregion
@@ -294,7 +294,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     #region Command Processing
 
     /// <summary>
-    /// Основной actor loop.
+    /// Main actor loop.
     /// </summary>
     private async Task ProcessCommandsAsync()
     {
@@ -426,8 +426,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             return;
         }
 
-        // Проактивная проверка: если URL протух во время длительной паузы/сна,
-        // обновляем его ДО открытия шлюзов и прогрева буфера
+        // Proactive check: if URL expired during a long pause/sleep,
+        // refresh it BEFORE opening gates and warming up the buffer
         if (pipeline.Source is Sources.CachingStreamSource cachingSource)
         {
             await cachingSource.EnsureStreamFreshnessAsync(_lifetimeCts.Token).ConfigureAwait(false);
@@ -452,8 +452,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         var pipeline = Interlocked.Exchange(ref _activePipeline, null);
         if (pipeline != null)
         {
-            // Не блокируем командный цикл ожиданием завершения сетевых запросов и дренажа диска старого источника (до 1-2 сек).
-            // Утилизация безопасно завершается в фоновом Task.Run.
+            // Do not block the command loop waiting for network request completion and disk drain of the old source (up to 1-2 sec).
+            // Disposal safely completes in a background Task.Run.
             TrackAndFirePipelineDispose(pipeline);
         }
 
@@ -464,7 +464,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает Dispose-команду.
+    /// Handles the Dispose command.
     /// </summary>
     private async Task HandleDisposeAsync()
     {
@@ -492,14 +492,14 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Единая последовательность возобновления playback.
+    /// Unified playback resume sequence.
     /// </summary>
     private void ResumePlaybackSequence(
         AudioPipeline pipeline,
         bool startTimers,
         bool configurePipeline)
     {
-        // Трек берётся у самого pipeline: у плеера нет своего «текущего трека», который гонка Stop/Play могла бы обнулить
+        // The track is retrieved directly from the pipeline: the player has no internal "current track" that a Stop/Play race could zero out
         if (configurePipeline)
             _options.OnPipelineConfiguring?.Invoke(pipeline, pipeline.StreamInfo.TrackId);
 
@@ -513,15 +513,15 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Строит adaptive план прогрева playback gate.
+    /// Builds an adaptive playback gate warmup plan.
     /// </summary>
     private static PlaybackWarmupPlan ComputePlaybackWarmupPlan(AudioPipeline pipeline, bool isSeek)
     {
         if (pipeline.Source.IsFullyBuffered || pipeline.Source is Sources.LocalFileSource)
         {
-            // Для локального файла/полного кэша ждём минимум 120 мс декодированных PCM-сэмплов (с запасом до 500 мс таймаута),
-            // чтобы при Seek в конец 10-секундного кластера WebM декодер успел пройти 160 мс пре-ролла И набрать
-            // минимум два полных 60-мс горизонта WASAPI до открытия гейта (исключает отложенный underrun через 15 мс после Seek!).
+            // For local file/full cache, wait for at least 120 ms of decoded PCM samples (with up to 500 ms timeout buffer),
+            // so that on Seek to the end of a 10-second WebM cluster, the decoder manages to complete 160 ms of pre-roll AND buffer
+            // at least two full 60-ms WASAPI horizons before opening the gate (prevents delayed underrun 15 ms after Seek!).
             int localPcmSamples = pipeline.SampleRate * pipeline.Channels * 120 / 1000;
             return new PlaybackWarmupPlan(Math.Max(localPcmSamples, pipeline.Channels * 2), 0, 500);
         }
@@ -574,7 +574,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает непрерывный запас source-ahead в миллисекундах.
+    /// Returns continuous source-ahead headroom in milliseconds.
     /// </summary>
     private static int GetSourceBufferedAheadMs(AudioPipeline pipeline)
     {
@@ -593,7 +593,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Проверяет, достаточен ли запас source-ahead для открытия gate.
+    /// Checks whether the source-ahead headroom is sufficient to open the gate.
     /// </summary>
     private static bool IsSourceReadyForResume(AudioPipeline pipeline, int requiredAheadMs)
     {
@@ -602,7 +602,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Подготавливает pipeline и запускает decoder.
+    /// Prepares the pipeline and starts the decoder.
     /// </summary>
     private async Task PrepareAndStartDecodingAsync(
         AudioPipeline pipeline,
@@ -630,7 +630,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Выполняет воспроизведение нового дескриптора потока в контексте сессии.
+    /// Plays a new stream descriptor in the context of the session.
     /// </summary>
     private async Task HandlePlayAsync(PlayCommand cmd)
     {
@@ -648,9 +648,9 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         float previousGain = _activePipeline?.GetLockedNormalizationGain() ?? 1.0f;
 
-        // Перед остановкой предыдущего трека вызываем _sharedBackend.Flush(), пока старый _pcmBuffer ещё полон!
-        // Это позволяет WinAudioBackend синхронно забрать 10 мс живого продолжения старого трека
-        // для абсолютно бесшовного wave-to-wave кроссфейда на новый трек без единого щелчка.
+        // Before stopping the previous track, call _sharedBackend.Flush() while the old _pcmBuffer is still full!
+        // This allows WinAudioBackend to synchronously fetch 10 ms of the live continuation of the old track
+        // for an absolutely seamless wave-to-wave crossfade to the new track without a single pop/click.
         var previousPipeline = Interlocked.Exchange(ref _activePipeline, null);
         if (previousPipeline != null)
         {
@@ -686,7 +686,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
             _sharedBackend.Flush();
 
-            // Flush захватил хвост кроссфейда и сбросил ресемплер: часы нового трека отсчитываются от текущего счётчика рендера
+            // Flush captured the tail of the crossfade and reset the resampler: the new track clock counts from the current render counter
             pipeline.SetDecodedSamplesPosition(0);
 
             _events.RaiseStreamInfo(pipeline.StreamInfo);
@@ -800,8 +800,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     #region Helpers
 
     /// <summary>
-    /// Переводит pipeline в режим буферизации и запускает фоновое ожидание
-    /// перед открытием playback gate.
+    /// Switches the pipeline to buffering mode and starts background waiting
+    /// before opening the playback gate.
     /// </summary>
     private void LaunchDeferredResume(
         AudioPipeline pipeline,
@@ -825,8 +825,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возобновляет playback немедленно, если буферы готовы,
-    /// или делегирует в <see cref="LaunchDeferredResume"/>.
+    /// Resumes playback immediately if buffers are ready,
+    /// or delegates to <see cref="LaunchDeferredResume"/>.
     /// </summary>
     private void ResumeOrDefer(
         AudioPipeline pipeline,
@@ -838,8 +838,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         bool configurePipeline,
         string? logContext = null)
     {
-        // Если весь хвост трека до EOF уже локально скачан и в кольцевом буфере есть декодированные сэмплы,
-        // немедленно возобновляем воспроизведение, даже если остаток трека у самого конца короче PcmThresholdSamples.
+        // If the entire track tail up to EOF is already downloaded locally and the ring buffer contains decoded samples,
+        // resume playback immediately, even if the remaining track at the very end is shorter than PcmThresholdSamples.
         if (!pcmReady
             && pipeline.BufferedSamples > 0
             && GetSourceBufferedAheadMs(pipeline) == int.MaxValue)
@@ -862,14 +862,14 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Возвращает <c>true</c>, если pipeline-команда устарела и должна быть отброшена.
+    /// Returns <c>true</c> if the pipeline command is stale and should be discarded.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool IsPipelineCommandStale(AudioPipeline pipeline, int sessionId) =>
         _disposed || _activePipeline != pipeline || _session.IsStale(sessionId);
 
     /// <summary>
-    /// Запускает dispose старого pipeline в фоне.
+    /// Starts disposing the old pipeline in the background.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void TrackAndFirePipelineDispose(AudioPipeline pipeline)
@@ -889,7 +889,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает естественное завершение трека внутри actor loop.
+    /// Handles natural track completion inside the actor loop.
     /// </summary>
     private async Task HandleTrackEndedAsync(TrackEndedCommand cmd)
     {
@@ -924,8 +924,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Выполняет fast-rewind текущего pipeline в начало трека
-    /// без пересоздания source, decoder и файловых дескрипторов.
+    /// Fast-rewinds the current pipeline to the beginning of the track
+    /// without recreating the source, decoder, or file descriptors.
     /// </summary>
     private async Task<bool> FastRewindInternalAsync(AudioPipeline pipeline, int sessionId)
     {
@@ -1001,17 +1001,17 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает starvation и переводит playback в adaptive rebuffer.
+    /// Handles starvation and switches playback to adaptive rebuffer.
     /// </summary>
     private Task HandleStarvationAsync(StarvationCommand cmd)
     {
         if (IsPipelineCommandStale(cmd.Pipeline, cmd.SessionId))
             return Task.CompletedTask;
 
-        // Принимаем starvation из Playing и Buffering:
-        // из Playing — нормальный путь (ring опустел при воспроизведении);
-        // из Buffering — сеть упала во время post-seek rebuffer (deferred resume уже активен,
-        // но его CTS будет заменён новым в LaunchDeferredResume).
+        // Accept starvation from Playing and Buffering:
+        // from Playing — normal path (ring emptied during playback);
+        // from Buffering — network dropped during post-seek rebuffer (deferred resume is already active,
+        // but its CTS will be replaced by a new one in LaunchDeferredResume).
         if (_state is not (PlayerState.Playing or PlayerState.Buffering))
             return Task.CompletedTask;
 
@@ -1022,8 +1022,8 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         var pipeline = cmd.Pipeline;
 
-        // Останавливаем только вывод звука и таймер позиции; таймер буфера оставляем активным,
-        // чтобы UI отображал прогресс докачки и пинг во время адаптивной ребуферизации.
+        // Stop only audio output and the position timer; keep the buffer timer active
+        // so the UI displays download progress and ping during adaptive rebuffering.
         if (_state == PlayerState.Playing)
         {
             pipeline.Stop();
@@ -1041,7 +1041,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Вычисляет план восстановления после starvation с повышенными порогами.
+    /// Calculates a recovery plan after starvation using elevated thresholds.
     /// </summary>
     private static PlaybackWarmupPlan ComputeStarvationRecoveryPlan(AudioPipeline pipeline)
     {
@@ -1051,9 +1051,9 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             ? Math.Min(basePlan.SourceAheadMs * 2, 8000)
             : 3000;
 
-        // basePlan.PcmThresholdSamples = 0 при IsFullyBuffered=true.
-        // Нулевой threshold даёт pcmReady=true немедленно при ring=0 → resume без данных.
-        // Минимум 100ms samples гарантирует что ring содержит реальные декодированные данные.
+        // basePlan.PcmThresholdSamples = 0 when IsFullyBuffered=true.
+        // A zero threshold yields pcmReady=true immediately when ring=0 → resume without data.
+        // A minimum of 100ms samples ensures the ring contains real decoded data.
         int recoveryPcmSamples = basePlan.PcmThresholdSamples > 0
             ? (int)(basePlan.PcmThresholdSamples * 1.5)
             : pipeline.SampleRate * pipeline.Channels * 100 / 1000;
@@ -1065,7 +1065,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Обработчик starvation от pipeline.
+    /// Starvation handler from the pipeline.
     /// </summary>
     private void OnPipelineStarvation(AudioPipeline pipeline, int sessionId)
     {
@@ -1076,7 +1076,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает фоновую ошибку внутри actor loop.
+    /// Handles a background error inside the actor loop.
     /// </summary>
     private Task HandlePlayerErrorAsync(PlayerErrorCommand cmd)
     {
@@ -1108,7 +1108,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         LocalizationService.Instance["Error_NoAudioDevice"];
 
     /// <summary>
-    /// Выполняет переход state machine.
+    /// Performs a state machine transition.
     /// </summary>
     private bool SetState(PlayerState newState, [CallerMemberName] string? caller = null)
     {
@@ -1148,7 +1148,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         (PlaybackIntent)Volatile.Read(ref _playbackIntent);
 
     /// <summary>
-    /// Создаёт session-bound callback завершения трека.
+    /// Creates a session-bound track completion callback.
     /// </summary>
     private Action CreateTrackEndedCallback(int sessionId)
     {
@@ -1160,7 +1160,7 @@ public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Создаёт session-bound callback фоновой ошибки.
+    /// Creates a session-bound background error callback.
     /// </summary>
     private Action<Exception> CreateErrorCallback(int sessionId, AudioPipeline pipeline)
     {

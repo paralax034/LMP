@@ -1,13 +1,13 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Сигнал от парсера о структурном повреждении данных (Validation by Consumption).
+/// Parser signal indicating structural data corruption (Validation by Consumption).
 /// </summary>
 public sealed class ParserCorruptionException : Exception
 {
     /// <summary>
-    /// Абсолютная байтовая позиция в потоке, где был обнаружен мусор.
-    /// Используется слоем самовосстановления для вычисления индекса битого чанка.
+    /// Absolute byte position in the stream where garbage was detected.
+    /// Used by the self-healing layer to calculate the index of the corrupted chunk.
     /// </summary>
     public long AbsoluteBytePosition { get; }
 

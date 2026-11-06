@@ -1,63 +1,63 @@
 namespace LMP.Core.Youtube.Exceptions;
 
 /// <summary>
-/// Причина недоступности стрима.
+/// Reason for stream unavailability.
 /// </summary>
 public enum StreamUnavailableReason
 {
-    /// <summary>Неизвестная причина.</summary>
+    /// <summary>Unknown reason.</summary>
     Unknown = 0,
 
     /// <summary>HTTP 403 Forbidden.</summary>
     Forbidden403,
 
-    /// <summary>Все клиенты не смогли получить стрим.</summary>
+    /// <summary>All clients failed to obtain the stream.</summary>
     AllClientsFailed,
 
-    /// <summary>Заблокировано в регионе.</summary>
+    /// <summary>Blocked in region.</summary>
     RegionBlocked,
 
-    /// <summary>Возрастные ограничения.</summary>
+    /// <summary>Age restricted.</summary>
     AgeRestricted,
 
-    /// <summary>Прямая трансляция (не VOD).</summary>
+    /// <summary>Live stream (not VOD).</summary>
     LiveStream,
 
-    /// <summary>Приватное видео.</summary>
+    /// <summary>Private video.</summary>
     Private,
 
-    /// <summary>Видео удалено.</summary>
+    /// <summary>Video deleted.</summary>
     Removed,
 
-    /// <summary>Требуется подписка/оплата.</summary>
+    /// <summary>Subscription/payment required.</summary>
     PaymentRequired,
 
-    /// <summary>Заблокировано по жалобе правообладателя (нарушение авторских прав).</summary>
+    /// <summary>Blocked due to a copyright claim (copyright infringement).</summary>
     CopyrightBlocked
 }
 
 /// <summary>
-/// Выбрасывается когда стримы недоступны (403, блокировка региона, и т.д.).
+/// Thrown when streams are unavailable (403, region block, etc.).
 /// </summary>
 public sealed class StreamUnavailableException : YoutubeExplodeException
 {
     /// <summary>
-    /// Тип недоступности стрима.
+    /// Stream unavailability type.
     /// </summary>
     public StreamUnavailableReason Reason { get; }
 
     /// <summary>
-    /// ID видео.
+    /// Video ID.
     /// </summary>
     public string VideoId { get; }
 
     /// <summary>
-    /// HTTP статус код (если применимо).
+    /// HTTP status code (if applicable).
     /// </summary>
     public int? HttpStatusCode { get; }
 
     /// <summary>
-    /// Инициализирует новое исключение StreamUnavailableException.
+    /// Initializes a new instance of StreamUnavailableException.
     /// </summary>
     public StreamUnavailableException(
         string message,
@@ -71,7 +71,7 @@ public sealed class StreamUnavailableException : YoutubeExplodeException
     }
 
     /// <summary>
-    /// Ключ локализации для данного типа ошибки.
+    /// Localization key for this error type.
     /// </summary>
     public string GetLocalizationKey()
     {

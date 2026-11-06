@@ -1,9 +1,9 @@
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// ViewModel диалога синхронизации плейлиста.
-/// Показывает diff между локальным и облачным состоянием,
-/// позволяет выбрать стратегию и поля для синхронизации.
+/// ViewModel for the playlist sync dialog.
+/// Displays the diff between local and cloud state,
+/// allowing selection of sync strategy and fields.
 /// </summary>
 public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
 {
@@ -37,25 +37,25 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
     public bool HasTrackDiff => Preview.TracksDiffer;
 
     /// <summary>
-    /// Показывать ли секцию обложек.
-    /// Видна когда хотя бы одна из сторон имеет обложку.
+    /// Gets a value indicating whether to show the artwork section.
+    /// Visible when at least one side has artwork.
     /// </summary>
     public bool HasThumbnailSection =>
         !string.IsNullOrEmpty(Preview.LocalThumbnailUrl) ||
         !string.IsNullOrEmpty(Preview.CloudThumbnailUrl);
 
     /// <summary>
-    /// Локальный URL/путь обложки для превью.
+    /// Local artwork URL/path for preview.
     /// </summary>
     public string? LocalThumbnailPreviewUrl => Preview.LocalThumbnailUrl;
 
     /// <summary>
-    /// Облачный URL обложки для превью. Сохраняет query-параметры аутентификации CDN (sqp/rs).
+    /// Cloud artwork URL for preview. Preserves CDN authentication query parameters (sqp/rs).
     /// </summary>
     public string? CloudThumbnailPreviewUrl => Preview.CloudThumbnailUrl;
 
     /// <summary>
-    /// Обложки отличаются. Использует единую логику сравнения из снимка превью.
+    /// Gets a value indicating whether artworks differ. Uses unified comparison logic from the preview snapshot.
     /// </summary>
     public bool ThumbnailDiffers => Preview.ThumbnailDiffers;
 
@@ -97,7 +97,7 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
     };
 
     /// <summary>
-    /// Callback для закрытия диалога с результатом.
+    /// Callback to close the dialog with a result.
     /// </summary>
     public Action<PlaylistSyncOptions?>? OnResult { get; set; }
 
@@ -111,7 +111,7 @@ public sealed partial class SyncPlaylistDialogViewModel : ViewModelBase
         SyncName = preview.NameDiffers;
         SyncDescription = preview.DescriptionDiffers;
 
-        // Thumbnail sync включён только если обложки реально различаются
+        // Thumbnail sync is enabled only if thumbnails actually differ
         SyncThumbnail = preview.ThumbnailDiffers && HasThumbnailSection;
 
         SyncTracks = preview.TracksDiffer;

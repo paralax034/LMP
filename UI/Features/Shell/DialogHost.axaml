@@ -7,7 +7,7 @@
     x:DataType="shell:DialogHostViewModel">
 
     <UserControl.Styles>
-        <!-- Анимация появления диалога -->
+        <!-- Dialog entrance animation -->
         <Style Selector="Border.dialog-backdrop">
             <Setter Property="Opacity" Value="0" />
             <Setter Property="Transitions">
@@ -20,7 +20,7 @@
             <Setter Property="Opacity" Value="1" />
         </Style>
 
-        <!-- Анимация контента -->
+        <!-- Content animation -->
         <Style Selector="ContentControl.dialog-content">
             <Setter Property="RenderTransform">
                 <ScaleTransform ScaleX="0.95" ScaleY="0.95" />
@@ -42,13 +42,13 @@
         </Style>
     </UserControl.Styles>
 
-    <!-- Полупрозрачный backdrop -->
+    <!-- Semi-transparent backdrop -->
     <Border Background="#80000000"
         IsHitTestVisible="True"
         Classes="dialog-backdrop"
         Classes.visible="{Binding HasActiveDialog}">
 
-        <!-- Центрированный контейнер диалога -->
+        <!-- Centered dialog container -->
         <ContentControl Content="{Binding CurrentDialog}"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
@@ -58,15 +58,15 @@
             Classes.visible="{Binding HasActiveDialog}"
             RenderTransformOrigin="0.5,0.5">
 
-            <!-- DataTemplates для всех типов диалогов -->
+            <!-- DataTemplates for all dialog types -->
             <ContentControl.DataTemplates>
 
-                <!-- Универсальный диалог выбора -->
+                <!-- Universal selection dialog -->
                 <DataTemplate DataType="{x:Type dialogs:ChoiceDialogViewModel}">
                     <content:ChoiceDialogContent />
                 </DataTemplate>
 
-                <!-- Выбор аккаунта (Добавлено для резолва View) -->
+                <!-- Account selection (Added for View resolution) -->
                 <DataTemplate DataType="{x:Type dialogs:AccountSelectionDialogViewModel}">
                     <content:AccountSelectionDialogContent />
                 </DataTemplate>
@@ -96,12 +96,12 @@
                     <content:SyncPlaylistDialogContent />
                 </DataTemplate>
 
-                <!-- Предупреждение о миграции плейлистов V3 -->
+                <!-- V3 playlist migration warning -->
                 <DataTemplate DataType="{x:Type dialogs:MigrationWarningDialogViewModel}">
                     <content:MigrationWarningDialogContent />
                 </DataTemplate>
 
-                <!-- Авторизация (Единый диалог) -->
+                <!-- Authentication (Unified dialog) -->
                 <DataTemplate DataType="{x:Type dialogs:AuthDialogViewModel}">
                     <content:AuthDialogContent />
                 </DataTemplate>

@@ -4,8 +4,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты подсистемы автообновления и целостности метаданных сборок.
-/// Проверяют разбор git-тегов, номеров коммитов, SourceGen DTO и фильтрации тестов.
+/// Unit tests for the auto-update subsystem and assembly metadata integrity.
+/// Verifies parsing of git tags, commit numbers, SourceGen DTOs, and test filtering.
 /// </summary>
 public static class UpdateTests
 {
@@ -95,7 +95,7 @@ public static class UpdateTests
     [TestMethod(TestCategory.Unit, "Prune Pending .old Update Binaries", Group = TestGroups.System, Order = 4)]
     public static Task TestCleanupPassAsync()
     {
-        // Изолированная песочница: ни каталог exe, ни реальный %LOCALAPPDATA%/LMP/Update не затрагиваются.
+        // Isolated sandbox: neither the exe directory nor the actual %LOCALAPPDATA%/LMP/Update are touched.
         string root = Path.Combine(Path.GetTempPath(), $"LMP_UpdateCleanupTest_{Guid.NewGuid():N}");
         string baseDir = Path.Combine(root, "app");
         string updateDir = Path.Combine(root, "Update");

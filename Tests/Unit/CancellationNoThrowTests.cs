@@ -5,27 +5,27 @@ using TokenExtensions = LMP.Core.Helpers.Extensions.CancellationTokenExtensions;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Контракты безысключительного ожидания и измерение цены паттерна <c>Task.Delay(ms, ct)</c>,
-/// от которого очищены циклы ожидания AudioPlayer.Seek.cs и повторы AudioPipeline.DecoderLoopAsync.
+/// Exception-free waiting contracts and performance measurement of the <c>Task.Delay(ms, ct)</c> pattern,
+/// which was eliminated from the wait loops in AudioPlayer.Seek.cs and retries in AudioPipeline.DecoderLoopAsync.
 /// </summary>
 public static class CancellationNoThrowTests
 {
     private const int CancelIterations = 2_000;
 
-    /// <summary>Число раундов замера: медиана по ним гасит разовые паузы GC и перекомпиляцию JIT посреди цикла.</summary>
+    /// <summary>Number of benchmark rounds: taking the median mitigates one-off GC pauses and JIT re-compilation mid-loop.</summary>
     private const int MeasureRounds = 5;
 
     private const int RoundIterations = CancelIterations / MeasureRounds;
 
     /// <summary>
-    /// Верхняя граница времени на бросающую ветку. Без отладчика 2 000 отмен занимают около 10 мс,
-    /// граница срабатывает только под профилировщиком или иным перехватчиком исключений.
+    /// Upper time limit for the throwing branch. Without a debugger attached, 2,000 cancellations take about 10 ms;
+    /// the limit triggers only under a profiler or other exception interceptor.
     /// </summary>
     private static readonly TimeSpan ThrowingPathBudget = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// Проверяет контракты <see cref="TokenExtensions.DelayNoThrowAsync(CancellationToken, int, bool)"/>
-    /// и <see cref="TokenExtensions.WhenCanceledAsync"/>: без исключений и с 0 B на синхронной ветке.
+    /// Verifies contracts of <see cref="TokenExtensions.DelayNoThrowAsync(CancellationToken, int, bool)"/>
+    /// and <see cref="TokenExtensions.WhenCanceledAsync"/>: exception-free execution and 0 B allocations on the synchronous path.
     /// </summary>
     [TestMethod(TestCategory.Unit, "DelayNoThrowAsync & WhenCanceledAsync Contracts", Group = TestGroups.System, Order = 20)]
     public static async Task TestDelayNoThrowContractsAsync()
@@ -34,7 +34,7 @@ public static class CancellationNoThrowTests
         canceledCts.Cancel();
         var canceled = canceledCts.Token;
 
-        // 1. Уже отменённый токен: синхронный false из кэшированной задачи, 0 B
+        // 1. Already canceled token: synchronous false from a cached task, 0 B
         Task<bool> preCanceled = TokenExtensions.DelayNoThrowAsync(canceled, 10_000);
         TestAssert.True(preCanceled.IsCompletedSuccessfully, "Pre-canceled delay must complete synchronously");
         TestAssert.False(await preCanceled.ConfigureAwait(false), "Pre-canceled delay must return false");
@@ -46,10 +46,10 @@ public static class CancellationNoThrowTests
                 TestAssert.Fail("Pre-canceled DelayNoThrowAsync must complete synchronously");
         }, warmup: 10, iterations: 5_000, context: "DelayNoThrowAsync (pre-canceled)");
 
-        // 2. Нулевая задержка завершается синхронно с true
+        // 2. Zero delay completes synchronously returning true
         TestAssert.True(await TokenExtensions.DelayNoThrowAsync(CancellationToken.None, 0).ConfigureAwait(false), "Zero delay must return true");
 
-        // 3. Отмена во время ожидания: false без OperationCanceledException и без ожидания полного интервала
+        // 3. Cancellation during wait: false without OperationCanceledException and without waiting for the full interval
         using var midwayCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(30));
         long start = Stopwatch.GetTimestamp();
         bool completed = await TokenExtensions.DelayNoThrowAsync(midwayCts.Token, 10_000, continueOnCapturedContext: false).ConfigureAwait(false);
@@ -58,7 +58,7 @@ public static class CancellationNoThrowTests
         TestAssert.False(completed, "Delay canceled midway must return false");
         TestAssert.True(elapsed < TimeSpan.FromSeconds(5), $"Canceled delay did not return promptly: {elapsed.TotalMilliseconds:F0}ms");
 
-        // 4. WhenCanceledAsync: штатное завершение в момент отмены
+        // 4. WhenCanceledAsync: graceful completion at the moment of cancellation
         TestAssert.True(TokenExtensions.WhenCanceledAsync(canceled).IsCompletedSuccessfully, "Pre-canceled WhenCanceledAsync must complete synchronously");
 
         using var laterCts = new CancellationTokenSource();
@@ -71,11 +71,11 @@ public static class CancellationNoThrowTests
     }
 
     /// <summary>
-    /// Измеряет цену одной отмены: <c>Task.Delay(ms, ct)</c> с перехватом исключения против <c>DelayNoThrowAsync</c>.
-    /// Оба пути завершаются синхронно на одном потоке, поэтому поточный счётчик аллокаций корректен.
-    /// Время каждого пути — медиана <see cref="MeasureRounds"/> раундов, чтобы одиночный выброс не решал исход сравнения.
-    /// Под отладчиком бросающая ветка не запускается: каждое first-chance исключение останавливает
-    /// все управляемые потоки процесса, включая аудиопоток, на 10–20 мс.
+    /// Measures the cost of a single cancellation: <c>Task.Delay(ms, ct)</c> with exception catching versus <c>DelayNoThrowAsync</c>.
+    /// Both paths complete synchronously on a single thread, ensuring the per-thread allocation counter is accurate.
+    /// The duration of each path is the median of <see cref="MeasureRounds"/> rounds so that an isolated outlier does not skew the result.
+    /// Under a debugger, the throwing branch is skipped: every first-chance exception pauses
+    /// all managed threads in the process, including the audio thread, for 10–20 ms.
     /// </summary>
     [TestMethod(TestCategory.Benchmark, "Cancellation Cost: Task.Delay(ms, ct) vs DelayNoThrowAsync",
         Group = TestGroups.System, Order = 21, TimeoutSeconds = 60)]
@@ -86,7 +86,7 @@ public static class CancellationNoThrowTests
         var token = cts.Token;
         bool debuggerAttached = Debugger.IsAttached;
 
-        // Прогрев (JIT, первичная раскрутка стека). Бросающую ветку под отладчиком не трогаем.
+        // Warmup (JIT, initial stack unwind). Skip the throwing branch under a debugger.
         for (int i = 0; i < 50; i++)
         {
             if (!debuggerAttached)
@@ -96,8 +96,8 @@ public static class CancellationNoThrowTests
 
         int threadId = Environment.CurrentManagedThreadId;
 
-        // 1. Целевой паттерн инварианта 3: DelayNoThrowAsync. Безопасен в любом окружении.
-        // Массив раундов создаётся до снимка счётчика, чтобы не попасть в учёт аллокаций
+        // 1. Target pattern of Invariant 3: DelayNoThrowAsync. Safe in any environment.
+        // Round array is created before taking the snapshot to avoid including its allocations in the count
         double[] noThrowRounds = new double[MeasureRounds];
         int canceledNoThrow = 0;
         long noThrowAllocBefore = GC.GetAllocatedBytesForCurrentThread();
@@ -125,13 +125,13 @@ public static class CancellationNoThrowTests
 
         if (debuggerAttached)
         {
-            // Каждое исключение под отладчиком = остановка всего процесса: 2 000 отмен давали 20-45 с заиканий звука и UI
+            // Every exception under a debugger = full process freeze: 2,000 cancellations caused 20–45 s of audio stutters and UI lag
             TestAssert.Skip("Debugger attached: throwing path skipped, every first-chance exception suspends all managed threads");
         }
         else
         {
-            // 2. Запрещённый паттерн: Task.Delay(ms, ct) + OperationCanceledException, ограничен по времени
-            // Бюджет проверяется между раундами: хотя бы один раунд выполняется всегда, медиана берётся по завершённым
+            // 2. Forbidden pattern: Task.Delay(ms, ct) + OperationCanceledException, time-bounded
+            // The budget is checked between rounds: at least one round always executes; the median is computed over completed rounds
             double[] throwRounds = new double[MeasureRounds];
             int completedRounds = 0;
             int thrown = 0;
@@ -168,7 +168,7 @@ public static class CancellationNoThrowTests
     {
         try
         {
-            // Намеренно воспроизводим запрещённый паттерн, чтобы измерить его цену
+            // Intentionally reproducing the forbidden pattern to measure its performance cost
             await Task.Delay(100, token).ConfigureAwait(false);
             return false;
         }
@@ -178,7 +178,7 @@ public static class CancellationNoThrowTests
         }
     }
 
-    /// <summary>Медиана замеров раундов. Сортирует переданный срез на месте и не аллоцирует.</summary>
+    /// <summary>Median of round measurements. Sorts the provided slice in-place without allocations.</summary>
     private static double MedianInPlace(Span<double> rounds)
     {
         rounds.Sort();

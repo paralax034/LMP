@@ -3,7 +3,7 @@ using Avalonia.Controls;
 namespace LMP.UI.Dialogs.Content;
 
 /// <summary>
-/// Контент диалога добавления трека в плейлисты.
+/// Dialog content for adding a track to playlists.
 /// DataContext: AddToPlaylistDialogViewModel
 /// </summary>
 public partial class AddToPlaylistDialogContent : UserControl

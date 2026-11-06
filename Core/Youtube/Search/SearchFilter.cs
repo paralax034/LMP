@@ -59,12 +59,12 @@ public enum SearchFilter
 }
 
 /// <summary>
-/// Расширения для SearchFilter.
+/// Extensions for SearchFilter.
 /// </summary>
 public static class SearchFilterExtensions
 {
     /// <summary>
-    /// Проверяет, является ли фильтр музыкальным контекстом (требует WEB_REMIX API).
+    /// Checks whether the filter is a music context (requires WEB_REMIX API).
     /// </summary>
     public static bool IsMusicContext(this SearchFilter filter)
     {

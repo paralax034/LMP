@@ -1,51 +1,51 @@
 namespace LMP.Core.ViewModels;
 
 /// <summary>
-/// Базовый класс для всех моделей представления (ViewModels) приложения.
-/// Построен на CommunityToolkit.Mvvm с полной поддержкой AOT.
+/// Base class for all application view models (ViewModels).
+/// Built on CommunityToolkit.Mvvm with full AOT support.
 /// </summary>
 public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISuspendable, IAccountAware
 {
     #region Properties
 
     /// <summary>
-    /// Контейнер для автоматической утилизации ресурсов.
+    /// Resource disposal container.
     /// </summary>
     protected List<IDisposable> Disposables { get; } = [];
 
     private readonly Lock _disposablesLock = new();
 
     /// <summary>
-    /// Текущий глобальный уровень приостановки активности приложения.
+    /// Current global application suspension level.
     /// </summary>
     public static SuspendLevel CurrentSuspendLevel { get; private set; } = SuspendLevel.None;
 
     /// <summary>
-    /// Событие изменения глобального уровня приостановки активности приложения.
+    /// Event raised when the global application suspension level changes.
     /// </summary>
     public static event Action<SuspendLevel>? SuspendLevelChanged;
 
     /// <summary>
-    /// Указывает, находится ли текущий компонент в состоянии приостановки (фоновом режиме).
+    /// Indicates whether the current component is suspended (in background mode).
     /// </summary>
     [ObservableProperty]
     public partial bool IsSuspended { get; private set; }
 
     /// <summary>
-    /// Предоставляет доступ к службе локализации для одноуровневого биндинга (требование IFilterable).
+    /// Provides access to the localization service for single-level binding (IFilterable requirement).
     /// </summary>
 #pragma warning disable CA1822
     public LocalizationService L => LocalizationService.Instance;
 #pragma warning restore CA1822
 
     /// <summary>
-    /// Предоставляет статический доступ к службе локализации.
+    /// Provides static access to the localization service.
     /// </summary>
     public static LocalizationService SL => LocalizationService.Instance;
 
     /// <summary>
-    /// Определяет, должен ли экземпляр получать широковещательные уведомления о смене аккаунта.
-    /// По умолчанию выключено, чтобы не регистрировать все VM подряд без необходимости.
+    /// Gets a value indicating whether the instance should receive broadcast notifications on account switch.
+    /// Disabled by default to avoid registering unnecessary VMs.
     /// </summary>
     protected virtual bool HandlesAccountChanges => false;
 
@@ -54,9 +54,9 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region Constructor
 
     /// <summary>
-    /// Инициализирует базовый класс.
-    /// При <see cref="HandlesAccountChanges"/> = <c>true</c> выполняет регистрацию
-    /// в реестре жизненного цикла для получения уведомлений о смене аккаунта.
+    /// Initializes the base class.
+    /// When <see cref="HandlesAccountChanges"/> is <c>true</c>, registers
+    /// in the lifecycle registry to receive account change notifications.
     /// </summary>
     protected ViewModelBase()
     {
@@ -71,12 +71,12 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region Navigation Lifecycle
 
     /// <summary>
-    /// Асинхронно вызывается при переходе на данную страницу навигации.
+    /// Asynchronously invoked when navigating to this page.
     /// </summary>
     public virtual Task OnNavigatedToAsync() => Task.CompletedTask;
 
     /// <summary>
-    /// Вызывается при уходе с данной страницы навигации на другой экран.
+    /// Invoked when navigating away from this page to another screen.
     /// </summary>
     public virtual void OnNavigatedFrom()
     {
@@ -115,33 +115,33 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region Protected Virtual Lifecycle
 
     /// <summary>
-    /// Вызывается при переходе компонента в фоновый режим без параметров.
+    /// Invoked when the component enters background mode without parameters.
     /// </summary>
     protected virtual void OnSuspend()
     {
     }
 
     /// <summary>
-    /// Вызывается при возвращении компонента в активный режим без параметров.
+    /// Invoked when the component returns to active mode without parameters.
     /// </summary>
     protected virtual void OnResume()
     {
     }
 
     /// <summary>
-    /// Вызывается при переходе компонента в фоновый режим с указанием уровня приостановки.
-    /// Перенаправляет вызов в беспараметрический метод для совместимости.
+    /// Invoked when the component enters background mode with a specified suspension level.
+    /// Forwards the call to the parameterless method for compatibility.
     /// </summary>
     protected virtual void OnSuspend(SuspendLevel level) => OnSuspend();
 
     /// <summary>
-    /// Вызывается при возвращении компонента в активный режим с указанием предыдущего уровня приостановки.
-    /// Перенаправляет вызов в беспараметрический метод для совместимости.
+    /// Invoked when the component returns to active mode with a specified previous suspension level.
+    /// Forwards the call to the parameterless method for compatibility.
     /// </summary>
     protected virtual void OnResume(SuspendLevel previousLevel) => OnResume();
 
     /// <summary>
-    /// Вызывается при изменении профиля пользователя.
+    /// Invoked when the user profile changes.
     /// </summary>
     protected virtual void OnAccountChanged()
     {
@@ -152,7 +152,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region Helpers for Subclasses
 
     /// <summary>
-    /// Регистрирует команду или ресурс в контейнере утилизации ресурсов.
+    /// Registers a command or resource in the resource disposal container.
     /// </summary>
     protected TCommand CreateCommand<TCommand>(TCommand command) where TCommand : IDisposable
     {
@@ -169,8 +169,8 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region Static Lifecycle Broadcasts
 
     /// <summary>
-    /// Распространяет уровень приостановки по системе. Применяет каскадную модель навигации
-    /// и точечно оповещает фоновые службы .
+    /// Propagates the suspension level across the system. Applies a cascading navigation model
+    /// and targets notifications to background services.
     /// </summary>
     public static void BroadcastSuspendLevel(SuspendLevel level, bool forceOptimize = false)
     {
@@ -200,7 +200,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     }
 
     /// <summary>
-    /// Рассылает событие изменения аккаунта через точечный реестр.
+    /// Broadcasts the account change event via a targeted registry.
     /// </summary>
     public static void BroadcastAccountChanged()
     {
@@ -212,7 +212,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     #region IDisposable
 
     /// <summary>
-    /// Выполняет утилизацию ресурсов компонента.
+    /// Disposes component resources.
     /// </summary>
     public void Dispose()
     {
@@ -221,7 +221,7 @@ public abstract partial class ViewModelBase : ObservableObject, IDisposable, ISu
     }
 
     /// <summary>
-    /// Выполняет утилизацию управляемых и неуправляемых ресурсов.
+    /// Disposes managed and unmanaged resources.
     /// </summary>
     protected virtual void Dispose(bool disposing)
     {

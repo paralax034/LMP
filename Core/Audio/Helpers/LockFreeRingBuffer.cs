@@ -6,8 +6,8 @@ using System.Runtime.InteropServices;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Экстремально быстрый Lock-Free кольцевой буфер для сценария Single-Producer / Single-Consumer
-/// с пулингом памяти через <see cref="ArrayPool{T}.Shared"/> (0 B аллокаций в LOH при пересоздании).
+/// Extremely fast Lock-Free ring buffer for the Single-Producer / Single-Consumer scenario
+/// using memory pooling via <see cref="ArrayPool{T}.Shared"/> (0 B allocations in LOH when recreated).
 /// </summary>
 public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
 {
@@ -21,18 +21,18 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     [StructLayout(LayoutKind.Sequential, Size = 128)]
     private struct ProducerState
     {
-        /// <summary>Абсолютный счётчик записанных элементов (producer двигает вперёд).</summary>
+        /// <summary>Absolute counter of written elements (advanced by producer).</summary>
         public int Head;
-        /// <summary>Кэшированное значение Tail от consumer.</summary>
+        /// <summary>Cached Tail value from consumer.</summary>
         public int CachedTail;
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 128)]
     private struct ConsumerState
     {
-        /// <summary>Абсолютный счётчик прочитанных элементов (consumer двигает вперёд).</summary>
+        /// <summary>Absolute counter of read elements (advanced by consumer).</summary>
         public int Tail;
-        /// <summary>Кэшированное значение Head от producer.</summary>
+        /// <summary>Cached Head value from producer.</summary>
         public int CachedHead;
     }
 
@@ -43,17 +43,17 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
         _buffer = ArrayPool<T>.Shared.Rent(_capacity);
     }
 
-    /// <summary>Текущее количество элементов в буфере.</summary>
+    /// <summary>Current number of elements in the buffer.</summary>
     public int Count
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => unchecked(Volatile.Read(ref _producer.Head) - Volatile.Read(ref _consumer.Tail));
     }
 
-    /// <summary>Ёмкость буфера (всегда степень двойки).</summary>
+    /// <summary>Buffer capacity (always a power of two).</summary>
     public int Capacity => _capacity;
 
-    /// <summary>Свободное место в буфере (1 слот зарезервирован).</summary>
+    /// <summary>Available space in the buffer (1 slot reserved).</summary>
     public int Available
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -61,8 +61,8 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>
-    /// Локально кэшированное свободное место.
-    /// Не делает межъядерных чтений (без Volatile.Read(Tail)), безопасно для Producer-а.
+    /// Locally cached available space.
+    /// Does not perform cross-core reads (no Volatile.Read(Tail)), safe for Producer.
     /// </summary>
     public int ProducerCachedAvailable
     {
@@ -70,7 +70,7 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
         get => _capacity - 1 - unchecked(_producer.Head - _producer.CachedTail);
     }
 
-    /// <summary>Буфер пуст.</summary>
+    /// <summary>Buffer is empty.</summary>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -78,8 +78,8 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>
-    /// Записывает данные в буфер.
-    /// Вызывается ТОЛЬКО Producer-ом (decoder loop).
+    /// Writes data to the buffer.
+    /// Must be called ONLY by Producer (decoder loop).
     /// </summary>
     public int Write(ReadOnlySpan<T> data)
     {
@@ -117,8 +117,8 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>
-    /// Читает данные из буфера.
-    /// Вызывается ТОЛЬКО Consumer-ом (audio callback / WinAudio).
+    /// Reads data from the buffer.
+    /// Must be called ONLY by Consumer (audio callback / WinAudio).
     /// </summary>
     public int Read(Span<T> output)
     {
@@ -158,7 +158,7 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>
-    /// Очищает буфер. Вызывать ТОЛЬКО при остановленном воспроизведении!
+    /// Clears the buffer. Call ONLY when playback is stopped!
     /// </summary>
     public void Clear()
     {
@@ -169,8 +169,8 @@ public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>
-    /// Возвращает арендованный массив обратно в <see cref="ArrayPool{T}.Shared"/>.
-    /// Вызывать после полной остановки Producer и Consumer.
+    /// Returns the rented array back to <see cref="ArrayPool{T}.Shared"/>.
+    /// Call after Producer and Consumer have completely stopped.
     /// </summary>
     public void Dispose()
     {

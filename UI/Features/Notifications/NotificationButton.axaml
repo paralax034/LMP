@@ -38,7 +38,7 @@
             <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         </Style>
 
-        <!-- Колокольчик в состоянии покоя — мягкий вторичный тон без паразитного свечения -->
+        <!-- Idle bell icon — soft secondary tone without stray glow -->
         <Style Selector="Button.notif-btn PathIcon">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
             <Setter Property="Transitions">
@@ -72,7 +72,7 @@
         Command="{Binding TogglePanelCommand}"
         ToolTip.Tip="{Binding L[Nav_Notifications]}">
         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <!-- Иконка колокольчика со счетчиком непрочитанных -->
+            <!-- Bell icon with an unread counter -->
             <Panel VerticalAlignment="Center">
                 <PathIcon Data="{StaticResource Icon.BellOutline}"
                     Width="15" Height="15" />
@@ -93,7 +93,7 @@
                 </Border>
             </Panel>
 
-            <!-- Текст «Уведомления», который элегантно раскрывается в шапке при открытии панели -->
+            <!-- "Notifications" text that smoothly expands in the header when the panel opens -->
             <TextBlock Classes="notif-title"
                 Text="{Binding L[Nav_Notifications]}"
                 FontSize="12"

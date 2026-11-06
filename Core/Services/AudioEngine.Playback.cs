@@ -8,7 +8,7 @@ public sealed partial class AudioEngine
     #region Command Loop
 
     /// <summary>
-    /// Единый цикл обработки typed commands.
+    /// Unified processing loop for typed commands.
     /// </summary>
     private async Task ProcessCommandsAsync()
     {
@@ -48,7 +48,7 @@ public sealed partial class AudioEngine
         catch (OperationCanceledException) { }
     }
 
-    /// <summary>Отправляет typed command в очередь.</summary>
+    /// <summary>Enqueues a typed command.</summary>
     private void EnqueueCommand(IEngineCommand command)
     {
         _commandQueue.Writer.TryWrite(command);
@@ -106,8 +106,8 @@ public sealed partial class AudioEngine
 
         lock (_queueLock)
         {
-            // Отложенный авто-переход по концу трека, с которого очередь уже ушла, отбрасывается до BeginNewSession:
-            // иначе он отменит запущенный следующий трек и перескочит через него
+            // A deferred auto-transition from the end of a track that the queue has already moved away from is discarded until BeginNewSession:
+            // otherwise it will cancel the running next track and skip over it
             if (cmd.EndedTrackId != null &&
                 IsStaleTrackEnd(cmd.EndedTrackId, (uint)_currentIndex < (uint)_queue.Count ? _queue[_currentIndex].Id : null))
             {
@@ -135,11 +135,11 @@ public sealed partial class AudioEngine
     #region Playback Core
 
     /// <summary>
-    /// Запускает воспроизведение трека по текущему индексу очереди с опциональной позиции и флагом автозапуска.
+    /// Starts track playback at the current queue index with an optional position and auto-start flag.
     /// </summary>
-    /// <param name="session">Идентификатор сессии воспроизведения.</param>
-    /// <param name="seekPosition">Начальная позиция воспроизведения при перемотке.</param>
-    /// <param name="startPlaying">Флаг автоматического старта проигрывания.</param>
+    /// <param name="session">Playback session identifier.</param>
+    /// <param name="seekPosition">Initial playback position when seeking.</param>
+    /// <param name="startPlaying">Automatic playback start flag.</param>
     private Task PlayCurrentIndexAsync(int session, TimeSpan? seekPosition = null, bool startPlaying = true)
     {
         TrackInfo? track;
@@ -152,9 +152,9 @@ public sealed partial class AudioEngine
         if (track == null || IsSealedFailedTrack(track.Id)) return Task.CompletedTask;
         if (_session.IsStale(session)) return Task.CompletedTask;
 
-        // Не блокируем актор-поток ожиданием предыдущей отменяемой задачи:
-        // отмена старой сессии уже инициирована через CancellationTokenSource в BeginNewSession().
-        // Новая задача запускается мгновенно, а отменённая завершится асинхронно в ThreadPool.
+        // Do not block the actor thread waiting for the previous canceled task:
+        // cancellation of the old session was already initiated via CancellationTokenSource in BeginNewSession().
+        // The new task starts instantly, while the canceled one completes asynchronously on the ThreadPool.
         var playTask = PlayTrackCoreAsync(track, session, GetSessionToken(), seekPosition, startPlaying);
         Volatile.Write(ref _activePlayTask, playTask);
 
@@ -162,7 +162,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Основной метод подготовки и запуска воспроизведения трека с поддержкой SeekPosition и ленивой загрузки.
+    /// Main method for preparing and starting track playback with support for SeekPosition and lazy loading.
     /// </summary>
     private async Task PlayTrackCoreAsync(
        TrackInfo track,
@@ -177,8 +177,8 @@ public sealed partial class AudioEngine
         Log.Debug($"[AudioEngine] [PlayTrackCore] Initiating playback for track: {track.Id} | " +
                           $"Session: {session} | StartPlaying: {startPlaying}");
 
-        // Глушим плеер только при переключении на ДРУГОЙ трек.
-        // При retry/resync того же трека PlayAsync сам атомарно заменит пайплайн без 30-секундной дыры в тишине.
+        // Mute/stop the player only when switching to a DIFFERENT track.
+        // On retry/resync of the same track, PlayAsync will atomically replace the pipeline without a 30-second silence gap.
         if (!string.Equals(CurrentTrack?.Id, track.Id, StringComparison.Ordinal))
         {
             _player.Stop();
@@ -234,8 +234,8 @@ public sealed partial class AudioEngine
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    // Вызываем асинхронный ResolveStreamAsync напрямую без лишней обёртки Task.Run,
-                    // которая порождала каскад дублирующих TaskCanceledException в пуле потоков.
+                    // Call asynchronous ResolveStreamAsync directly without an extra Task.Run wrapper,
+                    // which caused a cascade of duplicate TaskCanceledExceptions in the thread pool.
                     var descriptor = await ResolveStreamAsync(track, ct, seekPosition).ConfigureAwait(false);
 
                     if (descriptor.HasPerceptualLufs)
@@ -274,7 +274,7 @@ public sealed partial class AudioEngine
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    // Пользователь переключил трек — выходим мгновенно без повторных попыток
+                    // User switched track — exit instantly without retries
                     throw;
                 }
                 catch (Exception ex)
@@ -332,7 +332,7 @@ public sealed partial class AudioEngine
     #region Player Event Handlers
 
     /// <summary>
-    /// Подписывается на события низкоуровневого плеера (<see cref="AudioPlayer"/>).
+    /// Subscribes to low-level player events (<see cref="AudioPlayer"/>).
     /// </summary>
     private void SubscribeToPlayerEvents()
     {
@@ -368,7 +368,7 @@ public sealed partial class AudioEngine
 
     private void HandlePlayerStateChanged(PlaybackState state)
     {
-        // Намерение сверяется с фактом: смена качества и восстановление запускают PlayAsync в обход SetPlaybackStateAsync
+        // Intention is checked against state: quality change and recovery trigger PlayAsync bypassing SetPlaybackStateAsync
         if (state == PlaybackState.Playing) _playIntent = true;
         else if (state == PlaybackState.Paused) _playIntent = false;
 
@@ -386,8 +386,8 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Обработчик естественного завершения трека.
-    /// Маршрутизируется через typed command для соблюдения actor invariant.
+    /// Handler for natural track completion.
+    /// Routed via typed command to preserve actor invariant.
     /// </summary>
     private void HandlePlayerTrackEnded()
     {

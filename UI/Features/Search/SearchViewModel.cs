@@ -8,12 +8,12 @@ using LMP.Core.Youtube.Search;
 namespace LMP.UI.Features.Search;
 
 /// <summary>
-/// Элемент подсказки поисковой строки (история либо сетевое предложение YouTube).
+/// Search bar suggestion item (history or YouTube network suggestion).
 /// </summary>
 public sealed record SearchSuggestionItem(string Text, bool IsFromHistory, SearchViewModel Owner);
 
 /// <summary>
-/// ViewModel экрана поиска треков с поддержкой Ghost Text, in-place обновлением подсказок и приоритизацией прямых URL.
+/// Track search screen ViewModel supporting Ghost Text, in-place suggestion updates, and direct URL prioritization.
 /// </summary>
 public sealed partial class SearchViewModel : TrackListBaseViewModel
 {
@@ -62,8 +62,8 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     private string _searchQuery = string.Empty;
 
     /// <summary>
-    /// Текущий текст поискового запроса с автоматической очисткой от переносов строк.
-    /// Исключает деструктивное усечение пробелов при посимвольном вводе для предотвращения скачков курсора.
+    /// Current search query text with automatic newline stripping.
+    /// Prevents destructive whitespace trimming during character-by-character input to avoid cursor jumps.
     /// </summary>
     public string SearchQuery
     {
@@ -89,22 +89,22 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Полный текст автодополнения (Ghost Text), применяемый при нажатии Tab / стрелки вправо.
+    /// Full auto-completion text (Ghost Text) applied when pressing Tab / Right Arrow.
     /// </summary>
     [ObservableProperty] public partial string GhostText { get; private set; } = string.Empty;
 
     /// <summary>
-    /// Суффикс автодополнения (хвост подсказки, отображаемый следом за введенным текстом).
+    /// Auto-completion suffix (suggestion tail displayed after the typed text).
     /// </summary>
     [ObservableProperty] public partial string GhostTextSuffix { get; private set; } = string.Empty;
 
     /// <summary>
-    /// Флаг наличия доступного суффикса Ghost Text для отображения полупрозрачного слоя.
+    /// Flag indicating whether an available Ghost Text suffix exists for rendering the translucent layer.
     /// </summary>
     public bool HasGhostText => !string.IsNullOrEmpty(GhostTextSuffix);
 
     /// <summary>
-    /// Источник поиска: YouTube Music, YouTube, Local.
+    /// Search provider: YouTube Music, YouTube, Local.
     /// </summary>
     [ObservableProperty] public partial ContentSource Source { get; set; } = ContentSource.YouTubeMusic;
 
@@ -117,17 +117,17 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     {
         if (_isDisposed) return;
 
-        // 1. Мгновенная синхронная реакция на ввод
+        // 1. Instant synchronous input response
         UpdateLocalSuggestionsAndGhostText(value);
 
-        // 2. Дебаунс 200 мс для сетевого InnerTube/Suggest API
+        // 2. 200 ms debounce for network InnerTube/Suggest API
         _suggestDebounceTimer.Stop();
         if (!string.IsNullOrWhiteSpace(value) && Source != ContentSource.Local)
         {
             _suggestDebounceTimer.Start();
         }
 
-        // 3. Локальный поиск на лету (as-you-type) при выборе источника Local
+        // 3. As-you-type local search when Local source is selected
         if (Source == ContentSource.Local)
         {
             _localSearchDebounceTimer.Stop();
@@ -180,7 +180,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Точное число отображаемых треков (слушает UI-коллекцию Items).
+    /// Exact count of displayed tracks (listens to the Items UI collection).
     /// </summary>
     public int DisplayTrackCount
     {
@@ -193,17 +193,17 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Значение счетчика слева от строки поиска.
+    /// Counter value displayed to the left of the search bar.
     /// </summary>
     public int BadgeCount => DisplayTrackCount > 0 ? DisplayTrackCount : Suggestions.Count;
 
     /// <summary>
-    /// Индикатор видимости счетчика.
+    /// Counter visibility indicator.
     /// </summary>
     public bool IsBadgeVisible => true;
 
     /// <summary>
-    /// Всплывающая подсказка для счетчика треков/подсказок.
+    /// Tooltip for the tracks/suggestions counter.
     /// </summary>
     public string BadgeTooltip => DisplayTrackCount > 0
         ? string.Format(LocalizationService.Instance["Search_BadgeTooltip_Tracks"], DisplayTrackCount)
@@ -212,7 +212,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             : LocalizationService.Instance["Search_BadgeTooltip_Empty"];
 
     /// <summary>
-    /// Текст-заглушка ленты подсказок, когда подсказки отсутствуют.
+    /// Placeholder text for the suggestion feed when no suggestions are available.
     /// </summary>
     public string RibbonPlaceholderText
     {
@@ -229,33 +229,33 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Кнопка принудительного обновления: видна только при наличии кэшированных результатов.
+    /// Force-refresh button: visible only when cached results exist.
     /// </summary>
     public bool ShowForceSearchButton =>
         LibService.Settings.EnableSearchCache && IsFromCache && !IsLoading;
 
     /// <summary>
-    /// Локально сохраненная история поиска.
+    /// Locally saved search history.
     /// </summary>
     public ObservableCollection<string> RecentSearches { get; } = [];
 
     /// <summary>
-    /// Флаг наличия сохранённых запросов в локальной истории.
+    /// Flag indicating whether saved queries exist in local history.
     /// </summary>
     public bool HasRecentSearches => RecentSearches.Count > 0;
 
     /// <summary>
-    /// Комбинированный список подсказок (История + YouTube Suggest).
+    /// Combined suggestion list (History + YouTube Suggest).
     /// </summary>
     public ObservableCollection<SearchSuggestionItem> Suggestions { get; } = [];
 
     /// <summary>
-    /// Флаг наличия подсказок для отображения чипов в горизонтальной ленте.
+    /// Flag indicating whether suggestions exist for rendering chips in the horizontal ribbon.
     /// </summary>
     public bool HasSuggestions => Suggestions.Count > 0;
 
     /// <summary>
-    /// Флаг наличия истории в подсказках (zero-alloc проход без LINQ).
+    /// Flag indicating the presence of history items in suggestions (zero-alloc pass without LINQ).
     /// </summary>
     public bool HasHistoryInSuggestions
     {
@@ -289,7 +289,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     #region UI Presentation State
 
     /// <summary>
-    /// Флаг активности сетевой операции (первичная загрузка или постраничная докачка).
+    /// Flag indicating an active network operation (initial load or paged fetch).
     /// </summary>
     public bool IsBusy => IsLoading || IsFetchingFromNetwork;
 
@@ -298,14 +298,14 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     public bool IsSourceLocal => Source == ContentSource.Local;
 
     /// <summary>
-    /// Определяет необходимость показа заглушки «Ничего не найдено».
+    /// Determines whether to display the "Nothing found" placeholder.
     /// </summary>
     public bool ShowEmptyState => !IsLoading && !HasResults && (!string.IsNullOrWhiteSpace(_currentQuery) || Source == ContentSource.Local);
 
     /// <summary>
-    /// Перехватывает изменения свойств базовой модели и гарантирует своевременное уведомление вычисляемого свойства <see cref="IsBusy"/>.
+    /// Intercepts base model property changes and ensures timely notification of the computed property <see cref="IsBusy"/>.
     /// </summary>
-    /// <param name="e">Аргументы события изменения свойства.</param>
+    /// <param name="e">Property changed event arguments.</param>
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
@@ -317,7 +317,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Потокобезопасно инвалидирует состояние выполнения команд UI на основном потоке интерфейса.
+    /// Thread-safely invalidates UI command execution state on the main UI thread.
     /// </summary>
     private void NotifyCanExecuteSafe()
     {
@@ -372,7 +372,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Дополняет поле ввода текстом найденного Ghost Text.
+    /// Auto-completes the input field with the discovered Ghost Text.
     /// </summary>
     public void CompleteGhostText()
     {
@@ -702,7 +702,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             if (!string.IsNullOrWhiteSpace(_currentQuery))
                 AddToHistory(_currentQuery);
 
-            // 1. ПРИОРИТЕТНАЯ ПРОВЕРКА URL
+            // 1. PRIORITY URL CHECK
             var queryType = YoutubeProvider.DetectQueryType(_currentQuery);
 
             if (queryType == QueryType.DirectUrl)
@@ -717,14 +717,14 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
                 return;
             }
 
-            // 2. Локальный поиск по SQLite
+            // 2. Local SQLite search
             if (Source == ContentSource.Local)
             {
                 await HandleLocalSearchAsync(ct);
                 return;
             }
 
-            // 3. Сетевой поиск YouTube / YouTube Music
+            // 3. Network YouTube / YouTube Music search
             await HandleSearchAsync(ct, forceNetwork);
         }
         catch (OperationCanceledException) { }
@@ -765,10 +765,10 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Выполняет локальный поиск по всей базе данных SQLite (медиатеке пользователя)
-    /// с поддержкой как пустого запроса (выгрузка последних добавленных), так и фильтрации по названию и автору.
+    /// Performs a local search across the entire SQLite database (user media library),
+    /// supporting both empty queries (fetching recently added items) and filtering by title and artist.
     /// </summary>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="ct">Asynchronous operation cancellation token.</param>
     private async Task HandleLocalSearchAsync(CancellationToken ct)
     {
         if (_isDisposed) return;
@@ -981,10 +981,10 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Извлекает актуальные подсказки из локальной истории для заданного фрагмента ввода.
+    /// Retrieves relevant suggestions from local history for the specified input fragment.
     /// </summary>
-    /// <param name="trimmedQuery">Очищенная строка поискового запроса.</param>
-    /// <returns>Список подсказок на основе истории поиска.</returns>
+    /// <param name="trimmedQuery">Trimmed search query string.</param>
+    /// <returns>A list of suggestions based on search history.</returns>
     private List<SearchSuggestionItem> GetLocalMatchingSuggestions(string trimmedQuery)
     {
         int maxCount = LibService.Settings.MaxSuggestionsCount;
@@ -1016,8 +1016,8 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Мгновенно фильтрует текущие доступные подсказки (историю и уже полученные данные YouTube)
-    /// и рассчитывает Ghost Text на 0-м кадре.
+    /// Instantly filters currently available suggestions (history and already fetched YouTube data)
+    /// and calculates Ghost Text at frame 0.
     /// </summary>
     private void UpdateLocalSuggestionsAndGhostText(string query)
     {
@@ -1040,14 +1040,14 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             return;
         }
 
-        // 1. Ищем совпадения в локальной истории
+        // 1. Match against local history
         var matchedItems = GetLocalMatchingSuggestions(trimmed);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < matchedItems.Count; i++)
             seen.Add(matchedItems[i].Text);
 
-        // 2. Добавляем уже загруженные подсказки YouTube
+        // 2. Append already fetched YouTube suggestions
         for (int i = 0; i < Suggestions.Count; i++)
         {
             var item = Suggestions[i];
@@ -1066,7 +1066,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Вычисляет полный Ghost Text и изолированный суффикс.
+    /// Calculates full Ghost Text and isolated suffix.
     /// </summary>
     private void CalculateGhostText(string rawQuery, IReadOnlyList<SearchSuggestionItem> items)
     {
@@ -1077,7 +1077,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             return;
         }
 
-        // Приоритет 1: точное совпадение с учетом регистра и пробелов
+        // Priority 1: exact match including case and whitespace
         for (int i = 0; i < items.Count; i++)
         {
             var candidate = items[i].Text;
@@ -1089,7 +1089,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             }
         }
 
-        // Приоритет 2: если пользователь поставил хвостовой пробел
+        // Priority 2: if the user added a trailing space
         var trimmed = rawQuery.TrimStart();
         if (trimmed.Length > 0)
         {
@@ -1110,7 +1110,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Выполняет фоновую подгрузку подсказок из сети после завершения паузы ввода.
+    /// Performs background preloading of suggestions from the network after the input debounce delay expires.
     /// </summary>
     private void FetchRemoteSuggestionsThrottled(string query)
     {
@@ -1127,11 +1127,11 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Выполняет сетевой запрос подсказок и слияние с актуальной локальной историей.
-    /// Отсекает устаревшие результаты, если пользователь продолжил ввод.
+    /// Executes a network request for suggestions and merges them with the up-to-date local history.
+    /// Discards stale results if the user has continued typing.
     /// </summary>
-    /// <param name="targetQuery">Запрос, для которого запрашивались подсказки.</param>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="targetQuery">The query for which suggestions were requested.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     private async Task FetchAndMergeRemoteSuggestionsAsync(
         string targetQuery,
         CancellationToken ct)
@@ -1174,7 +1174,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
         }
         catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
         {
-            // Отмена фонового дебаунс-запроса при продолжении набора текста
+            // Cancel the background debounced request if text input continues
         }
         catch (Exception ex)
         {
@@ -1183,11 +1183,11 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Сравнивает две последовательности элементов подсказок по значению.
+    /// Compares two sequences of suggestion items by value.
     /// </summary>
-    /// <param name="current">Текущая коллекция элементов.</param>
-    /// <param name="next">Целевая коллекция элементов.</param>
-    /// <returns><c>true</c>, если коллекции идентичны по длине и содержимому.</returns>
+    /// <param name="current">Current collection of items.</param>
+    /// <param name="next">Target collection of items.</param>
+    /// <returns><c>true</c> if the collections are identical in length and content.</returns>
     private static bool AreSuggestionsEqual(ObservableCollection<SearchSuggestionItem> current, List<SearchSuggestionItem> next)
     {
         if (current.Count != next.Count)
@@ -1203,7 +1203,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Выполняет in-place синхронизацию подсказок без вызова Clear().
+    /// Performs in-place synchronization of suggestions without calling Clear().
     /// </summary>
     private void ApplySuggestions(List<SearchSuggestionItem> newItems)
     {

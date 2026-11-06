@@ -4,30 +4,30 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
-/// Представляет ответ API YouTube на запрос продолжения списка видео (пагинация).
-/// Плоская immutable-модель: не удерживает <see cref="JsonDocument"/> в памяти.
+/// Represents a YouTube API response for a video list continuation request (pagination).
+/// Flat immutable model: does not retain <see cref="JsonDocument"/> in memory.
 /// </summary>
 internal partial class PlaylistContinuationResponse
 {
     /// <summary>
-    /// Список видео, полученных в текущей итерации пагинации.
+    /// List of videos retrieved in the current pagination iteration.
     /// </summary>
     public IReadOnlyList<PlaylistVideoData> Videos { get; init; } = [];
 
     /// <summary>
-    /// Токен для получения следующей страницы, если она существует.
+    /// Token for fetching the next page, if one exists.
     /// </summary>
     public string? ContinuationToken { get; init; }
 
     /// <summary>
-    /// Данные о сессии пользователя.
+    /// User session data.
     /// </summary>
     public string? VisitorData { get; init; }
 
     /// <summary>
-    /// Создает экземпляр ответа пагинации, извлекая данные из JSON-элемента за один проход.
+    /// Creates a pagination response instance by extracting data from the JSON element in a single pass.
     /// </summary>
-    /// <param name="content">Корневой JSON-элемент ответа продолжения.</param>
+    /// <param name="content">Root JSON element of the continuation response.</param>
     public PlaylistContinuationResponse(JsonElement content)
     {
         var actions = content.GetPropertyOrNull(InnerTubeTokens.OnResponseReceivedActions);
@@ -66,7 +66,7 @@ internal partial class PlaylistContinuationResponse
 internal partial class PlaylistContinuationResponse
 {
     /// <summary>
-    /// Парсит ответ пагинации плейлиста из строки с мгновенным освобождением <see cref="JsonDocument"/>.
+    /// Parses a playlist pagination response from a string with immediate disposal of <see cref="JsonDocument"/>.
     /// </summary>
     public static PlaylistContinuationResponse Parse(string raw)
     {
@@ -75,12 +75,12 @@ internal partial class PlaylistContinuationResponse
     }
 
     /// <summary>
-    /// Парсит ответ пагинации плейлиста напрямую из сетевого потока без промежуточных строк в LOH.
-    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// Parses a playlist pagination response directly from a network stream without intermediate string allocations in LOH.
+    /// Disposes <see cref="JsonDocument"/> immediately after populating the model.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Экземпляр ответа продолжения плейлиста.</returns>
+    /// <param name="stream">HTTP response network stream.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>A playlist continuation response instance.</returns>
     public static async ValueTask<PlaylistContinuationResponse> ParseAsync(Stream stream, CancellationToken ct = default)
     {
         using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);

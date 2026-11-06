@@ -5,15 +5,15 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio.Parsers;
 
 /// <summary>
-/// Адаптер <see cref="WebMParser"/> для <see cref="IContainerParser"/>.
-/// Инкапсулирует логику управления памятью (Zero-Allocation) для аудио-фреймов.
+/// <see cref="WebMParser"/> adapter for <see cref="IContainerParser"/>.
+/// Encapsulates memory management logic (Zero-Allocation) for audio frames.
 /// </summary>
 public sealed class WebMContainerParser : IContainerParser
 {
     private readonly WebMParser _parser;
     private bool _disposed;
 
-    // Хранит ссылку на арендованный буфер текущего фрейма, чтобы вернуть его при чтении следующего
+    // Holds a reference to the current frame's rented buffer to return it when reading the next one
     private IMemoryOwner<byte>? _currentFrameOwner;
 
     public long DurationMs => _parser.DurationMs;
@@ -23,8 +23,8 @@ public sealed class WebMContainerParser : IContainerParser
     public int Channels => _parser.Channels > 0 ? _parser.Channels : 2;
 
     /// <summary>
-    /// Произошёл ли resync в текущем парсере.
-    /// Если true, последующий EOF означает реальное усечение файла.
+    /// Indicates whether a resync occurred in the current parser.
+    /// If true, a subsequent EOF indicates actual file truncation.
     /// </summary>
     public bool ResyncOccurred => _parser.ResyncOccurred;
 
@@ -39,8 +39,8 @@ public sealed class WebMContainerParser : IContainerParser
     }
 
     /// <summary>
-    /// Читает следующий аудио-фрейм. Использует синхронный fast-path без аллокации async state machine,
-    /// когда блок доступен из внутреннего буфера парсера мгновенно.
+    /// Reads the next audio frame. Uses a synchronous fast-path without allocating an async state machine
+    /// when the block is instantly available from the parser's internal buffer.
     /// </summary>
     public ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default)
     {
@@ -72,19 +72,19 @@ public sealed class WebMContainerParser : IContainerParser
         {
             Data = _currentFrameOwner.Memory[..block.Value.Length],
             TimestampMs = block.Value.TimestampMs,
-            DurationMs = 20, // Стандартная длительность Opus-фрейма
+            DurationMs = 20, // Default Opus frame duration
             IsKeyFrame = block.Value.IsKeyFrame
         };
     }
 
     /// <summary>
-    /// Ищет ближайшую точку входа для seek.
+    /// Searches for the nearest entry point for seeking.
     /// </summary>
     /// <returns>
-    /// BytePosition — абсолютная позиция в потоке (начало Cluster).
-    /// TimestampMs — РЕАЛЬНЫЙ timestamp из cue point (не target!).
-    /// Это позиция откуда начнётся декодирование. Decoder пропустит фреймы
-    /// до targetMs через skip frames mechanism.
+    /// BytePosition — absolute position in the stream (start of Cluster).
+    /// TimestampMs — ACTUAL timestamp from the cue point (not target!).
+    /// This is the position from which decoding will start. The decoder will skip frames
+    /// up to targetMs via the skip frames mechanism.
     /// </returns>
     public (long BytePosition, long TimestampMs)? FindSeekPosition(long targetMs)
     {
@@ -92,7 +92,7 @@ public sealed class WebMContainerParser : IContainerParser
         if (cuePoints.Count == 0)
             return null;
 
-        // Бинарный поиск ближайшего cue point ≤ targetMs
+        // Binary search for the nearest cue point ≤ targetMs
         int low = 0, high = cuePoints.Count - 1;
         while (low < high)
         {
@@ -106,9 +106,9 @@ public sealed class WebMContainerParser : IContainerParser
         var cue = cuePoints[low];
         long bytePos = _parser.FindSeekPosition(targetMs) ?? 0;
 
-        // Возвращаем РЕАЛЬНЫЙ timestamp из cue point.
-        // CachingStreamSource.SeekAsync установит positionMs = cue.TimeMs,
-        // и AudioPipeline.SetDecodedSamplesPosition пересчитает sample position.
+        // Return the ACTUAL timestamp from the cue point.
+        // CachingStreamSource.SeekAsync will set positionMs = cue.TimeMs,
+        // and AudioPipeline.SetDecodedSamplesPosition will recalculate the sample position.
         return (bytePos, cue.TimeMs);
     }
 

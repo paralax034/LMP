@@ -15,7 +15,7 @@ public sealed partial class AccountSelectionDialogViewModel : ViewModelBase
     public IRelayCommand CancelCommand { get; }
 
     /// <summary>
-    /// Инициализирует модель представления выбора аккаунта.
+    /// Initializes the account selection view model.
     /// </summary>
     public AccountSelectionDialogViewModel(
         IEnumerable<YoutubeAccountItem> accounts,

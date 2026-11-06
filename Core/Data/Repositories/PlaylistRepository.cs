@@ -6,9 +6,9 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
-/// Репозиторий списков воспроизведения на чистом ADO.NET SQLite.
-/// Полностью лишен рантайм-генерации выражений LINQ to Entities для гарантированной совместимости с Native AOT.
-/// Обеспечивает строгую изоляцию плейлистов на уровне аккаунтов.
+/// Pure ADO.NET SQLite playlist repository.
+/// Completely devoid of LINQ to Entities runtime expression generation to guarantee Native AOT compatibility.
+/// Provides strict account-level playlist isolation.
 /// </summary>
 public sealed class PlaylistRepository : IPlaylistRepository
 {
@@ -22,9 +22,9 @@ public sealed class PlaylistRepository : IPlaylistRepository
         """;
 
     /// <summary>
-    /// Инициализирует новый экземпляр репозитория плейлистов на базе чистых подключений SQLite.
+    /// Initializes a new instance of the playlist repository based on pure SQLite connections.
     /// </summary>
-    /// <param name="factory">Фабрика нативных подключений SQLite с контролем памяти.</param>
+    /// <param name="factory">Memory-controlled native SQLite connection factory.</param>
     public PlaylistRepository(ISqliteConnectionFactory factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
@@ -100,8 +100,8 @@ public sealed class PlaylistRepository : IPlaylistRepository
         bool guest = IsGuest(ownerId);
         var list = new List<(Playlist Playlist, int TrackCount)>();
 
-        // 1. Извлекаем количество лайкнутых треков системного плейлиста
-        // 2. Извлекаем пользовательские плейлисты с агрегированным количеством треков
+        // 1. Retrieve the liked track count for the system playlist
+        // 2. Retrieve user playlists with aggregated track counts
         await using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = $"""
@@ -120,7 +120,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 var pl = ReadPlaylist(reader);
-                int count = reader.GetInt32(20); // 19 индекс - TrackCount
+                int count = reader.GetInt32(20); // Index 19 - TrackCount
                 pl.TrackCount = count;
                 list.Add((pl, count));
             }
@@ -430,7 +430,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
 
         try
         {
-            // Проверка на дубликат связки
+            // Check for binding duplicate
             await using (var cmdExists = connection.CreateCommand())
             {
                 cmdExists.Transaction = transaction;
@@ -442,7 +442,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
                     return;
             }
 
-            // Проверка существования трека
+            // Check track existence
             await using (var cmdTrack = connection.CreateCommand())
             {
                 cmdTrack.Transaction = transaction;
@@ -505,7 +505,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
     /// <inheritdoc />
     public async Task<int> AddTracksAsync(string playlistId, IEnumerable<string> trackIds, string ownerId, CancellationToken ct = default)
     {
-        // Монотонно убывающий timestamp: idList[0] (самый свежий) получает наибольший timestamp
+        // Monotonically decreasing timestamp: idList[0] (newest) receives the highest timestamp
         var trackIdList = trackIds as IList<string> ?? [.. trackIds];
         if (trackIdList.Count == 0) return 0;
 
@@ -522,7 +522,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
             {
                 int count = Math.Min(chunkSize, trackIdList.Count - i);
 
-                // Существующие треки
+                // Existing tracks
                 await using (var cmd = connection.CreateCommand())
                 {
                     cmd.Transaction = transaction;
@@ -542,7 +542,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
                     }
                 }
 
-                // Уже привязанные к этому плейлисту
+                // Already bound to this playlist
                 await using (var cmdLinked = connection.CreateCommand())
                 {
                     cmdLinked.Transaction = transaction;
@@ -878,7 +878,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
             }
         }
 
-        // Проверка на статус Liked
+        // Check for Liked status
         return set;
     }
 
@@ -899,7 +899,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
         {
             int count = Math.Min(chunkSize, ids.Count - i);
 
-            // Выборка плейлистов
+            // Fetch playlists
             await using (var cmd = connection.CreateCommand())
             {
                 var paramNames = new string[count];
@@ -936,7 +936,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
                 }
             }
 
-            // Выборка лайков для переданных ID
+            // Fetch likes for the specified IDs
         }
 
         return result;
@@ -1069,11 +1069,11 @@ public sealed class PlaylistRepository : IPlaylistRepository
     }
 
     /// <summary>
-    /// Выполняет пакетное обновление соответствий setVideoId для группы треков в плейлисте в рамках транзакции.
+    /// Performs a batch update of setVideoId mappings for a group of tracks in a playlist within a transaction.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <param name="mappings">Коллекция пар: Идентификатор трека -> setVideoId.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
+    /// <param name="playlistId">Playlist identifier.</param>
+    /// <param name="mappings">Collection of pairs: Track ID -> setVideoId.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
     public async Task UpdateSetVideoIdsAsync(
             string playlistId,
             IReadOnlyList<(string TrackId, string SetVideoId)> mappings,
@@ -1201,7 +1201,7 @@ public sealed class PlaylistRepository : IPlaylistRepository
     #region ADO.NET Вспомогательные методы
 
     /// <summary>
-    /// Вычитывает модель <see cref="Playlist"/> напрямую из активного чтения <see cref="DbDataReader"/>.
+    /// Reads the <see cref="Playlist"/> model directly from an active <see cref="DbDataReader"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Playlist ReadPlaylist(DbDataReader reader)

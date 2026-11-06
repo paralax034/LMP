@@ -8,21 +8,21 @@ using LMP.Core.Youtube.Videos.Streams;
 namespace LMP.Core.Youtube.Videos;
 
 /// <summary>
-/// Предоставляет методы для получения информации о видео YouTube.
+/// Provides methods for retrieving YouTube video information.
 /// </summary>
 public sealed class VideoClient
 {
     private readonly VideoController _controller;
     private readonly Func<bool>? _isAuthenticatedCheck;
 
-    /// <summary>Клиент управления аудиопотоками.</summary>
+    /// <summary>Audio stream management client.</summary>
     public StreamClient Streams { get; }
 
-    /// <param name="http">HTTP-клиент.</param>
-    /// <param name="nTokenDecryptor">Провайдер расшифровки N-Token.</param>
-    /// <param name="sigCipherDecryptor">Провайдер расшифровки подписи.</param>
-    /// <param name="isAuthenticatedCheck">Callback проверки авторизации.</param>
-    /// <param name="poTokenProvider">Провайдер PoToken; <c>null</c> отключает pot.</param>
+    /// <param name="http">HTTP client.</param>
+    /// <param name="nTokenDecryptor">N-Token decryption provider.</param>
+    /// <param name="sigCipherDecryptor">Signature decryption provider.</param>
+    /// <param name="isAuthenticatedCheck">Authentication check callback.</param>
+    /// <param name="poTokenProvider">PoToken provider; <c>null</c> disables pot.</param>
     public VideoClient(
         HttpClient http,
         NTokenDecryptor nTokenDecryptor,
@@ -38,10 +38,10 @@ public sealed class VideoClient
     }
 
     /// <summary>
-    /// Возвращает метаданные трека по его идентификатору.
+    /// Returns track metadata by its identifier.
     /// </summary>
-    /// <param name="videoId">Идентификатор видео YouTube.</param>
-    /// <param name="cancellationToken">Токен отмены операции.</param>
+    /// <param name="videoId">YouTube video ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async ValueTask<TrackInfo> GetAsync(
         VideoId videoId,
         CancellationToken cancellationToken = default)
@@ -77,10 +77,10 @@ public sealed class VideoClient
     }
 
     /// <summary>
-    /// Возвращает PlayerResponse с полной fallback-цепочкой клиентов и корректным auth-контекстом.
+    /// Returns PlayerResponse with a full client fallback chain and correct auth context.
     /// </summary>
-    /// <param name="videoId">Идентификатор видео YouTube.</param>
-    /// <param name="cancellationToken">Токен отмены операции.</param>
+    /// <param name="videoId">YouTube video ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     internal async ValueTask<PlayerResponse> GetPlayerResponseAsync(
         VideoId videoId,
         CancellationToken cancellationToken = default)

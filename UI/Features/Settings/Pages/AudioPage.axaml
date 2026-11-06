@@ -160,7 +160,7 @@
                         <TextBlock Classes="desc" Text="{Binding L[Eq_Description]}" />
                     </StackPanel>
 
-                    <!-- Кнопка: Единый для всех (Глобус) -->
+                    <!-- Button: Common for all (Globe) -->
                     <Button Grid.Column="1" Width="32" Height="32" CornerRadius="6"
                         Margin="0,0,6,0" VerticalAlignment="Center"
                         Classes="icon-btn"
@@ -182,7 +182,7 @@
                         </Panel>
                     </Button>
 
-                    <!-- Выпадающий список пресетов (только по наведению) -->
+                    <!-- Preset dropdown list (hover only) -->
                     <Panel Grid.Column="2" Margin="0,0,6,0" VerticalAlignment="Center"
                         PointerEntered="OnPresetsTriggerPointerEntered"
                         PointerExited="OnPresetsTriggerPointerExited">
@@ -316,7 +316,7 @@
                         </Popup>
                     </Panel>
 
-                    <!-- Квадратная кнопка 5 / 10 -->
+                    <!-- Square button 5 / 10 -->
                     <Button Grid.Column="3" Width="32" Height="32" Padding="0"
                         Margin="0,0,6,0" CornerRadius="6" VerticalAlignment="Center"
                         Classes="icon-btn active"
@@ -333,7 +333,7 @@
                             VerticalAlignment="Center" />
                     </Button>
 
-                    <!-- Кнопка сброса иконкой (акцентная ТОЛЬКО когда CanResetEqualizer == true) -->
+                    <!-- Reset button with icon (accent color ONLY when CanResetEqualizer == true) -->
                     <Button Grid.Column="4" Width="32" Height="32"
                         Margin="0,0,10,0" VerticalAlignment="Center"
                         Classes="icon-btn"
@@ -355,7 +355,7 @@
                         </Panel>
                     </Button>
 
-                    <!-- Тумблер питания -->
+                    <!-- Power toggle switch -->
                     <ToggleSwitch Grid.Column="5" IsChecked="{Binding EqualizerEnabled}"
                         VerticalAlignment="Center" />
                 </Grid>

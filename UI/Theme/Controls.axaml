@@ -1,12 +1,12 @@
 <Styles xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Убираем обводку фокуса -->
+    <!-- Remove focus outline -->
     <Style Selector="Control:focus-visible">
         <Setter Property="FocusAdorner" Value="{x:Null}" />
     </Style>
 
-    <!-- GLOBAL LISTBOX / LISTBOXITEM (Единый контурный дизайн списков)      -->
+    <!-- GLOBAL LISTBOX / LISTBOXITEM (Unified outline list design)           -->
 
     <Style Selector="ListBox:not(.track-list):not(.chip-list):not(.nav-sidebar)">
         <Setter Property="Background" Value="Transparent" />
@@ -249,7 +249,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
 
-    <!-- Подсветка только рамки ItemBorder -->
+    <!-- Highlight ItemBorder border only -->
     <Style Selector="ComboBoxItem:pointerover /template/ Border#ItemBorder">
         <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
@@ -348,7 +348,7 @@
         </Setter>
     </Style>
 
-    <!-- TEXTBOX — ГЛОБАЛЬНЫЙ СТИЛЬ И ЦЕНТРАЛИЗОВАННЫЙ CONTEXT MENU         -->
+    <!-- TEXTBOX — GLOBAL STYLE AND CENTRALIZED CONTEXT MENU                  -->
 
     <Style Selector="TextBox:not(.flat-search-box)">
         <Setter Property="Background" Value="Transparent" />
@@ -457,7 +457,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <!-- CONTEXT MENU / MENUITEM — КАСКАДНЫЙ И ПЛОСКИЙ СТИЛЬ С ПОДДЕРЖКОЙ SUBMENU -->
+    <!-- CONTEXT MENU / MENUITEM — CASCADING AND FLAT STYLE WITH SUBMENU SUPPORT -->
 
     <Style Selector="ContextMenu">
         <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
@@ -560,7 +560,7 @@
         </Setter>
     </Style>
 
-    <!-- Листовые пункты меню (без подменю) используют плоский легковесный шаблон БЕЗ вложенного
+    <!-- Leaf menu items (without submenus) use a flat lightweight template WITHOUT a nested
     Popup/ScrollViewer -->
     <Style Selector="MenuItem:empty">
         <Setter Property="Template">

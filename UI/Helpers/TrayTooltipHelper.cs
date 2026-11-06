@@ -1,26 +1,26 @@
 namespace LMP.UI.Helpers;
 
 /// <summary>
-/// Формирует tooltip для иконки системного трея.
-/// Единый формат для Windows и non-Windows платформ (DRY).
+/// Generates a tooltip for the system tray icon.
+/// Unified format for Windows and non-Windows platforms (DRY).
 /// 
-/// <para><b>Формат с треком:</b> <c>{AppName}: {TrackTitle} ({Volume}{VolumeEmoji})</c></para>
-/// <para><b>Формат без трека:</b> <c>{AppName}</c></para>
-/// <para><b>Формат при скролле:</b> <c>{AppName}: {TrackTitle}\n{VolumeEmoji} {Volume}%</c></para>
+/// <para><b>Track format:</b> <c>{AppName}: {TrackTitle} ({Volume}{VolumeEmoji})</c></para>
+/// <para><b>No track format:</b> <c>{AppName}</c></para>
+/// <para><b>Scroll format:</b> <c>{AppName}: {TrackTitle}\n{VolumeEmoji} {Volume}%</c></para>
 /// </summary>
 public static class TrayTooltipHelper
 {
     /// <summary>
-    /// Максимальная длина tooltip для Win32 NOTIFYICONDATAW.szTip.
+    /// Maximum tooltip length for Win32 NOTIFYICONDATAW.szTip.
     /// </summary>
     public const int MaxTooltipLength = 127;
 
     /// <summary>
-    /// Формирует стандартный tooltip трея.
+    /// Generates the standard tray tooltip.
     /// </summary>
-    /// <param name="track">Текущий трек (null если ничего не играет)</param>
-    /// <param name="volume">Текущая громкость 0–100</param>
-    /// <returns>Отформатированная строка tooltip</returns>
+    /// <param name="track">Current track (null if nothing is playing)</param>
+    /// <param name="volume">Current volume 0–100</param>
+    /// <returns>Formatted tooltip string</returns>
     public static string Format(TrackInfo? track, int volume)
     {
         var appName = LocalizationService.Instance["Common_AppName"];
@@ -35,12 +35,12 @@ public static class TrayTooltipHelper
     }
 
     /// <summary>
-    /// Формирует tooltip с акцентом на громкости (используется при скролле колесиком).
-    /// Громкость выделена на отдельной строке для лучшей читаемости.
+    /// Generates a tooltip emphasizing volume (used during wheel scrolling).
+    /// Volume is highlighted on a separate line for better readability.
     /// </summary>
-    /// <param name="track">Текущий трек (null если ничего не играет)</param>
-    /// <param name="volume">Текущая громкость 0–100</param>
-    /// <returns>Отформатированная строка tooltip с выделенной громкостью</returns>
+    /// <param name="track">Current track (null if nothing is playing)</param>
+    /// <param name="volume">Current volume 0–100</param>
+    /// <returns>Formatted tooltip string with highlighted volume</returns>
     public static string FormatWithVolumeAccent(TrackInfo? track, int volume)
     {
         var appName = LocalizationService.Instance["Common_AppName"];
@@ -56,9 +56,9 @@ public static class TrayTooltipHelper
     }
 
     /// <summary>
-    /// Возвращает монохромный Unicode-эмодзи громкости.
+    /// Returns a monochrome Unicode volume emoji.
     /// </summary>
-    /// <param name="volume">Уровень громкости 0–100</param>
+    /// <param name="volume">Volume level 0–100</param>
     /// <returns>🔇 (mute), 🔈 (low), 🔉 (medium), 🔊 (high)</returns>
     public static string GetVolumeEmoji(int volume) => volume switch
     {
@@ -69,8 +69,8 @@ public static class TrayTooltipHelper
     };
 
     /// <summary>
-    /// Обрезает строку до <see cref="MaxTooltipLength"/> символов.
-    /// Необходимо для Win32 szTip (128 chars включая null terminator).
+    /// Truncates the string to <see cref="MaxTooltipLength"/> characters.
+    /// Required for Win32 szTip (128 chars including null terminator).
     /// </summary>
     private static string Truncate(string text)
         => text.Length > MaxTooltipLength ? text[..MaxTooltipLength] : text;

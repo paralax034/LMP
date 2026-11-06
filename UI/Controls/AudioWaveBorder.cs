@@ -13,8 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Граничный декоратор с непрерывным гидродинамическим волноводом, где длина волны отображает высоту ноты.
-/// Обеспечивает непрерывную анимацию активного трека без блокировок при смене страниц.
+/// Border decorator with a continuous hydrodynamic waveguide, where the wavelength represents the note pitch.
+/// Provides continuous animation of the active track without blocking during page switching.
 /// </summary>
 public sealed class AudioWaveBorder : Decorator
 {
@@ -88,7 +88,7 @@ public sealed class AudioWaveBorder : Decorator
     private static event Action? GlobalConfigChanged;
 
     /// <summary>
-    /// Гарантирует применение сохраненных настроек при холодном старте приложения.
+    /// Ensures the application of saved settings during cold startup of the application.
     /// </summary>
     private static void EnsureGlobalConfigLoaded()
     {
@@ -106,7 +106,7 @@ public sealed class AudioWaveBorder : Decorator
         }
         catch
         {
-            // Защита при работе в дизайнере Avalonia
+            // Guard check for running in the Avalonia designer
         }
     }
 
@@ -505,8 +505,8 @@ public sealed class AudioWaveBorder : Decorator
         long currentTimestamp = Stopwatch.GetTimestamp();
         double dt = Stopwatch.GetElapsedTime(_lastFrameTimestamp, currentTimestamp).TotalSeconds;
 
-        // Ограничиваем частоту пересчёта сплайна и создания StreamGeometry до ~60 FPS (16 мс),
-        // чтобы на мониторах 144-240 Гц не нагружать поток композитора и GC избыточной тесселяцией кривых Безье.
+        // Limit the spline recalculation and StreamGeometry creation frequency to ~60 FPS (16 ms),
+        // to avoid overloading the render thread and GC with excess Bezier curve tessellation on 144-240 Hz monitors.
         if (dt < MinFrameIntervalSeconds)
         {
             if (ShouldAnimate() || HasActivePackets())
@@ -608,7 +608,7 @@ public sealed class AudioWaveBorder : Decorator
             }
             else
             {
-                // Во время тишины/буферизации не крутим 60 FPS RequestAnimationFrame вхолостую
+                // Do not run the 60 FPS RequestAnimationFrame idle loop during silence/buffering
                 _isFrameLoopActive = false;
                 _idleWakeTimer ??= new DispatcherTimer(
                     TimeSpan.FromMilliseconds(180),
@@ -765,8 +765,8 @@ public sealed class AudioWaveBorder : Decorator
         EnsurePen(thickness, 255);
         if (_cachedPen == null) return;
 
-        // Быстрый путь: собираем индексы только активных пакетов на стеке.
-        // Если активных волновых пакетов сейчас нет — рисуем статичный скруглённый прямоугольник за 0 аллокаций без StreamGeometry!
+        // Fast path: collect indices of active packets only on the stack.
+        // If there are no active wave packets right now, render a static rounded rectangle with 0 allocations without StreamGeometry!
         Span<int> activePacketIndices = stackalloc int[MaxActivePackets];
         int activeCount = 0;
         for (int i = 0; i < MaxActivePackets; i++)
@@ -794,7 +794,7 @@ public sealed class AudioWaveBorder : Decorator
         var frameGeometry = new StreamGeometry();
         using (var ctx = frameGeometry.Open())
         {
-            // 1. ВЕРХНЯЯ ГРАНЬ (Слева направо)
+            // 1. TOP EDGE (Left to right)
             for (int i = 0; i < railSamples; i++)
             {
                 double u = i * invSamplesMinusOne;
@@ -804,16 +804,16 @@ public sealed class AudioWaveBorder : Decorator
             ctx.BeginFigure(_railPoints[0], isFilled: false);
             DrawSpline(ctx, _railPoints, railSamples);
 
-            // 2. ВЕРХНИЙ ПРАВЫЙ УГОЛ И ПРАВЫЙ ТОРЕЦ
+            // 2. TOP-RIGHT CORNER AND RIGHT EDGE
             ctx.CubicBezierTo(new Point(right - radius + k, top), new Point(right, top + radius - k),
                 new Point(right, top + radius));
             ctx.LineTo(new Point(right, bottom - radius));
 
-            // 3. НИЖНИЙ ПРАВЫЙ УГОЛ
+            // 3. BOTTOM-RIGHT CORNER
             ctx.CubicBezierTo(new Point(right, bottom - radius + k), new Point(right - radius + k, bottom),
                 new Point(right - radius, bottom));
 
-            // 4. НИЖНЯЯ ГРАНЬ (Справа налево: u идет от 1.0 к 0.0)
+            // 4. BOTTOM EDGE (Right to left: u goes from 1.0 to 0.0)
             for (int i = 0; i < railSamples; i++)
             {
                 double u = 1.0 - (i * invSamplesMinusOne);
@@ -822,12 +822,12 @@ public sealed class AudioWaveBorder : Decorator
 
             DrawSpline(ctx, _railPoints, railSamples);
 
-            // 5. НИЖНИЙ ЛЕВЫЙ УГОЛ И ЛЕВЫЙ ТОРЕЦ
+            // 5. BOTTOM-LEFT CORNER AND LEFT EDGE
             ctx.CubicBezierTo(new Point(left + radius - k, bottom), new Point(left, bottom - radius + k),
                 new Point(left, bottom - radius));
             ctx.LineTo(new Point(left, top + radius));
 
-            // 6. ВЕРХНИЙ ЛЕВЫЙ УГОЛ (Замыкание контура)
+            // 6. TOP-LEFT CORNER (Closing the path)
             ctx.CubicBezierTo(new Point(left, top + radius - k), new Point(left + radius - k, top),
                 new Point(left + radius, top));
 
@@ -857,8 +857,8 @@ public sealed class AudioWaveBorder : Decorator
     }
 
     /// <summary>
-    /// Вычисляет гладкое органическое смещение волны только по заранее отфильтрованным активным пакетам
-    /// с полиномиальным окном Ханна вместо вызовов тригонометрического косинуса для огибающей.
+    /// Calculates a smooth organic wave displacement using only pre-filtered active packets
+    /// with a polynomial Hann window instead of trigonometric cosine calls for the envelope.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private double CalculateOrganicDisplacement(double u, ReadOnlySpan<int> activeIndices)
@@ -875,7 +875,7 @@ public sealed class AudioWaveBorder : Decorator
             if (absDist >= halfWidth) continue;
 
             double norm = absDist / halfWidth;
-            // Быстрый полином (1 - norm^2)^2 заменяет вызов Math.Cos(PI * 0.5 * norm)^2 с точностью 99.6% и в 15 раз быстрее
+            // Fast polynomial (1 - norm^2)^2 replaces Math.Cos(PI * 0.5 * norm)^2 call with 99.6% accuracy and is 15x faster
             double invNorm2 = 1.0 - (norm * norm);
             double envelope = invNorm2 * invNorm2;
 
@@ -908,7 +908,7 @@ public sealed class AudioWaveBorder : Decorator
     }
 
     /// <summary>
-    /// Алгебраический софт-лимитер с непрерывной производной для исключения вылета за пределы Bounds.
+    /// Algebraic soft-limiter with a continuous derivative to prevent exceeding Bounds.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double SoftLimit(double x, double max)
@@ -918,8 +918,8 @@ public sealed class AudioWaveBorder : Decorator
     }
 
     /// <summary>
-    /// Квинтиковый SmootherStep: первая и вторая производные в точках сопряжения равны строго нулю.
-    /// Полностью устраняет высокочастотный дребезг касательных в алгоритме Катмулла-Рома.
+    /// Quintic SmootherStep: first and second derivatives at transition points are strictly zero.
+    /// Completely eliminates high-frequency tangent chatter in the Catmull-Rom algorithm.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double ComputeSmootherCornerBlend(double u, double margin)

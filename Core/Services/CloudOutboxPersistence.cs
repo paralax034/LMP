@@ -6,17 +6,17 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Изменение строки таблицы <c>CloudMutationOutbox</c>: <see cref="State"/> = <see langword="null"/> означает удаление.
+/// Table row change for <c>CloudMutationOutbox</c>: <see cref="State"/> = <see langword="null"/> indicates deletion.
 /// </summary>
 public readonly record struct CloudOutboxRowChange(string OwnerId, string TargetId, CloudPlaylistOutboxState? State);
 
 /// <summary>
-/// SQLite-хранилище очереди облачных мутаций с AOT-безопасной сериализацией через <see cref="AppJsonContext"/>.
+/// SQLite store for the cloud mutation queue with AOT-safe serialization via <see cref="AppJsonContext"/>.
 /// </summary>
 public sealed class CloudOutboxStore(ISqliteConnectionFactory factory)
 {
     /// <summary>
-    /// Загружает все непустые состояния очереди. Повреждённые строки пропускаются без прерывания гидратации.
+    /// Loads all non-empty queue states. Corrupted rows are skipped without interrupting hydration.
     /// </summary>
     public async Task<List<CloudPlaylistOutboxState>> LoadAllAsync(CancellationToken ct = default)
     {
@@ -66,7 +66,7 @@ public sealed class CloudOutboxStore(ISqliteConnectionFactory factory)
     }
 
     /// <summary>
-    /// Атомарно применяет пакет изменений (upsert/delete) в одной транзакции SQLite.
+    /// Atomically applies a batch of changes (upsert/delete) in a single SQLite transaction.
     /// </summary>
     public async Task WriteBatchAsync(IReadOnlyList<CloudOutboxRowChange> changes, CancellationToken ct = default)
     {
@@ -131,10 +131,10 @@ public sealed class CloudOutboxStore(ISqliteConnectionFactory factory)
 }
 
 /// <summary>
-/// Единый насос персистентности очереди Outbox: схлопывает «грязные» ключи в окне коалесценции
-/// и пишет их одной транзакцией. Читает самое свежее состояние в момент записи, поэтому порядок
-/// upsert/delete не может инвертироваться. Пока насос на паузе (до гидратации), запись не выполняется,
-/// чтобы ранние мутации не перезаписали строки предыдущей сессии.
+/// Unified Outbox queue persistence pump: coalesces dirty keys within a debouncing window
+/// and writes them in a single transaction. Reads the latest state at write time, preventing
+/// upsert/delete order inversion. While the pump is paused (before hydration), writing is suppressed
+/// so that early mutations do not overwrite rows from the previous session.
 /// </summary>
 public sealed class CloudOutboxPersistencePump
 {
@@ -153,12 +153,12 @@ public sealed class CloudOutboxPersistencePump
     private int _batchesWritten;
 
     /// <summary>
-    /// Создаёт насос персистентности.
+    /// Creates a persistence pump.
     /// </summary>
-    /// <param name="snapshotProvider">Возвращает клон актуального состояния ключа либо <see langword="null"/> для удаления.</param>
-    /// <param name="writer">Транзакционная запись пакета изменений.</param>
-    /// <param name="coalesceWindowMs">Окно схлопывания записей.</param>
-    /// <param name="startPaused">Не писать до вызова <see cref="Resume"/>.</param>
+    /// <param name="snapshotProvider">Returns a clone of the current key state, or <see langword="null"/> for deletion.</param>
+    /// <param name="writer">Transactional batch writer for changes.</param>
+    /// <param name="coalesceWindowMs">Record coalescing window.</param>
+    /// <param name="startPaused">Do not write until <see cref="Resume"/> is called.</param>
     public CloudOutboxPersistencePump(
         Func<string, string, CloudPlaylistOutboxState?> snapshotProvider,
         Func<IReadOnlyList<CloudOutboxRowChange>, CancellationToken, Task> writer,
@@ -171,10 +171,10 @@ public sealed class CloudOutboxPersistencePump
         _isPaused = startPaused;
     }
 
-    /// <summary>Количество успешно записанных транзакционных пакетов.</summary>
+    /// <summary>Number of successfully committed transactional batches.</summary>
     public int BatchesWritten => Volatile.Read(ref _batchesWritten);
 
-    /// <summary>Количество ключей, ожидающих записи.</summary>
+    /// <summary>Number of keys pending persistence.</summary>
     public int PendingCount
     {
         get
@@ -185,7 +185,7 @@ public sealed class CloudOutboxPersistencePump
     }
 
     /// <summary>
-    /// Помечает ключ очереди как изменённый. Не блокирует вызывающий поток и не выполняет I/O.
+    /// Marks a queue key as dirty. Non-blocking and performs no I/O.
     /// </summary>
     public void MarkDirty(string ownerId, string targetId)
     {
@@ -197,7 +197,7 @@ public sealed class CloudOutboxPersistencePump
     }
 
     /// <summary>
-    /// Снимает паузу (после гидратации) и запускает запись накопленных ключей.
+    /// Unpauses the pump (after hydration) and starts persisting accumulated keys.
     /// </summary>
     public void Resume()
     {
@@ -209,9 +209,9 @@ public sealed class CloudOutboxPersistencePump
     }
 
     /// <summary>
-    /// Немедленно сбрасывает накопленные ключи и ожидает простоя насоса не дольше <paramref name="timeoutMs"/>.
+    /// Flushes accumulated keys immediately and waits for the pump to go idle, up to <paramref name="timeoutMs"/>.
     /// </summary>
-    /// <returns><see langword="true"/>, если все изменения записаны.</returns>
+    /// <returns><see langword="true"/> if all changes were persisted successfully.</returns>
     public async Task<bool> DrainAsync(int timeoutMs)
     {
         Task idleTask;

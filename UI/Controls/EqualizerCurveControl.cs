@@ -12,8 +12,8 @@ using LMP.Core.Audio.Helpers;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Интерактивный график эквалайзера с единой живой волной:
-/// 100% кликабельная область по всей высоте колонок, 0 точек, живой отклик частот играющего трека.
+/// Interactive equalizer chart with a unified live wave:
+/// 100% clickable area across the full height of the columns, 0 points, live frequency response of the playing track.
 /// </summary>
 public sealed class EqualizerCurveControl : Control
 {
@@ -27,7 +27,7 @@ public sealed class EqualizerCurveControl : Control
     private const double SpectrumLerpDown = 10.0;
     private const double MinFrameIntervalSeconds = 0.0155; // ~60 FPS cap
 
-    // Технические подписи частот в нотации SI с латинской «k», как в Hints5BandFreqs: переводу не подлежат
+    // Technical frequency labels in SI notation with a Latin "k", matching Hints5BandFreqs: do not translate
     private static readonly string[] Labels10Band = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
     private static readonly string[] Hints10BandKeys =
     [
@@ -68,7 +68,7 @@ public sealed class EqualizerCurveControl : Control
     }
 
     /// <summary>
-    /// Событие изменения полос пользователем (передаёт массив из 10 ISO-полос в дБ).
+    /// Occurs when the user changes the bands (passes an array of 10 ISO bands in dB).
     /// </summary>
     public event Action<float[]>? BandsChanged;
 
@@ -90,7 +90,7 @@ public sealed class EqualizerCurveControl : Control
     private StreamGeometry? _cachedLineGeometry;
     private double _lastRenderedZeroY = double.NaN;
 
-    private const int DbStepCount = 49; // [-12.0 .. +12.0] с шагом 0.5 dB
+    private const int DbStepCount = 49; // [-12.0 .. +12.0] in 0.5 dB steps
     private readonly FormattedText?[] _cachedNormalLabels = new FormattedText?[EqualizerProcessor.BandCount];
     private readonly FormattedText?[] _cachedHotLabels = new FormattedText?[EqualizerProcessor.BandCount];
     private readonly FormattedText?[] _cachedHintSubLabels = new FormattedText?[EqualizerProcessor.BandCount];
@@ -509,7 +509,7 @@ public sealed class EqualizerCurveControl : Control
         double h = Bounds.Height;
         if (w < 40 || h < 40) return;
 
-        // Прозрачная подложка на весь Bounds для 100% срабатывания Hit-Test по всей высоте колонок
+        // Transparent background over full Bounds to ensure 100% Hit-Test triggering across the entire column height
         context.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
 
         EnsureBrushesAndPens();
@@ -522,11 +522,11 @@ public sealed class EqualizerCurveControl : Control
         double plotH = Math.Max(1.0, plotBottom - plotTop);
         double zeroY = plotTop + plotH * 0.5;
 
-        // 1. Центральная нулевая линия (0 дБ)
+        // 1. Center zero line (0 dB)
         if (_zeroLinePen != null)
             context.DrawLine(_zeroLinePen, new Point(plotLeft, zeroY), new Point(plotRight, zeroY));
 
-        // 2. Единая живая 10-полосная волна: дышит в такт музыке ВСЕГДА (даже когда EQ выключен)
+        // 2. Unified live 10-band wave: ALWAYS breathes with the music (even when EQ is disabled)
         for (int i = 0; i < EqualizerProcessor.BandCount; i++)
         {
             double u = i / 9.0;
@@ -549,7 +549,7 @@ public sealed class EqualizerCurveControl : Control
             _wave10Points[i] = new Point(x, y);
         }
 
-        // 3. Вертикальные линии управления (5 или 10) с кэшированными FormattedText
+        // 3. Vertical control lines (5 or 10) with cached FormattedText
         int controlCount = IsSimple5BandMode ? 5 : EqualizerProcessor.BandCount;
         EnsureLabelsCached(controlCount);
 
@@ -567,7 +567,7 @@ public sealed class EqualizerCurveControl : Control
                 context.DrawText(ft, new Point(colX - ft.Width * 0.5, plotBottom + 5.0));
         }
 
-        // 4. Отрисовка единой гладкой волны и её градиента (пересборка StreamGeometry только при изменении точек)
+        // 4. Rendering a unified smooth wave and its gradient (rebuilding StreamGeometry only when points change)
         EnsureWaveGeometries(zeroY);
 
         if (_fillGradientBrush != null && _cachedFillGeometry != null)
@@ -577,7 +577,7 @@ public sealed class EqualizerCurveControl : Control
         if (mainPen != null && _cachedLineGeometry != null)
             context.DrawGeometry(null, mainPen, _cachedLineGeometry);
 
-        // 5. Аккуратные микро-точки прямо на волне + текст параметров сверху при наведении
+        // 5. Neat micro-dots directly on the wave + parameter text on top when hovered
         for (int i = 0; i < controlCount; i++)
         {
             Point nodePt = GetControlNodeWavePoint(i, controlCount);
@@ -705,7 +705,7 @@ public sealed class EqualizerCurveControl : Control
         if (controlCount == EqualizerProcessor.BandCount)
             return _wave10Points[Math.Clamp(controlIdx, 0, 9)];
 
-        // Для 5 полос (u = 0, 0.25, 0.5, 0.75, 1.0) линейно интерполируем Y на 10-полосной волне
+        // For 5 bands (u = 0, 0.25, 0.5, 0.75, 1.0), linearly interpolate Y on the 10-band wave
         double exactIso = (controlIdx / 4.0) * 9.0;
         int i0 = Math.Clamp((int)exactIso, 0, 8);
         int i1 = i0 + 1;

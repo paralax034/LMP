@@ -6,7 +6,7 @@
 
     <Grid ColumnDefinitions="46, *" Name="LayoutGrid">
 
-        <!-- Боковое меню навигации -->
+        <!-- Side navigation menu -->
         <Border Grid.Column="0"
             Width="46"
             HorizontalAlignment="Left"
@@ -126,8 +126,8 @@
         </Border>
 
         <!-- 
-            DataContext="{x:Null}" на контейнере блокирует нисходящее наследование SettingsViewModel,
-            гарантируя отсутствие коллизий типов и исключений при монтировании страниц.
+            DataContext="{x:Null}" on the container blocks downward inheritance of SettingsViewModel,
+            ensuring no type collisions or exceptions during page mounting.
         -->
         <ScrollViewer Grid.Column="1"
             Name="ContentScrollViewer"

@@ -4,9 +4,9 @@ using System.Runtime.CompilerServices;
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Помечает статический метод как тест или отладочное действие для автоматического обнаружения.
+/// Marks a static method as a test or debug action for automatic discovery.
 /// <para>
-/// Поддерживаемые сигнатуры:
+/// Supported signatures:
 /// <list type="bullet">
 ///   <item><c>static Task MethodAsync()</c></item>
 ///   <item><c>static Task MethodAsync(CancellationToken ct)</c></item>
@@ -16,84 +16,84 @@ namespace LMP.Tests.Framework;
 /// </list>
 /// </para>
 /// </summary>
-/// <param name="category">Категория выполнения (<see cref="TestCategory"/>).</param>
-/// <param name="displayName">Понятное имя для UI (если null — генерируется из имени метода).</param>
+/// <param name="category">Execution category (<see cref="TestCategory"/>).</param>
+/// <param name="displayName">Display name for UI (if null, generated from method name).</param>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
 public sealed class TestMethodAttribute(
     TestCategory category,
     string? displayName = null) : Attribute
 {
-    /// <summary>Категория нагрузки и степень изоляции теста.</summary>
+    /// <summary>Load category and isolation level of the test.</summary>
     public TestCategory Category { get; } = category;
 
-    /// <summary>Отображаемое имя теста без дублирующих префиксов группы.</summary>
+    /// <summary>Display name of the test without duplicate group prefixes.</summary>
     public string? DisplayName { get; } = displayName;
 
     /// <summary>
-    /// Тематическая подсистема из <see cref="TestGroups"/>.
-    /// Если не задана, выводится автоматически из имени содержащего класса.
+    /// Thematic subsystem from <see cref="TestGroups"/>.
+    /// If omitted, automatically derived from the enclosing class name.
     /// </summary>
     public string? Group { get; init; }
 
-    /// <summary>Порядок сортировки внутри группы (меньше — выше в списке).</summary>
+    /// <summary>Sort order within the group (lower values appear higher in the list).</summary>
     public int Order { get; init; } = 100;
 
-    /// <summary>Флаг обязательного наличия интернет-соединения.</summary>
+    /// <summary>Flag requiring an active internet connection.</summary>
     public bool RequiresNetwork { get; init; }
 
-    /// <summary>Лимит времени выполнения в секундах (0 = без ограничения).</summary>
+    /// <summary>Execution timeout limit in seconds (0 = no limit).</summary>
     public int TimeoutSeconds { get; init; } = 30;
 }
 
-/// <summary>Категории выполнения тестов и отладочных инструментов.</summary>
+/// <summary>Execution categories for tests and debug tools.</summary>
 public enum TestCategory : byte
 {
-    /// <summary>Автономные детерминированные тесты логики без сети и внешних зависимостей.</summary>
+    /// <summary>Isolated deterministic logic tests without network or external dependencies.</summary>
     Unit = 0,
 
-    /// <summary>Интеграционные тесты подсистем (сеть, дешифрация, SQLite, компоненты).</summary>
+    /// <summary>Integration tests for subsystems (network, deciphering, SQLite, components).</summary>
     Integration = 1,
 
-    /// <summary>Бенчмарки производительности, пропускной способности и аллокаций памяти.</summary>
+    /// <summary>Performance, throughput, and memory allocation benchmarks.</summary>
     Benchmark = 2,
 
-    /// <summary>Сквозные сценарии полного цикла воспроизведения.</summary>
+    /// <summary>End-to-end full playback cycle scenarios.</summary>
     E2E = 3,
 
-    /// <summary>Диагностические сетевые и системные зонды (CDN ping, DNS, аудит ТСПУ).</summary>
+    /// <summary>Diagnostic network and system probes (CDN ping, DNS, TSPU audit).</summary>
     Diagnostic = 4,
 
-    /// <summary>Интерактивные и деструктивные отладочные действия (генерация данных, сброс кэшей).</summary>
+    /// <summary>Interactive and destructive debug actions (data generation, cache clearing).</summary>
     Action = 5
 }
 
 /// <summary>
-/// Канонические тематические группы тестов и подсистем.
+/// Canonical thematic groups of tests and subsystems.
 /// </summary>
 public static class TestGroups
 {
-    /// <summary>Аудио-движок, декодеры, DSP, эквалайзер, EBU R128 pre-scan и zero-alloc буферы.</summary>
+    /// <summary>Audio engine, decoders, DSP, equalizer, EBU R128 pre-scan, and zero-alloc buffers.</summary>
     public const string Audio = "Audio";
 
-    /// <summary>Дешифрация YouTube: NToken, SigCipher, PoToken (BotGuard), AST Solver и QuickJS.</summary>
+    /// <summary>YouTube deciphering: NToken, SigCipher, PoToken (BotGuard), AST Solver, and QuickJS.</summary>
     public const string Cipher = "Cipher";
 
-    /// <summary>Сетевой уровень: CDN, DNS/DoH, диагностика ТСПУ/DPI, время жизни URL.</summary>
+    /// <summary>Networking layer: CDN, DNS/DoH, TSPU/DPI diagnostics, URL expiration.</summary>
     public const string Network = "Network";
 
-    /// <summary>Парсеры YouTube/YTM (Search, PlayerResponse, Browse) и конвейер стриминга.</summary>
+    /// <summary>YouTube/YTM parsers (Search, PlayerResponse, Browse) and streaming pipeline.</summary>
     public const string Youtube = "Youtube";
 
-    /// <summary>Локальное хранилище: SQLite, MemoryPack, AtomicFile, дисковые и RAM кэши.</summary>
+    /// <summary>Local storage: SQLite, MemoryPack, AtomicFile, disk and RAM caches.</summary>
     public const string Storage = "Storage";
 
-    /// <summary>Плейлисты: порядок следования треков, синхронизация, CRUD и миграции.</summary>
+    /// <summary>Playlists: track ordering, synchronization, CRUD operations, and migrations.</summary>
     public const string Playlists = "Playlists";
 
-    /// <summary>Системные службы: автообновление, уведомления, мониторинг UI.</summary>
+    /// <summary>System services: auto-updater, notifications, UI monitoring.</summary>
     public const string System = "System";
 
-    // Алиасы для плавной обратной совместимости
+    // Aliases for smooth backward compatibility
     public const string NToken = Cipher;
     public const string SigCipher = Cipher;
     public const string Solver = Cipher;
@@ -102,7 +102,7 @@ public static class TestGroups
     public const string Notifications = System;
 
     /// <summary>
-    /// Нормализует произвольную строку группы к канонической константе <see cref="TestGroups"/>.
+    /// Normalizes an arbitrary group string to a canonical <see cref="TestGroups"/> constant.
     /// </summary>
     public static string Normalize(string? rawGroup) => rawGroup switch
     {
@@ -119,22 +119,22 @@ public static class TestGroups
 }
 
 /// <summary>
-/// Исключение, выбрасываемое при невозможности выполнения теста из-за невыполненных предусловий.
-/// Переводит тест в статус <see cref="TestRunState.Skipped"/> вместо ложного прохождения.
+/// Exception thrown when a test cannot be executed due to unfulfilled preconditions.
+/// Transitions the test to <see cref="TestRunState.Skipped"/> status instead of a false pass.
 /// </summary>
 public sealed class TestSkippedException(string reason) : Exception(reason)
 {
-    /// <summary>Причина пропуска теста для отображения в UI.</summary>
+    /// <summary>Reason for skipping the test to be displayed in the UI.</summary>
     public string Reason => Message;
 }
 
 /// <summary>
-/// Централизованный легковесный API утверждений (Assertions).
-/// Захватывает проверяемое выражение через <see cref="CallerArgumentExpressionAttribute"/>.
+/// Centralized lightweight assertions API.
+/// Captures evaluated expressions via <see cref="CallerArgumentExpressionAttribute"/>.
 /// </summary>
 public static class TestAssert
 {
-    /// <summary>Проверяет истинность условия.</summary>
+    /// <summary>Asserts that a condition is true.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void True(
         [DoesNotReturnIf(false)] bool condition,
@@ -145,7 +145,7 @@ public static class TestAssert
             ThrowFailure(message ?? $"Expected condition to be true: {expr}");
     }
 
-    /// <summary>Проверяет ложность условия.</summary>
+    /// <summary>Asserts that a condition is false.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void False(
         [DoesNotReturnIf(true)] bool condition,
@@ -156,7 +156,7 @@ public static class TestAssert
             ThrowFailure(message ?? $"Expected condition to be false: {expr}");
     }
 
-    /// <summary>Проверяет равенство двух значений.</summary>
+    /// <summary>Asserts that two values are equal.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Equal<T>(
         T expected,
@@ -168,7 +168,7 @@ public static class TestAssert
             ThrowFailure(message ?? $"Equal assertion failed for '{expr}': expected '{expected}', got '{actual}'");
     }
 
-    /// <summary>Проверяет, что ссылка равна null.</summary>
+    /// <summary>Asserts that a reference is null.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Null<T>(
         T? value,
@@ -179,7 +179,7 @@ public static class TestAssert
             ThrowFailure(message ?? $"Expected '{expr}' to be null, but got '{value}'");
     }
 
-    /// <summary>Проверяет, что ссылка не равна null.</summary>
+    /// <summary>Asserts that a reference is not null.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T NotNull<T>(
         [NotNull] T? value,
@@ -191,7 +191,7 @@ public static class TestAssert
         return value;
     }
 
-    /// <summary>Проверяет, что строка не пуста и не равна null.</summary>
+    /// <summary>Asserts that a string is neither null nor empty.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string NotNullOrEmpty(
         [NotNull] string? value,
@@ -203,18 +203,18 @@ public static class TestAssert
         return value;
     }
 
-    /// <summary>Прерывает выполнение теста и переводит его в состояние Skipped.</summary>
+    /// <summary>Aborts test execution and transitions it to the Skipped state.</summary>
     [DoesNotReturn]
     public static void Skip(string reason) =>
         throw new TestSkippedException(reason);
 
-    /// <summary>Прерывает выполнение теста с сообщением об ошибке.</summary>
+    /// <summary>Fails test execution with an error message.</summary>
     [DoesNotReturn]
     public static void Fail(string message) =>
         throw new InvalidOperationException($"[TestAssert.Fail] {message}");
 
     /// <summary>
-    /// Проверяет отсутствие управляемых аллокаций в горячем цикле.
+    /// Verifies the absence of managed allocations in the hot loop.
     /// </summary>
     public static void ZeroAlloc(Action action, int warmup = 5, int iterations = 1000, string? context = null)
     {

@@ -1,8 +1,8 @@
 namespace LMP.Core.Youtube.Bridge.PoToken;
 
 /// <summary>
-/// Высокоуровневый провайдер content-bound PoToken.
-/// Координирует генерацию токенов через <see cref="BotGuardService"/>.
+/// High-level provider for content-bound PoToken.
+/// Coordinates token generation via <see cref="BotGuardService"/>.
 /// </summary>
 public sealed class PoTokenProvider : IDisposable
 {
@@ -12,7 +12,7 @@ public sealed class PoTokenProvider : IDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Указывает, готов ли внутренний сервис BotGuard к мгновенному fast-mint без полного цикла инициализации.
+    /// Indicates whether the internal BotGuard service is ready for instant fast-minting without a full initialization cycle.
     /// </summary>
     public bool HasActiveContext
     {
@@ -25,7 +25,7 @@ public sealed class PoTokenProvider : IDisposable
         }
     }
 
-    /// <param name="httpProvider">Фабрика HTTP-клиента для WAA/gstatic запросов. Не требует YouTube cookies.</param>
+    /// <param name="httpProvider">HTTP client factory for WAA/gstatic requests. Does not require YouTube cookies.</param>
     public PoTokenProvider(Func<HttpClient> httpProvider)
     {
         _httpProvider = httpProvider ?? throw new ArgumentNullException(nameof(httpProvider));
@@ -33,11 +33,11 @@ public sealed class PoTokenProvider : IDisposable
     }
 
     /// <summary>
-    /// Прогревает контекст BotGuard и получает IntegrityToken (TTL 12 часов) в фоновом режиме,
-    /// чтобы первый трек в сессии сразу использовал быстрый mint (~2 мс) вместо холодного пайплайна (~900 мс).
+    /// Warms up the BotGuard context and acquires an IntegrityToken (TTL 12 hours) in the background,
+    /// ensuring the first track in the session uses fast minting (~2 ms) instead of a cold pipeline (~900 ms).
     /// </summary>
-    /// <param name="visitorData">Актуальный VisitorData сессии для первоначальной инициализации.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="visitorData">Current session VisitorData for initial setup.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task WarmupAsync(string? visitorData, CancellationToken ct = default)
     {
         BotGuardService service;
@@ -55,12 +55,12 @@ public sealed class PoTokenProvider : IDisposable
     }
 
     /// <summary>
-    /// Content-bound PoToken для параметра <c>&amp;pot=</c> videoplayback URL.
-    /// Переиспользует кэшированный BotGuard-контекст — только шаг mint (~2ms).
-    /// Полный pipeline (~1s) запускается лишь при истечении IntegrityToken TTL.
+    /// Content-bound PoToken for the <c>&amp;pot=</c> videoplayback URL parameter.
+    /// Reuses the cached BotGuard context — minting step only (~2ms).
+    /// The full pipeline (~1s) is only executed when the IntegrityToken TTL expires.
     /// </summary>
-    /// <param name="videoId">ID видео YouTube — используется как content binding identifier.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="videoId">YouTube video ID — used as the content binding identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<string?> GetContentTokenAsync(string videoId, CancellationToken ct = default)
     {
         BotGuardService service;
@@ -84,8 +84,8 @@ public sealed class PoTokenProvider : IDisposable
     }
 
     /// <summary>
-    /// Инвалидирует in-memory кэш и сбрасывает флаг инициализации.
-    /// Вызывать при смене аккаунта / VisitorData.
+    /// Invalidates the in-memory cache and resets the initialization flag.
+    /// Call this when switching accounts / VisitorData.
     /// </summary>
     public void Invalidate()
     {

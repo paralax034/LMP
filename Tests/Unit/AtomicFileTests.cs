@@ -3,8 +3,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты механизмов атомарной записи и восстановления файлов AtomicFile.
-/// Проверяют текстовый и бинарный roundtrip, ротацию версий N-1 (.bak) и auto-heal при сбоях.
+/// Unit tests for AtomicFile atomic write and recovery mechanisms.
+/// Verifies text and binary roundtrip, N-1 version rotation (.bak), and auto-heal on failure.
 /// </summary>
 public static class AtomicFileTests
 {
@@ -95,7 +95,7 @@ public static class AtomicFileTests
             AtomicFile.WriteText(path, validPayload, createBackup: false);
             AtomicFile.WriteText(path, validPayload, createBackup: true);
 
-            // Имитируем сбой: обнуляем основной файл (0 байт)
+            // Simulate failure: truncate main file to 0 bytes
             File.WriteAllText(path, string.Empty);
 
             var result = AtomicFile.ReadTextWithFallback(path, out bool recovered);
@@ -128,7 +128,7 @@ public static class AtomicFileTests
             AtomicFile.WriteBytes(path, payloadV1, createBackup: false);
             AtomicFile.WriteBytes(path, payloadV2, createBackup: true);
 
-            // Имитируем повреждение целевого файла до 0 байт
+            // Simulate target file corruption down to 0 bytes
             File.WriteAllBytes(path, []);
 
             var recoveredBytes = AtomicFile.ReadBytesWithFallback(path, out bool recovered);
@@ -137,7 +137,7 @@ public static class AtomicFileTests
             TestAssert.NotNull(recoveredBytes);
             TestAssert.True(recoveredBytes.AsSpan().SequenceEqual(payloadV1), "Recovered payload mismatch");
 
-            // Проверяем факт починки основного файла
+            // Verify that the main file was successfully repaired
             var healedBytes = File.ReadAllBytes(path);
             TestAssert.True(healedBytes.AsSpan().SequenceEqual(payloadV1), "Primary file was not auto-healed");
         }

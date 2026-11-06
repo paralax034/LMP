@@ -1,61 +1,61 @@
 namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
-/// Интерфейс метаданных сырого медиапотока YouTube.
+/// Metadata interface for a raw YouTube media stream.
 /// </summary>
 internal interface IStreamData
 {
-    /// <summary>Идентификатор формата (itag).</summary>
+    /// <summary>Format identifier (itag).</summary>
     int? Itag { get; }
 
-    /// <summary>Прямой или дешифрованный URL потока.</summary>
+    /// <summary>Direct or deciphered stream URL.</summary>
     string? Url { get; }
 
-    /// <summary>Шифрованная подпись (при наличии cipher).</summary>
+    /// <summary>Encrypted signature (when cipher is present).</summary>
     string? Signature { get; }
 
-    /// <summary>Имя URL-параметра подписи (обычно sig или s).</summary>
+    /// <summary>Signature URL parameter name (usually sig or s).</summary>
     string? SignatureParameter { get; }
 
-    /// <summary>Размер контента в байтах.</summary>
+    /// <summary>Content size in bytes.</summary>
     long? ContentLength { get; }
 
-    /// <summary>Битрейт потока в bps.</summary>
+    /// <summary>Stream bitrate in bps.</summary>
     long? Bitrate { get; }
 
-    /// <summary>MIME-тип медиапотока.</summary>
+    /// <summary>Media stream MIME type.</summary>
     string? MimeType { get; }
 
-    /// <summary>Формат контейнера (webm, mp4, etc).</summary>
+    /// <summary>Container format (webm, mp4, etc).</summary>
     string? Container { get; }
 
-    /// <summary>Строка аудиокодека (opus, mp4a.40.2, etc).</summary>
+    /// <summary>Audio codec string (opus, mp4a.40.2, etc).</summary>
     string? AudioCodec { get; }
 
-    /// <summary>Количество аудиоканалов (1 = mono, 2 = stereo, 6 = 5.1 surround).</summary>
+    /// <summary>Number of audio channels (1 = mono, 2 = stereo, 6 = 5.1 surround).</summary>
     int AudioChannels { get; }
 
-    /// <summary>Код языка аудиодорожки.</summary>
+    /// <summary>Audio track language code.</summary>
     string? AudioLanguageCode { get; }
 
-    /// <summary>Отображаемое имя языка аудиодорожки.</summary>
+    /// <summary>Audio track language display name.</summary>
     string? AudioLanguageName { get; }
 
-    /// <summary>Является ли аудиодорожка языком по умолчанию.</summary>
+    /// <summary>Indicates whether the audio track is the default language.</summary>
     bool? IsAudioLanguageDefault { get; }
 
-    /// <summary>Строка видеокодека.</summary>
+    /// <summary>Video codec string.</summary>
     string? VideoCodec { get; }
 
-    /// <summary>Метка качества видео (например, 1080p).</summary>
+    /// <summary>Video quality label (e.g., 1080p).</summary>
     string? VideoQualityLabel { get; }
 
-    /// <summary>Ширина кадра в пикселях.</summary>
+    /// <summary>Frame width in pixels.</summary>
     int? VideoWidth { get; }
 
-    /// <summary>Высота кадра в пикселях.</summary>
+    /// <summary>Frame height in pixels.</summary>
     int? VideoHeight { get; }
 
-    /// <summary>Частота кадров видеопотока.</summary>
+    /// <summary>Video stream frame rate.</summary>
     int? VideoFramerate { get; }
 }

@@ -1,12 +1,12 @@
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Фабрика профилей стриминга для разных условий сети.
+/// Streaming profile factory for various network conditions.
 /// </summary>
 public static class StreamingProfiles
 {
     /// <summary>
-    /// Получает конфигурацию стриминга для указанного профиля.
+    /// Gets the streaming configuration for the specified profile.
     /// </summary>
     public static StreamingConfig GetConfig(InternetProfile profile) => profile switch
     {
@@ -18,12 +18,11 @@ public static class StreamingProfiles
     };
 
     /// <summary>
-    /// Экономия трафика и высокая отзывчивость на слабых и нестабильных каналах.
+    /// Bandwidth saving and high responsiveness on weak and unstable connections.
     /// <para>
-    /// Начальный fetch минимален (24 KB) — достаточно для WebM/MP4 заголовков.
-    /// Startup prefetch (48 KB) перекрывает warmup-ожидание на узком канале.
-    /// Абсолютные пороги bandwidth снижены, чтобы не форсировать одиночный поток
-    /// раньше времени.
+    /// Initial fetch is minimal (24 KB) — sufficient for WebM/MP4 headers.
+    /// Startup prefetch (48 KB) covers warmup latency on a narrow channel.
+    /// Absolute bandwidth thresholds are lowered to avoid prematurely forcing a single stream.
     /// </para>
     /// </summary>
     public static StreamingConfig Low { get; } = new()
@@ -65,11 +64,11 @@ public static class StreamingProfiles
     };
 
     /// <summary>
-    /// Сбалансированный профиль для типичного домашнего соединения (5–30 Мбит/с).
+    /// Balanced profile for a typical home connection (5–30 Mbps).
     /// <para>
-    /// Начальный fetch (48 KB) — 3 alignment-блока, достаточно для всех контейнеров.
-    /// Startup prefetch (128 KB) перекрывает ~5–7 секунд аудио, что покрывает
-    /// warmup-порог без ожидания preload loop.
+    /// Initial fetch (48 KB) — 3 alignment blocks, sufficient for all containers.
+    /// Startup prefetch (128 KB) covers ~5–7 seconds of audio, which satisfies
+    /// the warmup threshold without waiting for the preload loop.
     /// </para>
     /// </summary>
     public static StreamingConfig Medium { get; } = new()
@@ -106,7 +105,7 @@ public static class StreamingProfiles
     };
 
     /// <summary>
-    /// Профиль для быстрых и стабильных сетей (50+ Мбит/с).
+    /// Profile for fast and stable networks (50+ Mbps).
     /// </summary>
     public static StreamingConfig High { get; } = new()
     {
@@ -142,7 +141,7 @@ public static class StreamingProfiles
     };
 
     /// <summary>
-    /// Профиль для максимально быстрого канала (100+ Мбит/с).
+    /// Profile for high-speed connections (100+ Mbps).
     /// </summary>
     public static StreamingConfig Ultra { get; } = new()
     {

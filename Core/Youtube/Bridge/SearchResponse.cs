@@ -70,8 +70,8 @@ internal partial class SearchResponse
     }
 
     /// <summary>
-    /// Объединённый обход + классификация в одном проходе.
-    /// Использует ArrayPool для стека вместо Stack{T} (меньше аллокаций).
+    /// Combined traversal + classification in a single pass.
+    /// Uses ArrayPool for the stack instead of Stack{T} (fewer allocations).
     /// </summary>
     private static void CollectAndClassify(
         JsonElement root,
@@ -161,7 +161,7 @@ internal partial class SearchResponse
     }
 
     /// <summary>
-    /// Классифицирует элемент и сразу добавляет в нужный список — без промежуточного ClassificationResult.
+    /// Classifies an element and immediately adds it to the target list — without an intermediate ClassificationResult.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ClassifyAndExtract(
@@ -250,7 +250,7 @@ internal partial class SearchResponse
     }
 
     /// <summary>
-    /// Быстрый поиск токена с ArrayPool стеком и ранним выходом.
+    /// Fast token lookup with an ArrayPool stack and early exit.
     /// </summary>
     private static string? ExtractContinuationTokenFast(JsonElement root)
     {
@@ -327,7 +327,7 @@ internal partial class SearchResponse
     }
 
     /// <summary>
-    /// Парсит из потока — избегает промежуточной строки.
+    /// Parses from a stream — avoids an intermediate string.
     /// </summary>
     public static async ValueTask<SearchResponse> ParseAsync(Stream stream, CancellationToken ct = default)
     {
@@ -573,7 +573,7 @@ internal partial class SearchResponse
         }
 
         /// <summary>
-        /// Возвращает JsonElement массива runs вместо IEnumerable — без аллокации.
+        /// Returns the runs array JsonElement instead of IEnumerable — allocation-free.
         /// </summary>
         private static JsonElement? GetRunsElement(JsonElement item, int columnIndex)
         {
@@ -589,7 +589,7 @@ internal partial class SearchResponse
         }
 
         /// <summary>
-        /// Собирает текст всех runs через централизованный стек-хелпер без лишних аллокаций.
+        /// Aggregates text from all runs via a centralized stack helper without extra allocations.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static string? GetRunText(JsonElement item, int columnIndex)

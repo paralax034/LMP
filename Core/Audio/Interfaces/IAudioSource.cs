@@ -1,75 +1,75 @@
 namespace LMP.Core.Audio.Interfaces;
 
 /// <summary>
-/// Источник аудио данных (сетевой стрим, файл и т.д.).
-/// Предоставляет сжатые аудио-фреймы для декодирования.
+/// Audio data source (network stream, file, etc.).
+/// Provides compressed audio frames for decoding.
 /// </summary>
 public interface IAudioSource : IAsyncDisposable, IDisposable
 {
     /// <summary>
-    /// Инициализирует источник и подготавливает к стримингу.
+    /// Initializes the source and prepares it for streaming.
     /// </summary>
     ValueTask<bool> InitializeAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Читает следующий сжатый аудио-фрейм.
+    /// Reads the next compressed audio frame.
     /// </summary>
     ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Перемещается к указанной позиции.
+    /// Seeks to the specified position.
     /// </summary>
     ValueTask<bool> SeekAsync(long positionMs, CancellationToken ct = default);
 
-    /// <summary>Общая длительность в миллисекундах (-1 если неизвестно)</summary>
+    /// <summary>Total duration in milliseconds (-1 if unknown)</summary>
     long DurationMs { get; }
 
-    /// <summary>Текущая позиция в миллисекундах</summary>
+    /// <summary>Current position in milliseconds</summary>
     long PositionMs { get; }
 
-    /// <summary>Поддерживает ли источник seeking</summary>
+    /// <summary>Indicates whether the source supports seeking</summary>
     bool CanSeek { get; }
 
-    /// <summary>Тип кодека аудио данных</summary>
+    /// <summary>Audio data codec type</summary>
     AudioCodec Codec { get; }
 
-    /// <summary>Прогресс буферизации (0-100)</summary>
+    /// <summary>Buffering progress (0-100)</summary>
     double BufferProgress { get; }
 
-    /// <summary>Полностью загружен</summary>
+    /// <summary>Fully loaded</summary>
     bool IsFullyBuffered { get; }
 
     /// <summary>
-    /// Decoder-specific config (ASC для AAC, CodecPrivate для Opus).
-    /// Null если не требуется или недоступен.
+    /// Decoder-specific config (ASC for AAC, CodecPrivate for Opus).
+    /// Null if not required or unavailable.
     /// </summary>
     byte[]? DecoderConfig { get; }
 
-    /// <summary>Sample rate из контейнера (0 если неизвестен)</summary>
+    /// <summary>Sample rate from container (0 if unknown)</summary>
     int SampleRate { get; }
 
-    /// <summary>Количество каналов из контейнера (0 если неизвестно)</summary>
+    /// <summary>Channel count from container (0 if unknown)</summary>
     int Channels { get; }
 
-    /// <summary>Буферизованные диапазоны для визуализации</summary>
+    /// <summary>Buffered ranges for visualization</summary>
     IReadOnlyList<(double Start, double End)> GetBufferedRanges();
 
-    /// <summary>Освобождает RAM буферы</summary>
+    /// <summary>Frees RAM buffers</summary>
     void ReleaseRamBuffers();
 
-    /// <summary>Отмена текущих операций</summary>
+    /// <summary>Cancellation of current operations</summary>
     void CancelPendingOperations();
 
     /// <summary>
-    /// Уведомляет источник об изменении состояния воспроизведения (пауза или активное проигрывание).
-    /// Используется сетевыми источниками для приостановки фонового скачивания на паузе.
+    /// Notifies the source of playback state changes (pause or active playback).
+    /// Used by network sources to pause background downloads when paused.
     /// </summary>
-    /// <param name="active">True — трек проигрывается, фоновая загрузка разрешена; False — на паузе.</param>
+    /// <param name="active">True — track is playing, background download allowed; False — paused.</param>
     void SetPlaybackActive(bool active);
 }
 
 /// <summary>
-/// Аудио-фрейм с метаданными
+/// Audio frame with metadata
 /// </summary>
 public readonly struct AudioFrame
 {
@@ -80,7 +80,7 @@ public readonly struct AudioFrame
 }
 
 /// <summary>
-/// Поддерживаемые аудио кодеки
+/// Supported audio codecs
 /// </summary>
 public enum AudioCodec
 {

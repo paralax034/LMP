@@ -20,7 +20,7 @@ public sealed partial class AddToPlaylistDialogViewModel : ViewModelBase
     private readonly DispatcherTimer _filterDebounceTimer;
 
     /// <summary>
-    /// Callback для закрытия диалога с результатом.
+    /// Callback to close the dialog with a result.
     /// </summary>
     public Action<List<string>>? OnResult { get; set; }
 

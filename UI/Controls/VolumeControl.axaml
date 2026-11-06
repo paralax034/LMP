@@ -7,7 +7,7 @@
     ClipToBounds="False">
 
     <Panel Name="VolumePanel">
-        <!-- Кнопка вызова/сворачивания (Управление свойствами перенесено в Code-Behind) -->
+        <!-- Toggle/Collapse button (Property management moved to Code-Behind) -->
         <Button x:Name="VolumeButton" Width="38" Height="38"
             Classes="playback-btn"
             Transitions="{x:Null}"
@@ -37,7 +37,7 @@
             </Grid>
         </Button>
 
-        <!-- Вертикальный парящий Popup-слайдер -->
+        <!-- Vertical floating Popup slider -->
         <Popup
             x:Name="VolumePopup"
             IsLightDismissEnabled="False"

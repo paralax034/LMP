@@ -13,17 +13,17 @@ public enum ImageQuality
 }
 
 /// <summary>
-/// Ультра-оптимизированный сервис кэширования изображений.
-/// Direct-to-Disk + атомарные операции + Lock-Free LRU.
+/// Ultra-optimized image caching service.
+/// Direct-to-Disk + atomic operations + Lock-Free LRU.
 ///
-/// <para><b>Архитектура памяти:</b></para>
+/// <para><b>Memory Architecture:</b></para>
 /// <list type="bullet">
-///   <item>Memory cache: Dictionary{ulong} (под lock) + LinkedList для O(1) LRU.
-///     Ключ — ulong FNV-1a hash: zero-alloc lookup, 8 байт vs 40+ байт string.</item>
-///   <item>ConcurrentDictionary убран: все обращения к нему шли под _lruLock
-///     (двойная синхронизация = чистые потери).</item>
-///   <item>Disk cache: прямая запись через FileStream без MemoryStream.</item>
-///   <item>Deduplication: Lazy&lt;Task&gt; с фиксом AddRef bug.</item>
+///   <item>Memory cache: Dictionary{ulong} (under lock) + LinkedList for O(1) LRU.
+///     Key is ulong FNV-1a hash: zero-alloc lookup, 8 bytes vs 40+ bytes string.</item>
+///   <item>ConcurrentDictionary removed: all access to it was under _lruLock
+///     (double synchronization = pure overhead).</item>
+///   <item>Disk cache: direct write via FileStream without MemoryStream.</item>
+///   <item>Deduplication: Lazy&lt;Task&gt; with a fix for the AddRef bug.</item>
 /// </list>
 /// </summary>
 public sealed class ImageCacheService : IDisposable
@@ -32,16 +32,16 @@ public sealed class ImageCacheService : IDisposable
     private readonly LibraryService _library;
     private readonly SemaphoreSlim _downloadSemaphore = new(6);
 
-    // App-level CTS: управляет жизненным циклом фоновых скачиваний.
-    // Контрол-уровневые CT используются только как decode-gate,
-    // но НЕ прерывают запись файла на диск.
+    // App-level CTS: manages background download lifecycle.
+    // Control-level CTs are used as decode-gate only,
+    // but do NOT interrupt writing the file to disk.
     private readonly CancellationTokenSource _appCts = new();
 
     /// <summary>
-    /// Memory cache. Ключ — FNV-1a hash (ulong), не строка.
-    /// Zero-alloc lookup на hot path: hash вычисляется арифметически,
-    /// Dictionary{ulong} использует GetHashCode() = (int)key, без boxing.
-    /// Все операции — под _lruLock.
+    /// Memory cache. Key is FNV-1a hash (ulong), not string.
+    /// Zero-alloc lookup on hot path: hash is computed arithmetically,
+    /// Dictionary{ulong} uses GetHashCode() = (int)key, without boxing.
+    /// All operations are under _lruLock.
     /// </summary>
     private readonly Dictionary<ulong, RefCountedBitmap> _memoryCache = [];
     private readonly LinkedList<ulong> _lruOrder = new();
@@ -49,14 +49,14 @@ public sealed class ImageCacheService : IDisposable
     private readonly Lock _lruLock = new();
 
     /// <summary>
-    /// Дедупликация параллельных загрузок одного URL.
-    /// Lazy гарантирует, что фабрика вызовется ровно один раз при конкурентном доступе.
-    /// Ключ — ulong hash.
+    /// Deduplication of parallel downloads for the same URL.
+    /// Lazy guarantees the factory is invoked exactly once during concurrent access.
+    /// Key is ulong hash.
     /// </summary>
     private readonly ConcurrentDictionary<ulong, Lazy<Task<Bitmap?>>> _pendingLoads = [];
 
     /// <summary>
-    /// Дедупликация параллельных сетевых скачиваний на диск по хешу файла (независимо от decodeWidth).
+    /// Deduplication of parallel network downloads to disk by file hash (independent of decodeWidth).
     /// </summary>
     private readonly ConcurrentDictionary<ulong, Task> _pendingDiskDownloads = [];
 
@@ -68,18 +68,18 @@ public sealed class ImageCacheService : IDisposable
     private const int CleanupInterval = 50;
 
     /// <summary>
-    /// Минимальный размер кэша покрывает два экрана треков (~20 видимых × 2) + буфер.
-    /// При Low quality (120px): 80 × 57KB ≈ 4.5MB — разумный дефолт.
-    /// Настраивается через Settings.Storage.MaxBitmapCacheItems.
+    /// Minimum cache size covers two track screens (~20 visible × 2) + buffer.
+    /// At Low quality (120px): 80 × 57KB ≈ 4.5MB — a reasonable default.
+    /// Configured via Settings.Storage.MaxBitmapCacheItems.
     /// </summary>
     private int MaxMemoryItems => _library.Settings.Storage.MaxBitmapCacheItems > 0
         ? _library.Settings.Storage.MaxBitmapCacheItems
         : 80;
 
-    // Реальный лимит в байтах:
-    // Low (120px):  120×120×4 = 57.6KB × 25 items ≈ 1.4MB — правильно
-    // High (400px): 400×400×4 = 640KB × 25 items ≈ 16MB — нужно учитывать
-    private long MaxMemoryBytes => MaxMemoryItems * 400L * 400 * 4; // запас для High качества
+    // Actual byte limit:
+    // Low (120px):  120×120×4 = 57.6KB × 25 items ≈ 1.4MB — correct
+    // High (400px): 400×400×4 = 640KB × 25 items ≈ 16MB — must account for
+    private long MaxMemoryBytes => MaxMemoryItems * 400L * 400 * 4; // margin for High quality
 
     public ImageCacheService(NetworkManager networkManager, LibraryService library)
     {
@@ -93,7 +93,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Синхронно предоставляет растровое изображение из оперативной памяти без задержек и аллокаций Task.
+    /// Synchronously provides a bitmap from RAM without delays or Task allocations.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetFromMemory(string url, int decodeWidth, out Bitmap? bitmap)
@@ -129,18 +129,18 @@ public sealed class ImageCacheService : IDisposable
         => GetImageAsync(url, (int)quality, ct);
 
     /// <summary>
-    /// Нормализует <paramref name="decodeWidth"/> один раз на входе.
-    /// Нормализованное значение используется и как ключ кэша, и как фактическая ширина decode —
-    /// гарантирует что все callers с разными raw-значениями в одном bucket получают
-    /// идентичный bitmap нужного качества.
+    /// Normalizes <paramref name="decodeWidth"/> once at entry.
+    /// The normalized value is used as both the cache key and the actual decode width —
+    /// guarantees that all callers with different raw values in the same bucket get
+    /// an identical bitmap of the required quality.
     /// </summary>
     public async Task<Bitmap?> GetImageAsync(string url, int decodeWidth, CancellationToken ct = default)
     {
         if (_isDisposed || string.IsNullOrEmpty(url)) return null;
 
-        // Нормализация ОДНИМ местом: ключ кэша и фактический decode используют одно значение.
-        // Без этого: width=44 → ключ=120, decode=44 → в кэше 44px bitmap под ключом 120.
-        // Следующий запрос width=100 → ключ=120 → хит → получает 44px вместо 100px.
+        // Normalization in ONE place: cache key and actual decode use the same value.
+        // Without this: width=44 → key=120, decode=44 → cache contains 44px bitmap under key 120.
+        // Next request width=100 → key=120 → hit → gets 44px instead of 100px.
         int normalizedWidth = decodeWidth switch
         {
             <= 0 => 0,
@@ -162,13 +162,13 @@ public sealed class ImageCacheService : IDisposable
             }
         }
 
-        // 2. Cold path: дедупликация
+        // 2. Cold path: deduplication
         var appToken = _appCts.Token;
         var lazyTask = _pendingLoads.GetOrAdd(
             memKey,
             static (k, state) => new Lazy<Task<Bitmap?>>(() =>
                 state.self.LoadImageInternalAsync(state.url, k, state.normalizedWidth, state.appToken)),
-            (self: this, url, normalizedWidth, appToken));  // ← normalizedWidth, не decodeWidth
+            (self: this, url, normalizedWidth, appToken));  // ← normalizedWidth, not decodeWidth
 
         Bitmap? bitmap;
         try
@@ -190,14 +190,14 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Предзагружает изображения на диск без декодирования в оперативную память.
-    /// Полезно для предварительного кэширования обложек (например, топ-10 результатов поиска).
+    /// Prefetches images to disk without decoding into RAM.
+    /// Useful for pre-caching cover art (e.g., top-10 search results).
     /// </summary>
     public async Task PrefetchAsync(IEnumerable<string> urls, CancellationToken ct = default)
     {
         if (_isDisposed) return;
 
-        // Фильтрация "уже есть на диске" происходит внутри EnsureDiskCachedAsync с double-check.
+        // "Already on disk" filtering occurs inside EnsureDiskCachedAsync with double-check.
         var candidates = urls
             .Where(static u => !string.IsNullOrEmpty(u))
             .Distinct(StringComparer.Ordinal)
@@ -205,11 +205,11 @@ public sealed class ImageCacheService : IDisposable
             .Select(u => EnsureDiskCachedAsync(u, ct));
 
         try { await Task.WhenAll(candidates).ConfigureAwait(false); }
-        catch { /* Ошибки prefetch тихо игнорируются — это фоновая оптимизация */ }
+        catch { /* Prefetch errors are silently ignored — this is a background optimization */ }
     }
 
     /// <summary>
-    /// Скачивает файл на диск, если его там ещё нет. В RAM ничего не задерживается.
+    /// Downloads a file to disk if it is not already present. Nothing is retained in RAM.
     /// </summary>
     private async Task EnsureDiskCachedAsync(string url, CancellationToken ct)
     {
@@ -254,15 +254,15 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Внутренняя загрузка: disk-check → download → decode → memory cache.
-    /// Принимает <paramref name="ct"/> уровня приложения (не контрола):
-    /// скачивание файла не прерывается при рециклинге элемента списка.
+    /// Internal fetch pipeline: disk-check → download → decode → memory cache.
+    /// Accepts an app-level <paramref name="ct"/> (not control-level):
+    /// file download is not interrupted when a list item is recycled.
     /// </summary>
-    /// <param name="url">Веб-адрес изображения.</param>
-    /// <param name="memKey">Хеш-ключ для оперативной памяти.</param>
-    /// <param name="decodeWidth">Целевая ширина декодирования.</param>
-    /// <param name="ct">Токен отмены уровня приложения.</param>
-    /// <returns>Декодированный <see cref="Bitmap"/> или <see langword="null"/> при отмене.</returns>
+    /// <param name="url">Image web address.</param>
+    /// <param name="memKey">Hash key for RAM cache.</param>
+    /// <param name="decodeWidth">Target decode width.</param>
+    /// <param name="ct">App-level cancellation token.</param>
+    /// <returns>Decoded <see cref="Bitmap"/> or <see langword="null"/> on cancellation.</returns>
     private async Task<Bitmap?> LoadImageInternalAsync(string url, ulong memKey, int decodeWidth, CancellationToken ct)
     {
         var diskHash = ComputeDiskKeyHash(url);
@@ -321,11 +321,11 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Скачивание файла на диск через изолированный ImageClient из <see cref="NetworkManager"/>.
+    /// Downloads a file to disk via isolated ImageClient from <see cref="NetworkManager"/>.
     /// </summary>
     private async Task DownloadDirectToDiskAsync(string url, string finalPath, CancellationToken ct)
     {
-        // Уникальный временный файл для предотвращения IOException при параллельных загрузках одного URL
+        // Unique temporary file to prevent IOException during parallel downloads of the same URL
         var tmpPath = $"{finalPath}.{Guid.NewGuid():N}.tmp";
 
         try
@@ -371,14 +371,14 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Добавляет bitmap в memory cache с LRU eviction.
-    /// GC pressure вызовы вынесены ЗА пределы <c>_lruLock</c>:
-    /// p/invoke в CLR runtime не должен блокировать параллельных читателей кэша.
+    /// Adds a bitmap to the memory cache with LRU eviction.
+    /// GC pressure calls are moved OUTSIDE <c>_lruLock</c>:
+    /// p/invoke into CLR runtime must not block concurrent cache readers.
     /// </summary>
     /// <summary>
-    /// Добавляет bitmap в memory cache с LRU eviction.
-    /// Освобождение вытесненных нативных буферов и GC pressure вызовы вынесены ЗА пределы <c>_lruLock</c>:
-    /// p/invoke в CLR runtime и Skia не должен блокировать параллельных читателей кэша.
+    /// Adds a bitmap to the memory cache with LRU eviction.
+    /// Releasing evicted native buffers and GC pressure calls are moved OUTSIDE <c>_lruLock</c>:
+    /// p/invoke into CLR runtime and Skia must not block concurrent cache readers.
     /// </summary>
     private void AddToMemoryCache(ulong key, Bitmap bitmap)
     {
@@ -388,7 +388,7 @@ public sealed class ImageCacheService : IDisposable
         long evictedBytes = 0;
         List<RefCountedBitmap>? evictedEntries = null;
 
-        // LRU eviction под локом
+        // LRU eviction under lock
         lock (_lruLock)
         {
             while ((_memoryCache.Count >= MaxMemoryItems ||
@@ -417,7 +417,7 @@ public sealed class ImageCacheService : IDisposable
             }
         }
 
-        // --- Освобождение нативной памяти и GC pressure вне лока ---
+        // --- Native memory release and GC pressure outside lock ---
         if (evictedEntries != null)
         {
             for (int i = 0; i < evictedEntries.Count; i++)
@@ -432,9 +432,9 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Вызывается с захваченным <c>_lruLock</c>.
-    /// Возвращает размер вытесненного bitmap и сам объект для последующего
-    /// <see cref="RefCountedBitmap.Dispose"/> и <see cref="GC.RemoveMemoryPressure"/> вне лока.
+    /// Called with <c>_lruLock</c> held.
+    /// Returns the size of the evicted bitmap and the object itself for subsequent
+    /// <see cref="RefCountedBitmap.Dispose"/> and <see cref="GC.RemoveMemoryPressure"/> outside lock.
     /// </summary>
     private long EvictLastUnsafe(out RefCountedBitmap? removed)
     {
@@ -455,8 +455,8 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Вызывается с уже захваченным _lruLock.
-    /// Перемещает ключ в начало LRU. O(1).
+    /// Called with _lruLock already held.
+    /// Moves key to the head of LRU. O(1).
     /// </summary>
     private void TouchLruUnsafe(ulong key)
     {
@@ -468,9 +468,9 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Принудительно приводит RAM-кэш изображений к заданным лимитам <see cref="MaxMemoryItems"/> и <see cref="MaxMemoryBytes"/>.
+    /// Forcefully brings RAM image cache within specified <see cref="MaxMemoryItems"/> and <see cref="MaxMemoryBytes"/> limits.
     /// </summary>
-    /// <param name="aggressive">Если <c>true</c>, дополнительно сокращает RAM-кэш вдвое при высоком давлении памяти.</param>
+    /// <param name="aggressive">If <c>true</c>, additionally halves RAM cache under high memory pressure.</param>
     private void EnforceMemoryLimits(bool aggressive = false)
     {
         List<RefCountedBitmap>? evictedEntries = null;
@@ -518,7 +518,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Очистка дискового кэша по времени модификации файла до 70% установленной квоты.
+    /// Cleans up disk cache by file modification time down to 70% of configured quota.
     /// </summary>
     private async Task CleanupDiskCacheAsync(long limitBytes)
     {
@@ -560,7 +560,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Полностью очищает memory cache и детерминированно освобождает все нативные буферы Skia.
+    /// Completely clears memory cache and deterministically disposes all native Skia buffers.
     /// </summary>
     public void ClearMemoryCache()
     {
@@ -582,7 +582,7 @@ public sealed class ImageCacheService : IDisposable
             Volatile.Write(ref _currentMemoryCacheBytes, 0);
         }
 
-        // Детерминированное освобождение нативной памяти Skia вне лока
+        // Deterministic release of Skia native memory outside lock
         if (toDispose != null)
         {
             for (int i = 0; i < toDispose.Length; i++)
@@ -626,7 +626,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Возвращает полный путь к файлу в дисковом кэше для указанного URL (единый FNV-1a 64-bit ключ).
+    /// Returns the full path to the disk cache file for the specified URL (using a unified FNV-1a 64-bit key).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string GetDiskCachePath(ReadOnlySpan<char> url)
@@ -636,7 +636,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Гарантирует скачивание файла обложки на диск без декодирования растра в RAM.
+    /// Ensures the cover image file is downloaded to disk without decoding the raster into RAM.
     /// </summary>
     public Task EnsureDiskFileAsync(string url, CancellationToken ct = default)
         => EnsureDiskCachedAsync(url, ct);
@@ -647,8 +647,8 @@ public sealed class ImageCacheService : IDisposable
     private const ulong FnvPrime = 1099511628211UL;
 
     /// <summary>
-    /// FNV-1a 64-bit хеш URL. Используется как ключ disk cache.
-    /// Zero-alloc: возвращает ulong, строка создаётся только для имени файла на диске (cold path).
+    /// FNV-1a 64-bit hash of the URL. Used as a disk cache key.
+    /// Zero-alloc: returns ulong, string is created only for the file name on disk (cold path).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong ComputeDiskKeyHash(ReadOnlySpan<char> url)
@@ -665,8 +665,8 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// FNV-1a 64-bit хеш URL + ширина. Нормализация ширины выполнена вызывающим кодом
-    /// единожды: <see cref="GetImageAsync"/> нормализует до вызова этого метода.
+    /// FNV-1a 64-bit hash of the URL + width. Width normalization is performed by the calling code
+    /// once: <see cref="GetImageAsync"/> normalizes before calling this method.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong ComputeMemoryKeyHash(ReadOnlySpan<char> url, int normalizedWidth)
@@ -701,7 +701,7 @@ public sealed class ImageCacheService : IDisposable
     }
 
     /// <summary>
-    /// Немедленно применяет лимит элементов в RAM и запускает фоновую проверку дисковой квоты.
+    /// Immediately applies the RAM element limit and triggers a background disk quota check.
     /// </summary>
     public void EnforceLimits()
     {

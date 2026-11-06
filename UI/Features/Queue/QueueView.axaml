@@ -9,7 +9,7 @@
         <!-- Empty State -->
         <StackPanel IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center"
             VerticalAlignment="Center" Spacing="16">
-            <!-- Empty State: иконка пустой очереди -->
+            <!-- Empty State: empty queue icon -->
             <PathIcon Data="{StaticResource Icon.PlaylistMusic}"
                 Width="64" Height="64"
                 Foreground="{DynamicResource TextMutedBrush}"

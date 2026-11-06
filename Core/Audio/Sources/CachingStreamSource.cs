@@ -5,95 +5,95 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio.Sources;
 
 /// <summary>
-/// Источник аудио с range-based кэшированием и HTTP Range-request загрузкой.
+/// Audio source featuring range-based caching and HTTP Range request loading.
 ///
-/// <para><b>Архитектура:</b></para>
+/// <para><b>Architecture:</b></para>
 /// <list type="bullet">
-///   <item>Данные загружаются произвольными диапазонами с адаптивным размером (MAPO)</item>
-///   <item>Диапазоны кэшируются в RAM (<see cref="SlidingRamCache"/>) и на диск (<see cref="AudioCacheManager"/>)</item>
-///   <item>Фоновый preload loop удерживает буфер вокруг текущей позиции</item>
-///   <item>Seek реализован через epoch-based cancellation</item>
-///   <item>Suspend/Resume приостанавливает фоновую загрузку при сворачивании окна</item>
+///   <item>Data is loaded in arbitrary ranges with adaptive size (MAPO)</item>
+///   <item>Ranges are cached in RAM (<see cref="SlidingRamCache"/>) and on disk (<see cref="AudioCacheManager"/>)</item>
+///   <item>Background preload loop maintains a buffer around the current position</item>
+///   <item>Seek is implemented via epoch-based cancellation</item>
+///   <item>Suspend/Resume pauses background downloading when the window is minimized</item>
 /// </list>
 ///
 /// <para><b>Partial class structure:</b></para>
 /// <list type="bullet">
-///   <item><c>CachingStreamSource.cs</c> — ядро: поля, конструктор, свойства, read frames, network assessment</item>
-///   <item><c>CachingStreamSource.Init.cs</c> — инициализация, создание парсера, startup prefetch</item>
+///   <item><c>CachingStreamSource.cs</c> — core: fields, constructor, properties, read frames, network assessment</item>
+///   <item><c>CachingStreamSource.Init.cs</c> — initialization, parser creation, startup prefetch</item>
 ///   <item><c>CachingStreamSource.Lifecycle.cs</c> — dispose, epoch cancellation, drain pending writes</item>
-///   <item><c>CachingStreamSource.Download.cs</c> — загрузка диапазонов, ReadAtAsync, EnsureRangeAsync, adaptive metrics</item>
+///   <item><c>CachingStreamSource.Download.cs</c> — range downloading, ReadAtAsync, EnsureRangeAsync, adaptive metrics</item>
 ///   <item><c>CachingStreamSource.Planning.cs</c> — MAPO planner, alignment, coverage queries</item>
 ///   <item><c>CachingStreamSource.Refresh.cs</c> — URL refresh, 403 diagnostics, HTTP request building</item>
 ///   <item><c>CachingStreamSource.Cache.cs</c> — SlidingRamCache, RamRangeBlock</item>
-///   <item><c>CachingStreamSource.Coordination.cs</c> — active download dedup и coordination</item>
-///   <item><c>CachingStreamSource.Seeking.cs</c> — seek с epoch-based cancellation</item>
-///   <item><c>CachingStreamSource.Preload.cs</c> — фоновая загрузка и буферизация</item>
-///   <item><c>CachingStreamSource.ReadStream.cs</c> — Stream-обёртка для парсеров</item>
+///   <item><c>CachingStreamSource.Coordination.cs</c> — active download dedup and coordination</item>
+///   <item><c>CachingStreamSource.Seeking.cs</c> — seek with epoch-based cancellation</item>
+///   <item><c>CachingStreamSource.Preload.cs</c> — background downloading and buffering</item>
+///   <item><c>CachingStreamSource.ReadStream.cs</c> — Stream wrapper for parsers</item>
 /// </list>
 /// </summary>
 public sealed partial class CachingStreamSource : IAudioSource
 {
     #region Constants
 
-    /// <summary>Короткая задержка перед окончательной утилизацией ресурсов (мс).</summary>
+    /// <summary>Short delay before final resource disposal (ms).</summary>
     private const int DisposalDelayMs = 32;
 
-    /// <summary>Критический таймаут suspend-mode подзагрузки (мс).</summary>
+    /// <summary>Critical timeout for suspend-mode backfetching (ms).</summary>
     private const int PlaybackGateCriticalTimeoutMs = 512;
 
-    /// <summary>Количество повторов чтения при смене эпохи.</summary>
+    /// <summary>Number of read retries on epoch change.</summary>
     private const int ReadAtMaxEpochRetries = 3;
 
-    /// <summary>Задержка между retry чтения при смене эпохи (мс).</summary>
+    /// <summary>Delay between read retries on epoch change (ms).</summary>
     private const int ReadAtEpochRetryDelayMs = 30;
 
     /// <summary>
-    /// Единый бюджет refresh после HTTP 403: сколько попыток получить URL допускается без единого успешного ответа CDN.
-    /// Расход определяет таблица <see cref="DecideRefresh"/>; после исчерпания source выбрасывает
-    /// <see cref="ChunkDownloadFatalException"/> вместо бесконечного retry.
+    /// Unified refresh budget after HTTP 403: maximum attempts allowed to acquire a URL without a single successful CDN response.
+    /// Consumption is determined by the <see cref="DecideRefresh"/> table; once exhausted, the source throws
+    /// <see cref="ChunkDownloadFatalException"/> instead of an infinite retry loop.
     /// </summary>
     private const int MaxForbiddenRefreshBudget = 3;
 
-    /// <summary>Минимальная граница seek clamp.</summary>
+    /// <summary>Minimum bound for seek clamp.</summary>
     private const long SeekLowerBound = 0;
 
-    /// <summary>Смещение для последнего байта контента.</summary>
+    /// <summary>Offset for the last byte of content.</summary>
     private const long SeekEndOffset = 1;
 
-    /// <summary>Задержка перед утилизацией CTS предыдущей эпохи (мс).</summary>
+    /// <summary>Delay before disposing the CTS of the previous epoch (ms).</summary>
     private const int DeferredEpochDisposeDelayMs = 2000;
 
-    /// <summary>Таймаут ожидания завершения preload-task при DisposeAsync (мс).</summary>
+    /// <summary>Timeout for awaiting preload task completion during DisposeAsync (ms).</summary>
     private const int PreloadTaskDisposeWaitTimeoutMs = 1000;
 
-    /// <summary>Гистерезис буфера для предотвращения дрожания вокруг цели (мс).</summary>
+    /// <summary>Buffer hysteresis to prevent jitter around target (ms).</summary>
     private const int TargetBufferHysteresisMs = 2500;
 
-    /// <summary>Порог критического refill-режима (мс). Ниже — агрессивный prefetch.</summary>
+    /// <summary>Critical refill threshold (ms). Below this, aggressive prefetch is triggered.</summary>
     private const int CriticalRefillBufferMs = 4000;
 
-    /// <summary>Аварийный порог буфера (мс). Ниже — максимально агрессивная загрузка.</summary>
+    /// <summary>Emergency buffer threshold (ms). Below this, maximum aggressive loading is triggered.</summary>
     private const int EmergencyRefillBufferMs = 1500;
 
-    /// <summary>Порог consecutive network failures для публикации stall event.</summary>
+    /// <summary>Threshold of consecutive network failures to publish a stall event.</summary>
     private const int NetworkStallThreshold = 5;
 
-    /// <summary>Базовая задержка network retry в ReadAtAsync (мс).</summary>
+    /// <summary>Base network retry delay in ReadAtAsync (ms).</summary>
     private const int NetworkRetryBaseMs = 500;
 
-    /// <summary>Потолок задержки network retry в ReadAtAsync (мс).</summary>
+    /// <summary>Maximum network retry delay ceiling in ReadAtAsync (ms).</summary>
     private const int NetworkRetryMaxBackoffMs = 5000;
 
-    /// <summary>Порог consecutive сетевых ошибок для открытия source-level circuit breaker.</summary>
+    /// <summary>Threshold of consecutive network errors to open the source-level circuit breaker.</summary>
     private const int SourceCircuitBreakerThreshold = 15;
 
-    /// <summary>Начальный backoff circuit breaker (мс).</summary>
+    /// <summary>Initial circuit breaker backoff (ms).</summary>
     private const int SourceCircuitBreakerInitialBackoffMs = 2_000;
 
-    /// <summary>Максимальная пауза между порциями тела HTTP-ответа, после которой соединение считается зависшим (мс).</summary>
+    /// <summary>Maximum pause between HTTP response body chunks before the connection is considered hung (ms).</summary>
     private const int BodyIdleTimeoutMs = 10_000;
 
-    /// <summary>Максимальный backoff circuit breaker (мс).</summary>
+    /// <summary>Maximum circuit breaker backoff (ms).</summary>
     private const int SourceCircuitBreakerMaxBackoffMs = 30_000;
 
     #endregion
@@ -101,18 +101,18 @@ public sealed partial class CachingStreamSource : IAudioSource
     #region Enums
 
     /// <summary>
-    /// Уровень деградации текущего сетевого соединения.
-    /// Влияет на параллелизм, размер запросов и агрессивность preload.
+    /// Degradation level of the current network connection.
+    /// Affects concurrency, request size, and preload aggressiveness.
     /// </summary>
     private enum NetworkDegradationLevel
     {
-        /// <summary>Сеть в норме. Стандартные параметры.</summary>
+        /// <summary>Network is normal. Standard parameters.</summary>
         Normal,
 
-        /// <summary>Повышенная задержка или узкий канал. Ограниченный параллелизм.</summary>
+        /// <summary>Increased latency or limited bandwidth. Restricted concurrency.</summary>
         Degraded,
 
-        /// <summary>Экстремальная задержка или минимальный канал. Один поток, маленькие запросы.</summary>
+        /// <summary>Extreme latency or minimal bandwidth. Single thread, small requests.</summary>
         Critical
     }
 
@@ -131,9 +131,8 @@ public sealed partial class CachingStreamSource : IAudioSource
     private readonly int _bitrate;
 
     /// <summary>
-    /// Флаг, указывающий, что в данный момент выполняется критическая сетевая
-    /// операция для Seek. Preload loop должен приостановиться, чтобы не создавать
-    /// конкуренцию за сеть.
+    /// Flag indicating that a critical network operation for Seek is currently in progress.
+    /// The preload loop must pause to avoid competing for network bandwidth.
     /// </summary>
     private volatile bool _seekInProgress;
 
@@ -143,31 +142,31 @@ public sealed partial class CachingStreamSource : IAudioSource
     //  Dependencies 
 
     /// <summary>
-    /// HTTP-клиент берётся из SharedHttpClient.Instance при каждом запросе,
-    /// чтобы автоматически использовать пересобранный клиент после Rebuild().
-    /// Захват ссылки в конструкторе приводил бы к использованию disposed клиента.
-    /// Явно внедрённый клиент (детерминированные тесты) имеет приоритет.
+    /// The HTTP client is retrieved from SharedHttpClient.Instance on every request
+    /// to automatically use the rebuilt client after Rebuild().
+    /// Capturing the reference in the constructor would lead to using a disposed client.
+    /// An explicitly injected client (for deterministic tests) takes precedence.
     /// </summary>
     private HttpClient CurrentHttpClient => _httpClientOverride ?? Audio.Http.SharedHttpClient.Instance;
 
     /// <summary>
-    /// Внедрённый HTTP-клиент; <c>null</c> — используется общий клиент приложения.
+    /// Injected HTTP client; <c>null</c> means the application shared client is used.
     /// </summary>
     private readonly HttpClient? _httpClientOverride;
 
     private readonly AudioCacheManager _cacheManager;
 
     /// <summary>
-    /// Поставщик stream URL: первичный continuation acquire (partial cache) и refresh после 403/истечения TTL.
-    /// Запрос всегда формирует этот source (<see cref="CreateUrlRequest"/>), поэтому получатель знает трек и вариант.
+    /// Stream URL provider: initial continuation acquire (partial cache) and refresh after 403/TTL expiration.
+    /// Requests are always constructed by this source (<see cref="CreateUrlRequest"/>), so the recipient knows the track and variant.
     /// </summary>
     private readonly StreamUrlProvider? _urlProvider;
 
     //  Parsing 
 
     /// <summary>
-    /// Метаданные кэша текущего трека. Гарантированно не null после успешного
-    /// <see cref="InitializeAsync"/>; обращение снаружи init — программная ошибка.
+    /// Cache metadata for the current track. Guaranteed not null after successful
+    /// <see cref="InitializeAsync"/>; accessing outside init is a logic error.
     /// </summary>
     private AudioCacheEntry? _cacheEntry;
     private IContainerParser? _parser;
@@ -176,19 +175,19 @@ public sealed partial class CachingStreamSource : IAudioSource
     //  RAM cache & active downloads 
 
     /// <summary>
-    /// RAM-кэш диапазонов байт, оптимизированный для малого количества активных блоков
-    /// в скользящем окне вокруг текущей позиции воспроизведения.
+    /// Byte range RAM cache optimized for a small number of active blocks
+    /// in a sliding window around the current playback position.
     /// </summary>
     private readonly SlidingRamCache _ramCache = new();
 
     /// <summary>
-    /// Реестр активных HTTP-загрузок для дедупликации.
-    /// Ключ = начало выровненного диапазона. Строгая overlap-защита.
+    /// Active HTTP download registry for deduplication.
+    /// Key = aligned range start offset. Strict overlap protection.
     /// </summary>
     private readonly Lock _activeDownloadsLock = new();
     private readonly Dictionary<long, ActiveRangeDownload> _activeDownloads = new(8);
 
-    /// <summary>Семафор параллельных загрузок.</summary>
+    /// <summary>Concurrent download semaphore.</summary>
     private readonly SemaphoreSlim _downloadSlots;
 
     //  Epoch-based cancellation 
@@ -197,14 +196,14 @@ public sealed partial class CachingStreamSource : IAudioSource
     private readonly Lock _epochLock = new();
 
     /// <summary>
-    /// Легковесный затвор для управления фоновым циклом предзагрузки.
-    /// Set = воспроизведение активно, Reset = плеер на паузе.
+    /// Lightweight gate to control the background preload loop.
+    /// Set = playback active, Reset = player paused.
     /// </summary>
     private readonly ManualResetEventSlim _playbackGate = new(initialState: true);
 
     /// <summary>
-    /// ManualResetEventSlim для блокировки preload loop при suspend.
-    /// Set = работаем, Reset = приостановлены.
+    /// ManualResetEventSlim to block the preload loop during suspend.
+    /// Set = running, Reset = paused.
     /// </summary>
     private readonly ManualResetEventSlim _suspendGate = new(initialState: true);
 
@@ -212,16 +211,16 @@ public sealed partial class CachingStreamSource : IAudioSource
     private CancellationTokenSource? _lifetimeCts;
     private Task? _preloadTask;
 
-    /// <summary>Счётчик незавершённых фоновых disk-write операций.</summary>
+    /// <summary>Counter of pending background disk write operations.</summary>
     private int _pendingDiskWrites;
 
-    /// <summary>Флаг того, что lease был успешно взят.</summary>
+    /// <summary>Flag indicating whether the lease was successfully acquired.</summary>
     private volatile bool _leaseAcquired;
 
     /// <summary>
-    /// Single-flight promise для первичного получения continuation URL.
-    /// Гарантирует, что одновременно выполняется только один URL resolution.
-    /// Не используется для 403 refresh — тот идёт через <see cref="CoordinatedRefreshAsync"/>.
+    /// Single-flight promise for initial continuation URL resolution.
+    /// Ensures that only one URL resolution runs concurrently.
+    /// Not used for 403 refreshes — those go through <see cref="CoordinatedRefreshAsync"/>.
     /// </summary>
     private TaskCompletionSource<string?>? _continuationUrlTcs;
     private readonly Lock _continuationLock = new();
@@ -237,15 +236,15 @@ public sealed partial class CachingStreamSource : IAudioSource
     private int _consecutive403Count;
     private int _requestSequenceNumber;
     /// <summary>
-    /// Израсходованный единый бюджет refresh после HTTP 403. Успешный refresh его НЕ сбрасывает —
-    /// только реальный 2xx от CDN, поэтому цикл «новый URL → снова 403» конечен.
+    /// Consumed unified refresh budget after HTTP 403. A successful refresh does NOT reset it —
+    /// only a real 2xx from the CDN does, ensuring the "new URL → 403 again" cycle is finite.
     /// </summary>
     private int _forbiddenRefreshBudgetSpent;
 
-    /// <summary>Исход последней попытки, израсходовавшей бюджет; только для диагностики fatal.</summary>
+    /// <summary>Outcome of the last attempt that consumed budget; used exclusively for fatal diagnostics.</summary>
     private RefreshOutcome _lastBudgetRefreshOutcome;
 
-    /// <summary>Флаг (0/1): бесплатный refresh после смены внешнего IP уже использован в текущем окне бюджета.</summary>
+    /// <summary>Flag (0/1): free refresh after external IP change has already been consumed in the current budget window.</summary>
     private int _egressRefreshUsed;
     private Exception? _lastDownloadException;
 
@@ -264,10 +263,10 @@ public sealed partial class CachingStreamSource : IAudioSource
     private double _estimatedBandwidthBytesPerSec;
 
     /// <summary>
-    /// Счётчик накопленных замеров bandwidth.
-    /// Используется для определения bootstrap-фазы EMA:
-    /// первые <see cref="StreamingConfig.BandwidthBootstrapSampleCount"/> замеров
-    /// получают повышенный вес для быстрой начальной сходимости.
+    /// Accumulated bandwidth sample count.
+    /// Used to determine the EMA bootstrap phase:
+    /// initial <see cref="StreamingConfig.BandwidthBootstrapSampleCount"/> samples
+    /// receive higher weight for rapid initial convergence.
     /// </summary>
     private int _bandwidthSampleCount;
 
@@ -275,7 +274,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     private volatile bool _initialized;
     private volatile bool _disposed;
 
-    // Кэширование вычисленных диапазонов буферизации для исключения аллокаций на 500ms таймере
+    // Cache calculated buffering ranges to eliminate allocations on the 500ms timer
     private readonly Lock _bufferedRangesCacheLock = new();
     private long _cachedDiskRangesVersion = -1;
     private long _cachedRamRangesVersion = -1;
@@ -285,13 +284,13 @@ public sealed partial class CachingStreamSource : IAudioSource
 
     #region Properties
 
-    /// <summary>Текущая расчетная скорость загрузки данных из сети (байт/сек).</summary>
+    /// <summary>Current estimated network download speed (bytes/sec).</summary>
     public double EstimatedSpeedBytesPerSec
     {
         get { lock (_latencyLock) return _estimatedBandwidthBytesPerSec; }
     }
 
-    /// <summary>Текущая средняя задержка сети (мс).</summary>
+    /// <summary>Current average network latency (ms).</summary>
     public double AveragePingMs
     {
         get { lock (_latencyLock) return GetAverageLatencyInternal(); }
@@ -318,15 +317,15 @@ public sealed partial class CachingStreamSource : IAudioSource
     /// <inheritdoc/>
     public int Channels => _parser?.Channels ?? 0;
 
-    /// <summary>Прогресс буферизации (0–100%).</summary>
+    /// <summary>Buffering progress (0–100%).</summary>
     public double BufferProgress => _cacheEntry?.DownloadProgress ?? 0;
 
     /// <summary>
-    /// Оценка непрерывного буфера вперёд от текущей позиции чтения в миллисекундах.
+    /// Estimated forward contiguous buffer length from the current read position in milliseconds.
     /// </summary>
     /// <remarks>
-    /// Использует локально доступные и in-flight диапазоны.
-    /// Нужен для latency-aware решения о безопасном открытии playback gate.
+    /// Uses locally available and in-flight ranges.
+    /// Required for latency-aware decisions on safely opening the playback gate.
     /// </remarks>
     public int BufferedAheadMs
     {
@@ -347,7 +346,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Указывает, что все данные от текущей позиции чтения до самого конца файла (EOF) уже локально доступны в RAM или на диске.
+    /// Indicates that all data from the current read position to the very end of the file (EOF) is locally available in RAM or on disk.
     /// </summary>
     public bool IsTailLocallyBuffered
     {
@@ -365,48 +364,40 @@ public sealed partial class CachingStreamSource : IAudioSource
         }
     }
 
-    /// <summary>Полностью ли загружен трек на диск.</summary>
+    /// <summary>Whether the track is fully downloaded to disk.</summary>
     public bool IsFullyBuffered => _cacheEntry?.IsComplete ?? false;
 
-    /// <summary>Объём скачанных данных в байтах.</summary>
+    /// <summary>Volume of downloaded data in bytes.</summary>
     public long DownloadedBytes => _cacheEntry?.DownloadedBytes ?? 0;
 
-    /// <summary>Битрейт (kbps).</summary>
+    /// <summary>Bitrate (kbps).</summary>
     public int Bitrate => _cacheEntry?.Bitrate ?? _bitrate;
 
-    /// <summary>Парсер контейнера. Доступен для диагностики.</summary>
+    /// <summary>Container parser. Available for diagnostics.</summary>
     internal IContainerParser? Parser => _parser;
 
-    /// <summary>Уникальный ключ записи в дисковом кэше.</summary>
+    /// <summary>Unique key of the disk cache entry.</summary>
     public string CacheKey => _cacheKey;
 
-    /// <summary>Идентификатор трека, которому принадлежит source.</summary>
+    /// <summary>ID of the track owning the source.</summary>
     internal string TrackId => _trackId;
 
-    /// <summary>Контейнер потока, байты которого уже лежат в RAM и дисковом кэше.</summary>
+    /// <summary>Stream container whose bytes are already present in RAM and disk cache.</summary>
     internal AudioFormat ContainerFormat => _format;
 
-    /// <summary>Текущий stream URL (пустая строка до получения continuation URL).</summary>
+    /// <summary>Current stream URL (empty string until continuation URL is acquired).</summary>
     internal string CurrentUrl => _currentUrl;
 
     /// <summary>
-    /// Указывает, что последний ответ CDN был HTTP 403 и текущий URL ещё не заменён рабочим.
+    /// Indicates that the last CDN response was HTTP 403 and the current URL has not yet been replaced with a working one.
     /// </summary>
     internal bool HasPendingForbidden => Volatile.Read(ref _consecutive403Count) > 0;
 
     /// <summary>
-    /// Проверяет, адресует ли URL-кандидат тот же вариант потока (itag/clen), что и source.
+    /// Creates an explicit URL request containing track, stream variant, and CDN 403 status of this source.
     /// </summary>
-    /// <param name="url">Проверяемый stream URL.</param>
-    /// <returns><c>true</c>, если URL можно применить без порчи кэша.</returns>
-    internal bool IsCompatibleStreamUrl(string url) =>
-        !string.IsNullOrWhiteSpace(url) && IsUrlVariantCompatible(url, out _);
-
-    /// <summary>
-    /// Создаёт явный запрос URL: трек, вариант потока и состояние CDN 403 этого source.
-    /// </summary>
-    /// <param name="kind">Назначение запроса.</param>
-    /// <returns>Неизменяемый запрос, не удерживающий ссылку на source.</returns>
+    /// <param name="kind">Target purpose of the request.</param>
+    /// <returns>An immutable request that does not hold a reference to the source.</returns>
     internal StreamUrlRequest CreateUrlRequest(StreamUrlRequestKind kind)
     {
         long totalSize = _cacheEntry?.TotalSize ?? 0;
@@ -422,35 +413,35 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Есть ли у source поставщик URL.
+    /// Indicates whether the source has an associated URL provider.
     /// </summary>
     internal bool HasUrlProvider => _urlProvider != null;
 
     /// <summary>
-    /// Запрашивает stream URL у поставщика от имени этого source. URL не применяется: решение принимает вызывающий.
+    /// Requests a stream URL from the provider on behalf of this source. Does not apply the URL: caller makes the decision.
     /// </summary>
-    /// <param name="kind">Назначение запроса.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>URL от поставщика либо <c>null</c>, если поставщика нет или URL получить не удалось.</returns>
+    /// <param name="kind">Target purpose of the request.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>URL from the provider, or <c>null</c> if no provider exists or URL acquisition failed.</returns>
     internal ValueTask<string?> RequestUrlAsync(StreamUrlRequestKind kind, CancellationToken ct) =>
         _urlProvider?.Invoke(CreateUrlRequest(kind), ct) ?? ValueTask.FromResult<string?>(null);
 
-    /// <summary>Количество непрерывных байт от начала файла (contiguous prefix).</summary>
+    /// <summary>Number of contiguous bytes from the beginning of the file (contiguous prefix).</summary>
     public long ContiguousPrefixBytes => _cacheEntry?.GetContiguousDownloadedBytesFrom(0) ?? 0;
 
     /// <summary>
-    /// Глобальное событие о non-fatal сетевых проблемах источника.
+    /// Global event raised on non-fatal network issues encountered by the source.
     /// </summary>
     public static event Action<string, Exception>? OnSourceWarning;
 
     /// <summary>
-    /// Источник данных обнаружил устойчивую потерю сети и ожидает восстановления.
-    /// Декодер заблокирован, PCM-буфер истощается.
+    /// Data source detected persistent network loss and is awaiting recovery.
+    /// Decoder is blocked, PCM buffer is depleting.
     /// </summary>
     public static event Action<string>? OnNetworkStalled;
 
     /// <summary>
-    /// Сеть восстановлена после stall — данные снова поступают.
+    /// Network recovered after stall — data is flowing again.
     /// </summary>
     public static event Action<string>? OnNetworkRecovered;
 
@@ -459,20 +450,20 @@ public sealed partial class CachingStreamSource : IAudioSource
     #region Constructor
 
     /// <summary>
-    /// Создаёт источник с range-based HTTP-стримингом.
+    /// Initializes a source with range-based HTTP streaming.
     /// </summary>
-    /// <param name="cacheKey">Уникальный ключ кэша (trackId + format + normalized_bitrate).</param>
-    /// <param name="trackId">Идентификатор трека.</param>
-    /// <param name="url">Исходный URL потока.</param>
-    /// <param name="contentLength">Полный размер контента в байтах.</param>
-    /// <param name="format">Аудио-формат контейнера.</param>
-    /// <param name="codec">Аудио-кодек.</param>
-    /// <param name="bitrate">Битрейт в kbps.</param>
-    /// <param name="cacheManager">Менеджер дискового кэша.</param>
-    /// <param name="config">Конфигурация стриминга.</param>
-    /// <param name="urlProvider">Поставщик URL для первичного acquire (partial cache) и refresh при 403.</param>
+    /// <param name="cacheKey">Unique cache key (trackId + format + normalized_bitrate).</param>
+    /// <param name="trackId">Track identifier.</param>
+    /// <param name="url">Initial stream URL.</param>
+    /// <param name="contentLength">Total content length in bytes.</param>
+    /// <param name="format">Audio container format.</param>
+    /// <param name="codec">Audio codec.</param>
+    /// <param name="bitrate">Bitrate in kbps.</param>
+    /// <param name="cacheManager">Disk cache manager.</param>
+    /// <param name="config">Streaming configuration.</param>
+    /// <param name="urlProvider">URL provider for initial acquire (partial cache) and 403 refreshes.</param>
     /// <param name="httpClient">
-    /// Необязательный HTTP-клиент для детерминированных тестов; по умолчанию — <c>SharedHttpClient.Instance</c>.
+    /// Optional HTTP client for deterministic testing; defaults to <c>SharedHttpClient.Instance</c>.
     /// </param>
     public CachingStreamSource(
         string cacheKey,
@@ -516,27 +507,27 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Оценивает деградацию сети по совокупности трёх независимых сигналов:
+    /// Evaluates network degradation across three independent signals:
     /// <list type="number">
     ///   <item>
-    ///     <b>Абсолютный bandwidth</b> — сравнение с профильными порогами
+    ///     <b>Absolute bandwidth</b> — comparison against profile thresholds
     ///     (<see cref="StreamingConfig.AbsoluteCriticalBandwidthBytesPerSec"/>,
     ///     <see cref="StreamingConfig.AbsoluteDegradedBandwidthBytesPerSec"/>).
-    ///     Защищает от ложного <c>Normal</c> на узком канале с низкобитрейтным аудио,
-    ///     где relative ratio может быть велик (10 Мбит/с + 128 kbps → ratio ≈ 78).
+    ///     Prevents false <c>Normal</c> states on low-bandwidth connections with low-bitrate audio,
+    ///     where relative ratio might be high (10 Mbps + 128 kbps → ratio ≈ 78).
     ///   </item>
     ///   <item>
-    ///     <b>Жизнеспособность канала</b> — bandwidth должен превышать битрейт аудио
-    ///     как минимум в <see cref="StreamingConfig.MinViableBandwidthMultiplier"/>×,
-    ///     иначе буферизация невозможна в принципе.
+    ///     <b>Connection viability</b> — bandwidth must exceed audio bitrate
+    ///     by at least <see cref="StreamingConfig.MinViableBandwidthMultiplier"/>×,
+    ///     otherwise buffering is fundamentally impossible.
     ///   </item>
     ///   <item>
-    ///     <b>Relative ratio и RTT</b> — классическая оценка по отношению
-    ///     bandwidth/bitrate и средней задержке.
+    ///     <b>Relative ratio and RTT</b> — classic evaluation based on
+    ///     bandwidth/bitrate ratio and average latency.
     ///   </item>
     /// </list>
-    /// Сигналы проверяются в порядке убывания жёсткости: первый сработавший
-    /// определяет итоговый уровень.
+    /// Signals are checked in decreasing order of strictness: the first triggered signal
+    /// dictates the resulting level.
     /// </summary>
     private NetworkDegradationLevel GetNetworkDegradationLevel()
     {
@@ -575,8 +566,8 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Возвращает максимально допустимое число параллельных HTTP-загрузок
-    /// с учётом текущего состояния сети.
+    /// Returns the maximum allowed number of concurrent HTTP downloads
+    /// based on current network condition.
     /// </summary>
     private int GetAdaptiveMaxConcurrentDownloads() => GetNetworkDegradationLevel() switch
     {
@@ -586,8 +577,8 @@ public sealed partial class CachingStreamSource : IAudioSource
     };
 
     /// <summary>
-    /// Возвращает адаптивный объём предварительной догрузки после seek.
-    /// На узком канале seek-preload уменьшается.
+    /// Returns an adaptive post-seek preload volume.
+    /// Seek preload is reduced on constrained networks.
     /// </summary>
     private int GetAdaptiveSeekPreloadBytes()
     {
@@ -603,10 +594,10 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Переводит количество буферизованных байт аудио в миллисекунды воспроизведения.
+    /// Converts buffered audio byte count to playback duration in milliseconds.
     /// </summary>
-    /// <param name="bytes">Количество байт аудиопотока.</param>
-    /// <returns>Эквивалентная длительность в миллисекундах.</returns>
+    /// <param name="bytes">Audio stream byte count.</param>
+    /// <returns>Equivalent duration in milliseconds.</returns>
     private int ConvertBufferedBytesToMs(long bytes)
     {
         if (bytes <= 0) return 0;
@@ -615,8 +606,8 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Вычисляет адаптивный целевой размер буфера на основе RTT и ширины канала.
-    /// Высокий ping увеличивает цель, но узкий канал ограничивает бессмысленное раздувание.
+    /// Calculates adaptive target buffer size based on RTT and available bandwidth.
+    /// High RTT increases the target, while low bandwidth caps unnecessary buffer bloat.
     /// </summary>
     private int GetAdaptiveTargetBufferMs()
     {
@@ -650,11 +641,11 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Возвращает минимальный непрерывный префикс данных (в байтах),
-    /// необходимый для безопасного старта decoder после seek.
+    /// Returns the minimum contiguous data prefix (in bytes)
+    /// required for a safe decoder start after a seek.
     /// </summary>
-    /// <param name="position">Целевая позиция seek в байтах.</param>
-    /// <returns>Требуемое количество contiguous-байт.</returns>
+    /// <param name="position">Target seek position in bytes.</param>
+    /// <returns>The required number of contiguous bytes.</returns>
     private int GetMinimalSeekStartBytes(long position)
     {
         if (position >= _contentLength) return 0;
@@ -692,11 +683,11 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Проверяет, достаточно ли локально доступных непрерывных данных
-    /// для мгновенного старта decoder после seek.
+    /// Checks whether enough locally available contiguous data exists
+    /// for an immediate decoder start after a seek.
     /// </summary>
-    /// <param name="position">Целевая позиция seek в байтах.</param>
-    /// <returns><c>true</c> если seek может стартовать без ожидания сети.</returns>
+    /// <param name="position">Target seek position in bytes.</param>
+    /// <returns><c>true</c> if the seek can start without waiting for the network.</returns>
     private bool HasMinimalLocalSeekStartData(long position)
     {
         int required = GetMinimalSeekStartBytes(position);
@@ -710,18 +701,18 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Вычисляет адаптивный таймаут ожидания critical-range при seek.
+    /// Calculates an adaptive critical-range wait timeout during seek.
     /// </summary>
-    /// <param name="expectedBytes">Ожидаемый объём критического диапазона.</param>
+    /// <param name="expectedBytes">Expected size of the critical range.</param>
     /// <returns>
-    /// Таймаут в миллисекундах, учитывающий RTT, пропускную способность
-    /// и стоимость переподключения на высоколатентных сетях.
+    /// Timeout in milliseconds, accounting for RTT, throughput,
+    /// and reconnect costs on high-latency networks.
     /// </returns>
     /// <remarks>
     /// <para>
-    /// Предыдущий верхний clamp 5000ms был слишком агрессивен для high-latency сетей:
-    /// первый полезный contiguous startup prefix мог приезжать через 8–12 секунд,
-    /// хотя сама пропускная способность оставалась достаточной для playback.
+    /// The previous upper clamp of 5000ms was too aggressive for high-latency networks:
+    /// the first useful contiguous startup prefix could arrive after 8–12 seconds,
+    /// even though throughput itself remained sufficient for playback.
     /// </para>
     /// </remarks>
     private int ComputeAdaptiveSeekCriticalTimeoutMs(int expectedBytes)
@@ -755,11 +746,11 @@ public sealed partial class CachingStreamSource : IAudioSource
     #region Public Seek Helpers
 
     /// <summary>
-    /// Проверяет, достаточно ли contiguous-данных для безопасного старта decoder
-    /// после ранее выполненного seek (для AudioPlayer polling).
+    /// Checks whether enough contiguous data is available for a safe decoder start
+    /// after a previously executed seek (for AudioPlayer polling).
     /// </summary>
-    /// <param name="positionMs">Позиция в миллисекундах, к которой был выполнен seek.</param>
-    /// <returns><c>true</c> если минимальный startup prefix доступен.</returns>
+    /// <param name="positionMs">Position in milliseconds to which the seek was performed.</param>
+    /// <returns><c>true</c> if the minimum startup prefix is available.</returns>
     public bool IsSeekDataReady(long positionMs)
     {
         if (_parser == null || !_initialized) return false;
@@ -777,8 +768,8 @@ public sealed partial class CachingStreamSource : IAudioSource
 
     /// <inheritdoc/>
     /// <remarks>
-    /// <para><b>Self-Healing:</b> При обнаружении коррупции парсером запускается
-    /// точечное восстановление диапазона без прерывания воспроизведения.</para>
+    /// <para><b>Self-Healing:</b> When the parser detects corruption, targeted range
+    /// recovery is triggered without interrupting playback.</para>
     /// </remarks>
     public ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default)
     {
@@ -804,8 +795,8 @@ public sealed partial class CachingStreamSource : IAudioSource
 
             return ReadFrameSlowAsync(vt, ct);
         }
-        // null допустим только при отмене токена вызывающего: иначе AudioPipeline примет его за EOF.
-        // Отмена эпохи чтения пробрасывается и обрабатывается в AudioPipeline как transient retry.
+        // null is allowed only on caller token cancellation; otherwise AudioPipeline treats it as EOF.
+        // Read epoch cancellation is propagated and handled in AudioPipeline as a transient retry.
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return new ValueTask<AudioFrame?>((AudioFrame?)null);
@@ -817,7 +808,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Фиксирует таймстемп и смещение потока после успешного чтения фрейма.
+    /// Captures the timestamp and stream offset after successfully reading a frame.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private void OnFrameRead(in AudioFrame frame)
@@ -828,7 +819,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Асинхронный путь чтения фрейма при ожидании подкачки данных из диска или сети.
+    /// Asynchronous frame reading path when waiting for data prefetching from disk or network.
     /// </summary>
     private async ValueTask<AudioFrame?> ReadFrameSlowAsync(
         ValueTask<AudioFrame?> pendingRead,
@@ -852,7 +843,7 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Медленный путь восстановления контейнера после ошибки парсинга с повторными попытками чтения.
+    /// Slow container recovery path after a parsing error, with read retries.
     /// </summary>
     private async ValueTask<AudioFrame?> HealAndReadFrameSlowAsync(
         long initialCorruptBytePos,
@@ -895,8 +886,8 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Self-healing: инвалидирует повреждённый диапазон и перекачивает его из сети.
-    /// Если сети нет — помечает диапазон как мёртвый и делает resync.
+    /// Self-healing: invalidates the damaged range and re-fetches it from the network.
+    /// If no network is available, marks the range as dead and performs a resync.
     /// </summary>
     private async Task HealCorruptionAsync(long absoluteBytePosition, CancellationToken ct)
     {
@@ -970,13 +961,13 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Пытается прикрепить continuation URL, полученный out-of-band,
-    /// к уже работающему source.
+    /// Attempts to attach a continuation URL received out-of-band
+    /// to an already running source.
     /// </summary>
-    /// <param name="url">Готовый финальный stream URL.</param>
+    /// <param name="url">Ready final stream URL.</param>
     /// <returns>
-    /// <c>true</c>, если URL был принят;
-    /// <c>false</c>, если source уже имел URL, был disposed или входной URL невалиден.
+    /// <c>true</c> if the URL was accepted;
+    /// <c>false</c> if the source already had a URL, was disposed, or the input URL is invalid.
     /// </returns>
     internal bool TryAttachContinuationUrl(string url)
     {
@@ -1011,12 +1002,12 @@ public sealed partial class CachingStreamSource : IAudioSource
     }
 
     /// <summary>
-    /// Атомарно обновляет stream URL после успешного refresh.
-    /// Сбрасывает счётчик consecutive 403 и обновляет URL в cache entry.
-    /// URL другого варианта (itag/clen) отвергается без изменения состояния.
+    /// Atomically updates the stream URL after a successful refresh.
+    /// Resets the consecutive 403 counter and updates the URL in the cache entry.
+    /// A URL from a different variant (itag/clen) is rejected without state mutation.
     /// </summary>
-    /// <param name="newUrl">Новый валидный stream URL.</param>
-    /// <returns><c>true</c>, если URL применён; <c>false</c> при dispose, пустом URL или чужом варианте.</returns>
+    /// <param name="newUrl">New valid stream URL.</param>
+    /// <returns><c>true</c> if the URL was applied; <c>false</c> on dispose, empty URL, or mismatched variant.</returns>
     internal bool UpdateUrl(string newUrl)
     {
         if (_disposed || string.IsNullOrWhiteSpace(newUrl))
@@ -1043,9 +1034,9 @@ public sealed partial class CachingStreamSource : IAudioSource
     #region Warning Events
 
     /// <summary>
-    /// Публикует non-fatal предупреждение источника для внешнего оркестратора UI.
+    /// Publishes a non-fatal source warning to the external UI orchestrator.
     /// </summary>
-    /// <param name="exception">Причина предупреждения.</param>
+    /// <param name="exception">The cause of the warning.</param>
     private void PublishSourceWarning(Exception exception)
     {
         var handler = OnSourceWarning;

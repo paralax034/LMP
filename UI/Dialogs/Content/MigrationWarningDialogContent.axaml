@@ -4,7 +4,7 @@
              x:Class="LMP.UI.Dialogs.Content.MigrationWarningDialogContent"
              x:DataType="dialogs:MigrationWarningDialogViewModel">
 
-    <!-- Дизайн выровнен с ChoiceDialogContent.axaml -->
+    <!-- Design aligned with ChoiceDialogContent.axaml -->
     <Border Background="{DynamicResource BgPrimaryBrush}"
             BorderBrush="{DynamicResource BgHighlightBrush}"
             BorderThickness="1"
@@ -15,7 +15,7 @@
 
         <StackPanel Spacing="16">
 
-            <!-- Заголовок с плоской оранжевой иконкой Icon.AlertCircle (без вложенных кругов) -->
+            <!-- Header with a flat orange Icon.AlertCircle icon (no nested circles) -->
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <PathIcon Data="{StaticResource Icon.AlertCircle}"
                           Width="24" Height="24"
@@ -27,7 +27,7 @@
                            VerticalAlignment="Center" />
             </StackPanel>
 
-            <!-- Сообщение -->
+            <!-- Message -->
             <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
                 <TextBlock Text="{Binding Message}"
                            TextWrapping="Wrap"
@@ -36,7 +36,7 @@
                            LineHeight="20" />
             </ScrollViewer>
 
-            <!-- Кнопка с таймером -->
+            <!-- Button with a timer -->
             <Button Content="{Binding ButtonText}"
                     Command="{Binding CloseCommand}"
                     IsEnabled="{Binding CanClose}"

@@ -5,56 +5,56 @@ using System.Security.Authentication;
 namespace LMP.Core.Youtube.Exceptions;
 
 /// <summary>
-/// Тип сетевой ошибки при взаимодействии с YouTube API.
+/// Specifies the type of network error encountered during YouTube API interaction.
 /// </summary>
 public enum NetworkErrorType
 {
-    /// <summary>Неклассифицированная сетевая ошибка.</summary>
+    /// <summary>Unclassified network error.</summary>
     Unknown = 0,
 
-    /// <summary>Истечение таймаута HTTP-подключения или ответа.</summary>
+    /// <summary>HTTP connection or response timeout elapsed.</summary>
     Timeout,
 
-    /// <summary>Ошибка SSL/TLS handshake (часто вызвана DPI-блокировкой).</summary>
+    /// <summary>SSL/TLS handshake failure (often caused by DPI blocking).</summary>
     SslHandshakeFailure,
 
-    /// <summary>DNS-резолюция не удалась или соединение отклонено.</summary>
+    /// <summary>DNS resolution failed or connection was refused.</summary>
     ConnectionFailed
 }
 
 /// <summary>
-/// Выбрасывается при сетевых ошибках взаимодействия с серверами YouTube.
+/// Thrown when a network error occurs while communicating with YouTube servers.
 /// <para>
-/// Отделяет сетевые сбои (таймауты, SSL/TLS, DNS) от контентных ошибок
-/// (видео недоступно, возрастные ограничения) для корректного отображения
-/// пользователю рекомендаций: "проверьте VPN/интернет" вместо "видео недоступно".
+/// Separates network failures (timeouts, SSL/TLS, DNS) from content errors
+/// (video unavailable, age restrictions) to display correct user guidance:
+/// "check VPN/internet connection" instead of "video unavailable".
 /// </para>
 /// </summary>
 public sealed class YoutubeNetworkException : YoutubeExplodeException
 {
     /// <summary>
-    /// Тип сетевой ошибки.
+    /// Gets the network error type.
     /// </summary>
     public NetworkErrorType ErrorType { get; }
 
     /// <summary>
-    /// <c>true</c> если ошибка вызвана таймаутом HTTP-запроса.
+    /// <c>true</c> if the error was caused by an HTTP request timeout.
     /// </summary>
     public bool IsTimeout => ErrorType == NetworkErrorType.Timeout;
 
     /// <summary>
-    /// <c>true</c> если ошибка вызвана провалом SSL/TLS handshake.
-    /// Типичная причина — DPI-блокировка или нерабочий прокси.
+    /// <c>true</c> if the error was caused by an SSL/TLS handshake failure.
+    /// A typical cause is DPI blocking or a broken proxy.
     /// </summary>
     public bool IsSslFailure => ErrorType == NetworkErrorType.SslHandshakeFailure;
 
     /// <summary>
-    /// <c>true</c> если не удалось установить TCP-соединение (DNS, connection refused, socket error).
+    /// <c>true</c> if a TCP connection could not be established (DNS, connection refused, socket error).
     /// </summary>
     public bool IsConnectionFailed => ErrorType == NetworkErrorType.ConnectionFailed;
 
     /// <summary>
-    /// Ключ локализации для данного типа сетевой ошибки.
+    /// Gets the localization key for this network error type.
     /// </summary>
     public string GetLocalizationKey() => ErrorType switch
     {
@@ -65,7 +65,7 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
     };
 
     /// <summary>
-    /// Ключ рекомендации для пользователя.
+    /// Gets the localization key for the user recommendation.
     /// </summary>
     public string GetRecommendationKey() => ErrorType switch
     {
@@ -74,11 +74,11 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
     };
 
     /// <summary>
-    /// Создаёт экземпляр сетевой ошибки YouTube.
+    /// Initializes a new instance of the YouTube network error.
     /// </summary>
-    /// <param name="message">Человекочитаемое описание ошибки.</param>
-    /// <param name="errorType">Классификация сетевой ошибки.</param>
-    /// <param name="innerException">Исходное исключение, вызвавшее сбой.</param>
+    /// <param name="message">Human-readable error description.</param>
+    /// <param name="errorType">Network error classification.</param>
+    /// <param name="innerException">The original exception that caused the failure.</param>
     public YoutubeNetworkException(string message, NetworkErrorType errorType, Exception? innerException = null)
         : base(message, innerException)
     {
@@ -86,20 +86,20 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
     }
 
     /// <summary>
-    /// Пытается классифицировать произвольное исключение как сетевую ошибку YouTube.
+    /// Attempts to classify an arbitrary exception as a YouTube network error.
     /// </summary>
-    /// <param name="exception">Исходное исключение.</param>
+    /// <param name="exception">The original exception.</param>
     /// <param name="cancellationToken">
-    /// Токен отмены вызывающего кода. Используется для различения user-cancel от HTTP timeout.
+    /// The caller's cancellation token. Used to distinguish user cancellation from HTTP timeout.
     /// </param>
     /// <returns>
-    /// <see cref="YoutubeNetworkException"/> с корректным <see cref="ErrorType"/>,
-    /// или <c>null</c> если исключение не является сетевой ошибкой.
+    /// A <see cref="YoutubeNetworkException"/> with the appropriate <see cref="ErrorType"/>,
+    /// or <c>null</c> if the exception is not a network error.
     /// </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static YoutubeNetworkException? TryClassify(Exception exception, CancellationToken cancellationToken)
     {
-        // 1. TaskCanceledException / TimeoutException от HttpClient.Timeout (не user-cancel)
+        // 1. TaskCanceledException / TimeoutException from HttpClient.Timeout (not user-canceled)
         if (!cancellationToken.IsCancellationRequested &&
             (exception is TimeoutException ||
              exception is TaskCanceledException ||
@@ -111,7 +111,7 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
                 exception);
         }
 
-        // 2. OperationCanceledException от внутреннего таймаута (не user-cancel)
+        // 2. OperationCanceledException from internal timeout (not user-canceled)
         if (exception is OperationCanceledException oce
             && !cancellationToken.IsCancellationRequested
             && !oce.CancellationToken.IsCancellationRequested)
@@ -122,7 +122,7 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
                 oce);
         }
 
-        // 3. HttpRequestException — анализ inner chain
+        // 3. HttpRequestException — inner chain analysis
         if (exception is HttpRequestException httpEx)
         {
             if (ContainsInChain<AuthenticationException>(httpEx))
@@ -141,7 +141,7 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
                     httpEx);
             }
 
-            // Generic HttpRequestException без специфичного inner — connection failed
+            // Generic HttpRequestException without a specific inner exception — connection failed
             return new YoutubeNetworkException(
                 $"Network error: {httpEx.Message}",
                 NetworkErrorType.ConnectionFailed,
@@ -169,7 +169,7 @@ public sealed class YoutubeNetworkException : YoutubeExplodeException
     }
 
     /// <summary>
-    /// Проверяет, содержит ли цепочка <see cref="Exception.InnerException"/> исключение указанного типа.
+    /// Checks whether the <see cref="Exception.InnerException"/> chain contains an exception of the specified type.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool ContainsInChain<T>(Exception root) where T : Exception

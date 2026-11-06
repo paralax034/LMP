@@ -29,7 +29,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Обработчик команды смены качества. Выполняется строго последовательно в actor-цикле.
+    /// Quality switch command handler. Executed strictly sequentially within the actor loop.
     /// </summary>
     private async Task HandleSwitchQualityAsync(SwitchQualityCommand cmd)
     {
@@ -39,7 +39,7 @@ public sealed partial class AudioEngine
         try
         {
             var elapsed = (DateTime.UtcNow - _lastQualitySwitchTime).TotalMilliseconds;
-            // Кулдаун без исключений: отмена сессии (новый трек или качество) просто завершает обработчик
+            // Cooldown without exceptions: session cancellation (new track or quality) simply completes the handler
             if (elapsed < QualitySwitchCooldownMs &&
                 !await ct.DelayNoThrowAsync(QualitySwitchCooldownMs - (int)elapsed, continueOnCapturedContext: false).ConfigureAwait(false))
                 return;

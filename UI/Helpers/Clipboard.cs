@@ -6,46 +6,46 @@ using Avalonia.Threading;
 namespace LMP.UI.Helpers;
 
 /// <summary>
-/// Сервис для работы с системным буфером обмена.
+/// Service for interacting with the system clipboard.
 /// 
-/// <para><b>Зачем нужен:</b></para>
+/// <para><b>Why it is needed:</b></para>
 /// <para>
-/// В Avalonia нет статического доступа к Clipboard — он доступен только через Window.
-/// Этот сервис инкапсулирует получение Clipboard из главного окна и предоставляет
-/// удобный API для копирования текста.
+/// Avalonia does not provide static access to the Clipboard; it is only accessible via Window.
+/// This service encapsulates retrieving the Clipboard from the main window and provides
+/// a convenient API for copying text.
 /// </para>
 /// 
-/// <para><b>Использование:</b></para>
+/// <para><b>Usage:</b></para>
 /// <code>
 /// await _clipboard.SetTextAsync("https://youtube.com/...");
 /// </code>
 /// 
-/// <para><b>Потокобезопасность:</b></para>
+/// <para><b>Thread Safety:</b></para>
 /// <para>
-/// Методы безопасны для вызова из любого потока — внутри происходит
-/// автоматическое переключение на UI-поток если необходимо.
+/// Methods are safe to call from any thread — automatic dispatching
+/// to the UI thread occurs internally if required.
 /// </para>
 /// </summary>
 public static class Clipboard
 {
     /// <summary>
-    /// Копирует текст в системный буфер обмена.
+    /// Copies text to the system clipboard.
     /// </summary>
-    /// <param name="text">Текст для копирования.</param>
+    /// <param name="text">The text to copy.</param>
     /// <returns>
-    /// Task, завершающийся после успешного копирования.
-    /// Если главное окно недоступно — завершается без ошибки (silent fail).
+    /// A Task that completes after successful copying.
+    /// If the main window is unavailable, completes silently without errors.
     /// </returns>
     /// <remarks>
-    /// <para>Метод безопасен для вызова когда окно ещё не создано или уже закрыто.</para>
-    /// <para>Не выбрасывает исключений — логирует ошибки внутри.</para>
+    /// <para>The method is safe to call even if the window has not been created yet or is already closed.</para>
+    /// <para>Does not throw exceptions — logs errors internally.</para>
     /// </remarks>
     /// <example>
     /// <code>
-    /// // Копирование ссылки на плейлист
+    /// // Copying a playlist link
     /// await _clipboard.SetTextAsync($"https://music.youtube.com/playlist?list={playlistId}");
     /// 
-    /// // Показать уведомление после копирования
+    /// // Showing a notification after copying
     /// await _notifications.ShowToastAsync(
     ///     titleKey: "Track_Copied",
     ///     messageKey: "Track_Copied",
@@ -93,13 +93,13 @@ public static class Clipboard
     }
 
     /// <summary>
-    /// Получает текст из системного буфера обмена.
+    /// Retrieves text from the system clipboard.
     /// </summary>
     /// <returns>
-    /// Текст из буфера обмена, или <c>null</c> если буфер пуст или недоступен.
+    /// The text from the clipboard, or <c>null</c> if the clipboard is empty or unavailable.
     /// </returns>
     /// <remarks>
-    /// Метод безопасен для вызова когда окно недоступно — возвращает <c>null</c>.
+    /// The method is safe to call when the window is unavailable — returns <c>null</c>.
     /// </remarks>
     public static async Task<string?> GetTextAsync()
     {

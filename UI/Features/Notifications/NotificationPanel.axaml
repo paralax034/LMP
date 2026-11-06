@@ -8,7 +8,7 @@
     x:Name="RootPanel">
 
     <UserControl.Styles>
-        <!-- Строка уведомления: плоская хроника без аллокаций анимаций при рециклинге скролла -->
+        <!-- Notification item: flat chronicle without animation allocations during scroll recycling -->
         <Style Selector="Border.notification-row">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
@@ -19,7 +19,7 @@
             <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
         </Style>
 
-        <!-- Мягкий бейдж серьезности с достаточным размером и контрастом -->
+        <!-- Soft severity badge with sufficient size and contrast -->
         <Style Selector="Border.severity-badge">
             <Setter Property="Width" Value="28" />
             <Setter Property="Height" Value="28" />
@@ -31,13 +31,13 @@
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
-        <!-- Контурная подсветка активной кнопки фильтра в шапке уведомлений -->
+        <!-- Outline highlight for the active filter button in the notification header -->
         <Style Selector="Button.header-icon-btn.active">
             <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
             <Setter Property="CornerRadius" Value="6" />
         </Style>
 
-        <!-- Компактная контурная кнопка действия внутри задачи (Отправить сейчас / Отмена) -->
+        <!-- Compact outline action button inside the task (Send Now / Cancel) -->
         <Style Selector="Button.task-action-btn">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />
@@ -58,7 +58,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
 
-        <!-- Блок рекомендации: аккуратный акцентный штрих слева без тяжелых рамок -->
+        <!-- Recommendation block: subtle accent stroke on the left without heavy borders -->
         <Style Selector="Border.recommendation-quote">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -67,12 +67,12 @@
             <Setter Property="Margin" Value="0,6,0,0" />
         </Style>
 
-        <!-- Метаданные трека -->
+        <!-- Track metadata -->
         <Style Selector="Grid.track-info-strip">
             <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
 
-        <!-- Контейнер технического стектрейса -->
+        <!-- Technical stack trace container -->
         <Style Selector="Border.code-log-box">
             <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightTransparentBrush}" />
@@ -82,7 +82,7 @@
             <Setter Property="Margin" Value="0,6,0,0" />
         </Style>
 
-        <!-- Стилизация нативного Expander для чистого инлайн-отображения -->
+        <!-- Native Expander styling for clean inline display -->
         <Style Selector="Expander.clean-expander">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -92,7 +92,7 @@
             <Setter Property="MinHeight" Value="0" />
         </Style>
 
-        <!-- Заголовок Expander: убираем системные рамки и паддинги -->
+        <!-- Expander header: remove system borders and paddings -->
         <Style Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -104,8 +104,8 @@
             <Setter Property="HorizontalAlignment" Value="Left" />
         </Style>
 
-        <!-- Переопределяем фон внутреннего Border#ToggleButtonBackground во всех состояниях,
-        исключая темный прямоугольник -->
+        <!-- Override inner Border#ToggleButtonBackground background in all states,
+        excluding the dark rectangle -->
         <Style
             Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader /template/ Border#ToggleButtonBackground,
                      Expander.clean-expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground,
@@ -119,7 +119,7 @@
             <Setter Property="Padding" Value="0" />
         </Style>
 
-        <!-- Скрываем второй дублирующий правый серый шеврон Fluent-шаблона -->
+        <!-- Hide the second redundant right gray chevron of the Fluent template -->
         <Style
             Selector="Expander.clean-expander /template/ ToggleButton#ExpanderHeader /template/ Border#ExpandCollapseChevronBorder">
             <Setter Property="IsVisible" Value="False" />
@@ -129,7 +129,7 @@
             <Setter Property="IsVisible" Value="False" />
         </Style>
 
-        <!-- Поворот единственного левого акцентного шеврона при раскрытии -->
+        <!-- Rotate the single left accent chevron when expanded -->
         <Style Selector="Expander.clean-expander:expanded PathIcon.expand-chevron">
             <Setter Property="RenderTransform">
                 <RotateTransform Angle="180" />
@@ -137,7 +137,7 @@
         </Style>
     </UserControl.Styles>
 
-    <!-- Стыковочный контейнер: СВЕРХУ ОСТРЫЙ (0,0), СНИЗУ СКРУГЛЕННЫЙ (8,8), БЕЗ ВЕРХНЕЙ ЛИНИИ
+    <!-- Docking container: SHARP TOP (0,0), ROUNDED BOTTOM (8,8), NO TOP BORDER
     (1,0,1,1) -->
     <Border Background="{DynamicResource BgPrimaryBrush}"
         BorderBrush="{DynamicResource BgHighlightBrush}"
@@ -150,7 +150,7 @@
 
         <Grid RowDefinitions="Auto, *">
 
-            <!-- Компактная служебная строка: иконки фильтрации (Все / Уведомления / Задачи), принудительная отправка и очистка -->
+            <!-- Compact utility bar: filter icons (All / Notifications / Tasks), forced dispatch, and clear -->
             <Grid Grid.Row="0"
                 ColumnDefinitions="Auto, *, Auto, Auto"
                 Margin="10,6,10,6">
@@ -215,14 +215,14 @@
                 </Button>
             </Grid>
 
-            <!-- Тонкий разделитель под служебной шапкой -->
+            <!-- Thin divider below the utility header -->
             <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom"
                 Background="{DynamicResource BgHighlightTransparentBrush}" />
 
-            <!-- ═══ ВЫСОКОПРОИЗВОДИТЕЛЬНЫЙ СПИСОК УВЕДОМЛЕНИЙ ═══ -->
+            <!-- ═══ HIGH-PERFORMANCE NOTIFICATION LIST ═══ -->
             <Grid Grid.Row="1">
 
-                <!-- Пустое состояние -->
+                <!-- Empty state -->
                 <StackPanel IsVisible="{Binding !HasNotifications}"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
@@ -241,10 +241,10 @@
                 </StackPanel>
 
                 <!--
-                    ListBox с аппаратной пиксельной виртуализацией:
-                    ScrollViewer.IsScrollInertiaEnabled="True" гарантирует плавный 60/120 FPS скролл.
-                    Focusable="False" отключает холостые проходы поиска фокуса.
-                    MaxHeight="450" гарантирует ограничение области прокрутки внутри Popup.
+                    ListBox with hardware pixel virtualization:
+                    ScrollViewer.IsScrollInertiaEnabled="True" guarantees smooth 60/120 FPS scrolling.
+                    Focusable="False" disables idle focus search passes.
+                    MaxHeight="450" guarantees restricting the scroll area inside the Popup.
                 -->
                 <ListBox IsVisible="{Binding HasNotifications}"
                     ItemsSource="{Binding DisplayedNotifications}"
@@ -283,8 +283,8 @@
                             <Border Classes="notification-row">
                                 <Grid ColumnDefinitions="Auto, *">
 
-                                    <!-- Лаконичный круглый индикатор серьезности с цветовой
-                                    подсветкой значка -->
+                                    <!-- Concise round severity indicator with color-coded
+                                    badge highlight -->
                                     <Border Grid.Column="0" Classes="severity-badge">
                                         <TextBlock Text="{Binding Icon}"
                                             Foreground="{Binding SeverityColorHex}"
@@ -294,10 +294,10 @@
                                             VerticalAlignment="Center" />
                                     </Border>
 
-                                    <!-- Информационное содержимое -->
+                                    <!-- Information content -->
                                     <StackPanel Grid.Column="1" Spacing="2">
 
-                                        <!-- Заголовок и относительное время на одной строке -->
+                                        <!-- Title and relative time on a single line -->
                                         <Grid ColumnDefinitions="*, Auto">
                                             <TextBlock Grid.Column="0"
                                                 Text="{Binding Title}"
@@ -316,7 +316,7 @@
                                                 Opacity="0.75" />
                                         </Grid>
 
-                                        <!-- Текст сообщения -->
+                                        <!-- Message text -->
                                         <TextBlock Text="{Binding Message}"
                                             FontSize="12"
                                             Foreground="{DynamicResource TextSecondaryBrush}"
@@ -324,7 +324,7 @@
                                             LineHeight="16"
                                             Margin="0,1,0,0" />
 
-                                        <!-- Полоса прогресса (только для задач с реальным прогрессом) и кнопка быстрого действия (Send Now / Cancel) -->
+                                        <!-- Progress bar (only for tasks with actual progress) and quick action button (Send Now / Cancel) -->
                                         <StackPanel Spacing="6"
                                             Margin="0,5,0,2"
                                             IsVisible="{Binding ShowTaskFooter}">
@@ -359,7 +359,7 @@
                                             </Button>
                                         </StackPanel>
 
-                                        <!-- Контекст трека с оригинальной кнопкой CopyLinkButton -->
+                                        <!-- Track context with original CopyLinkButton -->
                                         <Grid Classes="track-info-strip"
                                             ColumnDefinitions="Auto, *, Auto"
                                             IsVisible="{Binding TrackTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
@@ -386,7 +386,7 @@
                                                 IsVisible="{Binding TrackUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                                         </Grid>
 
-                                        <!-- Рекомендация: минималистичная цитата со штрихом -->
+                                        <!-- Recommendation: minimalist quote with stroke -->
                                         <Border Classes="recommendation-quote"
                                             IsVisible="{Binding HasRecommendation}">
                                             <Grid ColumnDefinitions="Auto, *">
@@ -406,7 +406,7 @@
                                             </Grid>
                                         </Border>
 
-                                        <!-- Инлайн-спойлер технических подробностей -->
+                                        <!-- Inline spoiler for technical details -->
                                         <Expander Classes="clean-expander"
                                             IsVisible="{Binding HasDetails}">
                                             <Expander.Header>
@@ -437,7 +437,7 @@
 
                                             <StackPanel Spacing="4" Margin="0,4,0,0">
 
-                                                <!-- Список попыток клиентов -->
+                                                <!-- Client attempts list -->
                                                 <ItemsControl ItemsSource="{Binding Attempts}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate
@@ -467,7 +467,7 @@
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
 
-                                                <!-- Трассировка исключения -->
+                                                <!-- Exception trace -->
                                                 <Border Classes="code-log-box"
                                                     IsVisible="{Binding HasExceptionDetails}">
                                                     <ScrollViewer MaxHeight="100"
@@ -482,7 +482,7 @@
                                                     </ScrollViewer>
                                                 </Border>
 
-                                                <!-- Скопировать ошибку с визуальным откликом -->
+                                                <!-- Copy error with visual feedback -->
                                                 <Button Classes="ghost-btn"
                                                     Height="24"
                                                     Padding="6,2"

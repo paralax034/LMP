@@ -1,7 +1,7 @@
 ﻿namespace LMP.Core.Models;
 
 /// <summary>
-/// Представляет состояние авторизации пользователя Google/YouTube.
+/// Represents the Google/YouTube user authorization state.
 /// </summary>
 public sealed class AuthState
 {
@@ -12,7 +12,7 @@ public sealed class AuthState
     public bool IsAuthenticated { get; set; }
 
     /// <summary>
-    /// Отображаемое имя пользователя. Автоматически возвращает локализованное имя гостя из ресурсов при отсутствии сессии.
+    /// The display name of the user. Automatically returns the localized guest name from resources if no session exists.
     /// </summary>
     public string UserName
     {
@@ -24,25 +24,25 @@ public sealed class AuthState
     public string AvatarUrl { get; set; } = "";
 
     /// <summary>
-    /// Идентификатор активного аккаунта YouTube (Gaia ID) для точечной изоляции.
+    /// The active YouTube account identifier (Gaia ID) for targeted isolation.
     /// </summary>
     public string ActiveGaiaId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Индекс сессии мульти-авторизации Google активного аккаунта.
-    /// По умолчанию пустая строка — это позволяет доверять флагу IsSelected от YouTube 
-    /// при первичном входе через расширение.
+    /// The Google multi-login session index of the active account.
+    /// Defaults to an empty string to trust the IsSelected flag from YouTube 
+    /// during initial sign-in via the extension.
     /// </summary>
     public string AuthUser { get; set; } = DefaultAuthUser;
 
     /// <summary>
-    /// Кэшированный список каналов пользователя для мгновенного оффлайн-переключения.
+    /// The cached list of user channels for instant offline switching.
     /// </summary>
     public List<YoutubeAccountItem> CachedAccounts { get; set; } = [];
 
     /// <summary>
-    /// Уникальный идентификатор текущего профиля для изоляции данных в БД.
-    /// Использует Gaia ID при наличии, иначе email, с безусловным fallback на гостя.
+    /// A unique identifier for the current profile used for DB data isolation.
+    /// Uses Gaia ID if available, otherwise email, with an unconditional fallback to guest.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string DisplayId => !string.IsNullOrEmpty(ActiveGaiaId)

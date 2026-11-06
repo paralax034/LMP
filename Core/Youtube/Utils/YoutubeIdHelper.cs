@@ -3,8 +3,8 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Высокопроизводительные утилиты для обработки идентификаторов YouTube и метаданных медиа-потоков.
-/// Минимизируют аллокации памяти в куче за счет эффективной работы со Span.
+/// High-performance utilities for processing YouTube identifiers and media stream metadata.
+/// Minimizes heap allocations through efficient work with Span.
 /// </summary>
 public static class YoutubeIdHelper
 {
@@ -21,10 +21,10 @@ public static class YoutubeIdHelper
     private const string BrowseWatchLaterId = "VLWL";
 
     /// <summary>
-    /// Быстро извлекает чистый YouTube ID без префиксов "yt_" или "yt_pl_" в виде Span без аллокаций.
+    /// Rapidly extracts a clean YouTube ID without "yt_" or "yt_pl_" prefixes as an allocation-free Span.
     /// </summary>
-    /// <param name="id">Исходный идентификатор.</param>
-    /// <returns>Очищенный сегмент символов.</returns>
+    /// <param name="id">The source identifier.</param>
+    /// <returns>The cleaned character segment.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ReadOnlySpan<char> ExtractRawIdSpan(ReadOnlySpan<char> id)
     {
@@ -37,11 +37,11 @@ public static class YoutubeIdHelper
     }
 
     /// <summary>
-    /// Извлекает чистый YouTube ID как строку. 
-    /// Если префиксы отсутствуют, возвращает исходную строку без выделения новой памяти.
+    /// Extracts a clean YouTube ID as a string.
+    /// If prefixes are absent, returns the original string without allocating new memory.
     /// </summary>
-    /// <param name="id">Исходный идентификатор.</param>
-    /// <returns>Очищенная строка идентификатора.</returns>
+    /// <param name="id">The source identifier.</param>
+    /// <returns>The cleaned identifier string.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string ExtractRawId(string id)
     {
@@ -67,11 +67,11 @@ public static class YoutubeIdHelper
     }
 
     /// <summary>
-    /// Централизованно преобразует идентификатор плейлиста в канонический browseId InnerTube API.
-    /// Корректно нормализует системные разделы (LL -> VLLL, LM -> VLLM, WL -> VLWL) и добавляет префикс VL.
+    /// Centralally converts a playlist identifier into a canonical InnerTube API browseId.
+    /// Correctly normalizes system sections (LL -> VLLL, LM -> VLLM, WL -> VLWL) and appends the VL prefix.
     /// </summary>
-    /// <param name="playlistId">Идентификатор плейлиста.</param>
-    /// <returns>Канонический идентификатор для browse-запроса.</returns>
+    /// <param name="playlistId">The playlist identifier.</param>
+    /// <returns>The canonical identifier for a browse request.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string NormalizePlaylistBrowseId(string playlistId)
     {
@@ -94,10 +94,10 @@ public static class YoutubeIdHelper
     }
 
     /// <summary>
-    /// Безопасно сопоставляет строковое представление контейнера с перечислением <see cref="AudioFormat"/>.
+    /// Safely maps the string representation of a container to the <see cref="AudioFormat"/> enumeration.
     /// </summary>
-    /// <param name="container">Имя контейнера.</param>
-    /// <returns>Соответствующий формат аудио.</returns>
+    /// <param name="container">The container name.</param>
+    /// <returns>The corresponding audio format.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static AudioFormat MapContainerToFormat(string? container)
     {

@@ -1,7 +1,7 @@
 namespace LMP.UI.Models;
 
 /// <summary>
-/// Результат диалога редактирования плейлиста.
+/// The result of the playlist editing dialog.
 /// </summary>
 public sealed class EditPlaylistResult
 {
@@ -10,28 +10,28 @@ public sealed class EditPlaylistResult
     public string? CustomColor { get; set; }
 
     /// <summary>
-    /// Описание плейлиста. null — не менялось.
+    /// Playlist description. null if unchanged.
     /// </summary>
     public string? Description { get; set; }
 
     /// <summary>
-    /// Вычисленный из обложки цвет (если был пересчитан в диалоге).
-    /// null — не пересчитывался, оставляем как есть.
+    /// Color extracted from the cover art (if recalculated in the dialog).
+    /// null — not recalculated, leave as is.
     /// </summary>
     public string? ComputedColor { get; set; }
 
     /// <summary>
-    /// Изменение синхронизации с YouTube.
-    /// null — пользователь не трогал переключатель.
-    /// true — хочет привязать к облаку.
-    /// false — хочет отвязать от облака.
+    /// YouTube sync state change.
+    /// null — user did not touch the toggle.
+    /// true — user wants to link to the cloud.
+    /// false — user wants to unlink from the cloud.
     /// </summary>
     public bool? SyncToCloud { get; set; }
 
     /// <summary>
-    /// Пользователь запросил создание локальной копии плейлиста.
-    /// При true <see cref="PlaylistEditService"/> создаёт новый локальный плейлист
-    /// вместо редактирования оригинала. Копия никогда не привязывается к YouTube.
+    /// User requested to create a local copy of the playlist.
+    /// When true, <see cref="PlaylistEditService"/> creates a new local playlist
+    /// instead of editing the original. A copy is never linked to YouTube.
     /// </summary>
     public bool ShouldCreateCopy { get; set; }
 }

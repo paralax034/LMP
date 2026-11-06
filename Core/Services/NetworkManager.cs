@@ -7,7 +7,7 @@ using LMP.Core.Audio.Http;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Централизованный сервис управления жизненным циклом сетевых клиентов и состоянием адаптеров.
+/// Centralized service for managing network client lifecycles and adapter states.
 /// </summary>
 public sealed partial class NetworkManager : IDisposable
 {
@@ -81,7 +81,7 @@ public sealed partial class NetworkManager : IDisposable
     public HttpClient ProbeClient => _probeClient;
 
     /// <summary>
-    /// Клиент для проверки и скачивания обновлений с поддержкой редиректов (GitHub Releases / S3 CDN).
+    /// Client for checking and downloading updates with redirect support (GitHub Releases / S3 CDN).
     /// </summary>
     public HttpClient UpdateClient => _updateClient;
 
@@ -105,7 +105,7 @@ public sealed partial class NetworkManager : IDisposable
     public bool IsVpnActive => Volatile.Read(ref _isVpnActive);
 
     /// <summary>
-    /// Выполняет динамическую проверку активного исходящего сетевого маршрута на принадлежность к VPN/TUN-туннелю.
+    /// Dynamically checks whether the active outbound network route belongs to a VPN/TUN tunnel.
     /// </summary>
     public bool CheckIsVpnActive()
     {
@@ -114,7 +114,7 @@ public sealed partial class NetworkManager : IDisposable
     }
 
     /// <summary>
-    /// Проверяет наличие и параметры активного прокси-сервера (явно заданного в приложении или системного прокси ОС).
+    /// Checks for the presence and parameters of an active proxy server (explicitly set in the application or OS system proxy).
     /// </summary>
     public (bool IsActive, string Host, int Port, bool IsSystemProxy) GetActiveProxyInfo()
     {
@@ -154,7 +154,7 @@ public sealed partial class NetworkManager : IDisposable
     public event Action? NetworkRebuilt;
 
     /// <summary>
-    /// Инициализирует NetworkManager с начальными параметрами сети.
+    /// Initializes NetworkManager with initial network parameters.
     /// </summary>
     public NetworkManager(ProxySettings? initialProxy = null, InternetProfile initialProfile = InternetProfile.Medium)
     {
@@ -245,9 +245,9 @@ public sealed partial class NetworkManager : IDisposable
         var customProxy = ProxyHelper.CreateWebProxy(proxy);
         bool hasExplicitProxy = customProxy is not null;
 
-        // Если задан явный прокси в LMP — используем его.
-        // Если нет — разрешаем .NET использовать системный прокси Windows (HttpClient.DefaultProxy)
-        // либо идти через текущий шлюз/TUN адаптер.
+        // If an explicit proxy is set in LMP, use it.
+        // Otherwise, allow .NET to use the Windows system proxy (HttpClient.DefaultProxy)
+        // or route through the current gateway/TUN adapter.
         var effectiveProxy = hasExplicitProxy ? customProxy : null;
 
         // 1. Audio CDN Client (HTTP/1.1, KeepAlive, DoH)
@@ -256,9 +256,9 @@ public sealed partial class NetworkManager : IDisposable
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
             Proxy = effectiveProxy,
             UseProxy = true,
-            // Отключаем клиентские таймауты.
-            // Позволяем серверу YouTube самому закрыть соединение (TCP FIN).
-            // Тогда чтение вернет 0 байт, и IOException не возникнет!
+            // Disable client-side timeouts.
+            // Allow the YouTube server to close the connection itself (TCP FIN).
+            // Then reading will return 0 bytes, preventing an IOException!
             PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
             PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             MaxConnectionsPerServer = 6,
@@ -321,7 +321,7 @@ public sealed partial class NetworkManager : IDisposable
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         };
 
-        // 4. Probe Client (HTTP/1.1, быстрые таймауты и своевременная очистка пула)
+        // 4. Probe Client (HTTP/1.1, fast timeouts, and timely pool cleanup)
         var probeHandler = new SocketsHttpHandler
         {
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
@@ -342,7 +342,7 @@ public sealed partial class NetworkManager : IDisposable
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
         };
 
-        // 5. Update Client (HTTP/1.1, автоматические редиректы для GitHub Releases и S3 CDN)
+        // 5. Update Client (HTTP/1.1, automatic redirects for GitHub Releases and S3 CDN)
         var updateHandler = new SocketsHttpHandler
         {
             ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
@@ -368,8 +368,8 @@ public sealed partial class NetworkManager : IDisposable
     }
 
     /// <summary>
-    /// Неблокирующее мягкое освобождение старых пулов. Использование Timer вместо Task.Delay
-    /// позволяет избежать лишней State Machine аллокации.
+    /// Non-blocking graceful disposal of old pools. Using a Timer instead of Task.Delay
+    /// avoids unnecessary State Machine allocations.
     /// </summary>
     private static void ScheduleDrainDisposal(params HttpClient[] oldClients)
     {
@@ -386,7 +386,7 @@ public sealed partial class NetworkManager : IDisposable
                 }
                 catch (ObjectDisposedException)
                 {
-                    /* Игнорируем штатный dispose */
+                    /* Ignore normal disposal */
                 }
                 catch (Exception ex)
                 {
@@ -501,8 +501,8 @@ public sealed partial class NetworkManager : IDisposable
 
     private static (string? OutboundIp, bool IsVpn) EvaluateOutboundRoute(bool verifySocketIp = false)
     {
-        // Fast-path на Windows: проверяем индекс лучшего интерфейса маршрутизации через iphlpapi.dll (0 B аллокаций, ~1.5 мкс).
-        // 0x08080808 = 8.8.8.8 (в network byte order и little-endian представление идентично).
+        // Fast-path on Windows: check the best routing interface index via iphlpapi.dll (0 B allocations, ~1.5 µs).
+        // 0x08080808 = 8.8.8.8 (network byte order and little-endian representations are identical).
         uint currentIfIndex = 0;
         if (OperatingSystem.IsWindows())
         {

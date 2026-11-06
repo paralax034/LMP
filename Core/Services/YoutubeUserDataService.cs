@@ -3,7 +3,7 @@
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Сервис для управления пользовательским профилем, Google-аккаунтами и брендовыми каналами на YouTube.
+/// Service for managing user profiles, Google accounts, and YouTube brand channels.
 /// </summary>
 public partial class YoutubeUserDataService
 {
@@ -11,19 +11,19 @@ public partial class YoutubeUserDataService
     private readonly TrackRegistry? _trackRegistry;
 
     /// <summary>
-    /// Инициализирует новый экземпляр службы работы с профилем пользователя.
+    /// Initializes a new instance of the user profile service.
     /// </summary>
-    /// <param name="auth">Служба управления аутентификацией и куками.</param>
+    /// <param name="auth">The authentication and cookie management service.</param>
     public YoutubeUserDataService(CookieAuthService auth)
         : this(auth, null)
     {
     }
 
     /// <summary>
-    /// Инициализирует новый экземпляр службы работы с профилем пользователя с поддержкой реестра Identity Map.
+    /// Initializes a new instance of the user profile service with Identity Map registry support.
     /// </summary>
-    /// <param name="auth">Служба управления аутентификацией и куками.</param>
-    /// <param name="trackRegistry">Реестр канонических моделей треков для обеспечения единого источника истины.</param>
+    /// <param name="auth">The authentication and cookie management service.</param>
+    /// <param name="trackRegistry">The registry of canonical track models to maintain a single source of truth.</param>
     public YoutubeUserDataService(CookieAuthService auth, TrackRegistry? trackRegistry)
     {
         _auth = auth;
@@ -33,14 +33,14 @@ public partial class YoutubeUserDataService
     #region Лайки YouTube
 
     /// <summary>
-    /// Загружает список понравившихся треков пользователя в зависимости от текущего режима синхронизации библиотеки.
+    /// Loads the user's liked tracks based on the current library synchronization mode.
     /// </summary>
     /// <remarks>
-    /// Выполняет запрос списка понравившихся треков напрямую через контекст активного клиента YouTube Music.
+    /// Requests the list of liked tracks directly via the active YouTube Music client context.
     /// </remarks>
-    /// <param name="provider">Провайдер YouTube для получения сконфигурированного клиента.</param>
-    /// <param name="mode">Режим синхронизации лайков (только музыка или все видео).</param>
-    /// <returns>Список моделей треков <see cref="TrackInfo"/>, отмеченных лайком на YouTube.</returns>
+    /// <param name="provider">The YouTube provider used to obtain a configured client.</param>
+    /// <param name="mode">The likes synchronization mode (music only or all videos).</param>
+    /// <returns>A list of <see cref="TrackInfo"/> track models liked on YouTube.</returns>
     public async Task<List<TrackInfo>> GetLikedTracksAsync(
         YoutubeProvider provider,
         LikeSyncMode mode = LikeSyncMode.MusicOnly,
@@ -114,7 +114,7 @@ public partial class YoutubeUserDataService
     }
 
     /// <summary>
-    /// Выполняет постраничную выгрузку всех понравившихся видео (плейлист "LL") до лимита в 1000 элементов.
+    /// Performs paged fetch of all liked videos ("LL" playlist) up to a 1000 item limit.
     /// </summary>
     private static async Task<List<TrackInfo>> GetAllLikedVideosAsync(
         YoutubeProvider provider,
@@ -132,8 +132,8 @@ public partial class YoutubeUserDataService
     #region Получение профилей и каналов
 
     /// <summary>
-    /// Возвращает список всех каналов (бренд-аккаунтов), привязанных к текущим кукам.
-    /// Использует данные, автоматически собранные при стартовой валидации сессии.
+    /// Returns a list of all channels (brand accounts) linked to the current cookies.
+    /// Uses data automatically gathered during initial session validation.
     /// </summary>
     public async Task<List<YoutubeAccountItem>> GetAvailableAccountsAsync()
     {
@@ -155,7 +155,7 @@ public partial class YoutubeUserDataService
     }
 
     /// <summary>
-    /// Возвращает базовые метаданные текущего авторизованного пользователя (имя, почту и аватар).
+    /// Returns basic metadata of the currently authenticated user (name, email, and avatar).
     /// </summary>
     public async Task<(string Name, string Email, string AvatarUrl, string ActiveGaiaId)> GetAccountInfoAsync()
     {

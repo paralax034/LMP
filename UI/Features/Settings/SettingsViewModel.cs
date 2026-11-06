@@ -5,8 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Features.Settings;
 
 /// <summary>
-/// Фасад страницы настроек с полностью ленивой (on-demand) инициализацией дочерних секций.
-/// Предотвращает синхронные блокировки UI-потока при первом входе в настройки.
+/// Settings page facade with fully lazy (on-demand) initialization of child sections.
+/// Prevents synchronous UI thread blocking during the initial navigation to settings.
 /// </summary>
 public sealed partial class SettingsViewModel : ViewModelBase
 {
@@ -48,7 +48,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Разрешает секционную ViewModel строго по требованию при первом переходе на вкладку.
+    /// Resolves a section ViewModel strictly on demand upon initial tab navigation.
     /// </summary>
     public T GetOrCreateSection<T>() where T : ViewModelBase
     {

@@ -6,25 +6,25 @@ using System.Runtime.Intrinsics.X86;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Пользовательский или встроенный пресет эквалайзера.
+/// Custom or built-in equalizer preset.
 /// </summary>
 public sealed class EqualizerPreset
 {
-    /// <summary>Уникальный идентификатор пресета.</summary>
+    /// <summary>Unique preset identifier.</summary>
     public string Id { get; set; } = "";
 
-    /// <summary>Отображаемое имя (для пользовательских пресетов) или ключ локализации.</summary>
+    /// <summary>Display name (for user presets) or localization key.</summary>
     public string Name { get; set; } = "";
 
-    /// <summary>Признак встроенного системного пресета (не подлежит удалению).</summary>
+    /// <summary>Indicates whether this is a built-in system preset (cannot be deleted).</summary>
     public bool IsBuiltIn { get; set; }
 
-    /// <summary>Значения усиления 10 ISO-полос в дБ [-12..+12].</summary>
+    /// <summary>Gain values for 10 ISO bands in dB [-12..+12].</summary>
     public float[] Bands { get; set; } = new float[EqualizerProcessor.BandCount];
 }
 
 /// <summary>
-/// Каталог встроенных музыкальных пресетов и преобразователь 5 макро-полос в 10 ISO-полос.
+/// Built-in music preset catalog and converter from 5 macro bands to 10 ISO bands.
 /// </summary>
 public static class EqualizerPresets
 {
@@ -43,8 +43,8 @@ public static class EqualizerPresets
     public const string AcousticId = "acoustic_jazz";
     public const string CustomId = "custom";
 
-    // Выровненные студийные кривые без рези на 4–8 кГц (мягкий верх, чистая середина 250–500 Гц)
-    // Полосы:                        31     62    125    250    500     1k     2k     4k     8k    16k
+    // Aligned studio curves with no harshness at 4–8 kHz (smooth top end, clean midrange 250–500 Hz)
+    // Bands:                        31     62    125    250    500     1k     2k     4k     8k    16k
     private static readonly float[] FlatBands = [0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f];
     private static readonly float[] WarmBands = [2.5f, 3.0f, 2.0f, 0.5f, -0.5f, 0.0f, -0.5f, -1.5f, -2.0f, -1.0f];
     private static readonly float[] BassBoostBands = [4.5f, 5.0f, 2.5f, -1.0f, -1.0f, 0.0f, 0.5f, 0.5f, 0.0f, 0.5f];
@@ -79,7 +79,7 @@ public static class EqualizerPresets
     public static ReadOnlySpan<string> BuiltInIds => BuiltInIdsArray;
 
     /// <summary>
-    /// Возвращает 10 полос встроенного пресета без аллокаций.
+    /// Returns 10 bands of a built-in preset without allocations.
     /// </summary>
     public static ReadOnlySpan<float> GetPresetBands(string? presetId) => presetId switch
     {
@@ -99,7 +99,7 @@ public static class EqualizerPresets
     };
 
     /// <summary>
-    /// Возвращает ключ локализации для встроенного пресета.
+    /// Returns the localization key for a built-in preset.
     /// </summary>
     public static string GetLocalizationKey(string presetId) => presetId switch
     {
@@ -121,7 +121,7 @@ public static class EqualizerPresets
     };
 
     /// <summary>
-    /// Преобразует 5 психоакустических макро-полос (Bass, Warmth, Vocals, Clarity, Air) в 10 канонических ISO-полос.
+    /// Converts 5 psychoacoustic macro bands (Bass, Warmth, Vocals, Clarity, Air) into 10 canonical ISO bands.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void MapMacro5ToIso10(ReadOnlySpan<float> macro5, Span<float> iso10)
@@ -147,7 +147,7 @@ public static class EqualizerPresets
     }
 
     /// <summary>
-    /// Извлекает 5 макро-полос из 10 ISO-полос для отображения в упрощённом режиме UI.
+    /// Extracts 5 macro bands from 10 ISO bands for simplified UI mode display.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void MapIso10ToMacro5(ReadOnlySpan<float> iso10, Span<float> macro5)
@@ -162,7 +162,7 @@ public static class EqualizerPresets
     }
 
     /// <summary>
-    /// Разрешает эффективные 10 полос эквалайзера с учётом приоритета:
+    /// Resolves effective 10 equalizer bands based on priority:
     /// <c>ForceGlobalEqualizer</c> -> <c>TrackInfo.EqualizerPresetId</c> -> <c>GlobalEqualizerPresetId</c>.
     /// </summary>
     public static string ResolveEffectiveBands(
@@ -219,7 +219,7 @@ public static class EqualizerPresets
 }
 
 /// <summary>
-/// Высокопроизводительный 10-полосный параметрический/графический эквалайзер реального времени.
+/// High-performance real-time 10-band parametric/graphic equalizer.
 /// </summary>
 public sealed class EqualizerProcessor
 {
@@ -227,16 +227,16 @@ public sealed class EqualizerProcessor
     public const float MinGainDb = -12.0f;
     public const float MaxGainDb = 12.0f;
 
-    /// <summary>Длительность активного окна сглаживания в стерео-фреймах (1440 фреймов = 30 мс при 48 кГц).</summary>
+    /// <summary>Duration of the active smoothing window in stereo frames (1440 frames = 30 ms at 48 kHz).</summary>
     private const int RampTotalFrames = 1440;
 
     /// <summary>
-    /// Коэффициент посэмплового однополюсного фильтра нижних частот (Per-Sample 1-Pole Low-Pass Smoother):
-    /// alpha = 0.0042f (постоянная времени tau ~ 5 мс, за 1440 сэмплов сходится на 99.8%, 0 ступенек квантования на ВЧ!).
+    /// Coefficient of the per-sample 1-pole low-pass filter (Per-Sample 1-Pole Low-Pass Smoother):
+    /// alpha = 0.0042f (time constant tau ~ 5 ms, converges to 99.8% in 1440 samples, 0 quantization steps on HF!).
     /// </summary>
     private const float SampleSmoothAlpha = 0.0042f;
 
-    /// <summary>Стандартные центральные частоты 10 ISO-октавных полос (Гц).</summary>
+    /// <summary>Standard center frequencies of 10 ISO octave bands (Hz).</summary>
     public static ReadOnlySpan<float> BandFrequenciesHz =>
         [31.25f, 62.5f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f];
 
@@ -253,7 +253,7 @@ public sealed class EqualizerProcessor
         public float PadM;
 
         /// <summary>
-        /// Посэмпловый шаг однополюсного НЧ-фильтра сглаживания коэффициентов (1-pole LPF без ВЧ-ступенек подблоков).
+        /// Per-sample step of the 1-pole LPF coefficient smoother (1-pole LPF without sub-block HF stepping).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SmoothStepTowards(in SvfCoefficientsF target, float alpha)
@@ -295,7 +295,7 @@ public sealed class EqualizerProcessor
         public double Ic2EqR;
 
         /// <summary>
-        /// Обрабатывает стереопару без вызовов <see cref="Math.FusedMultiplyAdd"/> (используется для нестандартного числа каналов).
+        /// Processes a stereo pair without <see cref="Math.FusedMultiplyAdd"/> calls (used for non-standard channel counts).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void ProcessStereoScalar(ref double left, ref double right, in SvfCoefficientsF c)
@@ -355,14 +355,14 @@ public sealed class EqualizerProcessor
     private readonly int _channels;
     private readonly Lock _configureLock = new();
 
-    // Поля SeqLock для lock-free публикации из UI-потока в AudioCallback
+    // SeqLock fields for lock-free publishing from the UI thread to AudioCallback
     private long _publishedVersion;
     private BandSvfCoeffArray _publishedCoeffs;
     private float _publishedPreampGain = 1.0f;
     private bool _publishedBypass = true;
     private bool _publishedHasPositiveBoost;
 
-    // Локальное состояние потока AudioCallback (single writer / single reader)
+    // Local thread state of AudioCallback (single writer / single reader)
     private long _localVersion;
     private BandSvfCoeffArray _unityCoeffs;
     private BandSvfCoeffArray _currentCoeffs;
@@ -404,8 +404,8 @@ public sealed class EqualizerProcessor
         };
 
     /// <summary>
-    /// Вычисляет коэффициенты Cytomic SVF с фиксированной центральной частотой g.
-    /// При 0 dB гарантирует M0 = 1, M1 = 0, M2 = 0 (выход равен входу независимо от состояния интеграторов).
+    /// Calculates Cytomic SVF coefficients with a fixed center frequency g.
+    /// At 0 dB guarantees M0 = 1, M1 = 0, M2 = 0 (output equals input regardless of integrator state).
     /// </summary>
     private static SvfCoefficientsF ComputeSvfBandCoefficients(int sampleRate, float freqHz, int bandIndex, float gainDb)
     {
@@ -648,8 +648,8 @@ public sealed class EqualizerProcessor
     }
 
     /// <summary>
-    /// Диспетчеризует стерео-обработку по пути стационарных коэффициентов (99.9% времени)
-    /// и пути плавной перестройки параметров (30 мс окно при движении ползунков).
+    /// Dispatches stereo processing to the stationary coefficient path (99.9% of time)
+    /// and smooth parameter transition path (30 ms window during slider movement).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void ProcessStereoInternal(float* pSamples, int totalFrames, Span<float> samplesSpan)
@@ -695,10 +695,10 @@ public sealed class EqualizerProcessor
     }
 
     /// <summary>
-    /// Горячее ядро эквалайзера (FMA3 + SSE2, Band-Major):
-    /// держит состояния <c>ic1</c>, <c>ic2</c> и 6 коэффициентов в 8 регистрах XMM,
-    /// обрабатывает L и R каналы одновременно в <see cref="Vector128{Double}"/>
-    /// (≤ 12 регистров XMM, 0 <c>call</c>, 0 обращений к стеку <c>[rsp + disp]</c> внутри цикла).
+    /// Equalizer hot kernel (FMA3 + SSE2, Band-Major):
+    /// keeps <c>ic1</c>, <c>ic2</c> states and 6 coefficients in 8 XMM registers,
+    /// processes L and R channels simultaneously in <see cref="Vector128{Double}"/>
+    /// (≤ 12 XMM registers, 0 <c>call</c>s, 0 stack accesses <c>[rsp + disp]</c> inside loop).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe void ProcessStereoSteadyFma(float* pSamples, int totalFrames)
@@ -751,9 +751,9 @@ public sealed class EqualizerProcessor
     }
 
     /// <summary>
-    /// Горячее ядро эквалайзера для процессоров без AVX2/FMA3 (базовый SSE2, Pentium/Celeron):
-    /// использует упакованный <see cref="Vector128{Double}"/> (<c>mulpd</c> + <c>addpd</c>)
-    /// без единого вызова <c>call fma</c> и без проливов регистров на стек.
+    /// Equalizer hot kernel for CPUs without AVX2/FMA3 (baseline SSE2, Pentium/Celeron):
+    /// uses packed <see cref="Vector128{Double}"/> (<c>mulpd</c> + <c>addpd</c>)
+    /// without a single <c>call fma</c> and without register spills to stack.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe void ProcessStereoSteadySse2(float* pSamples, int totalFrames)
@@ -855,8 +855,8 @@ public sealed class EqualizerProcessor
     }
 
     /// <summary>
-    /// Каскадная обработка 30-мс окна плавной перестройки коэффициентов (FMA3 + SSE2, Band-Major):
-    /// изоморфна посэмпловому сглаживанию, удерживает коэффициенты и состояния в 14 регистрах XMM без <c>call</c> и без стека.
+    /// Cascaded processing of the 30-ms smooth coefficient transition window (FMA3 + SSE2, Band-Major):
+    /// isomorphic to per-sample smoothing, keeps coefficients and states in 14 XMM registers without <c>call</c>s or stack usage.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe void ProcessStereoRampFma(float* pSamples, int rampFrames)

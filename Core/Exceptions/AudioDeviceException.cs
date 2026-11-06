@@ -1,7 +1,7 @@
 namespace LMP.Core.Exceptions;
 
 /// <summary>
-/// Бросается когда аудиоустройство вывода недоступно.
+/// Thrown when the audio output device is unavailable.
 /// </summary>
 public sealed class AudioDeviceException : Exception
 {

@@ -9,7 +9,7 @@ namespace LMP.Core.Data;
 public static class DatabaseExtensions
 {
     /// <summary>
-    /// Текущая версия схемы базы данных.
+    /// Current version of the database schema.
     /// </summary>
     public const int CurrentDbVersion = 6;
 
@@ -19,11 +19,11 @@ public static class DatabaseExtensions
     private const int SqliteNotADb = 26;
 
     /// <summary>
-    /// Идемпотентный DDL-пакет таблиц схемы без индексов.
+    /// Idempotent DDL script for schema tables without indexes.
     /// </summary>
     /// <remarks>
-    /// Отделён от <see cref="IndexesDdl"/>: в унаследованных базах часть колонок (например, <c>OwnerId</c>)
-    /// появляется только после <see cref="MigrateSchemaAsync"/>, поэтому индексы по ним строятся после миграции колонок.
+    /// Separated from <see cref="IndexesDdl"/>: in legacy databases, some columns (e.g., <c>OwnerId</c>)
+    /// appear only after <see cref="MigrateSchemaAsync"/>, so their indexes are built after column migrations.
     /// </remarks>
     private const string TablesDdl = """
         CREATE TABLE IF NOT EXISTS "Notifications" (
@@ -130,7 +130,7 @@ public static class DatabaseExtensions
         """;
 
     /// <summary>
-    /// Идемпотентный DDL-пакет индексов схемы; выполняется только после появления всех индексируемых колонок.
+    /// Idempotent DDL script for schema indexes; executes only after all indexed columns are present.
     /// </summary>
     private const string IndexesDdl = """
         CREATE INDEX IF NOT EXISTS "IX_CloudMutationOutbox_OwnerId_UpdatedAtTicks" ON "CloudMutationOutbox" ("OwnerId", "UpdatedAtTicks");
@@ -208,14 +208,14 @@ public static class DatabaseExtensions
     }
 
     /// <summary>
-    /// Создает транзакционно согласованную копию базы через <c>VACUUM INTO</c> с учетом страниц, находящихся в <c>-wal</c>.
+    /// Creates a transactionally consistent copy of the database via <c>VACUUM INTO</c>, including pages in <c>-wal</c>.
     /// </summary>
-    /// <param name="dbPath">Путь к исходному файлу базы данных.</param>
-    /// <param name="backupPath">Путь к итоговому файлу резервной копии; существующий файл атомарно заменяется.</param>
+    /// <param name="dbPath">Path to the source database file.</param>
+    /// <param name="backupPath">Path to the target backup file; an existing file is atomically replaced.</param>
     /// <remarks>
-    /// В отличие от <c>File.Copy</c>, не теряет транзакции из журнала WAL и не читает файл посреди checkpoint.
-    /// <c>VACUUM INTO</c> требует отсутствующего целевого файла, поэтому копия пишется во временный файл
-    /// и переименовывается только после успеха: прерванный бэкап не затирает предыдущий.
+    /// Unlike <c>File.Copy</c>, this does not lose transactions from the WAL log and does not read the file mid-checkpoint.
+    /// <c>VACUUM INTO</c> requires the target file to be absent, so the copy is written to a temporary file
+    /// and renamed only upon success: an interrupted backup will not overwrite the previous one.
     /// </remarks>
     public static void CreateConsistentBackup(string dbPath, string backupPath)
     {

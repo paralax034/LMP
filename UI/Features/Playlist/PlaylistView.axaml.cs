@@ -9,5 +9,5 @@ public partial class PlaylistView : UserControl
         InitializeComponent();
     }
     
-    // Code-behind очищен!
+    // Code-behind cleaned up!
 }

@@ -52,8 +52,8 @@ internal class SearchController(HttpClient http)
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
 
-        // Поисковый запрос явно объявляет системный язык пользователя в заголовках,
-        // предотвращая навязывание словарей опечаток сторонних регионов.
+        // The search query explicitly declares the user's system language in the headers,
+        // preventing third-party region typo dictionaries from being forced.
         var userHl = YoutubeHttpHandler.GetHl();
         var userGl = YoutubeHttpHandler.GetGl();
         request.Headers.AcceptLanguage.Clear();
@@ -92,8 +92,8 @@ internal class SearchController(HttpClient http)
                 writer.WriteString(InnerTubeTokens.ClientVersion, YoutubeHttpHandler.WebClientVersion);
             }
 
-            // Поисковый запрос должен учитывать локаль и регион пользователя системы,
-            // иначе англоязычный спеллчекер США искажает специфичные имена и никнеймы артистов.
+            // The search query must account for the system user's locale and region,
+            // otherwise the US English spellchecker distorts specific artist names and nicknames.
             writer.WriteString(InnerTubeTokens.Hl, YoutubeHttpHandler.GetHl());
             writer.WriteString(InnerTubeTokens.Gl, YoutubeHttpHandler.GetGl());
 

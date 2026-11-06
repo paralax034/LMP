@@ -39,8 +39,8 @@ namespace Avalonia.Layout
             AvaloniaProperty.Register<StackLayout, double>(nameof(EstimatedItemSize), 0.0);
 
         /// <summary>
-        /// Ожидаемый размер элемента вдоль оси прокрутки. 
-        /// При значении больше нуля полностью исключает холостой замер элемента 0 на старте.
+        /// Expected item size along the scroll axis.
+        /// A value greater than zero completely eliminates dummy measurement of item 0 on startup.
         /// </summary>
         public double EstimatedItemSize
         {

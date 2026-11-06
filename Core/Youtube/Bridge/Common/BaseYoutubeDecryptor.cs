@@ -3,46 +3,46 @@ using System.Collections.Concurrent;
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Абсолютный базовый класс для дешифраторов YouTube, реализующий общую логику 
-/// двухуровневого кэширования и защиты от повторной дешифрации (Idempotency).
+/// Absolute base class for YouTube decryptors implementing shared two-tier 
+/// caching logic and idempotency protection against re-decryption.
 /// </summary>
 public abstract class BaseYoutubeDecryptor : IYoutubeDecryptor, IDisposable
 {
     private bool _disposed;
 
     /// <summary>
-    /// Persistent QuickJS управляющий сервис.
+    /// Persistent QuickJS control service.
     /// </summary>
     protected readonly JsDecryptionService JsService;
 
     /// <summary>
-    /// Кэш дешифрованных значений (string -> string) на диске и в памяти.
+    /// Cache of decrypted values (string -> string) on disk and in memory.
     /// </summary>
     protected readonly DecryptorCache Cache;
 
     /// <summary>
-    /// Локальный кэш сессии для предотвращения повторной обработки уже расшифрованных токенов.
+    /// Local session cache to prevent re-processing of already decrypted tokens.
     /// </summary>
     protected readonly ConcurrentDictionary<string, byte> DecryptedTokens = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Менеджер контекста плеера.
+    /// Player context manager.
     /// </summary>
     public PlayerContextManager PlayerManager => JsService.PlayerManager;
 
     /// <summary>
-    /// Указывает, инициализирован ли внутренний нативный контекст QuickJS.
+    /// Indicates whether the internal native QuickJS context is initialized.
     /// </summary>
     public bool IsInitialized => JsService.IsInitialized;
 
     /// <summary>
-    /// Гарантирует фоновую инициализацию нативного контекста QuickJS (из кэша байткода или через AST-препроцессинг).
+    /// Ensures background initialization of the native QuickJS context (from bytecode cache or via AST preprocessing).
     /// </summary>
     public ValueTask EnsureInitializedAsync(CancellationToken ct = default) =>
         JsService.EnsureInitializedAsync(ct);
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="BaseYoutubeDecryptor"/>.
+    /// Initializes a new instance of the <see cref="BaseYoutubeDecryptor"/> class.
     /// </summary>
     protected BaseYoutubeDecryptor(JsDecryptionService jsService, string cacheFilePath, int maxMemory, int maxDisk)
     {
@@ -68,7 +68,7 @@ public abstract class BaseYoutubeDecryptor : IYoutubeDecryptor, IDisposable
     }
 
     /// <summary>
-    /// Освобождает неуправляемые (и управляемые) ресурсы.
+    /// Releases unmanaged (and managed) resources.
     /// </summary>
     protected virtual void Dispose(bool disposing)
     {
@@ -83,7 +83,7 @@ public abstract class BaseYoutubeDecryptor : IYoutubeDecryptor, IDisposable
             }
             catch
             {
-                // Подавление ошибок при закрытии пулов приложения
+                // Suppress errors during application pool teardown
             }
         }
 

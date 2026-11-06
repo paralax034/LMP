@@ -5,9 +5,9 @@ using SkiaSharp;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Извлекает доминантный цвет из обложек для градиентных фонов.
-/// Алгоритм: загрузить → resize 50x50 → фильтрация по L → вес по S → усреднение.
-/// Поддерживает HTTP/HTTPS URL и локальные файлы.
+/// Extracts the dominant color from cover art for gradient backgrounds.
+/// Algorithm: load → resize 50x50 → filter by L → weight by S → average.
+/// Supports HTTP/HTTPS URLs and local files.
 /// </summary>
 public sealed class DominantColorService
 {
@@ -28,9 +28,9 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Получает доминантный цвет из изображения.
-    /// Кэшируется в памяти по URL.
-    /// Поддерживает HTTP/HTTPS URL и локальные файлы.
+    /// Gets the dominant color from an image.
+    /// Cached in memory by URL.
+    /// Supports HTTP/HTTPS URLs and local files.
     /// </summary>
     public async Task<Color?> GetDominantColorAsync(string? imageUrl, CancellationToken ct = default)
     {
@@ -67,8 +67,8 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Загружает изображение и извлекает доминантный цвет без промежуточного декодирования в Avalonia.Bitmap.
-    /// Использует единый FNV-1a дисковый кэш с <see cref="ImageCacheService"/>.
+    /// Loads an image and extracts the dominant color without intermediate decoding into Avalonia.Bitmap.
+    /// Uses a unified FNV-1a disk cache with <see cref="ImageCacheService"/>.
     /// </summary>
     private async Task<Color?> ExtractColorAsync(string imageUrl, CancellationToken ct)
     {
@@ -91,7 +91,7 @@ public sealed class DominantColorService
         }
         else
         {
-            // Используем единый FNV-1a путь дискового кэша ImageCacheService (0 лишних сетевых скачиваний и 0 аллокаций Avalonia.Bitmap)
+            // Use the unified FNV-1a disk cache path from ImageCacheService (zero redundant network downloads and zero Avalonia.Bitmap allocations)
             var diskPath = ImageCacheService.GetDiskCachePath(imageUrl);
 
             if (!File.Exists(diskPath))
@@ -134,7 +134,7 @@ public sealed class DominantColorService
                 return null;
             }
 
-            // Аппаратный sub-sampling при декодировании JPEG/WebP сразу в минимальный размер (экономия нативного буфера)
+            // Hardware sub-sampling when decoding JPEG/WebP directly into the minimum size (saves native buffer allocations)
             var desiredScale = (float)SampleSize / Math.Max(1, Math.Max(codec.Info.Width, codec.Info.Height));
             var scaledSize = codec.GetScaledDimensions(desiredScale);
             var decodeInfo = new SKImageInfo(
@@ -160,7 +160,7 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Проверяет, является ли URL локальным путём.
+    /// Checks whether the URL is a local path.
     /// </summary>
     private static bool IsLocalPath(string url)
     {
@@ -170,7 +170,7 @@ public sealed class DominantColorService
         if (url.StartsWith(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // Абсолютный путь Windows (C:\...) или Unix (/home/...)
+        // Absolute Windows path (C:\...) or Unix path (/home/...)
         if (Path.IsPathRooted(url))
             return true;
 
@@ -178,7 +178,7 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Преобразует file:// URI или абсолютный путь в локальный путь.
+    /// Converts a file:// URI or absolute path into a local file path.
     /// </summary>
     private static string? ResolveLocalPath(string url)
     {
@@ -196,7 +196,7 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Анализ пикселей через прямой доступ к буферу (без аллокации массива SKColor[] в куче через bitmap.Pixels).
+    /// Analyzes pixels via direct buffer access (without allocating an SKColor[] array on the heap via bitmap.Pixels).
     /// </summary>
     private static unsafe Color AnalyzePixels(SKBitmap bitmap)
     {
@@ -234,7 +234,7 @@ public sealed class DominantColorService
             if (l < MinLuminance || l > MaxLuminance)
                 continue;
 
-            // Вес = насыщенность. Ненасыщенные серые имеют малый вклад
+            // Weight = saturation. Desaturated grays have low weight
             float weight = s < MinSaturation ? s * 0.1f : s;
 
             totalR += r * weight;
@@ -245,7 +245,7 @@ public sealed class DominantColorService
 
         if (totalWeight < 0.001)
         {
-            // Все пиксели отфильтрованы — вернём средний серый-тёмный
+            // All pixels were filtered out — return medium dark gray
             return Color.FromRgb(60, 60, 80);
         }
 
@@ -282,7 +282,7 @@ public sealed class DominantColorService
     }
 
     /// <summary>
-    /// Создаёт 3-stop градиент для header фона.
+    /// Creates a 3-stop gradient for the header background.
     /// </summary>
     public static LinearGradientBrush CreateHeaderGradient(Color dominant)
     {

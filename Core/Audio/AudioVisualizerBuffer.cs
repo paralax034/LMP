@@ -3,11 +3,11 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Потокобезопасный буфер для синхронизации мгновенных уровней сигнала (3 макро-полосы + 10 ISO-полос) между аудио-потоком и UI.
+/// Thread-safe buffer for synchronizing instantaneous signal levels (3 macro bands + 10 ISO bands) between the audio stream and the UI.
 /// </summary>
 /// <remarks>
-/// Каждое чтение уровней продлевает аренду читателя на <see cref="ReaderLeaseMs"/> мс. Аудио-поток проверяет её через
-/// <see cref="HasActiveReaders"/> и не тратит время рендера на анализ спектра, пока визуализацию никто не опрашивает.
+/// Each level read extends the reader lease by <see cref="ReaderLeaseMs"/> ms. The audio stream checks it via
+/// <see cref="HasActiveReaders"/> and skips render-time spectrum analysis when visualization is not being polled.
 /// </remarks>
 public static class AudioVisualizerBuffer
 {
@@ -18,15 +18,15 @@ public static class AudioVisualizerBuffer
     }
 
     /// <summary>
-    /// Порог устаревания данных спектра (45 мс в тиках Stopwatch).
-    /// Если WASAPI стоит на паузе или ждёт сеть при Seek, чтение мгновенно возвращает 0f,
-    /// позволяя UI плавно затухнуть без гонок между потоками.
+    /// Spectrum data staleness threshold (45 ms in Stopwatch ticks).
+    /// If WASAPI is paused or awaiting network during Seek, reading instantly returns 0f,
+    /// allowing the UI to decay smoothly without race conditions between threads.
     /// </summary>
     private static readonly long StaleThresholdTicks = System.Diagnostics.Stopwatch.Frequency * 45 / 1000;
 
     /// <summary>
-    /// Длительность аренды читателя в миллисекундах: вдвое больше холостого опроса (250 мс) в <c>EqualizerCurveControl</c>,
-    /// поэтому пропуск одного тика UI не выключает анализ.
+    /// Reader lease duration in milliseconds: double the idle polling interval (250 ms) in <c>EqualizerCurveControl</c>,
+    /// ensuring a single missed UI tick does not disable analysis.
     /// </summary>
     internal const int ReaderLeaseMs = 500;
 
@@ -53,14 +53,14 @@ public static class AudioVisualizerBuffer
     }
 
     /// <summary>
-    /// Возвращает true, если за последние 45 мс поступали свежие аудио-фреймы от активного потока воспроизведения.
-    /// Продлевает аренду читателя, поэтому холостой опрос UI сам возобновляет анализ спектра без взаимной блокировки.
+    /// Returns true if fresh audio frames were received from an active playback stream within the last 45 ms.
+    /// Extends the reader lease, so UI idle polling automatically resumes spectrum analysis without deadlocks.
     /// </summary>
     public static bool HasRecentActivity => IsActive();
 
     /// <summary>
-    /// Возвращает true, если уровни кто-либо читал за последние <see cref="ReaderLeaseMs"/> мс.
-    /// Предназначено для аудио-потока и само аренду не продлевает.
+    /// Returns true if levels were read by anyone within the last <see cref="ReaderLeaseMs"/> ms.
+    /// Intended for the audio stream and does not extend the lease itself.
     /// </summary>
     public static bool HasActiveReaders
     {
@@ -78,7 +78,7 @@ public static class AudioVisualizerBuffer
     public static float BeatPulse => IsActive() ? Volatile.Read(ref _beatPulse) : 0f;
     public static float OverallLevel => IsActive() ? Volatile.Read(ref _overallLevel) : 0f;
 
-    /// <summary>Индекс доминирующей ISO-полосы [0..9]; чтение продлевает аренду читателя.</summary>
+    /// <summary>Index of the dominant ISO band [0..9]; reading extends the reader lease.</summary>
     public static int DominantBandIndex
     {
         get
@@ -89,8 +89,8 @@ public static class AudioVisualizerBuffer
     }
 
     /// <summary>
-    /// Читает текущие уровни 10 ISO-полос [0..1] в переданный Span без аллокаций.
-    /// Автоматически обнуляет полосы, если поток воспроизведения стоит на паузе или в Seek.
+    /// Reads current levels of 10 ISO bands [0..1] into the provided Span with zero allocations.
+    /// Automatically zeroes out the bands if the playback stream is paused or seeking.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void CopyBands10(Span<float> destination)

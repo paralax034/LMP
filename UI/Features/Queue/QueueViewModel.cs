@@ -3,8 +3,8 @@ using Avalonia.Threading;
 namespace LMP.UI.Features.Queue;
 
 /// <summary>
-/// ViewModel экрана текущей очереди воспроизведения.
-/// Синхронизирует состав очереди с <see cref="AudioEngine"/> и активное состояние треков с <see cref="PlayerControlService"/>.
+/// ViewModel for the current playback queue screen.
+/// Synchronizes the queue contents with <see cref="AudioEngine"/> and active track state with <see cref="PlayerControlService"/>.
 /// </summary>
 public sealed partial class QueueViewModel : TrackListBaseViewModel
 {
@@ -27,7 +27,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     public IAsyncRelayCommand SaveQueueToPlaylistCommand { get; }
 
     /// <summary>
-    /// Инициализирует новый экземпляр <see cref="QueueViewModel"/>.
+    /// Initializes a new instance of the <see cref="QueueViewModel"/> class.
     /// </summary>
     public QueueViewModel(
         AudioEngine audio,
@@ -152,7 +152,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     }
 
     /// <summary>
-    /// Сохраняет текущую воспроизводимую очередь в новый плейлист с опциональной привязкой к YouTube Music.
+    /// Saves the current playback queue to a new playlist with optional binding to YouTube Music.
     /// </summary>
     private async Task SaveQueueToPlaylistAsync()
     {

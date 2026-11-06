@@ -13,13 +13,13 @@ internal partial class PlayerResponse
     public string? PlayabilityError { get; init; }
 
     /// <summary>
-    /// Требуется ли авторизация для просмотра (LOGIN_REQUIRED).
+    /// Indicates whether authorization is required for viewing (LOGIN_REQUIRED).
     /// </summary>
     public bool IsLoginRequired =>
         string.Equals(PlayabilityStatus, "LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Причина требования авторизации.
+    /// Reason for requiring authorization.
     /// </summary>
     public LoginRequiredReason LoginRequiredReason { get; init; } = LoginRequiredReason.Unknown;
     public string? Category { get; init; }
@@ -42,8 +42,8 @@ internal partial class PlayerResponse
     public IReadOnlyList<ClosedCaptionTrackData> ClosedCaptionTracks { get; init; } = [];
 
     /// <summary>
-    /// Integrated loudness трека в LUFS из <c>playerConfig.audioConfig.perceptualLoudnessDb</c>.
-    /// <c>float.NaN</c> если поле отсутствует.
+    /// Integrated loudness of the track in LUFS from <c>playerConfig.audioConfig.perceptualLoudnessDb</c>.
+    /// <c>float.NaN</c> if the field is missing.
     /// </summary>
     public float PerceptualLoudnessDb { get; init; } = float.NaN;
 
@@ -57,7 +57,7 @@ internal partial class PlayerResponse
         {
             var reason = PlayabilityError ?? "";
 
-            // 1. Bot detection (InnerTube возвращает детерминированную английскую ошибку при InvariantHl)
+            // 1. Bot detection (InnerTube returns a deterministic English error when using InvariantHl)
             if (reason.Contains("bot", StringComparison.OrdinalIgnoreCase))
             {
                 LoginRequiredReason = LoginRequiredReason.BotDetection;
@@ -237,8 +237,8 @@ internal partial class PlayerResponse
     }
 
     /// <summary>
-    /// Декодирует YouTube-специфичную base64-строку PlayerResponse и извлекает video_id.
-    /// YouTube использует URL-safe base64 (- вместо +, _ вместо /).
+    /// Decodes a YouTube-specific base64 string from PlayerResponse and extracts the video_id.
+    /// YouTube uses URL-safe base64 (- instead of +, _ instead of /).
     /// </summary>
     private static string? DecodePreviewVideoId(string encoded)
     {
@@ -283,9 +283,9 @@ internal partial class PlayerResponse
 internal partial class PlayerResponse
 {
     /// <summary>
-    /// Представляет данные одного медиапотока из InnerTube PlayerResponse.
-    /// Поддерживает как прямые URL (ANDROID_VR, авторизованный WEB_REMIX),
-    /// так и зашифрованные через <c>signatureCipher</c> (WEB_REMIX без авторизации, WEB).
+    /// Represents single media stream data from an InnerTube PlayerResponse.
+    /// Supports both direct URLs (ANDROID_VR, authorized WEB_REMIX)
+    /// and encrypted ones via <c>signatureCipher</c> (unauthorized WEB_REMIX, WEB).
     /// </summary>
     public sealed class StreamData : IStreamData
     {
@@ -298,7 +298,7 @@ internal partial class PlayerResponse
         public string? MimeType { get; init; }
         public string? Container { get; init; }
 
-        /// <summary>Все кодеки из MIME-типа.</summary>
+        /// <summary>All codecs from the MIME type.</summary>
         public string? Codecs { get; init; }
         public string? AudioCodec { get; init; }
         public int AudioChannels { get; init; } = 2;
@@ -311,8 +311,8 @@ internal partial class PlayerResponse
         public int? VideoHeight { get; init; }
         public int? VideoFramerate { get; init; }
 
-        /// <summary>Создаёт экземпляр данных потока из JSON-элемента PlayerResponse.</summary>
-        /// <param name="content">JSON-элемент одного формата из <c>formats</c> / <c>adaptiveFormats</c>.</param>
+        /// <summary>Creates a stream data instance from a PlayerResponse JSON element.</summary>
+        /// <param name="content">JSON element of a single format from <c>formats</c> / <c>adaptiveFormats</c>.</param>
         public StreamData(JsonElement content)
         {
             Itag = content.GetPropertyOrNull(InnerTubeTokens.Itag)?.GetInt32OrNull();
@@ -488,7 +488,7 @@ internal partial class PlayerResponse
 internal partial class PlayerResponse
 {
     /// <summary>
-    /// Парсит ответ PlayerResponse из сырого текста с мгновенным освобождением <see cref="JsonDocument"/>.
+    /// Parses the PlayerResponse payload from raw text with immediate disposal of <see cref="JsonDocument"/>.
     /// </summary>
     public static PlayerResponse Parse(string raw)
     {
@@ -497,12 +497,12 @@ internal partial class PlayerResponse
     }
 
     /// <summary>
-    /// Парсит ответ PlayerResponse напрямую из сетевого потока без промежуточных строк в LOH.
-    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// Parses the PlayerResponse payload directly from a network stream without intermediate strings in the LOH.
+    /// Disposes of <see cref="JsonDocument"/> immediately after model construction.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Экземпляр плоского ответа PlayerResponse.</returns>
+    /// <param name="stream">HTTP response network stream.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>An instance of the flat PlayerResponse.</returns>
     public static async ValueTask<PlayerResponse> ParseAsync(Stream stream, CancellationToken ct = default)
     {
         using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);

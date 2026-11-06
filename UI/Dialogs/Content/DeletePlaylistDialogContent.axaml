@@ -35,7 +35,7 @@
 
         <StackPanel Spacing="20">
 
-            <!-- Заголовок с иконкой -->
+            <!-- Header with icon -->
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Background="{DynamicResource SystemErrorBgBrush}"
                     CornerRadius="20" Width="40" Height="40">
@@ -55,16 +55,16 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- Описание -->
+            <!-- Description -->
             <TextBlock Text="{Binding L[Delete_Description]}"
                 TextWrapping="Wrap"
                 Foreground="{DynamicResource TextSecondaryBrush}"
                 FontSize="13" />
 
-            <!-- Опции удаления -->
+            <!-- Deletion options -->
             <StackPanel Spacing="8">
                 <Border Classes="option-card">
-                    <!-- Опция: только локально -->
+                    <!-- Option: local only -->
                     <RadioButton IsChecked="{Binding IsLocalOnly}" GroupName="DeleteMode">
                         <StackPanel Orientation="Horizontal" Spacing="12" Margin="8,0,0,0">
                             <PathIcon Data="{StaticResource Icon.FolderRemove}"
@@ -85,7 +85,7 @@
 
                 <Border Classes="option-card"
                     IsVisible="{Binding CanDeleteFromCloud}">
-                    <!-- Опция: везде (включая облако) -->
+                    <!-- Option: everywhere (including cloud) -->
                     <RadioButton IsChecked="{Binding IsDeleteEverywhere}" GroupName="DeleteMode">
                         <StackPanel Orientation="Horizontal" Spacing="12" Margin="8,0,0,0">
                             <PathIcon Data="{StaticResource Icon.CloudOff}"
@@ -105,7 +105,7 @@
                 </Border>
             </StackPanel>
 
-            <!-- Кнопки -->
+            <!-- Buttons -->
             <Grid ColumnDefinitions="*, Auto, Auto" Margin="0,8,0,0">
                 <Panel />
                 <Button Grid.Column="1"

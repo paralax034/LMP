@@ -30,7 +30,7 @@
 
             <Grid ColumnDefinitions="Auto, *, Auto">
 
-                <!-- Лаконичный круглый индикатор серьезности в едином стиле с NotificationPanel -->
+                <!-- Concise circular severity indicator styled consistently with NotificationPanel -->
                 <Border Grid.Column="0"
                     Width="28" Height="28"
                     CornerRadius="14"
@@ -47,7 +47,7 @@
                         VerticalAlignment="Center" />
                 </Border>
 
-                <!-- Информационное содержимое -->
+                <!-- Information content -->
                 <StackPanel Grid.Column="1"
                     Spacing="2"
                     VerticalAlignment="Center"
@@ -65,7 +65,7 @@
                         LineHeight="16" />
                 </StackPanel>
 
-                <!-- Кнопка закрытия тоста -->
+                <!-- Toast close button -->
                 <Button Grid.Column="2"
                     Classes="header-icon-btn"
                     Width="24" Height="24"

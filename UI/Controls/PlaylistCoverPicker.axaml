@@ -31,7 +31,7 @@
     </UserControl.Styles>
 
     <Grid RowDefinitions="Auto, *">
-        <!-- Шапка: счетчик и подсказка -->
+        <!-- Header: counter and hint -->
         <Border Grid.Row="0" Margin="0,0,0,6" Padding="0,0,0,4"
             BorderBrush="{DynamicResource BgHighlightBrush}"
             BorderThickness="0,0,0,1">
@@ -50,7 +50,7 @@
             </Grid>
         </Border>
 
-        <!-- Сетка треков: строгая высота 140px, 2 полных ряда по 50px -->
+        <!-- Track grid: strict height 140px, 2 full rows of 50px each -->
         <ScrollViewer Grid.Row="1"
             VerticalScrollBarVisibility="Auto"
             Height="140">

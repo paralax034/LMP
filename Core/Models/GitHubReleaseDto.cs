@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// DTO релиза GitHub API.
+/// GitHub API release DTO.
 /// </summary>
 public sealed class GitHubReleaseDto
 {
@@ -27,7 +27,7 @@ public sealed class GitHubReleaseDto
 }
 
 /// <summary>
-/// DTO файла-артефакта в релизе GitHub.
+/// GitHub release asset file DTO.
 /// </summary>
 public sealed class GitHubAssetDto
 {
@@ -42,7 +42,7 @@ public sealed class GitHubAssetDto
 }
 
 /// <summary>
-/// DTO краткой статистики репозитория GitHub.
+/// GitHub repository summary statistics DTO.
 /// </summary>
 public sealed class GitHubRepoInfoDto
 {

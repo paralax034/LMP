@@ -38,7 +38,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
     }
 
     /// <summary>
-    /// Создаёт HTTP-контент с использованием ReadOnlyMemoryContent для нулевых аллокаций.
+    /// Creates HTTP content using ReadOnlyMemoryContent for zero-allocation performance.
     /// </summary>
     private static ReadOnlyMemoryContent CreateJsonContent(Action<Utf8JsonWriter> writeBody)
     {
@@ -57,12 +57,12 @@ internal sealed class PlaylistMutationController(HttpClient http)
     }
 
     /// <summary>
-    /// Выполняет детерминированный POST-запрос к эндпоинту InnerTube API.
+    /// Performs a deterministic POST request to the InnerTube API endpoint.
     /// </summary>
-    /// <param name="endpoint">Имя эндпоинта без query-параметров.</param>
-    /// <param name="writeBody">Делегат записи JSON-структуры запроса.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Распарсенный корень JSON-ответа.</returns>
+    /// <param name="endpoint">Endpoint name without query parameters.</param>
+    /// <param name="writeBody">Delegate for writing the request JSON structure.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The parsed JSON root of the response.</returns>
     private async Task<JsonElement> PostAsync(
         string endpoint,
         Action<Utf8JsonWriter> writeBody,
@@ -140,7 +140,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
     }
 
     /// <summary>
-    /// Нормализует идентификатор плейлиста, отсекая префикс VL без аллокаций в куче.
+    /// Normalizes a playlist ID by stripping the VL prefix without heap allocations.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string SanitizePlaylistId(string playlistId)
@@ -220,7 +220,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
         CheckStatus(root);
 
-        // Ответ выравнивается по videoId: сервер может пропустить дубликат или недоступный трек и сдвинуть индексы
+        // Align response by videoId: the server may skip duplicate or unavailable tracks and shift indices
         var editResults = root.GetPropertyOrNull("playlistEditResults");
         var responseItems = new List<(string? VideoId, string? SetVideoId)>(videoIds.Count);
 
@@ -231,7 +231,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
                 var added = item.GetPropertyOrNull("playlistEditVideoAddedResultData");
                 if (added == null)
                 {
-                    // Сохраняем позицию: позиционный fallback допустим только при совпадении длины ответа
+                    // Save position: positional fallback is only allowed when response lengths match
                     responseItems.Add((null, null));
                     continue;
                 }
@@ -246,8 +246,8 @@ internal sealed class PlaylistMutationController(HttpClient http)
     }
 
     /// <summary>
-    /// Пакетно перемещает треки внутри плейлиста на YouTube.
-    /// Поддерживает ACTION_MOVE_VIDEO_AFTER и ACTION_MOVE_VIDEO_BEFORE.
+    /// Batch moves tracks within a playlist on YouTube.
+    /// Supports ACTION_MOVE_VIDEO_AFTER and ACTION_MOVE_VIDEO_BEFORE.
     /// </summary>
     public async Task MoveTracksAsync(
         string playlistId,
@@ -302,7 +302,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
         var cleanPlaylistId = SanitizePlaylistId(playlistId);
 
-        // Фильтруем пустые setVideoId, чтобы исключить 400 Bad Request
+        // Filter out empty setVideoId values to avoid 400 Bad Request
         var validSetVideoIds = new List<string>(setVideoIds.Count);
         for (int i = 0; i < setVideoIds.Count; i++)
         {
@@ -413,11 +413,11 @@ internal sealed class PlaylistMutationController(HttpClient http)
     /// <para><b>3-step process:</b></para>
     /// <list type="number">
     ///   <item>Initiate: POST with X-Goog-Upload-Command: start → get upload_url</item>
-    ///   <item>Upload: POST binary data → get scottyEncryptedBlobId (в JSON ответе)</item>
+    ///   <item>Upload: POST binary data → get scottyEncryptedBlobId (in JSON response)</item>
     ///   <item>Apply: edit_playlist with ACTION_SET_CUSTOM_THUMBNAIL</item>
     /// </list>
     /// 
-    /// <para><b>Важно:</b> HttpClient уже обрабатывает Cookie и Authorization через YoutubeHttpHandler.</para>
+    /// <para><b>Important:</b> HttpClient already handles Cookie and Authorization via YoutubeHttpHandler.</para>
     /// </summary>
     /// <param name="playlistId">YouTube playlist ID.</param>
     /// <param name="imageData">Image bytes (JPEG/PNG, recommended 1280x720 or square).</param>
@@ -442,12 +442,12 @@ internal sealed class PlaylistMutationController(HttpClient http)
 
             using var initiateRequest = new HttpRequestMessage(HttpMethod.Post, initiateUrl);
 
-            // Scotty-специфичные заголовки
+            // Scotty-specific headers
             initiateRequest.Headers.Add("X-Goog-Upload-Protocol", "resumable");
             initiateRequest.Headers.Add("X-Goog-Upload-Command", "start");
             initiateRequest.Headers.Add("X-Goog-Upload-Header-Content-Length", imageData.Length.ToString());
 
-            // Content-Type для пустого тела
+            // Content-Type for empty body
             initiateRequest.Content = new ByteArrayContent([]);
             initiateRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded")
             {
@@ -457,7 +457,7 @@ internal sealed class PlaylistMutationController(HttpClient http)
             using var initiateResponse = await http.SendAsync(initiateRequest, ct).ConfigureAwait(false);
             initiateResponse.EnsureSuccessStatusCode();
 
-            // Upload URL в заголовке X-Goog-Upload-URL
+            // Upload URL in X-Goog-Upload-URL header
             if (!initiateResponse.Headers.TryGetValues("X-Goog-Upload-URL", out var uploadUrls))
                 throw new InvalidOperationException("No X-Goog-Upload-URL in response headers");
 
@@ -490,11 +490,11 @@ internal sealed class PlaylistMutationController(HttpClient http)
             using var uploadResponse = await http.SendAsync(uploadRequest, ct).ConfigureAwait(false);
             uploadResponse.EnsureSuccessStatusCode();
 
-            // Parse JSON response для получения blobId
+            // Parse JSON response to extract blobId
             using var uploadStream = await uploadResponse.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             var uploadResult = await Json.ParseAsync(uploadStream, ct).ConfigureAwait(false);
 
-            // Формат ответа: {"encryptedBlobId": "..."}
+            // Response format: {"encryptedBlobId": "..."}
             var blobId = uploadResult.GetPropertyOrNull("encryptedBlobId")?.GetStringOrNull();
             if (string.IsNullOrEmpty(blobId))
             {

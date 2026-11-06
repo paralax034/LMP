@@ -8,25 +8,25 @@ public sealed class TruePeakLimiter
     #region Constants
 
     /// <summary>
-    /// Потолок True Peak защиты (-0.13 dBFS = 0.985f).
-    /// Предотвращает срабатывание системного лимитера Windows (CAudioLimiter APO в audiodg.exe) на 95-100% громкости.
+    /// True Peak protection ceiling (-0.13 dBFS = 0.985f).
+    /// Prevents triggering the Windows system limiter (CAudioLimiter APO in audiodg.exe) at 95-100% volume.
     /// </summary>
     private const float Ceiling = 0.985f;
 
     /// <summary>
-    /// Порог начала мягкого асимптотического скругления пиков (0.88f) на первых миллисекундах атаки.
-    /// Гарантирует 0 плоских срезов (FlatClipped == 0) и отсутствие пробоя Ceiling (0.985f) без скачков огибающей.
+    /// Soft asymptotic peak rounding knee threshold (0.88f) during the initial milliseconds of attack.
+    /// Guarantees 0 flat clips (FlatClipped == 0) and no Ceiling (0.985f) overshoot without envelope jumps.
     /// </summary>
     private const float KneeStart = 0.88f;
     private const float KneeSpan = Ceiling - KneeStart; // 0.105f
     private const float InvKneeSpan = 1.0f / KneeSpan;
 
-    /// <summary>Время плавной атаки огибающей (4 мс) — полностью исключает щелчки и модуляцию ("дрожащую нитку") на транзиентах.</summary>
+    /// <summary>Smooth envelope attack time (4 ms) — completely eliminates clicks and modulation ("fluttering string") on transients.</summary>
     private const float AttackMs = 4.0f;
 
     private const float PeakHoldMs = 30f;
 
-    /// <summary>Release time в миллисекундах (плавный возврат после завершения басовой партии).</summary>
+    /// <summary>Release time in milliseconds (smooth return after a bass section ends).</summary>
     private const float ReleaseMs = 400f;
 
     #endregion
@@ -38,8 +38,8 @@ public sealed class TruePeakLimiter
     private int _holdFramesRemaining;
 
     /// <summary>
-    /// Возвращает текущее состояние ослабления огибающей лимитера.
-    /// Значение 1.0f означает, что лимитер полностью восстановился и не ослабляет сигнал.
+    /// Returns the current attenuation state of the limiter envelope.
+    /// A value of 1.0f means the limiter has fully recovered and is not attenuating the signal.
     /// </summary>
     public float EnvelopeGain => _envelopeGain;
 
@@ -50,9 +50,9 @@ public sealed class TruePeakLimiter
     #endregion
 
     /// <summary>
-    /// Создаёт True Peak Limiter с указанным sample rate.
+    /// Creates a True Peak Limiter with the specified sample rate.
     /// </summary>
-    /// <param name="sampleRate">Sample rate аудио (Гц).</param>
+    /// <param name="sampleRate">Audio sample rate (Hz).</param>
     public TruePeakLimiter(int sampleRate)
     {
         int rate = Math.Max(8000, sampleRate);
@@ -69,8 +69,8 @@ public sealed class TruePeakLimiter
     }
 
     /// <summary>
-    /// Гладкий C2-непрерывный асимптотический сатуратор для положительной амплитуды пика.
-    /// В точке <see cref="KneeStart"/> имеет <c>f'(0) = 1</c> и <c>f''(0) = 0</c>.
+    /// Smooth C2-continuous asymptotic saturator for positive peak amplitude.
+    /// Has <c>f'(0) = 1</c> and <c>f''(0) = 0</c> at <see cref="KneeStart"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float SoftCeilingPositive(float abs)
@@ -82,20 +82,20 @@ public sealed class TruePeakLimiter
     }
 
     /// <summary>
-    /// Множитель, который мягко вписывает пик кадра под <see cref="Ceiling"/> той же C2-кривой, что и сам лимитер.
-    /// При пике не выше <see cref="KneeStart"/> возвращает ровно 1: сигнал, не дошедший до колена, проходит бит-в-бит.
-    /// Нужен узлам после лимитера, которые сами порождают межотсчётные пики (ресемплер WASAPI).
+    /// Multiplier that smoothly fits the frame peak under <see cref="Ceiling"/> using the same C2-curve as the limiter itself.
+    /// Returns exactly 1 for peaks below <see cref="KneeStart"/>: signals below the knee pass through bit-exact.
+    /// Required for nodes downstream of the limiter that generate inter-sample peaks (e.g., WASAPI resampler).
     /// </summary>
-    /// <param name="peak">Модуль наибольшего отсчёта кадра по всем каналам.</param>
+    /// <param name="peak">Maximum sample magnitude of the frame across all channels.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static float SoftCeilingScale(float peak)
         => peak > KneeStart ? SoftCeilingPositive(peak) * Helpers.SpanMathHelper.FastReciprocal(peak) : 1.0f;
 
     /// <summary>
-    /// Обрабатывает interleaved PCM буфер in-place (Zero-Latency, 100% сохранение стерео-баланса L/R и фазы при Seek).
+    /// Processes an interleaved PCM buffer in-place (Zero-Latency, 100% preservation of L/R stereo balance and phase on Seek).
     /// </summary>
-    /// <param name="samples">Interleaved PCM сэмплы (in-place обработка).</param>
-    /// <param name="crossfader">Ссылка на crossfader для per-sample gain interpolation.</param>
+    /// <param name="samples">Interleaved PCM samples (in-place processing).</param>
+    /// <param name="crossfader">Reference to the crossfader for per-sample gain interpolation.</param>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     public void Process(Span<float> samples, ref GainCrossfader crossfader)
     {
@@ -203,7 +203,7 @@ public sealed class TruePeakLimiter
     }
 
     /// <summary>
-    /// Сбрасывает envelope в исходное состояние (gain = 1.0).
+    /// Resets the envelope to its initial state (gain = 1.0).
     /// </summary>
     public void Reset()
     {

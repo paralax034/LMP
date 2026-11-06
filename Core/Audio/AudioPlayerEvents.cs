@@ -1,41 +1,41 @@
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Все события аудио плеера.
+/// All audio player events.
 /// </summary>
 public sealed class AudioPlayerEvents
 {
-    /// <summary>Изменилась позиция воспроизведения.</summary>
+    /// <summary>Playback position changed.</summary>
     public event Action<TimeSpan>? PositionChanged;
 
-    /// <summary>Изменилось состояние (Playing, Paused, etc).</summary>
+    /// <summary>State changed (Playing, Paused, etc).</summary>
     public event Action<PlaybackState>? StateChanged;
 
-    /// <summary>Трек закончился естественным образом.</summary>
+    /// <summary>Track ended naturally.</summary>
     public event Action? TrackEnded;
 
-    /// <summary>Произошла ошибка.</summary>
+    /// <summary>An error occurred.</summary>
     public event Action<AudioPlayerError>? ErrorOccurred;
 
-    /// <summary>Информация о потоке стала доступна или обновилась.</summary>
+    /// <summary>Stream information became available or updated.</summary>
     public event Action<AudioStreamInfo>? StreamInfoChanged;
 
-    /// <summary>Изменился прогресс буферизации.</summary>
+    /// <summary>Buffering progress changed.</summary>
     public event Action<BufferState>? BufferStateChanged;
 
-    /// <summary>Seek завершён.</summary>
+    /// <summary>Seek completed.</summary>
     public event Action<TimeSpan>? SeekCompleted;
 
     /// <summary>
-    /// Аудиоустройство отключено во время воспроизведения.
-    /// Плеер автоматически переведён в паузу. Pipeline жив, позиция сохранена.
-    /// Используется для отображения информационного toast.
+    /// Audio device disconnected during playback.
+    /// Player automatically paused. Pipeline remains alive, position preserved.
+    /// Used for displaying an informational toast.
     /// </summary>
     public event Action? DeviceLost;
 
     /// <summary>
-    /// Аудиоустройство восстановлено после потери — воспроизведение возобновлено автоматически.
-    /// Используется для отображения информационного toast.
+    /// Audio device restored after loss — playback resumed automatically.
+    /// Used for displaying an informational toast.
     /// </summary>
     public event Action? DeviceRestored;
 
@@ -48,10 +48,10 @@ public sealed class AudioPlayerEvents
     internal void RaiseBufferState(BufferState state) => BufferStateChanged?.Invoke(state);
     internal void RaiseSeekCompleted(TimeSpan pos) => SeekCompleted?.Invoke(pos);
 
-    /// <summary>Публикует событие потери устройства (informational, не ошибка).</summary>
+    /// <summary>Publishes a device loss event (informational, not an error).</summary>
     internal void RaiseDeviceLost() => DeviceLost?.Invoke();
 
-    /// <summary>Публикует событие восстановления устройства (informational).</summary>
+    /// <summary>Publishes a device restoration event (informational).</summary>
     internal void RaiseDeviceRestored() => DeviceRestored?.Invoke();
 }
 

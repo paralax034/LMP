@@ -64,7 +64,7 @@
         <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
 
-    <!-- TITLE FONT STYLING (Плоские селекторы без каскадных потомков) -->
+    <!-- TITLE FONT STYLING (Flat selectors without descendant combinators) -->
     <Style Selector="TextBlock.track-title">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="FontWeight" Value="Normal" />
@@ -80,7 +80,7 @@
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
 
-    <!-- КНОПКА ОБЛОЖКИ -->
+    <!-- COVER BUTTON -->
     <Style Selector="Button.cover-btn">
         <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="Transparent" />
@@ -102,7 +102,7 @@
         </Setter>
     </Style>
 
-    <!-- Переключение геометрии иконки Play/Pause (плоский селектор) -->
+    <!-- Toggle Play/Pause icon geometry (flat selector) -->
     <Style Selector="PathIcon.cover-play-icon">
         <Setter Property="Data" Value="{StaticResource Icon.Play}" />
     </Style>
@@ -123,7 +123,7 @@
         <Setter Property="Opacity" Value="1" />
     </Style>
 
-    <!-- КНОПКА ЛАЙКА -->
+    <!-- LIKE BUTTON -->
     <Style Selector="Button.like-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
@@ -159,7 +159,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <!-- КНОПКА ТРЕХ ТОЧЕК -->
+    <!-- THREE DOTS BUTTON -->
     <Style Selector="Button.more-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
@@ -297,7 +297,7 @@
         </Style.Animations>
     </Style>
 
-    <!-- Мета-чипы информации о сборке и репозитории -->
+    <!-- Build and repository info meta-chips -->
     <Style Selector="Border.meta-chip">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentTransparentBrush}" />

@@ -3,44 +3,44 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Audio.Normalization;
 
 /// <summary>
-/// Линейный интерполятор gain для устранения щелчков и смещения стерео-образа
-/// при смене целевого значения gain нормализации или громкости.
+/// Linear gain interpolator to eliminate clicks and stereo-image shifts
+/// when changing the target normalization gain or volume value.
 ///
-/// <para><b>Принцип работы:</b></para>
-/// <para>При изменении целевого gain вызывается <see cref="SetTarget"/>.
-/// Последующие вызовы <see cref="Advance"/> или <see cref="AdvanceFrame"/> возвращают линейно
-/// интерполированное значение от <c>fromGain</c> до <c>toGain</c>
-/// на протяжении <c>fadeSamples</c> сэмплов. После завершения интерполяции
-/// возвращается константный <c>toGain</c>.</para>
+/// <para><b>Operation principle:</b></para>
+/// <para>When the target gain changes, call <see cref="SetTarget"/>.
+/// Subsequent calls to <see cref="Advance"/> or <see cref="AdvanceFrame"/> return a linearly
+/// interpolated value from <c>fromGain</c> to <c>toGain</c>
+/// over <c>fadeSamples</c> samples. After interpolation completes,
+/// constant <c>toGain</c> is returned.</para>
 ///
-/// <para><b>Пороги fade duration:</b></para>
+/// <para><b>Fade duration thresholds:</b></para>
 /// <list type="bullet">
-///   <item>Резкое изменение (|delta| ≥ <see cref="SuddenChangeThreshold"/>):
-///     <see cref="SuddenFadeMs"/> мс — покрывает lock события, reset, смену настроек.</item>
-///   <item>Плавное изменение: <see cref="GradualFadeMs"/> мс —
-///     нормальная конвергенция provisional gain.</item>
+///   <item>Sudden change (|delta| ≥ <see cref="SuddenChangeThreshold"/>):
+///     <see cref="SuddenFadeMs"/> ms — covers lock events, reset, settings changes.</item>
+///   <item>Gradual change: <see cref="GradualFadeMs"/> ms —
+///     normal convergence of provisional gain.</item>
 /// </list>
 ///
-/// <para><b>Zero-alloc value type.</b> Всё состояние хранится внутри struct.
-/// Хранится как поле в <see cref="AudioPipeline"/>.</para>
+/// <para><b>Zero-alloc value type.</b> All state is stored inside the struct.
+/// Stored as a field in <see cref="AudioPipeline"/>.</para>
 ///
-/// <para><b>Single writer:</b> используется исключительно из fill thread
-/// backend'а в <c>AudioCallback</c>. Нет конкуренции по записи.</para>
+/// <para><b>Single writer:</b> used exclusively from the backend fill thread
+/// in <c>AudioCallback</c>. No write contention.</para>
 /// </summary>
 public struct GainCrossfader
 {
     #region Constants
 
     /// <summary>
-    /// Порог изменения gain для определения «резкого» перехода.
-    /// Изменение ≥ 5% считается резким и требует длинного fade.
+    /// Gain change threshold to identify a "sudden" transition.
+    /// A change ≥ 5% is considered sudden and requires a long fade.
     /// </summary>
     private const float SuddenChangeThreshold = 0.05f;
 
-    /// <summary>Длительность fade при резком изменении gain (мс).</summary>
+    /// <summary>Fade duration for sudden gain changes (ms).</summary>
     private const float SuddenFadeMs = 300f;
 
-    /// <summary>Длительность fade при плавном изменении gain (мс).</summary>
+    /// <summary>Fade duration for gradual gain changes (ms).</summary>
     private const float GradualFadeMs = 50f;
 
     #endregion
@@ -56,9 +56,9 @@ public struct GainCrossfader
     #endregion
 
     /// <summary>
-    /// Создаёт crossfader с начальным значением gain.
+    /// Creates a crossfader with an initial gain value.
     /// </summary>
-    /// <param name="initialGain">Начальный gain (обычно 1.0 для нового трека).</param>
+    /// <param name="initialGain">Initial gain (typically 1.0 for a new track).</param>
     public GainCrossfader(float initialGain)
     {
         _currentGain = initialGain;
@@ -69,27 +69,27 @@ public struct GainCrossfader
     }
 
     /// <summary>
-    /// Текущее значение gain (на момент последнего <see cref="Advance"/>).
-    /// Используется для инициализации следующего fade.
+    /// Current gain value (as of the last <see cref="Advance"/>).
+    /// Used to initialize the next fade.
     /// </summary>
     public readonly float CurrentGain => _currentGain;
 
     /// <summary>
-    /// <c>true</c> если интерполяция активна (ещё не достигли <c>targetGain</c>).
+    /// <c>true</c> if interpolation is active (has not reached <c>targetGain</c> yet).
     /// </summary>
     public readonly bool IsActive => _remainingSamples > 0;
 
     /// <summary>
-    /// Устанавливает новый целевой gain и начинает interpolation если значение изменилось.
+    /// Sets a new target gain and begins interpolation if the value has changed.
     /// </summary>
     /// <remarks>
-    /// <para>Если новый target идентичен текущему (|delta| &lt; 0.0001) — no-op.
-    /// Если интерполяция уже идёт, новый target прерывает её, начиная
-    /// новый fade с текущей позиции — предотвращает наложение переходов.</para>
+    /// <para>If the new target is identical to the current one (|delta| &lt; 0.0001) — no-op.
+    /// If interpolation is already in progress, the new target interrupts it, starting
+    /// a new fade from the current position — prevents transition overlap.</para>
     /// </remarks>
-    /// <param name="newTarget">Новое целевое значение gain.</param>
-    /// <param name="sampleRate">Sample rate для вычисления длины fade в сэмплах.</param>
-    /// <param name="channels">Количество каналов (fade считается в stereo samples).</param>
+    /// <param name="newTarget">New target gain value.</param>
+    /// <param name="sampleRate">Sample rate for calculating fade length in samples.</param>
+    /// <param name="channels">Number of channels (fade is calculated in stereo samples).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetTarget(float newTarget, int sampleRate, int channels)
     {
@@ -106,9 +106,9 @@ public struct GainCrossfader
     }
 
     /// <summary>
-    /// Возвращает gain для текущего сэмпла и продвигает интерполяцию на 1 сэмпл.
+    /// Returns the gain for the current sample and advances interpolation by 1 sample.
     /// </summary>
-    /// <returns>Текущий interpolated gain.</returns>
+    /// <returns>Current interpolated gain.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public float Advance()
     {
@@ -116,11 +116,11 @@ public struct GainCrossfader
     }
 
     /// <summary>
-    /// Возвращает единый gain для всего многоканального фрейма и продвигает интерполяцию на <paramref name="channels"/> сэмплов,
-    /// исключая фазовый и амплитудный перекос между левым и правым каналами.
+    /// Returns a single gain for the entire multichannel frame and advances interpolation by <paramref name="channels"/> samples,
+    /// avoiding phase and amplitude skew between left and right channels.
     /// </summary>
-    /// <param name="channels">Количество каналов в одном аудио-фрейме.</param>
-    /// <returns>Текущий интерполированный gain для фрейма.</returns>
+    /// <param name="channels">Number of channels in a single audio frame.</param>
+    /// <returns>Current interpolated gain for the frame.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public float AdvanceFrame(int channels)
     {
@@ -145,10 +145,10 @@ public struct GainCrossfader
     }
 
     /// <summary>
-    /// Сбрасывает crossfader в начальное состояние с указанным gain.
-    /// Вызывается при seek или потере устройства.
+    /// Resets the crossfader to its initial state with the specified gain.
+    /// Called on seek or device loss.
     /// </summary>
-    /// <param name="gain">Gain для немедленной установки (без fade).</param>
+    /// <param name="gain">Gain to set immediately (without fade).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Reset(float gain)
     {

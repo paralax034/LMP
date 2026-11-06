@@ -5,8 +5,8 @@ public sealed partial class CachingStreamSource
     // --- Epoch-Based Cancellation ---
 
     /// <summary>
-    /// Откладывает <see cref="IDisposable.Dispose"/> для CTS,
-    /// предотвращая <see cref="ObjectDisposedException"/> в конкурентных путях.
+    /// Defers <see cref="IDisposable.Dispose"/> for the CTS,
+    /// preventing <see cref="ObjectDisposedException"/> in concurrent execution paths.
     /// </summary>
     private static void DeferDisposeCancellationTokenSource(
         CancellationTokenSource? cts, int delayMs)
@@ -31,7 +31,7 @@ public sealed partial class CachingStreamSource
             TaskScheduler.Default);
     }
 
-    /// <summary>Отменяет все загрузки текущей эпохи и создаёт новую.</summary>
+    /// <summary>Cancels all downloads for the current epoch and creates a new one.</summary>
     private CancellationToken ResetDownloadEpoch()
     {
         lock (_epochLock)
@@ -64,7 +64,7 @@ public sealed partial class CachingStreamSource
         }
     }
 
-    /// <summary>Инициализирует первую эпоху загрузки.</summary>
+    /// <summary>Initializes the first loading epoch.</summary>
     private void InitializeFirstEpoch()
     {
         lock (_epochLock)
@@ -76,7 +76,7 @@ public sealed partial class CachingStreamSource
         }
     }
 
-    /// <summary>CancellationToken текущей эпохи загрузки. Потокобезопасно.</summary>
+    /// <summary>CancellationToken for the current loading epoch. Thread-safe.</summary>
     private CancellationToken CurrentDownloadToken
     {
         get
@@ -86,12 +86,12 @@ public sealed partial class CachingStreamSource
         }
     }
 
-    /// <summary>Мгновенно отменяет активные чтения на потоке без уничтожения источника.</summary>
+    /// <summary>Instantly cancels active stream reads without disposing the source.</summary>
     public void CancelActiveReads() => _readStream?.CancelActiveReads();
 
     // --- Dispose ---
 
-    /// <summary>Общая преамбула dispose: разблокировка gates, cancel epoch + lifetime.</summary>
+    /// <summary>Common dispose preamble: unblocking gates, canceling epoch + lifetime.</summary>
     private void BeginDispose()
     {
         _suspendGate.Set();
@@ -127,7 +127,7 @@ public sealed partial class CachingStreamSource
         }
     }
 
-    /// <summary>Общий эпилог dispose: освобождение всех ресурсов.</summary>
+    /// <summary>Common dispose epilogue: releasing all resources.</summary>
     private void DisposeSharedResources()
     {
         try
@@ -163,7 +163,7 @@ public sealed partial class CachingStreamSource
             _cacheManager.ReleaseLease(_cacheKey);
     }
 
-    /// <summary>Диспозит все блоки в RAM-кэше.</summary>
+    /// <summary>Disposes all blocks in the RAM cache.</summary>
     private void DisposeAllRamChunks() => _ramCache.DisposeAll();
 
     /// <inheritdoc/>
@@ -211,7 +211,7 @@ public sealed partial class CachingStreamSource
     // --- Drain ---
 
     /// <summary>
-    /// Ожидает завершения всех фоновых disk-write операций перед освобождением lease.
+    /// Awaits completion of all background disk-write operations before releasing the lease.
     /// </summary>
     private async Task DrainPendingDiskWritesAsync()
     {
@@ -231,7 +231,7 @@ public sealed partial class CachingStreamSource
                 $"[CachingSource] {remaining} pending disk writes not drained within {maxWaitMs}ms");
     }
 
-    /// <summary>Sync fallback для дренажа pending writes.</summary>
+    /// <summary>Sync fallback for draining pending writes.</summary>
     private void DrainPendingDiskWritesSync()
     {
         const int maxWaitMs = 500;

@@ -3,8 +3,8 @@ using LMP.UI.Dialogs;
 namespace LMP.UI.Services;
 
 /// <summary>
-/// UI-сервис редактирования плейлистов: показ диалогов и координация UI-потока.
-/// Доменная логика (клонирование, привязка, отвязка) строго делегирована в <see cref="PlaylistService"/>.
+/// UI service for playlist editing: displays dialogs and coordinates UI flow.
+/// Domain logic (cloning, linking, unlinking) is strictly delegated to <see cref="PlaylistService"/>.
 /// </summary>
 public sealed class PlaylistEditService
 {
@@ -30,12 +30,12 @@ public sealed class PlaylistEditService
     public sealed record EditResult(bool Changed, Playlist Playlist);
 
     /// <summary>
-    /// Координирует процесс редактирования метаданных и облачной привязки плейлиста.
+    /// Coordinates the process of editing playlist metadata and cloud linking.
     /// </summary>
-    /// <param name="playlistId">Идентификатор редактируемого плейлиста.</param>
-    /// <param name="lockNavigation">Делегат блокировки UI-навигации при длительных сетевых операциях.</param>
-    /// <param name="unlockNavigation">Делегат снятия блокировки UI-навигации.</param>
-    /// <returns>Результат редактирования с актуальной моделью плейлиста либо <c>null</c> при отмене.</returns>
+    /// <param name="playlistId">The identifier of the playlist being edited.</param>
+    /// <param name="lockNavigation">Delegate to lock UI navigation during long-running network operations.</param>
+    /// <param name="unlockNavigation">Delegate to unlock UI navigation.</param>
+    /// <returns>The editing result containing the updated playlist model, or <c>null</c> if canceled.</returns>
     public async Task<EditResult?> EditPlaylistAsync(
         string playlistId,
         Action<string> lockNavigation,
@@ -135,7 +135,7 @@ public sealed class PlaylistEditService
             changed = true;
         }
 
-        // Сохраняем отредактированные метаданные до изменения статуса привязки
+        // Save the edited metadata before changing the linking status
         if (changed)
         {
             playlist.UpdatedAt = DateTime.Now;
@@ -156,7 +156,7 @@ public sealed class PlaylistEditService
             }
         }
 
-        // 6. Sync toggle: выполняется строго после фиксации метаданных, чтобы не затереть облачные идентификаторы
+        // 6. Sync toggle: executed strictly after committing metadata to avoid overwriting cloud identifiers
         if (result.SyncToCloud.HasValue && result.SyncToCloud.Value != playlist.IsFromAccount)
         {
             bool wantsSync = result.SyncToCloud.Value;

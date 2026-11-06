@@ -7,13 +7,9 @@ public sealed partial class CachingStreamSource
     // --- RamRangeBlock ---
 
     /// <summary>
-    /// Иммутабельный блок данных в RAM-кэше, арендованный из <see cref="MemoryPool{T}"/>.
-    /// Владеет <see cref="IMemoryOwner{T}"/> и освобождает его ровно один раз через <see cref="Dispose"/>.
-    /// </summary>
-    /// <summary>
-    /// Иммутабельный блок данных в RAM-кэше со счётчиком ссылок, арендованный из единого <see cref="ArrayPool{T}.Shared"/>.
-    /// Позволяет одновременно читать данные из RAM-кэша и асинхронно сбрасывать их на диск
-    /// без выделения второго буфера (<c>diskCopy</c>) и без лишнего копирования памяти.
+    /// Reference-counted immutable data block in the RAM cache rented from the shared <see cref="ArrayPool{T}.Shared"/>.
+    /// Allows concurrent reading of data from the RAM cache and asynchronous flushing to disk
+    /// without allocating a second buffer (<c>diskCopy</c>) and without redundant memory copying.
     /// </summary>
     internal sealed class RamRangeBlock : IDisposable
     {
@@ -21,24 +17,24 @@ public sealed partial class CachingStreamSource
         private int _refCount = 1;
         private int _ramCacheDisposed;
 
-        /// <summary>Абсолютное смещение начала блока в контенте.</summary>
+        /// <summary>Absolute offset of the start of the block within the content.</summary>
         public long StartOffset { get; }
 
-        /// <summary>Абсолютное смещение байта, следующего за последним байтом блока.</summary>
+        /// <summary>Absolute offset of the byte immediately following the last byte of the block.</summary>
         public long EndOffsetExclusive => StartOffset + Length;
 
-        /// <summary>Фактическая длина данных блока в байтах (для RAM-кэша).</summary>
+        /// <summary>Actual byte length of the block data (for RAM cache).</summary>
         public int Length { get; }
 
-        /// <summary>Слайс арендованной памяти, содержащий ровно <see cref="Length"/> байт.</summary>
+        /// <summary>Rented memory slice containing exactly <see cref="Length"/> bytes.</summary>
         public Memory<byte> Memory { get; }
 
         /// <summary>
-        /// Создаёт блок из массива, арендованного в <see cref="ArrayPool{T}.Shared"/>.
+        /// Creates a block from an array rented from <see cref="ArrayPool{T}.Shared"/>.
         /// </summary>
-        /// <param name="startOffset">Абсолютное смещение блока в контенте.</param>
-        /// <param name="rentedBuffer">Арендованный буфер из <see cref="ArrayPool{T}.Shared"/>.</param>
-        /// <param name="actualLength">Количество байт, доступных для чтения в RAM-кэше.</param>
+        /// <param name="startOffset">Absolute offset of the block within the content.</param>
+        /// <param name="rentedBuffer">Rented buffer from <see cref="ArrayPool{T}.Shared"/>.</param>
+        /// <param name="actualLength">Number of bytes available for reading in the RAM cache.</param>
         public RamRangeBlock(long startOffset, byte[] rentedBuffer, int actualLength)
         {
             StartOffset = startOffset;
@@ -48,11 +44,11 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Увеличивает счётчик ссылок для фоновой записи на диск и возвращает срез полного скачанного диапазона.
+        /// Increments the reference count for background disk writing and returns a slice of the full downloaded range.
         /// </summary>
-        /// <param name="fullDownloadedLength">Полная длина скачанных данных для записи на диск.</param>
-        /// <param name="diskMemory">Срез памяти для записи на диск.</param>
-        /// <returns><c>true</c>, если буфер успешно удержан; иначе <c>false</c>.</returns>
+        /// <param name="fullDownloadedLength">Full length of downloaded data to write to disk.</param>
+        /// <param name="diskMemory">Memory slice for disk writing.</param>
+        /// <returns><c>true</c> if the buffer was successfully retained; otherwise, <c>false</c>.</returns>
         public bool TryRetainForDiskWrite(int fullDownloadedLength, out ReadOnlyMemory<byte> diskMemory)
         {
             while (true)
@@ -81,8 +77,8 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Освобождает одну ссылку на буфер (вызывается по завершении фоновой записи на диск).
-        /// При достижении нуля возвращает массив в <see cref="ArrayPool{T}.Shared"/>.
+        /// Releases one reference to the buffer (called upon completion of background disk writing).
+        /// Returns the array to <see cref="ArrayPool{T}.Shared"/> when the count reaches zero.
         /// </summary>
         public void ReleaseReference()
         {
@@ -107,10 +103,10 @@ public sealed partial class CachingStreamSource
     // --- SlidingRamCache ---
 
     /// <summary>
-    /// Потокобезопасный RAM-кэш диапазонов байт с скользящим окном вокруг текущей позиции.
+    /// Thread-safe RAM cache of byte ranges with a sliding window around the current position.
     /// <para>
-    /// Блоки хранятся отсортированными по <see cref="RamRangeBlock.StartOffset"/>.
-    /// Гарантирует отсутствие перекрытий: <see cref="TryAdd"/> отклоняет overlapping блоки.
+    /// Blocks are stored sorted by <see cref="RamRangeBlock.StartOffset"/>.
+    /// Guarantees no overlaps: <see cref="TryAdd"/> rejects overlapping blocks.
     /// </para>
     /// </summary>
     internal sealed class SlidingRamCache : IDisposable
@@ -120,22 +116,22 @@ public sealed partial class CachingStreamSource
         private long _totalBytes;
         private long _version;
 
-        /// <summary>Суммарный объём данных во всех блоках кэша (байт).</summary>
+        /// <summary>Total size of data across all cache blocks (in bytes).</summary>
         public long TotalBytes
         {
             get { lock (_lock) return _totalBytes; }
         }
 
-        /// <summary>Монотонно возрастающая версия состояния блоков в RAM-кэше.</summary>
+        /// <summary>Monotonically increasing version of the RAM cache blocks state.</summary>
         public long Version => Volatile.Read(ref _version);
 
         /// <summary>
-        /// Добавляет блок в кэш, сохраняя сортировку по смещению.
+        /// Adds a block to the cache while maintaining offset-sorted order.
         /// </summary>
-        /// <param name="block">Блок для добавления.</param>
+        /// <param name="block">Block to add.</param>
         /// <returns>
-        /// <c>true</c> если блок добавлен успешно;
-        /// <c>false</c> если он перекрывается с уже существующим блоком.
+        /// <c>true</c> if the block was added successfully;
+        /// <c>false</c> if it overlaps with an existing block.
         /// </returns>
         public bool TryAdd(RamRangeBlock block)
         {
@@ -157,12 +153,12 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Пытается прочитать данные, начиная с <paramref name="position"/>, из первого подходящего блока.
+        /// Tries to read data starting from <paramref name="position"/> from the first matching block.
         /// </summary>
-        /// <param name="position">Абсолютная позиция начала чтения.</param>
-        /// <param name="destination">Буфер назначения.</param>
-        /// <param name="read">Количество скопированных байт.</param>
-        /// <returns><c>true</c> если данные найдены и скопированы.</returns>
+        /// <param name="position">Absolute start position for reading.</param>
+        /// <param name="destination">Destination buffer.</param>
+        /// <param name="read">Number of bytes copied.</param>
+        /// <returns><c>true</c> if data was found and copied.</returns>
         public bool TryRead(long position, Memory<byte> destination, out int read)
         {
             lock (_lock)
@@ -184,7 +180,7 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Пытается синхронно прочитать данные в <see cref="Span{T}"/> без создания <see cref="Memory{T}"/>.
+        /// Tries to synchronously read data into a <see cref="Span{T}"/> without allocating a <see cref="Memory{T}"/>.
         /// </summary>
         public bool TryReadSpan(long position, Span<byte> destination, out int read)
         {
@@ -207,11 +203,11 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Проверяет, содержит ли кэш полный диапазон <c>[startOffset, startOffset+length)</c>.
+        /// Checks whether the cache contains the full range <c>[startOffset, startOffset+length)</c>.
         /// </summary>
-        /// <param name="startOffset">Начало диапазона.</param>
-        /// <param name="length">Длина диапазона.</param>
-        /// <returns><c>true</c> если диапазон полностью покрыт одним блоком.</returns>
+        /// <param name="startOffset">Range start.</param>
+        /// <param name="length">Range length.</param>
+        /// <returns><c>true</c> if the range is fully covered by a single block.</returns>
         public bool ContainsRange(long startOffset, int length)
         {
             long endExclusive = startOffset + length;
@@ -229,11 +225,11 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Возвращает количество непрерывных байт от <paramref name="position"/>
-        /// до конца первого блока, содержащего эту позицию.
+        /// Returns the number of contiguous bytes from <paramref name="position"/>
+        /// to the end of the first block containing that position.
         /// </summary>
-        /// <param name="position">Стартовая позиция.</param>
-        /// <returns>Длина доступного непрерывного диапазона; <c>0</c> если позиция не покрыта.</returns>
+        /// <param name="position">Start position.</param>
+        /// <returns>Length of the available contiguous range; <c>0</c> if the position is not covered.</returns>
         public long GetContiguousBytesFrom(long position)
         {
             lock (_lock)
@@ -250,13 +246,13 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Возвращает свободный от блоков промежуток вокруг <paramref name="position"/>:
-        /// от конца ближайшего блока слева до начала ближайшего блока справа.
+        /// Returns a block-free gap around <paramref name="position"/>:
+        /// from the end of the nearest block to the left to the start of the nearest block to the right.
         /// </summary>
-        /// <param name="position">Позиция, для которой ищется промежуток.</param>
-        /// <param name="freeStart">Конец ближайшего блока слева; <c>0</c>, если его нет.</param>
-        /// <param name="freeEndExclusive">Начало ближайшего блока справа; <see cref="long.MaxValue"/>, если его нет.</param>
-        /// <returns><c>false</c>, если позиция уже покрыта блоком.</returns>
+        /// <param name="position">Position to find the gap for.</param>
+        /// <param name="freeStart">End of the nearest block to the left; <c>0</c> if none.</param>
+        /// <param name="freeEndExclusive">Start of the nearest block to the right; <see cref="long.MaxValue"/> if none.</param>
+        /// <returns><c>false</c> if the position is already covered by a block.</returns>
         public bool TryGetFreeWindow(long position, out long freeStart, out long freeEndExclusive)
         {
             freeStart = 0;
@@ -282,11 +278,11 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Удаляет блок, содержащий <paramref name="position"/>, и возвращает его.
+        /// Removes the block containing <paramref name="position"/> and returns it.
         /// </summary>
-        /// <param name="position">Позиция внутри искомого блока.</param>
-        /// <param name="block">Извлечённый блок; <c>null</c> если не найден.</param>
-        /// <returns><c>true</c> если блок найден и удалён.</returns>
+        /// <param name="position">Position inside the target block.</param>
+        /// <param name="block">Extracted block; <c>null</c> if not found.</param>
+        /// <returns><c>true</c> if the block was found and removed.</returns>
         public bool TryRemoveContaining(long position, out RamRangeBlock? block)
         {
             lock (_lock)
@@ -308,13 +304,13 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Возвращает снимок всех блоков кэша в порядке возрастания смещения.
+        /// Returns a snapshot of all cache blocks in ascending offset order.
         /// </summary>
         public RamRangeBlock[] GetRangesSnapshot() =>
              GetRangesSnapshot(out _);
 
         /// <summary>
-        /// Атомарно возвращает снимок блоков RAM-кэша и его версию под единой блокировкой.
+        /// Atomically returns a snapshot of the RAM cache blocks and its version under a single lock.
         /// </summary>
         public RamRangeBlock[] GetRangesSnapshot(out long version)
         {
@@ -326,11 +322,11 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Вытесняет блоки, выходящие за пределы скользящего окна, и обрезает кэш до <paramref name="maxRamBytes"/>.
+        /// Evicts blocks outside the sliding window boundaries and trims the cache down to <paramref name="maxRamBytes"/>.
         /// </summary>
-        /// <param name="centerOffset">Текущая позиция чтения — центр окна.</param>
-        /// <param name="evictionWindowBytes">Полуширина окна в байтах.</param>
-        /// <param name="maxRamBytes">Абсолютный лимит RAM-кэша.</param>
+        /// <param name="centerOffset">Current read position — window center.</param>
+        /// <param name="evictionWindowBytes">Window half-width in bytes.</param>
+        /// <param name="maxRamBytes">Absolute RAM cache limit.</param>
         public void Trim(long centerOffset, long evictionWindowBytes, long maxRamBytes)
         {
             lock (_lock)
@@ -363,7 +359,7 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Освобождает все блоки и сбрасывает счётчик байт.
+        /// Releases all blocks and resets the byte counter.
         /// </summary>
         public void DisposeAll()
         {
@@ -382,7 +378,7 @@ public sealed partial class CachingStreamSource
         /// <inheritdoc/>
         public void Dispose() => DisposeAll();
 
-        // Выбирает индекс блока, наиболее удалённого от centerOffset.
+        // Selects the index of the block farthest from centerOffset.
         private int ChooseFarthestIndex(long centerOffset)
         {
             int chosen = 0;

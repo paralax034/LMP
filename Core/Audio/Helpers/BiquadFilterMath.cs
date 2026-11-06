@@ -6,18 +6,18 @@ using System.Runtime.Intrinsics.X86;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Коэффициенты биквадратного IIR-фильтра двойной точности (Direct Form II Transposed).
-/// Нормализованы (<c>a0 = 1</c>).
+/// Double-precision biquad IIR filter coefficients (Direct Form II Transposed).
+/// Normalized (<c>a0 = 1</c>).
 /// </summary>
 public readonly record struct BiquadCoefficients(double B0, double B1, double B2, double A1, double A2)
 {
-    /// <summary>Единичный фильтр (полный пропуск сигнала без изменений).</summary>
+    /// <summary>Identity filter (passthrough with no signal modification).</summary>
     public static BiquadCoefficients Identity => new(1.0, 0.0, 0.0, 0.0, 0.0);
 
 
     /// <summary>
-    /// Вычисляет квадрат модуля передаточной функции <c>|H(e^(jw))|²</c> на заданной частоте.
-    /// Используется для построения логарифмической кривой АЧХ в UI без аллокаций.
+    /// Calculates the squared magnitude response <c>|H(e^(jw))|²</c> at the specified frequency.
+    /// Used to render the logarithmic magnitude response curve in the UI without allocations.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public double ComputeMagnitudeSquared(double freqHz, int sampleRate)
@@ -42,7 +42,7 @@ public readonly record struct BiquadCoefficients(double B0, double B1, double B2
 }
 
 /// <summary>
-/// Коэффициенты биквадратного IIR-фильтра одинарной точности для горячего пути эквалайзера.
+/// Single-precision biquad IIR filter coefficients for the equalizer hot path.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct BiquadCoefficientsF
@@ -69,7 +69,7 @@ public struct BiquadCoefficientsF
 }
 
 /// <summary>
-/// Состояние биквадратного IIR-фильтра двойной точности (Direct Form II Transposed).
+/// Double-precision biquad IIR filter state (Direct Form II Transposed).
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct BiquadState
@@ -95,12 +95,12 @@ public struct BiquadState
 }
 
 /// <summary>
-/// Единый математический модуль расчёта коэффициентов IIR-фильтров по стандарту RBJ Audio-EQ-Cookbook.
-/// Устраняет дублирование между <see cref="KWeightingFilter"/>, <see cref="AudioSpectrumAnalyzer"/> и <see cref="EqualizerProcessor"/>.
+/// Unified math module for calculating IIR filter coefficients according to the RBJ Audio-EQ-Cookbook standard.
+/// Eliminates duplication between <see cref="KWeightingFilter"/>, <see cref="AudioSpectrumAnalyzer"/>, and <see cref="EqualizerProcessor"/>.
 /// </summary>
 public static class BiquadFilterMath
 {
-    /// <summary>ФНЧ 2-го порядка (Low-Pass Filter).</summary>
+    /// <summary>2nd order Low-Pass Filter (LPF).</summary>
     public static BiquadCoefficients ComputeLowPass(int sampleRate, double freqHz, double q = 0.7071067811865475)
     {
         double w0 = 2.0 * Math.PI * ClampFreq(freqHz, sampleRate) / sampleRate;
@@ -118,7 +118,7 @@ public static class BiquadFilterMath
         return new BiquadCoefficients(b0 * invA0, b1 * invA0, b2 * invA0, a1 * invA0, a2 * invA0);
     }
 
-    /// <summary>ФВЧ 2-го порядка (High-Pass Filter).</summary>
+    /// <summary>2nd order High-Pass Filter (HPF).</summary>
     public static BiquadCoefficients ComputeHighPass(int sampleRate, double freqHz, double q = 0.7071067811865475)
     {
         double w0 = 2.0 * Math.PI * ClampFreq(freqHz, sampleRate) / sampleRate;
@@ -136,7 +136,7 @@ public static class BiquadFilterMath
         return new BiquadCoefficients(b0 * invA0, b1 * invA0, b2 * invA0, a1 * invA0, a2 * invA0);
     }
 
-    /// <summary>Полосовой фильтр с единичным пиковым усилением (Constant 0 dB Peak Gain Band-Pass).</summary>
+    /// <summary>Band-pass filter with constant 0 dB peak gain.</summary>
     public static BiquadCoefficients ComputeBandPass(int sampleRate, double freqHz, double q = 0.75)
     {
         double w0 = 2.0 * Math.PI * ClampFreq(freqHz, sampleRate) / sampleRate;
@@ -154,7 +154,7 @@ public static class BiquadFilterMath
         return new BiquadCoefficients(b0 * invA0, b1 * invA0, b2 * invA0, a1 * invA0, a2 * invA0);
     }
 
-    /// <summary>Параметрический колоколообразный фильтр (Peaking EQ).</summary>
+    /// <summary>Parametric peaking filter (Peaking EQ).</summary>
     public static BiquadCoefficients ComputePeakingEq(int sampleRate, double freqHz, double gainDb, double q = 1.4142135623730951)
     {
         double a = Math.Abs(gainDb) < 0.001 ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
@@ -173,7 +173,7 @@ public static class BiquadFilterMath
         return new BiquadCoefficients(b0 * invA0, b1 * invA0, b2 * invA0, a1 * invA0, a2 * invA0);
     }
 
-    /// <summary>Низкочастотный шельфовый фильтр (Low-Shelf).</summary>
+    /// <summary>Low-shelf filter.</summary>
     public static BiquadCoefficients ComputeLowShelf(int sampleRate, double freqHz, double gainDb, double q = 0.7071067811865475)
     {
         double a = Math.Abs(gainDb) < 0.001 ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
@@ -193,7 +193,7 @@ public static class BiquadFilterMath
         return new BiquadCoefficients(b0 * invA0, b1 * invA0, b2 * invA0, a1 * invA0, a2 * invA0);
     }
 
-    /// <summary>Высокочастотный шельфовый фильтр (High-Shelf).</summary>
+    /// <summary>High-shelf filter.</summary>
     public static BiquadCoefficients ComputeHighShelf(int sampleRate, double freqHz, double gainDb, double q = 0.7071067811865475)
     {
         double a = Math.Abs(gainDb) < 0.001 ? 1.0 : Math.Pow(10.0, gainDb / 40.0);
@@ -219,7 +219,7 @@ public static class BiquadFilterMath
 }
 
 /// <summary>
-/// K-weighting фильтр по стандарту ITU-R BS.1770-4.
+/// K-weighting filter per ITU-R BS.1770-4 standard.
 /// </summary>
 public sealed class KWeightingFilter
 {
@@ -288,9 +288,9 @@ public sealed class KWeightingFilter
     }
 
     /// <summary>
-    /// Векторизованный стерео-проход K-Weighting (FMA3 + SSE2):
-    /// использует тождество RBJ High-Pass (<c>B2 == B0</c>, <c>B1 == -2 * B0</c>), сокращая число регистров
-    /// с 17 до 15 XMM (0 обращений к стеку <c>[rsp + disp]</c> внутри цикла).
+    /// Vectorized stereo K-Weighting pass (FMA3 + SSE2):
+    /// leverages the RBJ High-Pass identity (<c>B2 == B0</c>, <c>B1 == -2 * B0</c>), reducing register usage
+    /// from 17 to 15 XMM registers (0 stack accesses <c>[rsp + disp]</c> inside the loop).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe void ProcessBlockStereoFma(float* pIn, double* pOut, int frameCount)
@@ -354,9 +354,9 @@ public sealed class KWeightingFilter
     }
 
     /// <summary>
-    /// Векторизованный стерео-проход K-Weighting (базовый SSE2):
-    /// использует тождество RBJ High-Pass (<c>B2 == B0</c>, <c>B1 == -2 * B0</c>), укладываясь в 15 XMM-регистров
-    /// (0 обращений к стеку <c>[rsp + disp]</c> внутри цикла).
+    /// Vectorized stereo K-Weighting pass (baseline SSE2):
+    /// leverages the RBJ High-Pass identity (<c>B2 == B0</c>, <c>B1 == -2 * B0</c>), fitting into 15 XMM registers
+    /// (0 stack accesses <c>[rsp + disp]</c> inside the loop).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
     private unsafe void ProcessBlockStereoSse2(float* pIn, double* pOut, int frameCount)

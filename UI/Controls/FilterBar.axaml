@@ -14,10 +14,10 @@
         Padding="6,0,12,0">
         <TextBox.InnerLeftContent>
             <!--
-                IconData привязан к вычисляемому DirectProperty FilterBar.IconData,
-                которое возвращает StreamGeometry из Application.Resources по ключу IconKey.
-                Это позволяет менять иконку снаружи через строковый ключ без зависимости
-                от Material.Icons.
+                IconData is bound to the FilterBar.IconData computed DirectProperty,
+                which returns a StreamGeometry from Application.Resources by IconKey.
+                This allows changing the icon externally via a string key without depending
+                on Material.Icons.
             -->
             <PathIcon Data="{Binding IconData, ElementName=Root}"
                 Width="{Binding IconSize, ElementName=Root}"

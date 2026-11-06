@@ -9,8 +9,8 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
-/// Реализация репозитория управления треками в SQLite-хранилище.
-/// Работает через асинхронные команды ADO.NET (Microsoft.Data.Sqlite), не блокируя вызывающие потоки.
+/// Implementation of the track management repository in SQLite storage.
+/// Operates via asynchronous ADO.NET commands (Microsoft.Data.Sqlite) without blocking calling threads.
 /// </summary>
 public sealed partial class TrackRepository : ITrackRepository
 {
@@ -27,9 +27,9 @@ public sealed partial class TrackRepository : ITrackRepository
         """;
 
     /// <summary>
-    /// Инициализирует новый экземпляр репозитория треков на базе чистых подключений SQLite.
+    /// Initializes a new instance of the track repository based on pure SQLite connections.
     /// </summary>
-    /// <param name="factory">Фабрика нативных подключений SQLite с контролем памяти.</param>
+    /// <param name="factory">Factory for native SQLite connections with memory control.</param>
     public TrackRepository(ISqliteConnectionFactory factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
@@ -73,7 +73,7 @@ public sealed partial class TrackRepository : ITrackRepository
 
         var entities = new Dictionary<string, TrackInfo>(idList.Count, StringComparer.Ordinal);
 
-        // Пакетная выборка чанками по 500 для предотвращения превышения лимитов SQLite host parameters
+        // Batch fetching in chunks of 500 to prevent exceeding SQLite host parameters limits
         const int chunkSize = 500;
         for (int i = 0; i < idList.Count; i += chunkSize)
         {
@@ -622,7 +622,7 @@ public sealed partial class TrackRepository : ITrackRepository
             bool guest = IsGuest(ownerId);
             var nowStr = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
 
-            // 1. Удаление дубликата
+            // 1. Delete duplicate
             await using (var cmdDel = connection.CreateCommand())
             {
                 cmdDel.Transaction = transaction;
@@ -638,7 +638,7 @@ public sealed partial class TrackRepository : ITrackRepository
                 await cmdDel.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            // 2. Вставка новой записи
+            // 2. Insert new record
             await using (var cmdIns = connection.CreateCommand())
             {
                 cmdIns.Transaction = transaction;
@@ -652,7 +652,7 @@ public sealed partial class TrackRepository : ITrackRepository
                 await cmdIns.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            // 3. Пакетная очистка старых записей сверх лимита 100
+            // 3. Batch cleanup of old records exceeding the limit of 100
             await using (var cmdPrune = connection.CreateCommand())
             {
                 cmdPrune.Transaction = transaction;
@@ -794,7 +794,7 @@ public sealed partial class TrackRepository : ITrackRepository
     #region Helpers
 
     /// <summary>
-    /// Вспомогательный предикат для выявления гостевой или пустой сессии, подлежащих слиянию в единый профиль.
+    /// Helper predicate to identify a guest or empty session eligible for merging into a single profile.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsGuest(string ownerId) => string.IsNullOrEmpty(ownerId) || ownerId == "guest";
@@ -808,13 +808,13 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <summary>
-    /// Вычитывает модель трека <see cref="TrackInfo"/> напрямую из активного чтения <see cref="DbDataReader"/>.
+    /// Reads the <see cref="TrackInfo"/> track model directly from an active <see cref="DbDataReader"/>.
     /// </summary>
-    /// <param name="reader">Экземпляр открытого ридера SQLite.</param>
-    /// <param name="isLiked">Начальное состояние флага лайка.</param>
-    /// <returns>Экземпляр модели <see cref="TrackInfo"/>.</returns>
+    /// <param name="reader">An instance of an open SQLite reader.</param>
+    /// <param name="isLiked">Initial state of the liked flag.</param>
+    /// <returns>An instance of the <see cref="TrackInfo"/> model.</returns>
     /// <remarks>
-    /// Обеспечивает прямое сопоставление по индексам колонок без рефлексии и промежуточных аллокаций.
+    /// Provides direct mapping by column indexes without reflection or intermediate allocations.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static TrackInfo ReadTrackInfo(DbDataReader reader, bool isLiked = false)
@@ -863,7 +863,7 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <summary>
-    /// Проверяет наличие отметки "Мне нравится" для трека в рамках текущего владельца.
+    /// Checks if a track is marked as liked for the current owner.
     /// </summary>
     private static async Task<bool> CheckIsLikedAsync(DbConnection connection, string trackId, string ownerId, CancellationToken ct)
     {
@@ -886,7 +886,7 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <summary>
-    /// Пакетно извлекает идентификаторы понравившихся треков для переданной выборки ID.
+    /// Batch fetches identifiers of liked tracks for the provided set of IDs.
     /// </summary>
     private static async Task<HashSet<string>> GetLikedTrackIdsSubsetAsync(
         DbConnection connection,
@@ -935,7 +935,7 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <summary>
-    /// Добавляет строго типизированный параметр к команде SQLite.
+    /// Adds a strongly typed parameter to the SQLite command.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AddParameter(DbCommand cmd, string name, object? value)
@@ -947,7 +947,7 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <summary>
-    /// Возвращает атомарный SQL запрос вставки или обновления трека.
+    /// Returns an atomic SQL query for inserting or updating a track.
     /// </summary>
     private static string GetUpsertSql() => """
         INSERT INTO Tracks (
@@ -984,7 +984,7 @@ public sealed partial class TrackRepository : ITrackRepository
         """;
 
     /// <summary>
-    /// Привязывает значения модели трека к параметрам запроса Upsert.
+    /// Binds track model values to the Upsert query parameters.
     /// </summary>
     private static void BindUpsertParameters(DbCommand cmd, TrackInfo track, DateTime now)
     {

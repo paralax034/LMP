@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Features.Shared;
 
 /// <summary>
-/// ViewModel для представления отдельного трека в списках и очередях.
+/// ViewModel representing an individual track in lists and queues.
 /// </summary>
 public sealed partial class TrackItemViewModel : ViewModelBase
 {

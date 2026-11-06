@@ -4,12 +4,12 @@ using System.Text.Json;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Единая точка управления и парсинга превью-изображений (thumbnails) без LINQ-аллокаций.
+/// Single point of management and parsing for preview images (thumbnails) without LINQ allocations.
 /// </summary>
 public static class ThumbnailUtils
 {
     /// <summary>
-    /// Находит обложку с максимальным разрешением из списка доменных моделей Thumbnail.
+    /// Finds the cover image with the maximum resolution from a list of Thumbnail domain models.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string GetBestUrl(IReadOnlyList<Thumbnail> thumbnails, string? fallbackVideoId = null)
@@ -37,7 +37,7 @@ public static class ThumbnailUtils
     }
 
     /// <summary>
-    /// Находит обложку с максимальным разрешением из внутренних структур ThumbnailData.
+    /// Finds the cover image with the maximum resolution from internal ThumbnailData structures.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static string GetBestUrl(IEnumerable<Youtube.Bridge.ThumbnailData> thumbnails, string? fallbackVideoId = null)
@@ -60,7 +60,7 @@ public static class ThumbnailUtils
     }
 
     /// <summary>
-    /// Высокопроизводительно извлекает массив Thumbnail напрямую из JSON без создания промежуточных объектов ThumbnailData.
+    /// High-performance extracts a Thumbnail array directly from JSON without creating intermediate ThumbnailData objects.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Thumbnail[] ExtractThumbnails(JsonElement? thumbsElement)

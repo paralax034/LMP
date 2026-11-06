@@ -3,10 +3,10 @@ using System.Net;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Долгоживущий HTTP-сервер (синглтон) для приёма куков из браузерного расширения.
-/// Listener запускается лениво при первом вызове <see cref="WaitForCookiesAsync"/>
-/// и живёт до <see cref="Dispose"/>.
-/// Множественные вызовы <see cref="WaitForCookiesAsync"/> безопасно заменяют друг друга.
+/// Long-lived HTTP server (singleton) for receiving cookies from the browser extension.
+/// The listener starts lazily on the first call to <see cref="WaitForCookiesAsync"/>
+/// and runs until <see cref="Dispose"/>.
+/// Multiple calls to <see cref="WaitForCookiesAsync"/> safely replace each other.
 /// </summary>
 public sealed class LocalAuthServer : IDisposable
 {
@@ -20,15 +20,15 @@ public sealed class LocalAuthServer : IDisposable
     private readonly CancellationTokenSource _serverCts = new();
     private readonly Lock _lock = new();
 
-    /// <summary>Ожидающий результата вызов WaitForCookiesAsync.</summary>
+    /// <summary>Pending call to WaitForCookiesAsync waiting for a result.</summary>
     private TaskCompletionSource<string?>? _pendingTcs;
 
     private bool _isStarted;
     private bool _isDisposed;
 
     /// <summary>
-    /// Инициализирует объект сервера без запуска listener.
-    /// Фактический старт происходит лениво при первом ожидании куков.
+    /// Initializes the server object without starting the listener.
+    /// The actual start occurs lazily on the first cookie wait.
     /// </summary>
     public LocalAuthServer()
     {
@@ -37,8 +37,8 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Освобождает ранее созданный экземпляр сервера, если он уже был инициализирован.
-    /// Не инициирует создание сервиса через DI.
+    /// Disposes a previously created server instance if it was initialized.
+    /// Does not trigger service creation via DI.
     /// </summary>
     public static void DisposeIfCreated()
     {
@@ -46,11 +46,11 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Ожидает куки от расширения. При повторном вызове предыдущее ожидание снимается.
-    /// Отмена <paramref name="ct"/> снимает ожидание без остановки сервера.
+    /// Waits for cookies from the extension. On repeated calls, the previous wait is canceled.
+    /// Canceling <paramref name="ct"/> cancels the wait without stopping the server.
     /// </summary>
-    /// <param name="ct">Токен отмены ожидания.</param>
-    /// <returns>Строка куков или <c>null</c>, если ожидание было снято.</returns>
+    /// <param name="ct">Cancellation token for the wait operation.</param>
+    /// <returns>A cookie string or <c>null</c> if the wait was canceled.</returns>
     public Task<string?> WaitForCookiesAsync(CancellationToken ct)
     {
         if (!EnsureStarted())
@@ -73,9 +73,9 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Лениво запускает listener и фоновый цикл при первом реальном использовании.
+    /// Lazily starts the listener and background loop on first actual use.
     /// </summary>
-    /// <returns><c>true</c>, если сервер запущен или уже был запущен.</returns>
+    /// <returns><c>true</c> if the server is running or was already running.</returns>
     private bool EnsureStarted()
     {
         lock (_lock)
@@ -109,7 +109,7 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Привязывает пользовательский токен отмены к конкретному ожиданию куков.
+    /// Binds a user cancellation token to a specific cookie wait operation.
     /// </summary>
     private async Task<string?> WaitForCookiesCoreAsync(TaskCompletionSource<string?> tcs, CancellationToken ct)
     {
@@ -123,7 +123,7 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Снимает ожидание куков для указанного waiter, если он всё ещё актуален.
+    /// Cancels the cookie wait for the specified waiter if it is still active.
     /// </summary>
     private void CancelPendingWait(TaskCompletionSource<string?> tcs)
     {
@@ -138,7 +138,7 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Основной цикл обработки HTTP-запросов. Работает до отмены <see cref="_serverCts"/>.
+    /// Main HTTP request processing loop. Runs until <see cref="_serverCts"/> is canceled.
     /// </summary>
     private async Task RunLoopAsync(CancellationToken ct)
     {
@@ -170,7 +170,7 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает один HTTP-запрос.
+    /// Processes a single HTTP request.
     /// </summary>
     private async Task HandleContextAsync(HttpListenerContext context, CancellationToken ct)
     {
@@ -269,7 +269,7 @@ public sealed class LocalAuthServer : IDisposable
     }
 
     /// <summary>
-    /// Структура без аллокаций для передачи состояния отмены.
+    /// Allocation-free struct for passing cancellation state.
     /// </summary>
     private readonly record struct CookieWaiterState(
         LocalAuthServer Server,

@@ -5,44 +5,44 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Класс сбоя отправки облачной мутации, определяющий политику повтора в очереди Outbox.
+/// Cloud mutation delivery failure class that determines the retry policy in the Outbox queue.
 /// </summary>
 public enum CloudOutboxFailureKind : byte
 {
-    /// <summary>Операция отменена владельцем токена (закрытие приложения, отмена пользователем).</summary>
+    /// <summary>Operation canceled by token owner (application exit, user cancellation).</summary>
     Canceled = 0,
 
-    /// <summary>Временный сбой сети, таймаут HttpClient, кулдаун, 5xx/429, занятость SQLite.</summary>
+    /// <summary>Transient network failure, HttpClient timeout, cooldown, 5xx/429, SQLite busy.</summary>
     Transient = 1,
 
-    /// <summary>Сессия YouTube недействительна (401, LoginRequired): очередь паркуется до смены авторизации.</summary>
+    /// <summary>YouTube session invalid (401, LoginRequired): queue parked until re-authentication.</summary>
     AuthRequired = 2,
 
-    /// <summary>Облачный ресурс не существует (404, плейлист недоступен).</summary>
+    /// <summary>Cloud resource does not exist (404, playlist unavailable).</summary>
     NotFound = 3,
 
-    /// <summary>Нет прав на изменение облачного ресурса (403).</summary>
+    /// <summary>No permission to modify cloud resource (403).</summary>
     Forbidden = 4,
 
-    /// <summary>Неустранимая ошибка запроса (400, некорректный ответ).</summary>
+    /// <summary>Non-retryable request error (400, malformed response).</summary>
     Permanent = 5
 }
 
 /// <summary>
-/// Чистая (без I/O) машина состояний коалесценции облачных мутаций Outbox.
-/// Все методы мутируют переданное состояние и должны вызываться под блокировкой владельца состояния.
-/// Учитывает операции «в полёте», чтобы аннигиляция не уничтожала намерение пользователя,
-/// уже отправленное в облако текущим флашем.
+/// Pure (I/O-free) state machine for Outbox cloud mutation coalescence.
+/// All methods mutate the passed state and must be called under state owner lock.
+/// Accounts for in-flight operations to prevent annihilation from destroying
+/// user intent already sent to the cloud by the current flush.
 /// </summary>
 public static class CloudOutboxCoalescer
 {
-    /// <summary>Плейсхолдер YouTube вместо реального <c>SetVideoId</c>, который нельзя сохранять в БД.</summary>
+    /// <summary>YouTube placeholder replacing real <c>SetVideoId</c>, which must not be persisted in DB.</summary>
     public const string PlaceholderSetVideoId = "to_be_updated_by_client";
 
     private const int LinearScanThreshold = 8;
 
     /// <summary>
-    /// Проверяет, что <c>SetVideoId</c> пригоден для адресации элемента облачного плейлиста.
+    /// Validates that <c>SetVideoId</c> is suitable for addressing a cloud playlist item.
     /// </summary>
     public static bool IsUsableSetVideoId([NotNullWhen(true)] string? setVideoId) =>
         !string.IsNullOrEmpty(setVideoId) &&
@@ -51,11 +51,11 @@ public static class CloudOutboxCoalescer
     #region Likes
 
     /// <summary>
-    /// Применяет намерение «Мне нравится» к корзине лайков.
-    /// Пока лайк трека отправляется (<paramref name="isInFlight"/>), аннигиляция запрещена:
-    /// новое целевое значение сохраняется и будет отправлено следующим флашем.
+    /// Applies a "Like" intent to the likes bucket.
+    /// While track like is being sent (<paramref name="isInFlight"/>), annihilation is forbidden:
+    /// new target value is stored and will be sent by the next flush.
     /// </summary>
-    /// <returns><see langword="true"/>, если запись аннигилирована (возврат к базовому состоянию).</returns>
+    /// <returns><see langword="true"/> if entry was annihilated (reverted to baseline state).</returns>
     public static bool ApplyLike(
         CloudPlaylistOutboxState state,
         string trackId,
@@ -92,8 +92,8 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Фиксирует успешную отправку лайка. Если пользователь успел изменить цель во время отправки,
-    /// запись сохраняется с новым базовым значением, равным подтверждённому облачному состоянию.
+    /// Commits successful like delivery. If user changed target while in-flight,
+    /// entry is retained with new baseline set to confirmed cloud state.
     /// </summary>
     public static void CommitLike(CloudPlaylistOutboxState state, string trackId, bool syncedLiked)
     {
@@ -117,7 +117,7 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Удаляет запись лайка без фиксации (неустранимая ошибка отправки).
+    /// Removes like entry without committing (non-retryable delivery failure).
     /// </summary>
     public static void DropLike(CloudPlaylistOutboxState state, string trackId)
     {
@@ -127,7 +127,7 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Возвращает актуальное целевое значение лайка трека из живого состояния.
+    /// Returns current track like target value from live state.
     /// </summary>
     public static bool TryGetLikeTarget(CloudPlaylistOutboxState state, string trackId, out bool targetLiked)
     {
@@ -141,10 +141,10 @@ public static class CloudOutboxCoalescer
     #region Tracks
 
     /// <summary>
-    /// Применяет пакетное добавление треков. Отложенное удаление того же трека аннигилируется,
-    /// если оно не отправляется прямо сейчас; иначе удаление сохраняется, а добавление ставится как компенсация.
+    /// Applies batch track addition. Pending removal of the same track is annihilated
+    /// unless currently in-flight; otherwise removal is retained, and addition is queued as compensation.
     /// </summary>
-    /// <returns>Восстанавливаемые пары <c>(TrackId, SetVideoId)</c> аннигилированных удалений либо <see langword="null"/>.</returns>
+    /// <returns>Restorable <c>(TrackId, SetVideoId)</c> pairs of annihilated removals or <see langword="null"/>.</returns>
     public static List<(string TrackId, string SetVideoId)>? ApplyAddTracks(
         CloudPlaylistOutboxState state,
         IReadOnlyList<string> trackIds,
@@ -179,8 +179,8 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Применяет пакетное удаление треков. Отложенное добавление аннигилируется, если оно не отправляется
-    /// прямо сейчас; иначе добавление сохраняется, а удаление ставится как компенсация (без потери намерения).
+    /// Applies batch track removal. Pending addition is annihilated unless currently
+    /// in-flight; otherwise addition is retained, and removal is queued as compensation (without intent loss).
     /// </summary>
     public static void ApplyRemoveTracks(
         CloudPlaylistOutboxState state,
@@ -220,8 +220,8 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Применяет перестановку треков. Для ещё не созданного в облаке плейлиста (вне полёта)
-    /// перестановка применяется прямо к порядку отложенных добавлений без отдельных move-операций.
+    /// Applies track reordering. For a playlist not yet created in cloud (not in-flight),
+    /// reordering applies directly to pending addition order without separate move operations.
     /// </summary>
     public static void ApplyReorder(
         CloudPlaylistOutboxState state,
@@ -245,14 +245,14 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Создание плейлиста ещё не отправлено и не в полёте: Фаза 0 возьмёт актуальные название,
-    /// описание и порядок треков из локального состояния, отдельные правки для них не нужны.
+    /// Playlist creation not sent yet and not in-flight: Phase 0 will pull latest title,
+    /// description, and track order from local state, so separate edits are unnecessary.
     /// </summary>
     public static bool IsUnsentCreate(CloudPlaylistOutboxState state, bool isTargetInFlight) =>
         state.PendingCreatePlaylist && string.IsNullOrEmpty(state.YoutubePlaylistId) && !isTargetInFlight;
 
     /// <summary>
-    /// Снимает отдельные правки названия и описания, которые уйдут в запрос создания плейлиста.
+    /// Strips separate title and description edits that will be included in the playlist creation request.
     /// </summary>
     public static void DropMetadataAbsorbedByCreate(CloudPlaylistOutboxState state)
     {
@@ -261,8 +261,8 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Фиксирует название и описание, отправленные в запросе создания. Правка, сделанная во время
-    /// Фазы 0 и отличающаяся от отправленного значения, остаётся в очереди с новой базой.
+    /// Commits title and description sent in creation request. An edit made during
+    /// Phase 0 that differs from the sent value remains queued with a new baseline.
     /// </summary>
     public static void CommitMetadataSentWithCreate(
         CloudPlaylistOutboxState state,
@@ -287,7 +287,7 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Переводит состояние в терминальное удаление облачного плейлиста, отбрасывая остальные мутации.
+    /// Transitions state to terminal cloud playlist deletion, discarding other mutations.
     /// </summary>
     public static void ApplyDeletePlaylist(CloudPlaylistOutboxState state)
     {
@@ -309,8 +309,8 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Фиксирует успешное добавление: удаляет отправленные треки из очереди и дописывает полученные
-    /// <c>SetVideoId</c> в компенсирующие удаления, поставленные во время полёта.
+    /// Commits successful addition: removes sent tracks from queue and appends returned
+    /// <c>SetVideoId</c> values to compensating removals queued while in-flight.
     /// </summary>
     public static void CommitAdds(
         CloudPlaylistOutboxState state,
@@ -329,10 +329,10 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Нормализует конфликтующие пары «добавление + удаление» одного трека после завершения флаша:
-    /// добавление в полёте + удаление → итог «трека нет»; удаление в полёте + добавление → итог «трек есть».
+    /// Normalizes conflicting "add + remove" pairs for the same track after flush completion:
+    /// add in-flight + remove → result "track absent"; remove in-flight + add → result "track present".
     /// </summary>
-    /// <returns><see langword="true"/>, если состояние изменилось.</returns>
+    /// <returns><see langword="true"/> if state changed.</returns>
     public static bool ResolveInFlightCompensations(
         CloudPlaylistOutboxState state,
         IReadOnlySet<string> sentAdds,
@@ -366,8 +366,8 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Сопоставляет отправленные треки с полученными <c>SetVideoId</c> (ответ уже выровнен по запросу),
-    /// отбрасывая пустые значения и плейсхолдер <see cref="PlaceholderSetVideoId"/>.
+    /// Maps sent tracks to returned <c>SetVideoId</c> values (response already aligned with request),
+    /// discarding empty values and the <see cref="PlaceholderSetVideoId"/> placeholder.
     /// </summary>
     public static List<(string TrackId, string SetVideoId)> MapAddedSetVideoIds(
         IReadOnlyList<string> sentTrackIds,
@@ -392,17 +392,17 @@ public static class CloudOutboxCoalescer
     #region Cloud Rebase
 
     /// <summary>
-    /// Определяет, что YouTube отклонил саму правку (HTTP 400 или <c>STATUS_FAILED</c>), а не транспорт.
-    /// Типичная причина — устаревшие <c>SetVideoId</c> после изменения плейлиста на другом устройстве.
+    /// Determines whether YouTube rejected the edit itself (HTTP 400 or <c>STATUS_FAILED</c>) rather than transport.
+    /// Typical cause is stale <c>SetVideoId</c> values after playlist was modified on another device.
     /// </summary>
     public static bool IsRejectedEdit(Exception ex) =>
         ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest } ||
         ex.GetType() == typeof(YoutubeExplodeException);
 
     /// <summary>
-    /// Перебазирует удаления на актуальный облачный состав: запись с реальным <c>SetVideoId</c>, которого
-    /// уже нет в облаке, считается выполненной; запись без пригодного <c>SetVideoId</c> разрешается
-    /// первым свободным вхождением того же трека. Повторное использование одного <c>SetVideoId</c> исключено.
+    /// Rebases removals against current cloud state: entry with a real <c>SetVideoId</c> no longer
+    /// in cloud is considered completed; entry without a suitable <c>SetVideoId</c> resolves to
+    /// first available occurrence of the same track. Reusing the same <c>SetVideoId</c> is prevented.
     /// </summary>
     public static List<CloudTrackRemoveEntry> SelectRemovalsStillInCloud(
         IReadOnlyList<CloudTrackRemoveEntry> removals,
@@ -448,9 +448,9 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Строит пару порядков <c>SetVideoId</c> для перестановки поверх актуального облачного состава:
-    /// текущий — первые вхождения треков в облаке, целевой — треки целевого порядка, присутствующие в облаке.
-    /// Треки, удалённые в облаке, и облачные дубликаты в перестановке не участвуют.
+    /// Builds a pair of <c>SetVideoId</c> sequences for reordering over current cloud state:
+    /// current = first track occurrences in cloud, target = target order tracks present in cloud.
+    /// Tracks removed in cloud and cloud duplicates do not participate in reordering.
     /// </summary>
     public static (List<string> CurrentSetIds, List<string> DesiredSetIds) BuildRebasedReorder(
         IReadOnlyList<(string TrackId, string SetVideoId)> cloudOrder,
@@ -478,13 +478,13 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Выбирает локальные треки, удалённые в облаке на другом устройстве: у трека есть реальный
-    /// <c>SetVideoId</c> (он уже был связан с облаком), но в облачном составе трека нет.
-    /// Треки без пригодного <c>SetVideoId</c> считаются ещё не выгруженными и не выбираются.
+    /// Selects local tracks removed in cloud on another device: track has a real
+    /// <c>SetVideoId</c> (was linked to cloud), but is absent in cloud composition.
+    /// Tracks without suitable <c>SetVideoId</c> are considered pending upload and excluded.
     /// </summary>
     /// <returns>
-    /// Идентификаторы треков либо <see langword="null"/>, если сработал предохранитель: облако пустое
-    /// или кандидатов больше <c>max(3, localCount/4)</c> (вероятен частичный ответ облака).
+    /// Track identifiers or <see langword="null"/> if safety trigger fired: cloud is empty
+    /// or candidate count exceeds <c>max(3, localCount/4)</c> (likely partial cloud response).
     /// </returns>
     public static HashSet<string>? SelectCloudDeletedTrackIds(
         IReadOnlyList<(string TrackId, string? SetVideoId)> localTracks,
@@ -512,12 +512,12 @@ public static class CloudOutboxCoalescer
     #region Hydration Merge
 
     /// <summary>
-    /// Сливает живое состояние, накопленное до завершения гидратации, с более старым состоянием из SQLite.
-    /// Живые мутации переигрываются поверх восстановленных (базовые значения берутся из БД).
+    /// Merges live state accumulated prior to hydration completion with older state from SQLite.
+    /// Live mutations are replayed on top of restored ones (baseline values taken from DB).
     /// </summary>
-    /// <param name="live">Живое (более новое) состояние.</param>
-    /// <param name="restored">Восстановленное из БД (более старое) состояние; мутируется и возвращается.</param>
-    /// <param name="restoredSetVideoIds">Пары <c>SetVideoId</c> аннигилированных удалений для восстановления в БД.</param>
+    /// <param name="live">Live (newer) state.</param>
+    /// <param name="restored">State restored from DB (older); mutated and returned.</param>
+    /// <param name="restoredSetVideoIds">Annihilated removal <c>SetVideoId</c> pairs to restore in DB.</param>
     public static CloudPlaylistOutboxState MergeRestored(
         CloudPlaylistOutboxState live,
         CloudPlaylistOutboxState restored,
@@ -610,8 +610,8 @@ public static class CloudOutboxCoalescer
     #region Failure Policy
 
     /// <summary>
-    /// Классифицирует исключение облачной операции для выбора политики повтора.
-    /// Таймаут HttpClient (<see cref="OperationCanceledException"/> при неотменённом токене) считается временным.
+    /// Classifies cloud operation exception for retry policy selection.
+    /// HttpClient timeout (<see cref="OperationCanceledException"/> with un-canceled token) is treated as transient.
     /// </summary>
     public static CloudOutboxFailureKind ClassifyFailure(Exception ex, CancellationToken ct)
     {
@@ -648,7 +648,7 @@ public static class CloudOutboxCoalescer
     }
 
     /// <summary>
-    /// Вычисляет экспоненциальную задержку повтора: <c>base·2^(n−1)</c> с ограничением <paramref name="maxMs"/>.
+    /// Calculates exponential retry delay: <c>base·2^(n−1)</c> capped at <paramref name="maxMs"/>.
     /// </summary>
     public static int ComputeRetryBackoffMs(int retryCount, int baseMs, int maxMs)
     {
@@ -664,7 +664,7 @@ public static class CloudOutboxCoalescer
     #region Ordinal Helpers
 
     /// <summary>
-    /// Поэлементно сравнивает две последовательности идентификаторов (ordinal, без аллокаций).
+    /// Element-wise compares two sequences of identifiers (ordinal, allocation-free).
     /// </summary>
     public static bool SequenceEqualOrdinal(IReadOnlyList<string> a, IReadOnlyList<string> b)
     {

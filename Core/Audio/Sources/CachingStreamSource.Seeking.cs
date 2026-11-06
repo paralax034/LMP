@@ -21,15 +21,15 @@ public sealed partial class CachingStreamSource
 
         Log.Debug($"[CachingSource] Seek: {positionMs}ms → byte {targetBytePos}");
 
-        // 1. Перемещение позиции потока и отмена pending reads
+        // 1. Move stream position and cancel pending reads
         _readStream!.SeekAndCancelPendingReads(targetBytePos);
         Volatile.Write(ref _currentReadOffset, targetBytePos);
 
-        // 2. Сброс парсера для чтения с новой позиции
+        // 2. Reset parser for reading from the new position
         _parser.Reset();
         Volatile.Write(ref _positionMs, segmentStartMs);
 
-        // 3. Быстрый путь: данные уже есть локально
+        // 3. Fast path: data is already available locally
         if (HasMinimalLocalSeekStartData(targetBytePos))
         {
             Log.Debug($"[CachingSource] Seek: sufficient local prefix at {targetBytePos}, starting immediately");
@@ -37,7 +37,7 @@ public sealed partial class CachingStreamSource
             return true;
         }
 
-        // 4. Медленный путь: данных нет, нужна сетевая загрузка
+        // 4. Slow path: no data, network fetch required
         _seekInProgress = true;
         int minimalBytes;
         try
@@ -46,8 +46,8 @@ public sealed partial class CachingStreamSource
             if (minimalBytes <= 0)
                 return true;
 
-            // Если TryPrefetchChunkForSeekAsync уже запустил скачивание именно этого диапазона,
-            // не сбрасываем эпоху, чтобы EnsureRangeAsync бесшовно подхватил in-flight запрос по dedup.
+            // If TryPrefetchChunkForSeekAsync has already started downloading this exact range,
+            // do not reset the epoch so EnsureRangeAsync seamlessly attaches to the in-flight request via dedup.
             if (!TryGetOverlappingActiveDownload(targetBytePos, minimalBytes, out _))
             {
                 ResetDownloadEpoch();
@@ -81,7 +81,7 @@ public sealed partial class CachingStreamSource
             _seekInProgress = false;
         }
 
-        // 5. Запуск фоновой предзагрузки (R2)
+        // 5. Launch background prefetch (R2)
         long committedAhead = GetBufferedBytesAhead(targetBytePos);
         int r2SkipBytes = (int)Math.Min(committedAhead, int.MaxValue);
 
@@ -93,12 +93,12 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Best-effort prefetch минимального startup prefix для предстоящего seek.
-    /// Вызывается из <c>AudioPlayer</c> ПАРАЛЛЕЛЬНО с остановкой decoder,
-    /// до вызова <see cref="SeekAsync"/>.
+    /// Best-effort prefetch of the minimum startup prefix for an upcoming seek.
+    /// Called from <c>AudioPlayer</c> IN PARALLEL with stopping the decoder,
+    /// prior to calling <see cref="SeekAsync"/>.
     /// </summary>
-    /// <param name="positionMs">Целевая позиция seek в миллисекундах.</param>
-    /// <param name="ct">Токен отмены (lifetime, НЕ epoch).</param>
+    /// <param name="positionMs">Target seek position in milliseconds.</param>
+    /// <param name="ct">Cancellation token (lifetime, NOT epoch).</param>
     internal async Task TryPrefetchChunkForSeekAsync(long positionMs, CancellationToken ct)
     {
         if (_cacheEntry == null || _parser == null) return;
@@ -130,11 +130,11 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Fire-and-forget preload диапазона вокруг seek-позиции.
-    /// Не блокирует возврат из <see cref="SeekAsync"/>.
+    /// Fire-and-forget preload of the range around the seek position.
+    /// Does not block return from <see cref="SeekAsync"/>.
     /// </summary>
-    /// <param name="targetBytePos">Базовая позиция перемотки.</param>
-    /// <param name="skipBytes">Количество байт, уже запрошенных синхронным критическим путём.</param>
+    /// <param name="targetBytePos">Base seek position.</param>
+    /// <param name="skipBytes">Number of bytes already requested by the synchronous critical path.</param>
     private async Task PreloadRangeForSeekFireAndForgetAsync(long targetBytePos, int skipBytes)
     {
         try
@@ -143,7 +143,7 @@ public sealed partial class CachingStreamSource
             var downloadToken = CurrentDownloadToken;
             int preloadLength = GetAdaptiveSeekPreloadBytes();
 
-            // Сдвигаем стартовую позицию, чтобы не запрашивать то, что уже качается в SeekAsync
+            // Offset the start position to avoid requesting what is already downloading in SeekAsync
             long startPos = targetBytePos + skipBytes;
             int remainingPreload = preloadLength - skipBytes;
 

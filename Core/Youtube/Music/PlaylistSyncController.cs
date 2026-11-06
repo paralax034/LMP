@@ -113,8 +113,8 @@ internal sealed class PlaylistSyncController(HttpClient http)
     #region Full Playlist Data (WEB_REMIX Streaming)
 
     /// <summary>
-    /// Получает полный снимок плейлиста за минимальное количество HTTP-запросов.
-    /// Использует потоковый конвейер без промежуточных LOH-строк и DOM-документов.
+    /// Gets a full playlist snapshot using the minimum number of HTTP requests.
+    /// Uses a streaming pipeline without intermediate LOH strings or DOM documents.
     /// </summary>
     public async Task<FullPlaylistSyncData> GetFullPlaylistDataAsync(
       string playlistId,
@@ -122,8 +122,8 @@ internal sealed class PlaylistSyncController(HttpClient http)
     {
         var browseId = YoutubeIdHelper.NormalizePlaylistBrowseId(playlistId);
 
-        // Запускаем чтение шапки из стандартного YouTube WEB параллельно с основным потоком WEB_REMIX:
-        // WEB отдаёт точные до единицы просмотры, точную дату обновления (stats[2]), приватность и канал автора.
+        // Start reading the header from standard YouTube WEB in parallel with the main WEB_REMIX stream:
+        // WEB provides exact view counts (to the unit), exact update date (stats[2]), privacy status, and the author's channel.
         var webMetadataTask = TryFetchWebBrowseMetadataAsync(browseId, ct);
 
         FullPlaylistSyncData playlistData;
@@ -181,8 +181,8 @@ internal sealed class PlaylistSyncController(HttpClient http)
 
         var webMeta = await webMetadataTask.ConfigureAwait(false);
 
-        // Если WEB_REMIX вернул пустой ответ (без заголовка и треков) И стандартный YouTube WEB подтвердил,
-        // что плейлист больше не существует (удалён в облаке) — выбрасываем PlaylistUnavailableException для авто-даунгрейда в LocalOnly.
+        // If WEB_REMIX returned an empty response (without header and tracks) AND standard YouTube WEB confirmed
+        // that the playlist no longer exists (deleted in the cloud) — throw PlaylistUnavailableException for auto-downgrade to LocalOnly.
         if (string.IsNullOrEmpty(playlistData.Title) &&
             playlistData.Tracks.Count == 0 &&
             webMeta is { IsAvailable: false })
@@ -276,7 +276,7 @@ internal sealed class PlaylistSyncController(HttpClient http)
     /// Fetches playlist tracks with setVideoId for sync/removal.
     /// </summary>
     /// <remarks>
-    /// Wrapper над <see cref="GetFullPlaylistDataAsync"/> для обратной совместимости.
+    /// Wrapper around <see cref="GetFullPlaylistDataAsync"/> for backward compatibility.
     /// </remarks>
     public async Task<List<RemoteTrackInfo>> GetPlaylistTracksAsync(
         string playlistId,
@@ -290,8 +290,8 @@ internal sealed class PlaylistSyncController(HttpClient http)
 }
 
 /// <summary>
-/// Трек плейлиста с метаданными и setVideoId для sync/removal операций.
-/// IsPlayable=false — трек недоступен в YTM, но присутствует в плейлисте.
+/// Playlist track with metadata and setVideoId for sync/removal operations.
+/// IsPlayable=false — track is unavailable in YTM, but present in the playlist.
 /// </summary>
 public readonly record struct RemoteTrackInfo(
     string VideoId,

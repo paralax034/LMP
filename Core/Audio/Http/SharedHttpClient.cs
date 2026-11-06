@@ -7,8 +7,8 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Audio.Http;
 
 /// <summary>
-/// Глобальный HTTP-клиент для CDN-запросов аудио.
-/// Поддерживает горячую замену при смене сетевого интерфейса или настроек прокси.
+/// Global HTTP client for CDN audio requests.
+/// Supports hot swapping on network interface or proxy settings change.
 /// </summary>
 public static class SharedHttpClient
 {
@@ -17,7 +17,7 @@ public static class SharedHttpClient
     private static long _connectionSequence;
 
     /// <summary>
-    /// Регистрирует фабрику отложенного разрешения <see cref="NetworkManager"/> из DI-контейнера.
+    /// Registers a deferred resolution factory for <see cref="NetworkManager"/> from the DI container.
     /// </summary>
     public static void RegisterLazyFactory(Func<NetworkManager> factory)
     {
@@ -25,14 +25,14 @@ public static class SharedHttpClient
     }
 
     /// <summary>
-    /// Инициализирует статический фасад ссылкой на централизованный NetworkManager.
+    /// Initializes the static facade with a reference to the centralized NetworkManager.
     /// </summary>
     public static void Initialize(NetworkManager networkManager)
     {
         _networkManager = networkManager;
     }
 
-    /// <summary>Текущий активный экземпляр клиента (разрешает <see cref="NetworkManager"/> лениво при первом вызове).</summary>
+    /// <summary>The currently active client instance (resolves <see cref="NetworkManager"/> lazily on first call).</summary>
     public static HttpClient Instance =>
         (_networkManager ??= _lazyNetworkFactory?.Invoke())?.AudioClient ?? FallbackClient;
 
@@ -43,8 +43,8 @@ public static class SharedHttpClient
     });
 
     /// <summary>
-    /// Пересоздаёт HTTP-клиент с новым пулом соединений.
-    /// Старый клиент утилизируется через 30 секунд — чтобы не обрывать активные range-запросы.
+    /// Recreates the HTTP client with a new connection pool.
+    /// The old client is disposed after 30 seconds to avoid aborting active range requests.
     /// </summary>
     public static void Rebuild(ProxySettings? proxy = null)
     {
@@ -58,9 +58,8 @@ public static class SharedHttpClient
     }
 
     /// <summary>
-    /// Callback установки TCP-соединения для <see cref="SocketsHttpHandler"/>.
-    /// При DNS-блокировке YouTube-доменов автоматически переключается на DoH
-    /// (<see cref="DohResolver"/>).
+    /// TCP connection establishment callback for <see cref="SocketsHttpHandler"/>.
+    /// Automatically falls back to DoH (<see cref="DohResolver"/>) when YouTube domains are DNS-blocked.
     /// </summary>
     [DebuggerHidden]
     internal static async ValueTask<Stream> ConnectWithKeepAliveAsync(
@@ -69,7 +68,7 @@ public static class SharedHttpClient
     {
         IPAddress[] addresses;
 
-        // Если запрос идёт к локальному прокси (127.0.0.1 / localhost) — подключаемся напрямую без DNS/DoH
+        // If the request goes to a local proxy (127.0.0.1 / localhost), connect directly without DNS/DoH
         if (ctx.DnsEndPoint.Host is "127.0.0.1" or "localhost" ||
             IPAddress.TryParse(ctx.DnsEndPoint.Host, out _))
         {
@@ -155,8 +154,8 @@ public static class SharedHttpClient
     }
 
     /// <summary>
-    /// Резолвит DNS с фильтрацией до IPv4 для WinDivert-совместимости.
-    /// Выделен из ConnectCallback для переиспользования в DoH fallback path.
+    /// Resolves DNS with IPv4 filtering for WinDivert compatibility.
+    /// Extracted from ConnectCallback for reuse in the DoH fallback path.
     /// </summary>
     [DebuggerHidden]
     private static async Task<IPAddress[]> ResolveWithIpv4PreferenceAsync(
@@ -170,8 +169,8 @@ public static class SharedHttpClient
         if (requestedFamily != AddressFamily.Unspecified)
             return allAddresses;
 
-        // При Unspecified DNS возвращает A и AAAA.
-        // Оставляем только IPv4: WinDivert-based bypass работает только на IPv4.
+        // Unspecified DNS returns both A and AAAA.
+        // Keep IPv4 only: WinDivert-based bypass only works on IPv4.
         var ipv4Only = Array.FindAll(
             allAddresses,
             static a => a.AddressFamily == AddressFamily.InterNetwork);
@@ -180,7 +179,7 @@ public static class SharedHttpClient
     }
 
     /// <summary>
-    /// Создаёт Range-запрос с User-Agent, соответствующим клиенту из параметра <c>c=</c> в URL.
+    /// Creates a Range request with a User-Agent matching the client specified in the <c>c=</c> URL parameter.
     /// </summary>
     public static HttpRequestMessage CreateRangeRequest(string url, long start, long end)
     {
@@ -192,7 +191,7 @@ public static class SharedHttpClient
     }
 
     /// <summary>
-    /// Устанавливает заголовок User-Agent по параметру <c>c=</c> в URL.
+    /// Sets the User-Agent header based on the <c>c=</c> parameter in the URL.
     /// </summary>
     public static void ApplyUserAgentFromUrl(HttpRequestMessage request, string url)
     {

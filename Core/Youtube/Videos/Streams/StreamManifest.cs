@@ -41,8 +41,8 @@ public sealed class StreamManifest
             }
         }
 
-        // Гарантируем строгий порядок по убыванию битрейта (Best Available идет первым).
-        // Сортировка по месту (in-place) без LINQ исключает аллокации в Gen0.
+        // Ensure strict descending order by bitrate (Best Available comes first).
+        // In-place sorting without LINQ eliminates Gen0 allocations.
         _audioOnlyStreams.Sort(static (a, b) => b.Bitrate.BitsPerSecond.CompareTo(a.Bitrate.BitsPerSecond));
     }
 

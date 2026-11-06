@@ -4,17 +4,17 @@ using System.Net.Http.Headers;
 namespace LMP.Core.Audio.Http;
 
 /// <summary>
-/// Проверка доступности медиа-пути к YouTube CDN-хосту.
-/// Сравнивает <c>/generate_204</c> (health check) с <c>Range GET</c>
-/// к <c>/videoplayback</c> (media path).
-/// Расхождение — ключевой индикатор DPI-блокировки ТСПУ.
+/// Checks the availability of the media path to a YouTube CDN host.
+/// Compares <c>/generate_204</c> (health check) with <c>Range GET</c>
+/// to <c>/videoplayback</c> (media path).
+/// A discrepancy is a key indicator of TSPU DPI blocking.
 /// </summary>
 internal static class MediaPathProbe
 {
     private const int DefaultTimeoutMs = 6_000;
 
     /// <summary>
-    /// Результат проверки одного CDN-хоста по двум путям.
+    /// Result of checking a single CDN host via both paths.
     /// </summary>
     internal readonly record struct HostProbeResult(
         string Host,
@@ -26,25 +26,25 @@ internal static class MediaPathProbe
         long MediaBytesReceived,
         string? MediaError)
     {
-        /// <summary>Паттерн ТСПУ: health check проходит, media дропается.</summary>
+        /// <summary>TSPU pattern: health check passes, media is dropped.</summary>
         internal bool IsTspuPattern => HealthCheckOk && !MediaOk;
 
-        /// <summary>Полная блокировка хоста (оба пути недоступны).</summary>
+        /// <summary>Full host block (both paths unavailable).</summary>
         internal bool IsFullBlock => !HealthCheckOk && !MediaOk;
 
         /// <summary>
-        /// Хост отдаёт media-данные. Это главный критерий.
-        /// 204 может флапнуть по транзиентным причинам — media path важнее.
+        /// Host serves media data. This is the primary criterion.
+        /// 204 may flap due to transient reasons — the media path takes precedence.
         /// </summary>
         internal bool IsMediaAvailable => MediaOk;
 
-        /// <summary>Хост полностью рабочий (оба пути).</summary>
+        /// <summary>Host is fully operational (both paths).</summary>
         internal bool IsFullyAvailable => HealthCheckOk && MediaOk;
     }
 
     /// <summary>
-    /// Проверяет CDN-хост по обоим путям: <c>/generate_204</c> и <c>Range GET</c> к media URL.
-    /// Запускает оба запроса параллельно для минимизации латентности.
+    /// Checks a CDN host via both paths: <c>/generate_204</c> and <c>Range GET</c> to the media URL.
+    /// Runs both requests in parallel to minimize latency.
     /// </summary>
     internal static async Task<HostProbeResult> ProbeHostAsync(
         string mediaUrl,
@@ -68,8 +68,8 @@ internal static class MediaPathProbe
     }
 
     /// <summary>
-    /// <c>Range GET</c> к media URL с корректными параметрами сессии YouTube.
-    /// Использует общий рабочий SharedHttpClient.Instance.
+    /// <c>Range GET</c> to a media URL with valid YouTube session parameters.
+    /// Uses the shared operational SharedHttpClient.Instance.
     /// </summary>
     private static async Task<(bool Ok, int Ms, int Status, long Bytes, string? Error)>
         ProbeMediaRangeAsync(string mediaUrl, int timeoutMs, CancellationToken ct)
@@ -80,7 +80,7 @@ internal static class MediaPathProbe
             using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             probeCts.CancelAfter(Math.Max(timeoutMs, DefaultTimeoutMs));
 
-            // Формируем URL с параметрами воспроизведения (rn/rbuf), чтобы CDN не отклонял запрос
+            // Construct the URL with playback parameters (rn/rbuf) to prevent CDN rejection
             string probeUrl = mediaUrl;
             if (mediaUrl.Contains("googlevideo.com/videoplayback", StringComparison.Ordinal))
             {
@@ -130,7 +130,7 @@ internal static class MediaPathProbe
     }
 
     /// <summary>
-    /// <c>GET /generate_204</c> — проверка доступности хоста.
+    /// <c>GET /generate_204</c> — host availability check.
     /// </summary>
     private static async Task<(bool Ok, int Ms)> Probe204Async(
         string host, string referenceUrl, int timeoutMs, CancellationToken ct)
@@ -160,12 +160,12 @@ internal static class MediaPathProbe
     }
 
     /// <summary>
-    /// Извлекает hostname из media URL без лишних аллокаций на hot path.
+    /// Extracts the hostname from a media URL without unnecessary allocations on the hot path.
     /// </summary>
     internal static string ExtractHost(string url) => new Uri(url).Host;
 
     /// <summary>
-    /// Резолвит hostname в IPv4 для диагностического вывода.
+    /// Resolves the hostname to an IPv4 address for diagnostic output.
     /// </summary>
     internal static string ResolveToIp(string host)
     {

@@ -7,8 +7,8 @@ using System.Text.Json;
 namespace LMP.Core.Data.Repositories;
 
 /// <summary>
-/// Реализация персистентного хранилища уведомлений на базе чистого ADO.NET SQLite.
-/// Полностью совместима с Native AOT и сборкой с агрессивным триммингом (zero reflection).
+/// Implementation of persistent notification storage based on pure ADO.NET SQLite.
+/// Fully compatible with Native AOT and aggressive trimming builds (zero reflection).
 /// </summary>
 public sealed class NotificationRepository : INotificationRepository
 {
@@ -21,9 +21,9 @@ public sealed class NotificationRepository : INotificationRepository
         """;
 
     /// <summary>
-    /// Инициализирует новый экземпляр репозитория уведомлений на чистом ADO.NET.
+    /// Initializes a new instance of the notification repository using pure ADO.NET.
     /// </summary>
-    /// <param name="connectionFactory">Фабрика нативных подключений SQLite.</param>
+    /// <param name="connectionFactory">Factory for native SQLite connections.</param>
     public NotificationRepository(ISqliteConnectionFactory connectionFactory)
     {
         ArgumentNullException.ThrowIfNull(connectionFactory);
@@ -176,12 +176,12 @@ public sealed class NotificationRepository : INotificationRepository
     #region ADO.NET Вспомогательные методы
 
     /// <summary>
-    /// Считывает модель уведомления напрямую из активного чтения SQLite без рефлексии.
+    /// Reads a notification model directly from an active SQLite reader without reflection.
     /// </summary>
-    /// <param name="reader">Экземпляр открытого ридера базы данных.</param>
-    /// <returns>Экземпляр доменной модели <see cref="Notification"/>.</returns>
+    /// <param name="reader">An instance of an open database reader.</param>
+    /// <returns>An instance of the <see cref="Notification"/> domain model.</returns>
     /// <remarks>
-    /// Десериализация JSON-блоков истории попыток и аргументов выполняется строго через Source Generated контекст <see cref="AppJsonContext"/>.
+    /// Deserialization of retry history and argument JSON blocks is performed strictly via the Source Generated context <see cref="AppJsonContext"/>.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Notification ReadNotification(DbDataReader reader)

@@ -1,16 +1,16 @@
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Определяет поведение при нажатии кнопки закрытия окна.
+/// Defines the behavior when the window close button is clicked.
 /// </summary>
 public enum CloseAction
 {
-    /// <summary>Закрыть приложение полностью.</summary>
+    /// <summary>Close the application completely.</summary>
     Exit = 0,
 
-    /// <summary>Свернуть в системный трей, приложение продолжает работать.</summary>
+    /// <summary>Minimize to the system tray; the application continues running.</summary>
     MinimizeToTray = 1,
 
-    /// <summary>Спрашивать каждый раз.</summary>
+    /// <summary>Ask every time.</summary>
     Ask = 2
 }

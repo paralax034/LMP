@@ -99,8 +99,8 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Останавливает активный поток при критической ошибке, сохраняя текущий трек в плеере и очереди,
-    /// чтобы он не исчезал из интерфейса и пользователь мог возобновить его воспроизведение.
+    /// Stops the active stream on critical error while keeping the current track in the player and queue
+    /// so it does not disappear from the UI and the user can resume playback.
     /// </summary>
     public void StopAfterFatalPlaybackError()
     {

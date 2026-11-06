@@ -3,8 +3,8 @@ using Avalonia.Controls;
 namespace LMP.UI.Dialogs.Content;
 
 /// <summary>
-/// Контент overlay-диалога с произвольным набором кнопок и опциональным чекбоксом.
-/// DataContext устанавливается через DataTemplate в DialogHost.
+/// Content for an overlay dialog with a custom set of buttons and an optional checkbox.
+/// DataContext is set via DataTemplate in DialogHost.
 /// </summary>
 public partial class ChoiceDialogContent : UserControl
 {

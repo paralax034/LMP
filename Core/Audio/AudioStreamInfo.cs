@@ -3,62 +3,62 @@ using LMP.Core.Audio.Interfaces;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Неизменяемая информация о текущем аудио потоке.
-/// Единый источник правды о формате/кодеке/битрейте.
+/// Immutable information about the current audio stream.
+/// Single source of truth for format/codec/bitrate.
 /// </summary>
 public sealed record AudioStreamInfo
 {
-    /// <summary>Пустой экземпляр для отсутствующего потока.</summary>
+    /// <summary>Empty instance for a missing stream.</summary>
     public static readonly AudioStreamInfo Empty = new();
 
-    /// <summary>Идентификатор трека.</summary>
+    /// <summary>Track identifier.</summary>
     public string TrackId { get; init; } = "";
 
-    /// <summary>Типизированный формат контейнера.</summary>
+    /// <summary>Strongly-typed container format.</summary>
     public AudioFormat Format { get; init; }
 
-    /// <summary>Типизированный аудиокодек.</summary>
+    /// <summary>Strongly-typed audio codec.</summary>
     public AudioCodec CodecType { get; init; }
 
-    /// <summary>Битрейт потока в kbps.</summary>
+    /// <summary>Stream bitrate in kbps.</summary>
     public int Bitrate { get; init; }
 
-    /// <summary>Частота дискретизации в Hz.</summary>
+    /// <summary>Sample rate in Hz.</summary>
     public int SampleRate { get; init; }
 
-    /// <summary>Количество каналов.</summary>
+    /// <summary>Number of channels.</summary>
     public int Channels { get; init; }
 
-    /// <summary>Длительность потока в миллисекундах.</summary>
+    /// <summary>Stream duration in milliseconds.</summary>
     public long DurationMs { get; init; }
 
-    /// <summary><c>true</c>, если поток воспроизводится из локального кэша.</summary>
+    /// <summary><c>true</c> if the stream is played from local cache.</summary>
     public bool IsFromCache { get; init; }
 
-    /// <summary>Display-имя контейнера для UI.</summary>
+    /// <summary>Container display name for UI.</summary>
     public string Container => Format.ToDisplayName();
 
-    /// <summary>Display-имя кодека для UI.</summary>
+    /// <summary>Codec display name for UI.</summary>
     public string Codec => CodecType.ToDisplayName();
 
-    /// <summary><c>true</c>, если stream-info содержит валидные данные.</summary>
+    /// <summary><c>true</c> if the stream-info contains valid data.</summary>
     public bool IsValid => CodecType != AudioCodec.Unknown && Bitrate > 0;
 
-    /// <summary>Готовая строка для UI-отображения формата потока.</summary>
+    /// <summary>Formatted string for UI display of the stream format.</summary>
     public string FormatDisplay => IsValid
         ? $"{Format.ToDisplayName()}/{CodecType.ToDisplayName()}/{Bitrate:F0}kbps"
         : "Loading...";
 
     /// <summary>
-    /// Создаёт <see cref="AudioStreamInfo"/> из <see cref="ResolvedStreamDescriptor"/>
-    /// и runtime-параметров декодера.
+    /// Creates an <see cref="AudioStreamInfo"/> from a <see cref="ResolvedStreamDescriptor"/>
+    /// and decoder runtime parameters.
     /// </summary>
-    /// <param name="descriptor">Дескриптор resolved потока.</param>
-    /// <param name="sampleRate">Sample rate из декодера.</param>
-    /// <param name="channels">Количество каналов из декодера.</param>
-    /// <param name="durationMs">Длительность из source.</param>
-    /// <param name="isFromCache">Источник — полный дисковый кэш.</param>
-    /// <returns>Типизированная информация о потоке.</returns>
+    /// <param name="descriptor">Resolved stream descriptor.</param>
+    /// <param name="sampleRate">Sample rate from the decoder.</param>
+    /// <param name="channels">Number of channels from the decoder.</param>
+    /// <param name="durationMs">Duration from the source.</param>
+    /// <param name="isFromCache">Source is full disk cache.</param>
+    /// <returns>Strongly-typed stream information.</returns>
     public static AudioStreamInfo FromDescriptor(
         ResolvedStreamDescriptor descriptor,
         int sampleRate,

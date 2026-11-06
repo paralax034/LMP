@@ -41,7 +41,7 @@ internal class MusicController(HttpClient http)
             ?.GetPropertyOrNull(InnerTubeTokens.VisitorData)
             ?.GetStringOrNull();
 
-        // Обновляем глобальный VisitorData напрямую
+        // Directly update global VisitorData
         if (!string.IsNullOrWhiteSpace(newVisitorData) && newVisitorData != YoutubeClientUtils.VisitorData)
         {
             YoutubeClientUtils.VisitorData = newVisitorData;
@@ -58,7 +58,7 @@ internal class MusicController(HttpClient http)
     }
 
     /// <summary>
-    /// Создаёт HTTP-контент с использованием ReadOnlyMemoryContent для снижения GC pressure.
+    /// Creates HTTP content using ReadOnlyMemoryContent to reduce GC pressure.
     /// </summary>
     private static ReadOnlyMemoryContent CreateJsonContent(Action<Utf8JsonWriter> writeBody)
     {
@@ -157,10 +157,10 @@ internal class MusicController(HttpClient http)
     #region Account
 
     /// <summary>
-    /// Асинхронно получает структуру переключателя аккаунтов.
+    /// Asynchronically retrieves the account switcher structure.
     /// </summary>
-    /// <param name="cancellationToken">Токен отмены операции.</param>
-    /// <exception cref="LoginRequiredException">Выбрасывается, когда сессия авторизации недействительна или истекла.</exception>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="LoginRequiredException">Thrown when the authorization session is invalid or expired.</exception>
     public async Task<JsonElement> GetAccountSwitcherAsync(
         CancellationToken cancellationToken = default)
     {
@@ -170,12 +170,12 @@ internal class MusicController(HttpClient http)
         using var response = await http.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
-        // Перехватываем 302/307 редирект (свидетельствует об истечении сессии/кук)
+        // Intercept 302/307 redirect (indicates expired session/cookies)
         if (response.StatusCode is System.Net.HttpStatusCode.Redirect or System.Net.HttpStatusCode.Found)
         {
             Log.Warn("[MusicController] Switcher returned 302 Found redirect. Session is expired.");
 
-            // Возвращаем точную причину — SessionExpired
+            // Return the exact reason — SessionExpired
             throw new LoginRequiredException(
                 "Authentication is required. Current session has expired.",
                 string.Empty,

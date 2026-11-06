@@ -5,12 +5,12 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты сетевой логики: разбор параметров TUN/VPN маршрутизации,
-/// валидация адаптеров и подавление First-Chance исключений при отмене задержек.
+/// Unit tests for network logic: parsing TUN/VPN routing parameters,
+/// adapter validation, and suppressing First-Chance exceptions during delay cancellation.
 /// </summary>
 public static class NetworkLogicTests
 {
-    // Статический доступ к приватным методам без рефлексии: связывание идёт на этапе JIT/AOT, триммер видит обе ссылки
+    // Static access to private methods without reflection: binding occurs at JIT/AOT stage, trimmer sees both references
     [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "IsSpecialTunIpRange")]
     private static extern bool IsSpecialTunIpRange(NetworkManager? owner, IPAddress ip);
 
@@ -29,13 +29,13 @@ public static class NetworkLogicTests
         TestAssert.True(ContainsVpnKeyword(null, "Mihomo Virtual TUN Adapter"), "Failed to match VPN adapter");
         TestAssert.False(ContainsVpnKeyword(null, "Realtek PCIe GbE Family Controller"), "False-positive VPN match");
 
-        // Границы слова в IsTunOrTapIdentifier: отдельные tun/tap и utunN — туннели, «Tun» внутри слова — нет
+        // Word boundaries in IsTunOrTapIdentifier: standalone tun/tap and utunN are tunnels, "Tun" inside a word is not
         TestAssert.True(ContainsVpnKeyword(null, "utun3"), "macOS-style utunN must be recognized as TUN");
         TestAssert.True(ContainsVpnKeyword(null, "TAP-Windows Adapter V9"), "Standalone TAP token must be recognized");
         TestAssert.False(ContainsVpnKeyword(null, "Hauppauge TV Tuner"), "'Tun' inside a word must not match");
         TestAssert.False(ContainsVpnKeyword(null, null), "Null description must not match");
 
-        // Проверка отсутствия аллокаций
+        // Allocation freedom check
         TestAssert.ZeroAlloc(() =>
         {
             _ = IsSpecialTunIpRange(null, tunIp);
@@ -74,7 +74,7 @@ public static class NetworkLogicTests
     [TestMethod(TestCategory.Unit, "YoutubeNetworkException Classification & User-Cancel Guard", Group = TestGroups.Network, Order = 3)]
     public static Task TestYoutubeNetworkExceptionClassificationAsync()
     {
-        // 1. Внутренний таймаут HttpClient при не отменённом внешнем токене -> Timeout
+        // 1. Internal HttpClient timeout when the external token is not canceled -> Timeout
         var internalTimeoutEx = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
         var classifiedTimeout = Core.Youtube.Exceptions.YoutubeNetworkException.TryClassify(internalTimeoutEx, CancellationToken.None);
         TestAssert.NotNull(classifiedTimeout, "HttpClient internal timeout must be classified as YoutubeNetworkException");
@@ -82,14 +82,14 @@ public static class NetworkLogicTests
         TestAssert.Equal("Error_Network_Timeout", classifiedTimeout.GetLocalizationKey());
         TestAssert.Equal("Recommendation_CheckNetwork", classifiedTimeout.GetRecommendationKey());
 
-        // 2. Отмена самим пользователем (внешний токен отменён) -> обязана вернуть null, а не ложную ошибку сети!
+        // 2. Cancellation by the user (external token canceled) -> must return null, not a false network error!
         using var userCts = new CancellationTokenSource();
         userCts.Cancel();
         var userCancelEx = new TaskCanceledException("User switched track", null, userCts.Token);
         var classifiedUserCancel = Core.Youtube.Exceptions.YoutubeNetworkException.TryClassify(userCancelEx, userCts.Token);
         TestAssert.Null(classifiedUserCancel, "User-initiated cancellation must NEVER be classified as a network error");
 
-        // 3. Ошибка SSL/TLS Handshake (DPI / ТСПУ блокировка) -> SslHandshakeFailure
+        // 3. SSL/TLS Handshake error (DPI / TSPU blocking) -> SslHandshakeFailure
         var sslEx = new HttpRequestException(
             "The SSL connection could not be established",
             new System.Security.Authentication.AuthenticationException("Received an unexpected EOF or 0 bytes from the transport stream."));
@@ -99,7 +99,7 @@ public static class NetworkLogicTests
         TestAssert.Equal("Error_SslHandshake_Failed", classifiedSsl.GetLocalizationKey());
         TestAssert.Equal("Recommendation_DpiBlocked", classifiedSsl.GetRecommendationKey());
 
-        // 4. Сброс сокета / недоступность сети -> ConnectionFailed
+        // 4. Socket reset / network unreachable -> ConnectionFailed
         var socketEx = new HttpRequestException(
             "Connection reset by peer",
             new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionReset));

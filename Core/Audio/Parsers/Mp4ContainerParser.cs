@@ -5,18 +5,18 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio.Parsers;
 
 /// <summary>
-/// Парсер MP4/M4A контейнера для извлечения AAC фреймов.
-/// Поддерживает обычный MP4 и Fragmented MP4 (fMP4).
+/// MP4/M4A container parser for extracting AAC frames.
+/// Supports standard MP4 and Fragmented MP4 (fMP4).
 /// </summary>
 /// <remarks>
-/// <para><b>Архитектура (Partial):</b></para>
+/// <para><b>Architecture (Partial):</b></para>
 /// <list type="bullet">
-///   <item><c>Mp4ContainerParser.cs</c> — управление состоянием, I/O и чтение фреймов.</item>
-///   <item><c>Mp4ContainerParser.Stbl.cs</c> — логика индексации обычных MP4 файлов.</item>
-///   <item><c>Mp4ContainerParser.Fragment.cs</c> — логика работы с фрагментированным MP4 (Dash/HLS).</item>
+///   <item><c>Mp4ContainerParser.cs</c> — state management, I/O, and frame reading.</item>
+///   <item><c>Mp4ContainerParser.Stbl.cs</c> — indexing logic for standard MP4 files.</item>
+///   <item><c>Mp4ContainerParser.Fragment.cs</c> — logic for working with fragmented MP4 (DASH/HLS).</item>
 /// </list>
-/// <para><b>Performance:</b> Использует <see cref="Mp4BinaryReader"/> для zero-alloc парсинга заголовков
-/// и переиспользуемый буфер из <see cref="ArrayPool{T}.Shared"/> для чтения фреймов без аллокаций в куче.</para>
+/// <para><b>Performance:</b> Uses <see cref="Mp4BinaryReader"/> for zero-alloc header parsing
+/// and a reusable buffer from <see cref="ArrayPool{T}.Shared"/> for frame reading without heap allocations.</para>
 /// </remarks>
 public sealed partial class Mp4ContainerParser : IContainerParser
 {
@@ -29,11 +29,11 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     private int _sampleRate;
     private int _channels;
 
-    // Состояние для обычного MP4 (см. partial Stbl)
+    // State for standard MP4 (see partial Stbl)
     private List<SampleInfo> _samples = [];
     private int _currentSampleIndex;
 
-    // Состояние для fMP4 (см. partial Fragment)
+    // State for fMP4 (see partial Fragment)
     private bool _isFragmented;
     private uint _trackTimeScale = 1;
     private uint _defaultSampleDuration;
@@ -58,12 +58,12 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     }
 
     /// <summary>
-    /// Выполняет первичный парсинг заголовков контейнера и строит индекс семплов.
+    /// Performs initial parsing of container headers and builds sample index.
     /// </summary>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>
-    /// <c>true</c>, если контейнер успешно распознан и содержит достаточно метаданных
-    /// для чтения фреймов; иначе <c>false</c>.
+    /// <c>true</c> if the container is successfully recognized and contains sufficient metadata
+    /// for reading frames; otherwise, <c>false</c>.
     /// </returns>
     public async ValueTask<bool> ParseHeadersAsync(CancellationToken ct = default)
     {
@@ -144,8 +144,8 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     }
 
     /// <summary>
-    /// Читает следующий аудио-фрейм. При наличии семпла в таблице и синхронном чтении из потока
-    /// возвращает результат мгновенно без аллокаций в куче.
+    /// Reads the next audio frame. Returns immediately without heap allocations
+    /// if a sample is present in the table and synchronous stream reading is used.
     /// </summary>
     public ValueTask<AudioFrame?> ReadNextFrameAsync(CancellationToken ct = default)
     {
@@ -179,9 +179,9 @@ public sealed partial class Mp4ContainerParser : IContainerParser
     }
 
     /// <summary>
-    /// Считывает сэмпл MP4 в переиспользуемый буфер. Возвращает null только при отмене токена вызывающего,
-    /// предотвращая ложный <see cref="ParserCorruptionException"/>. Отмена эпохи чтения потока (seek/heal)
-    /// и утилизация пробрасываются: null для AudioPipeline означает EOF и привёл бы к ложному onTrackEnded.
+    /// Reads an MP4 sample into a reusable buffer. Returns null only when the caller's token is canceled,
+    /// preventing a false <see cref="ParserCorruptionException"/>. Stream reading epoch cancellation (seek/heal)
+    /// and disposal are rethrown: null for AudioPipeline signifies EOF and would cause a false onTrackEnded.
     /// </summary>
     private ValueTask<AudioFrame?> ReadSampleAsFrameAsync(SampleInfo sample, CancellationToken ct)
     {
@@ -242,7 +242,7 @@ public sealed partial class Mp4ContainerParser : IContainerParser
             if (ct.IsCancellationRequested)
                 return null;
 
-            // Отмена эпохи чтения и утилизация — не порча контейнера и не EOF: пробрасываем вызывающему
+            // Reading epoch cancellation and disposal are neither container corruption nor EOF: rethrow to the caller
             if (ex is ObjectDisposedException || Helpers.CancellationHelper.IsCancellationLike(ex))
                 throw;
 
@@ -287,7 +287,7 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         }
         else
         {
-            // Для классического MP4 сдвигаем индекс к первому сэмплу после текущей физической позиции
+            // For classic MP4, advance the index to the first sample after the current physical position
             while (_currentSampleIndex < _samples.Count && _samples[_currentSampleIndex].Offset < currentPos)
             {
                 _currentSampleIndex++;
@@ -308,7 +308,7 @@ public sealed partial class Mp4ContainerParser : IContainerParser
         return ValueTask.CompletedTask;
     }
 
-    // Вспомогательные структуры
+    // Helper structures
     private record struct SampleInfo(long Offset, int Size, long TimestampMs, int DurationMs, bool IsKeyFrame);
     private record struct SegmentInfo(long ByteOffset, long TimeOffset, uint Duration, uint Size);
 }

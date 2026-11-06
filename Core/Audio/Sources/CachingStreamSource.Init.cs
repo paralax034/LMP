@@ -80,7 +80,7 @@ public sealed partial class CachingStreamSource
             Log.Info($"[CachingSource] Parser ready: track={_trackId}, codec={Codec}, " +
                      $"sampleRate={SampleRate}, channels={Channels}, duration={DurationMs}ms");
 
-            // Startup Prefetch: заливаем warmup-буфер параллельно с decoder init.
+            // Startup Prefetch: fill the warmup buffer in parallel with decoder init.
             FireStartupPrefetchIfNeeded(initialBytes);
 
             _preloadTask = Task.Run(
@@ -92,7 +92,7 @@ public sealed partial class CachingStreamSource
         }
         catch (Exceptions.CdnUnavailableException)
         {
-            // Пробрасываем наружу без изменений для добавления хоста в CdnBlacklist и failover-ретрая
+            // Pass through unchanged to add host to CdnBlacklist and perform failover retry
             throw;
         }
         catch (Exceptions.UrlExpiredException)
@@ -113,16 +113,16 @@ public sealed partial class CachingStreamSource
     // --- Startup Prefetch ---
 
     /// <summary>
-    /// Запускает немедленный fire-and-forget prefetch после успешного parser init.
+    /// Starts an immediate fire-and-forget prefetch right after successful parser init.
     /// <para>
-    /// Перекрывает мёртвое время между завершением <see cref="InitializeAsync"/>
-    /// и первой итерацией preload loop (<see cref="StreamingConfig.PreloadIntervalMs"/>).
-    /// Без этого на канале с TTFB 1–2.5 с warmup ждёт 500 мс + N round-trips,
-    /// задерживая playback на 1–1.5 с.
+    /// Bridges the dead time between <see cref="InitializeAsync"/> completion
+    /// and the first iteration of the preload loop (<see cref="StreamingConfig.PreloadIntervalMs"/>).
+    /// Without this, on channels with a 1–2.5 s TTFB, warmup waits 500 ms + N round-trips,
+    /// delaying playback by 1–1.5 s.
     /// </para>
     /// </summary>
     /// <param name="alreadyFetchedBytes">
-    /// Объём данных, уже полученных initial fetch. Prefetch начинается встык после них.
+    /// Amount of data already retrieved by the initial fetch. Prefetch starts seamlessly right after it.
     /// </param>
     private void FireStartupPrefetchIfNeeded(int alreadyFetchedBytes)
     {
@@ -146,8 +146,8 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Best-effort фоновый prefetch для заполнения warmup-буфера.
-    /// Ошибки не прерывают инициализацию — preload loop подхватит недокачанное.
+    /// Best-effort background prefetch to populate the warmup buffer.
+    /// Errors do not abort initialization — the preload loop will pick up remaining data.
     /// </summary>
     private async Task SafeStartupPrefetchAsync(long start, int length)
     {
@@ -167,13 +167,13 @@ public sealed partial class CachingStreamSource
     // --- Bootstrap Check ---
 
     /// <summary>
-    /// Проверяет, достаточно ли локально доступных данных от начала файла
-    /// для безопасного bootstrap-старта parser/decoder без сетевого запроса.
+    /// Checks whether enough locally available data exists from the beginning of the file
+    /// for a safe bootstrap start of the parser/decoder without making a network request.
     /// </summary>
-    /// <param name="initialBytes">Минимальный стартовый префикс в байтах.</param>
+    /// <param name="initialBytes">Minimum starting prefix size in bytes.</param>
     /// <returns>
-    /// <c>true</c>, если contiguous local prefix от позиции 0 уже достаточен;
-    /// иначе <c>false</c>.
+    /// <c>true</c> if the contiguous local prefix starting from position 0 is sufficient;
+    /// otherwise, <c>false</c>.
     /// </returns>
     private bool HasLocalInitialBootstrapData(int initialBytes)
     {
@@ -186,7 +186,7 @@ public sealed partial class CachingStreamSource
 
     // --- Parser Factory ---
 
-    /// <summary>Выбирает парсер контейнера на основе формата трека.</summary>
+    /// <summary>Selects the container parser based on the track format.</summary>
     private IContainerParser CreateParser(Stream stream) => _format switch
     {
         AudioFormat.WebM or AudioFormat.Ogg => new WebMContainerParser(stream),

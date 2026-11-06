@@ -3,7 +3,7 @@
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Фабрика для создания изолированных <see cref="TrackItemViewModel"/>.
+/// A factory for creating isolated <see cref="TrackItemViewModel"/> instances.
 /// </summary>
 public sealed class TrackViewModelFactory
 {

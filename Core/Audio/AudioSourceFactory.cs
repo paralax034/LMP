@@ -8,8 +8,8 @@ using static LMP.Core.Audio.AudioConstants;
 namespace LMP.Core.Audio;
 
 /// <summary>
-/// Фабрика аудио источников. Определяет формат, проверяет кэш,
-/// создаёт подходящий <see cref="IAudioSource"/>.
+/// Audio source factory. Determines format, checks cache,
+/// and creates a suitable <see cref="IAudioSource"/>.
 /// </summary>
 public static class AudioSourceFactory
 {
@@ -18,18 +18,18 @@ public static class AudioSourceFactory
     private static volatile StreamingConfig _currentConfig = StreamingProfiles.Medium;
 
     /// <summary>
-    /// Runtime blacklist CDN-хостов, заблокированных для media-трафика ТСПУ.
-    /// Singleton — живёт весь жизненный цикл приложения.
+    /// Runtime blacklist of CDN hosts blocked for media traffic by TSPU.
+    /// Singleton — persists across the entire application lifecycle.
     /// </summary>
     internal static readonly CdnBlacklist CdnBlacklist = new(ttl: TimeSpan.FromMinutes(5));
 
     /// <summary>
-    /// Текущие активные настройки прокси для использования в probe-запросах.
+    /// Current active proxy settings for use in probe requests.
     /// </summary>
     internal static ProxySettings? CurrentProxySettings { get; set; }
 
     /// <summary>
-    /// Регистрирует фабрику отложенной инициализации глобального кэш-менеджера из DI-контейнера.
+    /// Registers a deferred initialization factory for the global cache manager from the DI container.
     /// </summary>
     public static void RegisterLazyFactory(Func<AudioCacheManager> factory)
     {
@@ -37,7 +37,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Инициализирует глобальный кэш-менеджер.
+    /// Initializes the global cache manager.
     /// </summary>
     public static void InitializeGlobalCache(AudioCacheManager cacheManager)
     {
@@ -46,18 +46,18 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Глобальный кэш-менеджер (создаётся лениво при первом обращении, если не был инициализирован явно).
+    /// Global cache manager (created lazily on first access if not explicitly initialized).
     /// </summary>
     public static AudioCacheManager GlobalCache =>
         _globalCacheManager ??= _lazyCacheFactory?.Invoke() ?? new AudioCacheManager();
 
     /// <summary>
-    /// Возвращает уже инициализированный экземпляр глобального кэш-менеджера или <c>null</c>, не вызывая его ленивого создания.
+    /// Returns an already initialized instance of the global cache manager or <c>null</c> without triggering lazy creation.
     /// </summary>
     public static AudioCacheManager? TryGetInitializedGlobalCache() => _globalCacheManager;
 
     /// <summary>
-    /// Обновляет конфигурацию стриминга.
+    /// Updates the streaming configuration.
     /// </summary>
     public static void SetStreamingConfig(StreamingConfig config)
     {
@@ -70,7 +70,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Обновляет конфигурацию из профиля интернета.
+    /// Updates the configuration from the internet profile.
     /// </summary>
     public static void ApplyInternetProfile(InternetProfile profile)
     {
@@ -78,7 +78,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Строит уникальный ключ кэша: trackId + формат + **нормализованный** битрейт.
+    /// Builds a unique cache key: trackId + format + **normalized** bitrate.
     /// </summary>
     public static string BuildCacheKey(string trackId, AudioFormat format, int bitrate)
     {
@@ -87,7 +87,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Ищет полностью закэшированный трек любого формата/битрейта.
+    /// Searches for a fully cached track of any format/bitrate.
     /// </summary>
     public static (string Path, AudioCacheEntry Entry)? FindAnyCachedTrack(string trackId)
     {
@@ -104,14 +104,14 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Создаёт экземпляр аудиоисточника на основе дескриптора потока.
+    /// Creates an audio source instance based on a stream descriptor.
     /// </summary>
-    /// <param name="descriptor">Дескриптор разрешенного потока.</param>
-    /// <param name="urlProvider">Поставщик URL для continuation acquire и refresh при 403.</param>
-    /// <param name="config">Конфигурация параметров стриминга.</param>
-    /// <returns>Инициализированный экземпляр аудиоисточника.</returns>
-    /// <exception cref="InvalidOperationException">Выбрасывается, если глобальный кэш не был инициализирован.</exception>
-    /// <exception cref="ArgumentException">Выбрасывается при отсутствии URL и локального кэша.</exception>
+    /// <param name="descriptor">Descriptor of the resolved stream.</param>
+    /// <param name="urlProvider">URL provider for continuation acquire and refresh on 403.</param>
+    /// <param name="config">Streaming configuration settings.</param>
+    /// <returns>An initialized audio source instance.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the global cache has not been initialized.</exception>
+    /// <exception cref="ArgumentException">Thrown when both URL and local cache are missing.</exception>
     public static Task<IAudioSource> CreateAsync(
         ResolvedStreamDescriptor descriptor,
         StreamUrlProvider? urlProvider = null,
@@ -145,7 +145,7 @@ public static class AudioSourceFactory
                 null));
         }
 
-        // Вычисляем канонический ключ кэша для данного трека и формата
+        // Calculate the canonical cache key for the given track and format
         string resolvedCacheKey = format != AudioFormat.Unknown && bitrateKbps > 0
             ? BuildCacheKey(trackId, format, bitrateKbps)
             : string.Empty;
@@ -153,7 +153,7 @@ public static class AudioSourceFactory
         // Cache-only or empty URL path
         if (string.IsNullOrEmpty(url))
         {
-            // При явном Partial Cache запрещаем откат на LocalFileSource: запускаем CachingStreamSource
+            // If Partial Cache is explicitly enabled, prevent fallback to LocalFileSource: launch CachingStreamSource
             if (descriptor.Origin == StreamSource.DiskCachePartial)
             {
                 int bootstrapBytes = Math.Min(config.InitialPrebufferBytes, int.MaxValue);
@@ -258,18 +258,18 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Создаёт экземпляр аудиоисточника по прямому URL (устаревшая перегрузка).
+    /// Creates an audio source instance via a direct URL (legacy overload).
     /// </summary>
-    /// <param name="url">Прямой URL потока или путь к локальному файлу.</param>
-    /// <param name="httpClient">HTTP-клиент для сетевых запросов.</param>
-    /// <param name="urlProvider">Поставщик URL для continuation acquire и refresh при 403.</param>
-    /// <param name="trackId">Идентификатор трека.</param>
-    /// <param name="bitrateHint">Предполагаемый битрейт в kbps.</param>
-    /// <param name="config">Конфигурация параметров стриминга.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <returns>Инициализированный экземпляр аудиоисточника.</returns>
-    /// <exception cref="InvalidOperationException">Выбрасывается, если глобальный кэш не был инициализирован.</exception>
-    /// <exception cref="ArgumentException">Выбрасывается при пустом URL и отсутствии кэша.</exception>
+    /// <param name="url">Direct stream URL or path to a local file.</param>
+    /// <param name="httpClient">HTTP client for network requests.</param>
+    /// <param name="urlProvider">URL provider for continuation acquire and refresh on 403.</param>
+    /// <param name="trackId">Track identifier.</param>
+    /// <param name="bitrateHint">Estimated bitrate in kbps.</param>
+    /// <param name="config">Streaming configuration settings.</param>
+    /// <param name="ct">Operation cancellation token.</param>
+    /// <returns>An initialized audio source instance.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the global cache has not been initialized.</exception>
+    /// <exception cref="ArgumentException">Thrown when URL is empty and no cache is available.</exception>
     public static async Task<IAudioSource> CreateAsync(
           string url,
           HttpClient httpClient,
@@ -376,7 +376,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Запускает спекулятивный прогрев TCP+TLS-соединений к последним известным CDN-хостам.
+    /// Triggers speculative TCP+TLS connection warmup to the last known CDN hosts.
     /// </summary>
     public static void PreWarmCdnConnections(HttpClient httpClient, CancellationToken ct)
     {
@@ -384,7 +384,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Возвращает информацию о кэше для трека.
+    /// Returns cache information for the track.
     /// </summary>
     public static AudioCacheEntry? GetCacheInfo(string trackId) =>
         _globalCacheManager?.FindBestCache(trackId);
@@ -392,7 +392,7 @@ public static class AudioSourceFactory
     #region Format Detection
 
     /// <summary>
-    /// Определяет формат по URL (mime-параметры, расширение).
+    /// Determines format by URL (MIME parameters, extension).
     /// </summary>
     public static AudioFormat DetectFormat(string url)
     {
@@ -430,7 +430,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Определяет формат: сначала по URL, потом по magic bytes.
+    /// Determines format: first by URL, then by magic bytes.
     /// </summary>
     internal static async Task<AudioFormat> DetectFormatAsync(
         string url, HttpClient httpClient, CancellationToken ct = default)
@@ -462,7 +462,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Определяет формат по magic bytes заголовка.
+    /// Determines format by header magic bytes.
     /// </summary>
     internal static AudioFormat DetectFormatByMagic(ReadOnlySpan<byte> header)
     {
@@ -481,7 +481,7 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Определяет кодек по формату контейнера.
+    /// Determines codec by container format.
     /// </summary>
     public static AudioCodec GetCodecForFormat(AudioFormat format) => format switch
     {

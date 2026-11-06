@@ -7,23 +7,23 @@ using System.Runtime.Intrinsics.X86;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Статические SIMD-ускоренные операции над <see cref="Span{T}"/> PCM-сэмплов.
+/// Static SIMD-accelerated operations on PCM sample <see cref="Span{T}"/>.
 /// </summary>
 /// <remarks>
-/// Заменяет <c>System.Numerics.Tensors.TensorPrimitives</c> без внешней зависимости.
-/// Векторизация реализована через <see cref="Vector{T}"/> (SSE / AVX / NEON),
-/// который входит в shared framework начиная с .NET Core 1.0.
+/// Replaces <c>System.Numerics.Tensors.TensorPrimitives</c> without external dependencies.
+/// Vectorization is implemented via <see cref="Vector{T}"/> (SSE / AVX / NEON),
+/// which is part of the shared framework starting with .NET Core 1.0.
 /// </remarks>
 internal static class SpanMathHelper
 {
     /// <summary>
-    /// Умножает каждый элемент <paramref name="samples"/> на константный
+    /// Multiplies each element of <paramref name="samples"/> by a constant
     /// <paramref name="gain"/> in-place.
     /// </summary>
     /// <remarks>
-    /// Hot path: обрабатывает вектор из <see cref="Vector{T}.Count"/> float за итерацию,
-    /// хвост (&lt; Count) — скалярно.
-    /// Прямая перезапись через <c>ref var vRef</c> исключает промежуточные копии.
+    /// Hot path: processes a vector of <see cref="Vector{T}.Count"/> floats per iteration,
+    /// with the tail (&lt; Count) processed scalarly.
+    /// Direct overwrite via <c>ref var vRef</c> eliminates intermediate copies.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void MultiplyByConstant(Span<float> samples, float gain)
@@ -49,8 +49,8 @@ internal static class SpanMathHelper
     }
 
     /// <summary>
-    /// Вычисляет <c>1.0f / d</c> через аппаратную инструкцию <c>rcpss</c> с одной итерацией уточнения Ньютона–Рафсона
-    /// (<c>r1 = r0 * (2 - d * r0)</c>), обеспечивая точность ~23.8 бит (~1 ULP IEEE-754 float) без генерации <c>divss</c>.
+    /// Computes <c>1.0f / d</c> via hardware instruction <c>rcpss</c> with one Newton–Raphson refinement step
+    /// (<c>r1 = r0 * (2 - d * r0)</c>), providing ~23.8 bit accuracy (~1 ULP IEEE-754 float) without generating <c>divss</c>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float FastReciprocal(float d)

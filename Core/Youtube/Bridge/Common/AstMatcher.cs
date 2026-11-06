@@ -4,12 +4,12 @@ using Acornima.Ast;
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Обеспечивает высокопроизводительное сопоставление узлов AST Acornima с шаблонами MatchTemplate.
+/// Provides high-performance matching of Acornima AST nodes against MatchTemplate templates.
 /// </summary>
 internal static class AstMatcher
 {
     /// <summary>
-    /// Рекурсивно проверяет соответствие узла AST Acornima заданному шаблону.
+    /// Recursively checks whether an Acornima AST node matches the specified template.
     /// </summary>
     public static bool Matches(Node? node, MatchTemplate? template)
     {

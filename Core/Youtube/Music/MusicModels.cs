@@ -29,7 +29,7 @@ public sealed class MusicItem
 }
 
 /// <summary>
-/// Полный снимок плейлиста из YouTube Music (WEB_REMIX browse).
+/// Complete YouTube Music playlist snapshot (WEB_REMIX browse).
 /// </summary>
 public sealed class FullPlaylistSyncData
 {
@@ -42,13 +42,13 @@ public sealed class FullPlaylistSyncData
     public long? ViewCount { get; set; }
 
     /// <summary>
-    /// Дата последнего обновления, распарсенная из subtitle runs или YouTube Web stats.
+    /// Last update date parsed from subtitle runs or YouTube Web stats.
     /// </summary>
     public DateOnly? ReleaseDate { get; set; }
 
     /// <summary>
-    /// Признак того, что плейлист доступен для редактирования текущему аккаунту
-    /// (наличие <c>musicEditablePlaylistDetailHeaderRenderer</c> или форм редактирования <c>WEB</c>).
+    /// Indicates whether the playlist is editable by the current account
+    /// (presence of <c>musicEditablePlaylistDetailHeaderRenderer</c> or <c>WEB</c> edit forms).
     /// </summary>
     public bool IsEditable { get; set; }
 
@@ -63,7 +63,7 @@ internal sealed class MusicBrowseResponse
 
     public MusicBrowseResponse(JsonElement root)
     {
-        // 1. Заголовок
+        // 1. Header
         var header = root.GetPropertyOrNull(InnerTubeTokens.Header)?.GetPropertyOrNull(InnerTubeTokens.MusicDetailHeaderRenderer)
             ?? root.GetPropertyOrNull(InnerTubeTokens.Header)?.GetPropertyOrNull(InnerTubeTokens.MusicResponsiveHeaderRenderer);
 

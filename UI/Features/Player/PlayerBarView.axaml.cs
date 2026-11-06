@@ -9,15 +9,15 @@ using Avalonia.Threading;
 namespace LMP.UI.Features.Player;
 
 /// <summary>
-/// Code-behind нижней панели управления плеером (Player Bar).
+/// Code-behind for the bottom player control bar (Player Bar).
 /// </summary>
 public partial class PlayerBarView : UserControl
 {
     private static class LayoutConstants
     {
         /// <summary>
-        /// Половина ширины прямоугольного бегунка таймлайна (3px / 2 = 1.5px).
-        /// Исключает размытие границ и субпиксельное смещение при отрисовке.
+        /// Half width of the rectangular timeline thumb (3px / 2 = 1.5px).
+        /// Prevents edge blurring and subpixel shift during rendering.
         /// </summary>
         public const double SeekThumbHalfWidth = 1.5;
         public const double SeekCursorHalfWidth = 1.0;
@@ -47,8 +47,8 @@ public partial class PlayerBarView : UserControl
     private double _cachedSeekWidth;
 
     /// <summary>
-    /// Сохраняет координату предпросмотра (0.0 - 1.0) для анимации
-    /// интерактивного соединительного моста (Span Selection Bridge).
+    /// Stores the preview coordinate (0.0 - 1.0) for the animation
+    /// of the interactive Span Selection Bridge.
     /// </summary>
     private double? _currentPreviewRatio;
 
@@ -65,8 +65,8 @@ public partial class PlayerBarView : UserControl
     private TranslateTransform? _seekTooltipTranslate;
 
     /// <summary>
-    /// Трансформация смещения для подсказки отмены перемещения.
-    /// Позволяет перемещать подсказку вслед за курсором мыши на аппаратном уровне.
+    /// Offset transformation for the move cancel tooltip.
+    /// Allows moving the tooltip following the mouse cursor at the hardware level.
     /// </summary>
     private TranslateTransform? _seekHintTranslate;
 
@@ -89,8 +89,8 @@ public partial class PlayerBarView : UserControl
     #region Initialization
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="PlayerBarView"/>.
-    /// Загружает XAML-разметку, инициализирует аппаратные трансформации и регистрирует обработчики событий.
+    /// Initializes a new instance of the <see cref="PlayerBarView"/> class.
+    /// Loads XAML markup, initializes hardware transformations, and registers event handlers.
     /// </summary>
     public PlayerBarView()
     {

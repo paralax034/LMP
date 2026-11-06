@@ -1,19 +1,19 @@
 namespace LMP.Core.Audio.Normalization;
 
 /// <summary>
-/// Единственный источник истины для runtime-вычисления gain нормализации.
-/// <para>Stateless, pure function. Gain вычисляется исключительно из <see cref="TrackInfo.IntegratedLufs"/>
-/// и текущего <see cref="NormalizationConfig"/>.</para>
+/// The single source of truth for runtime normalization gain calculation.
+/// <para>Stateless, pure function. Gain is calculated exclusively from <see cref="TrackInfo.IntegratedLufs"/>
+/// and the current <see cref="NormalizationConfig"/>.</para>
 /// </summary>
 public static class NormalizationGainResolver
 {
     /// <summary>
-    /// Резолвит линейный gain нормализации с учётом конфигурации.
+    /// Resolves linear normalization gain according to the configuration.
     /// </summary>
-    /// <param name="track">Информация о треке.</param>
-    /// <param name="config">Текущая конфигурация нормализации.</param>
+    /// <param name="track">Track information.</param>
+    /// <param name="config">Current normalization configuration.</param>
     /// <returns>
-    /// Линейный gain если источник найден; <c>float.NaN</c> если требуется EBU R128 анализ.
+    /// Linear gain if the source is found; <c>float.NaN</c> if EBU R128 analysis is required.
     /// </returns>
     public static float Resolve(TrackInfo? track, NormalizationConfig config)
     {
@@ -24,11 +24,11 @@ public static class NormalizationGainResolver
     }
 
     /// <summary>
-    /// Вычисляет линейный gain из canonical integrated LUFS.
+    /// Calculates linear gain from canonical integrated LUFS.
     /// </summary>
-    /// <param name="integratedLufs">Integrated loudness трека в LUFS.</param>
-    /// <param name="config">Текущая конфигурация нормализации.</param>
-    /// <returns>Линейный gain.</returns>
+    /// <param name="integratedLufs">Track integrated loudness in LUFS.</param>
+    /// <param name="config">Current normalization configuration.</param>
+    /// <returns>Linear gain.</returns>
     public static float ComputeGainFromIntegratedLufs(float integratedLufs, NormalizationConfig config)
     {
         if (!config.Enabled || !float.IsFinite(integratedLufs))
@@ -40,11 +40,11 @@ public static class NormalizationGainResolver
     }
 
     /// <summary>
-    /// Применяет ограничения режима и clamp к computed gain.
+    /// Applies mode constraints and clamping to the computed gain.
     /// </summary>
-    /// <param name="gain">Вычисленный линейный gain.</param>
-    /// <param name="config">Конфигурация нормализации.</param>
-    /// <returns>Gain с применёнными ограничениями.</returns>
+    /// <param name="gain">Calculated linear gain.</param>
+    /// <param name="config">Normalization configuration.</param>
+    /// <returns>Gain with constraints applied.</returns>
     private static float ApplyConstraints(float gain, NormalizationConfig config)
     {
         if (config.Mode == NormalizationMode.DownwardOnly)

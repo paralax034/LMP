@@ -3,18 +3,18 @@
 namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
-/// Представляет легковесные метаданные миниатюры (URL и разрешение).
-/// Реализован как readonly record struct для исключения аллокаций в управляемой куче.
+/// Represents lightweight thumbnail metadata (URL and resolution).
+/// Implemented as a readonly record struct to avoid allocations in the managed heap.
 /// </summary>
-/// <param name="Url">Прямой URL изображения миниатюры.</param>
-/// <param name="Width">Ширина изображения в пикселях.</param>
-/// <param name="Height">Высота изображения в пикселях.</param>
+/// <param name="Url">Direct URL of the thumbnail image.</param>
+/// <param name="Width">Image width in pixels.</param>
+/// <param name="Height">Image height in pixels.</param>
 internal readonly record struct ThumbnailData(string? Url, int? Width, int? Height)
 {
     /// <summary>
-    /// Извлекает данные миниатюры из JSON-элемента InnerTube API.
+    /// Extracts thumbnail data from an InnerTube API JSON element.
     /// </summary>
-    /// <param name="content">JSON-элемент объекта миниатюры.</param>
+    /// <param name="content">JSON element of the thumbnail object.</param>
     public ThumbnailData(JsonElement content)
         : this(
             content.GetPropertyOrNull("url"u8)?.GetStringOrNull(),

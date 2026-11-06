@@ -10,7 +10,7 @@ using Avalonia.Threading;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Результат проверки наличия обновлений.
+/// Result of the update check operation.
 /// </summary>
 public sealed record UpdateCheckResult(
     bool IsSuccess,
@@ -22,8 +22,8 @@ public sealed record UpdateCheckResult(
     string? ErrorMessage);
 
 /// <summary>
-/// Сервис проверки, загрузки и бесшовного применения обновлений приложения.
-/// Все сетевые операции выполняются через централизованный <see cref="NetworkManager"/>.
+/// Service for checking, downloading, and seamlessly applying application updates.
+/// All network operations are performed through the centralized <see cref="NetworkManager"/>.
 /// </summary>
 public sealed partial class UpdateService : IDisposable
 {
@@ -54,7 +54,7 @@ public sealed partial class UpdateService : IDisposable
 
 #if DEBUG
     /// <summary>
-    /// Эмуляция локального номера коммита для отладки обновления в Debug-сборке.
+    /// Emulated local commit number for debugging updates in Debug builds.
     /// </summary>
     public static int DebugSimulatedCommitCount { get; set; }
 #endif
@@ -94,7 +94,7 @@ public sealed partial class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Получает метаданные репозитория GitHub (звёзды, форки, задачи) через централизованный сетевой стек.
+    /// Fetches GitHub repository metadata (stars, forks, issues) via the centralized network stack.
     /// </summary>
     public async Task<GitHubRepoInfoDto?> GetRepositoryInfoAsync(CancellationToken ct = default)
     {
@@ -120,8 +120,8 @@ public sealed partial class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Выполняет проверку обновлений через GitHub Releases API с поддержкой rolling-релиза 'dev' и снимков.
-    /// Гарантирует дедупликацию параллельных сетевых запросов и изолированный таймаут.
+    /// Checks for updates via the GitHub Releases API with support for the 'dev' rolling release and snapshots.
+    /// Guarantees deduplication of concurrent network requests and an isolated timeout.
     /// </summary>
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(
         bool manual = false,
@@ -316,7 +316,7 @@ public sealed partial class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Потоково загружает архив обновления через сетевой стек с автоматической поддержкой редиректов в <see cref="NetworkManager.UpdateClient"/>.
+    /// Streams the update archive download via the network stack with automatic redirect support in <see cref="NetworkManager.UpdateClient"/>.
     /// </summary>
     public async Task<string> DownloadUpdateAsync(
         GitHubAssetDto asset,
@@ -407,7 +407,7 @@ public sealed partial class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Выполняет распаковку, атомарную замену файлов и запуск нового процесса.
+    /// Extracts the archive, atomically replaces files, and launches the new process.
     /// </summary>
     public void ApplyUpdateAndRestart()
     {
@@ -505,18 +505,18 @@ public sealed partial class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Очищает устаревшие резервные копии (.old) и временные каталоги при старте.
-    /// Использует короткий retry-цикл для компенсации асинхронного освобождения дескрипторов ядром Windows NTFS.
+    /// Cleans up stale backups (.old) and temporary directories on startup.
+    /// Uses a short retry loop to compensate for asynchronous handle release by the Windows NTFS kernel.
     /// </summary>
     public static void CleanupPendingOldFiles() =>
         CleanupPendingOldFiles(AppContext.BaseDirectory, G.Folder.Update);
 
     /// <summary>
-    /// Очищает <c>.old</c>-бинарники в <paramref name="baseDir"/> и каталог распаковки <paramref name="updateDir"/>.
-    /// Явные пути позволяют тестам работать во временной папке, не трогая каталог приложения и реальный <c>%LOCALAPPDATA%/LMP</c>.
+    /// Cleans up <c>.old</c> binaries in <paramref name="baseDir"/> and the extraction directory <paramref name="updateDir"/>.
+    /// Explicit paths allow tests to run in a temporary folder without touching the app directory or the actual <c>%LOCALAPPDATA%/LMP</c>.
     /// </summary>
-    /// <param name="baseDir">Каталог исполняемого файла, где лежат <c>.old</c>-копии.</param>
-    /// <param name="updateDir">Временный каталог скачанного обновления.</param>
+    /// <param name="baseDir">Executable directory containing <c>.old</c> copies.</param>
+    /// <param name="updateDir">Temporary directory of the downloaded update.</param>
     public static void CleanupPendingOldFiles(string baseDir, string updateDir)
     {
         try
@@ -573,8 +573,8 @@ public sealed partial class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Безвозвратно удаляет скачанный локальный архив обновления и распакованные файлы,
-    /// если в репозитории появился более актуальный релиз до применения предыдущего.
+    /// Permanently deletes the downloaded local update archive and extracted files
+    /// if a newer release appears in the repository before applying the previous one.
     /// </summary>
     public static void PurgeDownloadedPayload()
     {

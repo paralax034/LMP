@@ -7,12 +7,12 @@ using Avalonia.Media;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Универсальная кнопка копирования ссылки.
-/// Показывает hint-popup над кнопкой (аналогично RepeatHint/LikeHint в PlayerBar).
-/// Визуально отражает состояние Success/Error через fade-смену иконки + popup.
+/// Universal link copy button.
+/// Displays a hint popup above the button (similar to RepeatHint/LikeHint in PlayerBar).
+/// Visually reflects the Success/Error state via icon fade transition + popup.
 ///
-/// <para><b>Idle-состояние задаётся статически в AXAML</b> (Data + Foreground через DynamicResource),
-/// code-behind управляет только анимацией Success/Error и возвратом к idle.</para>
+/// <para><b>Idle state is set statically in AXAML</b> (Data + Foreground via DynamicResource),
+/// code-behind only controls Success/Error animations and returning to idle.</para>
 /// </summary>
 public partial class CopyLinkButton : UserControl
 {
@@ -29,7 +29,7 @@ public partial class CopyLinkButton : UserControl
 
     #region Styled Properties
 
-    /// <summary>Определяет, нужно ли показывать кольцо при наведении (hover-ring).</summary>
+    /// <summary>Determines whether to show the hover ring on pointer over.</summary>
     public static readonly StyledProperty<bool> ShowHoverRingProperty =
         AvaloniaProperty.Register<CopyLinkButton, bool>(nameof(ShowHoverRing), true);
 
@@ -39,7 +39,7 @@ public partial class CopyLinkButton : UserControl
         set => SetValue(ShowHoverRingProperty, value);
     }
 
-    /// <summary>URL для копирования.</summary>
+    /// <summary>URL to copy.</summary>
     public static readonly StyledProperty<string?> CopyUrlProperty =
         AvaloniaProperty.Register<CopyLinkButton, string?>(nameof(CopyUrl));
 
@@ -49,7 +49,7 @@ public partial class CopyLinkButton : UserControl
         set => SetValue(CopyUrlProperty, value);
     }
 
-    /// <summary>Текст hint-popup при успешном копировании.</summary>
+    /// <summary>Hint popup text on successful copy.</summary>
     public static readonly StyledProperty<string?> SuccessTextProperty =
         AvaloniaProperty.Register<CopyLinkButton, string?>(nameof(SuccessText));
 
@@ -59,7 +59,7 @@ public partial class CopyLinkButton : UserControl
         set => SetValue(SuccessTextProperty, value);
     }
 
-    /// <summary>Текст ToolTip.</summary>
+    /// <summary>ToolTip text.</summary>
     public static readonly StyledProperty<string?> ToolTipTextProperty =
         AvaloniaProperty.Register<CopyLinkButton, string?>(nameof(ToolTipText));
 
@@ -69,7 +69,7 @@ public partial class CopyLinkButton : UserControl
         set => SetValue(ToolTipTextProperty, value);
     }
 
-    /// <summary>Размер иконки.</summary>
+    /// <summary>Icon size.</summary>
     public static readonly StyledProperty<double> IconSizeProperty =
         AvaloniaProperty.Register<CopyLinkButton, double>(nameof(IconSize), 16.0);
 
@@ -79,7 +79,7 @@ public partial class CopyLinkButton : UserControl
         set => SetValue(IconSizeProperty, value);
     }
 
-    /// <summary>Размер круглой кнопки.</summary>
+    /// <summary>Circular button size.</summary>
     public static readonly StyledProperty<double> ButtonSizeProperty =
         AvaloniaProperty.Register<CopyLinkButton, double>(nameof(ButtonSize), 36.0);
 
@@ -105,9 +105,9 @@ public partial class CopyLinkButton : UserControl
         _hintIcon = this.FindControl<PathIcon>("HintIcon");
         _hintText = this.FindControl<TextBlock>("HintText");
 
-        // Idle-состояние (Data + Foreground) задано статически в AXAML через
-        // StaticResource / DynamicResource — code-behind не трогает его при attach.
-        // ApplyIdleState вызывается только после завершения анимации (возврат к idle).
+        // Idle state (Data + Foreground) is set statically in AXAML via
+        // StaticResource / DynamicResource — code-behind does not touch it on attach.
+        // ApplyIdleState is called only after the animation completes (return to idle).
     }
 
     private async void OnClick(object? sender, RoutedEventArgs e)
@@ -126,9 +126,9 @@ public partial class CopyLinkButton : UserControl
     }
 
     /// <summary>
-    /// Показывает hint-popup над кнопкой, меняет иконку кнопки через fade,
-    /// затем возвращает оба в исходное состояние.
-    /// CTS отменяет предыдущую анимацию при быстрых повторных кликах.
+    /// Displays a hint popup above the button, fades the button icon,
+    /// then restores both to their original state.
+    /// CTS cancels the previous animation on rapid consecutive clicks.
     /// </summary>
     private async Task AnimateStateAsync(bool success)
     {
@@ -205,10 +205,10 @@ public partial class CopyLinkButton : UserControl
     }
 
     /// <summary>
-    /// Восстанавливает idle-иконку после завершения анимации.
-    /// В отличие от AXAML-инициализации, здесь ресурсы гарантированно доступны
-    /// (вызывается только внутри <see cref="AnimateStateAsync"/> после Task.Delay).
-    /// Если TryGetResource недоступен — откатываемся к DynamicResource через ClearValue.
+    /// Restores the idle icon after animation completes.
+    /// Unlike AXAML initialization, resources are guaranteed to be available here
+    /// (called only inside <see cref="AnimateStateAsync"/> after Task.Delay).
+    /// If TryGetResource is unavailable, falls back to DynamicResource via ClearValue.
     /// </summary>
     private void ApplyIdleState()
     {

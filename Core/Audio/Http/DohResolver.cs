@@ -6,26 +6,26 @@ using System.Text.Json;
 namespace LMP.Core.Audio.Http;
 
 /// <summary>
-/// DNS-over-HTTPS fallback resolver для YouTube-доменов,
-/// заблокированных провайдером или Zapret на уровне UDP DNS.
+/// DNS-over-HTTPS fallback resolver for YouTube domains
+/// blocked by ISP or Zapret at the UDP DNS level.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Используется из <see cref="SharedHttpClient.ConnectWithKeepAliveAsync"/>
-/// при <see cref="SocketError.HostNotFound"/> для известных YouTube-доменов.
+/// Used from <see cref="SharedHttpClient.ConnectWithKeepAliveAsync"/>
+/// on <see cref="SocketError.HostNotFound"/> for known YouTube domains.
 /// </para>
 /// <para>
-/// DoH идёт по HTTPS/443 — провайдер не может заблокировать его без блокировки
-/// всего Google, а Zapret не перехватывает HTTPS-трафик.
+/// DoH uses HTTPS/443 — ISP cannot block it without blocking
+/// all of Google, and Zapret does not intercept HTTPS traffic.
 /// </para>
 /// <para>
-/// Кэширование: положительные записи — 5 минут, отрицательные — 30 секунд.
-/// Thread-safe через <see cref="ConcurrentDictionary{TKey,TValue}"/>.
+/// Caching: positive entries — 5 minutes, negative — 30 seconds.
+/// Thread-safe via <see cref="ConcurrentDictionary{TKey,TValue}"/>.
 /// </para>
 /// </remarks>
 internal static class DohResolver
 {
-    /// <summary>Домены, для которых применяется DoH fallback.</summary>
+    /// <summary>Domains to which DoH fallback is applied.</summary>
     private static readonly string[] FallbackDomains =
     [
         "youtube.com",
@@ -36,12 +36,12 @@ internal static class DohResolver
         "googlevideo.com",
     ];
 
-    private const long PositiveTtlTicks = 5 * 60 * TimeSpan.TicksPerSecond; // 5 минут
-    private const long NegativeTtlTicks = 30 * TimeSpan.TicksPerSecond; // 30 секунд
+    private const long PositiveTtlTicks = 5 * 60 * TimeSpan.TicksPerSecond; // 5 minutes
+    private const long NegativeTtlTicks = 30 * TimeSpan.TicksPerSecond; // 30 seconds
     private const int DohTimeoutMs = 4000;
 
     /// <summary>
-    /// Fallback DoH endpoints при недоступности Google DoH.
+    /// Fallback DoH endpoints when Google DoH is unavailable.
     /// </summary>
     private static readonly string[] FallbackEndpoints =
     [
@@ -52,16 +52,16 @@ internal static class DohResolver
     private static readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Выделенный HttpClient для DoH-запросов.
-    /// Не использует <see cref="SharedHttpClient"/> — иначе рекурсия в ConnectCallback.
-    /// Не использует custom ConnectCallback — стандартный DNS-резолв для dns.google работает.
+    /// Dedicated HttpClient for DoH requests.
+    /// Does not use <see cref="SharedHttpClient"/> — otherwise recursion in ConnectCallback.
+    /// Does not use a custom ConnectCallback — standard DNS resolution for dns.google works.
     /// </summary>
     private static readonly HttpClient _dohClient = CreateDohClient();
 
     private readonly record struct CacheEntry(IPAddress[] Addresses, long ExpiresAtTicks);
 
     /// <summary>
-    /// Проверяет, является ли домен кандидатом для DoH fallback.
+    /// Checks whether the domain is a candidate for DoH fallback.
     /// </summary>
     internal static bool IsFallbackDomain(string host)
     {
@@ -75,14 +75,14 @@ internal static class DohResolver
     }
 
     /// <summary>
-    /// Резолвит домен через DNS-over-HTTPS с кэшированием.
-    /// Возвращает <c>null</c> при неудаче.
+    /// Resolves the domain via DNS-over-HTTPS with caching.
+    /// Returns <c>null</c> on failure.
     /// </summary>
     internal static async ValueTask<IPAddress[]?> ResolveAsync(
         string host,
         CancellationToken ct = default)
     {
-        // Проверяем кэш
+        // Check cache
         if (_cache.TryGetValue(host, out var cached))
         {
             if (DateTime.UtcNow.Ticks < cached.ExpiresAtTicks)
@@ -93,7 +93,7 @@ internal static class DohResolver
             _cache.TryRemove(host, out _);
         }
 
-        // DoH запрос
+        // DoH request
         for (int i = 0; i < FallbackEndpoints.Length; i++)
         {
             var addresses = await TryDohQueryAsync(
@@ -110,14 +110,14 @@ internal static class DohResolver
             }
         }
 
-        // Все DoH endpoints не помогли — кэшируем негативный результат
+        // All DoH endpoints failed — cache the negative result
         _cache[host] = new CacheEntry([], DateTime.UtcNow.Ticks + NegativeTtlTicks);
         Log.Warn($"[DoH] Failed to resolve {host} via all DoH endpoints");
         return null;
     }
 
     /// <summary>
-    /// Инвалидирует кэш. Вызывается при смене сети.
+    /// Invalidates the cache. Called when changing networks.
     /// </summary>
     internal static void InvalidateCache()
     {
@@ -137,8 +137,8 @@ internal static class DohResolver
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(DohTimeoutMs);
 
-            // Google DNS: JSON API — проще парсить, следует CNAME автоматически
-            // Cloudflare: тот же формат при Accept: application/dns-json
+            // Google DNS: JSON API — easier to parse, follows CNAME automatically
+            // Cloudflare: same format with Accept: application/dns-json
             string url = $"{endpoint}?name={Uri.EscapeDataString(host)}&type=A";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -160,7 +160,7 @@ internal static class DohResolver
 
             var root = doc.RootElement;
 
-            // Проверяем Status (0 = NOERROR)
+            // Check Status (0 = NOERROR)
             if (root.TryGetProperty("Status", out var status) && status.GetInt32() != 0)
                 return null;
 
@@ -198,10 +198,10 @@ internal static class DohResolver
 
     private static HttpClient CreateDohClient()
     {
-        // Нельзя использовать SharedHttpClient.ConnectWithKeepAliveAsync — рекурсия.
-        // Стандартный SocketsHttpHandler с системным DNS.
-        // dns.google (8.8.8.8) и cloudflare-dns.com (1.1.1.1) резолвятся
-        // через DNS-записи, а не YouTube — провайдер их не блокирует.
+        // Cannot use SharedHttpClient.ConnectWithKeepAliveAsync — recursion.
+        // Standard SocketsHttpHandler with system DNS.
+        // dns.google (8.8.8.8) and cloudflare-dns.com (1.1.1.1) are resolved
+        // via DNS records, not YouTube — ISP does not block them.
         var handler = new SocketsHttpHandler
         {
             UseProxy = false,

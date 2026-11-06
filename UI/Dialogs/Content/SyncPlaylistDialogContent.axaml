@@ -29,7 +29,7 @@
 
         <Grid RowDefinitions="Auto, *, Auto">
 
-            <!-- Header: CloudSync + заголовок -->
+            <!-- Header: CloudSync + title -->
             <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,18">
                 <PathIcon Data="{StaticResource Icon.CloudSync}"
                     Width="26" Height="26"
@@ -52,7 +52,7 @@
                                 FontSize="14" FontWeight="SemiBold"
                                 Foreground="{DynamicResource TextSecondaryBrush}" />
 
-                            <!-- Название diff -->
+                            <!-- Diff title -->
                             <Grid ColumnDefinitions="Auto, *, *"
                                 IsVisible="{Binding HasNameDiff}">
                                 <PathIcon Grid.Column="0"
@@ -79,7 +79,7 @@
                                 </StackPanel>
                             </Grid>
 
-                            <!-- Описание diff -->
+                            <!-- Diff description -->
                             <StackPanel Orientation="Horizontal" Spacing="8"
                                 IsVisible="{Binding HasDescDiff}">
                                 <PathIcon Data="{StaticResource Icon.TextBoxOutline}"
@@ -92,7 +92,7 @@
                                     VerticalAlignment="Center" />
                             </StackPanel>
 
-                            <!-- Треки diff: иконка -->
+                            <!-- Diff tracks: icon -->
                             <StackPanel Orientation="Horizontal" Spacing="8"
                                 IsVisible="{Binding HasTrackDiff}">
                                 <PathIcon Data="{StaticResource Icon.MusicNote}"
@@ -105,7 +105,7 @@
                                     VerticalAlignment="Center" />
                             </StackPanel>
 
-                            <!-- Нет различий -->
+                            <!-- No differences -->
                             <TextBlock Text="{Binding L[Playlist_SyncNoChanges]}"
                                 FontSize="13"
                                 Foreground="{DynamicResource TextMutedBrush}"
@@ -121,11 +121,11 @@
                                 FontSize="14" FontWeight="SemiBold"
                                 Foreground="{DynamicResource TextSecondaryBrush}" />
 
-                            <!-- Две обложки рядом когда diff есть -->
+                            <!-- Two covers side-by-side when diff exists -->
                             <Grid ColumnDefinitions="*, Auto, *"
                                 IsVisible="{Binding ThumbnailDiffers}">
 
-                                <!-- Локальная обложка -->
+                                <!-- Local cover -->
                                 <StackPanel Grid.Column="0" Spacing="8" HorizontalAlignment="Center">
                                     <TextBlock Text="{Binding L[Playlist_SyncField_Local]}"
                                         FontSize="11" FontWeight="Medium"
@@ -152,7 +152,7 @@
                                     </Border>
                                 </StackPanel>
 
-                                <!-- Стрелка между обложками -->
+                                <!-- Arrow between covers -->
                                 <PathIcon Grid.Column="1"
                                     Data="{StaticResource Icon.ArrowRight}"
                                     Width="24" Height="24"
@@ -160,7 +160,7 @@
                                     VerticalAlignment="Center"
                                     Margin="16,24,16,0" />
 
-                                <!-- Облачная обложка -->
+                                <!-- Cloud cover -->
                                 <StackPanel Grid.Column="2" Spacing="8" HorizontalAlignment="Center">
                                     <TextBlock Text="{Binding L[Playlist_SyncField_Cloud]}"
                                         FontSize="11" FontWeight="Medium"
@@ -188,7 +188,7 @@
                                 </StackPanel>
                             </Grid>
 
-                            <!-- Одна обложка когда diff нет -->
+                            <!-- Single cover when no diff -->
                             <StackPanel HorizontalAlignment="Center" Spacing="8"
                                 IsVisible="{Binding !ThumbnailDiffers}">
                                 <Border Width="130" Height="130"
@@ -309,7 +309,7 @@
                     Command="{Binding CancelCommand}"
                     Background="Transparent"
                     MinWidth="90" Height="36" FontSize="13" />
-                <!-- Кнопка Sync -->
+                <!-- Sync button -->
                 <Button Command="{Binding SyncCommand}" Classes="accent accent-base"
                     MinWidth="110" Height="36" FontSize="13">
                     <StackPanel Orientation="Horizontal" Spacing="8">

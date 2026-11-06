@@ -1,22 +1,22 @@
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Состояние включения набора треков в список воспроизведения.
+/// Inclusion state of a set of tracks in the playlist.
 /// </summary>
 public enum PlaylistMembershipState
 {
     /// <summary>
-    /// Ни один из проверяемых треков не входит в плейлист.
+    /// None of the checked tracks are included in the playlist.
     /// </summary>
     None = 0,
 
     /// <summary>
-    /// В плейлист входит только часть из проверяемых треков.
+    /// Only some of the checked tracks are included in the playlist.
     /// </summary>
     Indeterminate = 1,
 
     /// <summary>
-    /// Все проверяемые треки уже включены в плейлист.
+    /// All checked tracks are already included in the playlist.
     /// </summary>
     All = 2
 }

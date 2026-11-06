@@ -52,7 +52,7 @@
         <Setter Property="RenderTransform" Value="scaleY(2.0)" />
     </Style>
 
-    <!-- СТИЛИЗАЦИЯ ПРЯМОУГОЛЬНОГО БЕГУНКА -->
+    <!-- RECTANGULAR THUMB STYLING -->
     <Style Selector="Grid.seek-container Border.slider-thumb">
         <Setter Property="Opacity" Value="0" />
         <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
@@ -158,8 +158,8 @@
         <Setter Property="Opacity" Value="1" />
     </Style>
 
-    <!-- ФОРМАТЫ СТРИМА И ПРЕСЕТЫ EQ: Собственный легковесный ControlTemplate без каскадных
-    переопределений -->
+    <!-- STREAM FORMATS AND EQ PRESETS: Custom lightweight ControlTemplate without cascading
+    overrides -->
     <Style Selector="Button.format-item-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />

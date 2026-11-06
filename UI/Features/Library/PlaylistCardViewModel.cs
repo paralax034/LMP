@@ -3,7 +3,7 @@ using Avalonia.Media;
 namespace LMP.UI.Features.Library;
 
 /// <summary>
-/// ViewModel карточки плейлиста в библиотеке.
+/// ViewModel for a playlist card in the library.
 /// </summary>
 public sealed partial class PlaylistCardViewModel : ViewModelBase
 {
@@ -26,18 +26,18 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Identity
 
     /// <summary>
-    /// Исходный объект плейлиста.
-    /// Мутабельный — обновляется через <see cref="UpdateFrom"/>.
+    /// The underlying playlist entity.
+    /// Mutable — updated via <see cref="UpdateFrom"/>.
     /// </summary>
     public Core.Models.Playlist Playlist { get; }
 
     /// <summary>
-    /// Уникальный идентификатор плейлиста.
+    /// Unique identifier of the playlist.
     /// </summary>
     public string Id => Playlist.Id;
 
     /// <summary>
-    /// Это системный плейлист «Понравившиеся» (специальный UI: обложка-сердце, без удаления).
+    /// Indicates whether this is the system "Liked Songs" playlist (special UI: heart cover, cannot be deleted).
     /// </summary>
     public bool IsLikedPlaylist => Playlist.Id == LibraryService.LikedPlaylistId;
 
@@ -46,22 +46,22 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Display
 
     /// <summary>
-    /// Название плейлиста. Обновляется при переименовании и смене языка.
+    /// Playlist title. Updated on rename and language changes.
     /// </summary>
     [ObservableProperty] public partial string Name { get; private set; }
 
     /// <summary>
-    /// URL обложки с upscale для YouTube-превью. Обновляется при смене обложки.
+    /// Cover art URL upscaled for YouTube thumbnails. Updated when the cover changes.
     /// </summary>
     [ObservableProperty] public partial string? ThumbnailUrl { get; private set; }
 
     /// <summary>
-    /// Количество треков в плейлисте. Обновляется при add/remove треков.
+    /// Track count in the playlist. Updated when tracks are added/removed.
     /// </summary>
     [ObservableProperty] public partial int TrackCount { get; set; }
 
     /// <summary>
-    /// Видимость карточки. Управляется stagger-анимацией в <see cref="LibraryViewModel"/>.
+    /// Card visibility state. Managed by stagger animation in <see cref="LibraryViewModel"/>.
     /// </summary>
     [ObservableProperty] public partial bool IsVisible { get; set; }
 
@@ -77,28 +77,28 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Форматированное количество треков с правильным склонением.
+    /// Formatted track count with localized pluralization.
     /// </summary>
     public string FormattedTrackCount => FormatTrackCount(TrackCount);
 
     /// <summary>
-    /// Есть обложка для отображения (не пустая и не Liked).
+    /// Gets a value indicating whether a valid cover art image exists (non-empty and not Liked).
     /// </summary>
     public bool HasThumbnail => !string.IsNullOrEmpty(ThumbnailUrl) && !IsLikedPlaylist;
 
     /// <summary>
-    /// Показывать placeholder вместо обложки.
+    /// Gets a value indicating whether to display a placeholder instead of cover art.
     /// </summary>
     public bool ShowPlaceholder => string.IsNullOrEmpty(ThumbnailUrl) && !IsLikedPlaylist;
 
     /// <summary>
-    /// Флаг открытого контекстного меню карточки (управляет псевдоклассом menu-open).
+    /// Flag indicating whether the card's context menu is open (controls the menu-open pseudoclass).
     /// </summary>
     [ObservableProperty] public partial bool IsMenuOpen { get; set; }
 
     /// <summary>
-    /// YouTube URL плейлиста для CopyLinkButton.
-    /// Null если плейлист не привязан к YouTube.
+    /// YouTube playlist URL for CopyLinkButton.
+    /// Null if the playlist is not bound to YouTube.
     /// </summary>
     public string? YoutubeUrl
     {
@@ -113,7 +113,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Можно ли скопировать ссылку на YouTube-плейлист.
+    /// Gets a value indicating whether the YouTube playlist link can be copied.
     /// </summary>
     public bool CanCopyLink => !string.IsNullOrEmpty(YoutubeUrl);
 
@@ -122,53 +122,53 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Author & Ownership
 
     /// <summary>
-    /// Имя автора/владельца плейлиста.
+    /// Name of the playlist author/owner.
     /// </summary>
     [ObservableProperty] public partial string? Author { get; private set; }
 
     /// <summary>
-    /// Показывать строку автора на карточке.
-    /// True только для чужих плейлистов с известным автором.
+    /// Gets a value indicating whether to display the author line on the card.
+    /// True only for third-party playlists with a known author.
     /// </summary>
     [ObservableProperty] public partial bool ShowAuthor { get; private set; }
 
     /// <summary>
-    /// Отображаемая строка автора с предлогом «от X».
+    /// Display string for the author with "by X" prefix.
     /// </summary>
     [ObservableProperty] public partial string? AuthorDisplayText { get; private set; }
 
     /// <summary>
-    /// Tooltip для строки автора: «Плейлист от X».
+    /// Tooltip for the author line: "Playlist by X".
     /// </summary>
     [ObservableProperty] public partial string? AuthorTooltip { get; private set; }
 
     /// <summary>
-    /// Плейлист приватный (🔒).
+    /// Playlist is private (🔒).
     /// </summary>
     [ObservableProperty] public partial bool IsPrivate { get; private set; }
 
     /// <summary>
-    /// Плейлист по ссылке (🔗).
+    /// Playlist is unlisted / accessible via link (🔗).
     /// </summary>
     [ObservableProperty] public partial bool IsUnlisted { get; private set; }
 
     /// <summary>
-    /// Плейлист хранится локально (LocalOnly или TwoWaySync).
+    /// Playlist is stored locally (LocalOnly or TwoWaySync).
     /// </summary>
     public bool IsLocal => Playlist.IsLocal;
 
     /// <summary>
-    /// Плейлист только для чтения (Foreign или CloudPublic).
+    /// Playlist is read-only (Foreign or CloudPublic).
     /// </summary>
     public bool IsReadOnly => !Playlist.IsEditable;
 
     /// <summary>
-    /// Можно ли удалить плейлист (всё кроме Liked).
+    /// Gets a value indicating whether the playlist can be deleted (all except Liked).
     /// </summary>
     public bool CanDelete => !IsLikedPlaylist;
 
     /// <summary>
-    /// Можно ли открыть диалог редактирования плейлиста.
+    /// Gets a value indicating whether the edit playlist dialog can be opened.
     /// </summary>
     public bool CanEdit => Playlist.IsEditable;
 
@@ -177,14 +177,14 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Cloud & Sync
 
     /// <summary>
-    /// Плейлист связан с YouTube: есть YoutubeId и он доступен,
-    /// или это Liked при аутентифицированном пользователе.
-    /// Используется для отображения иконки облака (☁).
+    /// Playlist is linked to YouTube: has an accessible YoutubeId,
+    /// or is Liked for an authenticated user.
+    /// Used to show the cloud icon (☁).
     /// </summary>
     [ObservableProperty] public partial bool HasCloudSource { get; private set; }
 
     /// <summary>
-    /// Двусторонняя синхронизация активна (TwoWaySync или Liked + auth).
+    /// Two-way synchronization is active (TwoWaySync or Liked + auth).
     /// </summary>
     [ObservableProperty] public partial bool IsTwoWaySynced { get; private set; }
 
@@ -193,19 +193,19 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Properties — Playback State
 
     /// <summary>
-    /// Данный плейлист активен в плеере и очередь «чистая».
-    /// Используется для анимации пульсации рамки карточки.
+    /// Indicates whether this playlist is active in the player and the queue is "pristine".
+    /// Used for the card border pulsing animation.
     /// </summary>
     [ObservableProperty] public partial bool IsActive { get; private set; }
 
     /// <summary>
-    /// Очередь полностью совпадает с треками этого плейлиста.
+    /// Indicates whether the queue exactly matches the tracks in this playlist.
     /// </summary>
     [ObservableProperty] public partial bool IsQueuePure { get; private set; }
 
     /// <summary>
-    /// Очередь чистая и прямо сейчас активно играет.
-    /// Используется для иконки Play/Pause в контекстном меню.
+    /// Queue is pristine and currently actively playing.
+    /// Used for the Play/Pause icon in the context menu.
     /// </summary>
     [ObservableProperty] public partial bool IsPlayingPure { get; private set; }
 
@@ -216,14 +216,14 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Текст для пункта контекстного меню «Воспроизвести / Пауза».
+    /// Display text for the "Play / Pause" context menu item.
     /// </summary>
     public string PlayMenuHeader => IsPlayingPure
         ? LocalizationService.Instance["Player_Pause"]
         : LocalizationService.Instance["Player_Play"];
 
     /// <summary>
-    /// Геометрия иконки Play/Pause для контекстного меню.
+    /// Path geometry for the context menu Play/Pause icon.
     /// </summary>
     public Geometry? PlayMenuIcon
     {
@@ -241,22 +241,22 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
 
     #region Commands
 
-    /// <summary>Открыть плейлист (навигация).</summary>
+    /// <summary>Open playlist (navigate).</summary>
     public IRelayCommand OpenCommand { get; }
 
-    /// <summary>Удалить плейлист.</summary>
+    /// <summary>Delete playlist.</summary>
     public IAsyncRelayCommand DeleteCommand { get; }
 
-    /// <summary>Добавить все треки в очередь.</summary>
+    /// <summary>Add all tracks to queue.</summary>
     public IAsyncRelayCommand AddToQueueCommand { get; }
 
-    /// <summary>Воспроизвести плейлист (smart play/pause).</summary>
+    /// <summary>Play playlist (smart play/pause).</summary>
     public IAsyncRelayCommand PlayCommand { get; }
 
-    /// <summary>Открыть диалог редактирования.</summary>
+    /// <summary>Opens the edit dialog.</summary>
     public IAsyncRelayCommand EditCommand { get; }
 
-    /// <summary>Скопировать ссылку на YouTube-плейлист.</summary>
+    /// <summary>Copies the YouTube playlist link.</summary>
     public IAsyncRelayCommand CopyLinkCommand { get; }
 
     #endregion
@@ -374,8 +374,8 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Update
 
     /// <summary>
-    /// Обновляет карточку из свежих данных плейлиста.
-    /// Вызывается при инкрементальном обновлении библиотеки.
+    /// Updates the card using fresh playlist data.
+    /// Called during incremental library updates.
     /// </summary>
     public void UpdateFrom(Core.Models.Playlist playlist, int trackCount)
     {
@@ -436,7 +436,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     #region Helpers
 
     /// <summary>
-    /// Выставляет все свойства ownership/visibility/author из модели.
+    /// Sets all ownership/visibility/author properties from the model.
     /// </summary>
     private void ApplyOwnershipState(Core.Models.Playlist playlist)
     {
@@ -448,7 +448,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Выставляет все свойства cloud/sync из модели.
+    /// Sets all cloud/sync properties from the model.
     /// </summary>
     private void ApplyCloudState(Core.Models.Playlist playlist)
     {
@@ -460,7 +460,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Пересчитывает локализованные строки автора.
+    /// Recalculates localized author strings.
     /// </summary>
     private void RefreshAuthorTexts()
     {
@@ -477,7 +477,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Форматирует количество треков с правильным склонением через локализацию.
+    /// Formats the track count with proper localization pluralization.
     /// </summary>
     private static string FormatTrackCount(int count)
     {
@@ -486,7 +486,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Переводит карточку в видимое состояние (stagger-анимация появления).
+    /// Transitions the card to a visible state (staggered entrance animation).
     /// </summary>
     public void Show()
     {

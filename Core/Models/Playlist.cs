@@ -4,8 +4,8 @@ using LMP.Core.Youtube.Search;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Режим хранения и синхронизации плейлиста.
-/// Отвечает исключительно за поведение sync, а не за ownership.
+/// Playlist storage and synchronization mode.
+/// Responsible exclusively for sync behavior, not ownership.
 /// </summary>
 public enum PlaylistSyncMode
 {
@@ -15,45 +15,45 @@ public enum PlaylistSyncMode
 }
 
 /// <summary>
-/// Владение плейлистом с точки зрения YouTube.
-/// Определяет, может ли текущий пользователь редактировать контент.
+/// Playlist ownership from YouTube's perspective.
+/// Determines whether the current user can edit the content.
 /// </summary>
 public enum PlaylistOwnership
 {
-    /// <summary>Данные о владельце отсутствуют (старые записи, fallback).</summary>
+    /// <summary>Owner data is missing (legacy records, fallback).</summary>
     Unknown = 0,
 
-    /// <summary>Плейлист принадлежит текущему аутентифицированному пользователю.</summary>
+    /// <summary>Playlist belongs to the currently authenticated user.</summary>
     Mine = 1,
 
-    /// <summary>Плейлист принадлежит другому пользователю.</summary>
+    /// <summary>Playlist belongs to another user.</summary>
     Foreign = 2,
 
-    /// <summary>Системный плейлист (Liked, Watch Later).</summary>
+    /// <summary>System playlist (Liked, Watch Later).</summary>
     System = 3
 }
 
 /// <summary>
-/// Уровень доступа к плейлисту на YouTube.
+/// Playlist privacy level on YouTube.
 /// </summary>
 public enum PlaylistVisibility
 {
-    /// <summary>Данные о видимости отсутствуют.</summary>
+    /// <summary>Visibility data is missing.</summary>
     Unknown = 0,
 
-    /// <summary>Доступен только владельцу.</summary>
+    /// <summary>Accessible only to the owner.</summary>
     Private = 1,
 
-    /// <summary>Доступен по прямой ссылке.</summary>
+    /// <summary>Accessible via direct link.</summary>
     Unlisted = 2,
 
-    /// <summary>Доступен всем.</summary>
+    /// <summary>Accessible to everyone.</summary>
     Public = 3
 }
 
 /// <summary>
-/// Доменная модель плейлиста.
-/// Хранит реальную информацию о плейлисте; права и ограничения вычисляются из неё.
+/// Playlist domain model.
+/// Stores real information about the playlist; permissions and restrictions are calculated from it.
 /// </summary>
 public sealed class Playlist : IBatchItem, ISearchResult
 {
@@ -92,14 +92,14 @@ public sealed class Playlist : IBatchItem, ISearchResult
     public string? CustomColor { get; set; }
 
     /// <summary>
-    /// Автоматически вычисленный доминантный цвет из обложки.
-    /// Формат: #RRGGBB. Пересчитывается при смене обложки.
+    /// Automatically calculated dominant color from the cover art.
+    /// Format: #RRGGBB. Recalculated when cover art changes.
     /// </summary>
     public string? ComputedColor { get; set; }
 
     /// <summary>
-    /// Эффективный цвет для градиента хедера.
-    /// Приоритет: CustomColor → ComputedColor → null.
+    /// Effective color for the header gradient.
+    /// Priority: CustomColor → ComputedColor → null.
     /// </summary>
     [JsonIgnore]
     public string? EffectiveColor => CustomColor ?? ComputedColor;
@@ -109,31 +109,31 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Author & Ownership
 
     /// <summary>
-    /// Отображаемое имя автора/владельца плейлиста.
+    /// Display name of the playlist author/owner.
     /// </summary>
     public string? Author { get; set; }
 
     /// <summary>
-    /// Описание плейлиста.
+    /// Playlist description.
     /// </summary>
     public string? Description { get; set; }
 
     /// <summary>
-    /// YouTube Channel ID владельца плейлиста.
-    /// Стабильный идентификатор для определения ownership и построения ссылки на канал.
+    /// YouTube Channel ID of the playlist owner.
+    /// Stable identifier for determining ownership and building the channel URL.
     /// </summary>
     public string? OwnerChannelId { get; set; }
 
     /// <summary>
-    /// Кому принадлежит плейлист: текущему пользователю, другому, системе.
-    /// Определяется при импорте сравнением <see cref="OwnerChannelId"/>
-    /// с идентификатором канала текущего аккаунта.
+    /// Who owns the playlist: current user, another user, or system.
+    /// Determined during import by comparing <see cref="OwnerChannelId"/>
+    /// with the channel identifier of the current account.
     /// </summary>
     public PlaylistOwnership Ownership { get; set; } = PlaylistOwnership.Unknown;
 
     /// <summary>
-    /// Уровень доступа к плейлисту на YouTube: публичный, по ссылке, приватный.
-    /// Заполняется из payload YouTube API, если данные доступны.
+    /// Playlist access level on YouTube: public, unlisted, private.
+    /// Populated from the YouTube API payload if data is available.
     /// </summary>
     public PlaylistVisibility Visibility { get; set; } = PlaylistVisibility.Unknown;
 
@@ -142,44 +142,44 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Sync & Cloud
 
     /// <summary>
-    /// Количество просмотров плейлиста по данным YouTube Music.
-    /// Заполняется при синхронизации (PlaylistSyncService).
+    /// Playlist view count according to YouTube Music data.
+    /// Populated during synchronization (PlaylistSyncService).
     /// </summary>
     public long? ViewCount { get; set; }
 
     /// <summary>
-    /// Дата создания/обновления плейлиста по данным YouTube.
+    /// Playlist creation/update date according to YouTube data.
     /// </summary>
     public DateOnly? ReleaseDate { get; set; }
 
     /// <summary>
-    /// Режим синхронизации. Определяет только поведение sync, не ownership.
+    /// Synchronization mode. Defines sync behavior only, not ownership.
     /// </summary>
     public PlaylistSyncMode SyncMode { get; set; } = PlaylistSyncMode.LocalOnly;
 
     /// <summary>
-    /// YouTube-идентификатор плейлиста для облачных операций.
+    /// YouTube playlist identifier for cloud operations.
     /// </summary>
     public string? YoutubeId { get; set; }
 
     /// <summary>
-    /// ETag для оптимистичной проверки изменений.
+    /// ETag for optimistic change verification.
     /// </summary>
     public string? ETag { get; set; }
 
     /// <summary>
-    /// Количество треков по данным YouTube API.
-    /// Позволяет показать count до полной загрузки списка треков.
+    /// Track count according to YouTube API data.
+    /// Allows displaying the count before the full track list is loaded.
     /// </summary>
     public int? CloudTrackCount { get; set; }
 
     /// <summary>
-    /// UTC-время последней успешной синхронизации с YouTube.
+    /// UTC timestamp of the last successful synchronization with YouTube.
     /// </summary>
     public DateTime? LastSyncedAtUtc { get; set; }
 
     /// <summary>
-    /// Плейлист недоступен в облаке (удалён, закрыт, 403/404 при sync).
+    /// Playlist is unavailable in the cloud (deleted, private, 403/404 during sync).
     /// </summary>
     public bool IsCloudUnavailable { get; set; }
 
@@ -188,8 +188,8 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Local Ownership (account isolation)
 
     /// <summary>
-    /// Идентификатор владельца локальной записи для изоляции между аккаунтами.
-    /// Не путать с <see cref="OwnerChannelId"/> (владелец на YouTube).
+    /// Identifier of the local record owner for cross-account isolation.
+    /// Do not confuse with <see cref="OwnerChannelId"/> (YouTube owner).
     /// </summary>
     public string OwnerId { get; set; } = string.Empty;
 
@@ -198,13 +198,13 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Sync Mode Queries (backward-compatible)
 
     /// <summary>
-    /// Плейлист имеет локальное представление (LocalOnly или TwoWaySync).
+    /// Playlist has a local representation (LocalOnly or TwoWaySync).
     /// </summary>
     [JsonIgnore]
     public bool IsLocal => SyncMode is PlaylistSyncMode.LocalOnly or PlaylistSyncMode.TwoWaySync;
 
     /// <summary>
-    /// Плейлист синхронизируется с аккаунтом YouTube Music.
+    /// Playlist synchronizes with a YouTube Music account.
     /// </summary>
     [JsonIgnore]
     public bool IsFromAccount => SyncMode == PlaylistSyncMode.TwoWaySync;
@@ -214,19 +214,19 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Ownership Queries
 
     /// <summary>
-    /// Плейлист принадлежит текущему аутентифицированному пользователю.
+    /// Playlist belongs to the currently authenticated user.
     /// </summary>
     [JsonIgnore]
     public bool IsMine => Ownership == PlaylistOwnership.Mine;
 
     /// <summary>
-    /// Плейлист принадлежит другому пользователю.
+    /// Playlist belongs to another user.
     /// </summary>
     [JsonIgnore]
     public bool IsForeign => Ownership == PlaylistOwnership.Foreign;
 
     /// <summary>
-    /// Системный плейлист (Liked, Watch Later).
+    /// System playlist (Liked, Watch Later).
     /// </summary>
     [JsonIgnore]
     public bool IsSystem => Ownership == PlaylistOwnership.System;
@@ -236,26 +236,26 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Cloud Link Queries
 
     /// <summary>
-    /// Плейлист имеет активную привязку к YouTube (ID есть и не помечен как недоступный).
+    /// Playlist has an active YouTube binding (ID exists and is not marked as unavailable).
     /// </summary>
     [JsonIgnore]
     public bool HasCloudLink => !string.IsNullOrEmpty(YoutubeId) && !IsCloudUnavailable;
 
     /// <summary>
-    /// Текущий пользователь может синхронизировать изменения обратно в YouTube.
+    /// Current user can synchronize changes back to YouTube.
     /// </summary>
     [JsonIgnore]
     public bool CanSyncToCloud => (IsMine || Ownership == PlaylistOwnership.Unknown) && HasCloudLink && SyncMode == PlaylistSyncMode.TwoWaySync;
 
     /// <summary>
-    /// Плейлист привязан к облаку для исходящих мутаций, включая ожидающее создание (YoutubeId ещё не получен).
-    /// Правки такого плейлиста обязаны попадать в Outbox, иначе они теряются до завершения Фазы 0.
+    /// The playlist is bound to the cloud for outgoing mutations, including pending creation (YoutubeId is not yet acquired).
+    /// Edits to such a playlist must go into the Outbox; otherwise, they are lost before Phase 0 completes.
     /// </summary>
     [JsonIgnore]
     public bool IsCloudBound => (IsMine || Ownership == PlaylistOwnership.Unknown) && SyncMode == PlaylistSyncMode.TwoWaySync && !IsCloudUnavailable;
 
     /// <summary>
-    /// Можно получить свежие данные из YouTube.
+    /// Fresh data can be fetched from YouTube.
     /// </summary>
     [JsonIgnore]
     public bool CanPullFromCloud => !string.IsNullOrEmpty(YoutubeId);
@@ -265,29 +265,29 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Permissions
 
     /// <summary>
-    /// Плейлист доступен только для чтения (чужой или CloudPublic).
-    /// <para><b>Backward-compatible:</b> для <see cref="PlaylistOwnership.Unknown"/>
-    /// возвращает <c>false</c>, сохраняя поведение для старых записей.</para>
+    /// The playlist is read-only (belongs to another user or is CloudPublic).
+    /// <para><b>Backward-compatible:</b> returns <c>false</c> for <see cref="PlaylistOwnership.Unknown"/>,
+    /// preserving behavior for legacy records.</para>
     /// </summary>
     [JsonIgnore]
     public bool IsReadOnly => IsForeign || SyncMode == PlaylistSyncMode.CloudPublic;
 
     /// <summary>
-    /// Плейлист можно редактировать (не read-only и не системный).
-    /// Заменяет старую логику <c>SyncMode != CloudPublic</c>,
-    /// добавляя проверку ownership.
+    /// The playlist can be edited (not read-only and not system).
+    /// Replaces the legacy <c>SyncMode != CloudPublic</c> logic
+    /// by adding an ownership check.
     /// </summary>
     [JsonIgnore]
     public bool IsEditable => !IsReadOnly && !IsSystem;
 
     /// <summary>
-    /// Можно менять название, описание, обложку.
+    /// Name, description, and cover image can be modified.
     /// </summary>
     [JsonIgnore]
     public bool CanEditMetadata => IsEditable;
 
     /// <summary>
-    /// Можно добавлять, удалять, переставлять треки.
+    /// Tracks can be added, removed, or reordered.
     /// </summary>
     [JsonIgnore]
     public bool CanEditTracks => IsEditable;
@@ -297,8 +297,8 @@ public sealed class Playlist : IBatchItem, ISearchResult
     #region Author URL
 
     /// <summary>
-    /// Прямая ссылка на канал автора плейлиста.
-    /// <c>null</c> если <see cref="OwnerChannelId"/> неизвестен.
+    /// Direct link to the playlist author's channel.
+    /// <c>null</c> if <see cref="OwnerChannelId"/> is unknown.
     /// </summary>
     [JsonIgnore]
     public string? AuthorUrl => !string.IsNullOrEmpty(OwnerChannelId)

@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Низкоуровневые примитивы управления виртуальной и физической памятью процесса,
-/// включая детерминированную компактификацию Gen 2 / LOH с дебаунсом после тяжелых операций.
+/// Low-level primitives for process virtual and physical memory management,
+/// including deterministic Gen 2 / LOH compaction with debouncing after heavy operations.
 /// </summary>
 public static partial class MemoryHelpers
 {
@@ -14,7 +14,7 @@ public static partial class MemoryHelpers
     private static long _lastHeavyCompactTicks;
 
     /// <summary>
-    /// Минимальный интервал между компактификациями после тяжелых фаз (тиков Stopwatch).
+    /// Minimum interval between compactions after heavy phases (Stopwatch ticks).
     /// </summary>
     private const int MinHeavyCompactIntervalSeconds = 5;
 
@@ -26,8 +26,8 @@ public static partial class MemoryHelpers
     private static partial bool _SetProcessWorkingSetSize(nint process, nint minimumWorkingSetSize, nint maximumWorkingSetSize);
 
     /// <summary>
-    /// Принудительно сбрасывает неиспользуемые страницы физической памяти (Working Set) на уровне ОС.
-    /// Использует 64-битные параметры <see cref="nint"/> (<c>SIZE_T</c>) и псевдо-хэндл текущего процесса без аллокаций в куче.
+    /// Forces trimming of unused physical memory pages (Working Set) at the OS level.
+    /// Uses 64-bit <see cref="nint"/> (<c>SIZE_T</c>) parameters and a pseudo-handle to the current process without heap allocations.
     /// </summary>
     public static void TrimWorkingSet()
     {
@@ -35,7 +35,7 @@ public static partial class MemoryHelpers
 
         try
         {
-            // Параметры (nint)(-1), (nint)(-1) (SIZE_T_MAX) указывают Windows освободить неактивные страницы Working Set.
+            // Parameters (nint)(-1), (nint)(-1) (SIZE_T_MAX) instruct Windows to release inactive Working Set pages.
             nint currentProcessHandle = _GetCurrentProcess();
             _SetProcessWorkingSetSize(currentProcessHandle, -1, -1);
 
@@ -49,9 +49,9 @@ public static partial class MemoryHelpers
     }
 
     /// <summary>
-    /// Выполняет немедленную компактификацию управляемой кучи (Gen 2 + LOH) для возврата ОС
-    /// виртуальных страниц (<c>Private: Commit</c>) после парсинга AST или инициализации нативных мостов.
-    /// Не сбрасывает Working Set в pagefile, поэтому безопасна при активном аудио-воспроизведении.
+    /// Performs immediate managed heap compaction (Gen 2 + LOH) to return
+    /// virtual pages (<c>Private: Commit</c>) to the OS after AST parsing or native bridge initialization.
+    /// Does not trim Working Set to pagefile, making it safe during active audio playback.
     /// </summary>
     public static void CompactManagedHeapNow(bool nonBlockingForAudio = false)
     {
@@ -61,8 +61,8 @@ public static partial class MemoryHelpers
 
             if (nonBlockingForAudio)
             {
-                // Во время активного аудио-воспроизведения используем фоновый (concurrent) GC Gen 2
-                // без Stop-The-World компактификации LOH и без блокировки потока WASAPI (пауза < 1 мс вместо 220 мс).
+                // During active audio playback, use background (concurrent) Gen 2 GC
+                // without Stop-The-World LOH compaction and without blocking the WASAPI thread (pause < 1 ms instead of 220 ms).
                 GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: false);
                 var bgInfo = GC.GetGCMemoryInfo();
                 Log.Info(
@@ -71,7 +71,7 @@ public static partial class MemoryHelpers
                 return;
             }
 
-            // В простое (без воспроизведения): одиночный проход с компактификацией LOH
+            // When idle (no playback): a single pass with LOH compaction
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
 
@@ -93,11 +93,11 @@ public static partial class MemoryHelpers
     }
 
     /// <summary>
-    /// Планирует отложенную компактификацию Gen 2 + LOH с дебаунсом после тяжелых аллокаций
-    /// (разбор <c>base.js</c>, компиляция AST, генерация <c>PoToken</c>).
-    /// Позволяет схлопнуть серию расшифровок в один проход GC без прерывания аудио-потока.
+    /// Schedules deferred Gen 2 + LOH compaction with debouncing after heavy allocations
+    /// (parsing <c>base.js</c>, AST compilation, <c>PoToken</c> generation).
+    /// Allows collapsing a series of decryptions into a single GC pass without interrupting the audio stream.
     /// </summary>
-    /// <param name="delayMs">Задержка дебаунса в миллисекундах (по умолчанию 2500 мс).</param>
+    /// <param name="delayMs">Debounce delay in milliseconds (default is 2500 ms).</param>
     public static void SchedulePostHeavyWorkCleanup(int delayMs = 2500)
     {
         CancellationToken token;

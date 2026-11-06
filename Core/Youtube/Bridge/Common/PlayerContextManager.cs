@@ -1,17 +1,17 @@
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Единая точка управления версией плеера и base.js.
-/// Singleton, потокобезопасный.
+/// Unified control point for player version and base.js.
+/// Singleton, thread-safe.
 /// </summary>
-/// <param name="httpProvider">Фабрика HTTP-клиента для загрузки скриптов плеера.</param>
+/// <param name="httpProvider">HTTP client factory for downloading player scripts.</param>
 public class PlayerContextManager(Func<HttpClient> httpProvider)
 {
     private readonly Func<HttpClient> _httpProvider = httpProvider ?? throw new ArgumentNullException(nameof(httpProvider));
 
     /// <summary>
-    /// Семафор single-flight: гарантирует один активный <see cref="PlayerContext.DetectVersionAsync"/>
-    /// при любом количестве параллельных вызовов <see cref="GetOrLoadAsync"/>.
+    /// Single-flight semaphore: guarantees a single active <see cref="PlayerContext.DetectVersionAsync"/>
+    /// across any number of concurrent <see cref="GetOrLoadAsync"/> calls.
     /// </summary>
     private readonly SemaphoreSlim _initSemaphore = new(1, 1);
 
@@ -19,18 +19,18 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
     private volatile string? _cachedSignatureTimestamp;
 
     /// <summary>
-    /// Возвращает актуальный контекст плеера.
-    /// При отсутствии валидного in-memory контекста последовательно проверяет
-    /// дисковый кэш и выполняет сетевую загрузку.
-    /// При недоступности сети делает fallback на дисковый кэш.
+    /// Returns the current player context.
+    /// If no valid in-memory context exists, sequentially checks
+    /// the disk cache and performs a network fetch.
+    /// Falls back to the disk cache if the network is unavailable.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">
-    /// Не удалось определить версию плеера или загрузить base.js.
+    /// Failed to detect the player version or download base.js.
     /// </exception>
     public virtual async Task<PlayerContext> GetOrLoadAsync(CancellationToken ct = default)
     {
-        // Fast path: volatile read без захвата семафора
+        // Fast path: volatile read without acquiring the semaphore
         var current = _current;
         if (current?.IsValid() == true) return current;
 
@@ -42,7 +42,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
 
             var http = _httpProvider();
 
-            // Попытка определить версию через сеть
+            // Attempting to detect version via network
             (string Version, string[] Urls)? versionInfo;
             try
             {
@@ -54,11 +54,11 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
             }
             catch (OperationCanceledException)
             {
-                // Внутренний таймаут HttpClient (не отмена вызывающего кода)
+                // Internal HttpClient timeout (does not cancel caller code)
                 versionInfo = null;
             }
 
-            // Сеть недоступна → fallback на дисковый кэш
+            // Network unavailable → fallback to disk cache
             if (versionInfo is not { } versionData)
             {
                 var diskFallback = TryLoadFromDiskCache();
@@ -121,11 +121,11 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
     }
 
     /// <summary>
-    /// Сканирует дисковый кэш и загружает наиболее свежий валидный контекст
-    /// без обращения к сети. Используется как fallback при недоступности
-    /// <see cref="PlayerContext.DetectVersionAsync"/>.
+    /// Scans the disk cache and loads the freshest valid context
+    /// without network requests. Used as a fallback when
+    /// <see cref="PlayerContext.DetectVersionAsync"/> is unavailable.
     /// </summary>
-    /// <returns>Контекст плеера или <c>null</c> если валидный кэш отсутствует.</returns>
+    /// <returns>Player context or <c>null</c> if no valid cache exists.</returns>
     public static PlayerContext? TryLoadFromDiskCache()
     {
         try
@@ -136,7 +136,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
             var stsFiles = Directory.GetFiles(dir, "player_*_sts.txt");
             if (stsFiles.Length == 0) return null;
 
-            // Свежайший первым — однократный сбор времени изменения для исключения O(N log N) дисковых I/O
+            // Freshest first — single-pass modification time collection to avoid O(N log N) disk I/O
             var fileInfos = new (string Path, DateTime LastWriteUtc)[stsFiles.Length];
             for (int i = 0; i < stsFiles.Length; i++)
             {
@@ -186,19 +186,19 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
     }
 
     /// <summary>
-    /// Возвращает закэшированный signatureTimestamp.
-    /// Единый источник истины для всех экземпляров <see cref="VideoController"/>.
+    /// Returns the cached signatureTimestamp.
+    /// Single source of truth for all <see cref="VideoController"/> instances.
     /// </summary>
     public string? GetCachedSignatureTimestamp() => _cachedSignatureTimestamp;
 
-    /// <summary>Записывает signatureTimestamp в кэш.</summary>
-    /// <param name="sts">Значение STS или <c>null</c> для сброса.</param>
+    /// <summary>Writes signatureTimestamp to cache.</summary>
+    /// <param name="sts">STS value or <c>null</c> to reset.</param>
     public void SetCachedSignatureTimestamp(string? sts) => _cachedSignatureTimestamp = sts;
 
     /// <summary>
-    /// Сбрасывает кэш signatureTimestamp.
-    /// Вызывается через <see cref="VideoController.InvalidateSignatureTimestamp"/>
-    /// при 403-recovery — гарантирует сброс для всех экземпляров <see cref="VideoController"/>.
+    /// Resets the signatureTimestamp cache.
+    /// Invoked via <see cref="VideoController.InvalidateSignatureTimestamp"/>
+    /// during 403 recovery — guarantees reset for all <see cref="VideoController"/> instances.
     /// </summary>
     public void InvalidateSignatureTimestamp()
     {
@@ -207,16 +207,16 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
     }
 
     /// <summary>
-    /// Мягкая инвалидация: сбрасывает in-memory контекст, дисковый кэш сохраняется.
+    /// Soft invalidation: resets in-memory context, preserving disk cache.
     /// </summary>
     public void InvalidateContext() => _current = null;
 
     /// <summary>
-    /// Жёсткая инвалидация: сбрасывает in-memory контекст и физически удаляет дисковый кэш.
+    /// Hard invalidation: resets in-memory context and physically deletes disk cache.
     /// </summary>
     public void Invalidate()
     {
-        // Snapshot до обнуления: корректен при параллельной записи из GetOrLoadAsync
+        // Snapshot before nulling: correct during concurrent write from GetOrLoadAsync
         var snapshot = _current;
         _current = null;
         if (snapshot != null)

@@ -9,38 +9,38 @@ public sealed partial class CachingStreamSource
     // --- RangeDownloadResult ---
 
     /// <summary>
-    /// Исход попытки загрузки HTTP range-диапазона.
+    /// Outcome of an HTTP range request download attempt.
     /// </summary>
     private enum RangeDownloadResult
     {
-        /// <summary>Диапазон успешно загружен и доступен локально.</summary>
+        /// <summary>Range downloaded successfully and available locally.</summary>
         Success,
 
-        /// <summary>Сервер вернул HTTP 403 Forbidden — URL истёк.</summary>
+        /// <summary>Server returned HTTP 403 Forbidden — URL expired.</summary>
         Forbidden403,
 
-        /// <summary>Транзиентная сетевая ошибка (timeout, socket, IO).</summary>
+        /// <summary>Transient network error (timeout, socket, IO).</summary>
         NetworkError,
 
-        /// <summary>Неустранимая ошибка (UMP-формат, circuit breaker).</summary>
+        /// <summary>Fatal unrecoverable error (UMP format, circuit breaker).</summary>
         Fatal,
 
-        /// <summary>Операция отменена (epoch change, dispose, внешний CancellationToken).</summary>
+        /// <summary>Operation canceled (epoch change, dispose, external CancellationToken).</summary>
         Cancelled,
 
-        /// <summary>Не удалось получить слот семафора за отведённое время.</summary>
+        /// <summary>Failed to acquire semaphore slot within allotted time.</summary>
         SlotTimeout,
 
-        /// <summary>Позиция выходит за пределы контента.</summary>
+        /// <summary>Position is out of bounds of the content.</summary>
         OutOfRange
     }
 
     // --- Adaptive Metrics ---
 
     /// <summary>
-    /// Сохраняет замер RTT через скользящее окно из трёх значений.
+    /// Records an RTT measurement using a sliding window of three values.
     /// </summary>
-    /// <param name="latencyMs">Измеренная задержка в миллисекундах.</param>
+    /// <param name="latencyMs">Measured latency in milliseconds.</param>
     private void SaveLatency(double latencyMs)
     {
         double currentAverage;
@@ -59,10 +59,10 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Сохраняет замер пропускной способности через взвешенное скользящее среднее (EMA).
+    /// Records a throughput measurement using an exponential moving average (EMA).
     /// </summary>
-    /// <param name="speedBytesPerSec">Измеренная скорость в байт/сек.</param>
-    /// <param name="bytesTransferred">Объём переданных данных, определяющий вес замера.</param>
+    /// <param name="speedBytesPerSec">Measured speed in bytes/sec.</param>
+    /// <param name="bytesTransferred">Transferred data volume determining measurement weight.</param>
     private void SaveBandwidth(double speedBytesPerSec, int bytesTransferred)
     {
         double currentSpeed;
@@ -102,13 +102,13 @@ public sealed partial class CachingStreamSource
     // --- ReadAtAsync ---
 
     /// <summary>
-    /// Создаёт фатальное исключение для диапазона, который source не смог получить
-    /// после исчерпания всех локальных и сетевых стратегий.
+    /// Creates a fatal exception for a range that the source failed to obtain
+    /// after exhausting all local and network strategies.
     /// </summary>
-    /// <param name="position">Позиция чтения, на которой зафиксирован terminal failure.</param>
+    /// <param name="position">Read position where the terminal failure occurred.</param>
     /// <returns>
-    /// Экземпляр <see cref="ChunkDownloadFatalException"/>, сигнализирующий верхнему слою,
-    /// что повторять чтение этого же диапазона на уровне decoder loop больше нельзя.
+    /// A <see cref="ChunkDownloadFatalException"/> instance signaling the upper layer
+    /// that reading this same range should not be retried at the decoder loop level.
     /// </returns>
     private ChunkDownloadFatalException CreateReadAtFatalException(long position)
     {
@@ -130,14 +130,14 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Читает данные с произвольной позиции, используя RAM-кэш, диск и сеть в порядке приоритета.
-    /// Реализует бесконечный retry для transient network errors с exponential backoff.
-    /// При смене эпохи (URL refresh) ожидает завершения обновления без преждевременного сброса.
+    /// Reads data from an arbitrary position, prioritizing RAM cache, disk, and network.
+    /// Implements infinite retry with exponential backoff for transient network errors.
+    /// On epoch change (URL refresh), waits for the update to complete without premature abort.
     /// </summary>
-    /// <param name="position">Абсолютная позиция чтения в контенте.</param>
-    /// <param name="buffer">Буфер назначения.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Количество прочитанных байт; <c>0</c> при достижении конца контента.</returns>
+    /// <param name="position">Absolute read position within content.</param>
+    /// <param name="buffer">Destination buffer.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of bytes read; <c>0</c> upon reaching end of content.</returns>
     internal async Task<int> ReadAtAsync(long position, Memory<byte> buffer, CancellationToken ct)
     {
         if (position >= _contentLength) return 0;
@@ -161,8 +161,8 @@ public sealed partial class CachingStreamSource
 
             try
             {
-                // Критическое чтение декодера использует только ct (отменяемый при Seek или Dispose),
-                // чтобы ResetDownloadEpoch() при HTTP 403 отменял фоновые preload-задачи, не убивая сам ReadAtAsync.
+                // Critical decoder read uses only ct (canceled on Seek or Dispose),
+                // so that ResetDownloadEpoch() on HTTP 403 cancels background preloads without killing ReadAtAsync itself.
                 var result = await EnsureRangeAsync(position, requiredLength, ct, isCritical: true)
                     .ConfigureAwait(false);
 
@@ -251,15 +251,15 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Пытается загрузить диапазон из дискового кэша в RAM и прочитать данные из него.
-    /// Окно чтения ограничено свободным промежутком между соседними RAM-блоками: блок гарантированно
-    /// коммитится в RAM, и следующий промах по соседней позиции не уходит на диск повторно.
+    /// Attempts to load range from disk cache into RAM and read data from it.
+    /// Read window is bounded by the free gap between adjacent RAM blocks: the block is guaranteed
+    /// to commit to RAM, preventing subsequent misses at adjacent positions from hitting disk again.
     /// </summary>
-    /// <param name="position">Абсолютная позиция начала чтения.</param>
-    /// <param name="minimumLength">Минимально необходимый объём данных.</param>
-    /// <param name="target">Буфер назначения.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Количество прочитанных байт; <c>0</c> если диапазон недоступен на диске.</returns>
+    /// <param name="position">Absolute read start position.</param>
+    /// <param name="minimumLength">Minimum required data length.</param>
+    /// <param name="target">Destination buffer.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of bytes read; <c>0</c> if range is unavailable on disk.</returns>
     private async Task<int> TryLoadRangeFromDiskAsync(
         long position, int minimumLength, Memory<byte> target, CancellationToken ct)
     {
@@ -267,7 +267,7 @@ public sealed partial class CachingStreamSource
         if (!_cacheEntry.TryGetContainingRange(position, out long rangeStart, out long rangeEndExclusive))
             return 0;
 
-        // Параллельная загрузка уже закоммитила позицию в RAM: диск не нужен.
+        // Concurrent download already committed position to RAM: disk not needed.
         if (!_ramCache.TryGetFreeWindow(position, out long freeStart, out long freeEndExclusive))
             return _ramCache.TryRead(position, target, out int ramRead) ? ramRead : 0;
 
@@ -291,7 +291,7 @@ public sealed partial class CachingStreamSource
         }
         finally
         {
-            // Буфер переходит во владение блока только при успешном чтении.
+            // Buffer ownership transfers to block only upon successful read.
             if (block == null)
                 ArrayPool<byte>.Shared.Return(rentedBuffer);
         }
@@ -305,19 +305,19 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Вычисляет окно чтения с диска для RAM-промаха: начало выравнивается вниз, затем окно
-    /// ограничивается дисковым диапазоном и свободным промежутком между соседними RAM-блоками.
+    /// Computes disk read window for RAM miss: aligns start down, then caps window
+    /// by disk range and free gap between adjacent RAM blocks.
     /// </summary>
-    /// <param name="position">Позиция промаха.</param>
-    /// <param name="desiredLength">Желаемая выровненная длина окна.</param>
-    /// <param name="alignment">Размер выравнивания запросов (байт).</param>
-    /// <param name="rangeStart">Начало дискового диапазона, содержащего позицию.</param>
-    /// <param name="rangeEndExclusive">Исключительная граница дискового диапазона.</param>
-    /// <param name="freeStart">Конец ближайшего RAM-блока слева.</param>
-    /// <param name="freeEndExclusive">Начало ближайшего RAM-блока справа.</param>
-    /// <param name="loadStart">Начало окна.</param>
-    /// <param name="loadLength">Длина окна.</param>
-    /// <returns><c>false</c>, если окно не содержит <paramref name="position"/>.</returns>
+    /// <param name="position">Miss position.</param>
+    /// <param name="desiredLength">Desired aligned window length.</param>
+    /// <param name="alignment">Request alignment size (bytes).</param>
+    /// <param name="rangeStart">Start of disk range containing position.</param>
+    /// <param name="rangeEndExclusive">Exclusive boundary of disk range.</param>
+    /// <param name="freeStart">End of nearest RAM block to the left.</param>
+    /// <param name="freeEndExclusive">Start of nearest RAM block to the right.</param>
+    /// <param name="loadStart">Window start.</param>
+    /// <param name="loadLength">Window length.</param>
+    /// <returns><c>false</c> if window does not contain <paramref name="position"/>.</returns>
     internal static bool TryComputeDiskLoadWindow(
         long position,
         int desiredLength,
@@ -356,16 +356,16 @@ public sealed partial class CachingStreamSource
     // --- EnsureRangeAsync ---
 
     /// <summary>
-    /// Гарантирует наличие диапазона данных, предотвращая бесконечные ретраи (Retry Storm).
+    /// Guarantees data range availability, preventing retry storms.
     /// <para>
-    /// При 403 инициирует <see cref="CoordinatedRefreshAsync"/>; при network error —
-    /// quadratic backoff; при fatal — пробрасывает <see cref="ChunkDownloadFatalException"/>.
+    /// Triggers <see cref="CoordinatedRefreshAsync"/> on 403; quadratic backoff
+    /// on network error; rethrows <see cref="ChunkDownloadFatalException"/> on fatal.
     /// </para>
     /// </summary>
-    /// <param name="position">Позиция начала диапазона.</param>
-    /// <param name="minimumLength">Минимально необходимая длина.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <param name="isCritical">Приоритет: критический (для воспроизведения) или фоновый (preload).</param>
+    /// <param name="position">Range start position.</param>
+    /// <param name="minimumLength">Minimum required length.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="isCritical">Priority: critical (playback) or background (preload).</param>
     private async Task<RangeDownloadResult> EnsureRangeAsync(
         long position,
         int minimumLength,
@@ -385,8 +385,8 @@ public sealed partial class CachingStreamSource
 
         ct.ThrowIfCancellationRequested();
 
-        // Проактивная проверка: обновляем URL ДО отправки запроса только если URL реально есть, но протухает.
-        // Если URL пустой (partial cache bootstrap), получение пойдёт штатно через EnsureUrlAvailableAsync.
+        // Proactive check: refresh URL BEFORE sending request only if URL exists but is expiring.
+        // If URL is empty (partial cache bootstrap), fetch proceeds normally via EnsureUrlAvailableAsync.
         if (!string.IsNullOrWhiteSpace(_currentUrl) && UrlEx.IsUrlExpiredOrExpiringSoon(_currentUrl, TimeSpan.FromMinutes(5)))
         {
             Log.Info($"[CachingSource] [{_trackId}] URL expired/expiring soon. Proactive refresh before request...");
@@ -397,7 +397,7 @@ public sealed partial class CachingStreamSource
             }
         }
 
-        // Source-level circuit breaker: не входим в retry loop если breaker открыт.
+        // Source-level circuit breaker: do not enter retry loop if breaker is open.
         if (IsSourceCircuitBreakerOpen(out int cbRemainingMs))
         {
             int cbDelay = Math.Min(cbRemainingMs, 1000);
@@ -445,7 +445,7 @@ public sealed partial class CachingStreamSource
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                // Epoch сменился (seek/refresh отменил старые загрузки) — нормальный transient.
+                // Epoch changed (seek/refresh canceled stale downloads) — normal transient.
                 continue;
             }
             finally
@@ -469,20 +469,20 @@ public sealed partial class CachingStreamSource
                                     $"received HTTP 403 and requires stream URL refresh"));
                         }
 
-                        // Отменяем ВСЕ параллельные preload: они используют тот же мёртвый URL.
+                        // Cancel ALL concurrent preloads: they share the same dead URL.
                         ResetDownloadEpoch();
 
                         Log.Warn($"[CachingSource] [{_trackId}] HTTP 403 on range {plan.Start}-{plan.Start + plan.Length - 1L}. " +
                                 $"Refreshing URL (refresh budget {Volatile.Read(ref _forbiddenRefreshBudgetSpent)}/{MaxForbiddenRefreshBudget})...");
 
-                        // Исчерпание единого бюджета бросает ChunkDownloadFatalException(Forbidden403) из CoordinatedRefreshAsync.
+                        // Single budget exhaustion throws ChunkDownloadFatalException(Forbidden403) from CoordinatedRefreshAsync.
                         RefreshOutcome outcome = await CoordinatedRefreshAsync(ct).ConfigureAwait(false);
 
                         switch (DecideRefresh(outcome, forbiddenDriven: true).Action)
                         {
                             case RangeRetryAction.RetryNow:
                                 chunkIoExceptions = 0;
-                                // Число refresh ограничено бюджетом source, поэтому новый URL получает полный набор сетевых попыток.
+                                // Refresh count is bounded by source budget, so new URL gets full set of network retries.
                                 attempt = -1;
                                 Log.Info($"[CachingSource] [{_trackId}] URL refreshed ({outcome}), retrying range {plan.Start} with fresh attempts");
                                 continue;
@@ -539,11 +539,11 @@ public sealed partial class CachingStreamSource
     // --- Source Circuit Breaker ---
 
     /// <summary>
-    /// Проверяет, открыт ли source-level circuit breaker.
-    /// При истечении backoff переходит в half-open (пропускает один запрос).
+    /// Checks if source-level circuit breaker is open.
+    /// Transitions to half-open when backoff expires (allows single request).
     /// </summary>
-    /// <param name="remainingMs">Оставшийся backoff в мс (0 если закрыт или half-open).</param>
-    /// <returns><c>true</c> если запрос должен быть отклонён.</returns>
+    /// <param name="remainingMs">Remaining backoff in ms (0 if closed or half-open).</param>
+    /// <returns><c>true</c> if request should be rejected.</returns>
     private bool IsSourceCircuitBreakerOpen(out int remainingMs)
     {
         lock (_circuitBreakerLock)
@@ -565,7 +565,7 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Регистрирует успешную сетевую операцию: сбрасывает счётчик, закрывает breaker.
+    /// Registers successful network operation: resets failure counter, closes breaker.
     /// </summary>
     private void OnSourceNetworkSuccess()
     {
@@ -583,7 +583,7 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Регистрирует сетевую ошибку. При достижении порога открывает breaker с exponential backoff.
+    /// Registers network error. Opens breaker with exponential backoff when threshold is met.
     /// </summary>
     private void OnSourceNetworkFailure()
     {
@@ -616,12 +616,12 @@ public sealed partial class CachingStreamSource
     // --- DownloadRangeCoreAsync ---
 
     /// <summary>
-    /// Оркестрирует загрузку диапазона: circuit breaker → слот семафора → URL guard → HTTP.
-    /// Фоновая загрузка, к которой присоединился критический читатель, перестаёт ждать слот.
+    /// Orchestrates range download: circuit breaker → semaphore slot → URL guard → HTTP.
+    /// Background download joined by critical reader stops waiting for slot.
     /// </summary>
-    /// <param name="plan">План загружаемого диапазона байт.</param>
-    /// <param name="download">Дескриптор загрузки в реестре: приоритет и сигнал его повышения.</param>
-    /// <param name="ct">Токен отмены текущей операции.</param>
+    /// <param name="plan">Download byte range plan.</param>
+    /// <param name="download">Download descriptor in registry: priority and escalation signal.</param>
+    /// <param name="ct">Cancellation token for current operation.</param>
     private async Task<RangeDownloadResult> DownloadRangeCoreAsync(
         DownloadPlan plan, ActiveRangeDownload download, CancellationToken ct)
     {
@@ -718,13 +718,13 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Вычисляет длину префикса скачанного блока, который можно безопасно закоммитить в RAM без overlap.
+    /// Computes prefix length of downloaded block that can safely commit to RAM without overlap.
     /// </summary>
-    /// <param name="start">Начало скачанного диапазона.</param>
-    /// <param name="actualLength">Фактически скачанная длина.</param>
+    /// <param name="start">Downloaded range start.</param>
+    /// <param name="actualLength">Actual downloaded length.</param>
     /// <returns>
-    /// Длина начального non-overlapping gap.
-    /// Может быть меньше <paramref name="actualLength"/>, если хвост диапазона уже есть локально.
+    /// Length of initial non-overlapping gap.
+    /// May be smaller than <paramref name="actualLength"/> if tail of range is already present locally.
     /// </returns>
     private int ComputeRamCommitLength(long start, int actualLength)
     {
@@ -735,11 +735,11 @@ public sealed partial class CachingStreamSource
     // --- DownloadRangeHttpAsync ---
 
     /// <summary>
-    /// Выполняет HTTP range-запрос, записывает данные в RAM и на диск.
+    /// Executes HTTP range request, writes data to RAM and disk.
     /// </summary>
-    /// <param name="plan">План загружаемого диапазона байт.</param>
-    /// <param name="ct">Токен отмены текущей операции.</param>
-    /// <returns>Результат выполнения загрузки диапазона.</returns>
+    /// <param name="plan">Download byte range plan.</param>
+    /// <param name="ct">Cancellation token for current operation.</param>
+    /// <returns>Range download execution result.</returns>
     private async Task<RangeDownloadResult> DownloadRangeHttpAsync(DownloadPlan plan, CancellationToken ct)
     {
         int rn = Interlocked.Increment(ref _requestSequenceNumber);
@@ -748,7 +748,7 @@ public sealed partial class CachingStreamSource
 
         Log.Debug($"[CachingSource] Range {plan.Start}-{end}: GET rn={rn}");
 
-        // Базовый URL запроса: 403 по уже заменённому URL не должен расходовать бюджет refresh.
+        // Base request URL: 403 on an already replaced URL must not consume refresh budget.
         string requestBaseUrl = _currentUrl;
         using var request = CreateRangeRequest(logicalIndex, plan.Start, end, rn);
         HttpResponseMessage response;
@@ -801,7 +801,7 @@ public sealed partial class CachingStreamSource
             {
                 if (!ReferenceEquals(requestBaseUrl, _currentUrl))
                 {
-                    // URL уже заменён параллельным refresh: этот 403 относится к старому URL.
+                    // URL already replaced by concurrent refresh: this 403 belongs to old URL.
                     Log.Debug($"[CachingSource] [{_trackId}] Stale 403 for replaced URL on range {plan.Start}-{end}, retrying with current URL");
                     return RangeDownloadResult.NetworkError;
                 }
@@ -821,7 +821,7 @@ public sealed partial class CachingStreamSource
             if (response.IsSuccessStatusCode)
                 ResetForbiddenRefreshBudget();
 
-            // После первого успешного ответа запоминаем CDN-ноду для speculative pre-warm.
+            // After first successful response, remember CDN node for speculative pre-warm.
             Http.CdnConnectionPreWarmer.RecordHost(_currentUrl);
 
             if (response.Content.Headers.ContentType?.MediaType?.Contains("yt-ump") == true)
@@ -844,8 +844,8 @@ public sealed partial class CachingStreamSource
                 int actualLength;
                 var bodySw = System.Diagnostics.Stopwatch.StartNew();
 
-                // Таймаут SendAsync покрывает только заголовки: тело получает собственный idle-дедлайн,
-                // который перезапускается после каждой порции данных.
+                // SendAsync timeout covers headers only: the body gets its own idle deadline,
+                // which resets after each chunk of data.
                 using var bodyIdleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
                 try
@@ -872,7 +872,7 @@ public sealed partial class CachingStreamSource
                     _lastDownloadException = ex;
                     ArrayPool<byte>.Shared.Return(rentedBuffer);
 
-                    // Если отмена инициирована извне (переключение трека) — мгновенный выход без ретраев
+                    // If cancellation was requested externally (track switch) — instant exit without retries
                     if (ct.IsCancellationRequested || _disposed || (_lifetimeCts?.IsCancellationRequested == true))
                         return RangeDownloadResult.Cancelled;
 
@@ -891,7 +891,7 @@ public sealed partial class CachingStreamSource
                     bodySw.Stop();
                 }
 
-                // Idle-дедлайн сработал при живом внешнем токене: это зависшее соединение, а не отмена.
+                // Idle deadline triggered while external token is active: this is a hung connection, not a cancellation.
                 if (actualLength < plan.Length
                     && bodyIdleCts.IsCancellationRequested
                     && !ct.IsCancellationRequested
@@ -906,7 +906,7 @@ public sealed partial class CachingStreamSource
                     return RangeDownloadResult.NetworkError;
                 }
 
-                // Игнорируем микро-замеры (< 16KB или < 20мс) — ложные всплески TCP slow-start.
+                // Ignore micro-measurements (< 16KB or < 20ms) — false spikes of TCP slow-start.
                 if (actualLength >= 16384 && bodySw.Elapsed.TotalMilliseconds >= 20)
                 {
                     double speedBytesPerSec = actualLength / (bodySw.Elapsed.TotalMilliseconds / 1000.0);
@@ -930,8 +930,8 @@ public sealed partial class CachingStreamSource
                 {
                     bool isCleanServerEof = false;
 
-                    // Если сервер передал ровно столько байт, сколько заявил в Content-Length ответа,
-                    // и дельта до расчетного конца файла находится в пределах погрешности выравнивания — это легитимный EOF
+                    // If the server transmitted exactly the number of bytes specified in Content-Length,
+                    // and the delta to the estimated end of file is within alignment tolerance — this is a legitimate EOF
                     if (response.Content.Headers.ContentLength is { } expectedLen && actualLength == expectedLen)
                     {
                         long delta = _contentLength - (plan.Start + actualLength);
@@ -953,7 +953,7 @@ public sealed partial class CachingStreamSource
                 int ramCommitLength = ComputeRamCommitLength(plan.Start, actualLength);
                 var block = new RamRangeBlock(plan.Start, rentedBuffer, Math.Max(0, ramCommitLength));
 
-                // Захватываем вторую ссылку на этот же буфер для асинхронной записи на диск (Zero-Copy: без второго Rent и без Span.CopyTo!)
+                // Capture a second reference to the same buffer for async disk write (Zero-Copy: no second Rent and no Span.CopyTo!)
                 if (block.TryRetainForDiskWrite(actualLength, out var diskMemory))
                 {
                     _ = WriteToDiskTrackedAsync(plan.Start, block, diskMemory);
@@ -966,8 +966,8 @@ public sealed partial class CachingStreamSource
                 }
                 else
                 {
-                    // Если блок не вошел в RAM-кэш, снимаем ссылку RAM-кэша;
-                    // буфер вернется в ArrayPool автоматически, когда завершится WriteToDiskTrackedAsync.
+                    // If the block didn't fit into the RAM cache, release the RAM cache reference;
+                    // the buffer will return to ArrayPool automatically when WriteToDiskTrackedAsync completes.
                     block.Dispose();
                 }
 
@@ -993,15 +993,15 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Читает поток полностью в буфер, пока не достигнут его конец или EOF потока.
-    /// Перед каждым чтением перезапускается idle-дедлайн <paramref name="idleCts"/>: медленная, но живая
-    /// передача не прерывается, а зависшее соединение отменяется через <paramref name="idleTimeoutMs"/>.
+    /// Reads the stream fully into the buffer until its end or the stream EOF is reached.
+    /// Before each read, the idle deadline <paramref name="idleCts"/> is reset: a slow but active
+    /// transfer is not interrupted, while a hung connection is cancelled via <paramref name="idleTimeoutMs"/>.
     /// </summary>
-    /// <param name="stream">Входной поток данных HTTP-ответа.</param>
-    /// <param name="buffer">Целевой буфер в памяти.</param>
-    /// <param name="idleCts">Источник отмены, связанный с внешним токеном; владеет им вызывающий код.</param>
-    /// <param name="idleTimeoutMs">Максимальная пауза между порциями данных (мс).</param>
-    /// <returns>Фактическое количество успешно вычитанных байт.</returns>
+    /// <param name="stream">Input HTTP response data stream.</param>
+    /// <param name="buffer">Target in-memory buffer.</param>
+    /// <param name="idleCts">Cancellation token source linked to the external token; owned by the caller.</param>
+    /// <param name="idleTimeoutMs">Maximum pause between data chunks (ms).</param>
+    /// <returns>Actual number of successfully read bytes.</returns>
     internal static async ValueTask<int> ReadStreamFullyAsync(
          Stream stream, Memory<byte> buffer, CancellationTokenSource idleCts, int idleTimeoutMs)
     {
@@ -1035,7 +1035,7 @@ public sealed partial class CachingStreamSource
             totalRead += read;
         }
 
-        // Снимаем дедлайн: срабатывание после выхода из цикла не должно выглядеть как зависание.
+        // Cancel the deadline: triggering after exiting the loop should not look like a hang.
         if (!ct.IsCancellationRequested)
             idleCts.CancelAfter(Timeout.Infinite);
 
@@ -1043,8 +1043,8 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Записывает скачанные данные на диск с отслеживанием pending-count
-    /// для безопасного освобождения lease при dispose source.
+    /// Writes downloaded data to disk while tracking pending-count
+    /// for safe lease disposal when source is disposed.
     /// </summary>
     private async Task WriteToDiskTrackedAsync(long offset, RamRangeBlock block, ReadOnlyMemory<byte> diskMemory)
     {
@@ -1069,8 +1069,8 @@ public sealed partial class CachingStreamSource
     // --- Network Retry Helpers ---
 
     /// <summary>
-    /// Capped exponential backoff для transient network retry.
-    /// Прогрессия: 500мс → 1с → 2с → 4с → 5с (потолок).
+    /// Capped exponential backoff for transient network retry.
+    /// Progression: 500ms → 1s → 2s → 4s → 5s (cap).
     /// </summary>
     private static int ComputeNetworkRetryBackoff(int consecutiveFailures)
     {
@@ -1080,7 +1080,7 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Однократная публикация network stall event при достижении порога.
+    /// One-time network stall event publication when threshold is reached.
     /// </summary>
     private void CheckAndPublishNetworkStall(
         ref bool published, int consecutiveFailures, long position)
@@ -1097,7 +1097,7 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Публикует событие восстановления сети после stall.
+    /// Publishes a network recovery event after a stall.
     /// </summary>
     private void PublishNetworkRecovered()
     {

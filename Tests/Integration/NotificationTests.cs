@@ -5,9 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Тесты и отладочные инструменты подсистемы уведомлений.
-/// Деструктивные операции выделены в категорию <see cref="TestCategory.Action"/>
-/// и изолированы от автоматических тестов с проверками (<see cref="TestCategory.Integration"/>).
+/// Tests and debugging tools for the notification subsystem.
+/// Destructive operations are categorized as <see cref="TestCategory.Action"/>
+/// and isolated from automated tests with assertions (<see cref="TestCategory.Integration"/>).
 /// </summary>
 public static class NotificationTests
 {
@@ -16,8 +16,8 @@ public static class NotificationTests
     // ==========================================
 
     /// <summary>
-    /// Интерактивное действие: генерирует 100 тестовых уведомлений в UI для стресс-теста списка.
-    /// Исключено из автоматического прогона Run All.
+    /// Interactive action: generates 100 test notifications in the UI to stress-test the list.
+    /// Excluded from automated Run All execution.
     /// </summary>
     [TestMethod(TestCategory.Action, "Generate 100 Stress Notifications",
         Group = TestGroups.System, Order = 1, RequiresNetwork = false, TimeoutSeconds = 10)]
@@ -27,8 +27,8 @@ public static class NotificationTests
     }
 
     /// <summary>
-    /// Интерактивное действие: полностью очищает список уведомлений пользователя.
-    /// Исключено из автоматического прогона Run All.
+    /// Interactive action: completely clears the user's notification list.
+    /// Excluded from automated Run All execution.
     /// </summary>
     [TestMethod(TestCategory.Action, "Clear All Notifications",
         Group = TestGroups.System, Order = 2, RequiresNetwork = false, TimeoutSeconds = 5)]
@@ -38,7 +38,7 @@ public static class NotificationTests
     }
 
     /// <summary>
-    /// Публичная точка вызова генерации уведомлений для ручных сценариев и <c>ManualTests</c>.
+    /// Public invocation point for generating notifications in manual scenarios and <c>ManualTests</c>.
     /// </summary>
     public static async Task TestGenerateNotificationsAsync(IServiceProvider services, int count = 100)
     {
@@ -48,7 +48,7 @@ public static class NotificationTests
     }
 
     /// <summary>
-    /// Публичная точка вызова очистки всех уведомлений для <c>ManualTests</c>.
+    /// Public invocation point for clearing all notifications for <c>ManualTests</c>.
     /// </summary>
     public static Task TestClearAllNotificationsAsync(IServiceProvider services)
     {
@@ -63,8 +63,8 @@ public static class NotificationTests
     // ==========================================
 
     /// <summary>
-    /// Автоматический тест: проверяет создание изолированного объекта <see cref="Notification"/>,
-    /// сохранение в <see cref="INotificationRepository"/> и корректность чтения через выборку.
+    /// Automated test: verifies creation of an isolated <see cref="Notification"/> object,
+    /// persistence in <see cref="INotificationRepository"/>, and correct retrieval via query.
     /// </summary>
     [TestMethod(TestCategory.Integration, "Notification Creation & Storage Integrity",
         Group = TestGroups.System, Order = 10, RequiresNetwork = false, TimeoutSeconds = 5)]

@@ -15,7 +15,7 @@ CRITICAL: You have a 1M+ token context window, but **API requests / tool calls a
 </agent_request_economy>
 
 <language_and_hygiene>
-- **Explanations, XML Docs, & Code Comments:** Strictly **Russian** (`/// <summary>` on new/modified public/protected members, inline comments). Keep existing `///` comments intact.
+- **Explanations, XML Docs, & Code Comments:** Strictly **English** (`/// <summary>` on new/modified public/protected members, inline comments). Keep existing `///` comments intact.
 - **Code, Identifiers, & CLI:** Strictly **English**.
 - **Compiler Strictness:** `TreatWarningsAsErrors=true` and `EnforceCodeStyleInBuild=true` are active globally (`Directory.Build.props`). Any unused `using`, nullable warning, or analyzer violation (`CA1859`, `CA1822`, `IDE0150`, `CA1416`) breaks the build.
 - **Global Usings:** Check `Core/GlobalUsings.cs` and `UI/GlobalUsings.cs` before adding redundant `using` statements.

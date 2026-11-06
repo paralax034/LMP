@@ -1,29 +1,29 @@
 namespace LMP.Core.Audio.Normalization;
 
 /// <summary>
-/// Режим нормализации громкости.
+/// Loudness normalization mode.
 /// </summary>
 public enum NormalizationMode
 {
-    /// <summary>Spotify-стиль: тихие треки усиливаются, громкие понижаются до таргета.</summary>
+    /// <summary>Spotify style: quiet tracks are boosted, loud tracks are attenuated to target.</summary>
     Bidirectional,
 
-    /// <summary>YouTube-стиль: только понижение громких треков (gain ≤ 1.0).</summary>
+    /// <summary>YouTube style: attenuation of loud tracks only (gain ≤ 1.0).</summary>
     DownwardOnly
 }
 
 /// <summary>
-/// Конфигурация нормализации громкости для одного pipeline.
+/// Loudness normalization configuration for a single pipeline.
 /// </summary>
-/// <param name="Enabled">Включена ли нормализация.</param>
-/// <param name="TargetLufs">Целевой уровень громкости в LUFS.</param>
-/// <param name="MaxGain">Максимальный gain-множитель.</param>
-/// <param name="Mode">Режим нормализации (Upward / Downward / Bidirectional).</param>
+/// <param name="Enabled">Whether normalization is enabled.</param>
+/// <param name="TargetLufs">Target loudness level in LUFS.</param>
+/// <param name="MaxGain">Maximum gain multiplier.</param>
+/// <param name="Mode">Normalization mode (Upward / Downward / Bidirectional).</param>
 /// <param name="PreScanDurationMs">
-/// Длительность EBU R128 pre-scan в миллисекундах.
+/// EBU R128 pre-scan duration in milliseconds.
 /// <list type="bullet">
-///   <item>30 000 мс — для streaming и partial-cache (по умолчанию).</item>
-///   <item>60 000 мс — для full-cache (файл доступен целиком, точность важнее).</item>
+///   <item>30,000 ms — for streaming and partial-cache (default).</item>
+///   <item>60,000 ms — for full-cache (entire file available, accuracy prioritized).</item>
 /// </list>
 /// </param>
 public readonly record struct NormalizationConfig(

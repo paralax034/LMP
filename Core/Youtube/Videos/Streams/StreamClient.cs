@@ -13,23 +13,23 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube.Videos.Streams;
 
 /// <summary>
-/// Обеспечивает доступ к медиа-потокам YouTube видео.
+/// Provides access to YouTube video media streams.
 /// <para>
-/// <b>Кэш-стратегия (3-уровневая):</b>
+/// <b>Cache strategy (3-level):</b>
 /// </para>
 /// <list type="number">
 ///   <item>
 ///     <b>Disk manifest cache</b> (<see cref="SessionCacheStore"/>):
-///     Полный манифест (все варианты) сохраняется на диск после первого API call.
-///     Переживает рестарт приложения. Инвалидируется по HTTP 403/410 при probe.
+///     The full manifest (all variants) is saved to disk after the first API call.
+///     Persists across application restarts. Invalidated on HTTP 403/410 during probe.
 ///   </item>
 ///   <item>
-///     <b>Network resolve</b>: Только если disk cache пуст или probe провалился.
-///     Один API call → полный манифест → записывается на диск.
+///     <b>Network resolve</b>: Only if disk cache is empty or probe failed.
+///     Single API call → full manifest → written to disk.
 ///   </item>
 ///   <item>
-///     <b>CDN connection pre-warming</b>: TCP+TLS prewarm к известным CDN-нодам
-///     параллельно с API call.
+///     <b>CDN connection pre-warming</b>: TCP+TLS prewarm to known CDN nodes
+///     in parallel with the API call.
 ///   </item>
 /// </list>
 /// </summary>
@@ -44,7 +44,7 @@ public sealed class StreamClient
     private readonly PoTokenProvider? _poTokenProvider;
 
     /// <summary>
-    /// Создает экземпляр StreamClient.
+    /// Creates an instance of StreamClient.
     /// </summary>
     public StreamClient(
         HttpClient http,
@@ -63,9 +63,9 @@ public sealed class StreamClient
     }
 
     /// <summary>
-    /// Генерирует аудиопотоки из сырых данных ответа YouTube.
-    /// Чистые аудиопотоки имеют абсолютный приоритет. Совмещённые потоки (видео + аудио, например itag 18)
-    /// подключаются исключительно как аварийный резерв, если чистые потоки отсутствуют (SABR-блокировка).
+    /// Generates audio streams from raw YouTube response data.
+    /// Audio-only streams have absolute priority. Muxed streams (video + audio, e.g., itag 18)
+    /// are attached exclusively as an emergency fallback if audio-only streams are missing (SABR block).
     /// </summary>
     private async IAsyncEnumerable<IStreamInfo> GetAudioStreamInfosAsync(
       VideoId videoId,
@@ -75,8 +75,8 @@ public sealed class StreamClient
     {
         var rawList = streamDatas as IReadOnlyList<IStreamData> ?? streamDatas.ToList();
 
-        // Проверяем, есть ли хотя бы один чистый аудиопоток с доступным URL или подписью,
-        // и сразу запускаем опережающий TCP+TLS прогрев CDN-хоста ДО генерации PoToken и расшифровки sig/n.
+        // Check if there is at least one audio-only stream with an available URL or signature,
+        // and immediately trigger speculative TCP+TLS pre-warming of the CDN host BEFORE PoToken generation and sig/n decryption.
         bool hasPureAudioStreams = false;
         string? earlyCdnUrl = null;
         for (int i = 0; i < rawList.Count; i++)
@@ -95,9 +95,11 @@ public sealed class StreamClient
 
         bool skipPoToken = string.Equals(clientName, YoutubeClientNames.AndroidVr, StringComparison.Ordinal);
 
-        // Запускаем упреждающий прогрев CDN-хоста ТОЛЬКО если предстоит холодная инициализация BotGuard (~800 мс)
-        // или холодная компиляция QuickJS (~5-1000 мс). Когда оба контекста уже горячие (fast-mint = 2 мс),
-        // Range 0-65535 стартует через ~10 мс, и параллельный /generate_204 лишь создаёт дублирующий холодный сокет.
+        // Trigger speculative CDN host pre-warming ONLY if a cold BotGuard initialization (~800 ms)
+// or cold QuickJS compilation (~5-1000 ms) is ahead. When both contexts are already warm (fast-mint = 2 ms),
+        // Range 0-65535 starts in ~10 ms, and a parallel /generate_204 merely creates a duplicate cold socket.
+        // Local memoization of the decrypted n-token within a single PlayerResponse
+// (all audio streams in the same response share the same input n parameter).
         bool expectsColdCryptoDelay = !_sigCipherDecryptor.IsInitialized
             || (!_nTokenDecryptor.IsInitialized)
             || (_poTokenProvider != null && !skipPoToken && !_poTokenProvider.HasActiveContext);
@@ -133,8 +135,8 @@ public sealed class StreamClient
             }
         }
 
-        // Локальная мемоизация расшифрованного n-токена в пределах одного ответа PlayerResponse
-        // (все аудиопотоки одного ответа разделяют одинаковый входной параметр n).
+        // Muxed stream (video/*) is accepted ONLY if there are no audio-only streams at all
+        // For YouTube WEB and WEB_REMIX, the n-token is ALWAYS encrypted.
         string? lastRawNToken = null;
         string? lastDecryptedNToken = null;
 
@@ -152,7 +154,7 @@ public sealed class StreamClient
 
             bool isAudioOnly = mimeType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase);
 
-            // Совмещённый поток (video/*) принимается ТОЛЬКО если чистых аудиопотоков нет вообще
+            // Executing a network HEAD request costing 1.5-2 seconds just to get a guaranteed HTTP 403 is pointless:
             bool isMuxedFallback = !hasPureAudioStreams
                                  && mimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
                                  && streamData.AudioChannels > 0
@@ -195,9 +197,9 @@ public sealed class StreamClient
 
             if (!string.IsNullOrEmpty(nToken))
             {
-                // Для WEB и WEB_REMIX YouTube ВСЕГДА шифрует n-token.
-                // Выполнять сетевой HEAD-запрос ценой 1.5-2 секунды ради получения заведомого HTTP 403 бессмысленно:
-                // расшифровка в QuickJS занимает всего 5 мс и выполняется упреждающе.
+                // decryption in QuickJS takes only 5 ms and is performed speculatively.
+                // LMP plays stereo/mono. Exclude 5.1 Surround (audioChannels > 2),
+                // which crash container parsers and decoders.
                 if (isNTokenDecryptionRequired == null)
                 {
                     bool isKnownEncryptedClient = string.Equals(clientName, YoutubeClientNames.WebRemix, StringComparison.Ordinal)
@@ -311,8 +313,23 @@ public sealed class StreamClient
             var bitrate = streamData.Bitrate is { } b ? new Bitrate(b) : (Bitrate?)null;
             if (bitrate is null) continue;
 
-            // LMP воспроизводит стерео/моно. Исключаем 5.1 Surround (audioChannels > 2),
-            // которые валят контейнерные парсеры и декодеры.
+                /// <summary>
+    /// Gets the stream manifest for a video.
+    /// <para>
+    /// <b>Always hits the network.</b> Caching is performed by the caller
+    /// (<see cref="SessionCacheStore.RecordManifest"/>).
+    /// This separation of concerns guarantees that StreamClient
+    /// does not mix full and incomplete manifests.
+    /// </para>
+    /// </summary>
+    /// <param name="videoId">Video ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="forceRefresh">Forced refresh after CDN 403: without WEB_REMIX priority.</param>
+    /// <param name="excludedClients">Clients whose URLs were rejected by CDN with HTTP 403; excluded from the fallback chain.</param>
+    /// <returns>Manifest containing all available audio streams.</returns>
+                /// <summary>
+    /// Invalidates signatureTimestamp in the player context manager cache.
+    /// </summary>
             int channels = streamData.AudioChannels;
             if (channels > 2) continue;
 
@@ -339,19 +356,19 @@ public sealed class StreamClient
     }
 
     /// <summary>
-    /// Получает манифест потоков для видео.
+    /// Gets the stream manifest for a video.
     /// <para>
-    /// <b>Всегда идёт в сеть.</b> Кэширование выполняется вызывающим кодом
+    /// <b>Always hits the network.</b> Caching is performed by the caller
     /// (<see cref="SessionCacheStore.RecordManifest"/>).
-    /// Это разделение ответственности гарантирует, что StreamClient
-    /// не смешивает полные и неполные манифесты.
+    /// This separation of concerns guarantees that StreamClient
+    /// does not mix full and incomplete manifests.
     /// </para>
     /// </summary>
-    /// <param name="videoId">ID видео.</param>
-    /// <param name="cancellationToken">Токен отмены.</param>
-    /// <param name="forceRefresh">Принудительный refresh после CDN 403: без WEB_REMIX-приоритета.</param>
-    /// <param name="excludedClients">Клиенты, чьи URL отвергнуты CDN с HTTP 403; исключаются из fallback-цепочки.</param>
-    /// <returns>Манифест со всеми доступными аудио-потоками.</returns>
+    /// <param name="videoId">Video ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="forceRefresh">Forced refresh after CDN 403: without WEB_REMIX priority.</param>
+    /// <param name="excludedClients">Clients whose URLs were rejected by CDN with HTTP 403; excluded from the fallback chain.</param>
+    /// <returns>Manifest containing all available audio streams.</returns>
     public async ValueTask<StreamManifest> GetManifestAsync(
         VideoId videoId,
         CancellationToken cancellationToken = default,
@@ -391,7 +408,7 @@ public sealed class StreamClient
     }
 
     /// <summary>
-    /// Инвалидирует signatureTimestamp в кэше менеджера контекста плеера.
+    /// Invalidates signatureTimestamp in the player context manager cache.
     /// </summary>
     public void InvalidateCipherManifest()
     {

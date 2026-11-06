@@ -3,16 +3,16 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Методы расширения для асинхронных потоков <see cref="IAsyncEnumerable{T}"/>.
+/// Extension methods for <see cref="IAsyncEnumerable{T}"/> async streams.
 /// </summary>
 internal static class AsyncCollectionExtensions
 {
     extension<T>(IAsyncEnumerable<T> source)
     {
         /// <summary>
-        /// Возвращает не более <paramref name="count"/> первых элементов потока.
+        /// Returns no more than <paramref name="count"/> elements from the start of the stream.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="source"/> is null.</exception>
         public async IAsyncEnumerable<T> TakeAsync(
             int count,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -31,9 +31,9 @@ internal static class AsyncCollectionExtensions
         }
 
         /// <summary>
-        /// Проецирует элементы потока в коллекции и объединяет их в плоскую последовательность.
+        /// Projects stream elements into collections and flattens them into a single sequence.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> или <paramref name="transform"/> равны null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="source"/> or <paramref name="transform"/> is null.</exception>
         public async IAsyncEnumerable<T1> SelectManyAsync<T1>(
             Func<T, IEnumerable<T1>> transform,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -52,9 +52,9 @@ internal static class AsyncCollectionExtensions
     extension(IAsyncEnumerable<object> source)
     {
         /// <summary>
-        /// Фильтрует элементы потока по заданному типу <typeparamref name="T"/>.
+        /// Filters stream elements based on a specified type <typeparamref name="T"/>.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="source"/> is null.</exception>
         public async IAsyncEnumerable<T> OfTypeAsync<T>(
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

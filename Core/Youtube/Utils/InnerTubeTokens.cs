@@ -1,8 +1,8 @@
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Статические UTF-8 литералы ключей и строковых констант InnerTube API.
-/// Используются для zero-alloc сопоставления токенов в <see cref="System.Text.Json.Utf8JsonReader"/> и <see cref="System.Text.Json.Utf8JsonWriter"/>.
+/// Static UTF-8 literals of keys and string constants for the InnerTube API.
+/// Used for zero-allocation token matching in <see cref="System.Text.Json.Utf8JsonReader"/> and <see cref="System.Text.Json.Utf8JsonWriter"/>.
 /// </summary>
 internal static class InnerTubeTokens
 {
@@ -271,35 +271,35 @@ internal static class InnerTubeTokens
 }
 
 /// <summary>
-/// Централизованные строковые константы протокола InnerTube API.
+/// Centralized string constants for the InnerTube API protocol.
 /// </summary>
 internal static class InnerTubeConstants
 {
-    /// <summary>Идентификатор категории видео YouTube для музыки.</summary>
+    /// <summary>YouTube video category identifier for music.</summary>
     public const string MusicCategoryId = "10";
 
-    /// <summary>Значение метаданных типа страницы для альбома.</summary>
+    /// <summary>Page type metadata value for an album.</summary>
     public const string PageTypeAlbum = "MUSIC_PAGE_TYPE_ALBUM";
 
-    /// <summary>Значение метаданных типа страницы для артиста.</summary>
+    /// <summary>Page type metadata value for an artist.</summary>
     public const string PageTypeArtist = "MUSIC_PAGE_TYPE_ARTIST";
 
-    /// <summary>Значение метаданных типа страницы для канала пользователя.</summary>
+    /// <summary>Page type metadata value for a user channel.</summary>
     public const string PageTypeUserChannel = "MUSIC_PAGE_TYPE_USER_CHANNEL";
 
-    /// <summary>Стиль значка официального верифицированного артиста.</summary>
+    /// <summary>Badge style for an official verified artist.</summary>
     public const string BadgeVerifiedArtist = "BADGE_STYLE_TYPE_VERIFIED_ARTIST";
 
-    /// <summary>Иконка значка официального верифицированного аудио-исполнителя.</summary>
+    /// <summary>Badge icon for an official verified audio artist.</summary>
     public const string AudioBadge = "AUDIO_BADGE";
 
-    /// <summary>Специфичные сериализованные параметры InnerTube protobuf.</summary>
+    /// <summary>Specific serialized InnerTube protobuf parameters.</summary>
     public static class Params
     {
-        /// <summary>Параметр browse-запроса плейлиста для получения полного списка видео.</summary>
+        /// <summary>Browse request parameter for a playlist to retrieve the complete video list.</summary>
         public static ReadOnlySpan<byte> PlaylistVideoList => "wgYCEAE%3D"u8;
 
-        // Фильтры поиска YouTube Music
+        // YouTube Music search filters
         public const string MusicFilterGeneral = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
         public const string MusicFilterSong = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
         public const string MusicFilterVideo = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D";
@@ -307,7 +307,7 @@ internal static class InnerTubeConstants
         public const string MusicFilterArtist = "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D";
         public const string MusicFilterPlaylist = "EgeKAQQoAEABagoQAxAEEAoQCRAF";
 
-        // Фильтры поиска стандартного YouTube Web
+        // Standard YouTube Web search filters
         public const string WebFilterVideo = "EgIQAQ%3D%3D";
         public const string WebFilterPlaylist = "EgIQAw%3D%3D";
         public const string WebFilterChannel = "EgIQAg%3D%3D";

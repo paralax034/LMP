@@ -1,47 +1,47 @@
 namespace LMP.Core.Audio.Normalization;
 
 /// <summary>
-/// Источник измерения integrated loudness трека.
+/// Measurement source for track integrated loudness.
 /// </summary>
 /// <remarks>
-/// Числовой порядок значений строго соответствует семантическому приоритету:
-/// большее число = более точный / надёжный источник.
-/// Это свойство используется напрямую в сравнении <c>existing &gt; incoming</c>
-/// в <see cref="TrackInfo.SetIntegratedLufs"/> и <see cref="AudioCacheManager.TryUpdateIntegratedLufs"/>.
+/// The numerical order of values strictly corresponds to semantic priority:
+/// a higher number = a more accurate / reliable source.
+/// This property is used directly in the <c>existing &gt; incoming</c> comparison
+/// in <see cref="TrackInfo.SetIntegratedLufs"/> and <see cref="AudioCacheManager.TryUpdateIntegratedLufs"/>.
 ///
 /// <para>
-/// Намеренно содержит только два содержательных значения:
+/// Intentionally contains only two meaningful values:
 /// <list type="bullet">
 ///   <item>
-///     <b>EbuMeasured</b> — результат локального EBU R128 анализа.
-///     Точность зависит от объёма проанализированного аудио (prefixscan / full-scan),
-///     но это параметр измерения, а не свойство источника.
-///     Не нужно различать «30 секунд» и «весь файл» на уровне enum —
-///     pipeline сам выбирает окно анализа в зависимости от доступных данных.
+///     <b>EbuMeasured</b> — result of local EBU R128 analysis.
+///     Accuracy depends on the amount of analyzed audio (prefixscan / full-scan),
+///     but this is a measurement parameter, not a property of the source.
+///     No need to distinguish "30 seconds" and "full file" at the enum level —
+///     the pipeline selects the analysis window based on available data.
 ///   </item>
 ///   <item>
-///     <b>YoutubePerceptual</b> — серверная loudness metadata от YouTube API.
-///     Всегда побеждает <see cref="EbuMeasured"/>, так как измерена
-///     на полном треке с учётом перцептивной модели YouTube.
+///     <b>YoutubePerceptual</b> — server-side loudness metadata from YouTube API.
+///     Always takes precedence over <see cref="EbuMeasured"/> because it is measured
+///     on the full track using YouTube's perceptual model.
 ///   </item>
 /// </list>
 /// </para>
 /// </remarks>
 public enum LoudnessSource
 {
-    /// <summary>Источник не определён. LUFS-значение недостоверно.</summary>
+    /// <summary>Source is undefined. LUFS value is unreliable.</summary>
     Unknown = 0,
 
     /// <summary>
-    /// EBU R128 измерение, выполненное локально.
-    /// Окно анализа: 30 с для streaming/partial-cache, 60 с для full-cache.
+    /// EBU R128 measurement performed locally.
+    /// Analysis window: 30s for streaming/partial-cache, 60s for full-cache.
     /// </summary>
     EbuMeasured = 1,
 
     /// <summary>
-    /// Perceptual loudness из YouTube API metadata.
-    /// Измерена на полном треке на стороне сервера.
-    /// Является каноническим значением — перезаписывает <see cref="EbuMeasured"/>.
+    /// Perceptual loudness from YouTube API metadata.
+    /// Measured on the full track on the server side.
+    /// Serves as the canonical value — overwrites <see cref="EbuMeasured"/>.
     /// </summary>
     YoutubePerceptual = 2
 }

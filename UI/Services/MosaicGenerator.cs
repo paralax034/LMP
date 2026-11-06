@@ -5,43 +5,43 @@ using Avalonia.Media.Imaging;
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Генерирует мозаичную обложку плейлиста из обложек треков.
+/// Generates a playlist mosaic cover from track artwork.
 /// 
-/// <para><b>Поддерживаемые раскладки:</b></para>
+/// <para><b>Supported layouts:</b></para>
 /// <list type="bullet">
-///   <item>1 обложка: масштабирование под полный размер</item>
-///   <item>2 обложки: две половинки по горизонтали</item>
-///   <item>3 обложки: 1 большая слева + 2 маленькие справа</item>
-///   <item>4 обложки: сетка 2×2</item>
+///   <item>1 cover: scaled to full size</item>
+///   <item>2 covers: two horizontal halves</item>
+///   <item>3 covers: 1 large on the left + 2 small on the right</item>
+///   <item>4 covers: 2×2 grid</item>
 /// </list>
 /// 
-/// <para><b>Результат:</b> PNG файл в AppData/LMP/Covers/,
-/// имя файла = хеш от ID треков для идемпотентности.</para>
+/// <para><b>Result:</b> PNG file in AppData/LMP/Covers/,
+/// filename = hash of track IDs for idempotency.</para>
 /// </summary>
 public static class MosaicGenerator
 {
-    /// <summary>Размер результирующего изображения (квадрат).</summary>
+    /// <summary>Size of the resulting image (square).</summary>
     private const int OutputSize = 512;
 
-    /// <summary>Зазор между частями мозаики в пикселях.</summary>
+    /// <summary>Gap between mosaic items in pixels.</summary>
     private const int Gap = 2;
 
-    /// <summary>Папка для сохранения мозаик.</summary>
+    /// <summary>Folder for saving mosaics.</summary>
     private static readonly string CoversFolder = Path.Combine(G.Folder.Data, "Covers");
 
     /// <summary>
-    /// Генерирует мозаику из переданных изображений и сохраняет как PNG.
+    /// Generates a mosaic from the provided images and saves it as a PNG.
     /// </summary>
     /// <param name="bitmaps">
-    /// Список загруженных изображений (1-4 штуки).
-    /// Caller отвечает за их Dispose после вызова.
+    /// List of loaded images (1-4 items).
+    /// The caller is responsible for disposing them after invocation.
     /// </param>
     /// <param name="trackIds">
-    /// ID треков — используются для генерации уникального имени файла.
+    /// Track IDs — used to generate a unique filename.
     /// </param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Полный путь к сохранённому PNG файлу.</returns>
-    /// <exception cref="ArgumentException">Если список пуст.</exception>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Full path to the saved PNG file.</returns>
+    /// <exception cref="ArgumentException">If the list is empty.</exception>
     public static async Task<string> GenerateAsync(
         IReadOnlyList<Bitmap> bitmaps,
         IReadOnlyList<string> trackIds,
@@ -50,20 +50,20 @@ public static class MosaicGenerator
         if (bitmaps.Count == 0)
             throw new ArgumentException("At least one bitmap is required.", nameof(bitmaps));
 
-        // Гарантируем существование папки
+        // Ensure the directory exists
         Directory.CreateDirectory(CoversFolder);
 
-        // Генерируем уникальное имя файла из ID треков
+        // Generate a unique filename from track IDs
         var fileName = GenerateFileName(trackIds);
         var filePath = Path.Combine(CoversFolder, fileName);
 
-        // Если файл уже существует (идемпотентность) — возвращаем путь
+        // If the file already exists (idempotency), return the path
         if (File.Exists(filePath))
             return filePath;
 
         ct.ThrowIfCancellationRequested();
 
-        // Рендер мозаики — должен выполняться на UI-потоке (Avalonia rendering)
+        // Mosaic rendering — must be executed on the UI thread (Avalonia rendering)
         using var memoryStream = new MemoryStream();
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -87,19 +87,19 @@ public static class MosaicGenerator
     }
 
     /// <summary>
-    /// Генерирует превью мозаики для отображения в UI (без сохранения на диск).
-    /// Должен вызываться на UI-потоке.
+    /// Generates a mosaic preview for UI display (without saving to disk).
+    /// Must be called on the UI thread.
     /// </summary>
-    /// <param name="bitmaps">Загруженные обложки (1-4).</param>
-    /// <returns>Bitmap для привязки к Image.Source.</returns>
+    /// <param name="bitmaps">Loaded covers (1-4).</param>
+    /// <returns>Bitmap for binding to Image.Source.</returns>
     public static RenderTargetBitmap GeneratePreview(IReadOnlyList<Bitmap> bitmaps)
     {
         return RenderMosaic(bitmaps);
     }
 
     /// <summary>
-    /// Рендерит мозаику в RenderTargetBitmap.
-    /// Общая логика для GenerateAsync и GeneratePreview.
+    /// Renders the mosaic into a RenderTargetBitmap.
+    /// Shared logic for GenerateAsync and GeneratePreview.
     /// </summary>
     private static RenderTargetBitmap RenderMosaic(IReadOnlyList<Bitmap> bitmaps)
     {
@@ -107,7 +107,7 @@ public static class MosaicGenerator
 
         using (var ctx = target.CreateDrawingContext())
         {
-            // Заливаем фон тёмным цветом (для gap)
+            // Fill the background with a dark color (for the gap)
             ctx.DrawRectangle(
                 Brushes.Black,
                 null,
@@ -135,15 +135,15 @@ public static class MosaicGenerator
         return target;
     }
 
-    // ═══ Раскладки ═══
+    // ═══ Layouts ═══
 
-    /// <summary>1 обложка: масштабируется на весь квадрат.</summary>
+    /// <summary>1 cover: scaled to the entire square.</summary>
     private static void DrawSingle(DrawingContext ctx, Bitmap bmp)
     {
         DrawBitmapToRect(ctx, bmp, new Rect(0, 0, OutputSize, OutputSize));
     }
 
-    /// <summary>2 обложки: две половинки по горизонтали с зазором.</summary>
+    /// <summary>2 covers: two horizontal halves with a gap.</summary>
     private static void DrawTwo(DrawingContext ctx, Bitmap left, Bitmap right)
     {
         var halfW = (OutputSize - Gap) / 2.0;
@@ -151,21 +151,21 @@ public static class MosaicGenerator
         DrawBitmapToRect(ctx, right, new Rect(halfW + Gap, 0, halfW, OutputSize));
     }
 
-    /// <summary>3 обложки: 1 большая слева + 2 маленькие справа (стопкой).</summary>
+    /// <summary>3 covers: 1 large on the left + 2 small stacked on the right.</summary>
     private static void DrawThree(DrawingContext ctx, Bitmap big, Bitmap topRight, Bitmap bottomRight)
     {
         var halfW = (OutputSize - Gap) / 2.0;
         var halfH = (OutputSize - Gap) / 2.0;
 
-        // Большая слева — занимает полную высоту
+        // Large left image — takes full height
         DrawBitmapToRect(ctx, big, new Rect(0, 0, halfW, OutputSize));
-        // Верхняя правая
+        // Top right
         DrawBitmapToRect(ctx, topRight, new Rect(halfW + Gap, 0, halfW, halfH));
-        // Нижняя правая
+        // Bottom right
         DrawBitmapToRect(ctx, bottomRight, new Rect(halfW + Gap, halfH + Gap, halfW, halfH));
     }
 
-    /// <summary>4 обложки: сетка 2×2.</summary>
+    /// <summary>4 covers: 2×2 grid.</summary>
     private static void DrawFour(DrawingContext ctx, Bitmap tl, Bitmap tr, Bitmap bl, Bitmap br)
     {
         var halfW = (OutputSize - Gap) / 2.0;
@@ -178,12 +178,12 @@ public static class MosaicGenerator
     }
 
     /// <summary>
-    /// Рисует Bitmap в указанный прямоугольник с обрезкой (UniformToFill).
-    /// Центрирует изображение и обрезает выступающие части.
+    /// Draws a Bitmap into the specified rectangle with cropping (UniformToFill).
+    /// Centers the image and crops overflowing parts.
     /// </summary>
     private static void DrawBitmapToRect(DrawingContext ctx, Bitmap bmp, Rect destRect)
     {
-        // Рассчитываем source rect для UniformToFill (центрированная обрезка)
+        // Calculate source rect for UniformToFill (centered cropping)
         var srcW = bmp.PixelSize.Width;
         var srcH = bmp.PixelSize.Height;
         var destAspect = destRect.Width / destRect.Height;
@@ -192,34 +192,34 @@ public static class MosaicGenerator
         Rect sourceRect;
         if (srcAspect > destAspect)
         {
-            // Изображение шире — обрезаем по бокам
+            // Image is wider — crop the sides
             var cropW = srcH * destAspect;
             var offsetX = (srcW - cropW) / 2.0;
             sourceRect = new Rect(offsetX, 0, cropW, srcH);
         }
         else
         {
-            // Изображение выше — обрезаем сверху/снизу
+            // Image is taller — crop top/bottom
             var cropH = srcW / destAspect;
             var offsetY = (srcH - cropH) / 2.0;
             sourceRect = new Rect(0, offsetY, srcW, cropH);
         }
 
-        // Публичный API DrawingContext.DrawImage
+        // Public DrawingContext.DrawImage API
         ctx.DrawImage(bmp, sourceRect, destRect);
     }
 
     /// <summary>
-    /// Генерирует уникальное имя файла из отсортированных ID треков.
-    /// Сортировка гарантирует одинаковое имя при одинаковом наборе треков
-    /// вне зависимости от порядка выбора.
+    /// Generates a unique filename from sorted track IDs.
+    /// Sorting guarantees the same filename for the same set of tracks
+    /// regardless of selection order.
     /// </summary>
     private static string GenerateFileName(IReadOnlyList<string> trackIds)
     {
         var sorted = trackIds.OrderBy(x => x, StringComparer.Ordinal).ToArray();
         var combined = string.Join("|", sorted);
 
-        // Простой хеш (достаточно для имени файла, не криптография)
+        // Simple hash (sufficient for a filename, non-cryptographic)
         var hash = combined.GetHashCode(StringComparison.Ordinal);
         return $"mosaic_{hash:X8}.png";
     }

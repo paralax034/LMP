@@ -16,10 +16,10 @@ public sealed partial class AudioEngine
 
     #region Public API
 
-    /// <summary>Возвращает текущую громкость в процентах.</summary>
+    /// <summary>Returns the current volume percentage.</summary>
     public float GetVolume() => _volumePercent;
 
-    /// <summary>Устанавливает громкость мгновенно.</summary>
+    /// <summary>Sets the volume instantly.</summary>
     public void SetVolumeInstant(float value)
     {
         int clamped;
@@ -35,7 +35,7 @@ public sealed partial class AudioEngine
             NotifyPersistenceNeeded();
     }
 
-    /// <summary>Обрабатывает изменение максимального лимита громкости.</summary>
+    /// <summary>Handles changes to the maximum volume limit.</summary>
     public void OnMaxVolumeLimitChanged(int newMaxVolume)
     {
         lock (_volumeLock)
@@ -46,7 +46,7 @@ public sealed partial class AudioEngine
         RaiseOnUI(() => OnMaxVolumeChanged?.Invoke(newMaxVolume));
     }
 
-    /// <summary>Пересчитывает gain после изменения аудио-настроек.</summary>
+    /// <summary>Recalculates gain after audio settings change.</summary>
     public void UpdateAudioSettings()
     {
         ApplyGainToPipeline();
@@ -54,7 +54,7 @@ public sealed partial class AudioEngine
         RaiseOnUI(() => OnMaxVolumeChanged?.Invoke(_library.Settings.MaxVolumeLimit));
     }
 
-    /// <summary>Инициализирует громкость из настроек при старте или после загрузки БД.</summary>
+    /// <summary>Initializes volume from settings at startup or after database load.</summary>
     public void InitializeVolumeFromSettings()
     {
         var settings = _library.Settings;
@@ -73,7 +73,7 @@ public sealed partial class AudioEngine
     #region Internal Computation & Loop
 
     /// <summary>
-    /// Сигнализирует фоновому циклу о необходимости сбросить изменённую громкость или LUFS в БД без периодического поллинга.
+    /// Signals the background loop to flush updated volume or LUFS to the database without periodic polling.
     /// </summary>
     private void NotifyPersistenceNeeded()
     {
@@ -86,7 +86,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Единственный источник истины для вычисления финального gain.
+    /// Single source of truth for calculating final gain.
     /// </summary>
     private float ComputeFinalGain()
     {
@@ -95,7 +95,7 @@ public sealed partial class AudioEngine
         return Math.Clamp(gain, 0f, MaxGain);
     }
 
-    /// <summary>Применяет volume gain к backend.</summary>
+    /// <summary>Applies volume gain to the backend.</summary>
     private void ApplyGainToPipeline()
     {
         float gain = ComputeFinalGain();
@@ -134,8 +134,8 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Событийный цикл сохранения громкости и нормализации в БД.
-    /// Спит с 0 переключений контекста до фактического изменения громкости или появления новых замеров LUFS.
+    /// Event-driven loop for persisting volume and normalization to the DB.
+    /// Sleeps with 0 context switches until an actual volume change or new LUFS measurements arrive.
     /// </summary>
     private async Task VolumeSaveLoopAsync()
     {

@@ -3,7 +3,7 @@ using LMP.Core.Youtube.Bridge.Common;
 namespace LMP.Core.Youtube.Bridge.NToken;
 
 /// <summary>
-/// Дешифратор N-Token YouTube.
+/// YouTube N-Token decryptor.
 /// </summary>
 public sealed class NTokenDecryptor : BaseYoutubeDecryptor
 {
@@ -11,12 +11,12 @@ public sealed class NTokenDecryptor : BaseYoutubeDecryptor
     private const int MinNTokenLength = 5;
 
     /// <summary>
-    /// Событие, сигнализирующее о начале комплексной (JS) дешифрации.
+    /// Event raised when complex (JS) decryption starts.
     /// </summary>
     public event Action<string?>? OnComplexDecryptionStarted;
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="NTokenDecryptor"/>.
+    /// Initializes a new instance of the <see cref="NTokenDecryptor"/> class.
     /// </summary>
     public NTokenDecryptor(JsDecryptionService jsService, string? cacheFilePath = null)
         : base(jsService, cacheFilePath ?? G.FilePath.NTokenCache, maxMemory: 2000, maxDisk: 500)
@@ -24,7 +24,7 @@ public sealed class NTokenDecryptor : BaseYoutubeDecryptor
     }
 
     /// <summary>
-    /// Расшифровывает N-Token YouTube.
+    /// Decrypts a YouTube N-Token.
     /// </summary>
     public async ValueTask<string> DecryptAsync(
         string nToken,
@@ -60,9 +60,9 @@ public sealed class NTokenDecryptor : BaseYoutubeDecryptor
             return result!;
         }
 
-        // null = solver сломан (не просто неверный вывод) — байткод для текущей версии плеера
-        // несовместим с актуальным алгоритмом YouTube. Удаляем дисковые артефакты, чтобы
-        // следующий GetOrLoadAsync загрузил свежий base.js вместо повторного чтения .bin.
+        // null = solver is broken (not just invalid output) — bytecode for the current player version
+        // is incompatible with YouTube's current algorithm. Purging disk artifacts so that
+        // the next GetOrLoadAsync fetches a fresh base.js instead of re-reading the .bin.
         if (result is null)
             JsService.InvalidatePlayerContextAndBytecode();
 

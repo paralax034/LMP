@@ -7,8 +7,8 @@ public sealed partial class CachingStreamSource
     #region Suspend/Resume
 
     /// <summary>
-    /// Приостанавливает фоновую загрузку (при сворачивании окна).
-    /// Critical read-ahead продолжает работать для бесперебойного воспроизведения.
+    /// Suspends background prefetching (when window is minimized).
+    /// Critical read-ahead continues working to ensure seamless playback.
     /// </summary>
     public void Suspend()
     {
@@ -17,7 +17,7 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Возобновляет фоновую загрузку.
+    /// Resumes background prefetching.
     /// </summary>
     public void Resume()
     {
@@ -30,16 +30,16 @@ public sealed partial class CachingStreamSource
     #region Preload Loop
 
     /// <summary>
-    /// Фоновый цикл предзагрузки диапазонов.
+    /// Background range prefetch loop.
     /// <para>
-    /// Первая итерация выполняется без задержки, чтобы немедленно подхватить
-    /// работу <see cref="SafeStartupPrefetchAsync"/> и продолжить заполнение буфера.
-    /// Последующие итерации разделены интервалом <see cref="StreamingConfig.PreloadIntervalMs"/>.
+    /// The first iteration runs without delay to immediately pick up
+    /// the work of <see cref="SafeStartupPrefetchAsync"/> and continue filling the buffer.
+    /// Subsequent iterations are separated by <see cref="StreamingConfig.PreloadIntervalMs"/>.
     /// </para>
     /// <para>
-    /// Адаптирует параллелизм и размер запросов к состоянию сети.
-    /// Включает opportunistic completion: если трек почти скачан,
-    /// добиваем оставшиеся gaps до полного кэширования.
+    /// Adapts parallelism and request size to network condition.
+    /// Includes opportunistic completion: if the track is almost downloaded,
+    /// completes the remaining gaps until fully cached.
     /// </para>
     /// </summary>
     private async Task PreloadLoopAsync(CancellationToken ct)
@@ -47,12 +47,12 @@ public sealed partial class CachingStreamSource
         bool justResumed = false;
 
         /// <summary>
-        /// Порог "почти скачан" — если скачано >= этого процента, включается completion fill.
+        /// "Almost downloaded" threshold — if >= this percentage is downloaded, completion fill is enabled.
         /// </summary>
         const double CompletionFillThresholdPercent = 90.0;
 
         /// <summary>
-        /// Максимальный абсолютный размер недокачки, при котором включается completion fill.
+        /// Maximum absolute size of remaining un-downloaded data to trigger completion fill.
         /// </summary>
         const long CompletionFillMaxRemainingBytes = 512 * 1024;
 
@@ -67,7 +67,7 @@ public sealed partial class CachingStreamSource
                 bool isSuspended = !_suspendGate.IsSet;
                 bool isPaused = !_playbackGate.IsSet;
 
-                // Пауза: ждём открытия gate без периодических холостых пробуждений
+                // Paused: waiting for gate to open without periodic idle wakeups
                 if (isPaused)
                 {
                     try { _playbackGate.Wait(ct); }
@@ -75,7 +75,7 @@ public sealed partial class CachingStreamSource
                     continue;
                 }
 
-                // Suspend mode: только critical read-ahead 
+                // Suspend mode: critical read-ahead only 
                 if (isSuspended)
                 {
                     long current = Volatile.Read(ref _currentReadOffset);
@@ -128,7 +128,7 @@ public sealed partial class CachingStreamSource
                     continue;
                 }
 
-                // Критическая сетевая операция seek в процессе — уступаем ей весь канал
+                // Critical network seek operation in progress — yielding full channel bandwidth to it
                 if (_seekInProgress)
                 {
                     if (!await ct.DelayNoThrowAsync(_config.PreloadIntervalMs, continueOnCapturedContext: false))
@@ -136,7 +136,7 @@ public sealed partial class CachingStreamSource
                     continue;
                 }
 
-                // Дебаунс после resume 
+                // Post-resume debounce 
                 if (justResumed)
                 {
                     justResumed = false;
@@ -147,7 +147,7 @@ public sealed partial class CachingStreamSource
 
                 if (_cacheEntry.IsComplete) break;
 
-                // Snapshot текущего состояния 
+                // Snapshot of the current state 
                 long epochAtLoopStart = Interlocked.Read(ref _downloadEpoch);
                 var token = CurrentDownloadToken;
                 long currentOffset = Volatile.Read(ref _currentReadOffset);
@@ -167,7 +167,7 @@ public sealed partial class CachingStreamSource
 
                 var degradation = GetNetworkDegradationLevel();
 
-                // Prefetch loop: планируем запросы вперёд от текущей позиции 
+                // Prefetch loop: schedule requests ahead from current position 
                 while (pending < adaptiveMaxDownloads)
                 {
                     if (Interlocked.Read(ref _downloadEpoch) != epochAtLoopStart)
@@ -201,9 +201,9 @@ public sealed partial class CachingStreamSource
                         break;
                 }
 
-                // Opportunistic completion fill: запускаем ТОЛЬКО когда весь хвост от текущей позиции
-                // до конца файла уже полностью скачан и нет активных загрузок (pending == 0),
-                // чтобы не создавать конкурирующие HTTP-запросы позади курсора при перемотках.
+                // Opportunistic completion fill: run ONLY when the entire tail from current position
+                // to end of file is fully downloaded and there are no active downloads (pending == 0),
+                // to avoid creating competing HTTP requests behind the cursor during seeks.
                 long bufferedToTail = GetBufferedBytesAheadIncludingInflight(currentOffset);
                 bool isTailFullyBuffered = currentOffset + bufferedToTail >= _contentLength;
 
@@ -242,15 +242,15 @@ public sealed partial class CachingStreamSource
                     break;
             }
             catch (OperationCanceledException) { break; }
-            catch { /* Защита от неожиданных исключений в фоновом цикле */ }
+            catch { /* Protection against unexpected exceptions in the background loop */ }
         }
     }
 
     /// <summary>
-    /// Сканирует все скачанные диапазоны и заполняет первые найденные gaps.
+    /// Scans all downloaded ranges and fills the first gaps found.
     /// </summary>
-    /// <param name="downloadToken">Токен текущей эпохи загрузки.</param>
-    /// <param name="maxRequests">Максимальное количество одновременных запросов.</param>
+    /// <param name="downloadToken">Current download epoch token.</param>
+    /// <param name="maxRequests">Maximum number of concurrent requests.</param>
     private async Task TryCompletionFillAsync(
         CancellationToken downloadToken,
         int maxRequests)
@@ -290,8 +290,8 @@ public sealed partial class CachingStreamSource
             if (gapLength <= 0)
                 continue;
 
-            // Защита от спама на конце файла: если это хвостовой зазор после последнего диапазона
-            // и он меньше размера блока выравнивания — сервер уже отдал весь файл, прекращаем повторные запросы
+            // Protection against end-of-file spam: if this is a tail gap after the last range
+            // and it is smaller than alignment block size — server has delivered full file, stop retrying
             if (i == ranges.Length && gapLength <= _requestAlignmentBytes * 2 && ranges.Length > 0)
                 continue;
 
@@ -311,7 +311,7 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Безопасная обёртка над <see cref="EnsureRangeAsync"/> для fire-and-forget вызовов.
+    /// Safe wrapper around <see cref="EnsureRangeAsync"/> for fire-and-forget calls.
     /// </summary>
     private async Task SafeEnsureRangeAsync(
         long position, int minimumLength, CancellationToken ct, bool isCritical)
@@ -336,16 +336,16 @@ public sealed partial class CachingStreamSource
     #region Buffer Ranges
 
     /// <summary>
-    /// Сливает отсортированные дисковые диапазоны и RAM-блоки в нормализованные отрезки <c>[0.0, 1.0]</c>
-    /// одним линейным проходом, без промежуточных коллекций и сортировки.
+    /// Merges sorted disk ranges and RAM blocks into normalized segments <c>[0.0, 1.0]</c>
+    /// in a single linear pass, without intermediate collections or sorting.
     /// </summary>
-    /// <param name="diskRanges">Дисковые диапазоны, отсортированные по началу.</param>
-    /// <param name="ramBlocks">RAM-блоки, отсортированные по началу.</param>
-    /// <param name="contentLength">Полный размер контента (байт), больше нуля.</param>
+    /// <param name="diskRanges">Disk ranges, sorted by start offset.</param>
+    /// <param name="ramBlocks">RAM blocks, sorted by start offset.</param>
+    /// <param name="contentLength">Total content length (bytes), greater than zero.</param>
     /// <param name="destination">
-    /// Буфер результата не короче значения режима подсчёта; пустой буфер включает режим подсчёта.
+    /// Result buffer at least as long as count mode value; an empty buffer enables count mode.
     /// </param>
-    /// <returns>Число слитых отрезков.</returns>
+    /// <returns>Number of merged segments.</returns>
     internal static int MergeBufferedRanges(
         ReadOnlySpan<LMP.Core.Audio.Cache.CacheByteRange> diskRanges,
         ReadOnlySpan<RamRangeBlock> ramBlocks,
@@ -411,9 +411,9 @@ public sealed partial class CachingStreamSource
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Объединяет диапазоны из disk-кэша и RAM-кэша,
-    /// нормализует в <c>[0.0, 1.0]</c> относительно <see cref="_contentLength"/>.
-    /// Перестройка идёт только при смене версий и аллоцирует лишь снимки и точный по размеру результат.
+    /// Combines ranges from disk cache and RAM cache,
+    /// normalizing them to <c>[0.0, 1.0]</c> relative to <see cref="_contentLength"/>.
+    /// Rebuild occurs only on version change and allocates only snapshots and an exact-sized result.
     /// </remarks>
     public IReadOnlyList<(double Start, double End)> GetBufferedRanges()
     {
@@ -445,7 +445,7 @@ public sealed partial class CachingStreamSource
         var diskRanges = entry.GetDownloadedRangesSnapshot(out long snapDiskVer);
         var ramBlocks = _ramCache.GetRangesSnapshot(out long snapRamVer);
 
-        // Оба снимка отсортированы по началу: первый проход считает отрезки, второй заполняет точный массив.
+        // Both snapshots are sorted by start offset: first pass counts segments, second pass fills exact array.
         int count = MergeBufferedRanges(diskRanges, ramBlocks, _contentLength, []);
         (double Start, double End)[] merged = [];
         if (count > 0)

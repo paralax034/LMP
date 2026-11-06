@@ -39,9 +39,9 @@ public partial class FilterBar : UserControl
     }
 
     /// <summary>
-    /// Ключ ресурса иконки из Icons.axaml.
-    /// По умолчанию — поиск (Icon.Search).
-    /// Смена ключа автоматически обновляет <see cref="IconData"/> через PropertyChanged.
+    /// The key of the icon resource from Icons.axaml.
+    /// Default is search (Icon.Search).
+    /// Changing the key automatically updates <see cref="IconData"/> via PropertyChanged.
     /// </summary>
     public static readonly StyledProperty<string> IconKeyProperty =
         AvaloniaProperty.Register<FilterBar, string>(nameof(IconKey), "Icon.Search");
@@ -52,7 +52,7 @@ public partial class FilterBar : UserControl
         set => SetValue(IconKeyProperty, value);
     }
 
-    // COMPUTED (Direct Properties для уведомления UI)
+    // COMPUTED (Direct Properties for UI notification)
 
     public static readonly DirectProperty<FilterBar, double> BarHeightProperty =
         AvaloniaProperty.RegisterDirect<FilterBar, double>(nameof(BarHeight), o => o.BarHeight);
@@ -75,8 +75,8 @@ public partial class FilterBar : UserControl
     public double IconSize => Compact ? 14 : 16;
 
     /// <summary>
-    /// Геометрия иконки, вычисленная из <see cref="IconKey"/> через Application.Resources.
-    /// Zero-alloc: StreamGeometry создаётся один раз при парсинге XAML.
+    /// Icon geometry computed from <see cref="IconKey"/> via Application.Resources.
+    /// Zero-alloc: StreamGeometry is created once during XAML parsing.
     /// </summary>
     public static readonly DirectProperty<FilterBar, Geometry?> IconDataProperty =
         AvaloniaProperty.RegisterDirect<FilterBar, Geometry?>(nameof(IconData), o => o.IconData);
@@ -106,8 +106,8 @@ public partial class FilterBar : UserControl
     }
 
     /// <summary>
-    /// Ищет StreamGeometry в Application.Resources по строковому ключу.
-    /// Вызывается только при смене IconKey — не на каждый layout pass.
+    /// Looks up StreamGeometry in Application.Resources by string key.
+    /// Called only when IconKey changes — not on every layout pass.
     /// </summary>
     private static Geometry? ResolveGeometry(string key)
     {

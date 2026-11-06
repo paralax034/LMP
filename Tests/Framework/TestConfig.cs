@@ -5,21 +5,21 @@ using System.Text.Json.Serialization;
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Конфигурация параметров тестов, загружаемая из JSON-файла.
+/// Test parameters configuration loaded from a JSON file.
 /// <para>
-/// <b>Назначение:</b> позволяет менять тестовые данные (videoId, itag, tokens, iterations)
-/// БЕЗ перекомпиляции — просто редактируй JSON и перезапускай тесты.
+/// <b>Purpose:</b> allows changing test data (videoId, itag, tokens, iterations)
+/// WITHOUT recompilation — just edit the JSON and rerun the tests.
 /// </para>
 /// <para>
-/// <b>Порядок загрузки:</b>
+/// <b>Loading order:</b>
 /// <list type="number">
-///   <item>Путь из <see cref="G.FilePath.TestConfig"/> (%LOCALAPPDATA%/LMP/test-config.json)</item>
-///   <item>Переопределение через env переменную LMP_TEST_CONFIG</item>
-///   <item>Если файл не найден — создаётся с дефолтными значениями</item>
+///   <item>Path from <see cref="G.FilePath.TestConfig"/> (%LOCALAPPDATA%/LMP/test-config.json)</item>
+///   <item>Override via the LMP_TEST_CONFIG env variable</item>
+///   <item>If the file is not found, it is created with default values</item>
 /// </list>
 /// </para>
 /// <para>
-/// <b>Использование в тестах:</b>
+/// <b>Usage in tests:</b>
 /// <code>
 /// var config = TestConfig.Get();
 /// var videoId = config.Pipeline.DebugVideoId;
@@ -28,8 +28,8 @@ namespace LMP.Tests.Framework;
 /// </para>
 /// </summary>
 /// <remarks>
-/// Singleton с lazy-инициализацией. Thread-safe.
-/// Для горячей перезагрузки используй <see cref="Reload"/>.
+/// Singleton with lazy initialization. Thread-safe.
+/// Use <see cref="Reload"/> for hot reloading.
 /// </remarks>
 public sealed class TestConfig
 {
@@ -41,8 +41,8 @@ public sealed class TestConfig
     private static readonly Lock _lock = new();
 
     /// <summary>
-    /// Возвращает текущий экземпляр конфигурации.
-    /// При первом обращении загружает из файла или создаёт дефолтный.
+    /// Returns the current configuration instance.
+    /// On first call, loads from file or creates a default instance.
     /// </summary>
     public static TestConfig Get()
     {
@@ -57,85 +57,85 @@ public sealed class TestConfig
     }
 
     //
-    // СЕКЦИИ КОНФИГУРАЦИИ
+    // CONFIGURATION SECTIONS
     //
 
     /// <summary>
-    /// Метаданные конфига (не редактируются пользователем).
+    /// Config metadata (not editable by the user).
     /// </summary>
     [JsonPropertyName("_meta")]
     public MetaConfig Meta { get; init; } = new();
 
     /// <summary>
-    /// Параметры для StreamPipelineTests.
-    /// Управляет списком тестовых видео, debug-параметрами и itag'ами.
+    /// Parameters for StreamPipelineTests.
+    /// Manages the list of test videos, debug parameters, and itags.
     /// </summary>
     [JsonPropertyName("pipeline")]
     public PipelineConfig Pipeline { get; init; } = new();
 
     /// <summary>
-    /// Параметры для NTokenTests.
-    /// Управляет тестовыми токенами и количеством итераций benchmark'а.
+    /// Parameters for NTokenTests.
+    /// Manages test tokens and the number of benchmark iterations.
     /// </summary>
     [JsonPropertyName("ntoken")]
     public NTokenConfig NToken { get; init; } = new();
 
     /// <summary>
-    /// Параметры для SigCipherTests.
-    /// Управляет тестовой подписью для проверки дешифрации.
+    /// Parameters for SigCipherTests.
+    /// Manages test signature for decryption verification.
     /// </summary>
     [JsonPropertyName("sigCipher")]
     public SigCipherConfig SigCipher { get; init; } = new();
 
     /// <summary>
-    /// Параметры для SigCipherSolverTests.
-    /// Управляет количеством random-комбинаций и benchmark-итераций.
+    /// Parameters for SigCipherSolverTests.
+    /// Manages the number of random combinations and benchmark iterations.
     /// </summary>
     [JsonPropertyName("solver")]
     public SolverConfig Solver { get; init; } = new();
 
     /// <summary>
-    /// Параметры для тестов совместимости разных версий плеера.
+    /// Parameters for player cross-version compatibility tests.
     /// </summary>
     [JsonPropertyName("playerVersions")]
     public PlayerVersionConfig PlayerVersions { get; init; } = new();
 
     /// <summary>
-    /// Общие параметры: таймауты, флаги поведения.
+    /// General parameters: timeouts, behavior flags.
     /// </summary>
     [JsonPropertyName("general")]
     public GeneralConfig General { get; init; } = new();
 
     //
-    // КОНФИГ-КЛАССЫ
+    // CONFIG CLASSES
     //
 
     /// <summary>
-    /// Метаданные конфига (служебная информация).
+    /// Config metadata (internal service information).
     /// </summary>
     public sealed class MetaConfig
     {
-        /// <summary>Описание файла.</summary>
+        /// <summary>File description.</summary>
         [JsonPropertyName("description")]
         public string Description { get; init; } = "LMP Test Configuration. Edit values and reload (no recompilation needed).";
 
-        /// <summary>Путь к документации.</summary>
+        /// <summary>Path to documentation.</summary>
         [JsonPropertyName("docs")]
         public string Docs { get; init; } = "https://github.com/Scream034/LMP/tree/main/Tests/Framework/TestConfig.cs";
 
-        /// <summary>Версия схемы конфига.</summary>
+        /// <summary>Config schema version.</summary>
         [JsonPropertyName("schemaVersion")]
         public int SchemaVersion { get; init; } = 1;
     }
 
     /// <summary>
-    /// Конфигурация StreamPipeline тестов.
+    /// Configuration for StreamPipeline tests.
     /// </summary>
     public sealed class PipelineConfig
     {
         /// <summary>
-        /// Список videoId для multi-video тестов.
-        /// Должны быть доступные, не удалённые видео.
+        /// List of videoIds for multi-video tests.
+        /// Must be available, non-deleted videos.
         /// </summary>
         [JsonPropertyName("testVideoIds")]
         public string[] TestVideoIds { get; init; } =
@@ -146,52 +146,52 @@ public sealed class TestConfig
         ];
 
         /// <summary>
-        /// VideoId для детального debug теста DebugSpecificStreamAsync.
+        /// VideoId for the detailed DebugSpecificStreamAsync debug test.
         /// </summary>
         [JsonPropertyName("debugVideoId")]
         public string DebugVideoId { get; init; } = "dQw4w9WgXcQ";
 
         /// <summary>
-        /// Целевой itag для debug теста.
-        /// null = любой первый audio-стрим.
+        /// Target itag for the debug test.
+        /// null = any first audio stream.
         /// </summary>
         [JsonPropertyName("debugTargetItag")]
         public int? DebugTargetItag { get; init; } = 251;
 
         /// <summary>
-        /// Скачивать ли тестовый chunk (первый 1KB) в debug тесте.
+        /// Whether to download the test chunk (first 1KB) in the debug test.
         /// </summary>
         [JsonPropertyName("debugTestDownload")]
         public bool DebugTestDownload { get; init; } = true;
     }
 
     /// <summary>
-    /// Конфигурация NToken тестов.
+    /// Configuration for NToken tests.
     /// </summary>
     public sealed class NTokenConfig
     {
         /// <summary>
-        /// Тестовый N-token для LiveDecryption теста.
+        /// Test N-token for the LiveDecryption test.
         /// </summary>
         [JsonPropertyName("testToken")]
         public string TestToken { get; init; } = "Siib9I-K-KF0GqS-";
 
         /// <summary>
-        /// Количество итераций в NToken benchmark'е.
+        /// Number of iterations in the NToken benchmark.
         /// </summary>
         [JsonPropertyName("benchmarkIterations")]
         public int BenchmarkIterations { get; init; } = 100;
     }
 
     /// <summary>
-    /// Конфигурация SigCipher тестов.
+    /// Configuration for SigCipher tests.
     /// </summary>
     public sealed class SigCipherConfig
     {
         /// <summary>
-        /// Тестовая подпись для LiveDecryption теста.
-        /// NOTE: YouTube-подписи уникальны для каждого запроса.
-        /// Тест проверяет что результат не равен входу.
+        /// Test signature for the LiveDecryption test.
+        /// NOTE: YouTube signatures are unique for each request.
+        /// The test verifies that the result does not equal the input.
         /// </summary>
         [JsonPropertyName("testSignature")]
         public string TestSignature { get; init; } =
@@ -199,50 +199,50 @@ public sealed class TestConfig
     }
 
     /// <summary>
-    /// Конфигурация SigCipherSolver тестов.
+    /// Configuration for SigCipherSolver tests.
     /// </summary>
     public sealed class SolverConfig
     {
         /// <summary>
-        /// Количество random-комбинаций для стресс-теста.
+        /// Number of random combinations for the stress test.
         /// </summary>
         [JsonPropertyName("randomCombinationsCount")]
         public int RandomCombinationsCount { get; init; } = 100;
 
         /// <summary>
-        /// Количество итераций в Solver benchmark'е.
+        /// Number of iterations in the Solver benchmark.
         /// </summary>
         [JsonPropertyName("benchmarkIterations")]
         public int BenchmarkIterations { get; init; } = 50;
     }
 
     /// <summary>
-    /// Конфигурация тестов совместимости версий плеера.
+    /// Configuration for player version compatibility tests.
     /// </summary>
     public sealed class PlayerVersionConfig
     {
         /// <summary>
-        /// Список версий плеера для тестирования.
-        /// Версии — хэши из URL: /player/XXXXXXXX/
+        /// List of player versions for testing.
+        /// Versions are hashes from URL: /player/XXXXXXXX/
         /// </summary>
         [JsonPropertyName("versions")]
         public string[] Versions { get; init; } = [];
 
         /// <summary>
-        /// Пары token→expected для каждой версии.
+        /// token→expected pairs for each version.
         /// </summary>
         [JsonPropertyName("nTokenTestCases")]
         public Dictionary<string, NTokenTestCase[]> NTokenTestCases { get; init; } = [];
 
         /// <summary>
-        /// Загружать ли base.js для старых версий из кэша.
+        /// Whether to load base.js for older versions from cache.
         /// </summary>
         [JsonPropertyName("loadCachedPlayerVersions")]
         public bool LoadCachedPlayerVersions { get; init; } = true;
     }
 
     /// <summary>
-    /// Пара encrypted→expected для тестирования NToken.
+    /// encrypted→expected pair for NToken testing.
     /// </summary>
     public sealed class NTokenTestCase
     {
@@ -259,30 +259,30 @@ public sealed class TestConfig
     public sealed class GeneralConfig
     {
         /// <summary>
-        /// Симуляция устаревшего номера коммита для отладки автообновления в Debug (0 = отключено).
+        /// Simulation of an outdated commit count for debugging auto-update in Debug (0 = disabled).
         /// </summary>
         [JsonPropertyName("simulateOldCommitCount")]
         public int SimulateOldCommitCount { get; init; } = 0;
 
         /// <summary>
-        /// Дефолтный таймаут для тестов с сетью, секунды.
+        /// Default timeout for network tests, in seconds.
         /// </summary>
         [JsonPropertyName("defaultNetworkTimeoutSeconds")]
         public int DefaultNetworkTimeoutSeconds { get; init; } = 60;
 
         /// <summary>
-        /// Подробное логирование в тестах.
+        /// Verbose logging in tests.
         /// </summary>
         [JsonPropertyName("verboseLogging")]
         public bool VerboseLogging { get; init; } = false;
     }
 
     //
-    // ЗАГРУЗКА И СОХРАНЕНИЕ
+    // LOADING AND SAVING
     //
 
     /// <summary>
-    /// Загружает конфигурацию из файла.
+    /// Loads configuration from a file.
     /// </summary>
     private static TestConfig Load()
     {
@@ -307,14 +307,14 @@ public sealed class TestConfig
             Log.Warn($"[TestConfig] Failed to load {configPath}: {ex.Message}");
         }
 
-        // Создаём дефолтный конфиг
+        // Create default config
         var defaultConfig = new TestConfig();
         SaveConfig(configPath, defaultConfig);
         return defaultConfig;
     }
 
     /// <summary>
-    /// Возвращает путь к файлу конфигурации.
+    /// Returns the path to the configuration file.
     /// </summary>
     public static string GetConfigPath()
     {
@@ -326,7 +326,7 @@ public sealed class TestConfig
     }
 
     /// <summary>
-    /// Сохраняет конфигурацию в валидный JSON (без комментариев).
+    /// Saves configuration to valid JSON (without comments).
     /// </summary>
     private static void SaveConfig(string path, TestConfig config)
     {
@@ -343,19 +343,19 @@ public sealed class TestConfig
     }
 
     /// <summary>
-    /// Открывает test-config.json в текстовом редакторе.
+    /// Opens test-config.json in a text editor.
     /// </summary>
     /// <remarks>
-    /// Стратегии открытия:
-    /// 1. notepad.exe (всегда есть на Windows)
-    /// 2. code (VS Code, если установлен)
-    /// 3. Fallback на Process.Start с UseShellExecute
+    /// Opening strategies:
+    /// 1. notepad.exe (always present on Windows)
+    /// 2. code (VS Code, if installed)
+    /// 3. Fallback to Process.Start with UseShellExecute
     /// </remarks>
     public static void OpenInEditor()
     {
         var path = GetConfigPath();
 
-        // Создаём файл если не существует
+        // Create file if it does not exist
         if (!File.Exists(path))
         {
             Log.Info($"[TestConfig] Creating default config at {path}");
@@ -364,7 +364,7 @@ public sealed class TestConfig
 
         try
         {
-            // Стратегия 1: Notepad (гарантированно работает на Windows)
+            // Strategy 1: Notepad (guaranteed to work on Windows)
             if (OperatingSystem.IsWindows())
             {
                 Process.Start(new ProcessStartInfo
@@ -377,7 +377,7 @@ public sealed class TestConfig
                 return;
             }
 
-            // Стратегия 2: xdg-open на Linux
+            // Strategy 2: xdg-open on Linux
             if (OperatingSystem.IsLinux())
             {
                 Process.Start(new ProcessStartInfo
@@ -390,7 +390,7 @@ public sealed class TestConfig
                 return;
             }
 
-            // Стратегия 3: open на macOS
+            // Strategy 3: open on macOS
             if (OperatingSystem.IsMacOS())
             {
                 Process.Start(new ProcessStartInfo
@@ -415,13 +415,13 @@ public sealed class TestConfig
         {
             Log.Error($"[TestConfig] Failed to open editor: {ex.Message}");
 
-            // Последний fallback — показать путь в логе
+            // Final fallback — log the path
             Log.Info($"[TestConfig] Please open manually: {path}");
         }
     }
 
     /// <summary>
-    /// Открывает папку с конфигом в проводнике.
+    /// Opens the configuration folder in file explorer.
     /// </summary>
     public static void OpenConfigFolder()
     {
@@ -463,7 +463,7 @@ public sealed class TestConfig
     }
 
     /// <summary>
-    /// Перезагружает конфигурацию из файла.
+    /// Reloads configuration from file.
     /// </summary>
     public static TestConfig Reload()
     {

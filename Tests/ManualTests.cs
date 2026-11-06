@@ -4,23 +4,23 @@ using LMP.Tests.Framework;
 namespace LMP.Tests;
 
 /// <summary>
-/// Универсальный CLI-раннер тестового фреймворка LMP поверх <see cref="TestDiscovery"/> и <see cref="TestRunner"/>.
-/// Поддерживает декларативную фильтрацию по группам, категориям и именам без хардкода тестовых методов.
+/// Universal CLI runner for the LMP test framework built on top of <see cref="TestDiscovery"/> and <see cref="TestRunner"/>.
+/// Supports declarative filtering by groups, categories, and names without hardcoding test methods.
 /// </summary>
 /// <remarks>
-/// Поддерживаемые аргументы командной строки:
+/// Supported command-line arguments:
 /// <list type="bullet">
-///   <item><c>--test</c> или <c>--run-tests</c> — запуск всех автоматических тестов (кроме <see cref="TestCategory.Action"/>).</item>
-///   <item><c>--test-group=Storage,Audio</c> — фильтрация по одной или нескольким группам <see cref="TestGroups"/>.</item>
-///   <item><c>--test-category=Unit,Integration</c> — фильтрация по категориям <see cref="TestCategory"/>.</item>
-///   <item><c>--test-filter=CacheTests</c> — поиск подстроки в <c>ClassName.MethodName</c> или <c>DisplayName</c>.</item>
-///   <item><c>--test-list</c> — вывод всех найденных тестов без выполнения.</item>
+///   <item><c>--test</c> or <c>--run-tests</c> — runs all automated tests (except <see cref="TestCategory.Action"/>).</item>
+///   <item><c>--test-group=Storage,Audio</c> — filters by one or more <see cref="TestGroups"/>.</item>
+///   <item><c>--test-category=Unit,Integration</c> — filters by <see cref="TestCategory"/>.</item>
+///   <item><c>--test-filter=CacheTests</c> — searches for a substring in <c>ClassName.MethodName</c> or <c>DisplayName</c>.</item>
+///   <item><c>--test-list</c> — lists all discovered tests without executing them.</item>
 /// </list>
 /// </remarks>
 public static class ManualTests
 {
     /// <summary>
-    /// Проверяет, является ли аргумент командной строки флагом запуска тестового раннера.
+    /// Checks whether the command-line argument is a flag to launch the test runner.
     /// </summary>
     public static bool IsTestCliArgument(string arg)
     {
@@ -36,7 +36,7 @@ public static class ManualTests
     }
 
     /// <summary>
-    /// Проверяет наличие хотя бы одного тестового CLI-аргумента в массиве параметров запуска.
+    /// Checks for the presence of at least one test CLI argument in the launch parameters array.
     /// </summary>
     public static bool HasTestCliArguments(ReadOnlySpan<string> args)
     {
@@ -50,15 +50,15 @@ public static class ManualTests
     }
 
     /// <summary>
-    /// Запускает все автоматические тесты.
+    /// Runs all automated tests.
     /// </summary>
     public static Task<int> RunAllAsync(CancellationToken ct = default) =>
         RunCliAsync(["--test"], ct);
 
     /// <summary>
-    /// Разбирает CLI-аргументы, фильтрует тесты через <see cref="TestDiscovery"/> и выполняет их через <see cref="TestRunner"/>.
-    /// Возвращает код завершения процесса (<c>0</c> — успех, <c>1</c> — есть упавшие тесты или фильтр пуст).
-    /// Без <c>--verbose</c> логи во время прогона пишутся только в файл, путь к нему печатается в итогах.
+    /// Parses CLI arguments, filters tests via <see cref="TestDiscovery"/>, and executes them via <see cref="TestRunner"/>.
+    /// Returns the process exit code (<c>0</c> — success, <c>1</c> — failed tests or empty filter).
+    /// Without <c>--verbose</c>, logs during execution are written to a file only; its path is printed in the summary.
     /// </summary>
     public static async Task<int> RunCliAsync(string[] args, CancellationToken ct = default)
     {
@@ -149,8 +149,8 @@ public static class ManualTests
             return 1;
         }
 
-        // Диагностика тестируемых подсистем остаётся в файле лога; консоль показывает только ход прогона.
-        // Флаг --verbose возвращает прежнее зеркалирование логов для разбора конкретного сбоя.
+        // Diagnostics for tested subsystems remain in the log file; the console shows execution progress only.
+        // The --verbose flag restores log mirroring for troubleshooting a specific failure.
         if (!verbose)
             Log.ConsoleOutputEnabled = false;
 

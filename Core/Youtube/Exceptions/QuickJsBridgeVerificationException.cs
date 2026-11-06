@@ -1,9 +1,9 @@
 namespace LMP.Core.Youtube.Exceptions;
 
 /// <summary>
-/// Фатальная ошибка проверки native quickjs_bridge.dll.
-/// Возникает, когда приложение загрузило устаревшую/неверную DLL
-/// или native browser environment не соответствует ожидаемому ABI/features.
+/// Fatal verification error for native quickjs_bridge.dll.
+/// Occurs when the application has loaded an outdated/incorrect DLL
+/// or the native browser environment does not match the expected ABI/features.
 /// </summary>
 public sealed class QuickJsBridgeVerificationException : Exception
 {

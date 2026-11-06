@@ -8,7 +8,7 @@ public sealed class SearchClient(HttpClient http)
     private readonly SearchController _controller = new(http);
 
     /// <summary>
-    /// Возвращает батчи результатов поиска.
+    /// Returns batches of search results.
     /// </summary>
     public IAsyncEnumerable<Batch<ISearchResult>> GetResultBatchesAsync(
         string searchQuery,
@@ -17,7 +17,7 @@ public sealed class SearchClient(HttpClient http)
         GetResultBatchesAsync(searchQuery, searchFilter, initialContinuationToken: null, cancellationToken);
 
     /// <summary>
-    /// Возвращает батчи результатов поиска с поддержкой возобновления по токену продолжения.
+    /// Returns batches of search results supporting resumption via a continuation token.
     /// </summary>
     public async IAsyncEnumerable<Batch<ISearchResult>> GetResultBatchesAsync(
         string searchQuery,
@@ -28,8 +28,8 @@ public sealed class SearchClient(HttpClient http)
         var encounteredIds = new HashSet<string>(64, StringComparer.Ordinal);
         string? continuationToken = initialContinuationToken;
 
-        // Проверка музыкального контекста переведена на существующий метод расширения,
-        // исключая дублирование логики маппинга энума.
+        // Music context check has been refactored to use an existing extension method,
+        // eliminating duplicate enum mapping logic.
         bool isMusicContext = searchFilter.IsMusicContext();
 
         bool processVideos = ShouldProcessVideos(searchFilter);
@@ -63,7 +63,7 @@ public sealed class SearchClient(HttpClient http)
     }
 
     /// <summary>
-    /// вынесли в отдельный метод для лучшего инлайнинга.
+    /// Extracted into a separate method for better inlining.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ProcessVideos(

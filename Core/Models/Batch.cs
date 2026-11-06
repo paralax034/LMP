@@ -12,7 +12,7 @@ public class Batch<T>(IReadOnlyList<T> items, string? continuationToken = null)
     public IReadOnlyList<T> Items { get; } = items;
 
     /// <summary>
-    /// Токен продолжения для последующей страницы выборки InnerTube.
+    /// Continuation token for the next page of the InnerTube fetch.
     /// </summary>
     public string? ContinuationToken { get; } = continuationToken;
 }

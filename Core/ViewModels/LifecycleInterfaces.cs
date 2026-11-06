@@ -1,57 +1,57 @@
 namespace LMP.Core.ViewModels;
 
 /// <summary>
-/// Уровень приостановки UI-обновлений.
+/// UI update suspension level.
 /// </summary>
 public enum SuspendLevel
 {
     /// <summary>
-    /// Окно активно — полная работа всех подписок и анимаций.
+    /// Window is active — full operation of all subscriptions and animations.
     /// </summary>
     None = 0,
 
     /// <summary>
-    /// Потеря фокуса или сворачивание (не в tray).
-    /// Поведение зависит от настройки OptimizeWhenInactive:
-    /// - true: аналогично Hard (dispose heavy subs)
-    /// - false: работает штатно (для второго монитора)
+    /// Focus lost or minimized (not to tray).
+    /// Behavior depends on OptimizeWhenInactive setting:
+    /// - true: similar to Hard (dispose heavy subs)
+    /// - false: operates normally (for second monitor)
     /// </summary>
     Soft = 1,
 
     /// <summary>
-    /// Минимизация в tray — жёсткая остановка.
-    /// Всегда dispose heavy подписок независимо от настроек.
+    /// Minimized to tray — hard stop.
+    /// Always disposes heavy subscriptions regardless of settings.
     /// </summary>
     Hard = 2
 }
 
 /// <summary>
-/// Определяет контракт для компонентов, поддерживающих приостановку и возобновление работы.
-/// Используется для оптимизации потребления ресурсов процессора и видеокарты во время фонового режима.
+/// Defines the contract for components supporting suspension and resumption of operation.
+/// Used for optimizing CPU and GPU resource usage during background mode.
 /// </summary>
 public interface ISuspendable
 {
     /// <summary>
-    /// Вызывается при переходе приложения или конкретного экрана в фоновый режим.
+    /// Called when the application or a specific screen enters background mode.
     /// </summary>
-    /// <param name="level">Уровень приостановки, определяющий глубину оптимизации ресурсов.</param>
+    /// <param name="level">Suspension level defining the depth of resource optimization.</param>
     void OnSuspend(SuspendLevel level);
 
     /// <summary>
-    /// Вызывается при возвращении приложения или экрана в активный режим.
+    /// Called when the application or screen returns to active mode.
     /// </summary>
-    /// <param name="previousLevel">Предыдущий уровень приостановки, из которого выполняется выход.</param>
+    /// <param name="previousLevel">Previous suspension level from which resumption occurs.</param>
     void OnResume(SuspendLevel previousLevel);
 }
 
 /// <summary>
-/// Определяет контракт для компонентов, реагирующих на смену активного профиля пользователя.
-/// Требует полной переинициализации или сброса локальных кэшей данных.
+/// Defines the contract for components reacting to active user profile changes.
+/// Requires full reinitialization or clearing of local data caches.
 /// </summary>
 public interface IAccountAware
 {
     /// <summary>
-    /// Вызывается при успешном переключении учетной записи пользователя в системе.
+    /// Called upon successful switching of the user account in the system.
     /// </summary>
     void OnAccountChanged();
 }

@@ -1,192 +1,192 @@
 namespace LMP.Core.Audio.Interfaces;
 
 /// <summary>
-/// Абстракция над аудио API операционной системы (WaveOut, ALSA, PulseAudio, etc).
+/// Abstraction over the operating system audio API (WaveOut, ALSA, PulseAudio, etc).
 ///
 /// <para><b>Lifecycle:</b></para>
 /// <list type="number">
-///   <item><see cref="Initialize"/> — первичная инициализация (создаёт устройство, запускает fill loop)</item>
-///   <item><see cref="Reinitialize"/> — переинициализация для нового трека (fast/slow path)</item>
-///   <item><see cref="ActivateFillLoop"/> — активирует перекачку данных в буфер БЕЗ воспроизведения</item>
-///   <item><see cref="WaitForWarmup"/> — ожидает накопления минимума данных в буфере</item>
-///   <item><see cref="Start"/> — запускает воспроизведение</item>
-///   <item><see cref="Stop"/> — останавливает с micro fade-out</item>
-///   <item><see cref="Flush"/> — очищает буферы (для seek)</item>
+///   <item><see cref="Initialize"/> — initial initialization (creates the device, starts the fill loop)</item>
+///   <item><see cref="Reinitialize"/> — reinitialization for a new track (fast/slow path)</item>
+///   <item><see cref="ActivateFillLoop"/> — activates data transfer to the buffer WITHOUT playback</item>
+///   <item><see cref="WaitForWarmup"/> — waits for a minimum amount of data to accumulate in the buffer</item>
+///   <item><see cref="Start"/> — starts playback</item>
+///   <item><see cref="Stop"/> — stops with a micro fade-out</item>
+///   <item><see cref="Flush"/> — flushes buffers (for seeking)</item>
 /// </list>
 ///
 /// <para><b>Warmup Protocol:</b></para>
-/// <para>Для предотвращения артефактов при старте трека, вызывающий код должен:</para>
+/// <para>To prevent artifacts when starting a track, the calling code should:</para>
 /// <code>
-/// backend.ActivateFillLoop();          // Fill loop начинает наполнять BufferedWaveProvider
-/// backend.WaitForWarmup(timeoutMs);    // Ждём ≥200ms данных в буфере
-/// backend.Start();                     // Теперь безопасно запускать воспроизведение
+/// backend.ActivateFillLoop();          // Fill loop starts populating BufferedWaveProvider
+/// backend.WaitForWarmup(timeoutMs);    // Wait for ≥200ms of data in the buffer
+/// backend.Start();                     // Now safe to start playback
 /// </code>
 ///
 /// <para><b>Device Loss Protocol:</b></para>
-/// <para>Backend уведомляет подписчиков о событиях устройства через callbacks:</para>
+/// <para>The backend notifies subscribers of device events via callbacks:</para>
 /// <code>
 /// backend.SetDeviceLostCallback(() => /* soft pause */);
 /// backend.SetDeviceAvailableCallback(() => /* auto-recovery */);
-/// backend.SetStarvationCallback(() => /* диагностика */);
+/// backend.SetStarvationCallback(() => /* diagnostics */);
 /// </code>
-/// <para>Все callbacks вызываются из фонового потока — реализация не должна блокировать.</para>
+/// <para>All callbacks are invoked from a background thread — implementations must not block.</para>
 /// </summary>
 public interface IPlaybackBackend : IDisposable
 {
     /// <summary>
-    /// Первичная инициализация backend.
-    /// Создаёт аудио-устройство и запускает fill loop.
+    /// Initial initialization of the backend.
+    /// Creates the audio device and starts the fill loop.
     /// </summary>
-    /// <param name="sampleRate">Частота дискретизации (Гц).</param>
-    /// <param name="channels">Количество каналов.</param>
-    /// <param name="dataCallback">Callback поставки PCM данных.</param>
+    /// <param name="sampleRate">Sample rate (Hz).</param>
+    /// <param name="channels">Number of channels.</param>
+    /// <param name="dataCallback">PCM data supply callback.</param>
     void Initialize(int sampleRate, int channels, AudioDataCallback dataCallback);
 
     /// <summary>
-    /// Переинициализирует backend для нового трека.
+    /// Reinitializes the backend for a new track.
     ///
-    /// <para><b>Fast path</b> (формат совпадает): обновляет callback, flush буферов. ~0ms.</para>
-    /// <para><b>Slow path</b> (формат изменился): пересоздаёт аудио-устройство. ~50-200ms.</para>
-    /// <para><b>First call</b> (Initialize не вызывался): делегирует к Initialize.</para>
+    /// <para><b>Fast path</b> (format matches): updates callback, flushes buffers. ~0ms.</para>
+    /// <para><b>Slow path</b> (format changed): recreates the audio device. ~50-200ms.</para>
+    /// <para><b>First call</b> (Initialize was not called): delegates to Initialize.</para>
     ///
-    /// <para>После Reinitialize backend находится в остановленном состоянии.
-    /// Вызывающий код должен использовать warmup protocol:
+    /// <para>After Reinitialize, the backend is in a stopped state.
+    /// The calling code must use the warmup protocol:
     /// <see cref="ActivateFillLoop"/> → <see cref="WaitForWarmup"/> → <see cref="Start"/>.</para>
     /// </summary>
-    /// <param name="sampleRate">Частота дискретизации (Гц).</param>
-    /// <param name="channels">Количество каналов.</param>
-    /// <param name="dataCallback">Callback поставки PCM данных.</param>
+    /// <param name="sampleRate">Sample rate (Hz).</param>
+    /// <param name="channels">Number of channels.</param>
+    /// <param name="dataCallback">PCM data supply callback.</param>
     void Reinitialize(int sampleRate, int channels, AudioDataCallback dataCallback);
 
     /// <summary>
-    /// Активирует fill loop для перекачки данных из callback во внутренний буфер,
-    /// БЕЗ запуска воспроизведения.
+    /// Activates the fill loop to transfer data from the callback to the internal buffer,
+    /// WITHOUT starting playback.
     ///
-    /// <para>Вызывается перед <see cref="WaitForWarmup"/> для наполнения буфера
-    /// до того, как <see cref="Start"/> запустит аудио-устройство.</para>
+    /// <para>Called before <see cref="WaitForWarmup"/> to fill the buffer
+    /// before <see cref="Start"/> launches the audio device.</para>
     ///
-    /// <para>Если fill loop уже активен — no-op.</para>
+    /// <para>If the fill loop is already active — no-op.</para>
     /// </summary>
     void ActivateFillLoop();
 
     /// <summary>
-    /// Ожидает накопления минимального количества данных во внутреннем буфере.
+    /// Waits for the minimum amount of data to accumulate in the internal buffer.
     ///
-    /// <para>Блокирует вызывающий поток. Используется между
-    /// <see cref="ActivateFillLoop"/> и <see cref="Start"/> для гарантии
-    /// что аудио-устройство не начнёт читать из пустого буфера.</para>
+    /// <para>Blocks the calling thread. Used between
+    /// <see cref="ActivateFillLoop"/> and <see cref="Start"/> to guarantee
+    /// that the audio device will not start reading from an empty buffer.</para>
     /// </summary>
-    /// <param name="timeoutMs">Максимальное время ожидания (мс).</param>
-    /// <returns>true если буфер прогрет до минимального уровня, false если таймаут.</returns>
+    /// <param name="timeoutMs">Maximum wait time (ms).</param>
+    /// <returns>true if the buffer warmed up to the minimum level; false on timeout.</returns>
     bool WaitForWarmup(int timeoutMs = 3000);
 
-    /// <summary>Запускает воспроизведение.</summary>
+    /// <summary>Starts playback.</summary>
     void Start();
 
-    /// <summary>Останавливает (приостанавливает) воспроизведение с micro fade-out.</summary>
+    /// <summary>Stops (pauses) playback with a micro fade-out.</summary>
     void Stop();
 
     /// <summary>
-    /// Очищает внутренний буфер. Вызывается при seek для немедленного
-    /// перехода к новой позиции без проигрывания устаревших данных.
+    /// Flushes the internal buffer. Called during seeking to immediately
+    /// jump to a new position without playing stale data.
     /// </summary>
     void Flush();
 
     //  Device Loss 
 
     /// <summary>
-    /// true если аудиоустройство потеряно (BT disconnect, USB unplug и т.д.).
-    /// При <c>true</c> вызовы <see cref="Start"/> недопустимы до восстановления
-    /// через <see cref="Reinitialize"/>.
+    /// true if the audio device is lost (BT disconnect, USB unplug, etc.).
+    /// When <c>true</c>, calls to <see cref="Start"/> are invalid until restored
+    /// via <see cref="Reinitialize"/>.
     /// </summary>
     bool IsDeviceLost { get; }
 
     /// <summary>
-    /// Регистрирует callback уведомления о потере устройства во время воспроизведения.
+    /// Registers a notification callback for device loss during playback.
     ///
-    /// <para>Callback вызывается из фонового потока (fill loop / timer).
-    /// Реализация не должна блокировать — используй <see cref="Task.Run(Action)"/> при необходимости.</para>
-    /// <para>null = отписаться.</para>
+    /// <para>The callback is invoked from a background thread (fill loop / timer).
+    /// Implementations must not block — use <see cref="Task.Run(Action)"/> if necessary.</para>
+    /// <para>null = unsubscribe.</para>
     /// </summary>
-    /// <param name="callback">Обработчик события потери устройства.</param>
+    /// <param name="callback">Device lost event handler.</param>
     void SetDeviceLostCallback(Action? callback);
 
     /// <summary>
-    /// Регистрирует callback уведомления о появлении устройства после потери.
+    /// Registers a notification callback for device availability after loss.
     ///
-    /// <para>Реализация запускает polling watcher при <see cref="IsDeviceLost"/> = true.
-    /// Callback вызывается из timer thread при обнаружении устройства.
-    /// Реализация не должна блокировать.</para>
-    /// <para>null = остановить watcher.</para>
+    /// <para>The implementation starts a polling watcher when <see cref="IsDeviceLost"/> = true.
+    /// The callback is invoked from the timer thread when a device is detected.
+    /// Implementations must not block.</para>
+    /// <para>null = stop watcher.</para>
     /// </summary>
-    /// <param name="callback">Обработчик события появления устройства.</param>
+    /// <param name="callback">Device available event handler.</param>
     void SetDeviceAvailableCallback(Action? callback);
 
     /// <summary>
-    /// Регистрирует callback уведомления о длительном отсутствии PCM данных.
+    /// Registers a notification callback for prolonged absence of PCM data.
     ///
-    /// <para>Вызывается когда fill loop не получает данных более 1 секунды при открытом gate.
-    /// Callback вызывается из fill thread — не должен блокировать.</para>
-    /// <para>null = отписаться.</para>
+    /// <para>Invoked when the fill loop receives no data for over 1 second while the gate is open.
+    /// The callback is invoked from the fill thread — must not block.</para>
+    /// <para>null = unsubscribe.</para>
     /// </summary>
-    /// <param name="callback">Обработчик события starvation.</param>
+    /// <param name="callback">Starvation event handler.</param>
     void SetStarvationCallback(Action? callback);
 
     /// <summary>
-    /// Устанавливает volume gain, применяемый непосредственно перед передачей
-    /// PCM в аудиоустройство (on-read path). Изменение слышно немедленно
-    /// (задержка ≤ один waveOut буфер, ~100ms), минуя provider buffer.
+    /// Sets the volume gain applied immediately before submitting
+    /// PCM to the audio device (on-read path). The change is heard immediately
+    /// (latency ≤ one waveOut buffer, ~100ms), bypassing the provider buffer.
     /// </summary>
     /// <remarks>
-    /// <para>Используется для управления громкостью пользователем (slider).
-    /// Нормализационный gain (<see cref="AudioPipeline"/> → <see cref="GainCrossfader"/>)
-    /// применяется отдельно в AudioCallback при записи в provider.</para>
-    /// <para>Вызывается из command thread — реализация должна быть thread-safe.</para>
+    /// <para>Used for user volume control (slider).
+    /// Normalization gain (<see cref="AudioPipeline"/> → <see cref="GainCrossfader"/>)
+    /// is applied separately in AudioCallback when writing to the provider.</para>
+    /// <para>Called from the command thread — implementations must be thread-safe.</para>
     /// </remarks>
-    /// <param name="gain">Volume gain множитель [0, MaxVolumeGain].</param>
+    /// <param name="gain">Volume gain multiplier [0, MaxVolumeGain].</param>
     void SetVolumeGain(float gain);
 
     //  Diagnostics 
 
-    /// <summary>Громкость (0.0 – 1.0).</summary>
+    /// <summary>Volume (0.0 – 1.0).</summary>
     float Volume { get; set; }
 
-    /// <summary>Воспроизводится ли в данный момент.</summary>
+    /// <summary>Gets whether playback is currently active.</summary>
     bool IsPlaying { get; }
 
     /// <summary>
-    /// Количество семплов (samples × channels) во внутреннем буфере,
-    /// которые были переданы, но ещё не воспроизведены.
+    /// Number of samples (samples × channels) in the internal buffer
+    /// that have been written but not yet played.
     /// </summary>
     int BufferedSamples { get; }
 
     int BufferedBytes { get; }
 
     /// <summary>
-    /// Монотонный счётчик сэмплов источника (frames × channels), переданных устройству из <see cref="AudioDataCallback"/>
-    /// за всё время жизни бэкенда. Не сбрасывается при Flush/Reinitialize: потребитель привязывается к нему через точку отсчёта.
+    /// Monotonic counter of source samples (frames × channels) passed to the device from <see cref="AudioDataCallback"/>
+    /// over the lifetime of the backend. Not reset on Flush/Reinitialize: consumer binds to it via a reference point.
     /// </summary>
     long RenderedSamples { get; }
 
     /// <summary>
-    /// Частота устройства вывода в Гц, в которой считается <see cref="BufferedSamples"/>.
-    /// <c>0</c> — бэкенд не ресемплирует, и потребитель берёт частоту источника.
+    /// Output device sample rate in Hz used to calculate <see cref="BufferedSamples"/>.
+    /// <c>0</c> — backend does not resample, and the consumer uses the source rate.
     /// </summary>
     int DeviceSampleRate => 0;
 
     /// <summary>
-    /// Возвращает согласованный снимок часов рендера без блокировок и аллокаций.
-    /// Снимок публикует единственный писатель — поток устройства.
+    /// Returns a consistent snapshot of the render clock without locks or allocations.
+    /// The snapshot is published by a single writer — the device thread.
     /// </summary>
     RenderClockSnapshot ReadRenderClock();
 
-    /// <summary>Название бэкенда для диагностики.</summary>
+    /// <summary>Backend name for diagnostic purposes.</summary>
     string Name { get; }
 }
 
 /// <summary>
-/// Callback для запроса PCM данных от бэкенда.
+/// Callback for requesting PCM data from the backend.
 /// </summary>
-/// <param name="buffer">Буфер для заполнения (float32, interleaved).</param>
-/// <returns>Количество заполненных фреймов (samples / channels).</returns>
+/// <param name="buffer">Buffer to fill (float32, interleaved).</param>
+/// <returns>Number of frames filled (samples / channels).</returns>
 public delegate int AudioDataCallback(Span<float> buffer);

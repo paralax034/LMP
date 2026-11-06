@@ -7,8 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Интеграционные тесты и бенчмарки подсистемы дешифрации N-Token.
-/// Проверяют взаимодействие с QuickJS runtime, кэширование, идемпотентность и AST Solver.
+/// Integration tests and benchmarks for the N-Token decryption subsystem.
+/// Validates interaction with QuickJS runtime, caching, idempotency, and AST Solver.
 /// </summary>
 public static class NTokenTests
 {
@@ -238,7 +238,7 @@ public static class NTokenTests
         for (int i = 0; i < iterations; i++)
             tokens[i] = $"B{nonce:X4}{i:D5}AA___"[..15];
 
-        // 1. Cache Miss (вызов через NTokenDecryptor -> QuickJS persistent context с одновременным заполнением кэша)
+        // 1. Cache Miss (call via NTokenDecryptor -> QuickJS persistent context while populating the cache)
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < tokens.Length; i++)
             await decryptor.DecryptAsync(tokens[i], ct).ConfigureAwait(false);
@@ -247,7 +247,7 @@ public static class NTokenTests
         var avgMiss = sw.Elapsed.TotalMilliseconds / iterations;
         Log.Info($"[Benchmark] Cache miss (QuickJS): {avgMiss:F3}ms avg ({iterations} runs)");
 
-        // 2. Cache Hit (повторный прогон по уже заполненному кэшу NTokenDecryptor без повторных вызовов QuickJS)
+        // 2. Cache Hit (subsequent run over the populated NTokenDecryptor cache without re-invoking QuickJS)
         sw.Restart();
         for (int i = 0; i < tokens.Length; i++)
             await decryptor.DecryptAsync(tokens[i], ct).ConfigureAwait(false);

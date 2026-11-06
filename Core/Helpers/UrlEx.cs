@@ -4,28 +4,28 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Утилиты для работы с URL. Все операции сохраняют исходный порядок параметров
-/// и НЕ перекодируют значения, которые не были изменены.
+/// Utilities for working with URLs. All operations preserve the original parameter order
+/// and do NOT re-encode values that were not modified.
 /// </summary>
 internal static class UrlEx
 {
-    //  SetQueryParameter — IN-PLACE замена с сохранением порядка
+    //  SetQueryParameter — IN-PLACE replacement preserving order
 
     /// <summary>
-    /// Устанавливает значение query-параметра. Если параметр уже существует,
-    /// заменяет его значение НА МЕСТЕ, сохраняя порядок всех остальных параметров.
-    /// Если параметра нет — добавляет в конец.
-    /// Значение кодируется через <see cref="Uri.EscapeDataString"/>,
-    /// но остальные параметры остаются нетронутыми (zero re-encoding).
+    /// Sets the value of a query parameter. If the parameter already exists,
+    /// replaces its value IN-PLACE while preserving the order of all other parameters.
+    /// If the parameter does not exist, appends it to the end.
+    /// The value is encoded via <see cref="Uri.EscapeDataString"/>,
+    /// but all other parameters remain untouched (zero re-encoding).
     /// </summary>
     public static string SetQueryParameter(string url, string key, string value)
     {
         var urlSpan = url.AsSpan();
 
-        // Ищем позицию существующего параметра
+        // Find the position of the existing parameter
         var (keyStart, valueStart, valueEnd) = FindParameterBounds(urlSpan, key);
 
-        // Кодируем ТОЛЬКО новое значение
+        // Encode ONLY the new value
         var encodedValue = Uri.EscapeDataString(value);
 
         if (keyStart >= 0)
@@ -33,7 +33,7 @@ internal static class UrlEx
             // IN-PLACE REPLACEMENT
             // url = [prefix][old_value][suffix]
             //        ^0..valueStart    ^valueEnd..
-            // Заменяем old_value на encodedValue, всё остальное — побитово копируем.
+            // Replace old_value with encodedValue; bitwise copy everything else.
 
             int newLength = valueStart + encodedValue.Length + (url.Length - valueEnd);
 
@@ -43,7 +43,7 @@ internal static class UrlEx
                 var (originalUrl, valStart, valEnd, newVal) = state;
                 var src = originalUrl.AsSpan();
 
-                // Prefix: всё до старого значения
+                // Prefix: everything before the old value
                 src[..valStart].CopyTo(span);
                 int pos = valStart;
 
@@ -51,12 +51,12 @@ internal static class UrlEx
                 newVal.AsSpan().CopyTo(span[pos..]);
                 pos += newVal.Length;
 
-                // Suffix: всё после старого значения
+                // Suffix: everything after the old value
                 src[valEnd..].CopyTo(span[pos..]);
             });
         }
 
-        // APPEND — параметра нет, добавляем в конец
+        // APPEND — parameter does not exist, append to the end
         var separator = urlSpan.Contains('?') ? '&' : '?';
         var encodedKey = Uri.EscapeDataString(key);
 
@@ -83,7 +83,7 @@ internal static class UrlEx
     }
 
     /// <summary>
-    /// Удаляет query-параметр из URL. Не трогает и не перекодирует остальные параметры.
+    /// Removes a query parameter from the URL. Does not touch or re-encode other parameters.
     /// </summary>
     public static string RemoveQueryParameter(string url, string key)
     {
@@ -91,35 +91,35 @@ internal static class UrlEx
         var (keyStart, _, valueEnd) = FindParameterBounds(urlSpan, key);
 
         if (keyStart < 0)
-            return url; // Параметра нет — возвращаем как есть
+            return url; // Parameter does not exist — return as is
 
-        // Определяем полный диапазон удаления (включая разделитель '&' или '?')
+        // Determine the full removal range (including the '&' or '?' delimiter)
         int removeStart;
         int removeEnd = valueEnd;
 
         if (keyStart > 0 && urlSpan[keyStart - 1] == '&')
         {
-            // Параметр НЕ первый — удаляем вместе с предшествующим '&'
+            // Parameter is NOT first — remove together with the preceding '&'
             removeStart = keyStart - 1;
         }
         else if (keyStart > 0 && urlSpan[keyStart - 1] == '?')
         {
-            // Параметр первый после '?'
+            // Parameter is first after '?'
             if (removeEnd < urlSpan.Length && urlSpan[removeEnd] == '&')
             {
-                // Есть ещё параметры — удаляем '&' после
+                // More parameters remain — remove the following '&'
                 removeStart = keyStart;
                 removeEnd++;
             }
             else
             {
-                // Единственный параметр — удаляем вместе с '?'
+                // Sole parameter — remove together with '?'
                 removeStart = keyStart - 1;
             }
         }
         else
         {
-            // Параметр в начале строки (signatureCipher без '?')
+            // Parameter at the start of the string (signatureCipher without '?')
             removeStart = keyStart;
             if (removeEnd < urlSpan.Length && urlSpan[removeEnd] == '&')
                 removeEnd++;
@@ -143,8 +143,8 @@ internal static class UrlEx
     //  Query parameter reading — zero-alloc fast path
 
     /// <summary>
-    /// Возвращает raw (не декодированное) значение параметра, или null если не найден.
-    /// Для большинства случаев декодирование не нужно.
+    /// Returns the raw (undecoded) parameter value, or null if not found.
+    /// Decoding is unnecessary for most cases.
     /// </summary>
     public static string? TryGetQueryParameterValue(string url, string key)
     {
@@ -156,7 +156,7 @@ internal static class UrlEx
 
         var rawValue = urlSpan[valueStart..valueEnd];
 
-        // Если значение содержит %XX — декодируем, иначе возвращаем как есть
+        // If the value contains %XX, decode it; otherwise return as is
         if (rawValue.Contains('%'))
             return Uri.UnescapeDataString(rawValue.ToString());
 
@@ -164,11 +164,11 @@ internal static class UrlEx
     }
 
     /// <summary>
-    /// Извлекает время истечения срока действия URL из параметра &amp;expire= (UTC) без строковых аллокаций.
+    /// Extracts URL expiration time from the &amp;expire= parameter (UTC) without string allocations.
     /// </summary>
-    /// <param name="url">URL для проверки.</param>
-    /// <param name="expireUtc">Распарсенное время в UTC.</param>
-    /// <returns><c>true</c>, если параметр найден и корректно распарсен; иначе <c>false</c>.</returns>
+    /// <param name="url">URL to check.</param>
+    /// <param name="expireUtc">Parsed time in UTC.</param>
+    /// <returns><c>true</c> if the parameter was found and successfully parsed; otherwise <c>false</c>.</returns>
     public static bool TryGetExpireUtc(string url, out DateTime expireUtc)
     {
         var urlSpan = url.AsSpan();
@@ -189,11 +189,11 @@ internal static class UrlEx
     }
 
     /// <summary>
-    /// Проверяет, истёк ли срок действия URL или истекает ли он в ближайшее время.
+    /// Checks whether the URL has expired or will expire shortly.
     /// </summary>
-    /// <param name="url">URL для проверки.</param>
-    /// <param name="safetyMargin">Запас времени до фактического истечения (по умолчанию 5 минут).</param>
-    /// <returns><c>true</c>, если URL протух или скоро протухнет; <c>false</c> если ссылка ещё валидна или expire отсутствует.</returns>
+    /// <param name="url">URL to check.</param>
+    /// <param name="safetyMargin">Time margin before actual expiration (defaults to 5 minutes).</param>
+    /// <returns><c>true</c> if the URL is expired or about to expire; <c>false</c> if the link is still valid or expire parameter is missing.</returns>
     public static bool IsUrlExpiredOrExpiringSoon(string url, TimeSpan? safetyMargin = null)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -216,7 +216,7 @@ internal static class UrlEx
 
         while (pos < urlSpan.Length)
         {
-            // Находим конец текущего параметра
+            // Find the end of the current parameter
             int ampPos = urlSpan[pos..].IndexOf('&');
             int segEnd = ampPos >= 0 ? pos + ampPos : urlSpan.Length;
 
@@ -261,14 +261,14 @@ internal static class UrlEx
     //  CORE: FindParameterBounds — span-based, zero-allocation
 
     /// <summary>
-    /// Находит точные границы параметра в URL.
-    /// Возвращает (keyStart, valueStart, valueEnd):
-    ///   keyStart  — индекс первого символа ключа
-    ///   valueStart — индекс первого символа значения (после '=')
-    ///   valueEnd   — индекс символа ПОСЛЕ последнего символа значения ('&' или конец строки)
-    /// Если параметр не найден, keyStart = -1.
+    /// Finds the exact parameter bounds in the URL.
+    /// Returns (keyStart, valueStart, valueEnd):
+    ///   keyStart   — index of the first character of the key
+    ///   valueStart — index of the first character of the value (after '=')
+    ///   valueEnd   — index of the character AFTER the last character of the value ('&' or end of string)
+    /// If the parameter is not found, keyStart = -1.
     /// 
-    /// Поиск по RAW ключу (без декодирования), т.к. YouTube ключи всегда plain ASCII.
+    /// Searches using the RAW key (without decoding), as YouTube keys are always plain ASCII.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static (int keyStart, int valueStart, int valueEnd) FindParameterBounds(
@@ -280,11 +280,11 @@ internal static class UrlEx
 
         while (searchPos < url.Length)
         {
-            // Находим конец текущего сегмента
+            // Find the end of the current segment
             int ampPos = url[searchPos..].IndexOf('&');
             int segmentEnd = ampPos >= 0 ? searchPos + ampPos : url.Length;
 
-            // Ищем '=' в текущем сегменте
+            // Find '=' in the current segment
             var segment = url[searchPos..segmentEnd];
             int eqPos = segment.IndexOf('=');
 
@@ -292,7 +292,7 @@ internal static class UrlEx
             {
                 var paramKey = segment[..eqPos];
 
-                // Точное сравнение ключа (case-sensitive, как YouTube и требует)
+                // Exact key comparison (case-sensitive, as required by YouTube)
                 if (paramKey.SequenceEqual(keySpan))
                 {
                     int keyStart = searchPos;
@@ -303,7 +303,7 @@ internal static class UrlEx
             }
             else
             {
-                // Параметр без значения (key без =)
+                // Parameter without a value (key without =)
                 if (segment.SequenceEqual(keySpan))
                 {
                     return (searchPos, segmentEnd, segmentEnd);

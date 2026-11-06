@@ -58,7 +58,7 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Обновляет иконки Maximize/Restore в title bar.
+    /// Updates the Maximize/Restore icons in the title bar.
     /// </summary>
     private void UpdateMaximizeRestoreIcons(WindowState state)
     {
@@ -70,7 +70,7 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Проверяет пользовательскую настройку MinimizeToTray.
+    /// Checks the MinimizeToTray user setting.
     /// </summary>
     private bool ShouldMinimizeToTray()
     {

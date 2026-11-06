@@ -5,17 +5,17 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Высокопроизводительный классификатор инвариантных (hl=en) ошибок playability от YouTube InnerTube API.
-/// Распознаёт юридические/региональные ограничения и извлекает имя правообладателя.
+/// High-performance classifier for invariant (hl=en) YouTube InnerTube API playability errors.
+/// Detects legal/regional restrictions and extracts the copyright owner's name.
 /// </summary>
 public static partial class PlayabilityErrorClassifier
 {
     /// <summary>
-    /// Анализирует сырое текстовое сообщение ошибки playability (hl=en) и классифицирует его.
+    /// Analyzes a raw playability error message (hl=en) and classifies it.
     /// </summary>
-    /// <param name="errorMessage">Сырой текст ошибки от YouTube API.</param>
-    /// <param name="claimant">Имя правообладателя (если найдено).</param>
-    /// <returns>Причина недоступности потока.</returns>
+    /// <param name="errorMessage">Raw error message text from the YouTube API.</param>
+    /// <param name="claimant">Copyright owner's name (if found).</param>
+    /// <returns>Reason for stream unavailability.</returns>
     public static StreamUnavailableReason Classify(string errorMessage, out string? claimant)
     {
         claimant = null;
@@ -69,7 +69,7 @@ public static partial class PlayabilityErrorClassifier
     }
 
     /// <summary>
-    /// Извлекает имя правообладателя из инвариантного английского сообщения об ошибке.
+    /// Extracts the copyright owner's name from an invariant English error message.
     /// </summary>
     public static string ExtractCopyrightHolder(string error)
     {

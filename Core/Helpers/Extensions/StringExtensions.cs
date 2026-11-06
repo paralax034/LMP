@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Методы расширения для строк.
+/// Extension methods for strings.
 /// </summary>
 internal static class StringExtensions
 {
@@ -13,7 +13,7 @@ internal static class StringExtensions
     extension(string? s)
     {
         /// <summary>
-        /// Усекает строку до длины <paramref name="len"/> с добавлением многоточия.
+        /// Truncates the string to length <paramref name="len"/>, appending an ellipsis.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public string Truncate(int len = 20)
@@ -26,14 +26,14 @@ internal static class StringExtensions
     extension(string str)
     {
         /// <summary>
-        /// Возвращает <see langword="null"/>, если строка пуста или состоит только из пробелов.
+        /// Returns <see langword="null"/> if the string is empty or consists only of whitespace.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public string? NullIfWhiteSpace() =>
             !string.IsNullOrWhiteSpace(str) ? str : null;
 
         /// <summary>
-        /// Разворачивает строку без аллокации массивов.
+        /// Reverses the string without array allocations.
         /// </summary>
         public string Reverse()
         {
@@ -48,10 +48,10 @@ internal static class StringExtensions
         }
 
         /// <summary>
-        /// Нормализует входную строку, заменяя любые управляющие символы и переводы строк на пробелы,
-        /// схлопывая повторные пробелы и выполняя тримминг по краям.
+        /// Normalizes the input string by replacing any control characters and newlines with spaces,
+        /// collapsing duplicate spaces, and trimming leading and trailing whitespace.
         /// </summary>
-        /// <returns>Нормализованная однострочная строка без мусорных управляющих символов.</returns>
+        /// <returns>A normalized single-line string without junk control characters.</returns>
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         public string SanitizeSingleLine()
         {

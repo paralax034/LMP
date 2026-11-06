@@ -3,7 +3,7 @@
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Методы расширения для HTTP-запросов и клиента.
+/// Extension methods for HTTP requests and client.
 /// </summary>
 internal static class HttpExtensions
 {
@@ -22,9 +22,9 @@ internal static class HttpExtensions
     extension(HttpRequestMessage request)
     {
         /// <summary>
-        /// Создает глубокую копию запроса с сохранением заголовков и недеструктивным контентом.
+        /// Creates a deep copy of the request while preserving headers and non-destructive content.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="request"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="request"/> is null.</exception>
         public HttpRequestMessage Clone()
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -53,9 +53,9 @@ internal static class HttpExtensions
     extension(HttpClient http)
     {
         /// <summary>
-        /// Выполняет HEAD-запрос с чтением только заголовков ответа.
+        /// Performs a HEAD request reading response headers only.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="http"/> или <paramref name="requestUri"/> равны null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="http"/> or <paramref name="requestUri"/> is null.</exception>
         public async ValueTask<HttpResponseMessage> HeadAsync(
             string requestUri,
             CancellationToken cancellationToken = default)

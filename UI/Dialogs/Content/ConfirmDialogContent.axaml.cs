@@ -3,46 +3,46 @@ using Avalonia.Controls;
 namespace LMP.UI.Dialogs.Content;
 
 /// <summary>
-/// Контент overlay-диалога подтверждения (Yes/No, OK/Cancel).
+/// Content for confirmation overlay dialogs (Yes/No, OK/Cancel).
 /// 
-/// <para><b>Все свойства immutable</b> — задаются через конструктор,
-/// DataContext устанавливается после инициализации полей,
-/// поэтому XAML-биндинги корректно подхватывают значения.</para>
+/// <para><b>All properties are immutable</b> — set via constructor,
+/// DataContext is set after field initialization,
+/// ensuring XAML bindings correctly pick up values.</para>
 /// </summary>
 public partial class ConfirmDialogContent : UserControl
 {
-    /// <summary>Заголовок диалога.</summary>
+    /// <summary>Dialog title.</summary>
     public string Title { get; }
 
-    /// <summary>Текст сообщения.</summary>
+    /// <summary>Message text.</summary>
     public string Message { get; }
 
-    /// <summary>Текст кнопки подтверждения.</summary>
+    /// <summary>Confirmation button text.</summary>
     public string ConfirmText { get; }
 
-    /// <summary>Текст кнопки отмены.</summary>
+    /// <summary>Cancel button text.</summary>
     public string CancelText { get; }
 
-    /// <summary>Подтвердить — вызывает callback с <c>true</c>.</summary>
+    /// <summary>Confirm — invokes callback with <c>true</c>.</summary>
     public IRelayCommand ConfirmCommand { get; }
 
-    /// <summary>Отменить — вызывает callback с <c>false</c>.</summary>
+    /// <summary>Cancel — invokes callback with <c>false</c>.</summary>
     public IRelayCommand CancelCommand { get; }
 
     /// <summary>
-    /// Конструктор для XAML-компилятора и превьюера.
-    /// Заполняет заглушками, чтобы дизайнер не падал.
+    /// Constructor for the XAML compiler and previewer.
+    /// Populates stub values to prevent designer crashes.
     /// </summary>
     public ConfirmDialogContent()
         : this("Designer Title", "Designer Message text...", "OK", "Cancel", _ => { })
     {
     }
 
-    /// <param name="title">Заголовок диалога.</param>
-    /// <param name="message">Текст сообщения.</param>
-    /// <param name="confirmText">Текст кнопки подтверждения.</param>
-    /// <param name="cancelText">Текст кнопки отмены.</param>
-    /// <param name="onResult">Callback: <c>true</c> = подтверждено, <c>false</c> = отменено.</param>
+    /// <param name="title">Dialog title.</param>
+    /// <param name="message">Message text.</param>
+    /// <param name="confirmText">Confirmation button text.</param>
+    /// <param name="cancelText">Cancel button text.</param>
+    /// <param name="onResult">Callback: <c>true</c> = confirmed, <c>false</c> = cancelled.</param>
     public ConfirmDialogContent(
         string title,
         string message,

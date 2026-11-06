@@ -1,35 +1,35 @@
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// Описание одной кнопки в диалоге выбора.
+/// Description of a single button in a choice dialog.
 /// </summary>
-/// <typeparam name="T">Тип значения, возвращаемого при нажатии.</typeparam>
+/// <typeparam name="T">The type of the value returned when clicked.</typeparam>
 public sealed class ChoiceOption<T>
 {
-    /// <summary>Текст кнопки.</summary>
+    /// <summary>Button text.</summary>
     public required string Text { get; init; }
 
-    /// <summary>Значение, возвращаемое при нажатии этой кнопки.</summary>
+    /// <summary>Value returned when this button is clicked.</summary>
     public required T Value { get; init; }
 
     /// <summary>
-    /// True — кнопка акцентная (primary). По умолчанию false.
+    /// True if the button is primary (accented). Default is false.
     /// </summary>
     public bool IsPrimary { get; init; }
 }
 
 /// <summary>
-/// ViewModel для одной кнопки в UI. Не generic — для работы с DataTemplate.
+/// ViewModel for a single button in the UI. Non-generic for DataTemplate compatibility.
 /// </summary>
 public sealed class ChoiceButtonViewModel
 {
-    /// <summary>Текст кнопки.</summary>
+    /// <summary>Button text.</summary>
     public string Text { get; }
 
-    /// <summary>True — акцентная кнопка.</summary>
+    /// <summary>True if the button is primary (accented).</summary>
     public bool IsPrimary { get; }
 
-    /// <summary>Команда нажатия.</summary>
+    /// <summary>Click command.</summary>
     public IRelayCommand ClickCommand { get; }
 
     public ChoiceButtonViewModel(string text, bool isPrimary, Action onClick)
@@ -41,10 +41,10 @@ public sealed class ChoiceButtonViewModel
 }
 
 /// <summary>
-/// Универсальная ViewModel для overlay-диалога с произвольным набором кнопок
-/// и опциональным чекбоксом.
+/// Universal ViewModel for an overlay dialog with an arbitrary set of buttons
+/// and an optional checkbox.
 /// 
-/// <para><b>Использование:</b></para>
+/// <para><b>Usage:</b></para>
 /// <code>
 /// var vm = ChoiceDialogViewModel.Create(
 ///     title: "Close?",
@@ -59,27 +59,27 @@ public sealed class ChoiceButtonViewModel
 /// );
 /// </code>
 /// 
-/// <para>Кнопка Cancel добавляется автоматически если указан <c>cancelText</c>.</para>
+/// <para>The Cancel button is added automatically if <c>cancelText</c> is specified.</para>
 /// </summary>
 public sealed partial class ChoiceDialogViewModel : ObservableObject
 {
-    /// <summary>Заголовок диалога.</summary>
+    /// <summary>Dialog title.</summary>
     public string Title { get; }
 
-    /// <summary>Текст сообщения (может быть null/empty — тогда не показывается).</summary>
+    /// <summary>Message text (can be null/empty — hidden in that case).</summary>
     public string? Message { get; }
 
-    /// <summary>Текст чекбокса. Null = чекбокс не показывается.</summary>
+    /// <summary>Checkbox text. Null = checkbox is hidden.</summary>
     public string? CheckBoxText { get; }
 
-    /// <summary>Есть ли чекбокс.</summary>
+    /// <summary>Indicates whether a checkbox is present.</summary>
     public bool HasCheckBox => !string.IsNullOrEmpty(CheckBoxText);
 
-    /// <summary>Текущее состояние чекбокса.</summary>
+    /// <summary>Current state of the checkbox.</summary>
     [ObservableProperty]
     public partial bool IsChecked { get; set; }
 
-    /// <summary>Список кнопок для отображения.</summary>
+    /// <summary>List of buttons to display.</summary>
     public IReadOnlyList<ChoiceButtonViewModel> Buttons { get; }
 
     private ChoiceDialogViewModel(
@@ -95,25 +95,25 @@ public sealed partial class ChoiceDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Фабричный метод для создания типизированного диалога выбора.
+    /// Factory method for creating a strongly-typed choice dialog.
     /// 
-    /// <para>Генерирует <see cref="ChoiceDialogViewModel"/> (не generic)
-    /// для совместимости с DataTemplate, но при этом callbacks типизированы.</para>
+    /// <para>Generates a <see cref="ChoiceDialogViewModel"/> (non-generic)
+    /// for DataTemplate compatibility, while preserving strongly-typed callbacks.</para>
     /// </summary>
-    /// <typeparam name="T">Тип значения кнопок.</typeparam>
-    /// <param name="title">Заголовок.</param>
-    /// <param name="message">Текст сообщения (опционально).</param>
-    /// <param name="options">Список кнопок с их значениями.</param>
+    /// <typeparam name="T">Type of the button values.</typeparam>
+    /// <param name="title">Title.</param>
+    /// <param name="message">Message text (optional).</param>
+    /// <param name="options">List of buttons with their values.</param>
     /// <param name="onResult">
-    /// Callback при нажатии любой кнопки (кроме Cancel).
-    /// Параметры: (value, isCheckBoxChecked).
+    /// Callback invoked when any button (except Cancel) is clicked.
+    /// Parameters: (value, isCheckBoxChecked).
     /// </param>
-    /// <param name="onCancel">Callback при отмене (опционально).</param>
+    /// <param name="onCancel">Callback invoked on cancellation (optional).</param>
     /// <param name="cancelText">
-    /// Текст кнопки отмены. Если указан — кнопка Cancel добавляется автоматически.
-    /// Если null — кнопки Cancel нет.
+    /// Cancel button text. If specified, the Cancel button is added automatically.
+    /// If null, no Cancel button is added.
     /// </param>
-    /// <param name="checkBoxText">Текст чекбокса. Null — чекбокс не показывается.</param>
+    /// <param name="checkBoxText">Checkbox text. Null — checkbox is hidden.</param>
     public static ChoiceDialogViewModel Create<T>(
         string title,
         string? message,
@@ -123,7 +123,7 @@ public sealed partial class ChoiceDialogViewModel : ObservableObject
         string? cancelText = null,
         string? checkBoxText = null)
     {
-        // Ссылка на будущую VM для доступа к IsChecked из кнопок
+        // Reference to the future VM to access IsChecked from buttons
         ChoiceDialogViewModel? vmRef = null;
 
         var buttons = new List<ChoiceButtonViewModel>(options.Count + (cancelText != null ? 1 : 0));

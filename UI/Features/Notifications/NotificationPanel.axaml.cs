@@ -18,8 +18,8 @@ public partial class NotificationPanel : UserControl
     }
 
     /// <summary>
-    /// При раскрытии Expander мягко подкручивает его в область видимости ScrollViewer после завершения раскладки.
-    /// Не перехватывает клик мыши и не вызывает срыва взаимодействия.
+    /// Smoothly scrolls the Expander into the ScrollViewer's viewport upon expansion after layout completes.
+    /// Does not intercept mouse clicks or break user interaction.
     /// </summary>
     private static void OnExpanderExpanded(object? sender, RoutedEventArgs e)
     {

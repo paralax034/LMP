@@ -10,18 +10,18 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Детерминированные модульные тесты алгоритмов аудио-тракта и DSP:
-/// проверяют математические инварианты (ITU-R BS.1770-4, побитовую линейность,
-/// фазовую когерентность каналов, частотную избирательность, асимптотический потолок),
-/// конечный автомат состояний и отсутствие аллокаций (0 B) на горячем пути.
+/// Deterministic unit tests for audio pipeline algorithms and DSP:
+/// verifies mathematical invariants (ITU-R BS.1770-4, bitwise linearity,
+/// inter-channel phase coherence, frequency selectivity, asymptotic ceiling),
+/// finite-state machine transitions, and zero allocations (0 B) on the hot path.
 /// </summary>
 public static class AudioLogicTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
-    private const int BufferSamples = SampleRate / 10 * Channels; // 100 мс стерео
+    private const int BufferSamples = SampleRate / 10 * Channels; // 100 ms stereo
 
-    /// <summary>Позиция по часам рендера: ход в пределах очереди устройства, удержание при голодании и ограничение длительностью трека.</summary>
+    /// <summary>Position based on render clock: advances within the device queue, holds on underrun, and is clamped by track duration.</summary>
     [TestMethod(TestCategory.Unit, "Render Clock Position: Extrapolation, Starvation Hold & Duration Clamp", Group = TestGroups.Audio, Order = 1)]
     public static async Task TestRenderClockPositionContractsAsync()
     {
@@ -32,28 +32,28 @@ public static class AudioLogicTests
 
         var clock = new RenderClock();
 
-        // 1. Устройству передано 10 с + 100 мс, из них 100 мс ещё в очереди: прозвучало ровно 10 с
+        // 1. Device received 10 s + 100 ms, 100 ms of which is still queued: exactly 10 s played
         clock.Publish(baseSamples + BufferSamples, BufferSamples, t0, samplesPerSecond);
         RenderClockSnapshot snapshot = clock.Read();
         TestAssert.Equal(baseSamples, snapshot.PlayedSamples);
 
-        // 2. Между показаниями позиция идёт по реальному времени, но не дальше переданного устройству
+        // 2. Between readings, position advances by real time, but no further than submitted to the device
         long after25Ms = RenderClock.Extrapolate(in snapshot, t0 + frequency / 40);
         TestAssert.True(Math.Abs(after25Ms - baseSamples - 2_400) <= 1, $"25 ms must advance 2400 samples, got {after25Ms - baseSamples}");
 
         long rendered = baseSamples + BufferSamples;
         TestAssert.Equal(rendered, RenderClock.Extrapolate(in snapshot, t0 + frequency), "Extrapolation must not run past the device queue");
 
-        // 3. Голодание: очередь пуста, позиция стоит, а не убегает вперёд по таймеру
+        // 3. Underrun: queue is empty, position holds instead of drifting forward by timer
         clock.Publish(rendered, 0, t0 + frequency, samplesPerSecond);
         RenderClockSnapshot starved = clock.Read();
         TestAssert.Equal(rendered, RenderClock.Extrapolate(in starved, t0 + 2 * frequency), "Starved clock must hold its position");
 
-        // 4. Сбой показаний (счётчик «назад»): позиция не откатывается
+        // 4. Glitchy readings (backward counter): position does not roll back
         clock.Publish(rendered - 4_800, 0, t0 + 2 * frequency, samplesPerSecond);
         TestAssert.True(clock.Read().PlayedSamples >= rendered, "Render clock must never move backwards");
 
-        // 5. Позиция pipeline ограничена длительностью трека
+        // 5. Pipeline position is clamped to track duration
         var backend = new NullAudioBackend();
         var pipeline = AudioPipelineTestHarness.Create(
             new BlockingAudioSource(SampleRate, Channels),
@@ -77,7 +77,7 @@ public static class AudioLogicTests
     [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & State Machine Contracts", Group = TestGroups.Audio, Order = 2)]
     public static Task TestAdaptiveDecoderDelayAndBatchHysteresisAsync()
     {
-        // 1. Монотонная шкала адаптивных задержек декодера в зависимости от запаса PCM в буфере
+        // 1. Monotonic scale of adaptive decoder delays depending on PCM headroom in the buffer
         int delayEmpty = AudioPipeline.ComputeBufferFullDelayMs(0, SampleRate, Channels);
         int delayLow = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 200 / 1000, SampleRate, Channels);
         int delayMid = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 500 / 1000, SampleRate, Channels);
@@ -90,7 +90,7 @@ public static class AudioLogicTests
         TestAssert.Equal(100, delayHigh);
         TestAssert.Equal(180, delayMax);
 
-        // 2. Проверка контрактов конечного автомата PlayerStateTransitions
+        // 2. Verification of PlayerStateTransitions state machine contracts
         TestAssert.True(
             PlayerStateTransitions.CanAcceptCommand(PlayerState.Playing, new StarvationCommand(1, null!)),
             "StarvationCommand must be accepted in Playing state");
@@ -114,7 +114,7 @@ public static class AudioLogicTests
         if (!OperatingSystem.IsWindows())
             TestAssert.Skip("Windows-only WASAPI test");
 
-        const int frames = 960; // Полная длина микро-фейда (20 мс @ 48 кГц)
+        const int frames = 960; // Full micro-fade duration (20 ms @ 48 kHz)
         const int sampleCount = frames * Channels;
 
         float* nativeBuffer = (float*)NativeMemory.AllocZeroed((nuint)(sampleCount * sizeof(float)));
@@ -127,7 +127,7 @@ public static class AudioLogicTests
             float[] sourceSamples = new float[sampleCount];
             Array.Fill(sourceSamples, 0.5f);
 
-            // 1. Математическая проверка Fade-In от 0 до 1 (с учётом IEEE 754 округления шага 1.0f / 960)
+            // 1. Mathematical verification of Fade-In from 0 to 1 (considering IEEE 754 rounding of step size 1.0f / 960)
             Span<float> fadeSpan = new(nativeBuffer, sampleCount);
             fadeSpan.Fill(1.0f);
             float fadeGain = 0f;
@@ -151,7 +151,7 @@ public static class AudioLogicTests
                 TestAssert.True(curr >= prev, $"Fade-in envelope must be monotonically non-decreasing at frame {f}");
             }
 
-            // Следующий фрейм завершает Fade-In с фиксацией ровно 1.0f
+            // Next frame completes Fade-In, locking exactly to 1.0f
             bool fadeInDone = WinAudioBackend.ApplyFadeEnvelope(
                 fadeSpan[..Channels],
                 1,
@@ -161,9 +161,9 @@ public static class AudioLogicTests
             TestAssert.True(fadeInDone, "Fade-in must complete on terminal step");
             TestAssert.Equal(1.0f, fadeGain, "Fade-in terminal gain must be 1.0f");
 
-            // 2. Математическая проверка Fade-Out и гарантированного зануления хвоста буфера
+            // 2. Mathematical verification of Fade-Out and guaranteed zeroing of the buffer tail
             fadeSpan.Fill(1.0f);
-            fadeGain = 0.5f; // Должен завершиться ровно на половине буфера (480 фреймов), обнулив вторую половину
+            fadeGain = 0.5f; // Must complete exactly at half the buffer (480 frames), clearing the second half
 
             bool fadeOutDone = WinAudioBackend.ApplyFadeEnvelope(
                 fadeSpan,
@@ -179,7 +179,7 @@ public static class AudioLogicTests
                 TestAssert.Equal(0f, fadeSpan[i], $"Tail sample {i} after fade-out completion must be strictly 0f");
             }
 
-            // 3. Инвариант 0 B аллокаций на нативном Span
+            // 3. Invariant of 0 B allocations on native Span
             TestAssert.ZeroAlloc(() =>
             {
                 ring.Write(sourceSamples.AsSpan());
@@ -210,10 +210,10 @@ public static class AudioLogicTests
     {
         var processor = new GainProcessor();
 
-        // 1. Побитовая линейность при стационарном коэффициенте <= 1.0f в пределах [-SafeCeiling, +SafeCeiling]
+        // 1. Bitwise linearity for steady-state gain <= 1.0f within [-SafeCeiling, +SafeCeiling]
         processor.SetVolumeGain(0.5f);
         float[] warmup = new float[2400 * Channels];
-        processor.Process(warmup.AsSpan()); // Завершаем рампу (1200 стерео-фреймов)
+        processor.Process(warmup.AsSpan()); // Complete ramp (1200 stereo frames)
 
         float[] linearBuf = [-0.8f, -0.4f, 0.0f, 0.25f, 0.6f, 0.8f];
         float[] expectedBuf = [-0.4f, -0.2f, 0.0f, 0.125f, 0.3f, 0.4f];
@@ -227,15 +227,15 @@ public static class AudioLogicTests
                 $"GainProcessor linear scaling mismatch at {i}");
         }
 
-        // 2. Строгий асимптотический потолок SafeCeiling (0.985f) и монотонность при Volume Boost (> 1.0f)
+        // 2. Strict asymptotic SafeCeiling (0.985f) and monotonicity during Volume Boost (> 1.0f)
         processor.SetVolumeGain(2.5f);
         processor.Process(warmup.AsSpan());
 
-        float[] boostInputs = [0.1f, 0.3f, 0.36f, 0.5f, 0.8f, 1.0f]; // 0.36f * 2.5f = 0.90f (граница SoftKneeThreshold)
+        float[] boostInputs = [0.1f, 0.3f, 0.36f, 0.5f, 0.8f, 1.0f]; // 0.36f * 2.5f = 0.90f (SoftKneeThreshold boundary)
         float[] boostOutputs = (float[])boostInputs.Clone();
         processor.Process(boostOutputs.AsSpan());
 
-        // До порога 0.90f сигнал масштабируется строго линейно
+        // Below 0.90f threshold, signal scales strictly linearly
         TestAssert.True(MathF.Abs(boostOutputs[0] - 0.25f) < 1e-6f, "Sub-knee boost sample 0 must be linear");
         TestAssert.True(MathF.Abs(boostOutputs[1] - 0.75f) < 1e-6f, "Sub-knee boost sample 1 must be linear");
         TestAssert.True(MathF.Abs(boostOutputs[2] - 0.90f) < 1e-6f, "Knee boundary (0.90f) must be exact");
@@ -246,7 +246,7 @@ public static class AudioLogicTests
             TestAssert.True(boostOutputs[i] <= 0.985f, $"Soft-clip output {boostOutputs[i]:F6} exceeded SafeCeiling (0.985f)");
         }
 
-        // 3. Непрерывность рампы и идентичность L/R при перенацеливании громкости на лету
+        // 3. Ramp continuity and L/R identity during on-the-fly gain retargeting
         processor.SetVolumeGain(0.2f);
         processor.Process(warmup.AsSpan());
 
@@ -266,7 +266,7 @@ public static class AudioLogicTests
                 float right = stereoChunk[i + 1];
                 TestAssert.Equal(left, right, $"Stereo imbalance during volume ramp at index {i}");
 
-                // Максимальный теоретический шаг рампы за 1 фрейм при |Δgain| <= 0.8 равен 0.8 / 1200 = 0.00067f
+                // Maximum theoretical ramp step per frame for |Δgain| <= 0.8 is 0.8 / 1200 = 0.00067f
                 float step = MathF.Abs(left - prevSample);
                 TestAssert.True(step <= 0.001f, $"Discontinuous volume step: {step:F6}");
                 prevSample = left;
@@ -282,7 +282,7 @@ public static class AudioLogicTests
         var limiter = new TruePeakLimiter(SampleRate);
         var crossfader = new GainCrossfader(1.0f);
 
-        // 1. Побитовая прозрачность в линейной области (|x| <= KneeStart = 0.88f, gain = 1.0f)
+        // 1. Bitwise transparency in linear region (|x| <= KneeStart = 0.88f, gain = 1.0f)
         float[] linearSignal = new float[512 * Channels];
         for (int f = 0; f < 512; f++)
         {
@@ -302,8 +302,8 @@ public static class AudioLogicTests
                 $"TruePeakLimiter altered linear sample below KneeStart (0.88f) at index {i}");
         }
 
-        // 2. Строгий Stereo Link: если пик возникает только в левом канале (L = 1.6f, R = 0.4f -> отношение 4:1),
-        // оба канала обязаны ослабляться на идентичный коэффициент с сохранением отношения L/R == 4:1 и потолка <= 0.985f.
+        // 2. Strict Stereo Link: if a peak occurs only in the left channel (L = 1.6f, R = 0.4f -> 4:1 ratio),
+        // both channels must be attenuated by an identical factor, preserving L/R ratio == 4:1 and ceiling <= 0.985f.
         limiter.Reset();
         crossfader.Reset(1.0f);
 
@@ -327,8 +327,8 @@ public static class AudioLogicTests
             TestAssert.True(outL <= 0.985f && outR <= 0.985f, $"Limiter ceiling breached at frame {f}: L={outL:F5}");
             TestAssert.True(outR > 0f, "Right channel must not be zeroed out");
 
-            // Stereo Link: общий коэффициент для обоих каналов сохраняет отношение L/R ровно 4:1.
-            // Прежний порог (> 2.0) пропускал независимый клиппинг канала (L -> 0.985, R = 0.4 даёт 2.46).
+            // Stereo Link: common factor for both channels preserves L/R ratio at exactly 4:1.
+            // Former threshold (> 2.0) allowed independent channel clipping (L -> 0.985, R = 0.4 yields 2.46).
             float ratio = outL / outR;
             TestAssert.True(MathF.Abs(ratio - 4.0f) < 1e-3f, $"Stereo link broken at frame {f}: L/R={ratio:F5}, expected 4.0");
         }
@@ -341,7 +341,7 @@ public static class AudioLogicTests
     {
         var eq = new EqualizerProcessor(SampleRate, Channels);
 
-        // 1. Побитовая прозрачность в режиме Bypass
+        // 1. Bitwise transparency in Bypass mode
         float[] input1k = new float[2048 * Channels];
         for (int f = 0; f < 2048; f++)
         {
@@ -361,10 +361,10 @@ public static class AudioLogicTests
                 $"Bypassed EQ modified sample at {i}");
         }
 
-        // 2. Точность коэффициента усиления Cytomic SVF на центральной частоте полосы 1 кГц (+12 dB и -12 dB)
+        // 2. Cytomic SVF gain precision at 1 kHz center band frequency (+12 dB and -12 dB)
         Span<float> bands = stackalloc float[EqualizerProcessor.BandCount];
         bands.Clear();
-        bands[5] = 12.0f; // 1000 Гц -> +12 dB (3.98107x)
+        bands[5] = 12.0f; // 1000 Hz -> +12 dB (3.98107x)
 
         eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
         eq.SnapToTarget();
@@ -388,7 +388,7 @@ public static class AudioLogicTests
             MathF.Abs(boostPeak - expectedBoostPeak) < 0.04f,
             $"1 kHz +12 dB gain mismatch: actual={boostPeak:F4}, expected={expectedBoostPeak:F4}");
 
-        // Ослабление -12 dB (0.25119x) на той же полосе 1 кГц
+        // -12 dB attenuation (0.25119x) on the same 1 kHz band
         eq.Reset();
         bands[5] = -12.0f;
         eq.Configure(enabled: true, bands, preampDb: 0f, autoPreamp: false);
@@ -412,7 +412,7 @@ public static class AudioLogicTests
             MathF.Abs(cutPeak - expectedCutPeak) < 0.015f,
             $"1 kHz -12 dB cut mismatch: actual={cutPeak:F4}, expected={expectedCutPeak:F4}");
 
-        // 3. Приоритет разрешения пресетов (ForceGlobalEqualizer vs Per-Track) и биекция 5 <-> 10 полос
+        // 3. Preset resolution priority (ForceGlobalEqualizer vs Per-Track) and 5 <-> 10 band bijection
         var settings = new AudioSettings
         {
             EqualizerEnabled = true,
@@ -435,7 +435,7 @@ public static class AudioLogicTests
         for (int i = 0; i < 5; i++)
             TestAssert.Equal(macro5In[i], macro5Out[i], $"Macro5 <-> Iso10 roundtrip failed at band {i}");
 
-        // 4. Стресс-тест конкурентной публикации SeqLock (Configure из фоновых потоков vs Process за 0 B аллокаций)
+        // 4. Concurrent SeqLock publishing stress test (Configure from background threads vs Process at 0 B allocations)
         TestAssert.ZeroAlloc(() =>
         {
             input1k.AsSpan(0, 512).CopyTo(working.AsSpan(0, 512));
@@ -444,8 +444,8 @@ public static class AudioLogicTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
         var token = cts.Token;
-        // Токен не передаётся в Task.Run: при позднем старте задачи из пула он отменил бы её до запуска
-        // и превратил бы await в ложный TaskCanceledException
+        // Token is not passed to Task.Run: late task startup from pool would cancel it before launch
+        // and would turn the await into a false TaskCanceledException
         var writerTask = Task.Run(() =>
         {
             int step = 0;
@@ -473,7 +473,7 @@ public static class AudioLogicTests
     [TestMethod(TestCategory.Unit, "AudioSpectrumAnalyzer Band Isolation & Visualizer Buffer (0 Alloc)", Group = TestGroups.Audio, Order = 7)]
     public static Task TestAudioSpectrumAnalyzerBandIsolationAndVisualizerBufferAsync()
     {
-        // AudioVisualizerBuffer — глобальное статическое состояние: активное воспроизведение перезапишет уровни
+        // AudioVisualizerBuffer is a global static state: active playback will overwrite levels
         if (AudioVisualizerBuffer.HasRecentActivity)
             TestAssert.Skip("AudioVisualizerBuffer is being fed by active playback; global state would corrupt assertions");
 
@@ -494,26 +494,26 @@ public static class AudioLogicTests
                 analyzer.ProcessBlock(signal.AsSpan(), Channels);
         }
 
-        // 1. НЧ сигнал 62.5 Гц (полоса 1) должен доминировать в LowLevel
+        // 1. LF signal 62.5 Hz (band 1) must dominate in LowLevel
         FeedFrequency(62.5f);
         AudioVisualizerBuffer.CopyBands10(bands10);
         TestAssert.True(AudioVisualizerBuffer.LowLevel > AudioVisualizerBuffer.MidLevel * 2.0f, "62.5Hz must dominate LowLevel");
         TestAssert.True(AudioVisualizerBuffer.LowLevel > AudioVisualizerBuffer.HighLevel * 3.0f, "62.5Hz must not leak into HighLevel");
         TestAssert.True(bands10[1] > bands10[5] * 2.5f, "Band[1] (62Hz) must exceed Band[5] (1kHz)");
 
-        // 2. СЧ сигнал 1000 Гц (полоса 5) должен доминировать в MidLevel и выдавать DominantBandIndex == 5
+        // 2. MF signal 1000 Hz (band 5) must dominate in MidLevel and produce DominantBandIndex == 5
         FeedFrequency(1000.0f);
         AudioVisualizerBuffer.CopyBands10(bands10);
         TestAssert.Equal(5, AudioVisualizerBuffer.DominantBandIndex);
         TestAssert.True(AudioVisualizerBuffer.MidLevel > AudioVisualizerBuffer.LowLevel * 2.0f, "1kHz must dominate MidLevel");
 
-        // 3. ВЧ сигнал 8000 Гц (полоса 8) должен доминировать в HighLevel
+        // 3. HF signal 8000 Hz (band 8) must dominate in HighLevel
         FeedFrequency(8000.0f);
         AudioVisualizerBuffer.CopyBands10(bands10);
         TestAssert.True(AudioVisualizerBuffer.HighLevel > AudioVisualizerBuffer.LowLevel * 3.0f, "8kHz must dominate HighLevel");
         TestAssert.True(bands10[8] > bands10[1] * 3.0f, "Band[8] (8kHz) must exceed Band[1] (62Hz)");
 
-        // 4. Zero-Alloc (после 50 итераций прогрева для завершения Tiered PGO компиляции) и чистота Reset()
+        // 4. Zero-Alloc (after 50 warmup iterations to complete Tiered PGO compilation) and purity of Reset()
         TestAssert.ZeroAlloc(
             () => analyzer.ProcessBlock(signal.AsSpan(), Channels),
             warmup: 50,
@@ -530,10 +530,10 @@ public static class AudioLogicTests
     [TestMethod(TestCategory.Unit, "EBU R128 / ITU-R BS.1770-4 Reference & Pre-Scan Config Invariants (0 Alloc)", Group = TestGroups.Audio, Order = 8)]
     public static Task TestEbuR128AnalyzerAndKWeightingMathematicalReferenceAsync()
     {
-        const int blockFrames = 4800; // 100 мс @ 48 кГц
+        const int blockFrames = 4800; // 100 ms @ 48 kHz
         const int blockSamples = blockFrames * Channels;
 
-        // 1. Эталонная проверка ITU-R BS.1770-4: стерео-синус 997 Гц с пиковой амплитудой 1.0
+        // 1. Reference ITU-R BS.1770-4 check: stereo sine 997 Hz with peak amplitude 1.0
         var kFilter = new KWeightingFilter(SampleRate, Channels);
         float[] sine997 = new float[blockSamples];
         double[] kOut = new double[blockSamples];
@@ -546,7 +546,7 @@ public static class AudioLogicTests
             sine997[f * 2 + 1] = s;
         }
 
-        // Устанавливаем стационарный режим IIR-фильтров K-weighting
+        // Establish steady state for K-weighting IIR filters
         kFilter.ProcessBlock(sine997.AsSpan(), kOut.AsSpan());
 
         double power = 0.0;
@@ -562,7 +562,7 @@ public static class AudioLogicTests
         gatingBlocks[0] = power;
         gatingBlocks[1] = power;
         gatingBlocks[2] = power;
-        gatingBlocks[3] = 1e-7; // Блок ниже относительного порога (-10 LU), обязан быть отброшен гейтом
+        gatingBlocks[3] = 1e-7; // Block below relative threshold (-10 LU) must be discarded by the gate
 
         float lufs = 0f;
         float gain = 0f;
@@ -572,9 +572,9 @@ public static class AudioLogicTests
             gain = EbuR128Analyzer.ComputeGainFromLufs(lufs, -14.0f, 3.0f);
         }, warmup: 40, iterations: 500, context: "EbuR128Analyzer Gating & Gain Computation");
 
-        // ITU-R BS.1770-4: подъём K-фильтра на 997 Гц равен +0.691 dB и ровно компенсируется константой −0.691,
-        // поэтому стерео-синус 0 dBFS обязан давать 0.00 LUFS. Допуск ±0.1 LU — требование EBU Tech 3341.
-        // RBJ-аппроксимация (ShelfFreqHz = 1500) даёт постоянный сдвиг около −0.04 LU — в пределах допуска.
+        // ITU-R BS.1770-4: K-filter boost at 997 Hz is +0.691 dB and is exactly offset by the −0.691 constant,
+        // so a 0 dBFS stereo sine must yield 0.00 LUFS. Tolerance ±0.1 LU is an EBU Tech 3341 requirement.
+        // RBJ approximation (ShelfFreqHz = 1500) gives a constant offset of about −0.04 LU — well within tolerance.
         TestAssert.True(
             MathF.Abs(lufs) < 0.1f,
             $"ITU-R BS.1770-4 reference sine must read 0.00 ±0.1 LUFS (EBU Tech 3341), got {lufs:F3} LUFS");
@@ -582,7 +582,7 @@ public static class AudioLogicTests
             gain,
             EbuR128Analyzer.ComputeIntegratedGainFromBlocks(gatingBlocks, 4, -14.0f, 3.0f));
 
-        // 2. Проверка немедленного применения конфигурации до первого вызова ProcessSamples() (Pre-Scan сценарий)
+        // 2. Check immediate application of configuration prior to the first ProcessSamples() call (Pre-Scan scenario)
         var analyzer = new EbuR128Analyzer();
         var config = new NormalizationConfig(
             Enabled: true,
@@ -599,15 +599,15 @@ public static class AudioLogicTests
         TestAssert.Equal(NormalizationMode.DownwardOnly, current.Mode);
         TestAssert.Equal(45_000, current.PreScanDurationMs);
 
-        // В режиме DownwardOnly любой gain > 1.0f при LockGain обязан ограничиваться сверху 1.0f
+        // In DownwardOnly mode, any gain > 1.0f when LockGain is enabled must be capped at 1.0f
         analyzer.LockGain(2.2f);
         TestAssert.Equal(1.0f, analyzer.GetLockedGain());
         TestAssert.Equal(1.0f, analyzer.ProcessSamples());
 
-        // 3. Динамический пересчёт Gain при изменении настроек (Bidirectional vs DownwardOnly) без повторного сканирования
+        // 3. Dynamic recalculation of Gain upon settings change (Bidirectional vs DownwardOnly) without re-scanning
         float? callbackLufs = null;
         analyzer.SetIntegratedLufsCallback(val => callbackLufs = val);
-        analyzer.NotifyIntegratedLufs(-20.0f); // На 6 LU тише цели -14 LUFS (~1.995x усиление)
+        analyzer.NotifyIntegratedLufs(-20.0f); // 6 LU quieter than the target -14 LUFS (~1.995x amplification)
         TestAssert.Equal(-20.0f, callbackLufs);
 
         analyzer.Configure(new NormalizationConfig(
@@ -625,7 +625,7 @@ public static class AudioLogicTests
         return Task.CompletedTask;
     }
 
-    // Закрытые члены AudioPlayer без рефлексии: сигнатуры связываются при первом вызове, совместимо с AOT.
+    // Private members of AudioPlayer without reflection: signatures are bound on first call, compatible with AOT.
     [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_state")]
     private static extern ref PlayerState PlayerStateField(AudioPlayer player);
 
@@ -636,13 +636,13 @@ public static class AudioLogicTests
     private static extern ref Timer? BufferTimerField(AudioPlayer player);
 
     /// <summary>
-    /// Проверяет арифметику индекса очереди при удалении трека: удалённый играющий трек сразу сменяется стоявшим следом
-    /// без пропуска, удаление последнего ведёт к концу очереди или кругу, а отложенный авто-переход по концу удалённого трека отбрасывается.
+    /// Verifies queue index arithmetic when deleting a track: a deleted playing track is immediately replaced by the next one in line
+    /// without skipping, deleting the last track leads to the end of the queue or wraps around, and a deferred auto-transition for the end of the deleted track is discarded.
     /// </summary>
     [TestMethod(TestCategory.Unit, "Queue Remove Current -> No Skip", Group = TestGroups.Audio, Order = 13)]
     public static Task TestQueueRemoveCurrentNoSkipAsync()
     {
-        // Удаление в движке: сдвиг индекса, а для текущего трека — шаг «вперёд» как у «Далее» (userInitiated: true)
+        // Deletion in the engine: index shift, and for the current track — a step "forward" like "Next" (userInitiated: true)
         static int RemoveAndResolve(int removedIndex, int currentIndex, int countBefore, bool repeatAll)
         {
             int index = AudioEngine.ComputeIndexAfterRemove(removedIndex, currentIndex);
@@ -651,34 +651,34 @@ public static class AudioLogicTests
                 : index;
         }
 
-        // 1. A, B, C; играет A; удаляем A -> сразу B (индекс 0 в B, C), а не C
+        // 1. A, B, C; A playing; delete A -> immediately B (index 0 in B, C), not C
         TestAssert.Equal(0, RemoveAndResolve(0, 0, 3, repeatAll: false), "Removing playing A must start B, not skip to C");
 
-        // 2. A, B, C, D; играет B; удаляем B -> C (индекс 1 в A, C, D)
+        // 2. A, B, C, D; B playing; delete B -> C (index 1 in A, C, D)
         TestAssert.Equal(1, RemoveAndResolve(1, 1, 4, repeatAll: false), "Removing playing middle track must start the next one");
 
-        // 3. Играющий последний: без повтора — конец очереди, с RepeatMode.All — первый трек
+        // 3. Playing the last track: without repeat — end of queue, with RepeatMode.All — first track
         TestAssert.Equal(-1, RemoveAndResolve(2, 2, 3, repeatAll: false), "Removing playing last track without repeat must end the queue");
         TestAssert.Equal(0, RemoveAndResolve(2, 2, 3, repeatAll: true), "Removing playing last track with RepeatAll must wrap to the first");
 
-        // 4. Единственный трек -> остановка даже при RepeatMode.All
+        // 4. Single track -> stop even with RepeatMode.All
         TestAssert.Equal(-1, RemoveAndResolve(0, 0, 1, repeatAll: true), "Removing the only track must stop playback");
 
-        // 5. Чужие треки: до текущего — индекс на 1 меньше, после — без изменений
+        // 5. Other tracks: before current — index decreased by 1, after — unchanged
         TestAssert.Equal(1, RemoveAndResolve(0, 2, 3, repeatAll: false), "Removing a track before current must shift index down");
         TestAssert.Equal(0, RemoveAndResolve(2, 0, 3, repeatAll: false), "Removing a track after current must keep index");
 
-        // 6. Два быстрых удаления: A, B, C; играет A; удаляем A, затем B до его старта -> C
+        // 6. Two rapid deletions: A, B, C; A playing; delete A, then B before it starts -> C
         int afterFirst = RemoveAndResolve(0, 0, 3, repeatAll: false);
         TestAssert.Equal(0, RemoveAndResolve(0, afterFirst, 2, repeatAll: false), "Second quick removal must start C");
 
-        // 7. Регресс навигации: обычный шаг, конец очереди, круг и одиночный трек при авто-переходе
+        // 7. Navigation regression: normal step, end of queue, wrap-around, and single track on auto-transition
         TestAssert.Equal(1, AudioEngine.ComputeNextIndex(0, 3, repeatAll: false, userInitiated: false));
         TestAssert.Equal(-1, AudioEngine.ComputeNextIndex(2, 3, repeatAll: false, userInitiated: false));
         TestAssert.Equal(0, AudioEngine.ComputeNextIndex(2, 3, repeatAll: true, userInitiated: false));
         TestAssert.Equal(-1, AudioEngine.ComputeNextIndex(0, 1, repeatAll: true, userInitiated: false), "Auto-advance on single track with RepeatAll must stop");
 
-        // 8. Авто-переход по концу удалённого A устарел: очередь уже стоит на B
+        // 8. Auto-transition on the end of deleted A is obsolete: queue is already at B
         TestAssert.True(AudioEngine.IsStaleTrackEnd("A", "B"), "Track-end of removed A must be dropped");
         TestAssert.False(AudioEngine.IsStaleTrackEnd("A", "A"), "Natural track-end must advance");
         TestAssert.False(AudioEngine.IsStaleTrackEnd(null, "B"), "User navigation is never stale");
@@ -689,7 +689,7 @@ public static class AudioLogicTests
     [TestMethod(TestCategory.Unit, "PlaybackErrorBehaviorMatrix & AudioPlayer Timer Lifecycle", Group = TestGroups.Audio, Order = 9)]
     public static async Task TestPlaybackErrorMatrixAndTimerLifecycleAsync()
     {
-        // 1. Проверка матрицы политик восстановления после ошибок воспроизведения
+        // 1. Verification of the recovery policy matrix after playback errors
         var dialogPolicy = PlaybackErrorBehaviorMatrix.Resolve(
             PlaybackErrorBehavior.Dialog, PlaybackFailureBehavior.SkipAndPlay);
         TestAssert.True(dialogPolicy.ShowNotification);
@@ -707,14 +707,14 @@ public static class AudioLogicTests
         TestAssert.False(ignoreStop.ShowNotification, "Ignore mode must suppress notification toasts");
         TestAssert.Equal(PlaybackRecoveryMode.Stop, ignoreStop.RecoveryMode);
 
-        // 2. Проверка сохранения активности _bufferTimer в AudioPlayer при переходах Buffering -> Suspend -> Resume -> StartPositionTimerDelayed
+        // 2. Verification that _bufferTimer activity is preserved in AudioPlayer during transitions Buffering -> Suspend -> Resume -> StartPositionTimerDelayed
         await using var player = new AudioPlayer(new AudioPlayerOptions
         {
             UseNullBackend = true,
             PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
         });
 
-        // Переводим плеер в состояние Buffering (как при Starvation) и проверяем, что StartPositionTimerDelayed запускает _bufferTimer
+        // Put player into Buffering state (as during Starvation) and verify that StartPositionTimerDelayed starts _bufferTimer
         PlayerStateField(player) = PlayerState.Buffering;
         player.SetUiTimersSuspended(true);
         player.SetUiTimersSuspended(false);
@@ -737,13 +737,13 @@ public static class AudioLogicTests
     private static extern unsafe void CallEqRampScalar(EqualizerProcessor eq, float* pSamples, int rampFrames);
 
     /// <summary>
-    /// Проверяет математическую эквивалентность FMA3-, SSE2- и скалярного путей Band-Major эквалайзера
-    /// (как в стационарном режиме, так и на 30-мс окне посэмплового сглаживания) и точность <see cref="SpanMathHelper.FastReciprocal"/>.
+    /// Verifies mathematical equivalence of FMA3, SSE2, and scalar paths of the Band-Major equalizer
+    /// (both in steady state and on a 30-ms sample-wise smoothing window) and accuracy of <see cref="SpanMathHelper.FastReciprocal"/>.
     /// </summary>
     [TestMethod(TestCategory.Unit, "Equalizer & Reciprocal SIMD Multi-Versioning Equivalence (0 Alloc)", Group = TestGroups.Audio, Order = 10)]
     public static unsafe Task TestEqualizerSimdMultiVersioningEquivalenceAsync()
     {
-        // 1. Проверка точности FastReciprocal (rcpss + 1 шаг Ньютона-Рафсона: погрешность <= 2e-7f)
+        // 1. Accuracy test for FastReciprocal (rcpss + 1 Newton-Raphson iteration: error <= 2e-7f)
         ReadOnlySpan<float> testInputs = [0.25f, 0.5f, 0.88f, 0.985f, 1.0f, 1.37f, 2.5f, 10.0f];
         foreach (float val in testInputs)
         {
@@ -753,7 +753,7 @@ public static class AudioLogicTests
             TestAssert.True(relError < 2.5e-7f, $"FastReciprocal({val}) relative error {relError:E3} exceeded 2.5e-7");
         }
 
-        // 2. Эквивалентность Stationary FMA / SSE2 / Scalar путей на 10-полосном пресете
+        // 2. Equivalence of Stationary FMA / SSE2 / Scalar paths on a 10-band preset
         const int frames = 512;
         float[] input = new float[frames * Channels];
         for (int f = 0; f < frames; f++)
@@ -798,7 +798,7 @@ public static class AudioLogicTests
                 $"Steady FMA vs Scalar mismatch at sample {i}: {outDefault[i]:R} vs {outScalar[i]:R}");
         }
 
-        // 3. Эквивалентность Band-Major Ramping (FMA / SSE2) и эталонного Sample-Major Ramping (Scalar)
+        // 3. Equivalence of Band-Major Ramping (FMA / SSE2) and reference Sample-Major Ramping (Scalar)
         var eqRampDefault = new EqualizerProcessor(SampleRate, Channels);
         var eqRampSse2 = new EqualizerProcessor(SampleRate, Channels);
         var eqRampScalar = new EqualizerProcessor(SampleRate, Channels);
@@ -812,10 +812,10 @@ public static class AudioLogicTests
         float[] rampBufSse2 = (float[])input.Clone();
         float[] rampBufScalar = (float[])input.Clone();
 
-        // Инициируем переход из Bypass -> VocalId (1440 фреймов сглаживания)
+        // Initiate transition from Bypass -> VocalId (1440 smoothing frames)
         eqRampDefault.Process(rampBufDefault.AsSpan());
 
-        // Для прямого вызова внутренних ядер синхронизируем опубликованные параметры через пустой срез
+        // For direct calling of inner kernels, synchronize published parameters via an empty slice
         Span<float> empty = Span<float>.Empty;
         _ = empty;
         eqRampSse2.Configure(true, preset, preampDb: -1.0f, autoPreamp: false);

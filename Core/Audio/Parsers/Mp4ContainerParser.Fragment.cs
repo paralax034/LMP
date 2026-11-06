@@ -6,15 +6,15 @@ namespace LMP.Core.Audio.Parsers;
 public sealed partial class Mp4ContainerParser
 {
     /// <summary>
-    /// Результат разбора <c>tfhd</c> box.
+    /// Result of parsing the <c>tfhd</c> box.
     /// </summary>
-    /// <param name="HasBaseDataOffset">Присутствует ли base data offset.</param>
-    /// <param name="BaseDataOffset">Абсолютный base data offset.</param>
-    /// <param name="DefaultBaseIsMoof">Используется ли moof как база по умолчанию.</param>
-    /// <param name="HasDefaultSampleDuration">Присутствует ли default sample duration.</param>
-    /// <param name="DefaultSampleDuration">Значение default sample duration.</param>
-    /// <param name="HasDefaultSampleSize">Присутствует ли default sample size.</param>
-    /// <param name="DefaultSampleSize">Значение default sample size.</param>
+    /// <param name="HasBaseDataOffset">Indicates whether base data offset is present.</param>
+    /// <param name="BaseDataOffset">Absolute base data offset.</param>
+    /// <param name="DefaultBaseIsMoof">Indicates whether moof is used as the default base.</param>
+    /// <param name="HasDefaultSampleDuration">Indicates whether default sample duration is present.</param>
+    /// <param name="DefaultSampleDuration">Default sample duration value.</param>
+    /// <param name="HasDefaultSampleSize">Indicates whether default sample size is present.</param>
+    /// <param name="DefaultSampleSize">Default sample size value.</param>
     private readonly record struct TfhdResult(
         bool HasBaseDataOffset,
         long BaseDataOffset,
@@ -25,38 +25,38 @@ public sealed partial class Mp4ContainerParser
         uint DefaultSampleSize);
 
     /// <summary>
-    /// Декодированные флаги <c>trun</c> box.
+    /// Decoded flags of the <c>trun</c> box.
     /// </summary>
     /// <param name="Flags">Raw 24-bit flags value.</param>
     private readonly record struct TrunFlags(uint Flags)
     {
-        /// <summary>Присутствует поле data_offset.</summary>
+        /// <summary>Indicates whether the data_offset field is present.</summary>
         public bool HasDataOffset => (Flags & 0x000001) != 0;
 
-        /// <summary>Присутствует поле first_sample_flags.</summary>
+        /// <summary>Indicates whether the first_sample_flags field is present.</summary>
         public bool HasFirstSampleFlags => (Flags & 0x000004) != 0;
 
-        /// <summary>Каждый sample содержит duration.</summary>
+        /// <summary>Indicates whether each sample contains a duration.</summary>
         public bool HasSampleDuration => (Flags & 0x000100) != 0;
 
-        /// <summary>Каждый sample содержит size.</summary>
+        /// <summary>Indicates whether each sample contains a size.</summary>
         public bool HasSampleSize => (Flags & 0x000200) != 0;
 
-        /// <summary>Каждый sample содержит flags.</summary>
+        /// <summary>Indicates whether each sample contains flags.</summary>
         public bool HasSampleFlags => (Flags & 0x000400) != 0;
 
-        /// <summary>Каждый sample содержит composition time offset.</summary>
+        /// <summary>Indicates whether each sample contains a composition time offset.</summary>
         public bool HasSampleCompositionTimeOffset => (Flags & 0x000800) != 0;
     }
 
     /// <summary>
-    /// Финализирует инициализацию fragmented MP4 после первичного scan.
+    /// Finalizes initialization of the fragmented MP4 after the initial scan.
     /// </summary>
-    /// <param name="foundSidx">Найден ли sidx во время первичного scan.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="foundSidx">Indicates whether sidx was found during the initial scan.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// <c>true</c>, если инициализация завершена и decoder config доступен;
-    /// иначе <c>false</c>.
+    /// <c>true</c> if initialization is complete and decoder config is available;
+    /// otherwise, <c>false</c>.
     /// </returns>
     private async Task<bool> FinalizeFragmentedInitAsync(bool foundSidx, CancellationToken ct)
     {
@@ -72,9 +72,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Сканирует поток до первого <c>moof</c> box для старта чтения fragmented data.
+    /// Scans the stream up to the first <c>moof</c> box to start reading fragmented data.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ScanToFirstMoofAsync(CancellationToken ct)
     {
         while (_reader.Remaining >= 8)
@@ -95,10 +95,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>sidx</c> box и строит seek map сегментов.
+    /// Parses the <c>sidx</c> box and builds the segment seek map.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseSidxAsync(long boxEnd, CancellationToken ct)
     {
         int version = await _reader.ReadByteAsync(ct).ConfigureAwait(false);
@@ -153,11 +153,11 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>moof</c> box и извлекает sample metadata текущего фрагмента.
+    /// Parses the <c>moof</c> box and extracts sample metadata for the current fragment.
     /// </summary>
-    /// <param name="moofStart">Абсолютная позиция начала moof.</param>
-    /// <param name="moofEnd">Абсолютная позиция конца moof.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="moofStart">Absolute start position of moof.</param>
+    /// <param name="moofEnd">Absolute end position of moof.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseMoofAsync(long moofStart, long moofEnd, CancellationToken ct)
     {
         _fragmentSamples.Clear();
@@ -179,12 +179,12 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>traf</c> box.
+    /// Parses the <c>traf</c> box.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца traf.</param>
-    /// <param name="moofStart">Абсолютная позиция начала moof.</param>
-    /// <param name="moofEnd">Абсолютная позиция конца moof.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of traf.</param>
+    /// <param name="moofStart">Absolute start position of moof.</param>
+    /// <param name="moofEnd">Absolute end position of moof.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseTrafAsync(long boxEnd, long moofStart, long moofEnd, CancellationToken ct)
     {
         uint sampleDuration = _defaultSampleDuration;
@@ -251,10 +251,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>tfhd</c> box.
+    /// Parses the <c>tfhd</c> box.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Декодированный результат tfhd.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Decoded tfhd result.</returns>
     private async Task<TfhdResult> ParseTfhdAsync(CancellationToken ct)
     {
         uint versionFlags = await _reader.ReadUInt32BEAsync(ct).ConfigureAwait(false);
@@ -299,9 +299,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>tfdt</c> box и возвращает base media decode time.
+    /// Parses the <c>tfdt</c> box and returns the base media decode time.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>Base media decode time.</returns>
     private async Task<long> ParseTfdtAsync(CancellationToken ct)
     {
@@ -314,14 +314,14 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>trun</c> box и добавляет samples текущего фрагмента в очередь.
+    /// Parses the <c>trun</c> box and enqueues samples of the current fragment.
     /// </summary>
-    /// <param name="baseDataOffset">Базовый offset данных.</param>
-    /// <param name="moofEnd">Абсолютная позиция конца moof.</param>
-    /// <param name="baseMediaDecodeTime">Базовое decode time.</param>
+    /// <param name="baseDataOffset">Base data offset.</param>
+    /// <param name="moofEnd">Absolute end position of moof.</param>
+    /// <param name="baseMediaDecodeTime">Base decode time.</param>
     /// <param name="defaultDuration">Default sample duration.</param>
     /// <param name="defaultSize">Default sample size.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseTrunAsync(
         long baseDataOffset,
         long moofEnd,
@@ -389,10 +389,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Сканирует поток в поисках следующего фрагмента и разбирает его.
+    /// Scans the stream for the next fragment and parses it.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns><c>true</c>, если найден и разобран следующий фрагмент.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><c>true</c> if the next fragment was found and parsed.</returns>
     private async Task<bool> ScanAndParseNextFragmentAsync(CancellationToken ct)
     {
         while (_reader.Remaining >= 8)
@@ -442,9 +442,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Корректирует относительные sample offsets относительно текущего <c>mdat</c>.
+    /// Adjusts relative sample offsets relative to the current <c>mdat</c>.
     /// </summary>
-    /// <param name="moofEnd">Абсолютная позиция конца текущего moof.</param>
+    /// <param name="moofEnd">Absolute end position of the current moof.</param>
     private void CorrectSampleOffsets(long moofEnd)
     {
         if (_fragmentSamples.Count == 0)
@@ -468,10 +468,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Читает следующий фрейм из fragmented MP4.
+    /// Reads the next frame from the fragmented MP4.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Следующий фрейм или <c>null</c> при EOF.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The next frame, or <c>null</c> on EOF.</returns>
     private async ValueTask<AudioFrame?> ReadNextFragmentedFrameAsync(CancellationToken ct)
     {
         while (_fragmentSamples.Count == 0)
@@ -487,10 +487,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Находит позицию seek по индексу сегментов fragmented MP4.
+    /// Finds the seek position using the fragmented MP4 segment index.
     /// </summary>
-    /// <param name="targetMs">Целевая позиция в миллисекундах.</param>
-    /// <returns>Byte position и timestamp сегмента, либо <c>null</c>.</returns>
+    /// <param name="targetMs">Target position in milliseconds.</param>
+    /// <returns>Byte position and timestamp of the segment, or <c>null</c>.</returns>
     private (long BytePosition, long TimestampMs)? FindSeekPositionFragmented(long targetMs)
     {
         if (_segments.Count == 0)
@@ -521,9 +521,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Выполняет fallback-оценку длительности fragmented MP4 по moof/traf/trun.
+    /// Performs fallback duration estimation for fragmented MP4 via moof/traf/trun.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task EstimateDurationFromMoofsAsync(CancellationToken ct)
     {
         long savedPosition = _reader.Position;
@@ -571,11 +571,11 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Быстро извлекает timing из одного moof без построения полной sample queue.
+    /// Fast-extracts timing from a single moof without building a full sample queue.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца moof.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Timestamp и суммарная duration фрагмента.</returns>
+    /// <param name="boxEnd">Absolute end position of moof.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Timestamp and total duration of the fragment.</returns>
     private async Task<(long Timestamp, long Duration)> QuickParseMoofForTimingAsync(long boxEnd, CancellationToken ct)
     {
         long timestamp = -1;
@@ -617,10 +617,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Быстро суммирует duration всех samples в trun без построения sample queue.
+    /// Fast-sums the duration of all samples in trun without building a sample queue.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Суммарная duration trun.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Total trun duration.</returns>
     private async Task<long> QuickParseTrunDurationAsync(CancellationToken ct)
     {
         uint versionFlags = await _reader.ReadUInt32BEAsync(ct).ConfigureAwait(false);

@@ -5,29 +5,29 @@ using LMP.Core.Audio.Normalization;
 namespace LMP.Core.Audio.Helpers;
 
 /// <summary>
-/// Статический helper для EBU R128 pre-scan через полностью изолированный pipeline.
+/// Static helper for EBU R128 pre-scan via a fully isolated pipeline.
 /// </summary>
 /// <remarks>
-/// <para>Создаёт и уничтожает собственные <see cref="FileStream"/>,
-/// <see cref="IContainerParser"/> и <see cref="IAudioDecoder"/>.
-/// Shared-ресурсы вызывающего <c>AudioPipeline</c> не затрагиваются.</para>
-/// <para>Все decode/filter буферы арендуются из <see cref="ArrayPool{T}.Shared"/>
-/// и возвращаются в <c>finally</c>.</para>
+/// <para>Creates and disposes its own <see cref="FileStream"/>,
+/// <see cref="IContainerParser"/>, and <see cref="IAudioDecoder"/>.
+/// Shared resources of the calling <c>AudioPipeline</c> remain untouched.</para>
+/// <para>All decode/filter buffers are rented from <see cref="ArrayPool{T}.Shared"/>
+/// and returned in <c>finally</c>.</para>
 /// </remarks>
 internal static class IsolatedPreScanHelper
 {
     #region Constants
 
-    /// <summary>Decimation для Opus — Concentus.Native достаточно быстр при 5.</summary>
+    /// <summary>Decimation factor for Opus — Concentus.Native is fast enough at 5.</summary>
     private const int DecimationFactorOpus = 5;
 
-    /// <summary>Decimation для AAC — SharpJaad медленнее, берём 8.</summary>
+    /// <summary>Decimation factor for AAC — SharpJaad is slower, so we use 8.</summary>
     private const int DecimationFactorAac = 8;
 
-    /// <summary>Opus @ 48kHz: 20ms фрейм = 960 samples.</summary>
+    /// <summary>Opus @ 48kHz: 20ms frame = 960 samples.</summary>
     private const int NominalSamplesOpus = 960;
 
-    /// <summary>AAC @ 44100Hz: ~23ms фрейм = 1024 samples.</summary>
+    /// <summary>AAC @ 44100Hz: ~23ms frame = 1024 samples.</summary>
     private const int NominalSamplesAac = 1024;
 
     private const double LufsOffset = -0.691;
@@ -37,18 +37,18 @@ internal static class IsolatedPreScanHelper
     #endregion
 
     /// <summary>
-    /// Выполняет EBU R128 pre-scan для указанного аудио файла.
+    /// Performs an EBU R128 pre-scan for the specified audio file.
     /// </summary>
-    /// <param name="filePath">Путь к аудио файлу (local или cache).</param>
-    /// <param name="codec">Кодек файла (Opus / AAC).</param>
-    /// <param name="targetLufs">Целевой уровень LUFS нормализации.</param>
-    /// <param name="maxGain">Максимальный допустимый gain.</param>
-    /// <param name="scanMaxSeconds">Максимальная длительность scan в секундах.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="filePath">Path to the audio file (local or cache).</param>
+    /// <param name="codec">File codec (Opus / AAC).</param>
+    /// <param name="targetLufs">Target normalization LUFS level.</param>
+    /// <param name="maxGain">Maximum allowed gain.</param>
+    /// <param name="scanMaxSeconds">Maximum scan duration in seconds.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// Пара <c>(IntegratedLufs, RawGain)</c>.
-    /// <c>RawGain = 1.0f</c>, если scan не дал результата.
-    /// <c>IntegratedLufs = <see cref="float.NaN"/></c> при ошибке формата.
+    /// A pair of <c>(IntegratedLufs, RawGain)</c>.
+    /// <c>RawGain = 1.0f</c> if the scan produced no result.
+    /// <c>IntegratedLufs = <see cref="float.NaN"/></c> on format error.
     /// </returns>
     public static async Task<(float IntegratedLufs, float RawGain)> RunAsync(
         string filePath,
@@ -118,7 +118,7 @@ internal static class IsolatedPreScanHelper
 
     #region Private Helpers
 
-    /// <summary>Определяет формат по magic bytes и сбрасывает позицию потока.</summary>
+    /// <summary>Detects format by magic bytes and resets stream position.</summary>
     private static async Task<AudioFormat> DetectFormatAsync(FileStream fs, CancellationToken ct)
     {
         var header = ArrayPool<byte>.Shared.Rent(AudioConstants.FormatDetectionHeaderSize);
@@ -143,8 +143,8 @@ internal static class IsolatedPreScanHelper
         }
     }
 
-    /// <summary>Создаёт изолированный parser для указанного формата.</summary>
-    /// <exception cref="NotSupportedException">Неподдерживаемый формат.</exception>
+    /// <summary>Creates an isolated parser for the specified format.</summary>
+    /// <exception cref="NotSupportedException">Unsupported format.</exception>
     private static IContainerParser CreateParser(AudioFormat format, FileStream fs) => format switch
     {
         AudioFormat.WebM or AudioFormat.Ogg => new Parsers.WebMContainerParser(fs),
@@ -153,8 +153,8 @@ internal static class IsolatedPreScanHelper
             $"[IsolatedPreScanHelper] Unsupported format: {format}")
     };
 
-    /// <summary>Создаёт изолированный decoder с учётом codec-specific инициализации.</summary>
-    /// <exception cref="NotSupportedException">Неподдерживаемый кодек.</exception>
+    /// <summary>Creates an isolated decoder handling codec-specific initialization.</summary>
+    /// <exception cref="NotSupportedException">Unsupported codec.</exception>
     private static IAudioDecoder CreateDecoder(
         AudioCodec codec, IContainerParser parser, int sampleRate, int channels) => codec switch
         {
@@ -174,7 +174,7 @@ internal static class IsolatedPreScanHelper
     }
 
     /// <summary>
-    /// Основной цикл чтения фреймов и вычисления EBU R128 integrated LUFS.
+    /// Main loop for reading frames and calculating EBU R128 integrated LUFS.
     /// </summary>
     private static async Task<(float IntegratedLufs, float RawGain)> ScanFramesAsync(
         IContainerParser parser,

@@ -8,7 +8,7 @@ public sealed partial class YoutubeAccountItem
     public static LocalizationService L => LocalizationService.Instance;
 
     /// <summary>
-    /// Порядковый номер аккаунта в списке.
+    /// Account ordinal index in the list.
     /// </summary>
     public int Index { get; set; }
 
@@ -17,22 +17,22 @@ public sealed partial class YoutubeAccountItem
     public string AvatarUrl { get; set; } = "";
 
     /// <summary>
-    /// Идентификатор Gaia основного аккаунта.
+    /// Gaia ID of the primary account.
     /// </summary>
     public string GaiaId { get; set; } = "";
 
     /// <summary>
-    /// Тег канала (например, @handle).
+    /// Channel tag (e.g., @handle).
     /// </summary>
     public string Handle { get; set; } = "";
 
     /// <summary>
-    /// Возвращает приоритетный ID для отображения (GaiaId для основного профиля или Email).
+    /// Returns the display priority ID (GaiaId for the main profile or Email).
     /// </summary>
     public string DisplayId => !string.IsNullOrEmpty(GaiaId) ? GaiaId : Email;
 
     /// <summary>
-    /// Индекс сессии мульти-авторизации Google (обычно "0" для основного, "1", "2" для дополнительных).
+    /// Google multi-auth session index (typically "0" for primary, "1", "2" for secondary accounts).
     /// </summary>
     public string AuthUser { get; set; } = AuthState.DefaultAuthUser;
 

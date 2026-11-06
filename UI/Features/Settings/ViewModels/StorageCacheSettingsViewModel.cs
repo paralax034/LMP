@@ -269,5 +269,5 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
     }
 }
 
-/// <summary>Пресеты количества bitmap-объектов в RAM-кэше изображений.</summary>
+/// <summary>Presets for the number of bitmap objects in the image RAM cache.</summary>
 public enum ImageCachePreset { Custom, Low, Medium, High }

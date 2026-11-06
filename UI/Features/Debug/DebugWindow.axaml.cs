@@ -4,8 +4,8 @@ using Avalonia.Controls;
 namespace LMP.UI.Features.Debug;
 
 /// <summary>
-/// Debug-окно с вкладками: Tests, YouTube, Memory, Audio.
-/// DataContext инициализируется до вызова InitializeComponent для исключения предупреждений привязки.
+/// Debug window with tabs: Tests, YouTube, Memory, Audio.
+/// DataContext is initialized before calling InitializeComponent to eliminate binding warnings.
 /// </summary>
 public partial class DebugWindow : Window
 {

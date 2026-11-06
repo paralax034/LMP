@@ -22,7 +22,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
 
-        <!-- Чипы источников в фирменном стиле -->
+        <!-- Brand-styled source chips -->
         <Style Selector="Button.source-chip">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
@@ -59,9 +59,9 @@
 
     <Grid ColumnDefinitions="180, 20, *">
 
-        <!-- ЛЕВАЯ КОЛОНКА: ОБЛОЖКА И ЦВЕТ -->
+        <!-- LEFT COLUMN: COVER AND COLOR -->
         <StackPanel Grid.Column="0" Spacing="12" VerticalAlignment="Top">
-            <!-- Квадратная обложка 200x200 -->
+            <!-- Square cover 200x200 -->
             <Border Classes="cover-frame" Width="180" Height="180" HorizontalAlignment="Center">
                 <Panel>
                     <PathIcon Data="{StaticResource Icon.PlaylistMusic}"
@@ -80,7 +80,7 @@
                         Stretch="UniformToFill"
                         IsVisible="{Binding IsPreviewHttp}" />
 
-                    <!-- Спиннер расчёта цвета -->
+                    <!-- Color calculation spinner -->
                     <Border Background="#80000000" IsVisible="{Binding IsRecalculatingColor}">
                         <PathIcon Data="{StaticResource Icon.Sync}"
                             Classes="spinning"
@@ -92,7 +92,7 @@
                 </Panel>
             </Border>
 
-            <!-- Фирменная карточка настройки цвета (без надписи Auto) -->
+            <!-- Branded color setting card (without Auto label) -->
             <StackPanel Spacing="4" Width="180">
                 <TextBlock Text="{Binding L[EditPlaylist_Color]}"
                     FontSize="11" FontWeight="SemiBold"
@@ -123,10 +123,10 @@
             </StackPanel>
         </StackPanel>
 
-        <!-- ПРАВАЯ КОЛОНКА: ИНПУТЫ И ИСТОЧНИК ОБЛОЖКИ -->
+        <!-- RIGHT COLUMN: INPUTS AND COVER SOURCE -->
         <StackPanel Grid.Column="2" Spacing="12">
 
-            <!-- Название -->
+            <!-- Title -->
             <StackPanel Spacing="4">
                 <TextBlock Text="{Binding L[EditPlaylist_Name]}"
                     FontSize="12" FontWeight="SemiBold"
@@ -137,7 +137,7 @@
                     Height="30" FontSize="12" />
             </StackPanel>
 
-            <!-- Описание -->
+            <!-- Description -->
             <StackPanel Spacing="4">
                 <TextBlock Text="{Binding L[EditPlaylist_Description]}"
                     FontSize="12" FontWeight="SemiBold"
@@ -150,7 +150,7 @@
                     FontSize="11" />
             </StackPanel>
 
-            <!-- Источник обложки (Чипы + содержимое) -->
+            <!-- Cover source (Chips + content) -->
             <StackPanel Spacing="5">
                 <Grid ColumnDefinitions="Auto, *">
                     <TextBlock Grid.Column="0"
@@ -199,7 +199,7 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- Контейнер выбранного режима источника -->
+                <!-- Selected source mode container -->
                 <Panel MinHeight="32">
                     <TextBox Text="{Binding ThumbnailUrl, Mode=TwoWay}"
                         PlaceholderText="https://..."
@@ -233,7 +233,7 @@
                 </Panel>
             </StackPanel>
 
-            <!-- Секция YouTube Sync -->
+            <!-- YouTube Sync section -->
             <Border Background="Transparent"
                 BorderBrush="{DynamicResource BgHighlightBrush}"
                 BorderThickness="1"
@@ -263,7 +263,7 @@
                 </Grid>
             </Border>
 
-            <!-- Кнопка создания копии -->
+            <!-- Make a copy button -->
             <Button Command="{Binding CreateCopyCommand}"
                 IsVisible="{Binding IsForEdit}"
                 HorizontalAlignment="Left"
@@ -275,7 +275,7 @@
                 </StackPanel>
             </Button>
 
-            <!-- Сообщение об ошибке -->
+            <!-- Error message -->
             <TextBlock Text="{Binding ErrorMessage}"
                 Foreground="{DynamicResource SystemErrorBrush}"
                 IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"

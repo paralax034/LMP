@@ -4,18 +4,18 @@ using SkiaSharp;
 namespace LMP.UI.Helpers;
 
 /// <summary>
-/// Централизованное управление памятью приложения.
+/// Centralized application memory management.
 ///
-/// <para><b>Три режима:</b></para>
+/// <para><b>Three modes:</b></para>
 /// <list type="bullet">
-///   <item><b>Soft</b>  — GC Gen1, non-blocking (при активном воспроизведении)</item>
+///   <item><b>Soft</b>  — GC Gen1, non-blocking (during active playback)</item>
 ///   <item><b>Normal</b> — GC Gen2 Optimized, non-blocking</item>
 ///   <item><b>Aggressive</b> — GC Gen2 + LOH compaction + TrimWorkingSet + Skia purge</item>
 /// </list>
 ///
-/// <para><b>Авто-очистка:</b> запускается через <see cref="StartAutoCleanup"/>,
-/// интервал берётся из <see cref="AppSettings.Memory"/>.
-/// Останавливается через <see cref="StopAutoCleanup"/> или <see cref="Dispose"/>.</para>
+/// <para><b>Auto-cleanup:</b> started via <see cref="StartAutoCleanup"/>,
+/// interval is retrieved from <see cref="AppSettings.Memory"/>.
+/// Stopped via <see cref="StopAutoCleanup"/> or <see cref="Dispose"/>.</para>
 /// </summary>
 public static class MemoryCleanupHelper
 {
@@ -26,8 +26,8 @@ public static class MemoryCleanupHelper
     #region Public API
 
     /// <summary>
-    /// Выполняет очистку памяти в фоновом потоке.
-    /// Автоматически выбирает режим: soft при воспроизведении, normal/aggressive иначе.
+    /// Performs memory cleanup on a background thread.
+    /// Automatically selects the mode: soft during playback, normal/aggressive otherwise.
     /// </summary>
     public static void PerformCleanup(bool aggressive = false)
     {
@@ -35,9 +35,9 @@ public static class MemoryCleanupHelper
     }
 
     /// <summary>
-    /// Запускает фоновый таймер авто-очистки.
-    /// Вызывать после инициализации LibraryService.
-    /// Повторный вызов сначала останавливает предыдущий таймер.
+    /// Starts the background auto-cleanup timer.
+    /// Call after initializing LibraryService.
+    /// A repeated call stops the previous timer first.
     /// </summary>
     public static void StartAutoCleanup()
     {
@@ -72,7 +72,7 @@ public static class MemoryCleanupHelper
     }
 
     /// <summary>
-    /// Останавливает фоновый таймер авто-очистки.
+    /// Stops the background auto-cleanup timer.
     /// </summary>
     public static void StopAutoCleanup()
     {
@@ -91,13 +91,13 @@ public static class MemoryCleanupHelper
     }
 
     /// <summary>
-    /// Перезапускает авто-очистку с новыми настройками.
-    /// Вызывать при изменении настроек в SettingsViewModel.
+    /// Restarts auto-cleanup with new settings.
+    /// Call when settings change in SettingsViewModel.
     /// </summary>
     public static void RestartAutoCleanup() => StartAutoCleanup();
 
     /// <summary>
-    /// Финальная очистка при завершении приложения.
+    /// Final cleanup on application shutdown.
     /// </summary>
     public static void Dispose()
     {
@@ -114,14 +114,14 @@ public static class MemoryCleanupHelper
 
         try
         {
-            // Первый прогон — сразу при старте (очищаем splash-остатки)
+            // First run — immediately at startup (cleaning up splash screen artifacts)
             await RunCleanupAsync(aggressive: false);
 
             while (await _autoCleanupTimer.WaitForNextTickAsync(ct))
             {
                 if (ct.IsCancellationRequested) break;
 
-                // Проверяем актуальные настройки (пользователь мог изменить)
+                // Check current settings (user may have modified them)
                 bool enabled = false;
                 try
                 {
@@ -162,8 +162,8 @@ public static class MemoryCleanupHelper
             long committedMb = gcInfo.TotalCommittedBytes / (1024 * 1024);
             long liveMb = GC.GetTotalMemory(false) / (1024 * 1024);
 
-            // Проверка давления памяти: форсируем aggressive ТОЛЬКО когда звук НЕ воспроизводится,
-            // чтобы никогда не вызывать блокирующий STW GC и TrimWorkingSet во время работы WASAPI.
+            // Memory pressure check: force aggressive ONLY when audio is NOT playing,
+            // to never trigger blocking STW GC and TrimWorkingSet while WASAPI is running.
             if (!aggressive && !isPlaying && pressureThreshold > 0)
             {
                 if (committedMb > pressureThreshold || liveMb > pressureThreshold)
@@ -173,8 +173,8 @@ public static class MemoryCleanupHelper
                 }
             }
 
-            // При активном воспроизведении не выбрасываем живые обложки из ImageCacheService,
-            // но всегда чистим мёртвые ссылки TrackRegistry и кэш контуров Skia (SKPath).
+            // During active playback, do not evict live covers from ImageCacheService,
+            // but always clear dead references in TrackRegistry and Skia path cache (SKPath).
             CleanupAppCaches(aggressive && !isPlaying, clearImages: !isPlaying || aggressive);
 
             bool hasHeapBloat = (committedMb - liveMb) >= 24 || committedMb > 64;
@@ -221,9 +221,9 @@ public static class MemoryCleanupHelper
     }
 
     /// <summary>
-    /// Очищает все внутренние кэши приложения + Skia non-GPU кэши.
-    /// При aggressive=true также пытается очистить GPU texture cache
-    /// через Avalonia Compositor (только из UI потока).
+    /// Clears all internal application caches + Skia non-GPU caches.
+    /// When aggressive=true, also attempts to purge the GPU texture cache
+    /// via Avalonia Compositor (from the UI thread only).
     /// </summary>
     private static void CleanupAppCaches(bool aggressive = false, bool clearImages = true)
     {
@@ -251,7 +251,7 @@ public static class MemoryCleanupHelper
             Log.Warn($"[Memory] TrackRegistry cleanup error: {ex.Message}");
         }
 
-        // Skia non-GPU кэши (шрифты, path effects, изображения)
+        // Skia non-GPU caches (fonts, path effects, images)
         try
         {
             SKGraphics.PurgeAllCaches();
@@ -262,7 +262,7 @@ public static class MemoryCleanupHelper
             Log.Warn($"[Memory] Skia purge error: {ex.Message}");
         }
 
-        // GPU texture cache — только при aggressive и только из UI потока.
+        // GPU texture cache — aggressive mode only and UI thread only.
         if (aggressive)
         {
             try

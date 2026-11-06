@@ -4,32 +4,32 @@ using Avalonia.Threading;
 namespace LMP.UI.Features.Shell;
 
 /// <summary>
-/// Контейнер для отображения диалогов поверх контента.
-/// Поддерживает стек диалогов: если новый диалог открывается поверх активного,
-/// активный приостанавливается и восстанавливается после закрытия нового.
+/// Container for displaying dialogs on top of content.
+/// Supports a dialog stack: if a new dialog opens over an active one,
+/// the active one is suspended and restored after the new one closes.
 /// </summary>
 public sealed partial class DialogHostViewModel : ViewModelBase
 {
-    /// <summary>Текущий отображаемый диалог.</summary>
+    /// <summary>The currently displayed dialog.</summary>
     [ObservableProperty] public partial object? CurrentDialog { get; private set; }
 
-    /// <summary>Есть ли активный диалог.</summary>
+    /// <summary>Indicates whether a dialog is currently active.</summary>
     [ObservableProperty] public partial bool HasActiveDialog { get; private set; }
 
-    //  Стек: (контент диалога, его TCS) 
+    //  Stack: (dialog content, its TCS) 
     private readonly Stack<(object Content, TaskCompletionSource<object?> Tcs)> _stack = new();
     private TaskCompletionSource<object?>? _dialogTcs;
     private readonly Lock _lock = new();
 
     /// <summary>
-    /// Показывает диалог поверх текущего (если есть) и асинхронно ожидает результата.
-    /// При наличии активного диалога он уходит в стек и восстанавливается после закрытия нового.
+    /// Displays a dialog on top of the current one (if any) and asynchronously awaits the result.
+    /// If an active dialog exists, it is pushed to the stack and restored after the new one closes.
     /// </summary>
     /// <remarks>
-    /// Диалог стекируется только если его TCS ещё не завершён. Завершённый TCS означает,
-    /// что <see cref="CloseDialog"/> уже был вызван, а асинхронная очистка UI-состояния
-    /// ещё не успела выполниться. Восстановление такого диалога приводило бы
-    /// к показу освобождённого ViewModel, который никто не ожидает.
+    /// A dialog is stacked only if its TCS is not yet completed. A completed TCS means
+    /// that <see cref="CloseDialog"/> was already called, but asynchronous UI state cleanup
+    /// has not executed yet. Restoring such a dialog would lead
+    /// to displaying a disposed ViewModel that nothing is awaiting.
     /// </remarks>
     public async Task<T?> ShowAsync<T>(object dialogContent)
     {
@@ -37,9 +37,9 @@ public sealed partial class DialogHostViewModel : ViewModelBase
 
         lock (_lock)
         {
-            // Стекируем текущий диалог только если его TCS ещё активен.
-            // Завершённый TCS = CloseDialog уже вызван, диалог закрыт —
-            // восстанавливать его после нового диалога нельзя.
+            // Stack the current dialog only if its TCS is still active.
+            // Completed TCS = CloseDialog was already called, the dialog is closed —
+            // it must not be restored after the new dialog.
             if (HasActiveDialog && _dialogTcs is { Task.IsCompleted: false } && CurrentDialog != null)
             {
                 Log.Debug($"[DialogHost] Stacking dialog. Suspending: {CurrentDialog.GetType().Name}, Showing: {dialogContent.GetType().Name}");
@@ -64,11 +64,11 @@ public sealed partial class DialogHostViewModel : ViewModelBase
             lock (_lock)
             {
                 if (_dialogTcs != tcs)
-                    return; // Другой диалог уже взял управление
+                    return; // Another dialog has already taken control
 
-                // Защитная очистка: отбрасываем записи с завершённым TCS,
-                // которые могли попасть в стек до введения проверки IsCompleted
-                // или из-за иных граничных сценариев (Dispose, повторный CloseDialog).
+                // Defensive cleanup: discard entries with a completed TCS
+                // that might have entered the stack before the IsCompleted check was introduced
+                // or due to other edge case scenarios (Dispose, repeated CloseDialog).
                 while (_stack.Count > 0 && _stack.Peek().Tcs.Task.IsCompleted)
                 {
                     var stale = _stack.Pop();
@@ -77,7 +77,7 @@ public sealed partial class DialogHostViewModel : ViewModelBase
 
                 if (_stack.Count > 0)
                 {
-                    // Восстанавливаем предыдущий диалог из стека
+                    // Restore the previous dialog from the stack
                     var (prevContent, prevTcs) = _stack.Pop();
                     _dialogTcs = prevTcs;
                     CurrentDialog = prevContent;
@@ -97,7 +97,7 @@ public sealed partial class DialogHostViewModel : ViewModelBase
         return result is T typed ? typed : default;
     }
 
-    /// <summary>Закрывает текущий верхний диалог с указанным результатом.</summary>
+    /// <summary>Closes the current top dialog with the specified result.</summary>
     public void CloseDialog(object? result = null)
     {
         lock (_lock)

@@ -66,7 +66,7 @@ internal class PlaylistController(HttpClient http)
     }
 
     /// <summary>
-    /// Получает следующую страницу видео плейлиста через continuation token
+    /// Gets the next playlist video page using a continuation token.
     /// </summary>
     public async ValueTask<PlaylistContinuationResponse> GetPlaylistContinuationAsync(
         string continuationToken,
@@ -123,7 +123,7 @@ internal class PlaylistController(HttpClient http)
     }
 
     /// <summary>
-    /// Получает ответ Next плейлиста.
+    /// Gets the Next response for a playlist.
     /// </summary>
     public async ValueTask<PlaylistNextResponse> GetPlaylistNextResponseAsync(
         PlaylistId playlistId,

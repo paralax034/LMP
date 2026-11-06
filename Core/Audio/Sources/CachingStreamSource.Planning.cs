@@ -5,24 +5,24 @@ public sealed partial class CachingStreamSource
     // --- DownloadPlan ---
 
     /// <summary>
-    /// Результат планирования следующего HTTP range-запроса.
+    /// The result of planning the next HTTP range request.
     /// </summary>
     private readonly record struct DownloadPlan(long Start, int Length);
 
     // --- Alignment Helpers ---
 
-    /// <summary>Выравнивает <paramref name="value"/> вниз до кратного <paramref name="alignment"/>.</summary>
+    /// <summary>Aligns <paramref name="value"/> down to a multiple of <paramref name="alignment"/>.</summary>
     private static long AlignDown(long value, int alignment) =>
         value - (value % alignment);
 
-    /// <summary>Выравнивает <paramref name="value"/> вверх до кратного <paramref name="alignment"/>.</summary>
+    /// <summary>Aligns <paramref name="value"/> up to a multiple of <paramref name="alignment"/>.</summary>
     private static int AlignUp(int value, int alignment)
     {
         int remainder = value % alignment;
         return remainder == 0 ? value : value + (alignment - remainder);
     }
 
-    /// <summary>Выравнивает <paramref name="value"/> вверх до кратного <paramref name="alignment"/>.</summary>
+    /// <summary>Aligns <paramref name="value"/> up to a multiple of <paramref name="alignment"/>.</summary>
     private static long AlignUp(long value, int alignment)
     {
         long remainder = value % alignment;
@@ -30,14 +30,14 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Возвращает длину запроса от <paramref name="planStart"/>, которая покрывает весь диапазон
-    /// <c>[requestedPosition, requestedPosition + minimumLength)</c> даже при невыровненной позиции, но не выходит за конец контента.
+    /// Returns the request length from <paramref name="planStart"/> that covers the entire range
+    /// <c>[requestedPosition, requestedPosition + minimumLength)</c> even for an unaligned position, without exceeding content length.
     /// </summary>
-    /// <param name="requestedPosition">Позиция, с которой читатель ждёт данные.</param>
-    /// <param name="minimumLength">Минимум байт, необходимый читателю от <paramref name="requestedPosition"/>.</param>
-    /// <param name="planStart">Выровненное начало планируемого запроса.</param>
-    /// <param name="contentLength">Полная длина контента.</param>
-    /// <returns>Длина в байтах; <c>0</c>, если <paramref name="planStart"/> лежит за концом контента.</returns>
+    /// <param name="requestedPosition">The position where the reader expects data.</param>
+    /// <param name="minimumLength">Minimum bytes required by the reader from <paramref name="requestedPosition"/>.</param>
+    /// <param name="planStart">Aligned start of the planned request.</param>
+    /// <param name="contentLength">Total content length.</param>
+    /// <returns>Length in bytes; <c>0</c> if <paramref name="planStart"/> lies beyond the content end.</returns>
     internal static int ComputeCriticalSpan(long requestedPosition, int minimumLength, long planStart, long contentLength)
     {
         long available = contentLength - planStart;
@@ -50,10 +50,10 @@ public sealed partial class CachingStreamSource
     // --- Buffer Queries ---
 
     /// <summary>
-    /// Возвращает число непрерывных байт от <paramref name="position"/> вперёд
-    /// по локально доступным данным (RAM или диск).
+    /// Returns the number of contiguous bytes forward from <paramref name="position"/>
+    /// in locally available data (RAM or disk).
     /// </summary>
-    /// <param name="position">Стартовая позиция.</param>
+    /// <param name="position">Starting position.</param>
     private long GetBufferedBytesAhead(long position)
     {
         long ramBytes = _ramCache.GetContiguousBytesFrom(position);
@@ -62,10 +62,10 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Возвращает число непрерывных байт от <paramref name="position"/> вперёд,
-    /// включая диапазоны, покрытые активными in-flight загрузками.
+    /// Returns the number of contiguous bytes forward from <paramref name="position"/>,
+    /// including ranges covered by active in-flight downloads.
     /// </summary>
-    /// <param name="position">Стартовая позиция.</param>
+    /// <param name="position">Starting position.</param>
     private long GetBufferedBytesAheadIncludingInflight(long position)
     {
         long localBuffered = GetBufferedBytesAhead(position);
@@ -96,10 +96,10 @@ public sealed partial class CachingStreamSource
     // --- Availability Queries ---
 
     /// <summary>
-    /// Проверяет, доступен ли диапазон локально (RAM или диск).
+    /// Checks whether the range is available locally (RAM or disk).
     /// </summary>
-    /// <param name="position">Начало диапазона.</param>
-    /// <param name="length">Длина диапазона.</param>
+    /// <param name="position">Range start.</param>
+    /// <param name="length">Range length.</param>
     private bool IsRangeLocallyAvailable(long position, int length)
     {
         if (length <= 0) return true;
@@ -109,11 +109,11 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Проверяет, покрыт ли диапазон полностью локально либо активной in-flight загрузкой.
+    /// Checks whether the range is fully covered either locally or by an active in-flight download.
     /// </summary>
-    /// <param name="position">Начало диапазона.</param>
-    /// <param name="length">Длина диапазона.</param>
-    /// <returns><c>true</c> если диапазон уже доступен или гарантированно качается.</returns>
+    /// <param name="position">Range start.</param>
+    /// <param name="length">Range length.</param>
+    /// <returns><c>true</c> if the range is already available or guaranteed to be downloading.</returns>
     private bool IsRangeKnownAvailable(long position, int length)
     {
         if (length <= 0) return true;
@@ -122,11 +122,11 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Проверяет, покрыт ли диапазон полностью уже зарегистрированной активной загрузкой.
+    /// Checks whether the range is fully covered by an already registered active download.
     /// </summary>
-    /// <param name="position">Начало диапазона.</param>
-    /// <param name="length">Длина диапазона.</param>
-    /// <returns><c>true</c> если диапазон полностью лежит внутри in-flight range.</returns>
+    /// <param name="position">Range start.</param>
+    /// <param name="length">Range length.</param>
+    /// <returns><c>true</c> if the range lies entirely within an in-flight range.</returns>
     private bool IsRangeCoveredByInflight(long position, int length)
     {
         long endExclusive = position + length;
@@ -145,10 +145,10 @@ public sealed partial class CachingStreamSource
     // --- Read Length ---
 
     /// <summary>
-    /// Возвращает выровненную длину чтения от <paramref name="position"/> до конца контента.
+    /// Returns the aligned read length from <paramref name="position"/> to the end of the content.
     /// </summary>
-    /// <param name="position">Начальная позиция чтения.</param>
-    /// <param name="minimumLength">Минимально допустимая длина.</param>
+    /// <param name="position">Starting read position.</param>
+    /// <param name="minimumLength">Minimum allowed length.</param>
     private int GetAlignedReadLength(long position, int minimumLength)
     {
         if (position >= _contentLength) return 0;
@@ -161,17 +161,17 @@ public sealed partial class CachingStreamSource
     // --- Coverage Trim ---
 
     /// <summary>
-    /// Обрезает планируемую длину загрузки до первого уже известного aligned coverage впереди.
+    /// Truncates the planned download length to the first known aligned coverage ahead.
     /// </summary>
-    /// <param name="start">Начало диапазона.</param>
-    /// <param name="length">Исходная длина диапазона.</param>
+    /// <param name="start">Range start.</param>
+    /// <param name="length">Original range length.</param>
     /// <param name="includeInflight">
-    /// <c>true</c> — учитывать in-flight загрузки как покрытие;
-    /// <c>false</c> — учитывать только локально доступные данные.
+    /// <c>true</c> — treat in-flight downloads as coverage;
+    /// <c>false</c> — consider only locally available data.
     /// </param>
     /// <returns>
-    /// Длину первого непрерывного gap от <paramref name="start"/> до ближайшего уже доступного
-    /// aligned диапазона. Если покрытия впереди нет — возвращает исходную <paramref name="length"/>.
+    /// Length of the first contiguous gap from <paramref name="start"/> to the nearest existing
+    /// aligned range. If there is no coverage ahead, returns the original <paramref name="length"/>.
     /// </returns>
     private int TrimLengthToFirstKnownCoverage(long start, int length, bool includeInflight)
     {
@@ -199,8 +199,8 @@ public sealed partial class CachingStreamSource
     // --- Throttle ---
 
     /// <summary>
-    /// Вычисляет целевую скорость загрузки для throttle-режима (байт/сек).
-    /// Возвращает <c>0</c> если throttle отключён (<see cref="StreamingConfig.ThrottleMultiplier"/> &lt;= 0).
+    /// Calculates the target download speed for throttling mode (bytes/sec).
+    /// Returns <c>0</c> if throttling is disabled (<see cref="StreamingConfig.ThrottleMultiplier"/> &lt;= 0).
     /// </summary>
     private double GetThrottleTargetBytesPerSec()
     {
@@ -213,27 +213,27 @@ public sealed partial class CachingStreamSource
     // --- MAPO Planner ---
 
     /// <summary>
-    /// Вычисляет оптимальный диапазон для следующего HTTP range-запроса (MAPO planner).
+    /// Calculates the optimal range for the next HTTP range request (MAPO planner).
     /// <para>
-    /// Алгоритм работает в два режима в зависимости от состояния буфера:
+    /// The algorithm operates in two modes depending on the buffer state:
     /// </para>
     /// <list type="bullet">
     ///   <item>
-    ///     <b>Startup/seek фаза</b> (<c>currentBufferSec &lt; BdpFloorMaxBufferMs</c>):
-    ///     активируется BDP floor — запрашиваем не менее одного Bandwidth-Delay Product,
-    ///     чтобы максимально загрузить канал и быстро наполнить буфер.
+    ///     <b>Startup/seek phase</b> (<c>currentBufferSec &lt; BdpFloorMaxBufferMs</c>):
+    ///     BDP floor is activated — request at least one Bandwidth-Delay Product
+    ///     to maximize link utilization and quickly fill the buffer.
     ///   </item>
     ///   <item>
-    ///     <b>Steady-state фаза</b> (буфер достаточен): чистый demand-based sizing
-    ///     по модели BBA (Buffer-Based Adaptation). BDP floor не применяется —
-    ///     достаточно качать ровно столько, сколько нужно для поддержания
-    ///     <see cref="StreamingConfig.TargetBufferMs"/>.
+    ///     <b>Steady-state phase</b> (sufficient buffer): pure demand-based sizing
+    ///     using the BBA (Buffer-Based Adaptation) model. BDP floor is not applied —
+    ///     downloading just enough to maintain
+    ///     <see cref="StreamingConfig.TargetBufferMs"/> is sufficient.
     ///   </item>
     /// </list>
     /// <para>
-    /// Ко всем bandwidth-based оценкам применяется
-    /// <see cref="StreamingConfig.ThroughputSafetyFactor"/> (≤ 1.0) по модели
-    /// THROUGHPUT (dash.js) — резервируем часть канала, чтобы не упираться в его потолок.
+    /// All bandwidth-based estimates apply
+    /// <see cref="StreamingConfig.ThroughputSafetyFactor"/> (≤ 1.0) following the
+    /// THROUGHPUT model (dash.js) — reserving part of the bandwidth to avoid saturating the link.
     /// </para>
     /// </summary>
     private DownloadPlan BuildDownloadPlan(long requestedPosition, int minimumLength, bool isCritical)
@@ -248,7 +248,7 @@ public sealed partial class CachingStreamSource
                 start = adjustedStart;
         }
 
-        // Невыровненная позиция: план от AlignDown(position) обязан покрыть и голову, иначе хвост окна уйдёт во второй критический GET
+        // Unaligned position: plan from AlignDown(position) must cover the head, otherwise the window tail causes a second critical GET
         int requiredSpan = ComputeCriticalSpan(requestedPosition, minimumLength, start, _contentLength);
         int minLengthAligned = AlignUp(Math.Max(requiredSpan, _config.MinRequestSizeBytes), _requestAlignmentBytes);
 
@@ -304,8 +304,8 @@ public sealed partial class CachingStreamSource
 
         int maxLength = Math.Max(minLengthAligned, effectiveMaxLength);
 
-        // Throughput safety factor (модель THROUGHPUT, dash.js):
-        // не претендуем на 100% канала, оставляем запас для параллельных запросов.
+        // Throughput safety factor (THROUGHPUT model, dash.js):
+        // do not claim 100% bandwidth, reserve margin for parallel requests.
         double safeBytes = 0;
         if (estimatedBandwidth > 0)
         {
@@ -322,8 +322,8 @@ public sealed partial class CachingStreamSource
 
         if (selectedBytes < minLengthAligned) selectedBytes = minLengthAligned;
 
-        // BDP floor (только в startup/seek фазе):
-        // активируем при пустом буфере, чтобы максимально загрузить канал за один RTT.
+        // BDP floor (startup/seek phase only):
+        // activate on an empty buffer to maximize link saturation in a single RTT.
         bool isStartupOrSeekPhase = currentBufferSec < (_config.BdpFloorMaxBufferMs / 1000.0);
         if (estimatedBandwidth > 0 && avgLatencyMs > 600 && isStartupOrSeekPhase)
         {

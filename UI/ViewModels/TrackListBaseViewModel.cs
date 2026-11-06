@@ -4,9 +4,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.ViewModels;
 
 /// <summary>
-/// Единая архитектурная основа для всех экранов отображения музыкальных треков.
-/// Исключает дублирование реактивности плеера, загрузок, SIMD-фильтрации,
-/// переходов навигации и перемещения элементов.
+/// Unified architectural foundation for all music track display screens.
+/// Eliminates duplication of player reactivity, loading, SIMD filtering,
+/// navigation transitions, and item reordering.
 /// </summary>
 public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterable
 {
@@ -27,7 +27,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
     public IVirtualTrackList Items => _items;
 
     /// <summary>
-    /// Текущий активный трек плеера для прямого доступа представлений без материализации ViewModel.
+    /// The player's currently active track for direct view access without ViewModel materialization.
     /// </summary>
     public TrackInfo? CurrentPlayingTrack => PlayerControl.CurrentTrack;
 
@@ -272,7 +272,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
     public List<TrackInfo> GetItemsSnapshot() => _items.GetMasterTracks();
 
     /// <summary>
-    /// Возвращает снимок только отфильтрованных (отображаемых на экране) треков.
+    /// Returns a snapshot of only the filtered (displayed on screen) tracks.
     /// </summary>
     public List<TrackInfo> GetFilteredItemsSnapshot()
     {

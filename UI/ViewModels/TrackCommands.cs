@@ -4,8 +4,8 @@ using Avalonia.Threading;
 namespace LMP.UI.ViewModels;
 
 /// <summary>
-/// Сверхлёгкая async команда для TrackItemViewModel с поддержкой нотификации CanExecuteChanged.
-/// Не создаёт Subject, Observable, Scheduler — только один int для флага выполнения.
+/// Ultra-lightweight async command for TrackItemViewModel supporting CanExecuteChanged notifications.
+/// Does not allocate Subject, Observable, or Scheduler — uses only a single int execution flag.
 /// </summary>
 internal sealed class TrackAsyncCommand : ICommand
 {
@@ -54,8 +54,8 @@ internal sealed class TrackAsyncCommand : ICommand
 }
 
 /// <summary>
-/// Сверхлёгкая sync команда для TrackItemViewModel.
-/// CanExecute всегда true — никакого Observable overhead.
+/// Ultra-lightweight sync command for TrackItemViewModel.
+/// CanExecute is always true — zero Observable overhead.
 /// </summary>
 internal sealed class TrackSyncCommand : ICommand
 {
@@ -64,8 +64,8 @@ internal sealed class TrackSyncCommand : ICommand
     public TrackSyncCommand(Action execute) => _execute = execute;
 
     /// <summary>
-    /// CanExecute всегда true — событие никогда не стреляет.
-    /// Пустые аксессоры предотвращают CS0067 и исключают аллокацию backing field.
+    /// CanExecute is always true — the event never fires.
+    /// Empty accessors prevent CS0067 and eliminate backing field allocation.
     /// </summary>
     public event EventHandler? CanExecuteChanged
     {

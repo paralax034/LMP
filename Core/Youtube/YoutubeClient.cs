@@ -9,7 +9,7 @@ using LMP.Core.Youtube.Videos;
 namespace LMP.Core.Youtube;
 
 /// <summary>
-/// Фасад над всеми субклиентами YouTube InnerTube API.
+/// Facade over all YouTube InnerTube API sub-clients.
 /// </summary>
 public sealed class YoutubeClient : IDisposable
 {
@@ -17,18 +17,18 @@ public sealed class YoutubeClient : IDisposable
     private readonly bool _ownsHttpClient;
 
     /// <summary>
-    /// Инициализирует клиент YouTube с внедрением всех необходимых зависимостей.
+    /// Initializes the YouTube client with all required dependencies injected.
     /// </summary>
-    /// <param name="http">Настроенный HTTP-клиент с обработчиками YouTube.</param>
-    /// <param name="nTokenDecryptor">Провайдер расшифровки N-Token.</param>
-    /// <param name="sigCipherDecryptor">Провайдер расшифровки подписи потока.</param>
-    /// <param name="isAuthenticatedCheck">Callback проверки наличия активной сессии.</param>
+    /// <param name="http">Configured HTTP client with YouTube handlers.</param>
+    /// <param name="nTokenDecryptor">N-Token decryption provider.</param>
+    /// <param name="sigCipherDecryptor">Stream signature decryption provider.</param>
+    /// <param name="isAuthenticatedCheck">Callback to check for an active session.</param>
     /// <param name="poTokenProvider">
-    /// Провайдер PoToken для подписи videoplayback URL.
-    /// <c>null</c> отключает добавление параметра <c>pot</c>.
+    /// PoToken provider for signing videoplayback URLs.
+    /// <c>null</c> disables adding the <c>pot</c> parameter.
     /// </param>
     /// <param name="ownsHttpClient">
-    /// <c>true</c> — <see cref="Dispose"/> уничтожит <paramref name="http"/>.
+    /// <c>true</c> if <see cref="Dispose"/> should dispose <paramref name="http"/>.
     /// </param>
     public YoutubeClient(
         HttpClient http,
@@ -55,16 +55,16 @@ public sealed class YoutubeClient : IDisposable
         Sync = new PlaylistSyncController(_youtubeHttp);
     }
 
-    /// <summary>Клиент для работы с видео и аудио-потоками.</summary>
+    /// <summary>Client for working with video and audio streams.</summary>
     public VideoClient Videos { get; }
 
-    /// <summary>Клиент для работы с плейлистами.</summary>
+    /// <summary>Client for working with playlists.</summary>
     public PlaylistClient Playlists { get; }
 
-    /// <summary>Клиент для поиска.</summary>
+    /// <summary>Client for search.</summary>
     public SearchClient Search { get; }
 
-    /// <summary>Клиент YouTube Music.</summary>
+    /// <summary>Client for YouTube Music.</summary>
     public MusicClient Music { get; }
 
     /// <summary>

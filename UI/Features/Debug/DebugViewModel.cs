@@ -12,8 +12,8 @@ using LMP.Core.Youtube.Search;
 namespace LMP.UI.Features.Debug;
 
 /// <summary>
-/// ViewModel для Debug-окна. Содержит логику YouTube/Memory/Audio вкладок
-/// и предоставляет <see cref="TestRunner"/> для вкладки Tests.
+/// ViewModel for the Debug window. Contains logic for YouTube/Memory/Audio tabs
+/// and provides <see cref="TestRunner"/> for the Tests tab.
 /// </summary>
 public sealed partial class DebugViewModel : ViewModelBase
 {
@@ -35,11 +35,11 @@ public sealed partial class DebugViewModel : ViewModelBase
     private readonly Lazy<YoutubeProvider> _youtubeLazy;
     private YoutubeProvider Youtube => _youtubeLazy.Value;
 
-    // TEST RUNNER (вкладка Tests)
+    // TEST RUNNER (Tests tab)
 
     private TestRunnerViewModel? _testRunner;
 
-    /// <summary>ViewModel для вкладки тестов. Создаётся лениво при первом обращении.</summary>
+    /// <summary>ViewModel for the tests tab. Created lazily on first access.</summary>
     public TestRunnerViewModel TestRunner => _testRunner ??= new TestRunnerViewModel();
 
     // EXISTING PROPERTIES (YouTube / Memory / Audio)
@@ -56,11 +56,11 @@ public sealed partial class DebugViewModel : ViewModelBase
 
     [ObservableProperty] public partial bool IsAudioPlaying { get; set; }
 
-    /// <summary> Активен ли в данный момент фоновый мониторинг зависаний UI-потока. </summary>
+    /// <summary> Indicates whether background UI thread hang monitoring is currently active. </summary>
     [ObservableProperty]
     public partial bool IsWatchdogEnabled { get; set; }
 
-    /// <summary> Текст состояния для отображения на кнопке управления Watchdog. </summary>
+    /// <summary> Status text to display on the Watchdog control button. </summary>
     [ObservableProperty]
     public partial string WatchdogStatusText { get; set; } = "Watchdog: OFF";
 
@@ -106,7 +106,7 @@ public sealed partial class DebugViewModel : ViewModelBase
         ForceGcCommand = new RelayCommand(ExecuteForceGc);
         ClearCachesCommand = new AsyncRelayCommand(ExecuteClearCaches);
 
-        // ПРИМЕЧАНИЕ: CheckVmLeaksCommand переведен в no-op, так как фабрика бесстейтовая.
+        // NOTE: CheckVmLeaksCommand converted to no-op since the factory is stateless.
         CheckVmLeaksCommand = new RelayCommand(() =>
         {
             AppendLog(
@@ -223,7 +223,7 @@ public sealed partial class DebugViewModel : ViewModelBase
 
             var options = new AudioPlayerOptions
             {
-                // Обновляем ровно вариант source из запроса: URL другого контейнера guard source всё равно отвергнет.
+                // Update specifically the source variant from the request: the guard source will reject a URL from another container anyway.
                 UrlProvider = async (request, ct) =>
                 {
                     var refreshed = await Youtube.RefreshStreamAsync(
@@ -576,10 +576,10 @@ public sealed partial class DebugViewModel : ViewModelBase
         var before = GC.GetTotalMemory(false) / 1024 / 1024;
         AppendLog($"Before: {before} MB");
 
-        // Используем централизованный хелпер
+        // Use a centralized helper
         MemoryCleanupHelper.PerformCleanup(aggressive: true);
 
-        // Ждём завершения (синхронно для Debug)
+        // Wait for completion (synchronously for Debug)
         Thread.Sleep(500);
         var after = GC.GetTotalMemory(true) / 1024 / 1024;
         AppendLog($"After:  {after} MB");

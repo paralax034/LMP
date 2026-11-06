@@ -4,19 +4,19 @@ using Avalonia.Input;
 namespace LMP.UI.Helpers;
 
 /// <summary>
-/// Глобальный трекер позиции курсора мыши.
-/// Регистрируется один раз в MainWindow — все контролы читают без подписок.
+/// Global mouse cursor position tracker.
+/// Registered once in MainWindow — all controls read without subscriptions.
 /// </summary>
 public static class MousePositionHelper
 {
     private static Point _position;
 
-    /// <summary>Последняя известная позиция курсора в координатах окна.</summary>
+    /// <summary>Last known cursor position in window coordinates.</summary>
     public static Point Position => _position;
 
     /// <summary>
-    /// Привязывает трекер к корневому элементу окна.
-    /// Вызывать один раз при инициализации MainWindow.
+    /// Binds the tracker to the root element of the window.
+    /// Call once during MainWindow initialization.
     /// </summary>
     public static void Attach(Visual root)
     {

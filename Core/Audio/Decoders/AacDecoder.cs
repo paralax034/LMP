@@ -6,8 +6,8 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio.Decoders;
 
 /// <summary>
-/// AAC декодер на базе SharpJaad с поддержкой HE-AAC (SBR).
-/// Оптимизирован с SIMD конвертацией и пулингом буферов.
+/// AAC decoder based on SharpJaad with HE-AAC (SBR) support.
+/// Optimized with SIMD conversion and buffer pooling.
 /// </summary>
 public sealed class AacDecoder : IAudioDecoder
 {
@@ -108,8 +108,8 @@ public sealed class AacDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// Полностью пересоздаёт внутренний декодер из оригинального ASC.
-    /// Вызывается после seek или при неисправимых ошибках.
+    /// Completely recreates the internal decoder from the original ASC.
+    /// Called after seek or on unrecoverable errors.
     /// </summary>
     private void RecreateDecoder()
     {
@@ -309,7 +309,7 @@ public sealed class AacDecoder : IAudioDecoder
                 if (_consecutiveErrors <= 3)
                     Log.Debug($"[AacDecoder] Decode error (attempt {_consecutiveErrors}): {ex.Message}");
 
-                // Каждые 5 ошибок пересоздаём декодер
+                // Recreate decoder every 5 errors
                 if (_consecutiveErrors % 5 == 0)
                     RecreateDecoder();
 
@@ -319,12 +319,12 @@ public sealed class AacDecoder : IAudioDecoder
                 return silenceSamples;
             }
 
-            // Последняя попытка: полное пересоздание
+            // Last resort: complete recreation
             RecreateDecoder();
 
             Log.Warn($"[AacDecoder] Persistent decode error after {_consecutiveErrors} attempts: {ex.Message}");
 
-            // Возвращаем тишину вместо исключения — не крашим воспроизведение
+            // Return silence instead of throwing an exception — do not crash playback
             int silence = MaxFrameSize;
             int total = silence * Channels;
             outputBuffer[..Math.Min(total, outputBuffer.Length)].Clear();
@@ -333,25 +333,25 @@ public sealed class AacDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// Лёгкий сброс внутреннего состояния декодера без полного пересоздания.
+    /// Lightweight reset of the internal decoder state without full recreation.
     /// </summary>
     /// <remarks>
-    /// <para><b>Индустриальная практика:</b></para>
+    /// <para><b>Industry Practice:</b></para>
     /// <list type="bullet">
-    ///   <item>FFmpeg: <c>avcodec_flush_buffers</c> — обнуление internal buffers
-    ///     через <c>memset</c> на <c>ChannelElement</c> без пересоздания контекста.</item>
-    ///   <item>VLC: flush сбрасывает error state, позволяя продолжить после seek.</item>
-    ///   <item>ExoPlayer: <c>canKeepCodec</c> — reuse codec, flush при seek.</item>
+    ///   <item>FFmpeg: <c>avcodec_flush_buffers</c> — zeroing internal buffers
+    ///     via <c>memset</c> on <c>ChannelElement</c> without recreating context.</item>
+    ///   <item>VLC: flush resets error state, allowing execution to resume after seek.</item>
+    ///   <item>ExoPlayer: <c>canKeepCodec</c> — codec reuse, flush on seek.</item>
     /// </list>
     ///
-    /// <para><b>Предыдущий подход (<see cref="RecreateDecoder"/>):</b>
+    /// <para><b>Previous approach (<see cref="RecreateDecoder"/>):</b>
     /// <c>ParseMP4DecoderSpecificInfo</c> + <c>new Decoder</c> + <c>new SampleBuffer</c>
-    /// = ~2ms + 10 аллокаций. Вызывался на КАЖДОМ skip-фрейме (5 раз для AAC)
-    /// = ~10ms + 50 аллокаций на seek.</para>
+    /// = ~2ms + 10 allocations. Called on EVERY skip-frame (5 times for AAC)
+    /// = ~10ms + 50 allocations per seek.</para>
     ///
-    /// <para><b>Новый подход:</b> <c>Decoder.Flush()</c> обнуляет SyntacticElements
-    /// (prediction/LTP state) через <c>Array.Clear</c>. FilterBank overlap
-    /// вытесняется skip-frames. Стоимость: ~0.1ms + 1 аллокация.</para>
+    /// <para><b>New approach:</b> <c>Decoder.Flush()</c> zeroes out SyntacticElements
+    /// (prediction/LTP state) via <c>Array.Clear</c>. FilterBank overlap
+    /// is evicted by skip-frames. Cost: ~0.1ms + 1 allocation.</para>
     /// </remarks>
     public void FlushState()
     {
@@ -363,8 +363,8 @@ public sealed class AacDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// Декодирует фрейм с предварительным flush внутреннего state.
-    /// Вызывается ОДИН РАЗ после seek через <c>_decoderResetNeeded</c> CAS-флаг.
+    /// Decodes a frame after flushing the internal state.
+    /// Called ONCE after seek via the <c>_decoderResetNeeded</c> CAS flag.
     /// </summary>
     public int DecodeWithReset(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer)
     {
@@ -373,20 +373,20 @@ public sealed class AacDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// SIMD-оптимизированная конвертация byte[] (little-endian PCM16) → float[].
+    /// SIMD-optimized conversion of byte[] (little-endian PCM16) → float[].
     /// </summary>
     /// <remarks>
-    /// <para>SharpJaad возвращает PCM данные как byte[] с int16 сэмплами.
-    /// Конвертация вызывается на каждый фрейм (~50 раз/сек), поэтому оптимизирована через SIMD.</para>
+    /// <para>SharpJaad returns PCM data as byte[] containing int16 samples.
+    /// Conversion is invoked every frame (~50 times/sec), hence optimized via SIMD.</para>
     /// </remarks>
     internal static void ConvertBytesToFloat(byte[] pcmBytes, Span<float> output, int sampleCount)
     {
         int count = Math.Min(sampleCount, output.Length);
 
-        // Интерпретируем byte[] как short[] без копирования
+        // Interpret byte[] as short[] without copying
         var shorts = MemoryMarshal.Cast<byte, short>(pcmBytes.AsSpan(0, count * sizeof(short)));
 
-        // Используем общую SIMD-конвертацию из OpusDecoder
+        // Use shared SIMD conversion from OpusDecoder
         OpusDecoder.ConvertShortToFloat(shorts[..count], output);
     }
 

@@ -4,17 +4,17 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
-/// Централизованный исполнитель запросов с поддержкой повторных попыток (Retry Policy) для повышения сетевой устойчивости.
+/// Centralized request executor with Retry Policy support for enhanced network resilience.
 /// </summary>
 internal static class ResilienceExecutor
 {
     /// <summary>
-    /// Выполняет асинхронную операцию с автоматическим перезапуском при возникновении сетевых ошибок или сбоев парсинга.
+    /// Executes an asynchronous operation with automatic retries on network errors or parsing failures.
     /// </summary>
-    /// <typeparam name="T">Тип возвращаемого значения.</typeparam>
-    /// <param name="operation">Делегат выполняемой сетевой операции.</param>
-    /// <param name="maxRetries">Максимальное количество повторных попыток.</param>
-    /// <param name="cancellationToken">Токен отмены.</param>
+    /// <typeparam name="T">The return value type.</typeparam>
+    /// <param name="operation">The network operation delegate to execute.</param>
+    /// <param name="maxRetries">Maximum number of retry attempts.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static async ValueTask<T> ExecuteWithRetryAsync<T>(
         Func<ValueTask<T>> operation,

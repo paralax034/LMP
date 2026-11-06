@@ -8,9 +8,9 @@ using LMP.Core.Exceptions;
 namespace LMP.Core.Audio.Decoders;
 
 /// <summary>
-/// OPUS декодер на базе нативной библиотеки <c>opus.dll</c> (libopus) с P/Invoke без аллокаций в куче,
-/// и автоматическим фоллбэком на управляемый Concentus при отсутствии нативной библиотеки.
-/// Оптимизирован с SIMD конвертацией short→float и гарантированным освобождением неуправляемой памяти.
+/// OPUS decoder based on the native <c>opus.dll</c> library (libopus) using allocation-free P/Invoke,
+/// featuring automatic fallback to managed Concentus when the native library is missing.
+/// Optimized with SIMD short→float conversion and guaranteed unmanaged memory release.
 /// </summary>
 public sealed partial class OpusDecoder : IAudioDecoder
 {
@@ -26,7 +26,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
     private bool _disposed;
 
     /// <summary>
-    /// Проверяет доступность нативной библиотеки <c>opus</c> в текущем окружении.
+    /// Checks the availability of the native <c>opus</c> library in the current environment.
     /// </summary>
     private static bool CheckNativeSupport()
     {
@@ -41,7 +41,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
         }
         catch
         {
-            // Нативная библиотека opus не найдена или несовместима с архитектурой
+            // Native opus library was not found or is incompatible with the target architecture
         }
         return false;
     }
@@ -53,7 +53,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
         MaxFrameSize = sampleRate * MaxFrameDurationMs / 1000;
         _lastPacketSamples = Math.Clamp(sampleRate * DefaultFrameDurationMs / 1000, 120, MaxFrameSize);
 
-        // RFC 7845 §5.1: заголовок OpusHead (19+ байт) содержит Output Gain (signed 16-bit LE Q7.8 dB на смещении 16)
+        // RFC 7845 §5.1: OpusHead header (19+ bytes) contains Output Gain (signed 16-bit LE Q7.8 dB at offset 16)
         if (codecPrivate.Length >= 18
             && codecPrivate[0] == (byte)'O'
             && codecPrivate[1] == (byte)'p'
@@ -90,8 +90,8 @@ public sealed partial class OpusDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// Финализатор гарантирует освобождение неуправляемого состояния <c>opus_decoder_destroy</c>,
-    /// если вызывающий код не вызвал <see cref="Dispose"/>.
+    /// Finalizer guarantees the release of unmanaged <c>opus_decoder_destroy</c> state
+    /// if the caller failed to invoke <see cref="Dispose"/>.
     /// </summary>
     ~OpusDecoder()
     {
@@ -104,7 +104,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
     public AudioCodec Codec => AudioCodec.Opus;
     public bool IsInitialized => true;
 
-    /// <summary>Признак использования нативного P/Invoke декодера без аллокаций в куче.</summary>
+    /// <summary>Indicates whether the zero-allocation native P/Invoke decoder is in use.</summary>
     internal bool IsUsingNative => _nativeDecoder != IntPtr.Zero;
 
     public unsafe int Decode(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer)
@@ -124,7 +124,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
             fixed (byte* inPtr = &MemoryMarshal.GetReference(encodedData))
             fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
             {
-                // Нативный декод напрямую в IEEE 754 float32 (без 16-битного квантования и без hard-clipping'а пиков > 1.0f!)
+                // Native decode directly to IEEE 754 float32 (without 16-bit quantization and without hard-clipping peaks > 1.0f!)
                 samples = NativeOpus.opus_decode_float(
                     _nativeDecoder,
                     inPtr,
@@ -171,11 +171,11 @@ public sealed partial class OpusDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// Декодирует фрейм после seek с seek-safe семантикой сброса состояния.
+    /// Decodes a frame after seeking with seek-safe state reset semantics.
     /// </summary>
-    /// <param name="encodedData">Сжатые данные одного Opus-фрейма.</param>
-    /// <param name="outputBuffer">Выходной PCM float32 буфер.</param>
-    /// <returns>Количество декодированных семплов на канал.</returns>
+    /// <param name="encodedData">Compressed data of a single Opus frame.</param>
+    /// <param name="outputBuffer">Output PCM float32 buffer.</param>
+    /// <returns>Number of decoded samples per channel.</returns>
     public int DecodeWithReset(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer)
     {
         FlushState();
@@ -183,7 +183,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// Выполняет лёгкий flush внутреннего состояния Opus-декодера.
+    /// Performs a lightweight flush of the internal Opus decoder state.
     /// </summary>
     public void FlushState()
     {
@@ -234,7 +234,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// SIMD-оптимизированная конвертация short[] → float[].
+    /// SIMD-optimized short[] → float[] conversion.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void ConvertShortToFloat(ReadOnlySpan<short> src, Span<float> dst)
@@ -298,7 +298,7 @@ public sealed partial class OpusDecoder : IAudioDecoder
     }
 
     /// <summary>
-    /// P/Invoke привязки к нативной библиотеке <c>opus</c> (из пакета Concentus.Native / системной libopus).
+    /// P/Invoke bindings for the native <c>opus</c> library (from the Concentus.Native package / system libopus).
     /// </summary>
     private static partial class NativeOpus
     {

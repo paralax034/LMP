@@ -1,16 +1,16 @@
 ﻿namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Методы расширения для коллекций и последовательностей.
+/// Extension methods for collections and sequences.
 /// </summary>
 internal static class CollectionExtensions
 {
     extension<T>(IEnumerable<T?> source) where T : class
     {
         /// <summary>
-        /// Фильтрует последовательность, отсекая элементы со значением <see langword="null"/>.
+        /// Filters the sequence, removing <see langword="null"/> elements.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is null.</exception>
         public IEnumerable<T> WhereNotNull()
         {
             ArgumentNullException.ThrowIfNull(source);
@@ -26,9 +26,9 @@ internal static class CollectionExtensions
     extension<T>(IEnumerable<T?> source) where T : struct
     {
         /// <summary>
-        /// Фильтрует последовательность <see cref="Nullable{T}"/>, возвращая распакованные значения.
+        /// Filters a sequence of <see cref="Nullable{T}"/>, returning unwrapped values.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is null.</exception>
         public IEnumerable<T> WhereNotNull()
         {
             ArgumentNullException.ThrowIfNull(source);
@@ -44,9 +44,9 @@ internal static class CollectionExtensions
     extension<T>(IEnumerable<T> source) where T : struct
     {
         /// <summary>
-        /// Возвращает элемент по индексу <paramref name="index"/> или <see langword="null"/> при выходе за границы.
+        /// Returns the element at the specified <paramref name="index"/> or <see langword="null"/> if the index is out of bounds.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is null.</exception>
         public T? ElementAtOrNull(int index)
         {
             ArgumentNullException.ThrowIfNull(source);
@@ -77,9 +77,9 @@ internal static class CollectionExtensions
         }
 
         /// <summary>
-        /// Возвращает первый элемент последовательности или <see langword="null"/>, если она пуста.
+        /// Returns the first element of the sequence or <see langword="null"/> if it is empty.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="source"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is null.</exception>
         public T? FirstOrNull()
         {
             ArgumentNullException.ThrowIfNull(source);

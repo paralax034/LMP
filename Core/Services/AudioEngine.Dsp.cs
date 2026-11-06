@@ -15,7 +15,7 @@ public sealed partial class AudioEngine
     #region Pipeline Configuration
 
     /// <summary>
-    /// Конфигурирует pipeline перед открытием gate: громкость, нормализация и кроссфейдер.
+    /// Configures the pipeline before opening the gate: volume, normalization, and crossfader.
     /// </summary>
     private void ConfigurePipelineBeforeStart(AudioPipeline pipeline, string? trackId)
     {
@@ -117,7 +117,7 @@ public sealed partial class AudioEngine
     #region Loudness Persistence & Sync
 
     /// <summary>
-    /// Сохраняет resolved integrated loudness в runtime-модели, AudioCache и очередь DB persistence.
+    /// Persists the resolved integrated loudness into the runtime model, AudioCache, and DB persistence queue.
     /// </summary>
     private void CommitIntegratedLufs(string trackId, float integratedLufs, LoudnessSource source)
     {
@@ -174,7 +174,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Асинхронно сохраняет отложенные записи integrated loudness в БД.
+    /// Asynchronously saves pending integrated loudness entries to the DB.
     /// </summary>
     private async Task FlushPendingNormalizationWritesAsync(CancellationToken ct)
     {
@@ -199,7 +199,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Синхронно сохраняет все отложенные записи integrated loudness в базу данных.
+    /// Synchronously saves all pending integrated loudness entries to the database.
     /// </summary>
     private void FlushPendingNormalizationWritesSync()
     {
@@ -233,7 +233,7 @@ public sealed partial class AudioEngine
     #region Dynamic Gain & Equalizer Application
 
     /// <summary>
-    /// Обновляет gain нормализации в running pipeline при получении более точного LUFS.
+    /// Updates the normalization gain in the running pipeline upon receiving a more accurate LUFS value.
     /// </summary>
     private void UpdateRunningPipelineGain(string trackId, float integratedLufs)
     {
@@ -261,7 +261,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Пробрасывает актуальные настройки нормализации и эквалайзера в активный pipeline.
+    /// Propagates the latest normalization and equalizer settings to the active pipeline.
     /// </summary>
     private void ApplyNormalizationToPipeline()
     {
@@ -287,7 +287,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>
-    /// Применяет текущую конфигурацию эквалайзера (с учётом тумблера ForceGlobal и пресета трека) к активному конвейеру.
+    /// Applies the current equalizer configuration (taking into account ForceGlobal toggle and track preset) to the active pipeline.
     /// </summary>
     public void UpdateEqualizerSettings()
     {

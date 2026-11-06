@@ -226,7 +226,7 @@
         <Border Grid.Row="0" Classes="header-strip">
             <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Stretch">
 
-                <!-- LEFT: Блоки статистики (остаются видимыми во время синхронизации, плавно обновляя счётчики) -->
+                <!-- LEFT: Statistics blocks (remain visible during synchronization, smoothly updating counters) -->
                 <StackPanel Grid.Column="0"
                             Orientation="Horizontal"
                             Spacing="0"
@@ -285,7 +285,7 @@
                     </Border>
                 </StackPanel>
 
-                <!-- RIGHT: Действия -->
+                <!-- RIGHT: Actions -->
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
                             Spacing="6"
@@ -328,7 +328,7 @@
             </ProgressBar.Transitions>
         </ProgressBar>
 
-        <!-- ROW 2: CONTENT (Постоянно доступен для LayoutManager, без скрытия скроллера) -->
+        <!-- ROW 2: CONTENT (Permanently accessible to LayoutManager, without hiding the scroller) -->
         <Grid Grid.Row="2" Margin="0,8,0,0">
 
             <ScrollViewer HorizontalScrollBarVisibility="Disabled">

@@ -6,9 +6,9 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.UI.Services;
 
 /// <summary>
-/// Оркестратор обработки ошибок воспроизведения.
-/// Единый центр принятия решений.
-/// Полностью неблокирующий — использует toast-уведомления вместо модальных диалогов.
+/// Playback error handling orchestrator.
+/// Single point of decision making.
+/// Completely non-blocking — uses toast notifications instead of modal dialogs.
 /// </summary>
 public sealed class PlaybackErrorOrchestrator : IDisposable
 {
@@ -191,7 +191,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     }
 
     /// <summary>
-    /// Обрабатывает неготовность аудиоустройства вывода без убийства и запечатывания активного трека.
+    /// Handles audio output device unreadiness without killing or sealing the active track.
     /// </summary>
     private async Task HandleAudioDeviceUnavailableAsync(AudioDeviceException exception)
     {

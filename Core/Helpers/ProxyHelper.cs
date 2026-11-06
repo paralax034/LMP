@@ -3,16 +3,16 @@ using System.Net;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Хелпер для корректной сборки WebProxy с поддержкой HTTP, HTTPS, SOCKS4 и SOCKS5.
+/// Helper for properly building WebProxy with HTTP, HTTPS, SOCKS4, and SOCKS5 support.
 /// </summary>
 internal static class ProxyHelper
 {
     /// <summary>
-    /// Создаёт сконфигурированный <see cref="IWebProxy"/> из настроек приложения.
-    /// Автоматически распознаёт схему протокола (socks5://, http://) в поле Host.
+    /// Creates a configured <see cref="IWebProxy"/> from application settings.
+    /// Automatically detects the protocol scheme (socks5://, http://) in the Host field.
     /// </summary>
-    /// <param name="proxy">Настройки прокси.</param>
-    /// <returns>Экземпляр <see cref="WebProxy"/> или <c>null</c>, если прокси выключен или не настроен.</returns>
+    /// <param name="proxy">Proxy settings.</param>
+    /// <returns>A <see cref="WebProxy"/> instance, or <c>null</c> if the proxy is disabled or not configured.</returns>
     internal static WebProxy? CreateWebProxy(ProxySettings? proxy)
     {
         if (proxy is null || !proxy.Enabled || string.IsNullOrWhiteSpace(proxy.Host))
@@ -22,7 +22,7 @@ internal static class ProxyHelper
         int port = proxy.Port > 0 ? proxy.Port : 8080;
         Uri proxyUri;
 
-        // Если пользователь указал схему вручную (socks5://, socks4://, http://, https://)
+        // If the user specified the scheme manually (socks5://, socks4://, http://, https://)
         if (hostInput.Contains("://", StringComparison.Ordinal))
         {
             if (Uri.TryCreate(hostInput, UriKind.Absolute, out var parsedUri))
@@ -40,7 +40,7 @@ internal static class ProxyHelper
         }
         else
         {
-            // Эвристика: если порт типичен для SOCKS (1080, 10808, 10809, 9050), используем socks5
+            // Heuristic: if the port is typical for SOCKS (1080, 10808, 10809, 9050), use socks5
             string scheme = port is 1080 or 10808 or 10809 or 9050 ? "socks5" : "http";
             proxyUri = new Uri($"{scheme}://{hostInput}:{port}");
         }

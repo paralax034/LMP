@@ -1,34 +1,34 @@
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// ViewModel диалога создания нового плейлиста.
+/// ViewModel for the new playlist creation dialog.
 /// </summary>
 public sealed partial class CreatePlaylistDialogViewModel : ViewModelBase
 {
     /// <summary>
-    /// Вложенный редактор параметров плейлиста.
+    /// Nested playlist parameters editor.
     /// </summary>
     public PlaylistEditorViewModel Editor { get; }
 
     /// <summary>
-    /// Callback для закрытия диалога с результатом.
+    /// Callback to close the dialog with a result.
     /// </summary>
     public Action<CreatePlaylistResult?>? OnResult { get; set; }
 
     /// <summary>
-    /// Команда подтверждения создания плейлиста.
+    /// Command to confirm playlist creation.
     /// </summary>
     public IAsyncRelayCommand ConfirmCommand { get; }
 
     /// <summary>
-    /// Команда отмены создания.
+    /// Command to cancel creation.
     /// </summary>
     public IRelayCommand CancelCommand { get; }
 
     /// <summary>
-    /// Инициализирует новый диалог создания плейлиста.
+    /// Initializes a new playlist creation dialog.
     /// </summary>
-    /// <param name="isAuthenticated">Авторизован ли пользователь.</param>
+    /// <param name="isAuthenticated">Whether the user is authenticated.</param>
     public CreatePlaylistDialogViewModel(bool isAuthenticated = false)
     {
         Editor = PlaylistEditorViewModel.ForCreate(isAuthenticated: isAuthenticated);
@@ -74,14 +74,14 @@ public sealed partial class CreatePlaylistDialogViewModel : ViewModelBase
 }
 
 /// <summary>
-/// Полный результат создания плейлиста со всеми метаданными из формы.
+/// Complete playlist creation result containing all form metadata.
 /// </summary>
-/// <param name="Name">Название создаваемого плейлиста.</param>
-/// <param name="Description">Текстовое описание плейлиста.</param>
-/// <param name="ThumbnailUrl">Локальный путь или сетевой URL обложки.</param>
-/// <param name="CustomColor">Пользовательский цвет в формате HEX.</param>
-/// <param name="ComputedColor">Автоматически вычисленный доминантный цвет обложки.</param>
-/// <param name="SyncToCloud">Флаг немедленной привязки к YouTube Music.</param>
+/// <param name="Name">Name of the playlist being created.</param>
+/// <param name="Description">Text description of the playlist.</param>
+/// <param name="ThumbnailUrl">Local path or network URL of the cover art.</param>
+/// <param name="CustomColor">Custom color in HEX format.</param>
+/// <param name="ComputedColor">Automatically calculated dominant cover color.</param>
+/// <param name="SyncToCloud">Flag indicating immediate sync to YouTube Music.</param>
 public sealed record CreatePlaylistResult(
     string Name,
     string? Description,

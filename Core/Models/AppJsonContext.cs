@@ -9,8 +9,8 @@ using LMP.Core.Youtube.Bridge.Common;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// JSON Source Generator для оптимизации памяти и производительности.
-/// Убирает накладные расходы рефлексии при работе с моделями.
+/// JSON Source Generator for memory and performance optimization.
+/// Removes reflection overhead when working with models.
 /// </summary>
 [JsonSerializable(typeof(LegacyLibraryData))]
 [JsonSerializable(typeof(TrackInfo))]

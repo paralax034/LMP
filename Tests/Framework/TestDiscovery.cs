@@ -3,9 +3,9 @@ using System.Collections.Frozen;
 namespace LMP.Tests.Framework;
 
 /// <summary>
-/// Обнаружение тестов по реестру, который LMP.Tests.Generator строит на этапе сборки: без рефлексии и совместимо с AOT.
-/// Кэширует дескрипторы, отсортированные списки и группы один раз за время жизни процесса.
-/// Потокобезопасен, не производит повторных аллокаций при открытии UI.
+/// Discovers tests via the registry built by LMP.Tests.Generator at build time: reflection-free and AOT-compatible.
+/// Caches descriptors, sorted lists, and groups once per process lifetime.
+/// Thread-safe, performs no re-allocations when UI opens.
 /// </summary>
 public static class TestDiscovery
 {
@@ -14,7 +14,7 @@ public static class TestDiscovery
     private static FrozenSet<string>? _groupsCache;
     private static readonly Lock _lock = new();
 
-    /// <summary>Все обнаруженные тесты по ID.</summary>
+    /// <summary>All discovered tests by ID.</summary>
     public static FrozenDictionary<string, TestDescriptor> GetAll()
     {
         var cache = _cache;
@@ -27,7 +27,7 @@ public static class TestDiscovery
         }
     }
 
-    /// <summary>Тесты, отсортированные по категории → группе → порядку (кэшированный массив).</summary>
+    /// <summary>Tests sorted by category → group → order (cached array).</summary>
     public static IReadOnlyList<TestDescriptor> GetAllOrdered()
     {
         var ordered = _orderedCache;
@@ -40,7 +40,7 @@ public static class TestDiscovery
         }
     }
 
-    /// <summary>Тесты, сгруппированные по категории.</summary>
+    /// <summary>Tests grouped by category.</summary>
     public static IReadOnlyDictionary<TestCategory, IReadOnlyList<TestDescriptor>> GetGrouped()
     {
         var ordered = GetAllOrdered();
@@ -65,7 +65,7 @@ public static class TestDiscovery
     }
 
     /// <summary>
-    /// Возвращает все уникальные тематические группы тестов.
+    /// Returns all unique topic groups of tests.
     /// </summary>
     public static FrozenSet<string> GetAllGroups()
     {
@@ -79,7 +79,7 @@ public static class TestDiscovery
         }
     }
 
-    /// <summary>Сбрасывает кэш тестов.</summary>
+    /// <summary>Resets the test cache.</summary>
     public static void InvalidateCache()
     {
         lock (_lock)

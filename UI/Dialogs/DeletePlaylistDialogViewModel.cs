@@ -12,7 +12,7 @@ public sealed partial class DeletePlaylistDialogViewModel : ViewModelBase
     public bool CanDeleteFromCloud { get; }
 
     /// <summary>
-    /// Callback для закрытия диалога с результатом.
+    /// Callback to close the dialog with a result.
     /// </summary>
     public Action<DeletePlaylistResult?>? OnResult { get; set; }
 

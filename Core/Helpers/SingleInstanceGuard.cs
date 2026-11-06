@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 namespace LMP.Core.Helpers;
 
 /// <summary>
-/// Обеспечивает запуск строго одного экземпляра приложения в рамках пользовательской сессии.
-/// Инкапсулирует системный мьютекс, кроссплатформенный IPC-канал передачи фокуса,
-/// автоматически устраняет зависшие зомби-процессы и восстанавливает главное окно.
+/// Ensures strict single-instance application startup within a user session.
+/// Encapsulates a system mutex, a cross-platform focus-transfer IPC channel,
+/// automatically eliminates hung zombie processes, and restores the main window.
 /// </summary>
 public sealed partial class SingleInstanceGuard : IDisposable
 {
@@ -39,7 +39,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
     }
 
     /// <summary>
-    /// Регистрирует делегат активации главного окна при получении межпроцессного сигнала от второго экземпляра.
+    /// Registers a main window activation delegate triggered by an inter-process signal from a second instance.
     /// </summary>
     public static void RegisterActivationCallback(Action? callback)
     {
@@ -47,11 +47,11 @@ public sealed partial class SingleInstanceGuard : IDisposable
     }
 
     /// <summary>
-    /// Пытается захватить владение системным мьютексом единственного экземпляра.
+    /// Tries to acquire ownership of the single-instance system mutex.
     /// </summary>
     /// <returns>
-    /// Экземпляр <see cref="SingleInstanceGuard"/> при успешном запуске (освобождает мьютекс при Dispose),
-    /// либо <c>null</c>, если процесс уже запущен и пользователь отказался от его перезапуска.
+    /// A <see cref="SingleInstanceGuard"/> instance on successful startup (releases the mutex upon Dispose),
+    /// or <c>null</c> if the process is already running and the user declined to restart it.
     /// </returns>
     public static SingleInstanceGuard? TryAcquire()
     {
@@ -86,18 +86,18 @@ public sealed partial class SingleInstanceGuard : IDisposable
         mutex?.Dispose();
         mutex = null;
 
-        // Второй процесс: пытаемся разбудить первый через быстрый кроссплатформенный IPC
+        // Second process: attempt to wake up the first one via fast cross-platform IPC
         if (TryNotifyActiveInstance())
         {
             return null;
         }
 
-        // Проверяем существующие процессы: устранение зависаний либо подтверждение перезапуска пользователем
+        // Check existing processes: eliminate hangs or request user confirmation to restart
         if (HandleExistingProcesses())
         {
             try
             {
-                // Даём ОС паузу для освобождения системных дескрипторов после завершения старого процесса
+                // Allow the OS time to release system handles after the old process terminates
                 Thread.Sleep(150);
                 mutex = new Mutex(true, MutexName, out isOnlyInstance);
                 if (!isOnlyInstance)
@@ -184,10 +184,10 @@ public sealed partial class SingleInstanceGuard : IDisposable
     }
 
     /// <summary>
-    /// Инспектирует запущенные процессы с аналогичным именем: принудительно завершает зависшие процессы,
-    /// запрашивает перезапуск у пользователя для живого процесса либо выводит его окно на передний план.
+    /// Inspects running processes with the same name: forcibly terminates hung processes,
+    /// prompts the user to restart an active process, or brings its window to the foreground.
     /// </summary>
-    /// <returns><c>true</c>, если предыдущий процесс был завершён и можно продолжить запуск текущего экземпляра.</returns>
+    /// <returns><c>true</c> if the previous process was terminated and current instance startup can proceed.</returns>
     private static bool HandleExistingProcesses()
     {
         try
@@ -205,7 +205,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
                     continue;
                 }
 
-                // 1. Принудительное уничтожение зависшего зомби-процесса без лишних вопросов
+                // 1. Forcefully kill the hung zombie process without prompting
                 if (!proc.Responding)
                 {
                     try
@@ -232,7 +232,7 @@ public sealed partial class SingleInstanceGuard : IDisposable
 
             using (activeProcess)
             {
-                // 2. Интерактивный диалог: завершить старый процесс или оставить его
+                // 2. Interactive dialog: terminate the old process or keep it
                 if (PromptTerminateExistingProcess())
                 {
                     try
@@ -247,22 +247,22 @@ public sealed partial class SingleInstanceGuard : IDisposable
                     }
                 }
 
-                // 3. Пользователь отказался от перезапуска — активируем окно существующего процесса
+                // 3. User declined to restart — activate the window of the existing process
                 ActivateProcessWindow(activeProcess);
             }
         }
         catch
         {
-            // Ошибки доступа к чужим процессам не должны вызывать аварийный сбой запуска
+            // Access errors when querying other processes must not crash the startup process
         }
 
         return false;
     }
 
     /// <summary>
-    /// Отображает модальный системный диалог с вопросом о завершении предыдущего процесса.
+    /// Displays a modal system dialog asking to terminate the previous process.
     /// </summary>
-    /// <returns><c>true</c>, если пользователь подтвердил закрытие предыдущего процесса.</returns>
+    /// <returns><c>true</c> if the user confirmed closing the previous process.</returns>
     private static bool PromptTerminateExistingProcess()
     {
         string title = "Lite Music Player";
@@ -278,13 +278,13 @@ public sealed partial class SingleInstanceGuard : IDisposable
             var locTitle = LocalizationService.Instance["Notification_AlreadyRunning_Title"];
             var locQuestion = LocalizationService.Instance["Notification_AlreadyRunning_Question"];
 
-            // Проверяем, что локализация вернула реальные значения, а не сырые ключи вида [Key]
+            // Verify that localization returned real values rather than raw keys like [Key]
             title = locTitle;
             question = locQuestion;
         }
         catch
         {
-            // Безопасный fallback при непредвиденных ошибках чтения настроек
+            // Safe fallback on unexpected settings read errors
         }
 
         if (OperatingSystem.IsWindows())
@@ -348,10 +348,10 @@ public sealed partial class SingleInstanceGuard : IDisposable
     }
 
     /// <summary>
-    /// Выводит на передний план окно указанного процесса.
-    /// Корректно находит хэндл окна через перечисление дескрипторов, даже если окно было скрыто в трей.
+    /// Brings the window of the specified process to the foreground.
+    /// Correctly finds the window handle via handle enumeration, even if the window was minimized to the tray.
     /// </summary>
-    /// <param name="proc">Целевой процесс существующего экземпляра.</param>
+    /// <param name="proc">Target process of the existing instance.</param>
     private static void ActivateProcessWindow(Process proc)
     {
         if (!OperatingSystem.IsWindows())
@@ -373,10 +373,10 @@ public sealed partial class SingleInstanceGuard : IDisposable
     }
 
     /// <summary>
-    /// Находит дескриптор окна процесса через системное перечисление Win32 окон.
+    /// Finds the process window handle using system Win32 window enumeration.
     /// </summary>
-    /// <param name="processId">Идентификатор целевого процесса.</param>
-    /// <returns>Дескриптор окна либо <see cref="IntPtr.Zero"/>, если окно не найдено.</returns>
+    /// <param name="processId">Target process ID.</param>
+    /// <returns>Window handle, or <see cref="IntPtr.Zero"/> if the window was not found.</returns>
     private static IntPtr FindProcessWindowHandle(int processId)
     {
         IntPtr result = IntPtr.Zero;

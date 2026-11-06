@@ -8,23 +8,23 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// Режим выбора обложки плейлиста.
+/// Playlist artwork selection mode.
 /// </summary>
 public enum CoverMode
 {
-    /// <summary>Прямой ввод HTTP/HTTPS URL адреса.</summary>
+    /// <summary>Direct HTTP/HTTPS URL input.</summary>
     Url,
 
-    /// <summary>Генерация мозаики из обложек треков текущего плейлиста.</summary>
+    /// <summary>Generate a mosaic from the track artwork of the current playlist.</summary>
     FromTracks,
 
-    /// <summary>Выбор локального файла изображения с файловой системы.</summary>
+    /// <summary>Select a local image file from the file system.</summary>
     File
 }
 
 /// <summary>
-/// ViewModel редактора метаданных плейлиста.
-/// Поддерживает двухколоночный макет, реактивное превью и автоматическую синхронизацию палитры.
+/// ViewModel for the playlist metadata editor.
+/// Supports a two-column layout, reactive preview, and automatic palette synchronization.
 /// </summary>
 public sealed partial class PlaylistEditorViewModel : ViewModelBase
 {
@@ -33,205 +33,205 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     private readonly string? _originalDescription;
 
     /// <summary>
-    /// Название плейлиста.
+    /// Playlist title.
     /// </summary>
     [ObservableProperty]
     public partial string Name { get; set; } = "";
 
     /// <summary>
-    /// URL или локальный путь к обложке плейлиста.
+    /// URL or local path to the playlist artwork.
     /// </summary>
     [ObservableProperty]
     public partial string? ThumbnailUrl { get; set; }
 
     /// <summary>
-    /// Пользовательский акцентный цвет в формате HEX (например, #FF5500).
+    /// Custom accent color in HEX format (e.g., #FF5500).
     /// </summary>
     [ObservableProperty]
     public partial string? CustomColor { get; set; }
 
     /// <summary>
-    /// Пользовательское текстовое описание плейлиста.
+    /// Custom text description of the playlist.
     /// </summary>
     [ObservableProperty]
     public partial string? Description { get; set; }
 
     /// <summary>
-    /// Автоматически вычисленный доминантный цвет обложки в формате HEX.
+    /// Automatically calculated dominant artwork color in HEX format.
     /// </summary>
     [ObservableProperty]
     public partial string? ComputedColor { get; set; }
 
     /// <summary>
-    /// Кисть для отображения превью активного цвета.
+    /// Brush for rendering the active color preview.
     /// </summary>
     [ObservableProperty]
     public partial IBrush ComputedColorPreviewBrush { get; set; } = Brushes.Transparent;
 
     /// <summary>
-    /// Текстовое представление активного цвета для отображения в компактной карточке палитры.
+    /// String representation of the active color for display in the compact palette card.
     /// </summary>
     [ObservableProperty]
     public partial string EffectiveColorText { get; set; } = "Auto";
 
     /// <summary>
-    /// Флаг выполнения асинхронного пересчёта доминантного цвета из изображения.
+    /// Flag indicating an ongoing asynchronous recalculation of the dominant color from the image.
     /// </summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RecalculateColorCommand))]
     public partial bool IsRecalculatingColor { get; set; }
 
     /// <summary>
-    /// Команда принудительного пересчёта доминантного цвета из активной обложки.
+    /// Command to force recalculation of the dominant color from the active artwork.
     /// </summary>
     public IAsyncRelayCommand RecalculateColorCommand { get; }
 
     /// <summary>
-    /// Флаг системного неизменяемого плейлиста (например, «Любимые треки»).
+    /// Flag indicating a system immutable playlist (e.g., "Favorite Tracks").
     /// </summary>
     public bool IsSystemPlaylist { get; }
 
     /// <summary>
-    /// Доступно ли имя для ручного редактирования.
+    /// Indicates whether the title is available for manual editing.
     /// </summary>
     public bool IsNameEditable { get; }
 
     /// <summary>
-    /// Флаг режима редактирования существующего плейлиста.
+    /// Flag indicating edit mode for an existing playlist.
     /// </summary>
     public bool IsForEdit { get; }
 
     /// <summary>
-    /// Делегат обратного вызова для запуска процесса создания локальной копии плейлиста.
+    /// Callback delegate to trigger the creation of a local playlist copy.
     /// </summary>
     public Action? OnCreateCopy { get; set; }
 
     /// <summary>
-    /// Команда создания локальной копии плейлиста.
+    /// Command to create a local copy of the playlist.
     /// </summary>
     public IRelayCommand CreateCopyCommand { get; }
 
     /// <summary>
-    /// Активный режим выбора источника обложки.
+    /// Active artwork source selection mode.
     /// </summary>
     [ObservableProperty]
     public partial CoverMode SelectedCoverMode { get; set; } = CoverMode.Url;
 
     /// <summary>
-    /// Флаг активности вкладки прямого URL.
+    /// Flag indicating whether the direct URL tab is active.
     /// </summary>
     [ObservableProperty]
     public partial bool IsCoverModeUrl { get; set; } = true;
 
     /// <summary>
-    /// Флаг активности вкладки мозаики из треков.
+    /// Flag indicating whether the track mosaic tab is active.
     /// </summary>
     [ObservableProperty]
     public partial bool IsCoverModeFromTracks { get; set; }
 
     /// <summary>
-    /// Флаг активности вкладки локального файла.
+    /// Flag indicating whether the local file tab is active.
     /// </summary>
     [ObservableProperty]
     public partial bool IsCoverModeFile { get; set; }
 
     /// <summary>
-    /// ViewModel выбора обложек для построения мозаики.
+    /// ViewModel for selecting artwork to build a mosaic.
     /// </summary>
     [ObservableProperty]
     public partial PlaylistCoverPickerViewModel? CoverPicker { get; set; }
 
     /// <summary>
-    /// Флаг отображения переключателя режимов обложки.
+    /// Flag indicating whether the artwork mode selector is visible.
     /// </summary>
     public bool ShowCoverModeSwitch { get; } = true;
 
     /// <summary>
-    /// Доступен ли режим создания мозаики из треков (требует наличия треков с обложками).
+    /// Indicates whether track mosaic mode is available (requires tracks with artwork).
     /// </summary>
     public bool HasTracksCoverOption { get; }
 
     /// <summary>
-    /// Путь к файлу, выбранному пользователем через системный диалог.
+    /// Path to the file selected by the user via the system dialog.
     /// </summary>
     [ObservableProperty]
     public partial string? SelectedFilePath { get; set; }
 
     /// <summary>
-    /// Команда вызова системного диалога открытия файла изображения.
+    /// Command to open the system open file dialog for images.
     /// </summary>
     public IAsyncRelayCommand SelectFileCommand { get; }
 
     /// <summary>
-    /// Флаг видимости секции облачной синхронизации с YouTube Music.
+    /// Flag indicating visibility of the YouTube Music cloud sync section.
     /// </summary>
     [ObservableProperty]
     public partial bool ShowSyncSection { get; set; }
 
     /// <summary>
-    /// Флаг включения двусторонней синхронизации с YouTube Music.
+    /// Flag enabling two-way sync with YouTube Music.
     /// </summary>
     [ObservableProperty]
     public partial bool IsSyncedToCloud { get; set; }
 
     /// <summary>
-    /// Флаг авторизации текущей пользовательской сессии.
+    /// Flag indicating authorization of the current user session.
     /// </summary>
     public bool IsAuthenticated { get; }
 
     /// <summary>
-    /// Флаг наличия привязанного удалённого идентификатора YouTube.
+    /// Flag indicating the presence of a linked remote YouTube ID.
     /// </summary>
     public bool HasYoutubeBinding { get; }
 
     /// <summary>
-    /// Исходное состояние флага синхронизации на момент открытия диалога.
+    /// Initial state of the sync flag when the dialog was opened.
     /// </summary>
     public bool OriginalSyncState { get; }
 
     /// <summary>
-    /// Текст текущей ошибки валидации данных формы.
+    /// Text of the current form data validation error.
     /// </summary>
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
     /// <summary>
-    /// Флаг наличия ошибок валидации.
+    /// Flag indicating the presence of validation errors.
     /// </summary>
     [ObservableProperty]
     public partial bool HasErrors { get; set; }
 
     /// <summary>
-    /// Доступно ли сохранение формы в текущем состоянии.
+    /// Indicates whether the form can be saved in its current state.
     /// </summary>
     public bool CanSave => !HasErrors;
 
     /// <summary>
-    /// URL превью для загрузки по сети или из ресурсов приложения.
+    /// Preview URL for loading over the network or from application resources.
     /// </summary>
     [ObservableProperty]
     public partial string? ThumbnailPreviewUrl { get; set; }
 
     /// <summary>
-    /// Флаг наличия доступного превью обложки любого типа.
+    /// Flag indicating whether a cover preview of any type is available.
     /// </summary>
     [ObservableProperty]
     public partial bool HasThumbnailPreview { get; set; }
 
     /// <summary>
-    /// Флаг сетевого источника превью (HTTP/HTTPS/avares).
+    /// Flag indicating a network source for the preview (HTTP/HTTPS/avares).
     /// </summary>
     [ObservableProperty]
     public partial bool IsPreviewHttp { get; set; }
 
     /// <summary>
-    /// Флаг локального источника превью (дисковый файл или ин-мемори растр).
+    /// Flag indicating a local source for the preview (disk file or in-memory bitmap).
     /// </summary>
     [ObservableProperty]
     public partial bool IsPreviewLocal { get; set; }
 
     /// <summary>
-    /// Локальный растровый снимок для мгновенного отображения мозаики или локального файла.
+    /// Local bitmap snapshot for instant display of a mosaic or local file.
     /// </summary>
     [ObservableProperty]
     public partial Bitmap? LocalPreviewBitmap { get; set; }
@@ -239,22 +239,22 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     private readonly DispatcherTimer _thumbnailDebounceTimer;
 
     /// <summary>
-    /// Инициализирует новый экземпляр <see cref="PlaylistEditorViewModel"/>.
+    /// Initializes a new instance of <see cref="PlaylistEditorViewModel"/>.
     /// </summary>
-    /// <param name="name">Название плейлиста.</param>
-    /// <param name="thumbnailUrl">URL или путь к обложке.</param>
-    /// <param name="customColor">Пользовательский цвет в формате HEX.</param>
-    /// <param name="description">Описание плейлиста.</param>
-    /// <param name="computedColor">Ранее вычисленный доминантный цвет.</param>
-    /// <param name="showSync">Флаг доступности настройки синхронизации.</param>
-    /// <param name="isSynced">Исходное состояние синхронизации.</param>
-    /// <param name="isAuthenticated">Авторизован ли пользователь.</param>
-    /// <param name="hasYoutubeBinding">Имеет ли плейлист привязку к ID YouTube.</param>
-    /// <param name="playlistTracks">Коллекция треков плейлиста для мозаики.</param>
-    /// <param name="isForEdit">Создан ли редактор для существующего плейлиста.</param>
-    /// <param name="isSystemPlaylist">Является ли плейлист системным.</param>
-    /// <param name="networkManager">Менеджер сетевых запросов.</param>
-    /// <param name="dominantColorService">Сервис анализа цветовой палитры.</param>
+    /// <param name="name">Playlist title.</param>
+    /// <param name="thumbnailUrl">Cover URL or path.</param>
+    /// <param name="customColor">Custom color in HEX format.</param>
+    /// <param name="description">Playlist description.</param>
+    /// <param name="computedColor">Previously calculated dominant color.</param>
+    /// <param name="showSync">Flag indicating whether sync settings are available.</param>
+    /// <param name="isSynced">Initial sync state.</param>
+    /// <param name="isAuthenticated">Indicates whether the user is authenticated.</param>
+    /// <param name="hasYoutubeBinding">Indicates whether the playlist is bound to a YouTube ID.</param>
+    /// <param name="playlistTracks">Collection of playlist tracks for mosaic generation.</param>
+    /// <param name="isForEdit">Indicates whether the editor is created for an existing playlist.</param>
+    /// <param name="isSystemPlaylist">Indicates whether the playlist is a system playlist.</param>
+    /// <param name="networkManager">Network request manager.</param>
+    /// <param name="dominantColorService">Color palette analysis service.</param>
     public PlaylistEditorViewModel(
         string name = "",
         string? thumbnailUrl = null,
@@ -370,13 +370,13 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Активирует режим ввода обложки по URL.</summary>
+    /// <summary>Activates the URL cover input mode.</summary>
     public void SetCoverModeUrl() => SelectedCoverMode = CoverMode.Url;
 
-    /// <summary>Активирует режим формирования мозаики из треков.</summary>
+    /// <summary>Activates the track mosaic generation mode.</summary>
     public void SetCoverModeFromTracks() => SelectedCoverMode = CoverMode.FromTracks;
 
-    /// <summary>Активирует режим выбора локального файла.</summary>
+    /// <summary>Activates the local file selection mode.</summary>
     public void SetCoverModeFile() => SelectedCoverMode = CoverMode.File;
 
     private async Task SelectFileAsync(CancellationToken ct)
@@ -585,7 +585,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Проверяет, представляет ли переданная строка валидный локальный путь или поддерживаемый URI схемы.
+    /// Checks whether the provided string represents a valid local path or a supported URI scheme.
     /// </summary>
     public static bool IsValidUri(string? url)
     {
@@ -614,7 +614,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Создаёт модель редактора для сценария создания нового плейлиста.
+    /// Creates an editor model for the new playlist creation scenario.
     /// </summary>
     public static PlaylistEditorViewModel ForCreate(
         bool isAuthenticated = false,
@@ -633,7 +633,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
             dominantColorService: dominantColorService);
 
     /// <summary>
-    /// Создаёт модель редактора для сценария редактирования существующего плейлиста.
+    /// Creates an editor model for the existing playlist editing scenario.
     /// </summary>
     public static PlaylistEditorViewModel ForEdit(
         Playlist playlist,
@@ -661,7 +661,7 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Экспортирует состояние полей формы в неизменяемый результат <see cref="EditPlaylistResult"/>.
+    /// Exports the state of form fields into an immutable <see cref="EditPlaylistResult"/>.
     /// </summary>
     public EditPlaylistResult ToResult() => new()
     {
@@ -673,19 +673,19 @@ public sealed partial class PlaylistEditorViewModel : ViewModelBase
     };
 
     /// <summary>
-    /// Флаг изменения состояния облачной синхронизации относительно исходного.
+    /// Flag indicating whether the cloud sync state has changed relative to the initial state.
     /// </summary>
     public bool SyncStateChanged => IsSyncedToCloud != OriginalSyncState;
 
     /// <summary>
-    /// Флаг изменения текстового описания относительно исходного значения.
+    /// Flag indicating whether the text description has changed relative to the initial value.
     /// </summary>
     public bool DescriptionChanged => !string.Equals(Description?.Trim(), _originalDescription?.Trim(), StringComparison.Ordinal);
 
     /// <summary>
-    /// Освобождает занятые ресурсы таймера, растровых превью и дочерней модели мозаики.
+    /// Releases resources used by the timer, bitmap previews, and child mosaic model.
     /// </summary>
-    /// <param name="disposing">Флаг вызова из Dispose.</param>
+    /// <param name="disposing">Flag indicating whether invocation comes from Dispose.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

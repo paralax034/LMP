@@ -222,7 +222,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- HEADER ICON BUTTON (Без рамок, чистая анимация цвета иконки на AccentBrush) -->
+    <!-- HEADER ICON BUTTON (Borderless, pure icon color animation to AccentBrush) -->
     <Style Selector="Button.header-icon-btn">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
@@ -280,7 +280,7 @@
 
     <!-- -->
     <!-- PLAYBACK BUTTONS                                                    -->
-    <!-- Без рамок, чистая анимация цвета иконки на AccentBrush             -->
+    <!-- Borderless, pure icon color animation to AccentBrush             -->
     <!-- -->
 
     <Style Selector="Button.playback-btn">
@@ -490,8 +490,8 @@
         <Setter Property="Cursor" Value="Arrow" />
     </Style>
 
-    <!-- Сохраняем акцентную рамку и цвет текста активной вкладки при наведении мыши (устраняет
-    мигание в серый) -->
+    <!-- Preserve accent border and active tab text color on mouse hover (prevents
+    flickering to gray) -->
     <Style Selector="Button.nav-tab.active:pointerover">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />

@@ -5,17 +5,17 @@ using System.Runtime.InteropServices;
 namespace LMP.Core.Audio.Backends;
 
 /// <summary>
-/// Применяет volume gain к PCM float-сэмплам in-place без фазового перекоса каналов и ступенек при движении ползунка.
+/// Applies volume gain to PCM float samples in-place without channel phase skew or stepping artifacts during slider movement.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Спроектирован для вызова исключительно из потока воспроизведения (playback thread).
-/// <see cref="SetVolumeGain"/> принимает значение потокобезопасно через <see langword="volatile"/>,
-/// само вычисление огибающей происходит только внутри <see cref="Process"/>.
+/// Designed to be called exclusively from the playback thread.
+/// <see cref="SetVolumeGain"/> receives the value in a thread-safe manner via <see langword="volatile"/>,
+/// while the envelope calculation itself occurs strictly inside <see cref="Process"/>.
 /// </para>
 /// <para>
-/// Zero-alloc hot path с аппаратным SIMD-ускорением через <see cref="Vector{T}"/> и защитой от срабатывания
-/// системного лимитера микшера Windows (<c>audiodg.exe</c>) около 100% громкости.
+/// Zero-alloc hot path with hardware SIMD acceleration via <see cref="Vector{T}"/> and protection against
+/// triggering the Windows mixer system limiter (<c>audiodg.exe</c>) near 100% volume.
 /// </para>
 /// </remarks>
 public sealed class GainProcessor
@@ -23,7 +23,7 @@ public sealed class GainProcessor
     #region Constants
 
     /// <summary>
-    /// Длина плавного перехода при изменении громкости в стерео-фреймах (1200 фреймов = 25 мс при 48 кГц).
+    /// Smooth transition duration when changing volume, in stereo frames (1200 frames = 25 ms at 48 kHz).
     /// </summary>
     private const int RampFrames = 1200;
 
@@ -31,8 +31,8 @@ public sealed class GainProcessor
     private const float GainEpsilon = 0.0001f;
 
     /// <summary>
-    /// Безопасный потолок амплитуды для WASAPI Shared Mode (-0.13 dBFS),
-    /// предотвращающий щелчки системного лимитера Windows на громкости 95–100%.
+    /// Safe amplitude ceiling for WASAPI Shared Mode (-0.13 dBFS),
+    /// preventing Windows system limiter clicks at 95–100% volume.
     /// </summary>
     private const float SafeCeiling = 0.985f;
     private const float SoftKneeThreshold = 0.90f;
@@ -52,9 +52,9 @@ public sealed class GainProcessor
     #endregion
 
     /// <summary>
-    /// Мягко ограничивает пики, превышающие <see cref="SoftKneeThreshold"/> (0.90f),
-    /// с сохранением непрерывности первой производной (C1) и асимптотой <see cref="SafeCeiling"/> (0.985f).
-    /// Сигнал в диапазоне [-0.90, +0.90] проходит со 100% побитовой линейностью.
+    /// Softly limits peaks exceeding <see cref="SoftKneeThreshold"/> (0.90f),
+    /// preserving first-derivative (C1) continuity with <see cref="SafeCeiling"/> (0.985f) as an asymptote.
+    /// Signals within the [-0.90, +0.90] range pass through with 100% bit-exact linearity.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float SoftClipSample(float x)
@@ -71,9 +71,9 @@ public sealed class GainProcessor
     }
 
     /// <summary>
-    /// Задаёт целевой volume gain. Потокобезопасно через volatile-запись.
+    /// Sets the target volume gain. Thread-safe via volatile write.
     /// </summary>
-    /// <param name="gain">Линейный коэффициент усиления. Значения ниже 0 приводятся к 0.</param>
+    /// <param name="gain">Linear gain factor. Values below 0 are clamped to 0.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetVolumeGain(float gain)
     {
@@ -81,9 +81,9 @@ public sealed class GainProcessor
     }
 
     /// <summary>
-    /// Применяет volume gain к PCM float-сэмплам in-place.
+    /// Applies volume gain to PCM float samples in-place.
     /// </summary>
-    /// <param name="samples">Interleaved PCM float-сэмплы. Изменяются in-place.</param>
+    /// <param name="samples">Interleaved PCM float samples. Modified in-place.</param>
     public void Process(Span<float> samples)
     {
         if (samples.IsEmpty) return;

@@ -6,8 +6,8 @@ using SlidingRamCache = LMP.Core.Audio.Sources.CachingStreamSource.SlidingRamCac
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Контрактные тесты <see cref="Mp4BinaryReader"/>: сборка заголовков box при частичных чтениях
-/// (законное поведение любого <see cref="Stream"/>), различение настоящего EOF и 0 B на синхронном пути.
+/// Contract tests for <see cref="Mp4BinaryReader"/>: box header assembly on partial reads
+/// (valid behavior for any <see cref="Stream"/>), distinguishing actual EOF from 0 B on the synchronous path.
 /// </summary>
 public static class Mp4BinaryReaderTests
 {
@@ -15,8 +15,8 @@ public static class Mp4BinaryReaderTests
     private const int ExtendedBoxSize = 40;
 
     /// <summary>
-    /// Доказывает P0: частичное чтение (&lt; 8 байт) не является EOF и обязано дочитываться,
-    /// как для синхронно, так и для асинхронно завершающегося потока.
+    /// Proves P0: partial reads (&lt; 8 bytes) are not EOF and must be read to completion,
+    /// for both synchronously and asynchronously completing streams.
     /// </summary>
     [TestMethod(TestCategory.Unit, "MP4 Box Header Assembly Under Short Reads", Group = TestGroups.Audio, Order = 20)]
     public static async Task TestReadBoxHeaderShortReadsAsync()
@@ -31,7 +31,7 @@ public static class Mp4BinaryReaderTests
             bool forceAsync = mode == 1;
             for (int chunk = 1; chunk <= 8; chunk++)
             {
-                // 1. Компактный заголовок: 4 байта size + 4 байта type
+                // 1. Compact header: 4-byte size + 4-byte type
                 using (var stream = new ChunkedReadStream(compact, chunk, forceAsync))
                 {
                     var reader = new Mp4BinaryReader(stream);
@@ -42,7 +42,7 @@ public static class Mp4BinaryReaderTests
                     TestAssert.Equal(8L, reader.Position, $"chunk={chunk}, async={forceAsync}: reader must stop right after the header");
                 }
 
-                // 2. Расширенный заголовок (size == 1 + 64-битный largesize)
+                // 2. Extended header (size == 1 + 64-bit largesize)
                 using (var stream = new ChunkedReadStream(extended, chunk, forceAsync))
                 {
                     var reader = new Mp4BinaryReader(stream);
@@ -57,7 +57,7 @@ public static class Mp4BinaryReaderTests
     }
 
     /// <summary>
-    /// Страховочный контракт для фикса: настоящий EOF и обрезанный хвост возвращают пустой заголовок без исключений.
+    /// Safety contract for the fix: genuine EOF and truncated tail return an empty header without throwing exceptions.
     /// </summary>
     [TestMethod(TestCategory.Unit, "MP4 Box Header EOF Contract", Group = TestGroups.Audio, Order = 21)]
     public static async Task TestReadBoxHeaderEofContractAsync()
@@ -68,7 +68,7 @@ public static class Mp4BinaryReaderTests
         {
             bool forceAsync = mode == 1;
 
-            // 1. Пустой поток: read == 0 с первого вызова
+            // 1. Empty stream: read == 0 on the first call
             using (var empty = new ChunkedReadStream([], 8, forceAsync))
             {
                 var reader = new Mp4BinaryReader(empty);
@@ -76,7 +76,7 @@ public static class Mp4BinaryReaderTests
                 TestAssert.True(header.IsEmpty, $"async={forceAsync}: empty stream must yield IsEmpty");
             }
 
-            // 2. Обрезанный хвост: 3 байта, затем EOF — пустой заголовок, без EndOfStreamException
+            // 2. Truncated tail: 3 bytes, then EOF — empty header, no EndOfStreamException
             using (var tail = new ChunkedReadStream(truncated, 1, forceAsync))
             {
                 var reader = new Mp4BinaryReader(tail);
@@ -88,25 +88,25 @@ public static class Mp4BinaryReaderTests
     }
 
     /// <summary>
-    /// Доказывает, что P0 достижим в production: <see cref="SlidingRamCache.TryRead"/> отдаёт частичное чтение
-    /// на стыке блоков, и читатель поверх быстрого пути кэша теряет заголовок.
+    /// Proves that P0 is achievable in production: <see cref="SlidingRamCache.TryRead"/> returns a partial read
+    /// at the boundary of blocks, causing the reader on top of the cache fast path to lose the header.
     /// </summary>
     [TestMethod(TestCategory.Unit, "MP4 Header Across SlidingRamCache Block Boundary", Group = TestGroups.Audio, Order = 22)]
     public static async Task TestBoxHeaderAcrossRamCacheBoundaryAsync()
     {
-        const int splitAt = 6; // Стык RAM-блоков внутри 8-байтного заголовка
+        const int splitAt = 6; // RAM block boundary inside an 8-byte header
         byte[] data = BuildCompactBox(Mp4BinaryReader.FCC_MOOF, CompactBoxSize);
 
         using var cache = new SlidingRamCache();
         AddBlock(cache, data, 0, splitAt);
         AddBlock(cache, data, splitAt, data.Length - splitAt);
 
-        // 1. Предусловие: блоки не склеиваются, TryRead ограничен остатком текущего блока
+        // 1. Precondition: blocks are not merged, TryRead is limited by the remainder of the current block
         byte[] probe = new byte[8];
         TestAssert.True(cache.TryRead(0, probe, out int partial), "SlidingRamCache must serve offset 0");
         TestAssert.Equal(splitAt, partial, "SlidingRamCache.TryRead must stop at the block boundary");
 
-        // 2. Сквозной сценарий: AsyncCachingReadStream fast path -> Mp4BinaryReader -> ScanAndParseNextFragmentAsync
+        // 2. End-to-end scenario: AsyncCachingReadStream fast path -> Mp4BinaryReader -> ScanAndParseNextFragmentAsync
         using var stream = new RamCacheReadStream(cache, data.Length);
         var reader = new Mp4BinaryReader(stream);
         var header = await reader.ReadBoxHeaderAsync(CancellationToken.None).ConfigureAwait(false);
@@ -117,7 +117,7 @@ public static class Mp4BinaryReaderTests
     }
 
     /// <summary>
-    /// Фиксирует бюджет фикса: синхронно завершающиеся чтения (полные и частичные) не аллоцируют.
+    /// Enforces the fix budget: synchronously completing reads (full and partial) do not allocate.
     /// </summary>
     [TestMethod(TestCategory.Unit, "MP4 Box Header Sync Path (0 Alloc)", Group = TestGroups.Audio, Order = 23)]
     public static Task TestReadBoxHeaderZeroAllocAsync()
@@ -175,7 +175,7 @@ public static class Mp4BinaryReaderTests
     }
 
     /// <summary>
-    /// Поток, отдающий не более <c>maxChunk</c> байт за вызов; в асинхронном режиме уступает поток перед чтением.
+    /// Stream that yields no more than <c>maxChunk</c> bytes per call; yields control before reading in async mode.
     /// </summary>
     private sealed class ChunkedReadStream(byte[] data, int maxChunk, bool forceAsync) : Stream
     {
@@ -235,8 +235,8 @@ public static class Mp4BinaryReaderTests
     }
 
     /// <summary>
-    /// Повторяет быстрый путь <c>AsyncCachingReadStream.ReadAsync</c> (ReadStream.cs, стр. 180–184):
-    /// одно обращение к <see cref="SlidingRamCache.TryRead"/> в пределах одного блока.
+    /// Replicates the <c>AsyncCachingReadStream.ReadAsync</c> fast path (ReadStream.cs, lines 180–184):
+    /// a single <see cref="SlidingRamCache.TryRead"/> call within a single block.
     /// </summary>
     private sealed class RamCacheReadStream(SlidingRamCache cache, long length) : Stream
     {

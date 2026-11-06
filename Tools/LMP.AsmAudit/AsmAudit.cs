@@ -7,10 +7,10 @@ using Iced.Intel;
 namespace LMP.Tools.AsmAudit;
 
 /// <summary>
-/// Бинарный линтер машинного кода Native AOT (x86-64 PE + MSF 7.0 PDB).
-/// Находит горячие циклы по обратным переходам графа потока управления и проверяет отсутствие
-/// инструкций <c>call</c>, тяжёлого деления/корня (<c>div*</c>/<c>sqrt*</c>), штрафов смешивания VEX/Legacy SSE
-/// и сбросов регистров на стек (<c>[rsp + disp]</c>).
+/// Native AOT machine code binary linter (x86-64 PE + MSF 7.0 PDB).
+/// Detects hot loops via back-edges in the control flow graph and verifies the absence of
+/// <c>call</c> instructions, heavy division/square root (<c>div*</c>/<c>sqrt*</c>), VEX/Legacy SSE transition penalties,
+/// and register spills to the stack (<c>[rsp + disp]</c>).
 /// </summary>
 public static partial class Program
 {
@@ -19,8 +19,8 @@ public static partial class Program
     private const uint SYMOPT_EXACT_SYMBOLS = 0x00000400;
 
     /// <summary>
-    /// Точный размер структуры <c>SYMBOL_INFOW</c> без хвостового буфера имени в 64-битном <c>dbghelp.h</c> (88 байт),
-    /// смещение поля <c>Name</c> равно 84 байтам.
+    /// Exact size of the <c>SYMBOL_INFOW</c> structure without the tailing name buffer in 64-bit <c>dbghelp.h</c> (88 bytes),
+    /// with the offset of the <c>Name</c> field being 84 bytes.
     /// </summary>
     private const uint SymbolInfoStructSize = 88;
     private const int SymbolInfoNameOffset = 84;
@@ -363,7 +363,7 @@ public static partial class Program
         if (string.IsNullOrWhiteSpace(name))
             return false;
 
-        // Аудируем только собственные методы сборок LMP / LMP.Core (отсекаем S_P_CoreLib_ и Internal_CompilerGenerated_)
+        // Audit only user methods from LMP / LMP.Core assemblies (filter out S_P_CoreLib_ and Internal_CompilerGenerated_)
         if (!name.StartsWith("LMP_", StringComparison.Ordinal))
             return false;
 
@@ -383,7 +383,7 @@ public static partial class Program
             return false;
         }
 
-        // Исключаем синтетические funclet-блоки, методы record-структур, инициализацию/сброс/освобождение и холодные Throw-хелперы
+        // Exclude synthetic funclets, record struct methods, initialization/reset/dispose routines, and cold Throw helpers
         if (name.Contains("funclet", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("cctor", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("ctor", StringComparison.OrdinalIgnoreCase) ||
@@ -466,7 +466,7 @@ public static partial class Program
 
         bool rbpIsStackFramePointer = IsRbpEstablishedAsFramePointer(instructions);
 
-        // Pass 1: Детектирование горячих циклов по обратным переходам (TargetIP < CurrentIP) с проверкой достижимости без ret/int3
+        // Pass 1: Hot loop detection via back-edges (TargetIP < CurrentIP) with reachability check excluding ret/int3
         var rawLoops = new List<(ulong HeaderIp, ulong BackEdgeIp, int StartIdx, int EndIdx)>();
         for (int i = 0; i < instructions.Count; i++)
         {
@@ -510,7 +510,7 @@ public static partial class Program
                 IsInnerLeafLoop: !containsNested));
         }
 
-        // Pass 2: Аудит инструкций внутри горячих циклов
+        // Pass 2: Instruction audit inside hot loops
         var annotations = new InstructionAnnotation[instructions.Count];
         int innerLoopCalls = 0;
         int outerLoopMathCalls = 0;
@@ -521,7 +521,7 @@ public static partial class Program
 
         foreach (var loop in loops)
         {
-            // Игнорируем микро-циклы пролога компилятора по обнулению стекового фрейма (xorps xmm,xmm + movaps [rsp+rax+disp],xmm)
+            // Ignore compiler prologue micro-loops zeroing the stack frame (xorps xmm,xmm + movaps [rsp+rax+disp],xmm)
             if (IsPrologZeroInitLoop(instructions, loop.StartIndex, loop.EndIndex))
                 continue;
 
@@ -532,12 +532,12 @@ public static partial class Program
 
             for (int idx = loop.StartIndex; idx <= loop.EndIndex; idx++)
             {
-                // Если инструкция принадлежит вложенному циклу, её детально проверяет сам внутренний цикл
+                // If an instruction belongs to a nested loop, it is audited in detail by the inner loop itself
                 if (!loop.IsInnerLeafLoop && IsInsideAnyInnerLoop(idx, loops))
                     continue;
 
-                // Отсекаем тупиковые блоки выхода (early return / call Throw* + int3), расположенные внутри
-                // диапазона адресов, но не имеющие пути возврата к обратной дуге цикла (BackEdgeIp)
+                // Filter out dead-end exit blocks (early return / call Throw* + int3) located within the address
+                // range, but having no return path to the loop back-edge (BackEdgeIp)
                 if (!CanReachWithoutReturn(instructions, ipToIndex, idx, loop.EndIndex))
                     continue;
 
@@ -599,7 +599,7 @@ public static partial class Program
             }
         }
 
-        // Форматирование дизассемблерного листинга с разметкой [HOT LOOP]
+        // Formatting disassemble listing with [HOT LOOP] annotations
         var formatter = new IntelFormatter();
         formatter.Options.UppercaseHex = true;
         formatter.Options.HexPrefix = "0x";

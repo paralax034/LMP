@@ -6,8 +6,8 @@ using LMP.Core.Youtube.Exceptions;
 namespace LMP.Core.Youtube.Bridge.PoToken;
 
 /// <summary>
-/// Управляет persistent QuickJS-контекстом для выполнения BotGuard VM
-/// и генерации PoToken через staged pipeline.
+/// Manages a persistent QuickJS context for executing the BotGuard VM
+/// and generating PoTokens via a staged pipeline.
 /// </summary>
 public sealed class BotGuardService : IDisposable
 {
@@ -22,13 +22,13 @@ public sealed class BotGuardService : IDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Время истечения текущего IntegrityToken.
-    /// Читается/пишется только под <see cref="_lock"/>.
+    /// Expiration time of the current IntegrityToken.
+    /// Read/written only under <see cref="_lock"/>.
     /// </summary>
     private DateTimeOffset _contextExpiresAt;
 
     /// <summary>
-    /// Таймаут ожидания завершения Promise в event loop.
+    /// Timeout for waiting for Promise completion in the event loop.
     /// </summary>
     private const int PumpTimeoutMs = 10_000;
 
@@ -36,14 +36,14 @@ public sealed class BotGuardService : IDisposable
         SearchValues.Create(Path.GetInvalidFileNameChars());
 
     /// <summary>
-    /// Указывает, инициализирован ли нативный контекст и актуален ли IntegrityToken для быстрого mint (~2 мс).
+    /// Indicates whether the native context is initialized and the IntegrityToken is valid for fast mint (~2 ms).
     /// </summary>
     public bool HasActiveContext => _handle != IntPtr.Zero && DateTimeOffset.UtcNow < _contextExpiresAt;
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="BotGuardService"/>.
+    /// Initializes a new instance of the <see cref="BotGuardService"/> class.
     /// </summary>
-    /// <param name="http">Клиент HTTP.</param>
+    /// <param name="http">The HTTP client.</param>
     public BotGuardService(HttpClient http)
     {
         _http = http;
@@ -54,7 +54,7 @@ public sealed class BotGuardService : IDisposable
     // 
 
     /// <summary>
-    /// Полный pipeline генерации PoToken для identifier.
+    /// Full pipeline for generating a PoToken for the identifier.
     /// </summary>
     public async Task<string?> GenerateAsync(string identifier, CancellationToken ct = default)
     {
@@ -142,7 +142,7 @@ public sealed class BotGuardService : IDisposable
     }
 
     /// <summary>
-    /// Fast mint для content-bound PoToken.
+    /// Fast mint for content-bound PoToken.
     /// </summary>
     public async Task<string?> MintForVideoAsync(string videoId, CancellationToken ct = default)
     {
@@ -203,7 +203,7 @@ public sealed class BotGuardService : IDisposable
         CancellationToken ct)
     {
         //
-        // Шаг 3a: staged context initialization
+        // Step 3a: staged context initialization
         //
         if (_handle == IntPtr.Zero)
         {
@@ -221,7 +221,7 @@ public sealed class BotGuardService : IDisposable
         }
 
         //
-        // Шаг 3b: Async snapshot
+        // Step 3b: Async snapshot
         //
         Log.Debug("[BotGuardService] Step 3b: Getting BotGuard snapshot (async)...");
 
@@ -278,7 +278,7 @@ public sealed class BotGuardService : IDisposable
         }
 
         //
-        // Шаг 4: IntegrityToken
+        // Step 4: IntegrityToken
         //
         Log.Debug("[BotGuardService] Step 4: Fetching IntegrityToken...");
 
@@ -296,7 +296,7 @@ public sealed class BotGuardService : IDisposable
         Log.Debug($"[BotGuardService] IntegrityToken OK (TTL={integrityData.EstimatedTtlSecs}s, isFallback={integrityData.IsFallbackToken})");
 
         //
-        // Шаг 5a: Activate token
+        // Step 5a: Activate token
         //
         Log.Debug("[BotGuardService] Step 5a: Activating IntegrityToken...");
 
@@ -324,7 +324,7 @@ public sealed class BotGuardService : IDisposable
             .ConfigureAwait(false);
 
         //
-        // Шаг 5b: Mint
+        // Step 5b: Mint
         //
         Log.Debug("[BotGuardService] Step 5b: Minting PoToken...");
 
@@ -362,8 +362,8 @@ public sealed class BotGuardService : IDisposable
         Common.QuickJsNative.TraceEnable(_handle, false);
 #endif
 
-        // Освобождаем ~1.2 МБ исходного кода bg.js из LOH: активный _handle жив до _contextExpiresAt,
-        // а все последующие MintForVideoAsync работают внутри созданного контекста QuickJS.
+        // Release ~1.2 MB of raw bg.js source code from LOH: the active _handle stays alive until _contextExpiresAt,
+        // and all subsequent MintForVideoAsync calls operate inside the created QuickJS context.
         _cachedBgScript = null;
         MemoryHelpers.SchedulePostHeavyWorkCleanup();
 
@@ -372,7 +372,7 @@ public sealed class BotGuardService : IDisposable
     }
 
     /// <summary>
-    /// Создаёт пустой native context и staged-load'ит:
+    /// Creates an empty native context and staged-loads:
     /// compat → bg.js → bootstrap.
     /// </summary>
     private async Task<bool> CreateAndLoadContextAsync(
@@ -418,11 +418,11 @@ public sealed class BotGuardService : IDisposable
 
         Log.Debug($"[BotGuardService] Staged load: bg.js={bgScript.Length / 1024}KB, initiating native bootstrap...");
 
-        // Шаг 1: Оцениваем сам тяжелый JS-скрипт bg.js
+        // Step 1: Evaluate the heavy bg.js script itself
         if (!EvalPhase("bg.js", bgScript))
             return false;
 
-        // Шаг 2: Инициализируем нативный бутстрап без вызовов JS-строк
+        // Step 2: Initialize native bootstrap without calling JS string evaluation
         bool bootstrapOk = await Task.Run(
             () => Common.QuickJsNative.InitBotGuardBootstrap(_handle, challenge.GlobalName, challenge.Program),
             ct).ConfigureAwait(false);
@@ -438,7 +438,7 @@ public sealed class BotGuardService : IDisposable
     }
 
     /// <summary>
-    /// Выполняет одну bootstrap-фазу и логирует точную ошибку.
+    /// Executes a single bootstrap phase and logs the exact error.
     /// </summary>
     private bool EvalPhase(string phaseName, string script)
     {
@@ -1030,7 +1030,7 @@ public sealed class BotGuardService : IDisposable
     }
 
     /// <summary>
-    /// Экранирует строку для JS-литерала в одинарных кавычках.
+    /// Escapes a string for a single-quoted JS literal.
     /// </summary>
     private static string EscapeJsString(string s)
     {

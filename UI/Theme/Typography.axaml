@@ -3,11 +3,11 @@
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- TYPOGRAPHY                                                          -->
-    <!-- Глобальные текстовые стили для заголовков, меток, описаний.         -->
-    <!-- Источник: SettingsView локальные стили → вынесены для переиспользования -->
+    <!-- Global text styles for headings, labels, descriptions.             -->
+    <!-- Source: SettingsView local styles → extracted for reuse            -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
-    <!-- Заголовок секции -->
+    <!-- Section header -->
     <Style Selector="TextBlock.h2">
         <Setter Property="FontSize" Value="16" />
         <Setter Property="FontWeight" Value="Bold" />
@@ -15,7 +15,7 @@
         <Setter Property="Margin" Value="0,32,0,12" />
     </Style>
 
-    <!-- Метка настройки / поля -->
+    <!-- Setting / field label -->
     <Style Selector="TextBlock.label">
         <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="SemiBold" />
@@ -23,7 +23,7 @@
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
-    <!-- Описание / подсказка -->
+    <!-- Description / hint -->
     <Style Selector="TextBlock.desc">
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
@@ -31,7 +31,7 @@
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
-    <!-- Моноширинное значение (слайдеры, числовые поля) -->
+    <!-- Monospaced value (sliders, numeric fields) -->
     <Style Selector="TextBlock.value-label">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontFamily" Value="Consolas, monospace" />
@@ -44,7 +44,7 @@
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- CARDS                                                               -->
-    <!-- Фоновый контейнер для группировки настроек/контента.               -->
+    <!-- Background container for grouping settings/content.                -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
     <Style Selector="Border.card">
@@ -58,7 +58,7 @@
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- COLOR ROW                                                           -->
-    <!-- Строка выбора цвета в настройках темы.                             -->
+    <!-- Color picker row in theme settings.                                -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
     <Style Selector="Grid.color-row">
@@ -76,7 +76,7 @@
     </Style>
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
-    <!-- FEATURE BADGES (BOOST, BETA, СКОРО)                                -->
+    <!-- FEATURE BADGES (BOOST, BETA, SOON)                                 -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
 
     <Style Selector="Border.feature-badge">

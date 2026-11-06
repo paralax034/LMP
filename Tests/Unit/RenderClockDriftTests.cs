@@ -6,7 +6,7 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Перенос хода часов рендера под дрейфом часов устройства относительно QPC: опережение ограничено допуском, время не убывает.
+/// Advances render clock under device clock drift relative to QPC: lead is capped to tolerance, time is monotonic.
 /// </summary>
 public static class RenderClockDriftTests
 {
@@ -16,7 +16,7 @@ public static class RenderClockDriftTests
     private const double SlowDevicePpm = 1_000.0;
     private const double MaxLeadMs = RenderClock.MaxCarryLeadMs + 1.0;
 
-    /// <summary>Устройство медленнее QPC на 1000 ppm: опережение переноса не растёт до глубины очереди ни при ровном шаге, ни при джиттере.</summary>
+    /// <summary>Device is slower than QPC by 1000 ppm: advance lead does not grow to queue depth under steady step or jitter.</summary>
     [TestMethod(TestCategory.Unit, "RenderClock Carry-Over Converges Under Device Drift", Group = TestGroups.Audio, Order = 43)]
     public static Task TestRenderClockDriftConvergesAsync()
     {

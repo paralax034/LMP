@@ -13,18 +13,18 @@ public sealed class BootstrapSettings
     private static readonly string FilePath = G.FilePath.Bootstrap;
 
     /// <summary>
-    /// Лимит GPU texture cache Skia в байтах.
-    /// Применяется при старте через SkiaOptions.MaxGpuResourceSizeBytes.
-    /// Изменение вступает в силу после перезапуска.
-    /// Дефолт: 64MB — покрывает ~762 обложки 120px без лишнего потребления RAM.
+    /// Skia GPU texture cache limit in bytes.
+    /// Applied at startup via SkiaOptions.MaxGpuResourceSizeBytes.
+    /// Changes take effect after a restart.
+    /// Default: 64MB — covers ~762 120px covers without excessive RAM consumption.
     /// </summary>
     public long GpuTextureCacheMb { get; set; } = 64;
 
     public string? LastRunVersion { get; set; }
 
     /// <summary>
-    /// Флаг, указывающий, что в текущем запуске произошло обновление версии приложения.
-    /// Используется для условного сброса критических конфигураций.
+    /// Flag indicating that an application version update occurred during the current launch.
+    /// Used for conditional reset of critical configurations.
     /// </summary>
     [JsonIgnore]
     public bool AppUpdatedThisRun { get; private set; }
@@ -42,7 +42,7 @@ public sealed class BootstrapSettings
                 var settings = JsonSerializer.Deserialize(text, AppJsonContext.Default.BootstrapSettings);
                 if (settings != null)
                 {
-                    // ОЧИСТКА КЭША ПРИ ОБНОВЛЕНИИ ВЕРСИИ ПЛЕЕРА
+                    // CACHE CLEARING ON PLAYER VERSION UPDATE
                     if (settings.LastRunVersion != G.Build.Version)
                     {
                         settings.AppUpdatedThisRun = true;
@@ -52,7 +52,7 @@ public sealed class BootstrapSettings
                         settings.Save();
                     }
 
-                    // ПРОВЕРКА ПЕРВОГО ЗАПУСКА
+                    // FIRST LAUNCH CHECK
                     if (settings.IsFirstRun)
                     {
                         settings.LanguageCode = G.SystemInfo.DetectSystemLanguage();
@@ -87,7 +87,7 @@ public sealed class BootstrapSettings
     }
 
     /// <summary>
-    /// Принудительно удаляет кэшированные файлы обхода блокировок на диске.
+    /// Forcefully deletes cached bypass files from disk.
     /// </summary>
     private static void PurgeBypassCaches()
     {
@@ -98,7 +98,7 @@ public sealed class BootstrapSettings
             if (Directory.Exists(G.Folder.SigCipherCache))
                 Directory.Delete(G.Folder.SigCipherCache, true);
 
-            G.Folder.Create(); // Пересоздаем пустые директории структуры папок
+            G.Folder.Create(); // Recreate empty directories of the folder structure
         }
         catch (Exception ex)
         {

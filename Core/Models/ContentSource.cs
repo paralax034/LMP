@@ -1,46 +1,46 @@
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Источник контента для приложения.
+/// Application content source.
 /// </summary>
 public enum ContentSource
 {
     /// <summary>
-    /// YouTube Music API (WEB_REMIX) — песни, альбомы, музыкальные плейлисты.
-    /// Рекомендуется для музыки.
+    /// YouTube Music API (WEB_REMIX) — tracks, albums, music playlists.
+    /// Recommended for music.
     /// </summary>
     YouTubeMusic,
     
     /// <summary>
-    /// Стандартный YouTube API (WEB) — все видео.
-    /// Для расширенного поиска.
+    /// Standard YouTube API (WEB) — all videos.
+    /// Used for advanced search.
     /// </summary>
     YouTube,
     
     /// <summary>
-    /// Локальные файлы на диске.
-    /// Полностью оффлайн, не зависит от интернета.
+    /// Local files on disk.
+    /// Fully offline, independent of internet connection.
     /// </summary>
     Local
 }
 
 /// <summary>
-/// Режим синхронизации лайков.
+/// Like synchronization mode.
 /// </summary>
 public enum LikeSyncMode
 {
     /// <summary>
-    /// YouTube Music Likes (LM) — только музыка.
+    /// YouTube Music Likes (LM) — music only.
     /// </summary>
     MusicOnly,
     
     /// <summary>
-    /// YouTube Liked Videos (LL) — все видео.
+    /// YouTube Liked Videos (LL) — all videos.
     /// </summary>
     AllVideos,
     
     /// <summary>
-    /// Без синхронизации — только локальные лайки.
+    /// No synchronization — local likes only.
     /// </summary>
     LocalOnly
 }

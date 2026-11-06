@@ -7,48 +7,48 @@ public sealed partial class CachingStreamSource
     // --- ActiveRangeDownload ---
 
     /// <summary>
-    /// Дескриптор активной HTTP range-загрузки, используемый для дедупликации
-    /// в реестре <see cref="_activeDownloads"/>.
+    /// Active HTTP range download descriptor used for deduplication
+    /// in the <see cref="_activeDownloads"/> registry.
     /// <para>
-    /// Фоновая загрузка ждёт слот семафора. Критический читатель, присоединившийся к ней,
-    /// повышает её приоритет через <see cref="PromoteToCritical"/>, и ожидание слота прекращается сразу.
+    /// A background download waits for a semaphore slot. A critical reader joining it
+    /// promotes its priority via <see cref="PromoteToCritical"/>, and slot waiting terminates immediately.
     /// </para>
     /// </summary>
     private sealed class ActiveRangeDownload
     {
         private readonly TaskCompletionSource? _promotion;
 
-        /// <summary>Начало загружаемого диапазона (байт).</summary>
+        /// <summary>Start offset of the range to download (bytes).</summary>
         public long Start { get; }
 
-        /// <summary>Длина загружаемого диапазона (байт).</summary>
+        /// <summary>Length of the range to download (bytes).</summary>
         public int Length { get; }
 
-        /// <summary>Исключительная правая граница диапазона.</summary>
+        /// <summary>Exclusive right bound of the range.</summary>
         public long EndExclusive => Start + Length;
 
-        /// <summary>Загрузка запущена критическим читателем и не занимает слот семафора.</summary>
+        /// <summary>Download was initiated by a critical reader and does not occupy a semaphore slot.</summary>
         public bool IsCritical { get; }
 
         /// <summary>
-        /// Сигнал повышения приоритета: завершается, когда к фоновой загрузке присоединяется критический читатель.
-        /// Для критической загрузки уже завершён.
+        /// Priority promotion signal: completes when a critical reader joins a background download.
+        /// Already completed for critical downloads.
         /// </summary>
         public Task PromotionTask => _promotion?.Task ?? Task.CompletedTask;
 
         /// <summary>
-        /// Ленивая задача загрузки. Запускается при первом обращении к <see cref="Lazy{T}.Value"/>.
-        /// <see cref="LazyThreadSafetyMode.ExecutionAndPublication"/> гарантирует единственный запуск.
+        /// Lazy download task. Started on the first access to <see cref="Lazy{T}.Value"/>.
+        /// <see cref="LazyThreadSafetyMode.ExecutionAndPublication"/> guarantees a single execution.
         /// </summary>
         public Lazy<Task<RangeDownloadResult>> LazyTask { get; }
 
         /// <summary>
-        /// Создаёт дескриптор активной загрузки.
+        /// Creates an active download descriptor.
         /// </summary>
-        /// <param name="start">Начало диапазона.</param>
-        /// <param name="length">Длина диапазона.</param>
-        /// <param name="isCritical">Приоритет загрузки на момент регистрации.</param>
-        /// <param name="lazyTask">Фабрика задачи загрузки.</param>
+        /// <param name="start">Range start offset.</param>
+        /// <param name="length">Range length.</param>
+        /// <param name="isCritical">Download priority at registration time.</param>
+        /// <param name="lazyTask">Download task factory.</param>
         public ActiveRangeDownload(long start, int length, bool isCritical, Lazy<Task<RangeDownloadResult>> lazyTask)
         {
             Start = start;
@@ -60,8 +60,8 @@ public sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Повышает фоновую загрузку до критической: ожидание слота семафора прекращается немедленно.
-        /// Повторные вызовы безопасны.
+        /// Promotes a background download to critical: semaphore slot waiting terminates immediately.
+        /// Subsequent calls are safe.
         /// </summary>
         public void PromoteToCritical() => _promotion?.TrySetResult();
     }
@@ -69,7 +69,7 @@ public sealed partial class CachingStreamSource
     // --- Coordination Methods ---
 
     /// <summary>
-    /// Возвращает количество зарегистрированных активных загрузок.
+    /// Returns the number of registered active downloads.
     /// </summary>
     private int GetActiveDownloadCount()
     {
@@ -77,13 +77,13 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Строгая защита от пересекающихся (overlapping) загрузок.
-    /// Критически важна на слабой сети: исключает двойную загрузку одних и тех же байт.
+    /// Strict protection against overlapping downloads.
+    /// Critically important on weak networks: prevents duplicate downloads of the same bytes.
     /// </summary>
-    /// <param name="start">Начало проверяемого диапазона.</param>
-    /// <param name="length">Длина проверяемого диапазона.</param>
-    /// <param name="active">Первая найденная перекрывающаяся загрузка; <c>null</c> если нет.</param>
-    /// <returns><c>true</c> если найдено перекрытие.</returns>
+    /// <param name="start">Start offset of the range to check.</param>
+    /// <param name="length">Length of the range to check.</param>
+    /// <param name="active">First overlapping download found; <c>null</c> if none.</param>
+    /// <returns><c>true</c> if an overlap is found.</returns>
     private bool TryGetOverlappingActiveDownload(long start, int length, out ActiveRangeDownload? active)
     {
         long endExclusive = start + length;
@@ -103,13 +103,13 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Регистрирует кандидата в реестре активных загрузок или возвращает
-    /// уже существующую перекрывающуюся загрузку (dedup).
+    /// Registers a download candidate in the active registry or returns
+    /// an existing overlapping download (dedup).
     /// </summary>
-    /// <param name="candidate">Кандидат на регистрацию.</param>
+    /// <param name="candidate">Candidate to register.</param>
     /// <returns>
-    /// Возвращает <paramref name="candidate"/> если регистрация успешна;
-    /// иначе — уже существующую загрузку, перекрывающую тот же диапазон.
+    /// Returns <paramref name="candidate"/> if registration succeeded;
+    /// otherwise, an existing download overlapping the same range.
     /// </returns>
     private ActiveRangeDownload RegisterOrGetActiveDownload(ActiveRangeDownload candidate)
     {
@@ -131,11 +131,11 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Удаляет загрузку из реестра только если текущий caller является её владельцем.
-    /// Предотвращает удаление чужой загрузки при race condition.
+    /// Removes a download from the registry only if the current caller is its owner.
+    /// Prevents removing another caller's download during race conditions.
     /// </summary>
-    /// <param name="key">Ключ загрузки (смещение начала диапазона).</param>
-    /// <param name="owner">Ожидаемый владелец записи.</param>
+    /// <param name="key">Download key (range start offset).</param>
+    /// <param name="owner">Expected entry owner.</param>
     private void RemoveActiveDownloadIfOwner(long key, ActiveRangeDownload owner)
     {
         lock (_activeDownloadsLock)
@@ -146,11 +146,11 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Ожидает завершения чужой задачи загрузки, поглощая все исключения кроме
-    /// <see cref="ChunkDownloadFatalException"/> и внешней отмены.
+    /// Awaits completion of another caller's download task, suppressing all exceptions except
+    /// <see cref="ChunkDownloadFatalException"/> and external cancellation.
     /// </summary>
-    /// <param name="task">Задача владельца диапазона.</param>
-    /// <param name="ct">Токен отмены caller'а.</param>
+    /// <param name="task">Task of the range owner.</param>
+    /// <param name="ct">Caller cancellation token.</param>
     private static async Task WaitForActiveDownloadAsync(Task task, CancellationToken ct)
     {
         try { await task.WaitAsync(ct).ConfigureAwait(false); }
@@ -160,12 +160,12 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Присоединяется к чужой загрузке диапазона. Критический читатель предварительно повышает
-    /// её приоритет, чтобы не ждать слот семафора за фоновым preload (priority inversion).
+    /// Joins another caller's range download. A critical reader promotes
+    /// its priority beforehand to avoid waiting for a semaphore slot behind background preload (priority inversion).
     /// </summary>
-    /// <param name="active">Загрузка-владелец перекрывающегося диапазона.</param>
-    /// <param name="isCritical">Приоритет присоединяющегося читателя.</param>
-    /// <param name="ct">Токен отмены caller'а.</param>
+    /// <param name="active">Download owner of the overlapping range.</param>
+    /// <param name="isCritical">Priority of the joining reader.</param>
+    /// <param name="ct">Caller cancellation token.</param>
     private static Task JoinActiveDownloadAsync(ActiveRangeDownload active, bool isCritical, CancellationToken ct)
     {
         if (isCritical)
@@ -174,31 +174,31 @@ public sealed partial class CachingStreamSource
         return WaitForActiveDownloadAsync(active.LazyTask.Value, ct);
     }
 
-    /// <summary>Исход ожидания слота фоновой загрузки.</summary>
+    /// <summary>Result of background download slot wait.</summary>
     internal enum SlotWaitOutcome : byte
     {
-        /// <summary>Слот получен; вызывающий код обязан вернуть его в семафор.</summary>
+        /// <summary>Slot acquired; caller must release it back to the semaphore.</summary>
         Acquired,
 
-        /// <summary>Приоритет повышен до критического: загрузка идёт без слота.</summary>
+        /// <summary>Priority promoted to critical: download proceeds without a slot.</summary>
         Promoted,
 
-        /// <summary>Слот не освободился за отведённое время.</summary>
+        /// <summary>Slot was not acquired within the allocated time.</summary>
         TimedOut,
 
-        /// <summary>Ожидание отменено токеном.</summary>
+        /// <summary>Wait canceled by token.</summary>
         Cancelled
     }
 
     /// <summary>
-    /// Ожидает слот семафора либо сигнал повышения приоритета без генерации исключений.
-    /// Если приоритет повышен раньше, брошенное ожидание само вернёт слот, когда получит его.
+    /// Waits for a semaphore slot or a priority promotion signal without throwing exceptions.
+    /// If promoted earlier, abandoned waiting will return the slot automatically when acquired.
     /// </summary>
-    /// <param name="slots">Семафор параллельных фоновых загрузок.</param>
-    /// <param name="timeoutMs">Предельное время ожидания слота (мс).</param>
-    /// <param name="promotion">Сигнал повышения приоритета.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Исход ожидания.</returns>
+    /// <param name="slots">Concurrent background download semaphore.</param>
+    /// <param name="timeoutMs">Maximum slot wait time (ms).</param>
+    /// <param name="promotion">Priority promotion signal.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Wait outcome.</returns>
     internal static async Task<SlotWaitOutcome> WaitForSlotOrPromotionAsync(
         SemaphoreSlim slots, int timeoutMs, Task promotion, CancellationToken ct)
     {
@@ -217,7 +217,7 @@ public sealed partial class CachingStreamSource
 
         if (!slotTask.IsCompletedSuccessfully)
         {
-            // Наблюдаем исключение отменённого ожидания, чтобы не получить UnobservedTaskException.
+            // Observe the canceled wait exception to prevent UnobservedTaskException.
             _ = slotTask.Exception;
             return SlotWaitOutcome.Cancelled;
         }
@@ -229,10 +229,10 @@ public sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Возвращает слот в семафор, если брошенное ожидание всё же его получило.
+    /// Returns a slot to the semaphore if the abandoned wait task acquired it later.
     /// </summary>
-    /// <param name="slotTask">Брошенное ожидание слота.</param>
-    /// <param name="slots">Семафор, которому принадлежит слот.</param>
+    /// <param name="slotTask">Abandoned slot wait task.</param>
+    /// <param name="slots">Semaphore owning the slot.</param>
     private static void ReturnSlotWhenGranted(Task<bool> slotTask, SemaphoreSlim slots)
     {
         _ = slotTask.ContinueWith(
@@ -259,13 +259,13 @@ public sealed partial class CachingStreamSource
     // --- Helpers ---
 
     /// <summary>
-    /// Определяет, является ли <see cref="HttpRequestException"/> следствием отмены
-    /// операции (dispose клиента, epoch cancel, socket abort) а не настоящей сетевой ошибкой.
+    /// Determines whether an <see cref="HttpRequestException"/> is a consequence of operation cancellation
+    /// (client dispose, epoch cancel, socket abort) rather than a genuine network error.
     /// </summary>
-    /// <param name="exception">Перехваченное исключение.</param>
-    /// <param name="ct">Токен отмены caller'а.</param>
-    /// <param name="disposed">Флаг dispose source'а.</param>
-    /// <returns><c>true</c> если исключение является артефактом отмены.</returns>
+    /// <param name="exception">Caught exception.</param>
+    /// <param name="ct">Caller cancellation token.</param>
+    /// <param name="disposed">Source disposed flag.</param>
+    /// <returns><c>true</c> if the exception is a cancellation artifact.</returns>
     private static bool IsCancelledSendFailure(HttpRequestException exception, CancellationToken ct, bool disposed)
     {
         if (disposed || ct.IsCancellationRequested) return true;

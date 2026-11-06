@@ -22,8 +22,8 @@ using System.Text.Json;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Центральный провайдер интеграции с YouTube и YouTube Music.
-/// Координирует работу с API, расшифровку токенов, поиск, плейлисты и управление сессионным кэшем потоков.
+/// Central integration provider for YouTube and YouTube Music.
+/// Coordinates API operations, token deciphering, search, playlists, and session stream cache management.
 /// </summary>
 public partial class YoutubeProvider : IDisposable
 {
@@ -37,13 +37,13 @@ public partial class YoutubeProvider : IDisposable
     private PoTokenProvider? _poTokenProvider;
 
     /// <summary>
-    /// Глобальный сервис авторизации через сессионные куки.
+    /// Global authorization service via session cookies.
     /// </summary>
     public readonly CookieAuthService AuthService = null!;
 
     /// <summary>
-    /// RAM-кэш полных манифестов. Ключ = trackId (с yt_ префиксом).
-    /// Дублирует дисковый SessionCacheStore для instant-access в текущей сессии.
+    /// RAM cache for full manifests. Key = trackId (with yt_ prefix).
+    /// Mirrors the disk-based SessionCacheStore for instant access within the current session.
     /// </summary>
     private readonly ConcurrentDictionary<string, StreamManifest> _manifestRamCache = new(StringComparer.Ordinal);
 
@@ -61,13 +61,13 @@ public partial class YoutubeProvider : IDisposable
     #region Properties & Events
 
     /// <summary>
-    /// Указывает, завершена ли фоновая инициализация провайдера.
+    /// Indicates whether the background initialization of the provider is complete.
     /// </summary>
     public bool IsReady { get; private set; }
 
     /// <summary>
-    /// Событие, вызываемое при старте ресурсоёмкой расшифровки n-токена.
-    /// Передаёт идентификатор видео в UI для отображения анимации прогресса.
+    /// Event raised when resource-intensive n-token deciphering begins.
+    /// Passes the video ID to the UI to display a progress animation.
     /// </summary>
     public event Action<string>? OnNTokenDecryptionStarted;
 
@@ -76,7 +76,7 @@ public partial class YoutubeProvider : IDisposable
     #region Constructor
 
     /// <summary>
-    /// Создаёт экземпляр провайдера YouTube.
+    /// Creates an instance of the YouTube provider.
     /// </summary>
     public YoutubeProvider(
         NetworkManager networkManager,
@@ -94,7 +94,7 @@ public partial class YoutubeProvider : IDisposable
         _sigCipherDecryptor = sigCipherDecryptor;
         _poTokenProvider = new PoTokenProvider(() => _networkManager.AudioClient);
 
-        // Связываем централизованный утилитный класс с куками сессии и сетевым менеджером
+        // Bind the centralized utility class to session cookies and network manager
         YoutubeClientUtils.Initialize(
             cookieAuth,
             () => _networkManager.ApiClient,
@@ -114,14 +114,14 @@ public partial class YoutubeProvider : IDisposable
     #region Client Initialization
 
     /// <summary>
-    /// Пересоздаёт внутренний <see cref="YoutubeClient"/> на базе актуального ApiClient из <see cref="NetworkManager"/>.
-    /// Вызывается при смене аккаунта, смене сетевого интерфейса (VPN) и изменении прокси.
+    /// Recreates the internal <see cref="YoutubeClient"/> based on the current ApiClient from <see cref="NetworkManager"/>.
+    /// Called when switching accounts, changing network interfaces (VPN), or updating proxy settings.
     /// </summary>
     public void ReloadClient()
     {
         if (_disposed) return;
 
-        // VisitorData и кулдаун BotDetection привязаны к сетевому маршруту/сессии — сбрасываем при пересборке.
+        // VisitorData and BotDetection cooldown are tied to the network route/session; reset them during rebuild.
         _poTokenProvider?.Invalidate();
         VideoController.ResetBotDetectionState();
 
@@ -144,7 +144,7 @@ public partial class YoutubeProvider : IDisposable
         var oldClient = Interlocked.Exchange(ref _youtube, newClient);
         if (oldClient != null)
         {
-            // Отложенное освобождение старой обёртки клиента, чтобы не оборвать активные вызовы
+            // Deferred disposal of the old client wrapper to avoid breaking active calls
             _ = Task.Run(async () =>
             {
                 if (await CancellationToken.None.DelayNoThrowAsync(15_000, continueOnCapturedContext: false).ConfigureAwait(false))
@@ -158,7 +158,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет асинхронную инициализацию провайдера. Потокобезопасно.
+    /// Performs asynchronous initialization of the provider. Thread-safe.
     /// </summary>
     public Task InitializeAsync()
     {
@@ -171,8 +171,8 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Гарантирует запуск фоновой инициализации (VisitorData / BotGuard / QuickJS) по требованию,
-    /// если приложение было запущено в быстром режиме без стартового прогрева.
+    /// Ensures background initialization (VisitorData / BotGuard / QuickJS) is triggered on demand
+    /// if the application was started in fast mode without initial warmup.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureInitializedOnDemand()
@@ -190,11 +190,11 @@ public partial class YoutubeProvider : IDisposable
         {
             Log.Info("[YouTube] Initiating lazy background Visitor Data resolution...");
 
-            // Получаем VisitorData, учитывая куки и защищая таймаутом
+            // Retrieve VisitorData taking cookies into account and protecting with a timeout
             var visitorData = await YoutubeClientUtils.EnsureVisitorDataAsync().ConfigureAwait(false);
 
-            // Запускаем неблокирующий фоновый прогрев BotGuard (IntegrityToken с TTL 12 часов) и STS плеера,
-            // чтобы первый нажатый пользователем трек сразу шёл по fast-mint (2 мс вместо ~900 мс).
+            // Launch non-blocking background warmup for BotGuard (IntegrityToken with 12-hour TTL) and player STS,
+            // so the user's first clicked track uses fast-mint (2 ms instead of ~900 ms).
             var poProvider = _poTokenProvider;
             if (poProvider != null && !_disposed)
             {
@@ -226,7 +226,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Возвращает сконфигурированный экземпляр клиента YouTubeClient, инициируя отложенный прогрев при необходимости.
+    /// Returns a configured <see cref="YoutubeClient"/> instance, triggering deferred warmup if necessary.
     /// </summary>
     public YoutubeClient GetClient()
     {
@@ -251,7 +251,7 @@ public partial class YoutubeProvider : IDisposable
     #region Edit YouTube Data
 
     /// <summary>
-    /// Устанавливает статус "Мне нравится" (Like) для трека на YouTube Music.
+    /// Sets the "Liked" status for a track on YouTube Music.
     /// </summary>
     public async Task LikeTrackAsync(string trackId, bool like)
     {
@@ -270,7 +270,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Создаёт новый облачный плейлист в аккаунте YouTube.
+    /// Creates a new cloud playlist in the YouTube account.
     /// </summary>
     public async Task<string?> CreatePlaylistAsync(
         string title,
@@ -298,7 +298,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет пакетное добавление треков в облачный плейлист.
+    /// Performs batch addition of tracks to a cloud playlist.
     /// </summary>
     public async Task<List<string?>> AddTracksToPlaylistAsync(
         string playlistId, IReadOnlyList<string> trackIds)
@@ -320,7 +320,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет пакетное добавление треков в облачный плейлист с пробросом сетевых и HTTP-исключений для очереди Outbox.
+    /// Performs batch addition of tracks to a cloud playlist, rethrowing network and HTTP exceptions for the Outbox queue.
     /// </summary>
     internal async Task<List<string?>> MutationsClientAddTracksAsync(
         string playlistId,
@@ -341,7 +341,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет пакетное удаление элементов из облачного плейлиста.
+    /// Performs batch deletion of items from a cloud playlist.
     /// </summary>
     public async Task RemoveTracksFromPlaylistAsync(
         string playlistId, IReadOnlyList<string> setVideoIds)
@@ -363,7 +363,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет пакетное удаление элементов из облачного плейлиста с поддержкой токена отмены для очереди Outbox.
+    /// Performs batch deletion of items from a cloud playlist with cancellation token support for the Outbox queue.
     /// </summary>
     internal async Task MutationsClientRemoveTracksAsync(
         string playlistId,
@@ -379,7 +379,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет пакетное изменение порядка треков в облачном плейлисте YouTube.
+    /// Performs batch reordering of tracks in a YouTube cloud playlist.
     /// </summary>
     public async Task MoveTracksInPlaylistAsync(
         string playlistId,
@@ -404,7 +404,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Редактирует текстовое описание облачного плейлиста.
+    /// Edits the text description of a cloud playlist.
     /// </summary>
     public async Task EditPlaylistDescriptionAsync(string playlistId, string description)
     {
@@ -430,7 +430,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Загружает пользовательскую обложку (изображение) для облачного плейлиста.
+    /// Uploads a custom cover art image for a cloud playlist.
     /// </summary>
     public async Task<bool> UploadPlaylistThumbnailAsync(
         string playlistId,
@@ -465,7 +465,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Изменяет название и/или описание облачного плейлиста одним запросом.
+    /// Updates the title and/or description of a cloud playlist in a single request.
     /// </summary>
     public async Task EditPlaylistDetailsAsync(
         string playlistId,
@@ -497,7 +497,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Изменяет название облачного плейлиста.
+    /// Updates the title of a cloud playlist.
     /// </summary>
     public async Task RenamePlaylistAsync(string playlistId, string newTitle)
     {
@@ -523,7 +523,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Удаляет облачный плейлист из аккаунта YouTube.
+    /// Deletes a cloud playlist from the YouTube account.
     /// </summary>
     public async Task DeletePlaylistAsync(string playlistId)
     {
@@ -549,8 +549,8 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Извлекает полные синхронизационные данные плейлиста YouTube, включая треки, автора и приватность.
-    /// Пробрасывает исключения отсутствия ресурса (404 / PlaylistUnavailableException) для корректного даунгрейда.
+    /// Fetches complete playlist synchronization data from YouTube, including tracks, author, and privacy status.
+    /// Rethrows resource missing exceptions (404 / PlaylistUnavailableException) for graceful fallback handling.
     /// </summary>
     public async Task<FullPlaylistSyncData?> GetFullPlaylistDataAsync(
         string youtubePlaylistId,
@@ -585,25 +585,25 @@ public partial class YoutubeProvider : IDisposable
     #region Resolve Stream (3-Tier Cache Strategy)
 
     /// <summary>
-    /// Разрешает stream URL для трека через YouTube API.
-    /// <para><b>Высокоэффективный 3-уровневый алгоритм:</b></para>
+    /// Resolves the stream URL for a track via the YouTube API.
+    /// <para><b>High-performance 3-tier algorithm:</b></para>
     /// <list type="number">
-    ///   <item>Exact full disk cache: Мгновенно возвращает локальный файл, если совпал запрошенный формат.</item>
-    ///   <item>Any full disk cache: Возвращает любой локальный файл, если пользователь не запрашивал конкретный формат.</item>
-    ///   <item>RAM manifest cache: Извлекает дескриптор из полной копии манифеста в оперативной памяти (0 сети).</item>
-    ///   <item>Disk manifest cache: Делает адаптивный HEAD-запрос к CDN. При 200/206 — восстанавливает весь манифест без обращения к YouTube API.</item>
-    ///   <item>YouTube API call: Запрашивает полный манифест со всеми медиа-вариантами, сохраняя их в RAM и на диск (1 API на все форматы).</item>
+    ///   <item>Exact full disk cache: Instantly returns local file if requested format matches.</item>
+    ///   <item>Any full disk cache: Returns any local file if user didn't request a specific format.</item>
+    ///   <item>RAM manifest cache: Extracts descriptor from full in-memory manifest copy (0 network calls).</item>
+    ///   <item>Disk manifest cache: Performs adaptive HEAD request to CDN. On 200/206, restores entire manifest without querying YouTube API.</item>
+    ///   <item>YouTube API call: Requests full manifest with all media variants, saving them to RAM and disk (1 API call for all formats).</item>
     /// </list>
     /// </summary>
-    /// <param name="track">Трек, для которого требуется stream URL.</param>
-    /// <param name="forceRefresh">Игнорировать локальные кэши и сбросить состояние PoToken/cipher перед запросом.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="track">Track requiring stream URL.</param>
+    /// <param name="forceRefresh">Bypass local caches and reset PoToken/cipher state prior to request.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <param name="variantOverride">
-    /// Точный вариант (контейнер/битрейт) уже работающего source. Имеет приоритет над предпочтением трека,
-    /// чтобы refresh не подменил WebM на MP4 посреди partial cache.
+    /// Exact variant (container/bitrate) of currently playing source. Takes priority over track preference
+    /// to prevent refresh from replacing WebM with MP4 during partial cache playback.
     /// </param>
     /// <param name="excludedClients">
-    /// Клиенты, чьи URL этого трека отвергнуты CDN с HTTP 403. При наличии RAM/disk-манифесты пропускаются.
+    /// Clients whose URLs for this track were rejected by CDN with HTTP 403. When present, RAM/disk manifests are skipped.
     /// </param>
     public async Task<ResolvedStreamDescriptor?> RefreshStreamAsync(
         TrackInfo track,
@@ -637,7 +637,7 @@ public partial class YoutubeProvider : IDisposable
             if (AudioSourceFactory.GlobalCache.IsFullyCached(cacheKey))
             {
                 var entry = AudioSourceFactory.GlobalCache.GetCacheInfo(cacheKey);
-                // Sanity check: отсекаем огрызки, размер которых не соответствует длительности
+                // Sanity check: filter out truncated files whose size does not match the duration
                 if (entry != null && (track.Duration <= TimeSpan.FromSeconds(5) || entry.TotalSize >= (long)(track.Duration.TotalSeconds * entry.Bitrate * 1000.0 / 8.0 * 0.50)))
                 {
                     var d = CreateDescriptorFromCacheEntry(track.Id, entry);
@@ -658,7 +658,7 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
-        // Манифесты в RAM/на диске могут содержать URL клиента, которого CDN уже отверг с 403: при исключениях — только API.
+        // RAM/disk manifests may contain URLs for a client already rejected with HTTP 403 by CDN: bypass caches and call API if exclusions exist.
         if (!forceRefresh && !hasExcludedClients && _manifestRamCache.TryGetValue(track.Id, out var ramManifest))
         {
             var d = SelectFromManifest(ramManifest, track.Id, requested.Format, requested.BitrateKbps, StreamSource.ProviderMemoryCache);
@@ -735,13 +735,13 @@ public partial class YoutubeProvider : IDisposable
     #region Quality Options (Menu UI Support)
 
     /// <summary>
-    /// Возвращает список доступных форматов стрима для указанного видео с поддержкой отмены операции и принудительного обновления.
-    /// Предотвращает лишние сетевые вызовы за счёт чтения скачанных файлов, сохранённых ранее манифестов и дискового кэша.
+    /// Returns a list of available stream formats for the specified video, supporting cancellation and forced refresh.
+    /// Prevents unnecessary network requests by reading downloaded files, previously saved manifests, and disk cache.
     /// </summary>
-    /// <param name="videoId">Идентификатор видео или трека.</param>
-    /// <param name="ct">Токен отмены операции.</param>
-    /// <param name="forceRefresh">Флаг принудительного игнорирования локального кэша и вызова YouTube API.</param>
-    /// <returns>Список вариантов аудиопотока.</returns>
+    /// <param name="videoId">Video or track ID.</param>
+    /// <param name="ct">Operation cancellation token.</param>
+    /// <param name="forceRefresh">Flag to force bypass of local cache and invoke YouTube API.</param>
+    /// <returns>List of audio stream variants.</returns>
     public async Task<List<StreamOption>> GetStreamOptionsAsync(
         string videoId,
         CancellationToken ct = default,
@@ -760,12 +760,12 @@ public partial class YoutubeProvider : IDisposable
 
         if (!forceRefresh)
         {
-            // 1. СНАЧАЛА проверяем RAM Cache (0 мс, 0 сети). Если манифест уже загружен кнопкой "Обновить" — берём его!
+            // 1. FIRST check RAM Cache (0 ms, 0 network calls). If manifest was already fetched via "Refresh" button — use it!
             if (_manifestRamCache.TryGetValue(trackId, out var ramManifest))
             {
                 manifest = ramManifest;
             }
-            // 2. Затем Disk Session Cache (0 мс, 0 сети)
+            // 2. Next, check Disk Session Cache (0 ms, 0 network calls)
             else
             {
                 var diskEntry = SessionCacheStore.GetManifest(trackId);
@@ -776,7 +776,7 @@ public partial class YoutubeProvider : IDisposable
                 }
             }
 
-            // Манифест найден в кэше — возвращаем ВСЕ форматы!
+            // Manifest found in cache — returning ALL formats!
             if (manifest != null)
             {
                 var options = MapManifestToOptions(manifest);
@@ -784,7 +784,7 @@ public partial class YoutubeProvider : IDisposable
                 return options;
             }
 
-            // 3. Если манифеста НЕТ, но файл скачан (папка Downloads) — возвращаем 1 формат, чтобы не лезть в сеть
+            // 3. If NO manifest exists, but the file is downloaded (Downloads folder) — return 1 format to avoid network requests
             if (isExplicitDownload)
             {
                 var format = track!.PreferredFormat ?? AudioSourceFactory.DetectFormat(track.LocalPath!);
@@ -804,7 +804,7 @@ public partial class YoutubeProvider : IDisposable
                 return [localOption];
             }
 
-            // 4. То же самое для Local Audio Disk Cache (скрытый кэш)
+            // 4. Same for Local Audio Disk Cache (hidden cache)
             var globalCache = AudioSourceFactory.GlobalCache;
             if (globalCache != null)
             {
@@ -829,7 +829,7 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
-        // 5. YouTube API Call — вызывается при принудительном обновлении или промахе локальных источников
+        // 5. YouTube API Call — invoked on forced refresh or local cache miss
         try
         {
             var vId = VideoId.Parse(rawId);
@@ -857,21 +857,21 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Инвалидирует RAM-кэш манифеста для конкретного трека.
-    /// Вызывается из <see cref="AudioEngine"/> при 403, чтобы следующий
-    /// <c>RefreshStreamAsync(force=false)</c> обратился к YouTube API,
-    /// а не вернул тот же мёртвый URL из оперативной памяти.
+    /// Invalidates the RAM manifest cache for a specific track.
+    /// Called from <see cref="AudioEngine"/> on 403 status code, so that the next
+    /// <c>RefreshStreamAsync(force=false)</c> queries the YouTube API
+    /// instead of returning the same dead URL from RAM.
     /// </summary>
-    /// <param name="trackId">Идентификатор трека (с yt_ префиксом или без).</param>
+    /// <param name="trackId">Track identifier (with or without yt_ prefix).</param>
     public void InvalidateMemoryCache(string trackId)
     {
         if (string.IsNullOrEmpty(trackId))
             return;
 
-        // Удаляем по точному ключу (обычно "yt_xxxxx")
+        // Remove by exact key (usually "yt_xxxxx")
         _manifestRamCache.TryRemove(trackId, out _);
 
-        // Страховка: если передан rawId без префикса — пробуем оба варианта.
+        // Fallback: if a rawId without prefix was passed, try both variants.
         var rawId = YoutubeIdHelper.ExtractRawId(trackId);
         if (!string.Equals(rawId, trackId, StringComparison.Ordinal))
         {
@@ -894,7 +894,7 @@ public partial class YoutubeProvider : IDisposable
 
         var blacklist = AudioSourceFactory.CdnBlacklist;
 
-        // Быстрая проверка: есть ли заблокированные хосты без выделения нового List через LINQ
+        // Fast check: determines if there are blocked hosts without allocating a new List via LINQ
         bool hasBlocked = false;
         for (int i = 0; i < streams.Count; i++)
         {
@@ -918,7 +918,7 @@ public partial class YoutubeProvider : IDisposable
             var stream = streams[i];
             bool isBlocked = hasBlocked && blacklist.IsBlockedUrl(stream.Url);
 
-            // Если есть альтернативы, пропускаем заблокированные
+            // If alternatives exist, skip blocked ones
             if (isBlocked) continue;
 
             firstUnblocked ??= stream;
@@ -949,7 +949,7 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
-        // Если все потоки оказались заблокированы, делаем fallback на первый доступный поток
+        // If all streams turn out to be blocked, fall back to the first available stream
         if (firstUnblocked == null && streams.Count > 0)
             return streams[0];
 
@@ -975,7 +975,7 @@ public partial class YoutubeProvider : IDisposable
     #region Search Base
 
     /// <summary>
-    /// Определяет тип переданного поискового запроса (ссылка, плейлист или обычный текст).
+    /// Determines the type of the given search query (URL, playlist, or plain text).
     /// </summary>
     public static QueryType DetectQueryType(string query)
     {
@@ -994,7 +994,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Извлекает 11-значный YouTube ID видео из любого URL-адреса.
+    /// Extracts the 11-character YouTube video ID from any URL.
     /// </summary>
     public static string? ExtractVideoId(string url)
     {
@@ -1005,7 +1005,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Загружает подробные метаданные трека по его прямой ссылке.
+    /// Loads detailed track metadata by its direct link.
     /// </summary>
     public async Task<TrackInfo?> GetTrackByUrlAsync(string url)
     {
@@ -1025,7 +1025,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Выполняет стриминговый (потоковый) поиск музыкального контента на YouTube.
+    /// Performs a streaming search for music content on YouTube.
     /// </summary>
     public async IAsyncEnumerable<List<TrackInfo>> SearchStreamingAsync(
      string query,
@@ -1091,7 +1091,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Облегчённый быстрый метод поиска без пошагового стриминга пакетов.
+    /// Lightweight fast search method without step-by-step batch streaming.
     /// </summary>
     public async Task<List<TrackInfo>> SearchFastAsync(
      string query,
@@ -1133,7 +1133,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Обычный поиск YouTube.
+    /// Standard YouTube search.
     /// </summary>
     public Task<List<TrackInfo>> SearchAsync(
         string query,
@@ -1148,8 +1148,8 @@ public partial class YoutubeProvider : IDisposable
     #region Search Session Nested Type
 
     /// <summary>
-    /// Итеративная сессия постраничного поиска с авто-дедупликацией и неблокирующим освобождением.
-    /// Динамически запрашивает актуальный YoutubeClient, предотвращая ObjectDisposedException при пересборке сети.
+    /// Iterative paged search session with auto-deduplication and non-blocking disposal.
+    /// Dynamically requests the active YoutubeClient, preventing ObjectDisposedException during network rebuilds.
     /// </summary>
     public sealed class SearchSession : IAsyncDisposable, IDisposable
     {
@@ -1169,17 +1169,17 @@ public partial class YoutubeProvider : IDisposable
         private string? _lastContinuationToken;
 
         /// <summary>
-        /// Указывает, есть ли ещё результаты для загрузки.
+        /// Indicates whether there are more results to fetch.
         /// </summary>
         public bool HasMore => (_hasMore || _buffer.Count > 0) && _isDisposed == 0 && _seenIds.Count < _maxResults;
 
         /// <summary>
-        /// Количество загруженных уникальных треков в текущей сессии.
+        /// Count of loaded unique tracks in the current session.
         /// </summary>
         public int LoadedCount => _seenIds.Count;
 
         /// <summary>
-        /// Применяемый поисковый фильтр.
+        /// Applied search filter.
         /// </summary>
         public SearchFilter Filter { get; }
 
@@ -1208,8 +1208,8 @@ public partial class YoutubeProvider : IDisposable
         }
 
         /// <summary>
-        /// Получает следующий пакет результатов поиска с контролем сетевой квоты.
-        /// Автоматически пересоздаёт энумератор при смене сетевого клиента (ObjectDisposedException recovery).
+        /// Fetches the next batch of search results with network quota control.
+        /// Automatically recreates the enumerator when the network client changes (ObjectDisposedException recovery).
         /// </summary>
         public async Task<List<TrackInfo>> FetchNextBatchAsync(int count = 25, CancellationToken ct = default)
         {
@@ -1232,7 +1232,7 @@ public partial class YoutubeProvider : IDisposable
 
                 var results = new List<TrackInfo>(Math.Min(count, 32));
 
-                // 1. Отдаем остатки из буфера
+                // 1. Yield remaining items from the buffer
                 while (_buffer.Count > 0 && results.Count < count)
                 {
                     results.Add(_buffer.Dequeue());
@@ -1241,7 +1241,7 @@ public partial class YoutubeProvider : IDisposable
                 if (results.Count >= count || !_hasMore)
                     return results;
 
-                // 2. Сетевая подгрузка: не более 2 сетевых запросов на одну фазу скролла
+                // 2. Network fetching: maximum 2 network requests per single scroll phase
                 int networkCalls = 0;
                 const int maxNetworkCalls = 2;
 
@@ -1261,7 +1261,7 @@ public partial class YoutubeProvider : IDisposable
                     }
                     catch (ObjectDisposedException)
                     {
-                        // Сеть была пересобрана (RebuildAll). Восстанавливаем энумератор с сохраненного токена продолжения
+                        // Network was rebuilt (RebuildAll). Restoring enumerator from the saved continuation token
                         Log.Info("[SearchSession] Client was rebuilt during active search session. Recovering enumerator with continuation token...");
                         _enumerator = null;
                         var freshClient = _provider.GetClient();
@@ -1373,7 +1373,7 @@ public partial class YoutubeProvider : IDisposable
     private readonly ConcurrentDictionary<string, (DateTime ExpireAt, List<string> Items)> _suggestionsCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Создаёт новую сессию итеративного поиска.
+    /// Creates a new iterative search session.
     /// </summary>
     public SearchSession CreateSearchSession(
         string query,
@@ -1388,7 +1388,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Запускает поиск с возвратом как треков первого пакета, так и объекта активной сессии для дозагрузки.
+    /// Starts search, returning both first batch tracks and the active session object for further loading.
     /// </summary>
     public async Task<(List<TrackInfo> Tracks, SearchSession Session)> SearchWithSessionAsync(
         string query,
@@ -1413,11 +1413,11 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Получает поисковые подсказки от Google/YouTube Suggest API с независимыми таймаутами для каждого узла и защитой от зависаний.
+    /// Fetches search suggestions from Google/YouTube Suggest API with independent node timeouts and freeze protection.
     /// </summary>
-    /// <param name="query">Поисковый запрос.</param>
-    /// <param name="ct">Токен отмены вызывающей стороны.</param>
-    /// <returns>Список текстовых подсказок (до 10 элементов).</returns>
+    /// <param name="query">Search query.</param>
+    /// <param name="ct">Caller cancellation token.</param>
+    /// <returns>List of text suggestions (up to 10 items).</returns>
     public async Task<List<string>> GetSearchSuggestionsAsync(string query, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -1425,7 +1425,7 @@ public partial class YoutubeProvider : IDisposable
 
         var normalizedQuery = query.Trim();
 
-        // Проверяем локальный RAM-кэш подсказок (TTL 5 минут) для исключения повторных запросов при Backspace
+        // Check local RAM suggestion cache (TTL 5 minutes) to skip redundant requests on Backspace
         if (_suggestionsCache.TryGetValue(normalizedQuery, out var cached) && cached.ExpireAt > DateTime.UtcNow)
         {
             return cached.Items;
@@ -1498,7 +1498,7 @@ public partial class YoutubeProvider : IDisposable
             }
             catch (Exception ex) when (ex is IOException or HttpRequestException && (ct.IsCancellationRequested || attemptTimeoutCts.IsCancellationRequested))
             {
-                // Подавление ожидаемых прерываний сокета при сработавшем токене отмены
+                // Suppress expected socket interruptions when cancellation token triggers
             }
             catch (Exception ex)
             {
@@ -1514,7 +1514,7 @@ public partial class YoutubeProvider : IDisposable
     #region Playlists, Channels, Radio & Downloads
 
     /// <summary>
-    /// Получает название и список треков из внешнего плейлиста YouTube.
+    /// Retrieves the title and track list from an external YouTube playlist.
     /// </summary>
     public async Task<(string Name, List<TrackInfo> Tracks)?> GetPlaylistAsync(string url)
     {
@@ -1560,10 +1560,10 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Получает список облачных плейлистов текущего авторизованного пользователя напрямую из API YouTube Music.
-    /// Пробрасывает исключения сетевого слоя вызывающей стороне, предотвращая ложное определение отсутствия плейлистов.
+    /// Retrieves the list of cloud playlists for the currently authorized user directly from the YouTube Music API.
+    /// Re-throws network layer exceptions to caller, preventing false reports of empty playlist collections.
     /// </summary>
-    /// <returns>Список моделей плейлистов <see cref="Playlist"/>.</returns>
+    /// <returns>A list of <see cref="Playlist"/> models.</returns>
     public async Task<List<Playlist>> GetUserPlaylistsByAuthAsync()
     {
         if (AuthService?.IsAuthenticated != true) return [];
@@ -1580,8 +1580,8 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Импортирует плейлист: загружает метаданные и все треки единым запросом,
-    /// сохраняет соответствия SetVideoId в локальную БД для исключения повторных запросов browse при удалении.
+    /// Imports a playlist: loads metadata and all tracks in a single request,
+    /// saving SetVideoId mappings to the local DB to avoid redundant browse queries on deletion.
     /// </summary>
     public async Task<Playlist?> ImportPlaylistAsync(
         string playlistId, bool isAccountSync = false, CancellationToken ct = default)
@@ -1618,8 +1618,8 @@ public partial class YoutubeProvider : IDisposable
                 for (int i = 0; i < tracks.Count; i++)
                     playlist.TrackIds.Add(tracks[i].Id);
 
-                // Сохраняем SetVideoId, извлеченные напрямую при первичном browse-импорте,
-                // и обращаемся к повторному Sync-запросу только если они отсутствовали в ответе.
+                // Save SetVideoId extracted directly during the initial browse import,
+                // and perform a repeat Sync request only if they were missing in the response.
                 if (result.SetVideoIdMappings is { Count: > 0 } directMappings)
                 {
                     await _libraryService.UpdateSetVideoIdsAsync(playlist.Id, directMappings, ct).ConfigureAwait(false);
@@ -1683,14 +1683,14 @@ public partial class YoutubeProvider : IDisposable
         {
             playlist.Ownership = PlaylistOwnership.Foreign;
 
-            // URL-импорт: если privacy не удалось получить из API, считаем минимум Public
+            // URL import: if privacy couldn't be retrieved from API, assume at least Public
             if (playlist.Visibility == PlaylistVisibility.Unknown)
                 playlist.Visibility = PlaylistVisibility.Public;
 
             return;
         }
 
-        // Account sync: определяем ownership по наличию приватного dropdown или сравнением с профилем
+        // Account sync: determine ownership by presence of private dropdown or comparison with profile
         if (AuthService?.IsAuthenticated != true)
         {
             playlist.Ownership = PlaylistOwnership.Unknown;
@@ -1731,7 +1731,7 @@ public partial class YoutubeProvider : IDisposable
             ? PlaylistOwnership.Mine
             : PlaylistOwnership.Foreign;
 
-        // Для чужих плейлистов из библиотеки fallback на Public только если privacy не распознали
+        // For third-party library playlists, fallback to Public only if privacy was not recognized
         if (playlist.IsForeign && playlist.Visibility == PlaylistVisibility.Unknown)
             playlist.Visibility = PlaylistVisibility.Public;
     }
@@ -1792,9 +1792,9 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Создаёт дескриптор потока на основе полностью закэшированной записи.
-    /// Битрейт берётся из реального значения записи кэша, а не из запроса пользователя,
-    /// чтобы <see cref="AudioStreamInfo"/> корректно отражал воспроизводимый файл.
+    /// Creates a stream descriptor based on a fully cached entry.
+    /// Bitrate is taken from the actual cache entry value rather than the user request,
+    /// ensuring <see cref="AudioStreamInfo"/> accurately reflects the playing file.
     /// </summary>
     private static ResolvedStreamDescriptor CreateDescriptorFromCacheEntry(
         string trackId,
@@ -1813,7 +1813,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Реконструирует <see cref="StreamManifest"/> из дисковой записи кэша манифеста.
+    /// Reconstructs a <see cref="StreamManifest"/> from an on-disk manifest cache entry.
     /// </summary>
     private static StreamManifest ReconstructManifest(TrackManifestEntry entry)
     {
@@ -1841,8 +1841,8 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Конвертирует манифест в список UI-опций с дедупликацией по нормализованному bucket'у.
-    /// Предотвращает показ двух форматов с одинаковым физическим кэш-файлом.
+    /// Converts a manifest into a list of UI options with deduplication by normalized bucket.
+    /// Prevents displaying two formats associated with the same physical cache file.
     /// </summary>
     private static List<StreamOption> MapManifestToOptions(StreamManifest manifest)
     {
@@ -1915,18 +1915,18 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Пытается быстро получить дескриптор потока из RAM-кэша манифестов без дисковых или сетевых запросов.
-    /// Поддерживает как полный trackId (с yt_ префиксом), так и чистый 11-значный videoId.
+    /// Attempts to quickly retrieve a stream descriptor from the RAM manifest cache without disk or network requests.
+    /// Supports both full trackId (with yt_ prefix) and clean 11-character videoId.
     /// </summary>
-    /// <param name="videoId">Идентификатор видео или трека.</param>
-    /// <param name="format">Желаемый формат.</param>
-    /// <param name="bitrate">Желаемый битрейт.</param>
+    /// <param name="videoId">Video or track identifier.</param>
+    /// <param name="format">Desired format.</param>
+    /// <param name="bitrate">Desired bitrate.</param>
     public ResolvedStreamDescriptor? TryGetCachedStreamDescriptor(string videoId, AudioFormat? format, int bitrate)
     {
         string trackId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId : $"yt_{videoId}";
         if (_manifestRamCache.TryGetValue(trackId, out var manifest))
         {
-            // URL, выданный для другого внешнего IP, CDN отвергнет с HTTP 403: такой дескриптор не отдаём.
+            // A URL issued for a different external IP will be rejected by CDN with HTTP 403: do not yield such descriptor.
             var d = SelectFromManifest(manifest, trackId, format, bitrate, StreamSource.ProviderMemoryCache);
             return d is { } found && !StreamUrlEgressGuard.Shared.IsBoundToCurrentEgress(found.Url) ? null : d;
         }
@@ -1934,7 +1934,7 @@ public partial class YoutubeProvider : IDisposable
     }
 
     /// <summary>
-    /// Очищает оперативную память от кэша манифестов.
+    /// Clears the manifest cache from RAM.
     /// </summary>
     public void ClearCache()
     {
@@ -1947,7 +1947,7 @@ public partial class YoutubeProvider : IDisposable
     #region Dispose
 
     /// <summary>
-    /// Освобождает все управляемые ресурсы провайдера YouTube.
+    /// Releases all managed resources of the YouTube provider.
     /// </summary>
     public void Dispose()
     {
@@ -1981,10 +1981,10 @@ public partial class YoutubeProvider : IDisposable
 
 public sealed partial class StreamOption : ObservableObject
 {
-    /// <summary>Типизированный формат контейнера.</summary>
+    /// <summary>Typed container format.</summary>
     public AudioFormat Format { get; init; }
 
-    /// <summary>Типизированный аудиокодек.</summary>
+    /// <summary>Typed audio codec.</summary>
     public AudioCodec CodecType { get; init; }
 
     public double Bitrate { get; set; }

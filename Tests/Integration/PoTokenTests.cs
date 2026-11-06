@@ -7,9 +7,9 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Интеграционные тесты генерации BotGuard PoToken.
-/// Основные тесты с проверками включены в автоматический прогон,
-/// а пошаговые дамперы вынесены в категорию Diagnostic.
+/// Integration tests for BotGuard PoToken generation.
+/// Core tests with assertions are included in the automated run,
+/// while step-by-step dumpers are categorized under Diagnostic.
 /// </summary>
 public static class PoTokenTests
 {

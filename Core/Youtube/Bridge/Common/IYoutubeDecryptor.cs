@@ -1,13 +1,13 @@
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Базовый интерфейс для дешифраторов YouTube.
+/// Base interface for YouTube decipherers.
 /// </summary>
 public interface IYoutubeDecryptor
 {
-    /// <summary>Инвалидирует кэш (при смене версии плеера).</summary>
+    /// <summary>Invalidates the cache (when player version changes).</summary>
     void InvalidateCache();
 
-    /// <summary>Асинхронно сбрасывает кэш на диск.</summary>
+    /// <summary>Asynchronously flushes the cache to disk.</summary>
     Task FlushCacheAsync();
 }

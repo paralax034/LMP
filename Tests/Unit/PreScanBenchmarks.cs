@@ -7,8 +7,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Бенчмарки скорости предварительного EBU R128 сканирования для Opus и AAC файлов.
-/// При отсутствии полностью закэшированных треков тест пропускается через <see cref="TestAssert.Skip"/>.
+/// Benchmarks for EBU R128 pre-scanning speed of Opus and AAC files.
+/// Skipped via <see cref="TestAssert.Skip"/> if fully cached tracks are missing.
 /// </summary>
 public static class PreScanBenchmarks
 {

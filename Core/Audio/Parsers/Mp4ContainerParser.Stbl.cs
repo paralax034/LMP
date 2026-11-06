@@ -3,10 +3,10 @@ namespace LMP.Core.Audio.Parsers;
 public sealed partial class Mp4ContainerParser
 {
     /// <summary>
-    /// Разбирает <c>moov</c> box и его дочерние элементы.
+    /// Parses the <c>moov</c> box and its child elements.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseMoovAsync(long boxEnd, CancellationToken ct)
     {
         while (_reader.Position < boxEnd)
@@ -43,10 +43,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>mvhd</c> box и извлекает длительность контейнера.
+    /// Parses the <c>mvhd</c> box and extracts the container duration.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseMvhdAsync(long boxEnd, CancellationToken ct)
     {
         int version = await _reader.ReadByteAsync(ct).ConfigureAwait(false);
@@ -78,10 +78,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>mvex</c> box и извлекает default sample параметры для fMP4.
+    /// Parses the <c>mvex</c> box and extracts default sample parameters for fMP4.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseMvexAsync(long boxEnd, CancellationToken ct)
     {
         while (_reader.Position < boxEnd)
@@ -101,9 +101,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>trex</c> box и извлекает значения по умолчанию для sample duration/size.
+    /// Parses the <c>trex</c> box and extracts default sample duration/size values.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseTrexAsync(CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -114,10 +114,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>trak</c> box.
+    /// Parses the <c>trak</c> box.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseTrakAsync(long boxEnd, CancellationToken ct)
     {
         while (_reader.Position < boxEnd)
@@ -143,12 +143,12 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>mdia</c> box, определяя audio track и его time scale.
+    /// Parses the <c>mdia</c> box, determining the audio track and its time scale.
     /// </summary>
-    /// <param name="boxSize">Размер содержимого box без заголовка.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxSize">Size of the box payload excluding the header.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// Кортеж: является ли track аудио-дорожкой и её time scale.
+    /// A tuple indicating whether the track is an audio track and its time scale.
     /// </returns>
     private async Task<(bool IsAudio, uint TimeScale)> ParseMdiaAsync(long boxSize, CancellationToken ct)
     {
@@ -196,11 +196,11 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>minf</c> box и делегирует разбор sample table.
+    /// Parses the <c>minf</c> box and delegates sample table parsing.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="timeScale">Time scale текущего трека.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="timeScale">Time scale of the current track.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseMinfAsync(long boxEnd, uint timeScale, CancellationToken ct)
     {
         while (_reader.Position < boxEnd)
@@ -220,11 +220,11 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>stbl</c> box и собирает данные для построения sample table.
+    /// Parses the <c>stbl</c> box and collects data to build the sample table.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="timeScale">Time scale текущего трека.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="timeScale">Time scale of the current track.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseStblAsync(long boxEnd, uint timeScale, CancellationToken ct)
     {
         List<uint> sampleSizes = [];
@@ -275,10 +275,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>stsd</c> box и извлекает параметры AAC sample entry.
+    /// Parses the <c>stsd</c> box and extracts AAC sample entry parameters.
     /// </summary>
-    /// <param name="boxEnd">Абсолютная позиция конца box.</param>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="boxEnd">Absolute end position of the box.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseStsdAsync(long boxEnd, CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -326,9 +326,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>esds</c> descriptor и извлекает AAC Audio Specific Config.
+    /// Parses the <c>esds</c> descriptor and extracts the AAC Audio Specific Config.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ParseEsdsAsync(CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -381,9 +381,9 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает AAC Audio Specific Config и обновляет sample rate / channels.
+    /// Parses the AAC Audio Specific Config and updates sample rate / channels.
     /// </summary>
-    /// <param name="asc">Сырые байты Audio Specific Config.</param>
+    /// <param name="asc">Raw bytes of the Audio Specific Config.</param>
     private void ParseAudioSpecificConfig(byte[] asc)
     {
         if (asc.Length < 2)
@@ -403,10 +403,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>stsz</c> box.
+    /// Parses the <c>stsz</c> box.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Список размеров семплов.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A list of sample sizes.</returns>
     private async Task<List<uint>> ParseStszAsync(CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -430,10 +430,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>stsc</c> box.
+    /// Parses the <c>stsc</c> box.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Список записей sample-to-chunk.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A list of sample-to-chunk entries.</returns>
     private async Task<List<(uint firstChunk, uint samplesPerChunk, uint descIdx)>> ParseStscAsync(CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -452,13 +452,13 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>stco</c> или <c>co64</c> box.
+    /// Parses the <c>stco</c> or <c>co64</c> box.
     /// </summary>
     /// <param name="use64BitOffsets">
-    /// <c>true</c> для <c>co64</c>, <c>false</c> для <c>stco</c>.
+    /// <c>true</c> for <c>co64</c>; <c>false</c> for <c>stco</c>.
     /// </param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Список абсолютных смещений чанков.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A list of absolute chunk offsets.</returns>
     private async Task<List<long>> ParseStcoAsync(bool use64BitOffsets, CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -478,10 +478,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Разбирает <c>stts</c> box.
+    /// Parses the <c>stts</c> box.
     /// </summary>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Список пар (count, delta) для time-to-sample.</returns>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A list of (count, delta) pairs for time-to-sample.</returns>
     private async Task<List<(uint count, uint delta)>> ParseSttsAsync(CancellationToken ct)
     {
         await _reader.SkipBytesAsync(4, ct).ConfigureAwait(false); // version + flags
@@ -499,13 +499,13 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Строит sample table для обычного MP4 без промежуточного списка timestamps.
+    /// Builds a sample table for standard MP4 without an intermediate list of timestamps.
     /// </summary>
-    /// <param name="sizes">Размеры семплов.</param>
-    /// <param name="stsc">Правила sample-to-chunk.</param>
-    /// <param name="offsets">Смещения чанков.</param>
-    /// <param name="stts">Time-to-sample таблица.</param>
-    /// <param name="timeScale">Time scale трека.</param>
+    /// <param name="sizes">Sample sizes.</param>
+    /// <param name="stsc">Sample-to-chunk mapping rules.</param>
+    /// <param name="offsets">Chunk offsets.</param>
+    /// <param name="stts">Time-to-sample table.</param>
+    /// <param name="timeScale">Track time scale.</param>
     private void BuildSampleTable(
         List<uint> sizes,
         List<(uint firstChunk, uint samplesPerChunk, uint descIdx)> stsc,
@@ -563,10 +563,10 @@ public sealed partial class Mp4ContainerParser
     }
 
     /// <summary>
-    /// Находит индекс семпла для seek по timestamp.
+    /// Finds the sample index for seeking by timestamp.
     /// </summary>
-    /// <param name="targetMs">Целевая позиция в миллисекундах.</param>
-    /// <returns>Индекс ближайшего семпла слева.</returns>
+    /// <param name="targetMs">Target position in milliseconds.</param>
+    /// <returns>Index of the nearest preceding sample.</returns>
     private int BinarySearchSample(long targetMs)
     {
         int left = 0;

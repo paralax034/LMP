@@ -7,34 +7,34 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Единый attached property для загрузки изображений с debounce, quality control
-/// и единым LRU-кэшем. Полностью заменяет DebouncedImage и QualityImage.
+/// Unified attached property for image loading with debounce, quality control,
+/// and a unified LRU cache. Fully replaces DebouncedImage and QualityImage.
 ///
-/// <para><b>Проблема которую решает:</b>
+/// <para><b>Problem solved:</b>
 /// DebouncedImage → AsyncImageLoader → RamCachedWebImageLoader (unbounded, full-resolution).
-/// 574 thumbnail × 280KB = до 160MB без eviction.
+/// 574 thumbnails × 280KB = up to 160MB without eviction.
 /// SmartImage → ImageCacheService → FNV-1a LRU, MaxMemoryItems=80, DecodeToWidth(120).
-/// 80 × 57KB ≈ 4.5MB потолок.</para>
+/// 80 × 57KB ≈ 4.5MB ceiling.</para>
 ///
 /// <para><b>Debounce:</b>
-/// При <see cref="DebounceProperty"/> &gt; 0 — двухфазная задержка.
-/// Phase 1: yield на Background priority (UI завершает layout текущего кадра).
-/// Phase 2: Task.Delay фильтрует промежуточные рециклинги.
-/// Рециклинг до истечения delay → CTS отменяется → загрузка прерывается.</para>
+/// When <see cref="DebounceProperty"/> &gt; 0 — two-phase delay.
+/// Phase 1: yield to Background priority (UI completes layout for the current frame).
+/// Phase 2: Task.Delay filters out intermediate recyclings.
+/// Recycling before delay expires → CTS cancelled → load aborted.</para>
 ///
 /// <para><b>Bitmap lifecycle:</b>
-/// HTTP → shared из LRU-кэша (IsOwned=false, не диспозим — Image.Source держит ссылку,
-/// GC соберёт после eviction + смены Source).
-/// avares:// / local → создан для контрола (IsOwned=true, диспозим при смене Source).</para>
+/// HTTP → shared from LRU cache (IsOwned=false, do not dispose — Image.Source holds reference,
+/// GC will collect after eviction + Source change).
+/// avares:// / local → created for control (IsOwned=true, disposed on Source change).</para>
 /// </summary>
 public static class SmartImage
 {
     #region Constants
 
     /// <summary>
-    /// Задержка debounce по умолчанию для виртуализованных списков (мс).
-    /// 80ms ≈ 5 кадров при 60fps — достаточно чтобы отфильтровать
-    /// промежуточные рециклинги при быстром скролле.
+    /// Default debounce delay for virtualized lists (ms).
+    /// 80ms ≈ 5 frames at 60fps — sufficient to filter out
+    /// intermediate recyclings during fast scrolling.
     /// </summary>
     public const int DefaultDebounceMs = 80;
 
@@ -46,7 +46,7 @@ public static class SmartImage
         AvaloniaProperty.RegisterAttached<Image, string?>("Source", typeof(SmartImage));
 
     /// <summary>
-    /// Качество декодирования. Avalonia автоматически парсит enum из XAML:
+    /// Decoding quality. Avalonia automatically parses enum from XAML:
     /// <c>ctrl:SmartImage.Quality="Low"</c> → ImageQuality.Low (120px).
     /// </summary>
     public static readonly AttachedProperty<ImageQuality> QualityProperty =
@@ -54,16 +54,16 @@ public static class SmartImage
             defaultValue: ImageQuality.Low);
 
     /// <summary>
-    /// Задержка debounce в мс. 0 = без debounce (статические изображения вне списков).
-    /// Используй <see cref="DefaultDebounceMs"/> для ItemsRepeater с рециклингом.
+    /// Debounce delay in ms. 0 = no debounce (static images outside lists).
+    /// Use <see cref="DefaultDebounceMs"/> for ItemsRepeater with recycling.
     /// </summary>
     public static readonly AttachedProperty<int> DebounceProperty =
         AvaloniaProperty.RegisterAttached<Image, int>("Debounce", typeof(SmartImage),
             defaultValue: 0);
 
     /// <summary>
-    /// Внутренний маркер: true если bitmap создан для этого контрола (avares/local).
-    /// false = bitmap из shared LRU-кэша, трогать нельзя.
+    /// Internal marker: true if bitmap was created for this control (avares/local).
+    /// false = bitmap is from shared LRU cache, do not modify or dispose.
     /// </summary>
     private static readonly AttachedProperty<bool> IsOwnedProperty =
         AvaloniaProperty.RegisterAttached<Image, bool>("IsOwned", typeof(SmartImage));
@@ -73,15 +73,15 @@ public static class SmartImage
     #region Pending Operations
 
     /// <summary>
-    /// ConditionalWeakTable не удерживает Image от GC —
-    /// рециклированный контрол собирается автоматически вместе с его CTS.
+    /// ConditionalWeakTable does not hold Image from GC —
+    /// a recycled control is automatically collected along with its CTS.
     /// </summary>
     private static readonly ConditionalWeakTable<Image, CancellationTokenSource> _pending = [];
 
     /// <summary>
-    /// Кэшируем сервис статически: GetService&lt;T&gt;() — это словарный lookup на каждый вызов.
-    /// При скролле 574 треков — сотни вызовов без кэша. Инициализируется лениво,
-    /// после того как DI-контейнер готов (первое обращение не раньше первой загрузки).
+    /// Cache service statically: GetService&lt;T&gt;() is a dictionary lookup on every invocation.
+    /// When scrolling 574 tracks, this results in hundreds of calls without cache. Lazily initialized
+    /// after the DI container is ready (first access no earlier than the first load).
     /// </summary>
     private static ImageCacheService? _imageCache;
 
@@ -109,8 +109,8 @@ public static class SmartImage
     #region Core Load Logic
 
     /// <summary>
-    /// Запускает загрузку изображения для контрола. Вызывается при изменении
-    /// <see cref="SourceProperty"/> или <see cref="QualityProperty"/>.
+    /// Initiates image loading for the control. Called when
+    /// <see cref="SourceProperty"/> or <see cref="QualityProperty"/> changes.
     /// </summary>
     private static async void BeginLoad(Image image)
     {
@@ -205,10 +205,10 @@ public static class SmartImage
     #region Loaders
 
     /// <summary>
-    /// HTTP/HTTPS: bitmap из единого LRU-кэша ImageCacheService.
-    /// Выполняется на UI-потоке: вызывающая цепочка BeginLoad не использует
-    /// ConfigureAwait(false), continuation возвращается через UI SynchronizationContext.
-    /// Shared bitmap — IsOwned=false, Dispose не вызываем.
+    /// HTTP/HTTPS: bitmap from unified LRU cache ImageCacheService.
+    /// Runs on UI thread: caller chain of BeginLoad does not use
+    /// ConfigureAwait(false), continuation returns via UI SynchronizationContext.
+    /// Shared bitmap — IsOwned=false, do not call Dispose.
     /// </summary>
     private static async Task LoadHttpAsync(Image image, string url, int decodeWidth, CancellationToken ct)
     {
@@ -225,9 +225,9 @@ public static class SmartImage
     }
 
     /// <summary>
-    /// avares:// embedded resource: decode на threadpool, bitmap принадлежит контролу.
-    /// Task.Run вынесен из UI-потока: DecodeToWidth на больших ресурсах может
-    /// занять несколько мс и вызвать jank при синхронном вызове.
+    /// avares:// embedded resource: decoded on threadpool, bitmap is owned by control.
+    /// Task.Run is offloaded from UI thread: DecodeToWidth on large resources can
+    /// take several ms and cause UI jank if called synchronously.
     /// </summary>
     private static async Task LoadAvaresAsync(Image image, string url, int decodeWidth, CancellationToken ct)
     {
@@ -263,8 +263,8 @@ public static class SmartImage
     }
 
     /// <summary>
-    /// Локальный файл: decode на threadpool, bitmap принадлежит контролу.
-    /// FileStream с useAsync:false эффективнее на threadpool (нет overhead async I/O).
+    /// Local file: decoded on threadpool, bitmap is owned by control.
+    /// FileStream with useAsync:false is more efficient on threadpool (no async I/O overhead).
     /// </summary>
     private static async Task LoadLocalAsync(Image image, string url, int decodeWidth, CancellationToken ct)
     {
@@ -303,9 +303,9 @@ public static class SmartImage
     #region Cleanup
 
     /// <summary>
-    /// Диспозит текущий bitmap только если он "owned" (avares/local).
-    /// HTTP-bitmaps из LRU-кэша не диспозим: кэш управляет lifecycle,
-    /// Image.Source держит последнюю ссылку до смены Source.
+    /// Disposes current bitmap only if it is "owned" (avares/local).
+    /// Do not dispose HTTP bitmaps from LRU cache: cache manages lifecycle,
+    /// Image.Source holds the last reference until Source changes.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void DisposeOwned(Image image)

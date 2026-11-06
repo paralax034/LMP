@@ -1,17 +1,17 @@
 namespace LMP.Core.ViewModels;
 
 /// <summary>
-/// Интерфейс для ViewModels с поддержкой текстовой фильтрации.
+/// Interface for ViewModels supporting text filtering.
 /// </summary>
 public interface IFilterable
 {
     /// <summary>
-    /// Текстовый запрос для локальной фильтрации.
+    /// Text query for local filtering.
     /// </summary>
     string FilterQuery { get; set; }
 
     /// <summary>
-    /// Сервис локализации для UI.
+    /// Localization service for UI.
     /// </summary>
     LocalizationService L { get; }
 }

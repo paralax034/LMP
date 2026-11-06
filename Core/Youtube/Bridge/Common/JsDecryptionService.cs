@@ -1,24 +1,24 @@
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Singleton-сервис управления persistent QuickJS context.
+/// Singleton service for managing persistent QuickJS context.
 /// <para>
-/// <b>Архитектура:</b> один native handle на всё время жизни приложения.
-/// Все дешифраторы (<see cref="NToken.NTokenDecryptor"/>,
-/// <see cref="SigCipher.SigCipherDecryptor"/>) разделяют один контекст —
-/// скрипт компилируется ровно один раз вместо одного раза на каждый вызов.
+/// <b>Architecture:</b> single native handle for the entire application lifetime.
+/// All decryptors (<see cref="NToken.NTokenDecryptor"/>,
+/// <see cref="SigCipher.SigCipherDecryptor"/>) share a single context —
+/// the script is compiled exactly once instead of once per call.
 /// </para>
 /// <para>
-/// <b>Thread safety:</b> QuickJS не потокобезопасен. Все вызовы к native
-/// слою сериализуются через <c>_callLock</c> (SemaphoreSlim 1,1).
-/// Инициализация защищена отдельным <c>_initLock</c>.
+/// <b>Thread safety:</b> QuickJS is not thread-safe. All calls to the native
+/// layer are serialized via <c>_callLock</c> (SemaphoreSlim 1,1).
+/// Initialization is protected by a separate <c>_initLock</c>.
 /// </para>
 /// <para>
 /// <b>Lifecycle:</b>
 /// <list type="bullet">
-///   <item>Lazy init при первом вызове — не блокирует старт приложения.</item>
-///   <item>При смене версии плеера — <see cref="ReinitializeAsync"/> создаёт новый handle.</item>
-///   <item>Dispose — уничтожает native handle, освобождает 250 KB QuickJS runtime.</item>
+///   <item>Lazy init on first call — does not block application startup.</item>
+///   <item>On player version change — <see cref="ReinitializeAsync"/> creates a new handle.</item>
+///   <item>Dispose — destroys native handle, releases 250 KB QuickJS runtime.</item>
 /// </list>
 /// </para>
 /// </summary>
@@ -31,22 +31,22 @@ public sealed class JsDecryptionService : IDisposable
     private volatile bool _initialized;
     private volatile bool _disposed;
 
-    /// <summary>Сериализует все native вызовы: QuickJS не потокобезопасен.</summary>
+    /// <summary>Serializes all native calls: QuickJS is not thread-safe.</summary>
     private readonly SemaphoreSlim _callLock = new(1, 1);
 
-    /// <summary>Защищает от concurrent инициализации (double-init race).</summary>
+    /// <summary>Protects against concurrent initialization (double-init race).</summary>
     private readonly SemaphoreSlim _initLock = new(1, 1);
 
-    /// <summary>Менеджер контекста плеера. Используется для Invalidate при 403-recovery.</summary>
+    /// <summary>Player context manager. Used for Invalidate during 403-recovery.</summary>
     public PlayerContextManager PlayerManager => _playerManager;
 
     /// <summary>
-    /// Указывает, инициализирован ли нативный контекст QuickJS и готов ли он к мгновенным вызовам (~0.1 мс).
+    /// Indicates whether the native QuickJS context is initialized and ready for instant calls (~0.1 ms).
     /// </summary>
     public bool IsInitialized => _initialized && _handle != IntPtr.Zero && !_disposed;
 
     /// <param name="playerManager">
-    /// Менеджер контекста плеера — источник препроцессированного скрипта.
+    /// Player context manager — the source of the preprocessed script.
     /// </param>
     public JsDecryptionService(PlayerContextManager playerManager)
     {
@@ -56,10 +56,10 @@ public sealed class JsDecryptionService : IDisposable
     //  Public API 
 
     /// <summary>
-    /// Гарантирует, что native context инициализирован.
+    /// Ensures that the native context is initialized.
     /// <para>
-    /// Идемпотентен: безопасно вызывать из нескольких потоков одновременно.
-    /// Тяжёлая работа (препроцессинг AST) выполняется на ThreadPool.
+    /// Idempotent: safe to call from multiple threads concurrently.
+    /// Heavy work (AST preprocessing) is executed on the ThreadPool.
     /// </para>
     /// </summary>
     public async ValueTask EnsureInitializedAsync(CancellationToken ct = default)
@@ -73,8 +73,8 @@ public sealed class JsDecryptionService : IDisposable
 
             var context = await _playerManager.GetOrLoadAsync(ct).ConfigureAwait(false);
 
-            // Передаем context целиком. AST-парсинг и чтение текста НЕ запустятся,
-            // если CreateHandleAsync успешно поднимет контекст из байткода.
+            // Pass context entirely. AST parsing and text reading will NOT execute
+            // if CreateHandleAsync successfully initializes the context from bytecode.
             await CreateHandleAsync(context, ct).ConfigureAwait(false);
 
             _initialized = true;
@@ -89,16 +89,16 @@ public sealed class JsDecryptionService : IDisposable
     }
 
     /// <summary>
-    /// Вызывает <c>globalThis._result.{functionName}(argument)</c>
-    /// в persistent context без повторного eval скрипта.
+    /// Invokes <c>globalThis._result.{functionName}(argument)</c>
+    /// in persistent context without re-evaluating the script.
     /// <para>
-    /// Hot path: ~0.1 мс на вызов. Полностью асинхронен — не блокирует UI.
+    /// Hot path: ~0.1 ms per call. Fully asynchronous — does not block the UI.
     /// </para>
     /// </summary>
-    /// <param name="functionName">Имя функции: <c>"n"</c>, <c>"sig"</c> и т.д.</param>
-    /// <param name="argument">Входная строка для дешифрации.</param>
-    /// <param name="ct">Токен отмены.</param>
-    /// <returns>Результат дешифрации или <c>null</c> при ошибке.</returns>
+    /// <param name="functionName">Function name: <c>"n"</c>, <c>"sig"</c>, etc.</param>
+    /// <param name="argument">Input string for decryption.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Decryption result or <c>null</c> on error.</returns>
     public async ValueTask<string?> CallAsync(
         string functionName,
         string argument,
@@ -131,8 +131,8 @@ public sealed class JsDecryptionService : IDisposable
     }
 
     /// <summary>
-    /// Принудительно реинициализирует нативный контекст с новым плеером.
-    /// Вызывается при ротации версий YouTube или при восстановлении после 403 ошибки.
+    /// Force-reinitializes the native context with a new player.
+    /// Called on YouTube version rotation or during 403 error recovery.
     /// </summary>
     public async ValueTask ReinitializeAsync(CancellationToken ct = default)
     {
@@ -141,12 +141,12 @@ public sealed class JsDecryptionService : IDisposable
         {
             _initialized = false;
 
-            // Получаем актуальный контекст плеера (из дискового кэша или сети)
+            // Retrieve the current player context (from disk cache or network)
             var context = await _playerManager.GetOrLoadAsync(ct).ConfigureAwait(false);
 
-            // Просто передаем контекст! CreateHandleAsync сам внутри разберется:
-            // если на диске лежит байткод — он мгновенно поднимет контекст из него (за ~5 мс),
-            // не считывая preprocessed.js и не запуская тяжелый AST-парсер.
+            // Simply pass the context! CreateHandleAsync will resolve it internally:
+            // if bytecode exists on disk — it instantly initializes the context from it (in ~5 ms),
+            // without reading preprocessed.js or running the heavy AST parser.
             await CreateHandleAsync(context, ct).ConfigureAwait(false);
 
             _initialized = true;
@@ -161,11 +161,11 @@ public sealed class JsDecryptionService : IDisposable
     }
 
     /// <summary>
-    /// Сбрасывает флаг инициализации.
-    /// Следующий вызов пересоздаст QuickJS context из кэшированного скрипта.
+    /// Resets the initialization flag.
+    /// The next call will recreate the QuickJS context from the cached script.
     /// <para>
-    /// При 403-recovery контекст пересоздаётся из дискового кэша (~3 мс),
-    /// а не из сети (~2.5 с download + ~1.5 с AST parse).
+    /// On 403-recovery, the context is recreated from disk cache (~3 ms)
+    /// rather than network (~2.5 s download + ~1.5 s AST parse).
     /// </para>
     /// </summary>
     public void Invalidate()
@@ -176,13 +176,13 @@ public sealed class JsDecryptionService : IDisposable
     }
 
     /// <summary>
-    /// Вызывается при обнаружении сломанного solver (n-token → null).
-    /// Сбрасывает in-memory состояние и физически удаляет все дисковые артефакты
-    /// текущей версии плеера, форсируя полную перезагрузку base.js при следующем вызове.
+    /// Called when a broken solver is detected (n-token → null).
+    /// Resets in-memory state and physically removes all disk artifacts
+    /// of the current player version, forcing a full base.js reload on the next call.
     /// </summary>
     /// <remarks>
-    /// Метод синхронный: файловые операции выполняются немедленно, без fire-and-forget,
-    /// чтобы гарантировать отсутствие байткода до следующего <see cref="EnsureInitializedAsync"/>.
+    /// Synchronous method: file operations complete immediately without fire-and-forget
+    /// to guarantee absence of bytecode prior to the next <see cref="EnsureInitializedAsync"/>.
     /// </remarks>
     public void InvalidatePlayerContextAndBytecode()
     {
@@ -191,8 +191,8 @@ public sealed class JsDecryptionService : IDisposable
         _initialized = false;
         _currentPlayerVersion = null;
 
-        // Мягкий сброс RAM-контекста; ClearDiskCache выполняется отдельно,
-        // чтобы не зависеть от _current (может быть null после предыдущего InvalidateContext).
+        // Soft RAM context reset; ClearDiskCache is executed separately
+        // to avoid relying on _current (which may be null after a previous InvalidateContext).
         _playerManager.InvalidateContext();
 
         if (!string.IsNullOrEmpty(version))
@@ -209,16 +209,16 @@ public sealed class JsDecryptionService : IDisposable
     //  Private helpers 
 
     /// <summary>
-    /// Создаёт новый native handle. Пытается загрузить из кэша байткода (fast path), 
-    /// при неудаче парсит текст, извлекает байткод из того же контекста и асинхронно сохраняет его.
-    /// Атомарно заменяет старый handle новым.
+    /// Creates a new native handle. Tries to load from bytecode cache (fast path);
+    /// on failure, parses text, extracts bytecode from the same context, and asynchronously saves it.
+    /// Atomically replaces the old handle with the new one.
     /// </summary>
     private async ValueTask CreateHandleAsync(PlayerContext context, CancellationToken ct)
     {
         IntPtr newHandle = IntPtr.Zero;
         var bytecodePath = PlayerContext.GetBytecodeCachePath(context.Version);
 
-        // 1. Fast path: Пробуем загрузить из байткода
+        // 1. Fast path: Try loading from bytecode
         if (File.Exists(bytecodePath))
         {
             try
@@ -237,13 +237,13 @@ public sealed class JsDecryptionService : IDisposable
             }
         }
 
-        // 2. Slow path: Сбой байткода. Лениво читаем JS с диска (или компилируем) и создаем заново
+        // 2. Slow path: Bytecode failure. Lazily read JS from disk (or compile) and recreate
         bool performedHeavyAstParse = false;
         if (newHandle == IntPtr.Zero)
         {
             performedHeavyAstParse = true;
 
-            // Метод GetOrPrepareScript вызовется и лениво считает preprocessed.js только сейчас!
+            // GetOrPrepareScript will be called to lazily read preprocessed.js only now!
             var script = await Task.Run(
                 () => context.GetOrPrepareScript(
                     () => YoutubeAstSolver.PreprocessPlayer(context.BaseJs)),
@@ -285,7 +285,7 @@ public sealed class JsDecryptionService : IDisposable
     }
 
     /// <summary>
-    /// Проверяет, не сменилась ли версия плеера, и реинициализирует при необходимости.
+    /// Checks if the player version has changed and reinitializes if necessary.
     /// </summary>
     private async ValueTask CheckAndReinitializeIfNeededAsync(CancellationToken ct)
     {

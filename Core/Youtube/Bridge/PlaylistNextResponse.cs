@@ -4,8 +4,8 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.Core.Youtube.Bridge;
 
 /// <summary>
-/// Представляет ответ API YouTube на запрос Next для плейлиста.
-/// Чистая плоская DTO-модель: извлекает данные при создании и не удерживает <see cref="JsonDocument"/> в памяти.
+/// Represents YouTube API response for a playlist Next request.
+/// Pure flat DTO model: extracts data upon creation and does not retain <see cref="JsonDocument"/> in memory.
 /// </summary>
 internal partial class PlaylistNextResponse : IPlaylistData
 {
@@ -18,19 +18,19 @@ internal partial class PlaylistNextResponse : IPlaylistData
     public IReadOnlyList<ThumbnailData> Thumbnails => Videos.Count > 0 ? Videos[0].Thumbnails : [];
 
     /// <summary>
-    /// Список видео в текущей партии Next-ответа.
+    /// List of videos in the current batch of the Next response.
     /// </summary>
     public IReadOnlyList<PlaylistVideoData> Videos { get; init; } = [];
 
     /// <summary>
-    /// Данные о сессии пользователя.
+    /// User session data.
     /// </summary>
     public string? VisitorData { get; init; }
 
     /// <summary>
-    /// Инициализирует плоскую модель Next-ответа из JSON-элемента за один проход.
+    /// Initializes a flat Next response model from a JSON element in a single pass.
     /// </summary>
-    /// <param name="content">Корневой JSON-элемент ответа Next.</param>
+    /// <param name="content">Root JSON element of the Next response.</param>
     public PlaylistNextResponse(JsonElement content)
     {
         var contentRoot = content
@@ -87,7 +87,7 @@ internal partial class PlaylistNextResponse : IPlaylistData
 internal partial class PlaylistNextResponse
 {
     /// <summary>
-    /// Парсит ответ Next плейлиста из строки с мгновенным освобождением <see cref="JsonDocument"/>.
+    /// Parses playlist Next response from a string with immediate disposal of <see cref="JsonDocument"/>.
     /// </summary>
     public static PlaylistNextResponse Parse(string raw)
     {
@@ -96,12 +96,12 @@ internal partial class PlaylistNextResponse
     }
 
     /// <summary>
-    /// Парсит ответ Next плейлиста напрямую из сетевого потока без промежуточных строк в LOH.
-    /// Освобождает <see cref="JsonDocument"/> сразу после формирования модели.
+    /// Parses playlist Next response directly from a network stream without intermediate strings in LOH.
+    /// Disposes <see cref="JsonDocument"/> immediately after constructing the model.
     /// </summary>
-    /// <param name="stream">Сетевой поток HTTP-ответа.</param>
-    /// <param name="ct">Токен отмены асинхронной операции.</param>
-    /// <returns>Экземпляр плоского ответа Next плейлиста.</returns>
+    /// <param name="stream">HTTP response network stream.</param>
+    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
+    /// <returns>An instance of the flat playlist Next response.</returns>
     public static async ValueTask<PlaylistNextResponse> ParseAsync(Stream stream, CancellationToken ct = default)
     {
         using var doc = await JsonDocument.ParseAsync(stream, default, ct).ConfigureAwait(false);

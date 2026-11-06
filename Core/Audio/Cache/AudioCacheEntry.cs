@@ -6,67 +6,67 @@ using MemoryPack;
 namespace LMP.Core.Audio.Cache;
 
 /// <summary>
-/// Метаданные range-based кэша одного аудиопотока.
+/// Metadata for the range-based cache of a single audio stream.
 /// </summary>
 [MemoryPackable]
 public sealed partial class AudioCacheEntry
 {
-    /// <summary>Уникальный ключ кэша.</summary>
+    /// <summary>Unique cache key.</summary>
     public string CacheKey { get; init; } = "";
 
-    /// <summary>Идентификатор трека.</summary>
+    /// <summary>Track identifier.</summary>
     public string TrackId { get; init; } = "";
 
-    /// <summary>Исходный URL.</summary>
+    /// <summary>Source URL.</summary>
     public string OriginalUrl { get; set; } = "";
 
-    /// <summary>Полный размер контента в байтах.</summary>
+    /// <summary>Total content size in bytes.</summary>
     public long TotalSize { get; set; }
 
-    /// <summary>Формат аудио-контейнера.</summary>
+    /// <summary>Audio container format.</summary>
     public AudioFormat Format { get; init; }
 
-    /// <summary>Аудио-кодек.</summary>
+    /// <summary>Audio codec.</summary>
     public AudioCodec Codec { get; set; }
 
-    /// <summary>Реальный битрейт в kbps.</summary>
+    /// <summary>Actual bitrate in kbps.</summary>
     public int Bitrate { get; set; }
 
-    /// <summary>Длительность трека в миллисекундах.</summary>
+    /// <summary>Track duration in milliseconds.</summary>
     public long DurationMs { get; set; } = -1;
 
     /// <summary>
-    /// Выравнивание диапазонов, использованное этим кэшем.
+    /// Range alignment used by this cache.
     /// </summary>
     public int AlignmentBytes { get; set; }
 
-    /// <summary>Дата и время создания записи.</summary>
+    /// <summary>Creation date and time of the entry.</summary>
     public DateTime CreatedAt { get; init; }
 
-    /// <summary>Дата и время последнего обращения.</summary>
+    /// <summary>Date and time of the last access.</summary>
     public DateTime LastAccessedAt { get; set; }
 
-    /// <summary>Дата и время полного завершения кэширования.</summary>
+    /// <summary>Date and time when caching completed entirely.</summary>
     public DateTime? CompletedAt { get; set; }
 
-    /// <summary>Флаг полной готовности локального кэша.</summary>
+    /// <summary>Flag indicating full readiness of the local cache.</summary>
     public bool IsComplete { get; set; }
 
-    /// <summary>Физический размер файла кэша на диске.</summary>
+    /// <summary>Physical cache file size on disk.</summary>
     public long ActualFileSize { get; set; }
 
     /// <summary>
-    /// Новое canonical-поле integrated loudness трека в LUFS.
+    /// New canonical field for the track's integrated loudness in LUFS.
     /// </summary>
     public float? IntegratedLufs { get; set; }
 
     /// <summary>
-    /// Источник значения <see cref="IntegratedLufs"/>.
+    /// Source of the <see cref="IntegratedLufs"/> value.
     /// </summary>
     public int IntegratedLufsSource { get; set; }
 
     /// <summary>
-    /// Сериализуемые диапазоны локально скачанных данных.
+    /// Serializable ranges of locally downloaded data.
     /// </summary>
     public List<SerializedDownloadedRange>? DownloadedRangesData { get; set; }
 
@@ -88,24 +88,24 @@ public sealed partial class AudioCacheEntry
     [MemoryPackIgnore]
     private ConcurrentDictionary<long, byte>? _corruptedOfflineRanges;
 
-    /// <summary>Точное количество байт, доступных локально.</summary>
+    /// <summary>Exact number of bytes available locally.</summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public long DownloadedBytes => Volatile.Read(ref _downloadedBytes);
 
-    /// <summary>Монотонно возрастающая версия списка скачанных диапазонов для zero-alloc кэширования в UI.</summary>
+    /// <summary>Monotonically increasing version of the downloaded ranges list for zero-alloc UI caching.</summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     internal long RangesVersion => Volatile.Read(ref _rangesVersion);
 
-    /// <summary>Прогресс загрузки в процентах.</summary>
+    /// <summary>Download progress percentage.</summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public double DownloadProgress =>
         TotalSize <= 0 ? 0 : Math.Min(100.0, (double)DownloadedBytes / TotalSize * 100.0);
 
     /// <summary>
-    /// Проверяет, полностью ли покрыт диапазон <c>[offset, offset + length)</c>.
+    /// Checks whether the range <c>[offset, offset + length)</c> is fully covered.
     /// </summary>
     public bool IsRangeDownloaded(long offset, long length)
     {
@@ -136,7 +136,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Помечает диапазон байт загруженным.
+    /// Marks a byte range as downloaded.
     /// </summary>
     public void MarkRangeDownloaded(long offset, long length)
     {
@@ -194,7 +194,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Инвалидирует диапазон байт.
+    /// Invalidates a byte range.
     /// </summary>
     public void InvalidateRange(long offset, long length)
     {
@@ -242,7 +242,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Сбрасывает все локально скачанные диапазоны.
+    /// Resets all locally downloaded ranges.
     /// </summary>
     public void ResetDownloadedRanges()
     {
@@ -257,7 +257,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Помечает весь файл полностью скачанным.
+    /// Marks the entire file as fully downloaded.
     /// </summary>
     public void MarkFullyDownloaded()
     {
@@ -277,7 +277,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Пытается вернуть непрерывный диапазон, содержащий указанную позицию.
+    /// Tries to return a contiguous range containing the specified position.
     /// </summary>
     internal bool TryGetContainingRange(long offset, out long start, out long endExclusive)
     {
@@ -319,7 +319,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Возвращает количество непрерывно доступных байт вперёд от позиции.
+    /// Returns the number of contiguously available bytes forward from the position.
     /// </summary>
     public long GetContiguousDownloadedBytesFrom(long offset)
     {
@@ -329,13 +329,13 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Возвращает snapshot скачанных диапазонов.
+    /// Returns a snapshot of downloaded ranges.
     /// </summary>
     internal CacheByteRange[] GetDownloadedRangesSnapshot() =>
           GetDownloadedRangesSnapshot(out _);
 
     /// <summary>
-    /// Атомарно возвращает снимок скачанных диапазонов и текущую версию под единой блокировкой.
+    /// Atomically returns a snapshot of downloaded ranges and the current version under a single lock.
     /// </summary>
     internal CacheByteRange[] GetDownloadedRangesSnapshot(out long version)
     {
@@ -350,7 +350,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Помечает выровненный диапазон как повреждённый в текущей оффлайн-сессии.
+    /// Marks an aligned range as corrupted in the current offline session.
     /// </summary>
     public void MarkRangeCorruptedOffline(long alignedStart)
     {
@@ -359,7 +359,7 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Восстанавливает runtime-состояние после загрузки из JSON.
+    /// Restores runtime state after loading from JSON.
     /// </summary>
     public void RestoreAfterLoad()
     {
@@ -380,7 +380,7 @@ public sealed partial class AudioCacheEntry
             MarkRangeDownloaded(range.Start, range.EndExclusive - range.Start);
         }
 
-        // Освобождаем DTO-список десериализации, чтобы не дублировать диапазоны в Gen 2
+        // Release deserialization DTO list to prevent duplicating ranges in Gen 2
         DownloadedRangesData = null;
     }
 
@@ -411,15 +411,15 @@ public sealed partial class AudioCacheEntry
 }
 
 /// <summary>
-/// Сериализуемый диапазон локально скачанных данных.
+/// Serializable range of locally downloaded data.
 /// </summary>
 [MemoryPackable]
 public sealed partial class SerializedDownloadedRange
 {
-    /// <summary>Начало диапазона включительно.</summary>
+    /// <summary>Inclusive start of the range.</summary>
     public long Start { get; set; }
 
-    /// <summary>Конец диапазона исключительно.</summary>
+    /// <summary>Exclusive end of the range.</summary>
     public long EndExclusive { get; set; }
 }
 

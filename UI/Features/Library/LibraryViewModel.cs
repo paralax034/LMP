@@ -9,9 +9,9 @@ using LMP.UI.Features.Shell;
 namespace LMP.UI.Features.Library;
 
 /// <summary>
-/// ViewModel страницы «Библиотека» — высокопроизводительное управление плейлистами пользователя.
-/// Поддерживает кинематический параллельный счетчик статистики со сглаживанием CubicEaseOut,
-/// неблокирующий многопоточный импорт из YouTube с защитой от 403/BotDetection и потокобезопасную предзагрузку.
+/// ViewModel for the "Library" page — high-performance user playlist management.
+/// Supports a kinematic parallel statistics counter with CubicEaseOut smoothing,
+/// non-blocking multithreaded YouTube import with 403/BotDetection protection, and thread-safe preloading.
 /// </summary>
 public sealed partial class LibraryViewModel : ViewModelBase
 {
@@ -53,7 +53,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
     private bool _hasAnimatedStatsOnce;
     private string _loadedOwnerId = string.Empty;
 
-    // Снапшоты анимации
+    // Animation snapshots
     private int _startPlaylists;
     private int _targetPlaylists;
     private int _startTracks;
@@ -61,7 +61,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
     private long _startDurationTicks;
     private long _targetDurationTicks;
 
-    // Последние зафиксированные значения счетчиков
+    // Last committed counter values
     private int _lastRenderedPlaylists;
     private int _lastRenderedTracks;
     private long _lastRenderedDurationTicks;
@@ -153,7 +153,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
         LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
 
-        // Потокобезопасная предварительная загрузка данных на этапе Splash Screen
+        // Thread-safe data preloading during the Splash Screen phase
         _initialLoadTask = PreloadDataInBackgroundAsync();
     }
 
@@ -731,8 +731,8 @@ public sealed partial class LibraryViewModel : ViewModelBase
                 var ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync();
                 ct.ThrowIfCancellationRequested();
 
-                // Исключаем плейлисты, которые прямо сейчас ожидают удаления в Outbox (защита от зомби-плейлистов)
-                // Ждём гидратацию Outbox: иначе удаление из прошлой сессии ещё не видно и плейлист импортируется обратно
+                // Exclude playlists that are currently pending deletion in the Outbox (zombie playlist protection)
+                // Await Outbox hydration: otherwise, deletions from the previous session are not yet visible and the playlist will be re-imported
                 var pendingDeletedYtIds = await _playlistSync.GetPendingDeletedYoutubeIdsAsync(ct: ct);
 
                 var filtered = ytPlaylists
@@ -842,7 +842,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
         int abortedBy403OrCooldown = 0;
         var mergeLock = new SemaphoreSlim(1, 1);
 
-        // Масштабируем число потоков от интернет-профиля: Low=1, Medium=2 (баланс), High=3, Ultra=4
+        // Scale the thread count based on the internet profile: Low=1, Medium=2 (balanced), High=3, Ultra=4
         int maxDegree = _library.Settings.InternetProfile switch
         {
             InternetProfile.Low => 1,

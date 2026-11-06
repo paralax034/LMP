@@ -1,22 +1,22 @@
 <!--
-  Trimmer Root Descriptor для Release (Native AOT, TrimMode=full).
-  Сохраняются только сборки, которые тримминг не может полностью проанализировать статически:
-  нативный interop аудиокодека Opus и SQLite.
-  Намеренно не перечислены (совместимы с триммингом без дескриптора):
-  - System.Text.Json: AppJsonContext использует source generation, рефлексивный fallback в Release отключен;
-  - MemoryPack: сериализаторы генерируются на этапе компиляции;
-  - модели LMP.Core: БД работает через ADO.NET без рефлексивного маппинга;
-  - Microsoft.Extensions.DependencyInjection: регистрации аннотированы DynamicallyAccessedMembers.
+  Trimmer Root Descriptor for Release (Native AOT, TrimMode=full).
+  Preserves only assemblies that trimming cannot fully analyze statically:
+  Opus audio codec native interop and SQLite.
+  Intentionally omitted (trimming-compatible without a descriptor):
+  - System.Text.Json: AppJsonContext uses source generation, reflection fallback is disabled in Release;
+  - MemoryPack: serializers are generated at compile time;
+  - LMP.Core models: DB operates via ADO.NET without reflection mapping;
+  - Microsoft.Extensions.DependencyInjection: registrations are annotated with DynamicallyAccessedMembers.
 -->
 <linker>
 
-  <!-- Opus: управляемый декодер Concentus и нативная обертка libopus -->
+  <!-- Opus: Concentus managed decoder and libopus native wrapper -->
   <assembly fullname="Concentus" preserve="all" />
   <assembly fullname="Concentus.Native" preserve="all" />
 
   <!--
-    SQLite: ADO.NET-провайдер и нативный мост SQLitePCLRaw (P/Invoke и обратные вызовы из нативного кода).
-    Пакет Microsoft.Data.Sqlite.Core поставляет сборку Microsoft.Data.Sqlite; сборки с именем пакета не существует.
+    SQLite: ADO.NET provider and SQLitePCLRaw native bridge (P/Invoke and callbacks from native code).
+    The Microsoft.Data.Sqlite.Core package provides the Microsoft.Data.Sqlite assembly; no assembly named after the package exists.
   -->
   <assembly fullname="Microsoft.Data.Sqlite" preserve="all" />
   <assembly fullname="SQLitePCLRaw.core" preserve="all" />

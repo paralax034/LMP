@@ -22,7 +22,7 @@ internal partial class VideoWatchPage
             ?.Pipe(s => DateTimeOffset.TryParse(s, out var d) ? d : (DateTimeOffset?)null);
 
     /// <summary>
-    /// Парсинг количества лайков с использованием высокопроизводительного Span-парсера без аллокаций.
+    /// Parses the number of likes using a high-performance, allocation-free Span parser.
     /// </summary>
     public long? LikeCount
     {
@@ -47,7 +47,7 @@ internal partial class VideoWatchPage
     }
 
     /// <summary>
-    /// Возвращает разобранный ответ плеера с кэшированием в поле экземпляра для исключения повторного парсинга.
+    /// Returns the parsed player response, caching it in an instance field to prevent redundant parsing.
     /// </summary>
     public PlayerResponse? PlayerResponse
     {

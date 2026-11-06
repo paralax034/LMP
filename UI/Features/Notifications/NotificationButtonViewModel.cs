@@ -54,6 +54,6 @@ public sealed partial class NotificationButtonViewModel : ViewModelBase
         });
     }
 
-    // Popup связан TwoWay: закрытие кликом вне панели тоже останавливает таймер обратного отсчёта
+    // Popup is bound TwoWay: clicking outside the panel to close it also stops the countdown timer
     partial void OnIsPanelOpenChanged(bool value) => _panelViewModel.SetPanelVisible(value);
 }

@@ -3,22 +3,22 @@ using System.Text.RegularExpressions;
 namespace LMP.Core.Youtube.Bridge.Common;
 
 /// <summary>
-/// Представляет иммутабельный и потокобезопасный контекст конкретной версии JS-плеера YouTube.
-/// Координирует хранение оригинального кода, результатов AST-оптимизации и скомпилированного нативного байткода.
+/// Represents an immutable and thread-safe context for a specific YouTube JS player version.
+/// Coordinates the storage of original code, AST optimization results, and compiled native bytecode.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Архитектура памяти (Предотвращение LOH Fragmentation):</b>
-/// Исходный код YouTube плеера (<c>base.js</c>) весит ~2.5 МБ. Строки такого размера аллоцируются в Large Object Heap (LOH).
-/// Длительное удержание таких строк в памяти неизбежно приводит к фрагментации LOH и провоцирует дорогостоящие GC Gen 2 сборки.
-/// После компиляции контекста в нативный движок, метод <see cref="ReleaseRawScripts"/> принудительно освобождает оригинальный 
-/// <see cref="BaseJs"/>, минимизируя нагрузку на сборщик мусора.
+/// <b>Memory Architecture (LOH Fragmentation Prevention):</b>
+/// The source code of the YouTube player (<c>base.js</c>) is ~2.5 MB. Strings of this size are allocated in the Large Object Heap (LOH).
+/// Long-term retention of such strings in memory inevitably leads to LOH fragmentation and triggers expensive GC Gen 2 collections.
+/// After compiling the context into the native engine, the <see cref="ReleaseRawScripts"/> method forcibly frees the original
+/// <see cref="BaseJs"/>, minimizing pressure on the garbage collector.
 /// </para>
 /// <para>
-/// <b>Безопасность Байткода QuickJS (Native Crash Prevention):</b>
-/// Нативный байткод QuickJS-NG бинарно несовместим между разными версиями компилятора или конфигурациями моста.
-/// Попытка загрузить устаревший или несовместимый байткод вызывает SegFault нативного процесса, что роняет всё .NET приложение.
-/// Для защиты от таких падений кэш байткода содержит маркер ABI нативного моста в имени файла (<see cref="GetBytecodeCachePath"/>).
+/// <b>QuickJS Bytecode Safety (Native Crash Prevention):</b>
+/// Native QuickJS-NG bytecode is binary incompatible across different compiler versions or bridge configurations.
+/// Attempting to load outdated or incompatible bytecode causes a native process SegFault, crashing the entire .NET application.
+/// To guard against such crashes, the bytecode cache includes the native bridge ABI marker in its filename (<see cref="GetBytecodeCachePath"/>).
 /// </para>
 /// </remarks>
 public sealed partial class PlayerContext
@@ -27,59 +27,59 @@ public sealed partial class PlayerContext
     private const int MaxAgeDays = 14;
 
     /// <summary>
-    /// Легковесный объект синхронизации (.NET 9+), защищающий процесс компиляции 
-    /// и оптимизации скрипта от гонок потоков (Thread Races).
+    /// A lightweight synchronization object (.NET 9+) that protects the script compilation
+    /// and optimization process against thread races.
     /// </summary>
     private readonly Lock _prepLock = new();
 
     /// <summary>
-    /// Хэш-идентификатор версии плеера YouTube (например, <c>"06cb0078"</c>).
-    /// Используется как ключевой маркер во всех файловых операциях и путях кэша.
+    /// Hash identifier of the YouTube player version (e.g., <c>"06cb0078"</c>).
+    /// Used as a key marker in all file operations and cache paths.
     /// </summary>
     public string Version { get; }
 
     /// <summary>
-    /// Полный оригинальный исходный код плеера (<c>base.js</c>), загруженный из сети или диска.
+    /// Complete original source code of the player (<c>base.js</c>), loaded from network or disk.
     /// </summary>
     /// <value>
-    /// Может быть сброшен в <see cref="string.Empty"/> после инициализации контекста методом <see cref="ReleaseRawScripts"/>
-    /// для предотвращения удержания памяти в LOH.
+    /// Can be reset to <see cref="string.Empty"/> after context initialization via <see cref="ReleaseRawScripts"/>
+    /// to prevent retaining memory in LOH.
     /// </value>
     public string BaseJs { get; private set; }
 
     /// <summary>
-    /// Оптимизированный методом Tree Shaking и готовый к исполнению JS-код.
+    /// JS code optimized via Tree Shaking and ready for execution.
     /// </summary>
     /// <remarks>
-    /// Содержит только те функции и зависимости, которые непосредственно участвуют в обходе подписи (Sig) и N-токена.
+    /// Contains only those functions and dependencies directly involved in bypassing the signature (Sig) and N-token.
     /// </remarks>
     public string? PreprocessedJs { get; private set; }
 
     /// <summary>
-    /// Временная метка подписи (STS / Signature Timestamp).
-    /// Необходима для формирования валидных запросов к серверам раздачи видео (видео-кукам) YouTube.
+    /// Signature timestamp (STS / Signature Timestamp).
+    /// Required to construct valid requests to YouTube video delivery servers (video cookies).
     /// </summary>
     public string? Sts { get; private set; }
 
     /// <summary>
-    /// Актуальная версия клиента InnerTube Web, динамически извлеченная из кода скрипта плеера.
+    /// Current InnerTube Web client version, extracted dynamically from the player script code.
     /// </summary>
     public string? ClientVersion { get; private set; }
 
     /// <summary>
-    /// Временная метка создания объекта в памяти приложения.
-    /// Используется для контроля ротации и инвалидации устаревших контекстов плеера в рамках 12-часового цикла YouTube.
+    /// Creation timestamp of the object in application memory.
+    /// Used to control rotation and invalidation of stale player contexts within YouTube's 12-hour cycle.
     /// </summary>
     public DateTimeOffset CachedAt { get; }
 
     /// <summary>
-    /// Инициализирует новый экземпляр класса <see cref="PlayerContext"/>.
+    /// Initializes a new instance of the <see cref="PlayerContext"/> class.
     /// </summary>
-    /// <param name="version">Уникальная строковая версия плеера.</param>
-    /// <param name="baseJs">Оригинальный JS-код плеера плеера.</param>
-    /// <param name="preprocessedJs">Необязательный уже оптимизированный JS-код.</param>
-    /// <param name="sts">Необязательная метка подписи. Если передана как <c>null</c>, будет извлечена автоматически.</param>
-    /// <param name="clientVersion">Необязательная версия клиента InnerTube. Если <c>null</c>, извлекается из <paramref name="baseJs"/>.</param>
+    /// <param name="version">Unique string version of the player.</param>
+    /// <param name="baseJs">Original player JS code.</param>
+    /// <param name="preprocessedJs">Optional pre-optimized JS code.</param>
+    /// <param name="sts">Optional signature timestamp. If passed as <c>null</c>, it will be extracted automatically.</param>
+    /// <param name="clientVersion">Optional InnerTube client version. If <c>null</c>, extracted from <paramref name="baseJs"/>.</param>
     public PlayerContext(
         string version,
         string baseJs,
@@ -96,7 +96,7 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Извлекает актуальную версию клиента InnerTube Web из кода плеера.
+    /// Extracts the current InnerTube Web client version from the player code.
     /// </summary>
     public static string? ExtractClientVersion(string baseJs)
     {
@@ -110,13 +110,13 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Возвращает препроцессированный JS-код или компилирует его «на лету» (Lazy Initialization)
-    /// с использованием предоставленного делегата оптимизации.
+    /// Returns the preprocessed JS code or compiles it on the fly (Lazy Initialization)
+    /// using the provided optimization delegate.
     /// </summary>
-    /// <param name="preprocessor">Делегат, выполняющий синтаксический разбор AST и Tree Shaking плеера.</param>
-    /// <returns>Строка с оптимизированным JavaScript-кодом.</returns>
+    /// <param name="preprocessor">Delegate performing AST parsing and Tree Shaking of the player.</param>
+    /// <returns>A string containing optimized JavaScript code.</returns>
     /// <remarks>
-    /// Метод потокобезопасен. После успешной компиляции результат автоматически записывается на диск asynchronously.
+    /// This method is thread-safe. Upon successful compilation, the result is automatically written to disk asynchronously.
     /// </remarks>
     public string GetOrPrepareScript(Func<string> preprocessor)
     {
@@ -129,7 +129,7 @@ public sealed partial class PlayerContext
             string js = preprocessor();
             PreprocessedJs = js;
 
-            // Запись кэша в фоновом режиме, чтобы не блокировать основной поток выполнения
+            // Asynchronous cache write to avoid blocking the main execution thread
             _ = SavePreprocessedCacheAsync();
 
             return js;
@@ -137,9 +137,9 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Освобождает гигантскую строку оригинального скрипта плеера (<see cref="BaseJs"/>)
-    /// и промежуточный препроцессированный скрипт (<see cref="PreprocessedJs"/>) из оперативной памяти.
-    /// Вызывать строго после инициализации нативного контекста QuickJS.
+    /// Releases the massive original player script string (<see cref="BaseJs"/>)
+    /// and the intermediate preprocessed script (<see cref="PreprocessedJs"/>) from RAM.
+    /// Call strictly after initializing the native QuickJS context.
     /// </summary>
     public void ReleaseRawScripts()
     {
@@ -152,13 +152,13 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Проверяет, актуален ли данный контекст плеера в оперативной памяти.
+    /// Checks whether this player context in RAM is still fresh.
     /// </summary>
-    /// <returns><c>true</c>, если с момента кэширования прошло менее 12 часов (соответствует циклу ротации YouTube).</returns>
+    /// <returns><c>true</c> if less than 12 hours have elapsed since caching (matches YouTube's rotation cycle).</returns>
     public bool IsValid() => (DateTimeOffset.UtcNow - CachedAt).TotalHours < 12;
 
     /// <summary>
-    /// Асинхронно записывает оптимизированную JS-версию и временную метку STS на диск.
+    /// Asynchronously writes the optimized JS version and STS timestamp to disk.
     /// </summary>
     public async Task SavePreprocessedCacheAsync()
     {
@@ -187,8 +187,8 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Выполняет полное асинхронное кэширование: оригинального кода, оптимизированного JS и метаданных на диск.
-    /// Запускает процедуру автоматической очистки устаревших файлов.
+    /// Performs full asynchronous caching: original code, optimized JS, and metadata to disk.
+    /// Triggers automatic cleanup of stale files.
     /// </summary>
     public async Task SaveCacheAsync()
     {
@@ -217,7 +217,7 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Загружает метаданные из кэша. Избегает чтения тяжелых JS-файлов, если доступен готовый байткод.
+    /// Loads metadata from cache. Avoids reading heavy JS files if compiled bytecode is available.
     /// </summary>
     public static PlayerContext? LoadFromCache(string version)
     {
@@ -269,10 +269,10 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Загружает кэшированный контекст плеера с диска без проверки срока давности.
+    /// Loads cached player context from disk without checking expiration.
     /// </summary>
-    /// <param name="version">Хэш версии плеера.</param>
-    /// <param name="requireRawBaseJs">Если <c>true</c>, загружает оригинальный <c>base.js</c> для полного прогона AST-парсера.</param>
+    /// <param name="version">Player version hash.</param>
+    /// <param name="requireRawBaseJs">If <c>true</c>, loads original <c>base.js</c> for a full AST parser pass.</param>
     public static PlayerContext? LoadFromCacheNoExpiry(string version, bool requireRawBaseJs = false)
     {
         try
@@ -310,7 +310,7 @@ public sealed partial class PlayerContext
     }
 
     /// <summary>
-    /// Возвращает список всех версий плеера, имеющих сохранённый <c>base.js</c> или <c>preprocessed.js</c> в локальном кэше (от новых к старым).
+    /// Returns a list of all player versions that have saved <c>base.js</c> or <c>preprocessed.js</c> in the local cache (newest to oldest).
     /// </summary>
     public static string[] GetCachedVersions()
     {

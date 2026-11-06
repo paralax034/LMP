@@ -8,13 +8,13 @@
     x:DataType="vm:SearchViewModel">
 
     <UserControl.Styles>
-        <!-- Крупное поле ввода на всю высоту шапки (18px) поверх базового flat-search-box -->
+        <!-- Large input field spanning full header height (18px) over the base flat-search-box -->
         <Style Selector="TextBox.flat-search-box">
             <Setter Property="FontSize" Value="18" />
             <Setter Property="Padding" Value="2,0" />
         </Style>
 
-        <!-- Минималистичные интерактивные чипы с ограничением максимальной ширины -->
+        <!-- Minimalist interactive chips with maximum width constraint -->
         <Style Selector="Border.ribbon-chip">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
@@ -43,7 +43,7 @@
         <Border Grid.Row="0" Classes="header-strip">
             <Grid ColumnDefinitions="Auto, *, Auto" Height="46">
 
-                <!-- 1. LEFT: МОНОЛИТНЫЙ СЧЕТЧИК ВО ВСЮ ВЫСОТУ С ОДНОЙ ПРАВОЙ ЛИНИЕЙ -->
+                <!-- 1. LEFT: MONOLITHIC FULL-HEIGHT COUNTER WITH A SINGLE RIGHT BORDER -->
                 <Border Grid.Column="0"
                     Background="Transparent"
                     BorderBrush="{DynamicResource BgHighlightBrush}"
@@ -60,7 +60,7 @@
                         Foreground="{DynamicResource AccentBrush}" />
                 </Border>
 
-                <!-- 2. CENTER: КРУПНЫЙ ПЛОСКИЙ ИНПУТ С НЕЗАВИСИМЫМ GHOST TEXT СЛОЕМ -->
+                <!-- 2. CENTER: LARGE FLAT INPUT WITH AN INDEPENDENT GHOST TEXT LAYER -->
                 <Grid Grid.Column="1" Margin="12,0" Height="44" VerticalAlignment="Center">
                     <TextBlock
                         IsVisible="{Binding HasGhostText}"
@@ -75,8 +75,8 @@
                             Foreground="{DynamicResource TextMutedBrush}" />
                     </TextBlock>
 
-                    <!-- Клавиши Tab и Right обрабатываются в code-behind на фазе туннелирования для
-                    защиты навигации каретки -->
+                    <!-- Tab and Right keys are handled in code-behind during the tunneling phase to
+                    protect caret navigation -->
                     <TextBox Name="SearchBox"
                         Classes="flat-search-box"
                         Text="{Binding SearchQuery}"
@@ -91,12 +91,12 @@
                     </TextBox>
                 </Grid>
 
-                <!-- 3. RIGHT: ДЕЙСТВИЯ, РАЗДЕЛИТЕЛЬ ВО ВСЮ ВЫСОТУ И ИСТОЧНИКИ -->
+                <!-- 3. RIGHT: ACTIONS, FULL-HEIGHT DIVIDER AND SOURCES -->
                 <StackPanel Grid.Column="2"
                     Orientation="Horizontal"
                     VerticalAlignment="Stretch">
 
-                    <!-- Кнопка очистки текста [X] -->
+                    <!-- Clear text button [X] -->
                     <Button Classes="header-icon-btn"
                         Command="{Binding ClearQueryCommand}"
                         IsVisible="{Binding SearchQuery, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
@@ -106,7 +106,7 @@
                         <PathIcon Data="{StaticResource Icon.Close}" Width="14" Height="14" />
                     </Button>
 
-                    <!-- Кнопка очистки истории (метла) -->
+                    <!-- Clear history button (broom) -->
                     <Button Classes="header-icon-btn"
                         Command="{Binding ClearHistoryCommand}"
                         IsVisible="{Binding HasRecentSearches}"
@@ -116,7 +116,7 @@
                         <PathIcon Data="{StaticResource Icon.Broom}" Width="16" Height="16" />
                     </Button>
 
-                    <!-- Кнопка обновления из сети при попадании в кэш -->
+                    <!-- Refresh from network button on cache hit -->
                     <Button Classes="header-icon-btn"
                         Command="{Binding ForceSearchCommand}"
                         IsVisible="{Binding IsFromCache}"
@@ -127,13 +127,13 @@
                             Width="16" Height="16" />
                     </Button>
 
-                    <!-- РАЗДЕЛИТЕЛЬ ВО ВСЮ ВЫСОТУ ТОЛЩИНОЙ В 1PX -->
+                    <!-- FULL-HEIGHT DIVIDER WITH 1PX THICKNESS -->
                     <Border Width="1"
                         VerticalAlignment="Stretch"
                         Background="{DynamicResource BgHighlightBrush}"
                         Margin="4,0,8,0" />
 
-                    <!-- ИСТОЧНИКИ КОНТЕНТА -->
+                    <!-- CONTENT SOURCES -->
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
                         Margin="0,0,12,0">
                         <Button Classes="header-icon-btn"
@@ -164,7 +164,7 @@
             </Grid>
         </Border>
 
-        <!-- ROW 1: НЕОНОВАЯ ЛИНИЯ ЗАГРУЗКИ ПО ЛИНИИ ШАПКИ -->
+        <!-- ROW 1: NEON LOADING LINE ALONG THE HEADER BORDER -->
         <ProgressBar Grid.Row="1"
             Height="2"
             IsIndeterminate="{Binding IsBusy}"
@@ -173,21 +173,21 @@
             Background="Transparent"
             BorderThickness="0" />
 
-        <!-- ROW 2: ГОРИЗОНТАЛЬНАЯ ЛЕНТА ПОДСКАЗОК И ИСТОРИИ (CHIPS RIBBON) -->
+        <!-- ROW 2: HORIZONTAL SUGGESTIONS AND HISTORY RIBBON (CHIPS RIBBON) -->
         <Border Grid.Row="2"
             Classes="header-strip"
             Height="38"
             Padding="16,4">
             <Panel VerticalAlignment="Center">
 
-                <!-- Плейсхолдер при отсутствии подсказок: предотвращает прыжки сетки -->
+                <!-- Placeholder when no suggestions are available: prevents grid layout shifts -->
                 <TextBlock Text="{Binding RibbonPlaceholderText}"
                     FontSize="12"
                     Foreground="{DynamicResource TextMutedBrush}"
                     VerticalAlignment="Center"
                     IsVisible="{Binding !HasSuggestions}" />
 
-                <!-- ScrollViewer с адаптивной динамической маской краев -->
+                <!-- ScrollViewer with adaptive dynamic edge mask -->
                 <ScrollViewer Name="RibbonScrollViewer"
                     HorizontalScrollBarVisibility="Hidden"
                     VerticalScrollBarVisibility="Disabled"
@@ -201,7 +201,7 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:SearchSuggestionItem">
-                                <!-- Интерактивный чип: ЛКМ — выбор, ПКМ / ContextMenu — удаление -->
+                                <!-- Interactive chip: Left Click — select, Right Click / ContextMenu — delete -->
                                 <Border Classes="ribbon-chip"
                                     PointerPressed="OnSuggestionPointerPressed"
                                     ContextRequested="OnSuggestionContextRequested">
@@ -219,10 +219,10 @@
             </Panel>
         </Border>
 
-        <!-- ROW 3: СПИСОК ТРЕКОВ СО СКРОЛЛОМ У САМОГО КРАЯ ЭКРАНА -->
+        <!-- ROW 3: TRACK LIST WITH SCROLLBAR AT THE EXTREME SCREEN EDGE -->
         <Grid Grid.Row="3">
 
-            <!-- СКЕЛЕТОНЫ ПЕРВИЧНОЙ ЗАГРУЗКИ (12 ШТУК) -->
+            <!-- INITIAL LOADING SKELETONS (12 ITEMS) -->
             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                 IsVisible="{Binding IsLoading}">
                 <StackPanel Classes="breathing skeleton-list-container" Margin="24,12">
@@ -241,7 +241,7 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- ОСНОВНОЙ СКРОЛЛЕР ТРЕКОВ (Скроллбар строго у правого края окна) -->
+            <!-- MAIN TRACK SCROLLER (Scrollbar strictly at the right window edge) -->
             <ScrollViewer Name="ResultsScrollViewer"
                 HorizontalScrollBarVisibility="Disabled"
                 IsVisible="{Binding !IsLoading}">
@@ -260,7 +260,7 @@
                     Margin="16,0,16,80" />
             </ScrollViewer>
 
-            <!-- ПУСТОЙ РЕЗУЛЬТАТ -->
+            <!-- EMPTY RESULT -->
             <StackPanel HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Spacing="12"

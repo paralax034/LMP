@@ -11,14 +11,12 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Сервис синхронизации локальных плейлистов с платформой YouTube Music и управления
-/// умной фоновой очередью облачных мутаций (Smart Cloud Mutation Outbox Queue).
-/// Инкапсулирует коалесценцию (схлопывание) операций, LIS-сжатие перестановок,
-/// персистентность в SQLite, учёт состояния сети и разрешение конфликтов.
+/// Sync service for local playlists and YouTube Music platform, managing the Smart Cloud Mutation Outbox Queue.
+/// Encapsulates operation coalescing, LIS-based permutation compression, SQLite persistence, network status awareness, and conflict resolution.
 /// </summary>
 public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 {
-    /// <summary>Идентификатор системной корзины очереди для мутаций лайков.</summary>
+    /// <summary>Identifier of the system queue bucket for like mutations.</summary>
     public const string LikesOutboxTargetId = "__likes__";
 
     private const int QuietGuardWindowMs = 3_000;
@@ -50,8 +48,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     private readonly Dictionary<(string OwnerId, string TargetId), CloudPlaylistOutboxState> _outboxByKey = [];
     private readonly Dictionary<(string OwnerId, string TargetId), CloudOutboxFailureKind> _lastFailureKind = [];
 
-    // Счётчик неустранимых отказов (400) по цели: не сбрасывается новыми правками и фиксацией фаз,
-    // поэтому «отравленная» задача не зацикливается
+    // Counter for unrecoverable failures (400) by target: not reset by new edits or phase commits,
+    // so a "poisoned" task does not loop indefinitely
     private readonly Dictionary<(string OwnerId, string TargetId), int> _permanentStrikes = [];
     private readonly Dictionary<(string OwnerId, string TrackId), (bool Liked, long ExpiresAtTicks)> _likeTombstones = [];
     private readonly Dictionary<(string OwnerId, string YoutubeId), long> _deleteTombstones = [];
@@ -65,7 +63,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     private readonly Task _workerTask;
     private Task? _hydrationTask;
 
-    // Операции «в полёте» (под _outboxLock): цель текущего флаша и отправляемый сейчас лайк
+    // In-flight operations (under _outboxLock): current flush target and the like mutation currently being sent
     private string? _inFlightOwnerId;
     private string? _inFlightTargetId;
     private string? _inFlightLikeTrackId;
@@ -78,9 +76,9 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     private static LocalizationService SL => LocalizationService.Instance;
 
     /// <summary>
-    /// Окно коалесценции перед отправкой накопленного пакета в облако (в миллисекундах).
-    /// По умолчанию читается из пользовательской настройки <see cref="AppSettings.CloudBatchInterval"/>
-    /// (10 сек – 3 ч, по умолчанию 1 мин).
+    /// Coalescing window before sending the accumulated batch to the cloud (in milliseconds).
+    /// Read by default from user setting <see cref="AppSettings.CloudBatchInterval"/>
+    /// (10 sec – 3 hrs, 1 min by default).
     /// </summary>
     public int DebounceWindowMs
     {
@@ -96,20 +94,20 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Опциональный предикат проверки активной начальной буферизации аудиопотока.
-    /// Используется для откладывания тяжёлых Scotty-выгрузок обложек во время старта трека.
+    /// Optional predicate checking whether initial audio stream buffering is currently active.
+    /// Used to defer heavy Scotty cover uploads during track startup.
     /// </summary>
     public Func<bool>? IsAudioBufferingCheck { get; set; }
 
     /// <summary>
-    /// Событие, вызываемое при фоновом изменении метаданных, создании YoutubeId или даунгрейде прав плейлиста.
+    /// Event raised when background metadata changes occur, YoutubeId is created, or playlist permissions are downgraded.
     /// </summary>
     public event Action<Playlist>? OnCloudPlaylistStateChanged;
 
     private string CurrentOwnerId => _auth.State.DisplayId;
 
     /// <summary>
-    /// Инициализирует новый экземпляр сервиса синхронизации плейлистов и фоновой очереди мутаций.
+    /// Initializes a new instance of the playlist synchronization service and background mutation queue.
     /// </summary>
     public PlaylistSyncService(
         IPlaylistRepository playlists,
@@ -137,7 +135,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         if (connectionFactory != null)
         {
             _store = new CloudOutboxStore(connectionFactory);
-            // Запись в SQLite разрешается только после гидратации, чтобы не затереть строки прошлой сессии
+            // Writing to SQLite is only allowed after hydration to prevent overwriting previous session rows
             _persistencePump = new CloudOutboxPersistencePump(GetPersistSnapshot, _store.WriteBatchAsync, startPaused: true);
         }
 
@@ -150,25 +148,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     #region Smart Cloud Mutation Outbox — Enqueue & Coalescing API
 
     /// <summary>
-    /// Возвращает количество активных корзин с ожидающими мутациями для текущего владельца.
-    /// </summary>
-    public int GetPendingTargetCount(string? ownerId = null)
-    {
-        var owner = ownerId ?? CurrentOwnerId;
-        lock (_outboxLock)
-        {
-            int count = 0;
-            foreach (var kvp in _outboxByKey)
-            {
-                if (string.Equals(kvp.Key.OwnerId, owner, StringComparison.Ordinal) && !kvp.Value.IsEmpty)
-                    count++;
-            }
-            return count;
-        }
-    }
-
-    /// <summary>
-    /// Возвращает копию текущего коалесцированного состояния очереди для указанного плейлиста или корзины лайков.
+    /// Returns a snapshot of the current coalesced queue state for the specified playlist or likes bucket.
     /// </summary>
     public CloudPlaylistOutboxState? GetPendingStateSnapshot(string targetId, string? ownerId = null)
     {
@@ -183,7 +163,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь Фазу 0 создания облачного плейлиста (оффлайн-оптимистичная привязка без блокировки UI).
+    /// Queues Phase 0 of cloud playlist creation (offline-optimistic binding without blocking UI).
     /// </summary>
     public void EnqueueCreatePlaylist(Playlist playlist, IReadOnlyList<string>? initialTrackIds = null)
     {
@@ -199,7 +179,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             state.PendingDeletePlaylist = false;
             state.PendingCreatePlaylist = string.IsNullOrEmpty(playlist.YoutubeId);
 
-            // Название и описание уйдут в сам запрос создания: отдельные правки только удвоили бы запросы
+            // Title and description will be sent in the creation request itself: separate edits would only double the requests
             bool createCarriesMetadata = CloudOutboxCoalescer.IsUnsentCreate(
                 state, IsTargetInFlightUnderLock(ownerId, playlist.Id));
             if (createCarriesMetadata)
@@ -243,9 +223,9 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь удаление облачного плейлиста.
-    /// Если плейлист ещё не был создан в облаке (<c>PendingCreatePlaylist == true</c> и <c>YoutubePlaylistId == null</c>),
-    /// пара <c>Create + Delete</c> взаимно аннигилируется в 0 сетевых запросов.
+    /// Queues deletion of a cloud playlist.
+    /// If the playlist has not been created in the cloud yet (<c>PendingCreatePlaylist == true</c> and <c>YoutubePlaylistId == null</c>),
+    /// the <c>Create + Delete</c> pair mutually annihilates down to 0 network calls.
     /// </summary>
     public void EnqueueDeletePlaylist(Playlist playlist)
     {
@@ -263,8 +243,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 ? playlist.YoutubeId
                 : existing?.YoutubePlaylistId;
 
-            // Пока Фаза 0 в полёте, облачный плейлист может появиться: аннигиляция Create + Delete запрещена,
-            // удаление будет выполнено с YoutubeId, который зафиксирует завершившийся флаш.
+            // While Phase 0 is in-flight, the cloud playlist might appear: Create + Delete annihilation is forbidden,
+            // deletion will be performed with the YoutubeId committed by the completed flush.
             if (string.IsNullOrEmpty(knownYoutubeId) && !IsTargetInFlightUnderLock(ownerId, playlist.Id))
             {
                 _outboxByKey.Remove((ownerId, playlist.Id));
@@ -295,7 +275,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь мутацию отметки «Мне нравится» с автоматической аннигиляцией пар <c>Like + Unlike</c>.
+    /// Queues a "Like" mutation with automatic annihilation of <c>Like + Unlike</c> pairs.
     /// </summary>
     public void EnqueueLikeMutation(string trackId, bool targetLiked, bool? baselineLiked = null)
     {
@@ -344,7 +324,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь пакетное добавление треков в облачный плейлист с аннигиляцией ранее удалённых в том же окне треков.
+    /// Queues batch addition of tracks to a cloud playlist, annihilating tracks previously deleted within the same window.
     /// </summary>
     public void EnqueueAddTracks(Playlist playlist, IReadOnlyList<string> trackIds)
     {
@@ -408,8 +388,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь пакетное удаление треков из облачного плейлиста.
-    /// Аннигилирует треки, которые были добавлены в текущем окне коалесценции и ещё не отправлены в YouTube.
+    /// Queues batch removal of tracks from a cloud playlist.
+    /// Annihilates tracks added in the current coalescing window that have not been sent to YouTube yet.
     /// </summary>
     public void EnqueueRemoveTracks(
         Playlist playlist,
@@ -457,7 +437,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь изменение порядка треков в плейлисте с коалесценцией серии перетаскиваний в один батч.
+    /// Queues reordering of tracks in a playlist, coalescing a series of drag-and-drops into a single batch.
     /// </summary>
     public void EnqueueReorderTracks(
         Playlist playlist,
@@ -505,7 +485,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ставит в очередь изменение метаданных плейлиста (название, описание, обложка) по принципу Last-Write-Wins (LWW).
+    /// Queues playlist metadata modification (title, description, cover) using Last-Write-Wins (LWW).
     /// </summary>
     public void EnqueueMetadataUpdate(
         Playlist playlist,
@@ -575,7 +555,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 }
             }
 
-            // Плейлист ещё не создан в облаке: Фаза 0 прочитает уже сохранённые в БД название и описание
+            // Playlist not created in cloud yet: Phase 0 will read title and description already saved in DB
             if (string.IsNullOrEmpty(playlist.YoutubeId) &&
                 CloudOutboxCoalescer.IsUnsentCreate(state, IsTargetInFlightUnderLock(ownerId, playlist.Id)))
             {
@@ -611,7 +591,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Мгновенно аннулирует все ожидающие облачные мутации для указанного плейлиста.
+    /// Instantly cancels all pending cloud mutations for the specified playlist.
     /// </summary>
     public void DiscardPlaylistOutbox(string playlistId, string? ownerId = null)
     {
@@ -634,8 +614,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Возвращает набор облачных <c>YoutubeId</c>, которые в данный момент ожидают удаления в очереди Outbox.
-    /// Используется при синхронизации аккаунта, чтобы не импортировать обратно плейлисты, ожидающие удаления.
+    /// Returns a set of cloud <c>YoutubeId</c>s currently pending deletion in the Outbox queue.
+    /// Used during account sync to avoid re-importing playlists queued for deletion.
     /// </summary>
     public HashSet<string> GetPendingDeletedYoutubeIds(string? ownerId = null)
     {
@@ -654,7 +634,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 }
             }
 
-            // Недавно удалённые плейлисты: список аккаунта YouTube обновляется с задержкой
+            // Recently deleted playlists: YouTube account list updates with a delay
             PruneExpiredTombstonesUnderLock(DateTime.UtcNow.Ticks);
             foreach (var key in _deleteTombstones.Keys)
             {
@@ -667,8 +647,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Асинхронная версия <see cref="GetPendingDeletedYoutubeIds"/>, дожидающаяся гидратации очереди из SQLite,
-    /// чтобы ранняя синхронизация аккаунта не импортировала обратно плейлист, удаление которого ещё не восстановлено.
+    /// Async version of <see cref="GetPendingDeletedYoutubeIds"/> that awaits queue hydration from SQLite,
+    /// preventing early account sync from re-importing a playlist whose deletion hasn't been restored yet.
     /// </summary>
     public async Task<HashSet<string>> GetPendingDeletedYoutubeIdsAsync(string? ownerId = null, CancellationToken ct = default)
     {
@@ -677,7 +657,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Отменяет ожидающее в Outbox удаление облачного плейлиста по его <c>YoutubeId</c> (аннигиляция <c>Delete + Re-Import</c>).
+    /// Cancels a pending cloud playlist deletion in the Outbox by its <c>YoutubeId</c> (<c>Delete + Re-Import</c> annihilation).
     /// </summary>
     public bool CancelPendingDeleteByYoutubeId(string youtubeId, string? ownerId = null)
     {
@@ -714,7 +694,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Принудительно выполняет немедленный сброс (Force Flush) всех накопленных мутаций для конкретного плейлиста или лайков.
+    /// Forces an immediate flush of all accumulated mutations for a specific playlist or likes.
     /// </summary>
     public async Task FlushPlaylistAsync(string playlistId, CancellationToken ct = default)
     {
@@ -744,13 +724,13 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Принудительно выполняет немедленный сброс (Flush) всех накопленных мутаций лайков.
+    /// Forces an immediate flush of all accumulated like mutations.
     /// </summary>
     public async Task FlushLikesAsync(CancellationToken ct = default) =>
         await FlushPlaylistAsync(LikesOutboxTargetId, ct).ConfigureAwait(false);
 
     /// <summary>
-    /// Принудительно выполняет сброс всех ожидающих облачных мутаций текущего пользователя.
+    /// Forces a flush of all pending cloud mutations for the current user.
     /// </summary>
     public async Task FlushAllAsync(CancellationToken ct = default)
     {
@@ -801,7 +781,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 state.RetryCount = 0;
             }
 
-            // Смена сети/авторизации снимает парковку AuthRequired: очередь отправляется сразу
+            // Network/auth change unparks AuthRequired: queue is dispatched immediately
             _lastFailureKind.Clear();
         }
 
@@ -809,8 +789,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Применяет смену окна пакетной отправки: пересчитывает таймеры карточек ожидающих задач
-    /// и будит воркер, чтобы новое окно действовало сразу, а не после текущего ожидания.
+    /// Applies batch window configuration change: recalculates task card timers
+    /// and wakes up worker so the new window takes effect immediately instead of after current wait.
     /// </summary>
     public void OnBatchIntervalChanged()
     {
@@ -835,7 +815,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
         if (pending != null)
         {
-            // Дедлайн карточки фиксируется при постановке задачи: без пересчёта таймер показывал бы старое окно
+            // Card deadline is locked on enqueuing: without recalculation the timer would display the old window
             for (int i = 0; i < pending.Count; i++)
                 SyncTaskNotificationForState(pending[i], isSendingNow: false);
         }
@@ -853,11 +833,11 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     {
         var ct = _disposeCts.Token;
 
-        // Даём приложению спокойно завершить стартовую инициализацию перед чтением очереди из SQLite
+        // Let the application smoothly finish startup initialization before reading queue from SQLite
         if (!await ct.DelayNoThrowAsync(1200, continueOnCapturedContext: false).ConfigureAwait(false))
             return;
 
-        // Единственная регистрация на всё время жизни воркера (без утечки CancellationTokenRegistration на итерацию)
+        // Single registration for the entire worker lifetime (avoids leaking CancellationTokenRegistration per iteration)
         var cancelTask = ct.WhenCanceledAsync();
         int consecutiveFaults = 0;
 
@@ -1044,7 +1024,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         }
         else
         {
-            // Тот же дедлайн, что у воркера: окно пакета от первой правки, но не раньше «тихого» окна после последней
+            // Same deadline as the worker: batch window from the first edit, but no earlier than the quiet window after the last
             int windowMs = Math.Max(50, DebounceWindowMs);
             long batchWindowTicks = TimeSpan.FromMilliseconds(windowMs).Ticks;
             long quietGuardTicks = TimeSpan.FromMilliseconds(Math.Min(QuietGuardWindowMs, windowMs)).Ticks;
@@ -1115,7 +1095,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         if (!_auth.IsAuthenticated)
             return;
 
-        // Снимок берётся заново под локом: устаревший снимок FlushAll мог бы отправить уже аннигилированные мутации
+        // Snapshot is re-taken under the lock: a stale FlushAll snapshot could send mutations that were already annihilated
         var snapshot = BeginFlight(requested.OwnerId, requested.TargetId);
         if (snapshot == null)
             return;
@@ -1277,10 +1257,10 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             bool metadataSentWithCreate = false;
             List<string>? rejectedPhaseKeys = null;
 
-            // ═══ ФАЗА 0: Оффлайн-оптимистичное создание плейлиста в YouTube ═══
+            // ═══ PHASE 0: Offline-optimistic YouTube playlist creation ═══
             if (snapshot.PendingCreatePlaylist && !string.IsNullOrEmpty(playlist.YoutubeId))
             {
-                // Создание уже зафиксировано в БД (сбой между записью YoutubeId и коммитом outbox): повтор дал бы дубликат
+                // Creation is already committed in the DB (failure between YoutubeId write and outbox commit): retry would produce a duplicate
                 CommitCompletedCreatePhase(snapshot.OwnerId, playlist.Id, playlist.YoutubeId!);
             }
             else if (snapshot.PendingCreatePlaylist || string.IsNullOrEmpty(playlist.YoutubeId))
@@ -1299,14 +1279,14 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 if (!await TryCommitCreatedPlaylistAsync(snapshot, playlist, createdYtId, ct).ConfigureAwait(false))
                     return;
 
-                // Название и описание уже в облаке: Фаза 4 этого прохода их не повторяет,
-                // а правки, сделанные во время создания, остаются в очереди на следующий проход
+                // Title and description are already in the cloud: Phase 4 of this pass skips them,
+                // while edits made during creation remain queued for the next pass
                 metadataSentWithCreate = true;
                 CommitMetadataSentWithCreate(snapshot.OwnerId, playlist.Id, createdName, createdDescription);
 
                 if (!snapshot.PendingCreatePlaylist)
                 {
-                    // Неявное создание (задача Create утеряна): выгружаем весь локальный состав, а не только дельту
+                    // Implicit creation (Create task lost): uploading the entire local composition instead of just the delta
                     isImplicitCreate = true;
                     addIds = await CollectImplicitCreateTrackIdsAsync(snapshot, playlist.Id, ct).ConfigureAwait(false);
                 }
@@ -1314,7 +1294,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             var youtubeId = playlist.YoutubeId!;
 
-            // ═══ ФАЗА 1: Удаление треков (ACTION_REMOVE_VIDEO) ═══
+            // ═══ PHASE 1: Video deletion (ACTION_REMOVE_VIDEO) ═══
             if (snapshot.PendingRemoveTracks.Count > 0)
             {
                 var setVideoIdsToRemove = await ResolveSetVideoIdsForRemovalAsync(
@@ -1326,7 +1306,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                     return;
                 }
 
-                // Отказ YouTube после перебазирования пропускает только эту фазу, а не всю задачу
+                // YouTube rejection after rebasing skips only this phase, not the entire task
                 if (setVideoIdsToRemove.Count > 0 &&
                     !await TryRemoveTracksWithRebaseAsync(
                         playlist, setVideoIdsToRemove, snapshot.PendingRemoveTracks, ct).ConfigureAwait(false))
@@ -1337,13 +1317,13 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 CommitCompletedRemovePhase(snapshot.OwnerId, playlist.Id, snapshot.PendingRemoveTracks);
             }
 
-            // ═══ ФАЗА 2: Пакетное добавление треков (ACTION_ADD_VIDEO) ═══
+            // ═══ PHASE 2: Batch video addition (ACTION_ADD_VIDEO) ═══
             if (addIds.Count > 0)
             {
                 var returnedSetVideoIds = await _youtube.MutationsClientAddTracksAsync(youtubeId, addIds, ct)
                     .ConfigureAwait(false);
 
-                // Ответ выровнен по videoId; плейсхолдеры to_be_updated_by_client в БД не попадают
+                // Response is aligned by videoId; to_be_updated_by_client placeholders are not persisted to the DB
                 var mappings = CloudOutboxCoalescer.MapAddedSetVideoIds(addIds, returnedSetVideoIds);
                 if (mappings.Count > 0)
                 {
@@ -1353,10 +1333,10 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 CommitCompletedAddPhase(snapshot.OwnerId, playlist.Id, addIds, mappings);
             }
 
-            // ═══ ФАЗА 3: Сжатая перестановка порядка треков (LIS Move Compression) ═══
+            // ═══ PHASE 3: Compact track reordering (LIS Move Compression) ═══
             if (snapshot.HasPendingReorder && snapshot.BaselineTrackOrder != null && snapshot.TargetTrackOrder != null)
             {
-                // При неявном создании состав уже выгружен в актуальном локальном порядке
+                // On implicit creation, composition is already uploaded in the up-to-date local order
                 if (!isImplicitCreate &&
                     !await ExecuteCompressedReorderPhaseAsync(
                         playlist, snapshot.BaselineTrackOrder, snapshot.TargetTrackOrder, ct).ConfigureAwait(false))
@@ -1367,14 +1347,14 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 CommitCompletedReorderPhase(snapshot.OwnerId, playlist.Id, snapshot.TargetTrackOrder);
             }
 
-            // ═══ ФАЗА 4: Метаданные и обложка Scotty (Last-Write-Wins) ═══
+            // ═══ PHASE 4: Metadata and Scotty cover (Last-Write-Wins) ═══
             bool sendName = !metadataSentWithCreate &&
                             snapshot.HasPendingName && !string.IsNullOrWhiteSpace(snapshot.TargetName);
             bool sendDescription = !metadataSentWithCreate &&
                                    snapshot.HasPendingDescription && snapshot.TargetDescription != null;
             if (sendName || sendDescription)
             {
-                // Название и описание уходят одним edit_playlist с двумя действиями
+                // Title and description are dispatched in a single edit_playlist with two actions
                 await _youtube.EditPlaylistDetailsAsync(
                     youtubeId,
                     sendName ? snapshot.TargetName : null,
@@ -1401,7 +1381,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 CommitCompletedThumbnailPhase(snapshot.OwnerId, playlist.Id, snapshot.TargetThumbnailUrl!);
             }
 
-            // Точечное обновление вместо полного Upsert: не воскрешает удалённую строку и не затирает параллельные правки
+            // Point update instead of a full Upsert: does not resurrect a deleted row or overwrite concurrent edits
             playlist.LastSyncedAtUtc = DateTime.UtcNow;
             playlist.IsCloudUnavailable = false;
             await _playlists.UpdateCloudLinkStateAsync(
@@ -1463,7 +1443,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
         if (deleteRequested)
         {
-            // Удаление поставлено во время Фазы 0: фиксируем YoutubeId, следующий проход воркера удалит облачную копию
+            // Deletion queued during Phase 0: persisting YoutubeId, next worker pass will delete the cloud copy
             CommitCompletedCreatePhase(snapshot.OwnerId, snapshot.TargetId, createdYtId);
             SignalWorker();
             return false;
@@ -1583,7 +1563,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             lock (_outboxLock)
             {
-                // Отправляем актуальную цель живого состояния: пользователь мог переключить лайк после снимка
+                // Sending the up-to-date live state target: user might have toggled like after the snapshot was taken
                 if (!_outboxByKey.TryGetValue((snapshot.OwnerId, LikesOutboxTargetId), out var live) ||
                     !CloudOutboxCoalescer.TryGetLikeTarget(live, trackId, out targetLiked))
                 {
@@ -1647,10 +1627,10 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Удаляет треки из облака; при отказе YouTube (устаревшие <c>SetVideoId</c> после правок на другом
-    /// устройстве) перечитывает облачный состав и повторяет удаление один раз по актуальным идентификаторам.
+    /// Removes tracks from the cloud; on YouTube rejection (stale <c>SetVideoId</c> after edits on another
+    /// device), re-reads cloud composition and retries deletion once using current identifiers.
     /// </summary>
-    /// <returns><see langword="false"/>, если YouTube отклонил и перебазированное удаление.</returns>
+    /// <returns><see langword="false"/> if YouTube rejected the rebased deletion as well.</returns>
     private async Task<bool> TryRemoveTracksWithRebaseAsync(
         Playlist playlist,
         List<string> setVideoIds,
@@ -1701,8 +1681,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Перечитывает облачный состав плейлиста, обновляя локальные <c>SetVideoId</c> по первым вхождениям треков.
-    /// Недоступность данных считается временным сбоем, чтобы задача повторилась, а не была отброшена.
+    /// Re-reads cloud playlist composition, updating local <c>SetVideoId</c> values based on first track occurrences.
+    /// Data unavailability is treated as a transient failure to retry the task instead of dropping it.
     /// </summary>
     private async Task<List<(string TrackId, string SetVideoId)>> RefreshCloudOrderAsync(
         Playlist playlist,
@@ -1776,8 +1756,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         if (!anyMissing)
             return result;
 
-        // Только если у части удаляемых треков SetVideoId отсутствовал (или был плейсхолдером) до удаления,
-        // выполняем ровно 1 запрос к облаку для разрешения всех недостающих SetVideoId разом.
+        // Only if some tracks to be removed lacked a SetVideoId (or had a placeholder) prior to deletion,
+        // perform exactly 1 cloud query to resolve all missing SetVideoId values at once.
         var fullData = await _youtube.GetFullPlaylistDataAsync(playlist.YoutubeId!, ct).ConfigureAwait(false);
         if (fullData is { IsEditable: false })
         {
@@ -1819,7 +1799,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <returns>
-    /// <see langword="false"/>, если YouTube отклонил и перестановку поверх перечитанного облачного состава.
+    /// <see langword="false"/> if YouTube rejected reordering on top of re-read cloud composition as well.
     /// </returns>
     private async Task<bool> ExecuteCompressedReorderPhaseAsync(
         Playlist playlist,
@@ -1870,7 +1850,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             }
         }
 
-        // Формируем текущий облачный порядок (baseline + новые добавленные треки в конце) и целевой порядок SetVideoId
+        // Construct current cloud order (baseline + new added tracks appended) and target SetVideoId order
         var currentCloudSetIds = new List<string>(tracksWithSetIds.Count);
         var seenInBaseline = new HashSet<string>(tracksWithSetIds.Count, StringComparer.Ordinal);
 
@@ -1912,8 +1892,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                      $"({DescribeRejection(ex)}) -> rebasing on cloud state");
         }
 
-        // Облачный порядок разошёлся с локальной базой (правки на другом устройстве):
-        // строим ходы от фактического состава
+        // Cloud order diverged from the local database (edits on another device):
+        // building moves based on the actual composition
         var cloudOrder = await RefreshCloudOrderAsync(playlist, ct).ConfigureAwait(false);
         var (rebasedCurrent, rebasedDesired) = CloudOutboxCoalescer.BuildRebasedReorder(cloudOrder, targetTrackOrder);
         var rebasedMoves = BuildMinimalReorderMoves(rebasedCurrent, rebasedDesired);
@@ -1938,10 +1918,10 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Вычисляет минимальную последовательность команд перемещения <c>(SetVideoId, Predecessor, Successor)</c>
-    /// для трансформации <paramref name="currentOrder"/> в <paramref name="desiredOrder"/> на базе
-    /// наибольшей возрастающей подпоследовательности (Longest Increasing Subsequence, LIS).
-    /// Элементы, входящие в LIS, остаются неподвижными, что минимизирует размер HTTP-батча.
+    /// Computes the minimal sequence of move commands <c>(SetVideoId, Predecessor, Successor)</c>
+    /// to transform <paramref name="currentOrder"/> into <paramref name="desiredOrder"/> based on the
+    /// Longest Increasing Subsequence (LIS).
+    /// Elements within the LIS remain stationary, minimizing HTTP batch size.
     /// </summary>
     public static List<(string SetVideoId, string? Predecessor, string? Successor)> BuildMinimalReorderMoves(
         IReadOnlyList<string> currentOrder,
@@ -1966,7 +1946,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         if (n <= 1 || SequenceEqualOrdinal(simulated, desiredOrder))
             return moves;
 
-        // Находим LIS по целевым индексам элементов в simulated
+        // Find LIS based on target element indices in simulated
         var tails = new int[n];
         var prev = new int[n];
         int lisLen = 0;
@@ -1998,7 +1978,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             curr = prev[curr];
         }
 
-        // Перемещаем только элементы, не вошедшие в LIS, в порядке их следования в desiredOrder
+        // Move only elements not in the LIS, preserving their sequence in desiredOrder
         for (int targetIdx = 0; targetIdx < desiredOrder.Count; targetIdx++)
         {
             var sid = desiredOrder[targetIdx];
@@ -2011,7 +1991,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             simulated.RemoveAt(currentIdx);
 
-            // Находим позицию вставки относительно уже выстроенного префикса desiredOrder[0..targetIdx-1]
+            // Find insertion position relative to the already built prefix desiredOrder[0..targetIdx-1]
             int insertIdx = 0;
             if (targetIdx > 0)
             {
@@ -2066,11 +2046,11 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     {
         var kind = CloudOutboxCoalescer.ClassifyFailure(ex, ct);
 
-        // 400/403 при истёкшей сессии означают потерю авторизации, а не битую мутацию
+        // 400/403 with an expired session indicates lost authorization, not a corrupted mutation
         if ((kind is CloudOutboxFailureKind.Permanent or CloudOutboxFailureKind.Forbidden) && !_auth.IsAuthenticated)
             return CloudOutboxFailureKind.AuthRequired;
 
-        // Одиночный 403 бывает следствием антибот-защиты: даунгрейд плейлиста только после повторного подтверждения
+        // Single 403 can result from anti-bot protection: playlist downgrade only after re-confirmation
         if (kind == CloudOutboxFailureKind.Forbidden && retryCount < ForbiddenConfirmationAttempts)
             return CloudOutboxFailureKind.Transient;
 
@@ -2180,7 +2160,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             if (!_outboxByKey.TryGetValue((ownerId, playlistId), out var state))
                 return;
 
-            // Удаления, поставленные во время полёта, получают реальные SetVideoId только что добавленных треков
+            // Deletions queued in-flight receive real SetVideoId values of newly added tracks
             CloudOutboxCoalescer.CommitAdds(state, completedAdds, mappings);
 
             state.RetryCount = 0;
@@ -2353,7 +2333,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             if (!dropEntry)
             {
-                // Выдача лайков YouTube отстаёт от записи: синхронизация не должна откатить подтверждённое значение
+                // YouTube like propagation lags behind writes: sync must not roll back a confirmed value
                 long nowTicks = DateTime.UtcNow.Ticks;
                 PruneExpiredTombstonesUnderLock(nowTicks);
                 _likeTombstones[(ownerId, trackId)] = (syncedLiked, nowTicks + RecentFlushTombstoneTtlMs * TimeSpan.TicksPerMillisecond);
@@ -2500,8 +2480,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Учитывает неустранимый отказ YouTube: первый отказ даёт один повтор, второй подряд отбрасывает задачу
-    /// с понятным уведомлением вместо сырого текста ответа.
+    /// Handles unrecoverable YouTube failure: the first failure grants one retry, the second consecutive failure discards the task
+    /// with a user-friendly notification instead of raw response text.
     /// </summary>
     private void MarkPermanentFailure(string ownerId, string targetId, Exception ex)
     {
@@ -2623,7 +2603,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             return Task.CompletedTask;
         }
 
-        // Single-flight: все вызывающие ждут одну и ту же загрузку, а не читают таблицу параллельно
+        // Single-flight: all callers await the same download instead of reading the table in parallel
         var hydrationTask = StartHydrationIfNeeded();
         return ct.CanBeCanceled ? hydrationTask.WaitAsync(ct) : hydrationTask;
     }
@@ -2655,7 +2635,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
         if (rows == null)
         {
-            // Насос остаётся на паузе: запись поверх непрочитанных строк уничтожила бы мутации прошлой сессии
+            // The pump remains paused: writing over unread rows would destroy mutations from the previous session
             _isHydratedFromDb = true;
             Log.Warn("[PlaylistOutbox] Outbox hydration failed; SQLite persistence is paused for this session.");
             return;
@@ -2680,7 +2660,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                     continue;
                 }
 
-                // Мутации, сделанные до окончания гидратации, переигрываются поверх строки прошлой сессии
+                // Mutations made before hydration finishes are replayed on top of the previous session row
                 var merged = CloudOutboxCoalescer.MergeRestored(live, restored, out var restoredSetVideoIds);
                 if (merged.IsEmpty)
                 {
@@ -2739,7 +2719,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         CloudPlaylistOutboxState? snapshot,
         bool shouldDelete)
     {
-        // Насос сам читает актуальное состояние под локом в момент записи; аргументы оставлены для совместимости вызовов
+        // The pump reads the current state under lock at write time; arguments are preserved for call compatibility
         _ = snapshot;
         _ = shouldDelete;
         if (_persistencePump == null)
@@ -2778,7 +2758,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     #region Legacy-Compatible Cloud Wrappers & Full Sync Operations
 
     /// <summary>
-    /// Оптимистично переводит плейлист в режим двусторонней синхронизации и ставит Фазу 0 создания в очередь Outbox (0 мс без блокировки UI).
+    /// Optimistically switches the playlist to two-way sync mode and queues Phase 0 creation into the Outbox (0 ms, non-blocking UI).
     /// </summary>
     public async Task<bool> LinkToCloudAsync(Playlist playlist, CancellationToken ct = default)
     {
@@ -2805,8 +2785,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Формирует снимок различий между локальным плейлистом и удаленным представлением на YouTube.
-    /// Предварительно принудительно сбрасывает накопленные в Outbox мутации для данного плейлиста.
+    /// Creates a diff snapshot between the local playlist and the remote YouTube representation.
+    /// Force-flushes pending Outbox mutations for this playlist beforehand.
     /// </summary>
     public async Task<PlaylistSyncPreview?> BuildPreviewAsync(Playlist playlist, CancellationToken ct = default)
     {
@@ -2819,7 +2799,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         {
             VideoController.ThrowIfInCooldown();
 
-            // Сначала сбрасываем все ожидающие в Outbox локальные мутации для этого плейлиста
+            // First, flush all pending local Outbox mutations for this playlist
             await FlushPlaylistAsync(playlist.Id, ct).ConfigureAwait(false);
 
             var refreshedPlaylist = await _playlists.GetByIdAsync(playlist.Id, CurrentOwnerId, ct).ConfigureAwait(false);
@@ -2949,7 +2929,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 }
             }
 
-            // Связанные с облаком треки, удалённые в облаке на другом устройстве, — не «локальные новинки»
+            // Cloud-linked tracks deleted in the cloud on another device are not "local additions"
             int cloudRemovedCount =
                 CloudOutboxCoalescer.SelectCloudDeletedTrackIds(localLinks, cloudTrackIds)?.Count ?? 0;
             int cloudOnlyCount = cloudIdSet.Count - commonCount;
@@ -3026,7 +3006,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Применяет выбранные параметры синхронизации к локальному и облачному плейлистам.
+    /// Applies the selected synchronization parameters to the local and cloud playlists.
     /// </summary>
     public async Task<PlaylistSyncResult> ApplySyncAsync(
         Playlist playlist,
@@ -3132,7 +3112,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Выполняет прямое синхронизирование плейлиста без показа предварительного UI-диалога.
+    /// Performs direct playlist synchronization without showing a preliminary UI dialog.
     /// </summary>
     public async Task<PlaylistSyncResult> SyncDirectAsync(
         Playlist playlist,
@@ -3147,8 +3127,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Синхронизирует отметки «Мне нравится» текущего аккаунта с YouTube Music.
-    /// Предварительно отправляет все накопленные локальные мутации лайков из Outbox.
+    /// Synchronizes the current account's Liked songs with YouTube Music.
+    /// Flushes all pending local like mutations from the Outbox beforehand.
     /// </summary>
     public async Task SyncLikedTracksAsync(CancellationToken ct = default)
     {
@@ -3165,7 +3145,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             var ownerId = CurrentOwnerId;
 
-            // Ожидающие и недавно отправленные лайки важнее облачной выдачи, которая отстаёт от записи
+            // Pending and recently sent likes take precedence over cloud fetch, which lags behind writes
             Dictionary<string, bool>? overrides;
             lock (_outboxLock)
             {
@@ -3199,7 +3179,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 }
             }
 
-            // Повторная синхронизация без изменений не должна переписывать весь список лайков в SQLite
+            // Re-synchronization without changes must not rewrite the entire likes list in SQLite
             var localPrefix = await _tracks.GetLikedTrackIdsAsync(ownerId, limit: trackIds.Count, offset: 0, ct)
                 .ConfigureAwait(false);
             if (CloudOutboxCoalescer.SequenceEqualOrdinal(localPrefix, trackIds))
@@ -3238,7 +3218,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             overrides[kvp.Key.TrackId] = kvp.Value.Liked;
         }
 
-        // Неотправленные мутации перекрывают надгробия уже отправленных
+        // Unsent mutations override tombstones of already sent ones
         if (_outboxByKey.TryGetValue((ownerId, LikesOutboxTargetId), out var likeState))
         {
             for (int i = 0; i < likeState.PendingLikes.Count; i++)
@@ -3252,7 +3232,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Неблокирующе ставит создание удаленного плейлиста и выгрузку его состава в фоновую очередь Outbox.
+    /// Enqueues the remote playlist creation and track list upload into the background Outbox queue non-blockingly.
     /// </summary>
     public async Task UploadPlaylistToAccountAsync(Playlist playlist, CancellationToken ct = default)
     {
@@ -3261,24 +3241,6 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         if (!_auth.IsAuthenticated || playlist.SyncMode != PlaylistSyncMode.LocalOnly) return;
 
         await LinkToCloudAsync(playlist, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Удаляет облачный плейлист из аккаунта YouTube.
-    /// </summary>
-    public async Task DeleteCloudPlaylistAsync(string youtubePlaylistId)
-    {
-        if (!_auth.IsAuthenticated) return;
-
-        try
-        {
-            await _youtube.DeletePlaylistAsync(youtubePlaylistId).ConfigureAwait(false);
-            Log.Info($"[PlaylistSync] Deleted playlist {youtubePlaylistId} from YouTube");
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[PlaylistSync] Failed to delete remote playlist {youtubePlaylistId}: {ex.Message}");
-        }
     }
 
     private async Task DowngradeForeignPlaylistOnForbiddenAsync(Playlist playlist, CancellationToken ct)
@@ -3292,7 +3254,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Переводит удаленный плейлист в локальный режим при получении статуса 404 Not Found из облака.
+    /// Converts a remote playlist to local mode upon receiving a 404 Not Found status from the cloud.
     /// </summary>
     public async Task DowngradeDeadCloudPlaylistAsync(Playlist playlist, CancellationToken ct = default)
     {
@@ -3610,7 +3572,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         for (int i = 0; i < fullData.Tracks.Count; i++)
             cloudIdSet.Add("yt_" + fullData.Tracks[i].VideoId);
 
-        // Удалённые в облаке на другом устройстве треки удаляются локально, а не выгружаются повторно
+        // Tracks deleted in the cloud on another device are removed locally rather than uploaded again
         var cloudDeleted = await SelectCloudDeletedLocalTracksAsync(playlist, cloudIdSet, ct).ConfigureAwait(false);
         int removedLocally = 0;
         if (cloudDeleted is { Count: > 0 })
@@ -3857,7 +3819,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         if (!BeginShutdown())
             return;
 
-        // Синхронный Dispose вызывается контейнером при выходе: ожидание ограничено, чтобы не подвесить закрытие
+        // Synchronous Dispose is called by the container on exit: timeout is capped to prevent hanging shutdown
         try
         {
             Task.Run(ShutdownCoreAsync).Wait(TimeSpan.FromMilliseconds(ShutdownWorkerWaitMs + ShutdownPersistDrainMs));
@@ -3902,7 +3864,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
         if (_persistencePump != null)
         {
-            // Последние коммиты обязаны попасть в SQLite, иначе подтверждённые мутации переотправятся при следующем запуске
+            // Latest commits must reach SQLite; otherwise, acknowledged mutations will be re-sent on the next launch
             var hydrationTask = Volatile.Read(ref _hydrationTask);
             if (hydrationTask is { IsCompleted: false })
                 await Task.WhenAny(hydrationTask, Task.Delay(ShutdownPersistDrainMs)).ConfigureAwait(false);
@@ -3911,8 +3873,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 Log.Warn("[PlaylistOutbox] Outbox persistence was not fully drained before shutdown.");
         }
 
-        // CTS освобождается только после остановки воркера; _flushLock не освобождается намеренно:
-        // SemaphoreSlim без AvailableWaitHandle не держит неуправляемых ресурсов, а поздний Release не должен падать
+        // CTS is disposed only after the worker stops; _flushLock is intentionally left unreleased:
+        // SemaphoreSlim without AvailableWaitHandle holds no unmanaged resources, and a late Release must not crash
         if (workerStopped)
             _disposeCts.Dispose();
     }

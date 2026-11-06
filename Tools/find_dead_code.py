@@ -23,7 +23,7 @@ def main():
     assembly_path = root / "Core" / "bin" / "Release" / "net11.0" / "LMP.Core.dll"
     output_file = root / "DeadCode.txt"
     dgml_path = root / "obj" / "Release" / "net11.0" / "win-x64" / "native" / "LMP.codegen.dgml.xml"
-    scanner_script = root / "Tools" / "AotScanner" / "Program.cs"
+    scanner_script = root / "Tools" / "LMP.AotScanner" / "AotScanner.cs"
 
     print_banner(
         "LMP Native AOT Dead Code Detection Pipeline",

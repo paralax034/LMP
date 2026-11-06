@@ -19,13 +19,13 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
     private readonly List<SyncItemViewModel> _conflictingItems = [];
     private readonly List<SyncItemViewModel> _nonConflictingItems = [];
 
-    // Флаг для предотвращения рекурсии при смене шаблона
+    // Flag to prevent recursion on template change
     private bool _suppressTemplateSync;
     private readonly DispatcherTimer _searchDebounceTimer;
 
     public ObservableCollection<SyncItemViewModel> Items { get; } = [];
 
-    // Глобальные шаблоны (замена Toggles)
+    // Global templates (replaces Toggles)
 
     public List<SyncActionOption> ConflictTemplates { get; }
     public List<SyncActionOption> NewTemplates { get; }
@@ -36,7 +36,7 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
     [ObservableProperty]
     public partial SyncActionOption SelectedNewTemplate { get; set; }
 
-    // Статистика
+    // Statistics
 
     [ObservableProperty]
     public partial string TotalSummary { get; set; } = "";
@@ -47,13 +47,13 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
     [ObservableProperty]
     public partial string SearchQuery { get; set; } = "";
 
-    // Команды
+    // Commands
 
     public IRelayCommand ConfirmCommand { get; }
     public IRelayCommand CancelCommand { get; }
 
     /// <summary>
-    /// Callback для закрытия диалога с результатом.
+    /// Callback to close the dialog with a result.
     /// </summary>
     public Action<List<SyncDecision>>? OnResult { get; set; }
 
@@ -64,7 +64,7 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
     {
         var L = LocalizationService.Instance;
 
-        // Инициализация списков шаблонов
+        // Initialize template lists
         ConflictTemplates =
         [
             new SyncActionOption(MergeAction.Merge, L["Sync_Action_Merge"]),
@@ -87,7 +87,7 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
             ApplyFilter();
         };
 
-        // Создание элементов
+        // Create items
         foreach (var p in playlists)
         {
             var hasConflict = existingLocalNames.Contains(p.Title);
@@ -96,7 +96,7 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
 
             var item = new SyncItemViewModel(p, hasConflict, trackCount);
 
-            // Сразу применяем дефолтный шаблон к элементу
+            // Immediately apply default template to item
             item.SelectedOption = hasConflict
                 ? item.AvailableActions.First(a => a.Action == SelectedConflictTemplate.Action)
                 : item.AvailableActions.First(a => a.Action == SelectedNewTemplate.Action);
@@ -117,7 +117,7 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
             else _nonConflictingItems.Add(item);
         }
 
-        // Команды
+        // Commands
         ConfirmCommand = new RelayCommand(() =>
         {
             var result = _allItems.Where(x => x.SelectedAction != MergeAction.Skip)
@@ -167,8 +167,8 @@ public sealed partial class SyncSelectionViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Если пользователь вручную поменял элемент, проверяем, не сбился ли шаблон.
-    /// (Если все элементы группы одинаковые - ставим этот шаблон, иначе ничего не делаем).
+    /// If the user manually changes an item, check if the template is out of sync.
+    /// (If all items in the group are identical, set this template; otherwise, do nothing).
     /// </summary>
     private void SyncTemplatesFromItems()
     {
@@ -293,27 +293,27 @@ public sealed partial class SyncItemViewModel : ObservableObject
     public static LocalizationService L => LocalizationService.Instance;
 
     /// <summary>
-    /// Флаг доступности стратегии слияния (только для конфликтных элементов).
+    /// Availability flag for merge strategy (conflicted items only).
     /// </summary>
     public bool CanMerge => HasConflict;
 
     /// <summary>
-    /// Активна ли стратегия слияния.
+    /// Indicates whether the merge strategy is active.
     /// </summary>
     public bool IsMergeSelected => SelectedAction == MergeAction.Merge;
 
     /// <summary>
-    /// Активна ли стратегия создания копии / прямого импорта.
+    /// Indicates whether the create copy / direct import strategy is active.
     /// </summary>
     public bool IsDuplicateSelected => SelectedAction == MergeAction.Duplicate;
 
     /// <summary>
-    /// Активна ли стратегия пропуска элемента.
+    /// Indicates whether the skip item strategy is active.
     /// </summary>
     public bool IsSkipSelected => SelectedAction == MergeAction.Skip;
 
     /// <summary>
-    /// Подсказка для кнопки создания копии или импорта в зависимости от наличия конфликта.
+    /// Tooltip for the create copy or import button depending on conflict presence.
     /// </summary>
     public string DuplicateActionTooltip => HasConflict
         ? L["Sync_Action_CreateNew"]
@@ -328,19 +328,19 @@ public sealed partial class SyncItemViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Выбирает действие слияния для плейлиста.
+    /// Selects the merge action for the playlist.
     /// </summary>
     [RelayCommand]
     public void SelectMerge() => SetActionByKind(MergeAction.Merge);
 
     /// <summary>
-    /// Выбирает действие дублирования / импорта для плейлиста.
+    /// Selects the duplicate / import action for the playlist.
     /// </summary>
     [RelayCommand]
     public void SelectDuplicate() => SetActionByKind(MergeAction.Duplicate);
 
     /// <summary>
-    /// Выбирает действие пропуска для плейлиста.
+    /// Selects the skip action for the playlist.
     /// </summary>
     [RelayCommand]
     public void SelectSkip() => SetActionByKind(MergeAction.Skip);

@@ -1,8 +1,8 @@
 namespace LMP.Core.Youtube.Exceptions;
 
 /// <summary>
-/// Выбрасывается когда YouTube требует авторизацию для воспроизведения контента или выполнения операций.
-/// Обычно для возрастных ограничений (age-restricted), приватного контента, детекции бота или при истечении сессии.
+/// Thrown when YouTube requires authentication to play content or perform operations.
+/// Typically caused by age restrictions, private content, bot detection, or an expired session.
 /// </summary>
 public sealed class LoginRequiredException(
     string message,
@@ -10,17 +10,17 @@ public sealed class LoginRequiredException(
     LoginRequiredReason reason) : YoutubeExplodeException(message)
 {
     /// <summary>
-    /// Причина требования авторизации.
+    /// Reason for requiring authentication.
     /// </summary>
     public LoginRequiredReason Reason { get; } = reason;
 
     /// <summary>
-    /// ID видео.
+    /// Video ID.
     /// </summary>
     public string VideoId { get; } = videoId;
 
     /// <summary>
-    /// Ключ локализации для данного типа ошибки.
+    /// Localization key for this error type.
     /// </summary>
     public string GetLocalizationKey()
     {
@@ -37,28 +37,28 @@ public sealed class LoginRequiredException(
 }
 
 /// <summary>
-/// Причина требования авторизации.
+/// Reason for requiring authentication.
 /// </summary>
 public enum LoginRequiredReason
 {
-    /// <summary>Неизвестная причина.</summary>
+    /// <summary>Unknown reason.</summary>
     Unknown = 0,
 
-    /// <summary>Возрастные ограничения.</summary>
+    /// <summary>Age-restricted.</summary>
     AgeRestricted,
 
-    /// <summary>Приватное видео.</summary>
+    /// <summary>Private video.</summary>
     Private,
 
-    /// <summary>Только для подписчиков.</summary>
+    /// <summary>Members-only.</summary>
     MembersOnly,
 
-    /// <summary>Сессия авторизации истекла или недействительна.</summary>
+    /// <summary>Authentication session expired or invalid.</summary>
     SessionExpired,
 
     /// <summary>
-    /// YouTube расценил запрос как автоматизированный (бот-детекция).
-    /// Ответ содержит <c>LOGIN_REQUIRED</c> + <c>"Sign in to confirm you're not a bot"</c>.
+    /// YouTube flagged the request as automated (bot detection).
+    /// The response contains <c>LOGIN_REQUIRED</c> + <c>"Sign in to confirm you're not a bot"</c>.
     /// </summary>
     BotDetection
 }

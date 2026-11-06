@@ -7,10 +7,10 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>LMP.Decoders.AAC</AssemblyName>
     <RootNamespace>SharpJaad.AAC</RootNamespace>
-    <!-- Unsafe blocks для эффективного побитового сдвига и работы с указателями в аудио-декодере -->
+    <!-- Unsafe blocks for efficient bitwise shifting and pointer operations in the audio decoder -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Декодер SharpJaad написан на чистом C# и не требует внешних NuGet-пакетов -->
+  <!-- SharpJaad decoder is written in pure C# and requires no external NuGet packages -->
 
 </Project>

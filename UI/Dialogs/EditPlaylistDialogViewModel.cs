@@ -3,39 +3,39 @@ using Microsoft.Extensions.DependencyInjection;
 namespace LMP.UI.Dialogs;
 
 /// <summary>
-/// ViewModel диалога редактирования плейлиста.
-/// Выполняет отложенную сборку мозаики без требования промежуточного применения пользователем.
+/// ViewModel for the playlist editing dialog.
+/// Performs deferred mosaic construction without requiring intermediate user application.
 /// </summary>
 public sealed class EditPlaylistDialogViewModel : ViewModelBase
 {
     /// <summary>
-    /// Дочерняя модель редактора параметров плейлиста.
+    /// Child model for the playlist parameter editor.
     /// </summary>
     public PlaylistEditorViewModel Editor { get; }
 
     /// <summary>
-    /// Callback для закрытия диалога с результатом.
+    /// Callback to close the dialog with a result.
     /// </summary>
     public Action<EditPlaylistResult?>? OnResult { get; set; }
 
     /// <summary>
-    /// Команда сохранения изменений плейлиста.
+    /// Command to save playlist changes.
     /// </summary>
     public IAsyncRelayCommand SaveCommand { get; }
 
     /// <summary>
-    /// Команда отмены редактирования и закрытия диалога.
+    /// Command to cancel editing and close the dialog.
     /// </summary>
     public IRelayCommand CancelCommand { get; }
 
     /// <summary>
-    /// Инициализирует модель диалога редактирования плейлиста.
+    /// Initializes a new instance of the playlist editing dialog model.
     /// </summary>
-    /// <param name="playlist">Редактируемый плейлист.</param>
-    /// <param name="isAuthenticated">Флаг авторизации сессии в YouTube.</param>
-    /// <param name="playlistTracks">Список треков плейлиста для мозаики обложек.</param>
-    /// <param name="networkManager">Менеджер сетевых запросов.</param>
-    /// <param name="dominantColorService">Служба палитры цветов.</param>
+    /// <param name="playlist">The playlist being edited.</param>
+    /// <param name="isAuthenticated">Flag indicating if the YouTube session is authenticated.</param>
+    /// <param name="playlistTracks">List of playlist tracks for the cover mosaic.</param>
+    /// <param name="networkManager">Network request manager.</param>
+    /// <param name="dominantColorService">Color palette service.</param>
     public EditPlaylistDialogViewModel(
         Playlist playlist,
         bool isAuthenticated,
@@ -77,9 +77,9 @@ public sealed class EditPlaylistDialogViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Асинхронно сохраняет состояние редактора, компилируя мозаику в файл при необходимости.
+    /// Asynchronously saves the editor state, compiling the mosaic to a file if necessary.
     /// </summary>
-    /// <param name="ct">Токен отмены операции.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task SaveAsync(CancellationToken ct)
     {
         if (Editor.SelectedCoverMode == CoverMode.FromTracks && Editor.CoverPicker != null)

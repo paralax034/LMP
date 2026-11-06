@@ -1,16 +1,16 @@
 namespace LMP.Core.Helpers.Extensions;
 
 /// <summary>
-/// Обобщённые методы пайплайн-трансформации значений.
+/// Generic pipeline value transformation methods.
 /// </summary>
 internal static class GenericExtensions
 {
     extension<TIn>(TIn input)
     {
         /// <summary>
-        /// Передаёт значение в функцию трансформации.
+        /// Passes the value to a transformation function.
         /// </summary>
-        /// <exception cref="ArgumentNullException">Если <paramref name="transform"/> равен null.</exception>
+        /// <exception cref="ArgumentNullException">If <paramref name="transform"/> is null.</exception>
         public TOut Pipe<TOut>(Func<TIn, TOut> transform)
         {
             ArgumentNullException.ThrowIfNull(transform);

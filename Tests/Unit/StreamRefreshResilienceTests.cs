@@ -15,18 +15,18 @@ using RefreshOutcome = LMP.Core.Audio.Sources.CachingStreamSource.RefreshOutcome
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Регрессионные тесты устойчивости refresh-конвейера CachingStreamSource:
-/// ограниченный бюджет 403-циклов, защита варианта потока и безысключительная отмена ожиданий.
-/// Все тесты автономны: HTTP подменяется in-memory обработчиком, сеть не используется.
+/// Regression tests for the CachingStreamSource refresh pipeline resilience:
+/// bounded 403-cycle budget, stream variant protection, and non-throwing wait cancellation.
+/// All tests are self-contained: HTTP is replaced with an in-memory handler; no network is used.
 /// </summary>
 public static class StreamRefreshResilienceTests
 {
-    /// <summary>Должно совпадать с CachingStreamSource.MaxForbiddenRefreshBudget.</summary>
+    /// <summary>Must match CachingStreamSource.MaxForbiddenRefreshBudget.</summary>
     private const int ExpectedForbiddenRefreshBudget = 3;
 
     private const long ContentLength = 1_000_000;
 
-    /// <summary>Метка async-потока теста: отсекает first-chance исключения параллельных тестов и фоновых задач.</summary>
+    /// <summary>Async stream tag for the test: filters out first-chance exceptions from parallel tests and background tasks.</summary>
     private static readonly AsyncLocal<bool> FlowScope = new();
 
     [TestMethod(TestCategory.Unit, "403 Loop With Fresh URLs Escalates To Fatal Within Budget", Group = TestGroups.Network, Order = 30)]
@@ -112,26 +112,26 @@ public static class StreamRefreshResilienceTests
             _ => Task.FromResult(nextUrl),
             contentLength: WebmLength);
 
-        // 1. MP4 (itag 140) вместо WebM (itag 251): ровно сценарий порчи partial cache из лога.
+        // 1. MP4 (itag 140) instead of WebM (itag 251): exact scenario of partial cache corruption from the log.
         nextUrl = BuildUrl(nowUnix, "mp4Tok", 140, Mp4Length);
         var outcome = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
         TestAssert.Equal(RefreshOutcome.NoUrl, outcome, "Foreign itag must be rejected as NoUrl");
         TestAssert.Equal(webmUrl, source.CurrentUrl, "Current URL must stay on the original variant");
 
-        // 2. Тот же itag, но другой clen (например, DRC-версия): байтовые смещения несовместимы.
+        // 2. Same itag, but different clen (e.g. DRC version): byte offsets are incompatible.
         nextUrl = BuildUrl(nowUnix, "drcTok", 251, Mp4Length);
         outcome = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
         TestAssert.Equal(RefreshOutcome.NoUrl, outcome, "Same itag with foreign clen must be rejected");
         TestAssert.Equal(webmUrl, source.CurrentUrl, "Current URL must not change on clen mismatch");
 
-        // 3. Совместимый свежий URL принимается.
+        // 3. Compatible fresh URL is accepted.
         string compatibleUrl = BuildUrl(nowUnix, "okTok", 251, WebmLength);
         nextUrl = compatibleUrl;
         outcome = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
         TestAssert.Equal(RefreshOutcome.NewUrl, outcome, "Compatible URL must be accepted");
         TestAssert.Equal(compatibleUrl, source.CurrentUrl, "Compatible URL must become current");
 
-        // 4. Внешний UpdateUrl (AudioPipeline) защищён тем же guard.
+        // 4. External UpdateUrl (AudioPipeline) is protected by the same guard.
         bool applied = source.UpdateUrl(BuildUrl(nowUnix, "mp4Tok2", 140, Mp4Length));
         TestAssert.False(applied, "UpdateUrl must reject a foreign variant");
         TestAssert.Equal(compatibleUrl, source.CurrentUrl, "UpdateUrl rejection must keep current URL");
@@ -186,7 +186,7 @@ public static class StreamRefreshResilienceTests
             },
             contentLength: WebmLength);
 
-        // Source вне AudioPlayer: ровно ситуация 403 на первом range во время InitializeAsync.
+        // Source outside AudioPlayer: exact situation of 403 on the first range during InitializeAsync.
         await RunReadAtUntilFatalAsync(source, timeoutMs: 15_000).ConfigureAwait(false);
 
         TestAssert.True(requests.TryDequeue(out var first), "Provider must be invoked after CDN 403");
@@ -206,7 +206,7 @@ public static class StreamRefreshResilienceTests
     {
         const long WebmLength = 2_711_112;
 
-        // Partial cache до continuation URL: запрос несёт вариант, но не считается 403-driven.
+        // Partial cache prior to continuation URL: request carries variant, but is not considered 403-driven.
         using var handler = new AlwaysForbiddenHandler();
         using var httpClient = new HttpClient(handler, disposeHandler: false);
         using var tempCache = new TempCacheManager();
@@ -235,7 +235,7 @@ public static class StreamRefreshResilienceTests
         const long Mp4Length = 2_785_782;
         const long WebmLength = 2_711_112;
 
-        // Порядок как в session cache из лога: MP4 первым, затем WebM по возрастанию битрейта.
+        // Order matches session cache from the log: MP4 first, then WebM by ascending bitrate.
         var variants = new List<LMP.Core.Audio.Http.VariantEntry>
         {
             new() { Itag = 140, Url = BuildVariantUrl(140), Container = "mp4", Bitrate = 128_000, Clen = Mp4Length },
@@ -321,7 +321,7 @@ public static class StreamRefreshResilienceTests
         FlowScope.Value = true;
         try
         {
-            // Initiator удерживает _refreshLock, пока refresher не отпущен.
+            // Initiator holds _refreshLock until refresher is released.
             var initiatorTask = CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None);
             await refresherEntered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
@@ -332,7 +332,7 @@ public static class StreamRefreshResilienceTests
             var initiatorOutcome = await initiatorTask.ConfigureAwait(false);
             TestAssert.Equal(RefreshOutcome.NewUrl, initiatorOutcome, "Initiator refresh must succeed");
 
-            // Waiter уже получил lock и находится в PostRefreshDelay (1500 мс) — отменяем посередине.
+            // Waiter has already acquired the lock and is inside PostRefreshDelay (1500 ms) — cancel mid-way.
             waiterCts.CancelAfter(300);
 
             RefreshOutcome waiterOutcome;
@@ -398,8 +398,8 @@ public static class StreamRefreshResilienceTests
         using var httpClient = new HttpClient(handler, disposeHandler: false);
         using var tempCache = new TempCacheManager();
 
-        // Partial cache без URL: трек и вариант приходят в запросе от самого source,
-        // без привязки к состоянию AudioPlayer (раньше — _callbackTrackId, гонка Stop/Play).
+        // Partial cache without URL: track and variant originate from the request made by source itself,
+        // decoupled from AudioPlayer state (previously — _callbackTrackId, Stop/Play race condition).
         var source = CreateSourceWithProvider(
             tempCache,
             httpClient,
@@ -439,7 +439,7 @@ public static class StreamRefreshResilienceTests
         static RefreshDecision Decide(RefreshOutcome outcome, bool forbiddenDriven) =>
             CachingStreamSourceAccessors.DecideRefresh(null, outcome, forbiddenDriven);
 
-        // После HTTP 403 любая попытка, кроме смены внешнего IP, списывает единицу одного общего бюджета.
+        // After HTTP 403, any attempt (except changing external IP) consumes one unit of a single shared budget.
         TestAssert.Equal(new RefreshDecision(true, RangeRetryAction.RetryNow), Decide(RefreshOutcome.NewUrl, true),
             "Fresh URL after 403 must spend the budget and retry at once");
         TestAssert.Equal(new RefreshDecision(true, RangeRetryAction.RetryAfterBackoff), Decide(RefreshOutcome.SameUrl, true),
@@ -449,7 +449,7 @@ public static class StreamRefreshResilienceTests
         TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.RetryNow), Decide(RefreshOutcome.EgressChanged, true),
             "Egress change is not a CDN rejection and must not spend the budget");
 
-        // Проактивный TTL-refresh бюджет не трогает.
+        // Proactive TTL refresh does not consume budget.
         TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.RetryNow), Decide(RefreshOutcome.NewUrl, false),
             "TTL refresh must not spend the budget");
         TestAssert.Equal(new RefreshDecision(false, RangeRetryAction.RetryAfterBackoff), Decide(RefreshOutcome.SameUrl, false),
@@ -463,12 +463,12 @@ public static class StreamRefreshResilienceTests
     // --- Helpers ---
 
     /// <summary>
-    /// Результат прогона ReadAtAsync до терминального исключения.
+    /// Result of running ReadAtAsync until a terminal exception.
     /// </summary>
     private readonly record struct FatalRun(ChunkDownloadFatalException Fatal, long ElapsedMs, int CancelExceptions);
 
     /// <summary>
-    /// Вызывает ReadAtAsync и ожидает ChunkDownloadFatalException; таймаут означает бесконечный retry.
+    /// Invokes ReadAtAsync and expects ChunkDownloadFatalException; timeout indicates an infinite retry loop.
     /// </summary>
     private static async Task<FatalRun> RunReadAtUntilFatalAsync(CachingStreamSource source, int timeoutMs)
     {
@@ -558,13 +558,13 @@ public static class StreamRefreshResilienceTests
         $"https://rr1---sn-test.googlevideo.com/videoplayback?expire=1&ip={ip}&itag=251&c=WEB_REMIX";
 
     /// <summary>
-    /// HTTP-обработчик, отвечающий 403 Forbidden на любой запрос (модель CDN, отвергающего все URL).
+    /// HTTP handler that responds with 403 Forbidden to every request (models a CDN rejecting all URLs).
     /// </summary>
     private sealed class AlwaysForbiddenHandler : HttpMessageHandler
     {
         private int _requests;
 
-        /// <summary>Количество полученных запросов.</summary>
+        /// <summary>Number of received requests.</summary>
         public int Requests => Volatile.Read(ref _requests);
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -579,13 +579,13 @@ public static class StreamRefreshResilienceTests
     }
 
     /// <summary>
-    /// Временный дисковый кэш, удаляемый после теста.
+    /// Temporary disk cache removed after the test.
     /// </summary>
     private sealed class TempCacheManager : IDisposable
     {
         private readonly string _tempDir;
 
-        /// <summary>Менеджер кэша во временной директории.</summary>
+        /// <summary>Cache manager in a temporary directory.</summary>
         public AudioCacheManager Manager { get; }
 
         public TempCacheManager()

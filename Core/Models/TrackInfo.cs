@@ -8,8 +8,8 @@ using MemoryPack;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Представляет музыкальный трек.
-/// string interning для ID, минимизированы аллокации.
+/// Represents a music track.
+/// String interning for IDs, allocations minimized.
 /// </summary>
 [MemoryPackable]
 public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchResult
@@ -20,7 +20,7 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     #region Identity
 
     /// <summary>
-    /// Уникальный идентификатор с кэшированием для избежания дубликатов строк.
+    /// Unique identifier with caching to prevent duplicate strings.
     /// </summary>
     public string Id
     {
@@ -61,13 +61,13 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     }
 
     /// <summary>
-    /// Извлекает чистый YouTube ID без префикса (zero-alloc через Span).
+    /// Extracts raw YouTube ID without prefix (zero-alloc via Span).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ReadOnlySpan<char> GetRawIdSpan() => YoutubeIdHelper.ExtractRawIdSpan(Id);
 
     /// <summary>
-    /// Получает чистый ID как строку (для async контекста).
+    /// Gets raw ID as a string (for async context).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string GetRawId() => YoutubeIdHelper.ExtractRawId(Id);
@@ -77,42 +77,42 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     #region Metadata
 
     /// <summary>
-    /// Название трека.
+    /// Track title.
     /// </summary>
     [ObservableProperty] public partial string Title { get; set; } = string.Empty;
 
     /// <summary>
-    /// Исполнитель/автор.
+    /// Artist/author.
     /// </summary>
     [ObservableProperty] public partial string Author { get; set; } = string.Empty;
 
     /// <summary>
-    /// ID канала YouTube.
+    /// YouTube channel ID.
     /// </summary>
     [ObservableProperty] public partial string? ChannelId { get; set; }
 
     /// <summary>
-    /// URL трека на YouTube.
+    /// YouTube track URL.
     /// </summary>
     [ObservableProperty] public partial string Url { get; set; } = string.Empty;
 
     /// <summary>
-    /// Длительность трека.
+    /// Track duration.
     /// </summary>
     [ObservableProperty] public partial TimeSpan Duration { get; set; }
 
     /// <summary>
-    /// URL обложки.
+    /// Thumbnail URL.
     /// </summary>
     [ObservableProperty] public partial string ThumbnailUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// Флаг официального канала исполнителя.
+    /// Official artist channel flag.
     /// </summary>
     public bool IsOfficialArtist { get; set; }
 
     /// <summary>
-    /// Флаг музыкального контента.
+    /// Music content flag.
     /// </summary>
     public bool IsMusic { get; set; }
 
@@ -154,20 +154,20 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     #region Format Preferences
 
     /// <summary>
-    /// Предпочитаемый формат контейнера для этого трека.
-    /// Персистентный пользовательский выбор.
+    /// Preferred container format for this track.
+    /// Persistent user selection.
     /// </summary>
     [ObservableProperty] public partial AudioFormat? PreferredFormat { get; set; }
 
     /// <summary>
-    /// Предпочитаемый битрейт для этого трека.
-    /// Персистентный пользовательский выбор.
+    /// Preferred bitrate for this track.
+    /// Persistent user selection.
     /// </summary>
     [ObservableProperty] public partial int PreferredBitrate { get; set; }
 
     /// <summary>
-    /// Индивидуальный пресет эквалайзера, закреплённый за этим треком.
-    /// <c>null</c> = использовать глобальный профиль эквалайзера.
+    /// Per-track custom equalizer preset.
+    /// <c>null</c> = use global equalizer profile.
     /// </summary>
     [ObservableProperty] public partial string? EqualizerPresetId { get; set; }
 
@@ -178,18 +178,18 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     #region Runtime Stream Selection
 
     /// <summary>
-    /// Временный формат контейнера, выбранный пользователем в текущей сессии
-    /// (например, при переключении качества).
-    /// Не является кэшем resolved stream metadata.
+    /// Transient container format selected by the user in the current session
+    /// (e.g., when switching quality).
+    /// Is not a cache of resolved stream metadata.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public AudioFormat? TransientFormat { get; set; }
 
     /// <summary>
-    /// Временный битрейт, выбранный пользователем в текущей сессии
-    /// (например, при переключении качества).
-    /// Не является кэшем resolved stream metadata.
+    /// Transient bitrate selected by the user in the current session
+    /// (e.g., when switching quality).
+    /// Is not a cache of resolved stream metadata.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
@@ -200,21 +200,21 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     #region Audio Normalization
 
     /// <summary>
-    /// Новое canonical-поле integrated loudness трека в LUFS.
+    /// New canonical field for track integrated loudness in LUFS.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public float IntegratedLufs { get; set; } = float.NaN;
 
     /// <summary>
-    /// Источник значения <see cref="IntegratedLufs"/>.
+    /// Source of the <see cref="IntegratedLufs"/> value.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
     public LoudnessSource IntegratedLufsSource { get; set; } = LoudnessSource.Unknown;
 
     /// <summary>
-    /// <c>true</c> если integrated loudness измерена.
+    /// <c>true</c> if integrated loudness is measured.
     /// </summary>
     [JsonIgnore]
     [MemoryPackIgnore]
@@ -222,8 +222,8 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
         !float.IsNaN(IntegratedLufs) && float.IsFinite(IntegratedLufs);
 
     /// <summary>
-    /// Устанавливает integrated loudness трека.
-    /// Более точный источник может перезаписать менее точный.
+    /// Sets the track's integrated loudness.
+    /// A more accurate source can overwrite a less accurate one.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetIntegratedLufs(float lufs, LoudnessSource source)
@@ -257,12 +257,12 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     #region Methods
 
     /// <summary>
-    /// Обновляет метаданные из свежего объекта.
-    /// Игнорирует пустые значения и предотвращает затирание статуса лайка
-    /// ответами API, не содержащими пользовательского контекста.
+    /// Updates metadata from a fresh object.
+    /// Ignores empty values and prevents overwriting the like status
+    /// by API responses that lack user context.
     /// </summary>
-    /// <param name="fresh">Свежий экземпляр трека с актуальными метаданными.</param>
-    /// <param name="includeUserState">Указывает, содержит ли входящий объект авторизованный контекст пользователя (лайки, локальный путь, статус загрузки).</param>
+    /// <param name="fresh">A fresh track instance containing updated metadata.</param>
+    /// <param name="includeUserState">Specifies whether the incoming object contains authorized user context (likes, local path, download status).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void UpdateMetadata(TrackInfo fresh, bool includeUserState = false)
     {
@@ -338,9 +338,9 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     }
 
     /// <summary>
-    /// Принудительно устанавливает статус отметки «Мне нравится» для канонического экземпляра.
+    /// Forcibly sets the like status for the canonical instance.
     /// </summary>
-    /// <param name="isLiked">Целевой статус лайка.</param>
+    /// <param name="isLiked">Target like status.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void SetLikedState(bool isLiked)
     {

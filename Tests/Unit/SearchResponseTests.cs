@@ -5,8 +5,8 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Модульные тесты парсинга поисковой выдачи YouTube SearchResponse.
-/// Проверяют корректность извлечения треков, плейлистов, каналов и маркеров пагинации.
+/// Unit tests for parsing YouTube SearchResponse search results.
+/// Verifies correct extraction of tracks, playlists, channels, and pagination tokens.
 /// </summary>
 public static class SearchResponseTests
 {
@@ -80,21 +80,21 @@ public static class SearchResponseTests
 
     TestAssert.NotNull(response);
 
-    // Видео
+    // Videos
     TestAssert.Equal(1, response.Videos.Count);
     TestAssert.Equal("vid_search_01", response.Videos[0].Id);
     TestAssert.Equal("Search Video Title", response.Videos[0].Title);
     TestAssert.Equal(TimeSpan.FromSeconds(260), response.Videos[0].Duration);
 
-    // Плейлисты
+    // Playlists
     TestAssert.Equal(1, response.Playlists.Count);
     TestAssert.Equal("PL_SEARCH_PLAYLIST_01", response.Playlists[0].Id);
 
-    // Каналы
+    // Channels
     TestAssert.Equal(1, response.Channels.Count);
     TestAssert.Equal("UC_SEARCH_CHANNEL_01", response.Channels[0].Id);
 
-    // Токен продолжения
+    // Continuation token
     TestAssert.Equal("SEARCH_CONTINUATION_TOKEN_999", response.ContinuationToken);
   }
 }
