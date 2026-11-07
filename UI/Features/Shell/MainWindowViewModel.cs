@@ -205,6 +205,28 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        if (CurrentPage is IUnsavedChangesGuard guard && guard.HasUnsavedChanges)
+        {
+            _ = ConfirmAndNavigateAsync(guard, () => ExecuteNavigateCore(pageName));
+            return;
+        }
+
+        ExecuteNavigateCore(pageName);
+    }
+
+    private async Task ConfirmAndNavigateAsync(IUnsavedChangesGuard guard, Action onConfirmed)
+    {
+        var dialogService = _services.GetRequiredService<DialogService>();
+        if (await dialogService.ConfirmUnsavedChangesAsync(guard))
+        {
+            onConfirmed();
+        }
+    }
+
+    private void ExecuteNavigateCore(string pageName)
+    {
+        if (IsNavigationLocked || DialogHost.HasActiveDialog) return;
+
         var sw = Stopwatch.StartNew();
         Log.Info($"Switching to page: {pageName}");
 
@@ -261,6 +283,19 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     public void NavigateToPlaylist(string playlistId)
+    {
+        if (IsNavigationLocked || DialogHost.HasActiveDialog) return;
+
+        if (CurrentPage is IUnsavedChangesGuard guard && guard.HasUnsavedChanges)
+        {
+            _ = ConfirmAndNavigateAsync(guard, () => ExecuteNavigateToPlaylistCore(playlistId));
+            return;
+        }
+
+        ExecuteNavigateToPlaylistCore(playlistId);
+    }
+
+    private void ExecuteNavigateToPlaylistCore(string playlistId)
     {
         if (IsNavigationLocked || DialogHost.HasActiveDialog) return;
 

@@ -55,3 +55,24 @@ public interface IAccountAware
     /// </summary>
     void OnAccountChanged();
 }
+
+/// <summary>
+/// Defines a contract for ViewModels that hold uncommitted user edits requiring confirmation before navigation.
+/// </summary>
+public interface IUnsavedChangesGuard
+{
+    /// <summary>
+    /// Indicates whether the ViewModel currently has uncommitted modifications.
+    /// </summary>
+    bool HasUnsavedChanges { get; }
+
+    /// <summary>
+    /// Applies and persists the pending modifications.
+    /// </summary>
+    void ApplyChanges();
+
+    /// <summary>
+    /// Discards the pending modifications and rolls back to the last committed state.
+    /// </summary>
+    void DiscardChanges();
+}

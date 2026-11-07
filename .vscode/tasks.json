@@ -17,9 +17,9 @@
             "label": "build: debug",
             "type": "shell",
             "command": "python build.py debug nopause",
-            "group": {"kind": "build", "isDefault": true},
+            "group": { "kind": "build", "isDefault": true },
             "problemMatcher": "$msCompile",
-            "presentation": {"panel": "shared"}
+            "presentation": { "panel": "shared" }
         },
         {
             "label": "build: release",
@@ -27,7 +27,7 @@
             "command": "python build.py release nopause",
             "group": "build",
             "problemMatcher": "$msCompile",
-            "presentation": {"panel": "shared"}
+            "presentation": { "panel": "shared" }
         },
         {
             "label": "build: clean",
@@ -82,6 +82,13 @@
             "label": "tool: audit-l10n",
             "type": "shell",
             "command": "python Tools\\audit_l10n.py",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "tool: sort-l10n",
+            "type": "shell",
+            "command": "python Tools\\sort_l10n.py",
             "group": "build",
             "problemMatcher": []
         },

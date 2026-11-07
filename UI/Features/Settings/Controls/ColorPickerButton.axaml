@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:LMP.UI.Features.Settings.Controls"
     x:Class="LMP.UI.Features.Settings.Controls.ColorPickerButton"
     x:Name="Root">
 
@@ -14,14 +15,14 @@
             <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Border.color-swatch">
-            <Setter Property="Width" Value="40" />
-            <Setter Property="Height" Value="40" />
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
             <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 </Transitions>
             </Setter>
         </Style>
@@ -30,11 +31,23 @@
         </Style>
     </UserControl.Styles>
 
-    <Button x:Name="ColorButton" Classes="color-btn" Click="OnButtonClick">
-        <Border Classes="color-swatch">
-            <Border.Background>
-                <SolidColorBrush Color="{Binding Color, ElementName=Root}" />
-            </Border.Background>
-        </Border>
-    </Button>
+    <Panel>
+        <Button x:Name="ColorButton" Classes="color-btn" Click="OnButtonClick">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock Text="{Binding HexText, ElementName=Root}"
+                    FontFamily="Consolas, monospace"
+                    FontSize="12"
+                    Foreground="{DynamicResource TextMutedBrush}"
+                    VerticalAlignment="Center" />
+                <Border Classes="color-swatch"
+                    Background="{Binding SwatchBrush, ElementName=Root}" />
+            </StackPanel>
+        </Button>
+
+        <Popup x:Name="ColorPopup"
+            PlacementTarget="{Binding #ColorButton}"
+            Placement="BottomEdgeAlignedRight"
+            IsLightDismissEnabled="True"
+            WindowManagerAddShadowHint="False" />
+    </Panel>
 </UserControl>

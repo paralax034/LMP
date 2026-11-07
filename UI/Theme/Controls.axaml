@@ -6,7 +6,7 @@
         <Setter Property="FocusAdorner" Value="{x:Null}" />
     </Style>
 
-    <!-- GLOBAL LISTBOX / LISTBOXITEM (Unified outline list design)           -->
+    <!-- GLOBAL LISTBOX / LISTBOXITEM (Unified outline list design) -->
 
     <Style Selector="ListBox:not(.track-list):not(.chip-list):not(.nav-sidebar)">
         <Setter Property="Background" Value="Transparent" />
@@ -95,7 +95,7 @@
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- CHECKBOX              -->
+    <!-- CHECKBOX -->
 
     <Style Selector="CheckBox">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
@@ -126,7 +126,7 @@
         <Setter Property="Stroke" Value="{DynamicResource AccentButtonTextBrush}" />
     </Style>
 
-    <!-- RADIOBUTTON           -->
+    <!-- RADIOBUTTON -->
 
     <Style Selector="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
@@ -158,7 +158,7 @@
         </Setter>
     </Style>
 
-    <!-- COMBOBOX              -->
+    <!-- COMBOBOX -->
 
     <Style Selector="ComboBox">
         <Setter Property="Background" Value="Transparent" />
@@ -265,7 +265,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 
-    <!-- TOGGLESWITCH          -->
+    <!-- TOGGLESWITCH -->
 
     <Style Selector="ToggleSwitch">
         <Setter Property="Cursor" Value="Hand" />
@@ -275,7 +275,7 @@
     <Style Selector="ToggleSwitch /template/ Border#OuterBorder">
         <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
@@ -285,39 +285,65 @@
     </Style>
     <Style Selector="ToggleSwitch:pointerover /template/ Border#OuterBorder">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
     </Style>
-    <Style Selector="ToggleSwitch:checked /template/ Border#OuterBorder">
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
-    </Style>
-    <Style Selector="ToggleSwitch:checked:pointerover /template/ Border#OuterBorder">
+    <Style Selector="ToggleSwitch:pressed /template/ Border#OuterBorder">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
     </Style>
-    <Style Selector="ToggleSwitch /template/ Grid#SwitchKnob">
+    <Style Selector="ToggleSwitch /template/ Border#SwitchKnobBounds">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Transitions">
             <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
                 <BrushTransition Property="Background" Duration="0:0:0.15" />
             </Transitions>
         </Setter>
+    </Style>
+    <Style Selector="ToggleSwitch:pointerover /template/ Border#SwitchKnobBounds">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="ToggleSwitch:pressed /template/ Border#SwitchKnobBounds">
+        <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="ToggleSwitch /template/ Ellipse#SwitchKnobOn">
         <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="Fill" Duration="0:0:0.15" />
+                <DoubleTransition Property="Width" Duration="0:0:0.15" Easing="0,0,0,1" />
+                <DoubleTransition Property="Height" Duration="0:0:0.15" Easing="0,0,0,1" />
             </Transitions>
         </Setter>
+    </Style>
+    <Style Selector="ToggleSwitch:pointerover /template/ Ellipse#SwitchKnobOn">
+        <Setter Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+    <Style Selector="ToggleSwitch:pressed /template/ Ellipse#SwitchKnobOn">
+        <Setter Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="ToggleSwitch /template/ Ellipse#SwitchKnobOff">
         <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="Fill" Duration="0:0:0.15" />
+                <DoubleTransition Property="Width" Duration="0:0:0.15" Easing="0,0,0,1" />
+                <DoubleTransition Property="Height" Duration="0:0:0.15" Easing="0,0,0,1" />
             </Transitions>
         </Setter>
     </Style>
+    <Style Selector="ToggleSwitch:pointerover /template/ Ellipse#SwitchKnobOff">
+        <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="ToggleSwitch:pressed /template/ Ellipse#SwitchKnobOff">
+        <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
 
-    <!-- SLIDER                -->
+    <!-- SLIDER -->
 
     <Style Selector="Slider">
         <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
@@ -325,22 +351,7 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <Style Selector="Slider /template/ Thumb /template/ Border">
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Background" Value="{DynamicResource BgPrimaryBrush}" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.15" />
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-            </Transitions>
-        </Setter>
-    </Style>
-    <Style Selector="Slider:pointerover /template/ Thumb /template/ Border">
-        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-    </Style>
-    <Style
-        Selector="Slider:horizontal /template/ Border#TrackBackground, Slider:vertical /template/ Border#TrackBackground">
+    <Style Selector="Slider /template/ Thumb">
         <Setter Property="Transitions">
             <Transitions>
                 <BrushTransition Property="Background" Duration="0:0:0.15" />
@@ -348,7 +359,7 @@
         </Setter>
     </Style>
 
-    <!-- TEXTBOX — GLOBAL STYLE AND CENTRALIZED CONTEXT MENU                  -->
+    <!-- TEXTBOX — GLOBAL STYLE AND CENTRALIZED CONTEXT MENU -->
 
     <Style Selector="TextBox:not(.flat-search-box)">
         <Setter Property="Background" Value="Transparent" />
@@ -646,23 +657,16 @@
         <Setter Property="Margin" Value="8,4" />
     </Style>
 
-    <!-- EXPANDER              -->
+    <!-- EXPANDER -->
 
     <Style Selector="Expander">
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
     </Style>
-    <Style Selector="Expander /template/ ToggleButton#PART_toggle">
+    <Style
+        Selector="Expander /template/ ToggleButton#ExpanderHeader, Expander /template/ ToggleButton#PART_toggle">
         <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="CornerRadius" Value="8" />
-    </Style>
-    <Style Selector="Expander:pointerover /template/ ToggleButton#PART_toggle">
-        <Setter Property="Background" Value="{DynamicResource BgElevatedTransparentBrush}" />
     </Style>
 
     <!-- TABCONTROL / TABITEM  -->

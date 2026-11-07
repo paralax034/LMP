@@ -516,4 +516,9 @@ public sealed class AppSettings
     /// Animation speed of the playing track in the list.
     /// </summary>
     public TrackAnimationSpeed TrackAnimationSpeed { get; set; } = TrackAnimationSpeed.Medium;
+
+    /// <summary>
+    /// List of user-saved custom color themes.
+    /// </summary>
+    public List<ThemeSettings> UserThemes { get; set; } = [];
 }

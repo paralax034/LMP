@@ -1,122 +1,157 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:controls="using:LMP.UI.Features.Settings.Controls"
-             x:Class="LMP.UI.Features.Settings.Controls.ColorPickerPopup"
-             x:Name="Root"
-             Width="280">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:LMP.UI.Features.Settings.Controls"
+    x:Class="LMP.UI.Features.Settings.Controls.ColorPickerPopup"
+    x:DataType="controls:ColorPickerPopup"
+    x:Name="Root"
+    Width="292">
 
     <UserControl.Styles>
         <Style Selector="Button.preset-color">
-            <Setter Property="Width" Value="28"/>
-            <Setter Property="Height" Value="28"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="2"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="BorderThickness" Value="2"/>
-            <Setter Property="BorderBrush" Value="Transparent"/>
-            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="2" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
         </Style>
         <Style Selector="Button.preset-color:pointerover">
-            <Setter Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}"/>
-            <Setter Property="Opacity" Value="0.9"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.preset-color:pressed">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Slider.color-slider">
-            <Setter Property="Minimum" Value="0"/>
-            <Setter Property="Maximum" Value="255"/>
-            <Setter Property="Height" Value="24"/>
+            <Setter Property="MinHeight" Value="28" />
         </Style>
         <Style Selector="TextBlock.section-header">
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
-            <Setter Property="Margin" Value="0,12,0,6"/>
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,10,0,4" />
         </Style>
     </UserControl.Styles>
 
-    <Border Background="{DynamicResource BgElevatedBrush}"
-            BorderBrush="{DynamicResource BgHighlightBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
-            Padding="16"
-            BoxShadow="0 8 24 0 #40000000">
-        
+    <Border Background="{DynamicResource BgPrimaryBrush}"
+        BorderBrush="{DynamicResource BgHighlightBrush}"
+        BorderThickness="1"
+        CornerRadius="8"
+        Padding="16"
+        BoxShadow="{StaticResource CardShadow}">
+
         <StackPanel Spacing="4">
-            
+
             <!-- Preview & HEX Input -->
-            <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,8">
+            <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,4">
                 <Border Width="48" Height="48" CornerRadius="6"
-                        BorderThickness="1" BorderBrush="{DynamicResource BgHighlightBrush}">
-                    <Border.Background>
-                        <SolidColorBrush Color="{Binding SelectedColor, ElementName=Root}"/>
-                    </Border.Background>
-                </Border>
-                
+                    Background="{Binding PreviewBrush, ElementName=Root}"
+                    BorderThickness="1" BorderBrush="{DynamicResource BgHighlightBrush}" />
+
                 <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="HEX" FontSize="10" Foreground="{DynamicResource TextMutedBrush}"/>
+                    <TextBlock Text="{Binding L[Theme_Popup_Hex], ElementName=Root}"
+                        FontSize="11"
+                        Foreground="{DynamicResource TextSecondaryBrush}" />
                     <TextBox x:Name="HexTextBox"
-                             Text="{Binding HexInput, ElementName=Root, Mode=TwoWay}"
-                             FontFamily="Consolas, monospace"
-                             FontSize="14"
-                             PlaceholderText="#RRGGBB"
-                             MaxLength="9"
-                             Margin="0,4,0,0"/>
+                        Text="{Binding HexInput, ElementName=Root, Mode=TwoWay}"
+                        FontFamily="Consolas, monospace"
+                        FontSize="13"
+                        PlaceholderText="{Binding L[Theme_Popup_HexPlaceholder], ElementName=Root}"
+                        MaxLength="9"
+                        Margin="0,4,0,0" />
                 </StackPanel>
             </Grid>
 
             <!-- Preset Colors -->
-            <TextBlock Classes="section-header" Text="PRESETS"/>
-            <ItemsControl x:Name="PresetsControl" ItemsSource="{Binding PresetColors, ElementName=Root}">
+            <TextBlock Classes="section-header"
+                Text="{Binding L[Theme_Popup_Presets], ElementName=Root}" />
+            <ItemsControl x:Name="PresetsControl"
+                ItemsSource="{Binding PresetColors, ElementName=Root}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <WrapPanel/>
+                        <WrapPanel Orientation="Horizontal" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="controls:ColorPreset">
                         <Button Classes="preset-color"
+                            Click="OnPresetClick"
+                            Tag="{Binding Color}"
+                            ToolTip.Tip="{Binding Hex}">
+                            <Border Width="22" Height="22"
+                                CornerRadius="3"
                                 Background="{Binding Brush}"
-                                Click="OnPresetClick"
-                                Tag="{Binding Color}"
-                                ToolTip.Tip="{Binding Name}"/>
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Button>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
             <!-- RGB Sliders -->
-            <TextBlock Classes="section-header" Text="RGB"/>
-            
-            <Grid ColumnDefinitions="24, *, 40">
-                <TextBlock Text="R" VerticalAlignment="Center" Foreground="#FF6B6B" FontWeight="Bold"/>
-                <Slider Grid.Column="1" Classes="color-slider" 
-                        Value="{Binding RedValue, ElementName=Root, Mode=TwoWay}" Margin="8,0"/>
-                <TextBlock Grid.Column="2" Text="{Binding RedValue, ElementName=Root}" 
-                           VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Consolas"/>
+            <TextBlock Classes="section-header"
+                Text="{Binding L[Theme_Popup_Rgb], ElementName=Root}" />
+
+            <Grid ColumnDefinitions="20, *, 36">
+                <TextBlock Text="R" VerticalAlignment="Center" Foreground="#FF6B6B"
+                    FontWeight="Bold" />
+                <Slider Grid.Column="1" Classes="color-slider"
+                    Minimum="0" Maximum="255"
+                    Value="{Binding RedValue, ElementName=Root, Mode=TwoWay}" Margin="8,0" />
+                <TextBlock Grid.Column="2" Text="{Binding RedValue, ElementName=Root}"
+                    Foreground="{DynamicResource TextPrimaryBrush}"
+                    VerticalAlignment="Center" HorizontalAlignment="Right"
+                    FontFamily="Consolas, monospace" />
             </Grid>
-            
-            <Grid ColumnDefinitions="24, *, 40">
-                <TextBlock Text="G" VerticalAlignment="Center" Foreground="#4ECB71" FontWeight="Bold"/>
-                <Slider Grid.Column="1" Classes="color-slider" 
-                        Value="{Binding GreenValue, ElementName=Root, Mode=TwoWay}" Margin="8,0"/>
-                <TextBlock Grid.Column="2" Text="{Binding GreenValue, ElementName=Root}" 
-                           VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Consolas"/>
+
+            <Grid ColumnDefinitions="20, *, 36">
+                <TextBlock Text="G" VerticalAlignment="Center" Foreground="#4ECB71"
+                    FontWeight="Bold" />
+                <Slider Grid.Column="1" Classes="color-slider"
+                    Minimum="0" Maximum="255"
+                    Value="{Binding GreenValue, ElementName=Root, Mode=TwoWay}" Margin="8,0" />
+                <TextBlock Grid.Column="2" Text="{Binding GreenValue, ElementName=Root}"
+                    Foreground="{DynamicResource TextPrimaryBrush}"
+                    VerticalAlignment="Center" HorizontalAlignment="Right"
+                    FontFamily="Consolas, monospace" />
             </Grid>
-            
-            <Grid ColumnDefinitions="24, *, 40">
-                <TextBlock Text="B" VerticalAlignment="Center" Foreground="#5B9BD5" FontWeight="Bold"/>
-                <Slider Grid.Column="1" Classes="color-slider" 
-                        Value="{Binding BlueValue, ElementName=Root, Mode=TwoWay}" Margin="8,0"/>
-                <TextBlock Grid.Column="2" Text="{Binding BlueValue, ElementName=Root}" 
-                           VerticalAlignment="Center" HorizontalAlignment="Right" FontFamily="Consolas"/>
+
+            <Grid ColumnDefinitions="20, *, 36">
+                <TextBlock Text="B" VerticalAlignment="Center" Foreground="#5B9BD5"
+                    FontWeight="Bold" />
+                <Slider Grid.Column="1" Classes="color-slider"
+                    Minimum="0" Maximum="255"
+                    Value="{Binding BlueValue, ElementName=Root, Mode=TwoWay}" Margin="8,0" />
+                <TextBlock Grid.Column="2" Text="{Binding BlueValue, ElementName=Root}"
+                    Foreground="{DynamicResource TextPrimaryBrush}"
+                    VerticalAlignment="Center" HorizontalAlignment="Right"
+                    FontFamily="Consolas, monospace" />
             </Grid>
 
             <!-- Action Buttons -->
-            <Grid ColumnDefinitions="*, 8, *" Margin="0,16,0,0">
-                <Button Grid.Column="0" Content="✕" Click="OnCancelClick"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                <Button Grid.Column="2" Classes="primary-btn accent-base" Content="✓" Click="OnConfirmClick"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+            <Grid ColumnDefinitions="*, 8, *" Margin="0,12,0,0">
+                <Button Grid.Column="0" Click="OnCancelClick"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <PathIcon Data="{StaticResource Icon.Close}" Width="12" Height="12" />
+                        <TextBlock Text="{Binding L[Common_Cancel], ElementName=Root}" FontSize="12" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="2" Classes="primary-btn" Padding="12,6" Click="OnConfirmClick"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <PathIcon Data="{StaticResource Icon.Check}" Width="12" Height="12" />
+                        <TextBlock Text="{Binding L[Common_OK], ElementName=Root}" FontSize="12" />
+                    </StackPanel>
+                </Button>
             </Grid>
-            
+
         </StackPanel>
     </Border>
 </UserControl>

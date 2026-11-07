@@ -3,37 +3,227 @@
     xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
     xmlns:controls="using:LMP.UI.Features.Settings.Controls"
     x:Class="LMP.UI.Features.Settings.Pages.AppearancePage"
-    x:DataType="vm:AppearanceSettingsViewModel">
+    x:DataType="vm:AppearanceSettingsViewModel"
+    x:Name="PageRoot">
 
     <StackPanel Margin="32,24">
-        <Grid ColumnDefinitions="Auto, *" Margin="0,0,0,16">
+        <Grid ColumnDefinitions="Auto, *, Auto" Margin="0,0,0,16">
             <PathIcon Grid.Column="0" Data="{StaticResource Icon.Palette}"
                 Width="20" Height="20" VerticalAlignment="Center"
                 Foreground="{DynamicResource AccentBrush}" />
             <TextBlock Grid.Column="1" Classes="h2"
                 Text="{Binding L[Settings_Appearance]}"
                 VerticalAlignment="Center" Margin="8,0,0,0" />
+
+            <!-- Clipboard JSON Import / Export actions -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8"
+                VerticalAlignment="Center">
+                <Button Command="{Binding ExportThemeToClipboardCommand}"
+                    ToolTip.Tip="{Binding L[Theme_ExportClipboard_Tip]}"
+                    Padding="12,6">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <PathIcon Data="{StaticResource Icon.ContentCopy}" Width="14" Height="14" />
+                        <TextBlock Text="{Binding L[Theme_ExportClipboard]}" FontSize="12" />
+                    </StackPanel>
+                </Button>
+                <Button Command="{Binding ImportThemeFromClipboardCommand}"
+                    ToolTip.Tip="{Binding L[Theme_ImportClipboard_Tip]}"
+                    Padding="12,6">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <PathIcon Data="{StaticResource Icon.ContentSave}" Width="14" Height="14" />
+                        <TextBlock Text="{Binding L[Theme_ImportClipboard]}" FontSize="12" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
+
+        <!-- Prominent Top Unsaved Changes Action Banner -->
+        <Border IsVisible="{Binding HasUnsavedThemeChanges}"
+            Background="{DynamicResource AccentTransparentBrush}"
+            BorderBrush="{DynamicResource AccentBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="16,12"
+            Margin="0,0,0,16">
+            <Grid ColumnDefinitions="Auto, *, Auto">
+                <PathIcon Grid.Column="0"
+                    Data="{StaticResource Icon.AlertCircleOutline}"
+                    Width="18" Height="18"
+                    Foreground="{DynamicResource AccentBrush}"
+                    VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                    Text="{Binding L[Theme_UnsavedBanner]}"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Foreground="{DynamicResource TextPrimaryBrush}"
+                    VerticalAlignment="Center"
+                    Margin="12,0" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"
+                    VerticalAlignment="Center">
+                    <Button Classes="primary-btn"
+                        Padding="18,6"
+                        Content="{Binding L[Common_Apply]}"
+                        Command="{Binding ApplyThemeCommand}" />
+                    <Button Padding="14,6"
+                        Content="{Binding L[Common_Cancel]}"
+                        Command="{Binding CancelThemeChangesCommand}" />
+                    <Button Padding="14,6"
+                        Content="{Binding L[Common_Reset]}"
+                        Command="{Binding ResetThemeCommand}" />
+                </StackPanel>
+            </Grid>
+        </Border>
 
         <Border Classes="card">
             <StackPanel Spacing="20">
 
-                <!--  Theme preset  -->
-                <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel>
-                        <TextBlock Classes="label" Text="{Binding L[Theme_Presets]}" />
-                        <TextBlock Classes="desc" Text="{Binding L[Theme_PresetsDesc]}" />
-                    </StackPanel>
-                    <ComboBox Grid.Column="1"
-                        ItemsSource="{Binding ThemePresets}"
-                        SelectedItem="{Binding SelectedPreset}"
-                        PlaceholderText="{Binding L[Theme_SelectPreset]}"
-                        MinWidth="200" />
-                </Grid>
+                <!-- Theme Presets Header, Compact Create Input & Interactive Chips -->
+                <StackPanel Spacing="14">
+                    <Grid ColumnDefinitions="*, 16, Auto">
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock Classes="label" Text="{Binding L[Theme_Presets]}" />
+                            <TextBlock Classes="desc" Text="{Binding L[Theme_PresetsDesc]}" />
+                        </StackPanel>
+
+                        <!-- Compact Save New Custom Preset Bar (visible only when theme is
+                        modified) -->
+                        <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center"
+                            IsVisible="{Binding HasUnsavedThemeChanges}">
+                            <TextBox Width="200"
+                                Text="{Binding NewPresetNameInput, Mode=TwoWay}"
+                                PlaceholderText="{Binding L[Theme_CreatePreset_Watermark]}"
+                                MaxLength="32" />
+                            <Button Command="{Binding CreatePresetCommand}"
+                                Padding="12,8">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <PathIcon Data="{StaticResource Icon.Plus}" Width="14"
+                                        Height="14" />
+                                    <TextBlock Text="{Binding L[Theme_CreatePreset]}" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <ItemsControl ItemsSource="{Binding ThemePresetChips}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ThemePresetChipItem">
+                                <Panel Margin="0,0,8,8">
+                                    <Border Background="Transparent"
+                                        IsVisible="{Binding !IsRenaming}">
+                                        <StackPanel Orientation="Horizontal" Spacing="2">
+                                            <Button Classes="format-item-btn"
+                                                Classes.active="{Binding IsSelected}"
+                                                Command="{Binding #PageRoot.((vm:AppearanceSettingsViewModel)DataContext).SelectPresetChipCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="{Binding ChipHint}"
+                                                Padding="10,6">
+                                                <Button.ContextMenu>
+                                                    <ContextMenu IsVisible="{Binding IsCustom}">
+                                                        <MenuItem Header="{Binding L[Theme_Rename]}"
+                                                            Command="{Binding #PageRoot.((vm:AppearanceSettingsViewModel)DataContext).BeginRenamePresetCommand}"
+                                                            CommandParameter="{Binding}">
+                                                            <MenuItem.Icon>
+                                                                <PathIcon
+                                                                    Data="{StaticResource Icon.Pencil}"
+                                                                    Width="14" Height="14" />
+                                                            </MenuItem.Icon>
+                                                        </MenuItem>
+                                                        <MenuItem Classes="danger"
+                                                            Header="{Binding L[Button_Delete]}"
+                                                            Command="{Binding #PageRoot.((vm:AppearanceSettingsViewModel)DataContext).DeletePresetCommand}"
+                                                            CommandParameter="{Binding}">
+                                                            <MenuItem.Icon>
+                                                                <PathIcon
+                                                                    Data="{StaticResource Icon.Delete}"
+                                                                    Width="14" Height="14" />
+                                                            </MenuItem.Icon>
+                                                        </MenuItem>
+                                                    </ContextMenu>
+                                                </Button.ContextMenu>
+
+                                                <StackPanel Orientation="Horizontal" Spacing="8"
+                                                    VerticalAlignment="Center">
+                                                    <Border Width="14" Height="14" CornerRadius="7"
+                                                        Background="{Binding BgPrimaryBrush}"
+                                                        BorderBrush="{Binding AccentBrush}"
+                                                        BorderThickness="2"
+                                                        VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Name}"
+                                                        FontSize="12"
+                                                        VerticalAlignment="Center" />
+                                                    <PathIcon Data="{StaticResource Icon.Pencil}"
+                                                        Width="10" Height="10"
+                                                        Foreground="{DynamicResource TextMutedBrush}"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding IsCustom}" />
+                                                </StackPanel>
+                                            </Button>
+
+                                            <!-- Quick Delete Button for Custom Presets -->
+                                            <Button Classes="ghost-btn"
+                                                IsVisible="{Binding IsCustom}"
+                                                Padding="5,4"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{Binding L[Button_Delete]}"
+                                                Command="{Binding #PageRoot.((vm:AppearanceSettingsViewModel)DataContext).DeletePresetCommand}"
+                                                CommandParameter="{Binding}">
+                                                <PathIcon Data="{StaticResource Icon.Close}"
+                                                    Width="10" Height="10"
+                                                    Foreground="{DynamicResource TextMutedBrush}" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Inline Rename Mode for Custom Preset Chip -->
+                                    <Border IsVisible="{Binding IsRenaming}"
+                                        Background="Transparent"
+                                        BorderBrush="{DynamicResource AccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="8,4">
+                                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                            VerticalAlignment="Center">
+                                            <TextBox Classes="flat-search-box"
+                                                Text="{Binding EditName, Mode=TwoWay}"
+                                                MinWidth="110"
+                                                MaxLength="32"
+                                                FontSize="12" />
+                                            <Button Classes="ghost-btn"
+                                                Padding="4,2"
+                                                Command="{Binding #PageRoot.((vm:AppearanceSettingsViewModel)DataContext).CommitRenamePresetCommand}"
+                                                CommandParameter="{Binding}">
+                                                <PathIcon Data="{StaticResource Icon.Check}"
+                                                    Width="12" Height="12"
+                                                    Foreground="{DynamicResource AccentBrush}" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+                                </Panel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
 
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
-                <!--  Live wave animation toggle  -->
+                <!-- Live Preview Toggle -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Theme_LivePreview]}" />
+                        <TextBlock Classes="desc" Text="{Binding L[Theme_LivePreviewDesc]}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding LivePreviewEnabled}" />
+                </Grid>
+
+                <!-- Live wave animation toggle -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
                         <TextBlock Classes="label" Text="{Binding L[Settings_UseWaveAnimation]}" />
@@ -42,7 +232,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding UseWaveAnimation}" />
                 </Grid>
 
-                <!--  Track playing animation speed  -->
+                <!-- Track playing animation speed -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
                         <TextBlock Classes="label" Text="{Binding L[Settings_TrackAnimationSpeed]}" />
@@ -57,89 +247,294 @@
 
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
-                <!--  Accent color  -->
-                <Grid Classes="color-row" ColumnDefinitions="*, Auto">
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Classes="color-name" Text="{Binding L[Theme_AccentColor]}" />
-                        <TextBlock Classes="color-hint" Text="{Binding L[Theme_AccentColorDesc]}" />
-                    </StackPanel>
-                    <controls:ColorPickerButton Grid.Column="1"
-                        Color="{Binding AccentColor, Mode=TwoWay}" />
-                </Grid>
+                <!-- WCAG 2.0 Contrast & Readability Diagnostics -->
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="label" FontSize="13"
+                        Text="{Binding L[Theme_Contrast_Section]}" />
 
-                <!--  Advanced colors  -->
-                <Expander Header="{Binding L[Settings_AdvancedColors]}" IsExpanded="False">
-                    <StackPanel Spacing="0" Margin="0,16,0,0">
+                    <Grid ColumnDefinitions="*, 16, *">
+                        <!-- Primary Text on Primary Background -->
+                        <Border Grid.Column="0"
+                            Background="Transparent"
+                            BorderBrush="{DynamicResource BgHighlightBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="14,10">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <TextBlock Grid.Column="0"
+                                    Text="{Binding L[Theme_Contrast_PrimaryLabel]}"
+                                    FontSize="12"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    VerticalAlignment="Center"
+                                    TextTrimming="CharacterEllipsis" />
+                                <Border Grid.Column="1"
+                                    BorderBrush="{Binding PrimaryContrastBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="8,3"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding PrimaryContrastRatioText}"
+                                            FontFamily="Consolas, monospace"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="{Binding PrimaryContrastBrush}" />
+                                        <TextBlock Text="{Binding PrimaryContrastBadgeText}"
+                                            FontSize="11"
+                                            FontWeight="Bold"
+                                            Foreground="{Binding PrimaryContrastBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
 
-                        <Grid Classes="color-row" ColumnDefinitions="*, Auto">
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Classes="color-name" Text="{Binding L[Theme_BgPrimary]}" />
-                                <TextBlock Classes="color-hint"
-                                    Text="{Binding L[Theme_BgPrimaryDesc]}" />
+                        <!-- Accent Button Contrast -->
+                        <Border Grid.Column="2"
+                            Background="Transparent"
+                            BorderBrush="{DynamicResource BgHighlightBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="14,10">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <TextBlock Grid.Column="0"
+                                    Text="{Binding L[Theme_Contrast_AccentLabel]}"
+                                    FontSize="12"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    VerticalAlignment="Center"
+                                    TextTrimming="CharacterEllipsis" />
+                                <Border Grid.Column="1"
+                                    BorderBrush="{Binding AccentContrastBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="8,3"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Border Background="{Binding AccentSampleBgBrush}"
+                                            CornerRadius="3"
+                                            Padding="5,1">
+                                            <TextBlock Text="{Binding AccentContrastRatioText}"
+                                                FontFamily="Consolas, monospace"
+                                                FontSize="11"
+                                                FontWeight="Bold"
+                                                Foreground="{Binding AccentSampleTextBrush}" />
+                                        </Border>
+                                        <TextBlock Text="{Binding AccentContrastBadgeText}"
+                                            FontSize="11"
+                                            FontWeight="Bold"
+                                            Foreground="{Binding AccentContrastBrush}"
+                                            VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Core Palette Colors (2-Column Balanced Grid) -->
+                <Grid ColumnDefinitions="*, 24, *" RowDefinitions="Auto, Auto, Auto">
+                    <!-- Row 0: Accent & Primary Text -->
+                    <Border Grid.Row="0" Grid.Column="0"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,0,0,12">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Classes="color-name" FontWeight="SemiBold" FontSize="13"
+                                    Text="{Binding L[Theme_AccentColor]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Theme_AccentColorDesc]}" />
                             </StackPanel>
                             <controls:ColorPickerButton Grid.Column="1"
-                                Color="{Binding BgPrimaryColor, Mode=TwoWay}" />
+                                Color="{Binding AccentColor, Mode=TwoWay}" />
                         </Grid>
+                    </Border>
 
-                        <Grid Classes="color-row" ColumnDefinitions="*, Auto">
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Classes="color-name"
-                                    Text="{Binding L[Theme_BgSecondary]}" />
-                                <TextBlock Classes="color-hint"
-                                    Text="{Binding L[Theme_BgSecondaryDesc]}" />
-                            </StackPanel>
-                            <controls:ColorPickerButton Grid.Column="1"
-                                Color="{Binding BgSecondaryColor, Mode=TwoWay}" />
-                        </Grid>
-
-                        <Grid Classes="color-row" ColumnDefinitions="*, Auto">
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Classes="color-name" Text="{Binding L[Theme_BgElevated]}" />
-                                <TextBlock Classes="color-hint"
-                                    Text="{Binding L[Theme_BgElevatedDesc]}" />
-                            </StackPanel>
-                            <controls:ColorPickerButton Grid.Column="1"
-                                Color="{Binding BgElevatedColor, Mode=TwoWay}" />
-                        </Grid>
-
-                        <Separator Background="{DynamicResource BgHighlightBrush}"
-                            Height="1" Margin="0,8,0,16" />
-
-                        <Grid Classes="color-row" ColumnDefinitions="*, Auto">
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Classes="color-name"
+                    <Border Grid.Row="0" Grid.Column="2"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,0,0,12">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Classes="color-name" FontWeight="SemiBold" FontSize="13"
                                     Text="{Binding L[Theme_TextPrimary]}" />
-                                <TextBlock Classes="color-hint"
-                                    Text="{Binding L[Theme_TextPrimaryDesc]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Theme_TextPrimaryDesc]}" />
                             </StackPanel>
                             <controls:ColorPickerButton Grid.Column="1"
                                 Color="{Binding TextPrimaryColor, Mode=TwoWay}" />
                         </Grid>
+                    </Border>
 
-                        <Grid Classes="color-row" ColumnDefinitions="*, Auto">
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Classes="color-name"
+                    <!-- Row 1: Primary Background & Secondary Text -->
+                    <Border Grid.Row="1" Grid.Column="0"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,0,0,12">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Classes="color-name" FontWeight="SemiBold" FontSize="13"
+                                    Text="{Binding L[Theme_BgPrimary]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Theme_BgPrimaryDesc]}" />
+                            </StackPanel>
+                            <controls:ColorPickerButton Grid.Column="1"
+                                Color="{Binding BgPrimaryColor, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1" Grid.Column="2"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,0,0,12">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Classes="color-name" FontWeight="SemiBold" FontSize="13"
                                     Text="{Binding L[Theme_TextSecondary]}" />
-                                <TextBlock Classes="color-hint"
+                                <TextBlock Classes="desc"
                                     Text="{Binding L[Theme_TextSecondaryDesc]}" />
                             </StackPanel>
                             <controls:ColorPickerButton Grid.Column="1"
                                 Color="{Binding TextSecondaryColor, Mode=TwoWay}" />
                         </Grid>
+                    </Border>
+
+                    <!-- Row 2: Secondary Background & Elevated Background -->
+                    <Border Grid.Row="2" Grid.Column="0"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="14,10">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Classes="color-name" FontWeight="SemiBold" FontSize="13"
+                                    Text="{Binding L[Theme_BgSecondary]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Theme_BgSecondaryDesc]}" />
+                            </StackPanel>
+                            <controls:ColorPickerButton Grid.Column="1"
+                                Color="{Binding BgSecondaryColor, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Grid.Column="2"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="14,10">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock Classes="color-name" FontWeight="SemiBold" FontSize="13"
+                                    Text="{Binding L[Theme_BgElevated]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Theme_BgElevatedDesc]}" />
+                            </StackPanel>
+                            <controls:ColorPickerButton Grid.Column="1"
+                                Color="{Binding BgElevatedColor, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- Advanced Derived Surface & State Tokens -->
+                <Expander Header="{Binding L[Settings_AdvancedColors]}"
+                    HorizontalAlignment="Stretch"
+                    IsExpanded="False">
+                    <StackPanel Spacing="16" Margin="0,8,0,0" HorizontalAlignment="Stretch">
+
+                        <Grid ColumnDefinitions="*, 16, Auto">
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Classes="label" Text="{Binding L[Theme_DerivedColors]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Theme_AutoDerive_Tip]}" />
+                            </StackPanel>
+                            <Button Grid.Column="2"
+                                Command="{Binding RecalculateDerivedColorsCommand}"
+                                ToolTip.Tip="{Binding L[Theme_AutoDerive_Tip]}"
+                                VerticalAlignment="Center"
+                                Padding="12,6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <PathIcon Data="{StaticResource Icon.Refresh}" Width="14"
+                                        Height="14" />
+                                    <TextBlock Text="{Binding L[Theme_AutoDerive]}" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*, 24, *" RowDefinitions="Auto, Auto, Auto">
+                            <Border Grid.Row="0" Grid.Column="0"
+                                BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="14,10"
+                                Margin="0,0,0,12">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                        <TextBlock Classes="color-name" FontWeight="SemiBold"
+                                            FontSize="13"
+                                            Text="{Binding L[Theme_BgHighlight]}" />
+                                        <TextBlock Classes="desc"
+                                            Text="{Binding L[Theme_BgHighlightDesc]}" />
+                                    </StackPanel>
+                                    <controls:ColorPickerButton Grid.Column="1"
+                                        Color="{Binding BgHighlightColor, Mode=TwoWay}" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="0" Grid.Column="2"
+                                BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="14,10"
+                                Margin="0,0,0,12">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                        <TextBlock Classes="color-name" FontWeight="SemiBold"
+                                            FontSize="13"
+                                            Text="{Binding L[Theme_BgHover]}" />
+                                        <TextBlock Classes="desc"
+                                            Text="{Binding L[Theme_BgHoverDesc]}" />
+                                    </StackPanel>
+                                    <controls:ColorPickerButton Grid.Column="1"
+                                        Color="{Binding BgHoverColor, Mode=TwoWay}" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="0"
+                                BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="14,10"
+                                Margin="0,0,0,12">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                        <TextBlock Classes="color-name" FontWeight="SemiBold"
+                                            FontSize="13"
+                                            Text="{Binding L[Theme_BgSkeleton]}" />
+                                        <TextBlock Classes="desc"
+                                            Text="{Binding L[Theme_BgSkeletonDesc]}" />
+                                    </StackPanel>
+                                    <controls:ColorPickerButton Grid.Column="1"
+                                        Color="{Binding BgSkeletonColor, Mode=TwoWay}" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="2"
+                                BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="14,10"
+                                Margin="0,0,0,12">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                        <TextBlock Classes="color-name" FontWeight="SemiBold"
+                                            FontSize="13"
+                                            Text="{Binding L[Theme_TextMuted]}" />
+                                        <TextBlock Classes="desc"
+                                            Text="{Binding L[Theme_TextMutedDesc]}" />
+                                    </StackPanel>
+                                    <controls:ColorPickerButton Grid.Column="1"
+                                        Color="{Binding TextMutedColor, Mode=TwoWay}" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="2" Grid.Column="0"
+                                BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1" CornerRadius="6" Padding="14,10">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                        <TextBlock Classes="color-name" FontWeight="SemiBold"
+                                            FontSize="13"
+                                            Text="{Binding L[Theme_BgOverlay]}" />
+                                        <TextBlock Classes="desc"
+                                            Text="{Binding L[Theme_BgOverlayDesc]}" />
+                                    </StackPanel>
+                                    <controls:ColorPickerButton Grid.Column="1"
+                                        Color="{Binding BgOverlayColor, Mode=TwoWay}" />
+                                </Grid>
+                            </Border>
+                        </Grid>
 
                     </StackPanel>
                 </Expander>
-
-                <!--  Apply / Reset  -->
-                <StackPanel Orientation="Horizontal" Spacing="16"
-                    IsVisible="{Binding HasUnsavedThemeChanges}"
-                    Margin="0,10,0,0">
-                    <Button Classes="primary-btn"
-                        Content="{Binding L[Common_Apply]}"
-                        Command="{Binding ApplyThemeCommand}" />
-                    <Button Content="{Binding L[Common_Reset]}"
-                        Command="{Binding ResetThemeCommand}" />
-                </StackPanel>
 
             </StackPanel>
         </Border>

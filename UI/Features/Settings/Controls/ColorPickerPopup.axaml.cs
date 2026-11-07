@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
@@ -10,21 +8,11 @@ using Avalonia.Media.Immutable;
 namespace LMP.UI.Features.Settings.Controls;
 
 /// <summary>
-/// Popup content for color selection with RGB sliders and HEX input.
+/// Popup content for color selection with RGB sliders, preset swatches, and HEX input.
+/// Uses native <see cref="AvaloniaProperty"/> bindings for zero-reflection compiled binding support.
 /// </summary>
-public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
+public partial class ColorPickerPopup : UserControl
 {
-    #region INotifyPropertyChanged
-
-    public new event PropertyChangedEventHandler? PropertyChanged;
-
-    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-    {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-    }
-
-    #endregion
-
     #region Events
 
     public event EventHandler<Color>? ColorConfirmed;
@@ -37,67 +25,51 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
     public static readonly StyledProperty<Color> SelectedColorProperty =
         AvaloniaProperty.Register<ColorPickerPopup, Color>(nameof(SelectedColor), Colors.White);
 
+    public static readonly StyledProperty<byte> RedValueProperty =
+        AvaloniaProperty.Register<ColorPickerPopup, byte>(nameof(RedValue));
+
+    public static readonly StyledProperty<byte> GreenValueProperty =
+        AvaloniaProperty.Register<ColorPickerPopup, byte>(nameof(GreenValue));
+
+    public static readonly StyledProperty<byte> BlueValueProperty =
+        AvaloniaProperty.Register<ColorPickerPopup, byte>(nameof(BlueValue));
+
+    public static readonly StyledProperty<string> HexInputProperty =
+        AvaloniaProperty.Register<ColorPickerPopup, string>(nameof(HexInput), "#FFFFFF");
+
     public Color SelectedColor
     {
         get => GetValue(SelectedColorProperty);
         set => SetValue(SelectedColorProperty, value);
     }
 
-    #endregion
-
-    #region Bindable Properties
-
-    private byte _redValue;
     public byte RedValue
     {
-        get => _redValue;
-        set
-        {
-            if (_redValue == value) return;
-            _redValue = value;
-            OnPropertyChanged();
-            if (!_isUpdating) UpdateColorFromRgb();
-        }
+        get => GetValue(RedValueProperty);
+        set => SetValue(RedValueProperty, value);
     }
 
-    private byte _greenValue;
     public byte GreenValue
     {
-        get => _greenValue;
-        set
-        {
-            if (_greenValue == value) return;
-            _greenValue = value;
-            OnPropertyChanged();
-            if (!_isUpdating) UpdateColorFromRgb();
-        }
+        get => GetValue(GreenValueProperty);
+        set => SetValue(GreenValueProperty, value);
     }
 
-    private byte _blueValue;
     public byte BlueValue
     {
-        get => _blueValue;
-        set
-        {
-            if (_blueValue == value) return;
-            _blueValue = value;
-            OnPropertyChanged();
-            if (!_isUpdating) UpdateColorFromRgb();
-        }
+        get => GetValue(BlueValueProperty);
+        set => SetValue(BlueValueProperty, value);
     }
 
-    private string _hexInput = "#FFFFFF";
     public string HexInput
     {
-        get => _hexInput;
-        set
-        {
-            if (_hexInput == value) return;
-            _hexInput = value;
-            OnPropertyChanged();
-            if (!_isUpdating) UpdateColorFromHex();
-        }
+        get => GetValue(HexInputProperty);
+        set => SetValue(HexInputProperty, value);
     }
+
+    public LocalizationService L => LocalizationService.Instance;
+
+    public SolidColorBrush PreviewBrush { get; } = new(Colors.White);
 
     public IReadOnlyList<ColorPreset> PresetColors => CachedPresets;
 
@@ -106,64 +78,98 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
     private static readonly IReadOnlyList<ColorPreset> CachedPresets = GeneratePresets();
     private bool _isUpdating;
 
-    public ColorPickerPopup()
+    static ColorPickerPopup()
     {
-        InitializeComponent();
-
         SelectedColorProperty.Changed.AddClassHandler<ColorPickerPopup>(static (sender, _) =>
         {
             sender.SyncFromSelectedColor();
         });
+
+        RedValueProperty.Changed.AddClassHandler<ColorPickerPopup>(static (sender, _) =>
+        {
+            sender.UpdateColorFromRgb();
+        });
+
+        GreenValueProperty.Changed.AddClassHandler<ColorPickerPopup>(static (sender, _) =>
+        {
+            sender.UpdateColorFromRgb();
+        });
+
+        BlueValueProperty.Changed.AddClassHandler<ColorPickerPopup>(static (sender, _) =>
+        {
+            sender.UpdateColorFromRgb();
+        });
+
+        HexInputProperty.Changed.AddClassHandler<ColorPickerPopup>(static (sender, _) =>
+        {
+            sender.UpdateColorFromHex();
+        });
+    }
+
+    public ColorPickerPopup()
+    {
+        InitializeComponent();
+        SyncFromSelectedColor();
     }
 
     private void SyncFromSelectedColor()
     {
+        var color = SelectedColor;
+        PreviewBrush.Color = color;
+
         if (_isUpdating) return;
         _isUpdating = true;
-
-        var color = SelectedColor;
-        _redValue = color.R;
-        _greenValue = color.G;
-        _blueValue = color.B;
-        _hexInput = color.ToString();
-
-        OnPropertyChanged(nameof(RedValue));
-        OnPropertyChanged(nameof(GreenValue));
-        OnPropertyChanged(nameof(BlueValue));
-        OnPropertyChanged(nameof(HexInput));
-
-        _isUpdating = false;
+        try
+        {
+            RedValue = color.R;
+            GreenValue = color.G;
+            BlueValue = color.B;
+            HexInput = ThemeManagerService.FormatHexColor(color);
+        }
+        finally
+        {
+            _isUpdating = false;
+        }
     }
 
     private void UpdateColorFromRgb()
     {
+        if (_isUpdating) return;
         _isUpdating = true;
-
-        SelectedColor = Color.FromRgb(_redValue, _greenValue, _blueValue);
-        _hexInput = SelectedColor.ToString();
-        OnPropertyChanged(nameof(HexInput));
-
-        _isUpdating = false;
+        try
+        {
+            var color = Color.FromRgb(RedValue, GreenValue, BlueValue);
+            PreviewBrush.Color = color;
+            SelectedColor = color;
+            HexInput = ThemeManagerService.FormatHexColor(color);
+        }
+        finally
+        {
+            _isUpdating = false;
+        }
     }
 
     private void UpdateColorFromHex()
     {
-        if (string.IsNullOrWhiteSpace(_hexInput)) return;
+        if (_isUpdating) return;
+        var input = HexInput;
+        if (string.IsNullOrWhiteSpace(input)) return;
 
-        if (TryParseHex(_hexInput, out var color))
+        if (TryParseHex(input, out var color))
         {
             _isUpdating = true;
-
-            SelectedColor = color;
-            _redValue = color.R;
-            _greenValue = color.G;
-            _blueValue = color.B;
-
-            OnPropertyChanged(nameof(RedValue));
-            OnPropertyChanged(nameof(GreenValue));
-            OnPropertyChanged(nameof(BlueValue));
-
-            _isUpdating = false;
+            try
+            {
+                PreviewBrush.Color = color;
+                SelectedColor = color;
+                RedValue = color.R;
+                GreenValue = color.G;
+                BlueValue = color.B;
+            }
+            finally
+            {
+                _isUpdating = false;
+            }
         }
     }
 
@@ -196,13 +202,14 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
         color = Colors.White;
         try
         {
-            if (!hex.StartsWith('#'))
-                hex = "#" + hex;
+            var trimmed = hex.Trim();
+            if (!trimmed.StartsWith('#'))
+                trimmed = "#" + trimmed;
 
-            if (!OnlyHEXRegex().IsMatch(hex))
+            if (!OnlyHEXRegex().IsMatch(trimmed))
                 return false;
 
-            color = Color.Parse(hex);
+            color = Color.Parse(trimmed);
             return true;
         }
         catch
@@ -211,46 +218,33 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
         }
     }
 
-    private static List<ColorPreset> GeneratePresets()
-    {
-        return
-        [
-            // Purples
-            new("Paralax Purple", "#8A2BE2"),
-            new("Violet", "#9B59B6"),
-            new("Deep Purple", "#673AB7"),
-            new("Lavender", "#B39DDB"),
-
-            // Blues
-            new("Electric Blue", "#00B4D8"),
-            new("Sky Blue", "#5B9BD5"),
-            new("Navy", "#1E3A5F"),
-            new("Cyan", "#00BCD4"),
-
-            // Greens
-            new("Spotify Green", "#1DB954"),
-            new("Emerald", "#2ECC71"),
-            new("Teal", "#009688"),
-            new("Mint", "#4ECB71"),
-
-            // Warm
-            new("Sunset Orange", "#FF6B35"),
-            new("Coral", "#FF6B6B"),
-            new("Gold", "#FFB86C"),
-            new("Pink", "#FF69B4"),
-
-            // Neutrals
-            new("White", "#FFFFFF"),
-            new("Light Gray", "#B3B3B3"),
-            new("Dark Gray", "#404040"),
-            new("Pure Black", "#000000"),
-
-            // Backgrounds
-            new("Deep Dark", "#0F0B15"),
-            new("Spotify Black", "#121212"),
-            new("Ocean Dark", "#001219"),
-        ];
-    }
+    private static List<ColorPreset> GeneratePresets() =>
+    [
+        new("#8A2BE2"),
+        new("#9B59B6"),
+        new("#673AB7"),
+        new("#B39DDB"),
+        new("#00B4D8"),
+        new("#5B9BD5"),
+        new("#1E3A5F"),
+        new("#00BCD4"),
+        new("#1DB954"),
+        new("#2ECC71"),
+        new("#009688"),
+        new("#4ECB71"),
+        new("#FF6B35"),
+        new("#FF6B6B"),
+        new("#FFB86C"),
+        new("#FF69B4"),
+        new("#FFFFFF"),
+        new("#B3B3B3"),
+        new("#404040"),
+        new("#000000"),
+        new("#0F0B15"),
+        new("#121212"),
+        new("#001219"),
+        new("#282A36")
+    ];
 
     [GeneratedRegex(@"^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")]
     private static partial Regex OnlyHEXRegex();
@@ -263,14 +257,12 @@ public partial class ColorPickerPopup : UserControl, INotifyPropertyChanged
 /// </summary>
 public sealed class ColorPreset
 {
-    public string Name { get; }
     public string Hex { get; }
     public Color Color { get; }
     public IBrush Brush { get; }
 
-    public ColorPreset(string name, string hex)
+    public ColorPreset(string hex)
     {
-        Name = name;
         Hex = hex;
         Color = Color.Parse(hex);
         Brush = new ImmutableSolidColorBrush(Color);

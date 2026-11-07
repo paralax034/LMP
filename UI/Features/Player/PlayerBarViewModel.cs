@@ -72,6 +72,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private CancellationTokenSource? _prevDebounceCts;
 
     private bool _isSeeking;
+    private bool _isInitializing;
 
     private int _lastVolumeBeforeMute;
 
@@ -175,7 +176,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     partial void OnVolumeChanged(int value)
     {
-        if (_playerControl.CurrentVolume != value)
+        if (!_isInitializing && _playerControl.CurrentVolume != value)
         {
             _playerControl.SetVolume(value);
         }
@@ -421,42 +422,44 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void InitializeFromSettings()
     {
-        var settings = _library.Settings;
-
-        int newMax = Math.Max(settings.MaxVolumeLimit, DefaultMaxVolume);
-        MaxVolume = newMax;
-
-        int savedVolume = settings.Volume;
-        if (savedVolume > 0 && savedVolume <= MaxVolume)
+        _isInitializing = true;
+        try
         {
-            Volume = savedVolume;
-            _lastVolumeBeforeMute = savedVolume;
+            var settings = _library.Settings;
+
+            int newMax = Math.Max(settings.MaxVolumeLimit, DefaultMaxVolume);
+            MaxVolume = newMax;
+
+            int savedVolume = settings.Volume;
+            if (savedVolume >= 0 && savedVolume <= MaxVolume)
+            {
+                Volume = savedVolume;
+                _lastVolumeBeforeMute = savedVolume > 0 ? savedVolume : DefaultVolume;
+            }
+            else if (savedVolume > MaxVolume)
+            {
+                Volume = MaxVolume;
+                _lastVolumeBeforeMute = MaxVolume;
+            }
+            else
+            {
+                Volume = DefaultVolume;
+                _lastVolumeBeforeMute = DefaultVolume;
+            }
+
+            AutoShuffleEnabled = _playerControl.ShuffleEnabled;
+            RepeatMode = _playerControl.RepeatMode;
+
+            RecalcEffectivePercent();
+
+            RaiseVolumePropertiesChanged();
+            UpdateQueueState();
+            SyncEqualizerStateFromSettings();
         }
-        else if (savedVolume > MaxVolume)
+        finally
         {
-            Volume = MaxVolume;
-            _lastVolumeBeforeMute = MaxVolume;
+            _isInitializing = false;
         }
-        else
-        {
-            Volume = DefaultVolume;
-            _lastVolumeBeforeMute = DefaultVolume;
-        }
-
-        AutoShuffleEnabled = _playerControl.ShuffleEnabled;
-        RepeatMode = _playerControl.RepeatMode;
-
-        // Synchronize volume only on actual mismatch to prevent no-op DB writes during startup
-        if (_playerControl.CurrentVolume != Volume)
-        {
-            _playerControl.SetVolume(Volume);
-        }
-
-        RecalcEffectivePercent();
-
-        RaiseVolumePropertiesChanged();
-        UpdateQueueState();
-        SyncEqualizerStateFromSettings();
 
         Log.Info(
             $"[PlayerBar] Initialized: Vol={Volume}, MaxVol={MaxVolume}, AutoShuffle={AutoShuffleEnabled}, Repeat={RepeatMode}");
@@ -987,7 +990,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         else
         {
             // Critical latency: system red color and extra bold font weight (Heavy)
-            if (app?.Resources.TryGetResource("AccentBrush", app.ActualThemeVariant, out var b) == true &&
+            if (app?.Resources.TryGetResource("SystemErrorBrush", app.ActualThemeVariant, out var b) == true &&
                 b is IBrush brush)
                 PingBrush = brush;
             else
@@ -1998,7 +2001,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     partial void OnIsEqualizerEnabledChanged(bool value)
     {
-        if (_isSyncingEq) return;
+        if (_isSyncingEq || _library.Settings.Audio.EqualizerEnabled == value) return;
         _eqSaveDebounceTimer?.Stop();
         _library.UpdateSettings(s => s.Audio.EqualizerEnabled = value);
         _audio.UpdateEqualizerSettings();
@@ -2007,7 +2010,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     partial void OnIsSimple5BandModeChanged(bool value)
     {
         OnPropertyChanged(nameof(BandModeBadgeText));
-        if (_isSyncingEq) return;
+        if (_isSyncingEq || _library.Settings.Audio.UseSimple5BandMode == value) return;
         _library.UpdateSettings(s => s.Audio.UseSimple5BandMode = value);
     }
 
@@ -2018,7 +2021,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     partial void OnForceGlobalEqualizerChanged(bool value)
     {
-        if (_isSyncingEq)
+        if (_isSyncingEq || _library.Settings.Audio.ForceGlobalEqualizer == value)
         {
             RefreshEqualizerButtonFlags(EqualizerBandGains);
             return;
@@ -2150,6 +2153,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsRepeatNone));
         OnPropertyChanged(nameof(IsRepeatOne));
         OnPropertyChanged(nameof(IsRepeatAll));
+        RebuildEqualizerPresetsList();
         SyncEqualizerStateFromSettings();
     }
 

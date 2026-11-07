@@ -30,6 +30,7 @@ namespace LMP.Core.Models;
 [JsonSerializable(typeof(VariantEntry))]
 [JsonSerializable(typeof(List<VariantEntry>))]
 [JsonSerializable(typeof(ThemeSettings))]
+[JsonSerializable(typeof(List<ThemeSettings>))]
 [JsonSerializable(typeof(BootstrapSettings))]
 [JsonSerializable(typeof(AuthState))]
 [JsonSerializable(typeof(NotificationService.AttemptDto))]

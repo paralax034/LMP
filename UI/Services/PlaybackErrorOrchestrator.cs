@@ -354,9 +354,16 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     {
         var (trackId, trackTitle) = GetCurrentTrackInfo();
 
+        var configuredFailureBehavior = _libraryService.Settings.Audio.PlaybackFailureBehavior;
+        if (exception is VideoUnplayableException
+            && configuredFailureBehavior == PlaybackFailureBehavior.SkipAndPause)
+        {
+            configuredFailureBehavior = PlaybackFailureBehavior.SkipAndPlay;
+        }
+
         var policy = PlaybackErrorBehaviorMatrix.Resolve(
             _libraryService.Settings.Audio.CriticalErrorBehavior,
-            _libraryService.Settings.Audio.PlaybackFailureBehavior);
+            configuredFailureBehavior);
 
         await ApplyRecoveryPolicyAsync(policy);
 

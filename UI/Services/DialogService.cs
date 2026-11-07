@@ -269,9 +269,45 @@ public sealed class DialogService
     #region Close Action Dialog
 
     /// <summary>
-    /// Shows a "What to do on close?" dialog using the universal ChoiceDialog.
+    /// Prompts the user to apply, discard, or cancel when leaving a page with unsaved changes.
     /// </summary>
-    /// <returns>Selected result or null if canceled.</returns>
+    /// <param name="guard">The active guard with unsaved changes.</param>
+    /// <returns><c>true</c> if changes were applied or discarded and navigation may proceed; <c>false</c> if navigation was canceled.</returns>
+    public async Task<bool> ConfirmUnsavedChangesAsync(IUnsavedChangesGuard guard)
+    {
+        if (!guard.HasUnsavedChanges)
+            return true;
+
+        var choice = await ShowChoiceAsync(
+            title: L["Theme_UnsavedDialog_Title"],
+            message: L["Theme_UnsavedDialog_Message"],
+            options:
+            [
+                new ChoiceOption<bool>
+                {
+                    Text = L["Common_Apply"],
+                    Value = true,
+                    IsPrimary = true
+                },
+                new ChoiceOption<bool>
+                {
+                    Text = L["Theme_DiscardChanges"],
+                    Value = false
+                }
+            ],
+            cancelText: L["Common_Cancel"]);
+
+        if (choice is null)
+            return false;
+
+        if (choice.Value)
+            guard.ApplyChanges();
+        else
+            guard.DiscardChanges();
+
+        return true;
+    }
+
     public async Task<ChoiceResult<CloseAction>?> ShowCloseActionDialogAsync()
     {
         return await ShowChoiceAsync(

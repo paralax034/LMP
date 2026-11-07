@@ -99,7 +99,7 @@ public sealed partial class AudioEngine
             {
                 ResetSealedFailedTrack();
                 int session = BeginNewSession();
-                _ = PlayTrackCoreAsync(playbackTrack, session, GetSessionToken());
+                EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: true));
             }
         }
 
@@ -114,7 +114,12 @@ public sealed partial class AudioEngine
 
         lock (_queueLock)
         {
-            if (_queue.Any(t => t.Id == track.Id)) return;
+            for (int i = 0; i < _queue.Count; i++)
+            {
+                if (string.Equals(_queue[i].Id, track.Id, StringComparison.Ordinal))
+                    return;
+            }
+
             _queue.Add(track);
             insertedIndex = _queue.Count - 1;
             InvalidateQueueSnapshot();
@@ -139,7 +144,7 @@ public sealed partial class AudioEngine
         {
             ResetSealedFailedTrack();
             int session = BeginNewSession();
-            _ = PlayTrackCoreAsync(playbackTrack, session, GetSessionToken());
+            EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: true));
         }
     }
 
@@ -329,6 +334,12 @@ public sealed partial class AudioEngine
 
         int next = ComputeNextIndex(_currentIndex, _queue.Count, RepeatMode == RepeatMode.All, userInitiated);
         if (next < 0) return false;
+
+        string? sealedId = Volatile.Read(ref _sealedFailedTrackId);
+        if (sealedId != null && string.Equals(_queue[next].Id, sealedId, StringComparison.Ordinal))
+        {
+            return TryMoveNextSkippingTrack(sealedId);
+        }
 
         // Loop transition on RepeatMode.All: in auto-shuffle mode, the queue is reshuffled
         if (next <= _currentIndex && ShuffleEnabled && _queue.Count > 1)

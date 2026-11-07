@@ -83,10 +83,60 @@ public sealed class ThemeSettings : IEquatable<ThemeSettings>
     public override string ToString() => Name;
 
     /// <summary>
-    /// Determines equality of two themes by their name.
+    /// Creates a deep copy of the theme settings instance.
     /// </summary>
-    /// <param name="other">Theme instance to compare.</param>
-    /// <returns><c>true</c> if theme names match, case-insensitively.</returns>
+    /// <param name="isBuiltIn">Optional override for the <see cref="IsBuiltIn"/> flag.</param>
+    /// <returns>A cloned <see cref="ThemeSettings"/> instance.</returns>
+    public ThemeSettings Clone(bool? isBuiltIn = null) => new()
+    {
+        Name = Name,
+        IsBuiltIn = isBuiltIn ?? IsBuiltIn,
+        BgPrimary = BgPrimary,
+        BgSecondary = BgSecondary,
+        BgElevated = BgElevated,
+        BgHighlight = BgHighlight,
+        BgHover = BgHover,
+        BgSkeleton = BgSkeleton,
+        BgSkeletonDeep = BgSkeletonDeep,
+        BgOverlay = BgOverlay,
+        AccentColor = AccentColor,
+        AccentHover = AccentHover,
+        SystemError = SystemError,
+        SystemErrorBg = SystemErrorBg,
+        SystemInfoBlue = SystemInfoBlue,
+        SystemWarnOrange = SystemWarnOrange,
+        TextPrimary = TextPrimary,
+        TextSecondary = TextSecondary,
+        TextMuted = TextMuted,
+        TextDark = TextDark
+    };
+
+    /// <summary>
+    /// Determines whether all color tokens of this theme match another theme instance.
+    /// </summary>
+    /// <param name="other">Theme instance to compare colors against.</param>
+    /// <returns><c>true</c> if all HEX color tokens are equal case-insensitively.</returns>
+    public bool HasSameColors(ThemeSettings? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+
+        return string.Equals(BgPrimary, other.BgPrimary, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgSecondary, other.BgSecondary, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgElevated, other.BgElevated, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgHighlight, other.BgHighlight, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgHover, other.BgHover, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgSkeleton, other.BgSkeleton, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgSkeletonDeep, other.BgSkeletonDeep, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(BgOverlay, other.BgOverlay, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(AccentColor, other.AccentColor, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(AccentHover, other.AccentHover, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(TextPrimary, other.TextPrimary, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(TextSecondary, other.TextSecondary, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(TextMuted, other.TextMuted, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(TextDark, other.TextDark, StringComparison.OrdinalIgnoreCase);
+    }
+
     public bool Equals(ThemeSettings? other)
     {
         if (other is null) return false;
