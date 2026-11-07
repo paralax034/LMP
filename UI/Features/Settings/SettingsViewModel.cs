@@ -72,7 +72,7 @@ public sealed partial class SettingsViewModel : ViewModelBase
         }
         else if (section is StorageCacheSettingsViewModel storageVm)
         {
-            _ = Task.Run(storageVm.UpdateCacheStats);
+            storageVm.UpdateCacheStats();
         }
     }
 

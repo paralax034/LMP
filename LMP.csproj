@@ -13,9 +13,7 @@
           Conscious choice: Runtime Async without EnablePreviewFeatures, JIT improvements.
         -->
         <TargetFramework>net11.0</TargetFramework>
-        <Nullable>enable</Nullable>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <LangVersion>latest</LangVersion>
+        <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
 
         <RootNamespace>LMP</RootNamespace>
         <AssemblyName>LMP</AssemblyName>
@@ -28,14 +26,6 @@
 
         <!-- Compiled bindings by default: faster + compile-time type checking -->
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-
-        <!-- Required for low-level audio operations (PCM buffers, native interop) -->
-        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-
-        <!-- Suppresses IL20xx/IL30xx warnings/errors during AOT analysis -->
-        <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
-        <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-        <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
     </PropertyGroup>
 
     <!--   MEMORY / JIT OPTIMIZATION -->

@@ -164,48 +164,55 @@ public static class StreamFreshnessTests
                 };
             });
 
-        // Invoke LogAndDiagnose403Async to verify immediate SessionCacheStore invalidation
-        using (var req = new HttpRequestMessage(HttpMethod.Get, initialUrl))
-        using (var resp = new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden) { Content = new StringContent("") })
-        {
-            await CachingStreamSourceAccessors.LogAndDiagnose403Async(source, 0, req, resp).ConfigureAwait(false);
-        }
-
-        TestAssert.Null(
-            Core.Audio.Http.SessionCacheStore.GetManifest(trackId),
-            "HTTP 403 must immediately invalidate SessionCacheStore entry so Partial Cache Fast Start never reuses dead URL");
-
-        // 2. Proactive refresh (no HTTP 403) during network outage: provider returned null -> NoUrl, budget is not consumed
-        for (int i = 0; i < 5; i++)
-        {
-            var outcomeNoUrl = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
-            TestAssert.Equal(RefreshOutcome.NoUrl, outcomeNoUrl, "Null provider result must yield NoUrl (transient network outage)");
-        }
-
-        // 3. After HTTP 403, a stale URL (previous n-token, expired expire) -> SameUrl consumes the shared budget;
-        //    after exhaustion (3 = CachingStreamSource.MaxForbiddenRefreshBudget), refresh escalates to Forbidden403.
-        Volatile.Write(ref CachingStreamSourceAccessors.Consecutive403Count(source), 1);
-
-        mode = 1;
-        for (int i = 0; i < 3; i++)
-        {
-            var outcomeSame = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
-            TestAssert.Equal(RefreshOutcome.SameUrl, outcomeSame, $"Expected SameUrl on iteration {i + 1}");
-        }
-
-        Core.Exceptions.ChunkDownloadFatalException? fatal = null;
         try
         {
-            _ = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Core.Exceptions.ChunkDownloadFatalException ex) when (ex.Reason == Core.Exceptions.ChunkDownloadFailureReason.Forbidden403)
-        {
-            fatal = ex;
-        }
+            // Invoke LogAndDiagnose403Async to verify immediate SessionCacheStore invalidation
+            using (var req = new HttpRequestMessage(HttpMethod.Get, initialUrl))
+            using (var resp = new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden) { Content = new StringContent("") })
+            {
+                await CachingStreamSourceAccessors.LogAndDiagnose403Async(source, 0, req, resp).ConfigureAwait(false);
+            }
 
-        TestAssert.NotNull(fatal, "Exhausted refresh budget after HTTP 403 must escalate to fatal Forbidden403");
-        TestAssert.True(fatal!.Message.Contains("same or stale stream URL", StringComparison.Ordinal),
-            $"Fatal message must name the stale URL cause instead of blaming the CDN, got: {fatal.Message}");
+            TestAssert.Null(
+                Core.Audio.Http.SessionCacheStore.GetManifest(trackId),
+                "HTTP 403 must immediately invalidate SessionCacheStore entry so Partial Cache Fast Start never reuses dead URL");
+
+            // 2. Proactive refresh (no HTTP 403) during network outage: provider returned null -> NoUrl, budget is not consumed
+            for (int i = 0; i < 5; i++)
+            {
+                var outcomeNoUrl = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+                TestAssert.Equal(RefreshOutcome.NoUrl, outcomeNoUrl, "Null provider result must yield NoUrl (transient network outage)");
+            }
+
+            // 3. After HTTP 403, a stale URL (previous n-token, expired expire) -> SameUrl consumes the shared budget;
+            //    after exhaustion (3 = CachingStreamSource.MaxForbiddenRefreshBudget), refresh escalates to Forbidden403.
+            Volatile.Write(ref CachingStreamSourceAccessors.Consecutive403Count(source), 1);
+
+            mode = 1;
+            for (int i = 0; i < 3; i++)
+            {
+                var outcomeSame = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+                TestAssert.Equal(RefreshOutcome.SameUrl, outcomeSame, $"Expected SameUrl on iteration {i + 1}");
+            }
+
+            Core.Exceptions.ChunkDownloadFatalException? fatal = null;
+            try
+            {
+                _ = await CachingStreamSourceAccessors.CoordinatedRefreshAsync(source, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Core.Exceptions.ChunkDownloadFatalException ex) when (ex.Reason == Core.Exceptions.ChunkDownloadFailureReason.Forbidden403)
+            {
+                fatal = ex;
+            }
+
+            TestAssert.NotNull(fatal, "Exhausted refresh budget after HTTP 403 must escalate to fatal Forbidden403");
+            TestAssert.True(fatal!.Message.Contains("same or stale stream URL", StringComparison.Ordinal),
+                $"Fatal message must name the stale URL cause instead of blaming the CDN, got: {fatal.Message}");
+        }
+        finally
+        {
+            Core.Audio.Http.SessionCacheStore.Invalidate(trackId);
+        }
     }
 
     [TestMethod(TestCategory.Unit, "Resume Freshness Skips Empty URL During Acquisition", Group = TestGroups.Network, Order = 5)]

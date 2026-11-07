@@ -2,13 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
+    <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
     <AssemblyName>LMP.Decoders.AAC</AssemblyName>
     <RootNamespace>SharpJaad.AAC</RootNamespace>
-    <!-- Unsafe blocks for efficient bitwise shifting and pointer operations in the audio decoder -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- SharpJaad decoder is written in pure C# and requires no external NuGet packages -->

@@ -60,7 +60,7 @@ public sealed partial class AudioEngine
         var settings = _library.Settings;
         lock (_volumeLock)
         {
-            _volumePercent = settings.Volume > 0
+            _volumePercent = settings.Volume >= 0
                 ? Math.Clamp(settings.Volume, 0, Math.Max(settings.MaxVolumeLimit, 100))
                 : 50;
             _lastSavedVolume = _volumePercent;
@@ -156,8 +156,10 @@ public sealed partial class AudioEngine
 
                 if (currentVol != _lastSavedVolume)
                 {
+                    int prevVol = _lastSavedVolume;
                     _lastSavedVolume = currentVol;
                     _library.UpdateSettings(s => s.Volume = currentVol);
+                    Log.Info($"[AudioEngine] Volume saved: {prevVol}% -> {currentVol}% (gain={_currentGain:F4}x)");
                 }
 
                 await FlushPendingNormalizationWritesAsync(_lifetimeCts.Token).ConfigureAwait(false);

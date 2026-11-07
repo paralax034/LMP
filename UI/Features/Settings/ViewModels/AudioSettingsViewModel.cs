@@ -8,14 +8,24 @@ namespace LMP.UI.Features.Settings.ViewModels;
 
 public sealed partial class AudioSettingsViewModel : ViewModelBase
 {
+    [Flags]
+    private enum PendingAudioChanges : uint
+    {
+        None = 0,
+        MaxVolume = 1 << 0,
+        NormLufs = 1 << 1,
+        NormGain = 1 << 2,
+        EqPreamp = 1 << 3,
+        EqBands = 1 << 4
+    }
+
     private readonly LibraryService _library;
     private readonly AudioEngine _audio;
     private readonly DialogService _dialog;
     private readonly YoutubeProvider _youtube;
 
-    private DispatcherTimer? _normLufsDebounceTimer;
-    private DispatcherTimer? _normGainDebounceTimer;
-    private DispatcherTimer? _eqBandsDebounceTimer;
+    private DispatcherTimer? _debounceTimer;
+    private PendingAudioChanges _pendingChanges;
     private bool _isLoading;
     private bool _isRevertingNormalization;
 
@@ -76,26 +86,26 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
 
         ShowNormalizationInfoCommand = new AsyncRelayCommand(ShowNormalizationInfoAsync);
         ResetEqualizerCommand = new RelayCommand(() =>
-         {
-             EqualizerPreampDb = 0f;
-             SelectEqualizerPresetById(EqualizerPresets.FlatId);
-         });
+        {
+            EqualizerPreampDb = 0f;
+            SelectEqualizerPresetById(EqualizerPresets.FlatId);
+        });
         ToggleEqualizerModeCommand = new RelayCommand(() => UseSimple5BandMode = !UseSimple5BandMode);
         ToggleForceGlobalEqualizerCommand = new RelayCommand(() => ForceGlobalEqualizer = !ForceGlobalEqualizer);
         SelectEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(p =>
-         {
-             if (p == null) return;
-             if (p.IsSelected && !p.IsBuiltIn)
-             {
-                 for (int i = 0; i < EqualizerPresetsList.Count; i++)
-                     EqualizerPresetsList[i].IsRenaming = ReferenceEquals(EqualizerPresetsList[i], p);
-                 p.EditTitle = p.Title;
-                 return;
-             }
-             for (int i = 0; i < EqualizerPresetsList.Count; i++)
-                 EqualizerPresetsList[i].IsRenaming = false;
-             SelectEqualizerPresetById(p.Id);
-         });
+        {
+            if (p == null) return;
+            if (p.IsSelected && !p.IsBuiltIn)
+            {
+                for (int i = 0; i < EqualizerPresetsList.Count; i++)
+                    EqualizerPresetsList[i].IsRenaming = ReferenceEquals(EqualizerPresetsList[i], p);
+                p.EditTitle = p.Title;
+                return;
+            }
+            for (int i = 0; i < EqualizerPresetsList.Count; i++)
+                EqualizerPresetsList[i].IsRenaming = false;
+            SelectEqualizerPresetById(p.Id);
+        });
         CommitRenamePresetCommand = new RelayCommand<EqualizerPresetChipItem>(CommitRenamePreset);
         DeleteEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(DeleteCustomPreset);
         SaveInlinePresetCommand = new RelayCommand(SaveInlinePreset);
@@ -164,17 +174,76 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         }
     }
 
+    private void ScheduleDebounce(PendingAudioChanges flag)
+    {
+        _pendingChanges |= flag;
+        _debounceTimer?.Stop();
+        _debounceTimer ??= new DispatcherTimer(
+            TimeSpan.FromMilliseconds(350),
+            DispatcherPriority.Normal,
+            (_, _) => FlushPendingChanges());
+        _debounceTimer.Start();
+    }
+
+    private void CancelPendingFlag(PendingAudioChanges flag)
+    {
+        _pendingChanges &= ~flag;
+        if (_pendingChanges == PendingAudioChanges.None)
+            _debounceTimer?.Stop();
+    }
+
+    private void FlushPendingChanges()
+    {
+        _debounceTimer?.Stop();
+        var pending = _pendingChanges;
+        if (pending == PendingAudioChanges.None) return;
+        _pendingChanges = PendingAudioChanges.None;
+
+        if ((pending & (PendingAudioChanges.NormLufs | PendingAudioChanges.NormGain)) != 0)
+            _audio.UpdateAudioSettings();
+
+        if ((pending & PendingAudioChanges.MaxVolume) != 0)
+            Log.Info($"[Settings] MaxVolumeLimit -> {MaxVolumeLimit}% (gain={_audio.CurrentGain:F4}x)");
+
+        if ((pending & PendingAudioChanges.NormLufs) != 0)
+            Log.Info($"[Settings] NormalizationTargetLufs -> {NormalizationTargetLufs:F1} LUFS");
+
+        if ((pending & PendingAudioChanges.NormGain) != 0)
+            Log.Info($"[Settings] NormalizationMaxGain -> {NormalizationMaxGain:F1} dB");
+
+        if ((pending & PendingAudioChanges.EqPreamp) != 0)
+            Log.Info($"[Settings] EqualizerPreampDb -> {EqualizerPreampDb:+0.0;-0.0;0.0} dB");
+
+        if ((pending & PendingAudioChanges.EqBands) != 0)
+        {
+            var bands = _library.Settings.Audio.CustomEqualizerBands;
+            _isLoading = true;
+            try
+            {
+                EqualizerBandGains = bands;
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+
+            Log.Info($"[Settings] Equalizer custom bands updated: [{FormatBands(bands)}] dB");
+        }
+    }
+
     partial void OnMaxVolumeLimitChanged(int value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.MaxVolumeLimit = value);
         _audio.OnMaxVolumeLimitChanged(value);
+        ScheduleDebounce(PendingAudioChanges.MaxVolume);
     }
 
     partial void OnRememberTrackFormatChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.RememberTrackFormat = value);
+        Log.Info($"[Settings] RememberTrackFormat -> {value}");
     }
 
     partial void OnVolumeBoostEnabledChanged(bool value)
@@ -182,6 +251,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Audio.VolumeBoostEnabled = value);
         _audio.UpdateAudioSettings();
+        Log.Info($"[Settings] VolumeBoostEnabled -> {value} (gain={_audio.CurrentGain:F4}x)");
     }
 
     partial void OnAudioNormalizationEnabledChanged(bool value)
@@ -208,44 +278,28 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
 
                 _library.UpdateSettings(s => s.Audio.NormalizationEnabled = false);
                 _audio.UpdateAudioSettings();
+                Log.Info("[Settings] NormalizationEnabled -> False");
             });
             return;
         }
 
         _library.UpdateSettings(s => s.Audio.NormalizationEnabled = true);
         _audio.UpdateAudioSettings();
+        Log.Info("[Settings] NormalizationEnabled -> True");
     }
 
     partial void OnNormalizationTargetLufsChanged(float value)
     {
         if (_isLoading) return;
-        _normLufsDebounceTimer?.Stop();
-        _normLufsDebounceTimer ??= new DispatcherTimer(
-            TimeSpan.FromMilliseconds(300),
-            DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _normLufsDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.Audio.NormalizationTargetLufs = NormalizationTargetLufs);
-                _audio.UpdateAudioSettings();
-            });
-        _normLufsDebounceTimer.Start();
+        _library.UpdateSettings(s => s.Audio.NormalizationTargetLufs = value);
+        ScheduleDebounce(PendingAudioChanges.NormLufs);
     }
 
     partial void OnNormalizationMaxGainChanged(float value)
     {
         if (_isLoading) return;
-        _normGainDebounceTimer?.Stop();
-        _normGainDebounceTimer ??= new DispatcherTimer(
-            TimeSpan.FromMilliseconds(300),
-            DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _normGainDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.Audio.NormalizationMaxGain = NormalizationMaxGain);
-                _audio.UpdateAudioSettings();
-            });
-        _normGainDebounceTimer.Start();
+        _library.UpdateSettings(s => s.Audio.NormalizationMaxGain = value);
+        ScheduleDebounce(PendingAudioChanges.NormGain);
     }
 
     partial void OnSelectedNormalizationModeChanged(LocalizedItem<NormalizationMode>? value)
@@ -253,6 +307,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.Audio.NormalizationMode = value.Value);
         _audio.UpdateAudioSettings();
+        Log.Info($"[Settings] NormalizationMode -> {value.Value}");
     }
 
     partial void OnSelectedVolumeCurveChanged(LocalizedItem<VolumeCurveType>? value)
@@ -260,6 +315,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.Audio.VolumeCurve = value.Value);
         _audio.UpdateAudioSettings();
+        Log.Info($"[Settings] VolumeCurve -> {value.Value} (gain={_audio.CurrentGain:F4}x)");
     }
 
     partial void OnSelectedQualityItemChanged(LocalizedItem<AudioQualityPreference>? value)
@@ -267,12 +323,13 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.QualityPreference = value.Value);
         _youtube.ClearCache();
+        Log.Info($"[Settings] QualityPreference -> {value.Value}");
     }
 
     partial void OnEqualizerEnabledChanged(bool value)
     {
         if (_isLoading) return;
-        _eqBandsDebounceTimer?.Stop();
+        CancelPendingFlag(PendingAudioChanges.EqBands);
         _library.UpdateSettings(s => s.Audio.EqualizerEnabled = value);
         _audio.UpdateEqualizerSettings();
     }
@@ -281,7 +338,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ForceGlobalEqualizerTooltip));
         if (_isLoading) return;
-        _eqBandsDebounceTimer?.Stop();
+        CancelPendingFlag(PendingAudioChanges.EqBands);
         _library.UpdateSettings(s => s.Audio.ForceGlobalEqualizer = value);
         _audio.UpdateEqualizerSettings();
     }
@@ -291,6 +348,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(BandModeBadgeText));
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Audio.UseSimple5BandMode = value);
+        Log.Info($"[Settings] EqualizerBandMode -> {(value ? "5-Band" : "10-Band")}");
     }
 
     partial void OnEqualizerPreampDbChanged(float value)
@@ -299,17 +357,20 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         _library.UpdateSettings(s => s.Audio.EqualizerPreampDb = value);
         RefreshCanReset(EqualizerBandGains);
         _audio.UpdateEqualizerSettings();
+        ScheduleDebounce(PendingAudioChanges.EqPreamp);
     }
 
     public void ApplyCustomBandsFromUi(float[] bands10)
     {
         if (_isLoading) return;
 
-        var audio = _library.Settings.Audio;
-        bool presetChanged = !string.Equals(audio.GlobalEqualizerPresetId, EqualizerPresets.CustomId, StringComparison.Ordinal);
-        audio.EqualizerEnabled = true;
-        audio.CustomEqualizerBands = bands10;
-        audio.GlobalEqualizerPresetId = EqualizerPresets.CustomId;
+        bool presetChanged = !string.Equals(_library.Settings.Audio.GlobalEqualizerPresetId, EqualizerPresets.CustomId, StringComparison.Ordinal);
+        _library.UpdateSettings(s =>
+        {
+            s.Audio.EqualizerEnabled = true;
+            s.Audio.CustomEqualizerBands = bands10;
+            s.Audio.GlobalEqualizerPresetId = EqualizerPresets.CustomId;
+        });
 
         if (presetChanged && _audio.CurrentTrack is { EqualizerPresetId.Length: > 0 } currentTrack && !ForceGlobalEqualizer)
             _ = _library.SetTrackEqualizerPresetAsync(currentTrack, EqualizerPresets.CustomId);
@@ -328,37 +389,24 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         }
 
         _audio.UpdateEqualizerSettings();
+        ScheduleDebounce(PendingAudioChanges.EqBands);
+    }
 
-        _eqBandsDebounceTimer?.Stop();
-        _eqBandsDebounceTimer ??= new DispatcherTimer(
-            TimeSpan.FromMilliseconds(350),
-            DispatcherPriority.Background,
-            (_, _) =>
-            {
-                _eqBandsDebounceTimer?.Stop();
-                _isLoading = true;
-                try
-                {
-                    EqualizerBandGains = _library.Settings.Audio.CustomEqualizerBands;
-                }
-                finally
-                {
-                    _isLoading = false;
-                }
-
-                _library.UpdateSettings(s =>
-                {
-                    s.Audio.EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
-                    s.Audio.CustomEqualizerBands = _library.Settings.Audio.CustomEqualizerBands;
-                    s.Audio.GlobalEqualizerPresetId = _library.Settings.Audio.GlobalEqualizerPresetId;
-                });
-            });
-        _eqBandsDebounceTimer.Start();
+    private static string FormatBands(float[] bands)
+    {
+        if (bands.Length == 0) return string.Empty;
+        var sb = new System.Text.StringBuilder(bands.Length * 6);
+        for (int i = 0; i < bands.Length; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append(bands[i].ToString("+0.0;-0.0;0.0", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
     }
 
     private void SelectEqualizerPresetById(string presetId)
     {
-        _eqBandsDebounceTimer?.Stop();
+        CancelPendingFlag(PendingAudioChanges.EqBands);
         _library.UpdateSettings(s =>
         {
             s.Audio.GlobalEqualizerPresetId = presetId;
@@ -452,7 +500,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         string name = NewPresetNameInput.Trim();
         if (string.IsNullOrEmpty(name)) return;
 
-        _eqBandsDebounceTimer?.Stop();
+        CancelPendingFlag(PendingAudioChanges.EqBands);
         string id = "user_" + Guid.NewGuid().ToString("N")[..8];
         var bandsCopy = new float[EqualizerProcessor.BandCount];
         for (int i = 0; i < EqualizerBandGains.Length && i < bandsCopy.Length; i++)
@@ -476,6 +524,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         EqualizerEnabled = true;
         EqualizerPresetsList.Add(new EqualizerPresetChipItem(id, name, isBuiltIn: false));
         UpdateSelectedChip(id);
+        Log.Info($"[Settings] Saved custom EQ preset '{name}' (id={id}, bands=[{FormatBands(bandsCopy)}])");
         _audio.UpdateEqualizerSettings();
     }
 
@@ -483,7 +532,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
     {
         if (item == null || item.IsBuiltIn) return;
 
-        _eqBandsDebounceTimer?.Stop();
+        CancelPendingFlag(PendingAudioChanges.EqBands);
         _library.UpdateSettings(s =>
         {
             s.Audio.UserEqualizerPresets.RemoveAll(p => string.Equals(p.Id, item.Id, StringComparison.Ordinal));
@@ -496,6 +545,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
 
         EqualizerPresetsList.Remove(item);
         SyncEqualizerBandsFromSettings();
+        Log.Info($"[Settings] Deleted custom EQ preset '{item.Title}' (id={item.Id})");
         _audio.UpdateEqualizerSettings();
     }
 
@@ -508,6 +558,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
         if (string.IsNullOrEmpty(newName) || string.Equals(newName, item.Title, StringComparison.Ordinal))
             return;
 
+        string oldName = item.Title;
         item.Title = newName;
         _library.UpdateSettings(s =>
         {
@@ -523,6 +574,8 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
 
         if (item.IsSelected)
             ActiveEqualizerPresetTitle = newName;
+
+        Log.Info($"[Settings] Renamed custom EQ preset '{oldName}' -> '{newName}' (id={item.Id})");
     }
 
     private async Task ShowNormalizationInfoAsync()
@@ -537,9 +590,7 @@ public sealed partial class AudioSettingsViewModel : ViewModelBase
     {
         if (disposing)
         {
-            _normLufsDebounceTimer?.Stop();
-            _normGainDebounceTimer?.Stop();
-            _eqBandsDebounceTimer?.Stop();
+            FlushPendingChanges();
         }
         base.Dispose(disposing);
     }

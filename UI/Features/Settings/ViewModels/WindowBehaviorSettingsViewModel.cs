@@ -50,12 +50,18 @@ public sealed partial class WindowBehaviorSettingsViewModel : ViewModelBase
     partial void OnSelectedCloseActionChanged(LocalizedItem<CloseAction>? value)
     {
         if (_isLoading || value is null) return;
+        if (_library.Settings.CloseAction == value.Value) return;
+
         _library.UpdateSettings(s => s.CloseAction = value.Value);
+        Log.Info($"[Settings] CloseAction -> {value.Value}");
     }
 
     partial void OnMinimizeToTrayChanged(bool value)
     {
         if (_isLoading) return;
+        if (_library.Settings.MinimizeToTray == value) return;
+
         _library.UpdateSettings(s => s.MinimizeToTray = value);
+        Log.Info($"[Settings] MinimizeToTray -> {value}");
     }
 }

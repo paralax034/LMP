@@ -137,6 +137,16 @@ def main():
 
     print()
 
+    stale_locks = list(root.rglob("packages*.lock.json"))
+    if stale_locks and not dry_run:
+        for lock_file in stale_locks:
+            try:
+                lock_file.unlink()
+                print(f"  {Color.GRAY}Removed obsolete lock file: {lock_file.relative_to(root)}{Color.RESET}")
+            except OSError as ex:
+                print(f"{Color.YELLOW}[WARN] Could not remove {lock_file}: {ex}{Color.RESET}")
+        print()
+
     if not has_changes:
         print(f"{Color.GREEN}✓ All solution dependencies in Directory.Packages.props are up to date!{Color.RESET}\n")
         sys.exit(0)
@@ -149,29 +159,15 @@ def main():
     props_file.write_text(props_text, encoding="utf-8")
     print(f"  {Color.GREEN}✓ Updated: Directory.Packages.props{Color.RESET}\n")
 
-    print(f"{Color.YELLOW}>>> Synchronizing dependency graph and lock files (Debug / Release / DebugAot)...{Color.RESET}")
-    restore_steps = [
-        ["dotnet", "restore", "LMP.sln", "-p:Configuration=Debug", "--force-evaluate"],
-        ["dotnet", "restore", "LMP.csproj", "-p:Configuration=Release", "-r", "win-x64", "--force-evaluate"],
-        [
-            "dotnet", "restore", "LMP.csproj",
-            "-p:Configuration=Debug",
-            "-r", "win-x64",
-            "-p:PublishAot=true",
-            "-p:NuGetLockFilePath=packages.DebugAot.lock.json",
-            "--force-evaluate"
-        ]
-    ]
-
-    for cmd in restore_steps:
-        res = subprocess.run(cmd, cwd=str(root))
-        if res.returncode != 0:
-            print(f"{Color.RED}[ERROR] 'dotnet restore' failed on command: {' '.join(cmd)}{Color.RESET}")
-            sys.exit(1)
+    print(f"{Color.YELLOW}>>> Restoring solution dependency graph...{Color.RESET}")
+    res = subprocess.run(["dotnet", "restore", "LMP.sln"], cwd=str(root))
+    if res.returncode != 0:
+        print(f"{Color.RED}[ERROR] 'dotnet restore LMP.sln' failed.{Color.RESET}")
+        sys.exit(1)
 
     print()
     print(f"{Color.GRAY}=============================================================={Color.RESET}")
-    print(f"{Color.GREEN} Successfully updated {upgrade_count} package(s) and synchronized all lock files!{Color.RESET}")
+    print(f"{Color.GREEN} Successfully updated {upgrade_count} package(s) and restored LMP.sln!{Color.RESET}")
     print(f"{Color.GRAY}=============================================================={Color.RESET}\n")
 
 if __name__ == "__main__":

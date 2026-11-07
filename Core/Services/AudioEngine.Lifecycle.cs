@@ -184,6 +184,7 @@ public sealed partial class AudioEngine
         {
             _disposed = true;
 
+            _library.OnInitialized -= InitializeFromSettings;
             _youtube.OnNTokenDecryptionStarted -= HandleNTokenDecryptionStarted;
             CdnConnectionPreWarmer.OnTunnelDeadDetected -= HandleCdnTunnelDead;
             Audio.Sources.CachingStreamSource.OnNetworkStalled -= HandleSourceNetworkStalled;
@@ -217,6 +218,7 @@ public sealed partial class AudioEngine
         if (_disposed) return;
         _disposed = true;
 
+        _library.OnInitialized -= InitializeFromSettings;
         _youtube.OnNTokenDecryptionStarted -= HandleNTokenDecryptionStarted;
         CdnConnectionPreWarmer.OnTunnelDeadDetected -= HandleCdnTunnelDead;
         Audio.Sources.CachingStreamSource.OnNetworkStalled -= HandleSourceNetworkStalled;

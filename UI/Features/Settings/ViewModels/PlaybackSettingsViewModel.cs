@@ -74,6 +74,7 @@ public sealed partial class PlaybackSettingsViewModel : ViewModelBase
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.AutoPlayOnUrlPaste = value);
+        Log.Info($"[Settings] AutoPlayOnUrlPaste -> {value}");
     }
 
     partial void OnSelectedErrorBehaviorChanged(LocalizedItem<PlaybackErrorBehavior>? value)
@@ -81,30 +82,35 @@ public sealed partial class PlaybackSettingsViewModel : ViewModelBase
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.Audio.CriticalErrorBehavior = value.Value);
         UpdatePlaybackFailureActionAvailability();
+        Log.Info($"[Settings] CriticalErrorBehavior -> {value.Value}");
     }
 
     partial void OnPlayErrorSoundChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Audio.PlayErrorSound = value);
+        Log.Info($"[Settings] PlayErrorSound -> {value}");
     }
 
     partial void OnSkipNTokenTracksChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Audio.SkipNTokenTracks = value);
+        Log.Info($"[Settings] SkipNTokenTracks -> {value}");
     }
 
     partial void OnSelectedNTokenNotificationChanged(LocalizedItem<NTokenNotificationMode>? value)
     {
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.Audio.NTokenNotificationMode = value.Value);
+        Log.Info($"[Settings] NTokenNotificationMode -> {value.Value}");
     }
 
     partial void OnSelectedPlaybackFailureChanged(LocalizedItem<PlaybackFailureBehavior>? value)
     {
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.Audio.PlaybackFailureBehavior = value.Value);
+        Log.Info($"[Settings] PlaybackFailureBehavior -> {value.Value}");
     }
 
     private void UpdatePlaybackFailureActionAvailability()

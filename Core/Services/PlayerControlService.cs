@@ -138,22 +138,17 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         _audio.OnLoadingStateChanged += HandleLoadingStateChanged;
         _audio.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
 
-        // If DB is already loaded — sync UI state, if not — wait for Initialized
-        if (_library.IsInitialized)
+        if (!_library.IsInitialized)
         {
-            _audio.InitializeVolumeFromSettings();
-            ForceSync();
-        }
-        else
-        {
-            _library.OnInitialized += () =>
-            {
-                _audio.InitializeVolumeFromSettings();
-                ForceSync();
-            };
+            _library.OnInitialized += HandleLibraryInitialized;
         }
 
         Log.Debug("[PlayerControl] Service initialized");
+    }
+
+    private void HandleLibraryInitialized()
+    {
+        ForceSync();
     }
 
     #endregion
@@ -622,6 +617,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _library.OnInitialized -= HandleLibraryInitialized;
         _audio.OnPlaybackStateChanged -= HandlePlaybackStateChanged;
         _audio.OnTrackChanged -= HandleTrackChanged;
         _audio.OnQueueChanged -= HandleQueueChanged;

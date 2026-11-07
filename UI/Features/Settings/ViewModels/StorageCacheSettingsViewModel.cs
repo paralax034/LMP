@@ -5,12 +5,21 @@ namespace LMP.UI.Features.Settings.ViewModels;
 
 public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 {
+    [Flags]
+    private enum PendingStorageChanges : uint
+    {
+        None = 0,
+        StorageQuotas = 1 << 0,
+        DownloadsLimit = 1 << 1,
+        BitmapCacheItems = 1 << 2
+    }
+
     private readonly LibraryService _library;
     private readonly ImageCacheService _imageCache;
     private readonly DialogService _dialog;
 
-    private DispatcherTimer? _storageDebounceTimer;
-    private DispatcherTimer? _downloadsLimitDebounceTimer;
+    private DispatcherTimer? _debounceTimer;
+    private PendingStorageChanges _pendingChanges;
     private bool _isLoading;
     private bool _isUpdatingPreset;
 
@@ -59,13 +68,13 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
     }
 
     private void OnAudioFormatCached(string trackId, AudioFormat format, int bitrate, bool isDownloaded) =>
-        Dispatcher.UIThread.Post(UpdateCacheStats);
+        UpdateCacheStats();
 
     private void OnAudioCacheCleared() =>
-        Dispatcher.UIThread.Post(UpdateCacheStats);
+        UpdateCacheStats();
 
     private void OnAudioEntryEvicted(string trackId) =>
-        Dispatcher.UIThread.Post(UpdateCacheStats);
+        UpdateCacheStats();
 
     public void RefreshLists()
     {
@@ -118,51 +127,68 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
         }
     }
 
+    private void ScheduleDebounce(PendingStorageChanges flag)
+    {
+        _pendingChanges |= flag;
+        _debounceTimer?.Stop();
+        _debounceTimer ??= new DispatcherTimer(
+            TimeSpan.FromMilliseconds(450),
+            DispatcherPriority.Normal,
+            (_, _) => FlushPendingChanges());
+        _debounceTimer.Start();
+    }
+
+    private void FlushPendingChanges()
+    {
+        _debounceTimer?.Stop();
+        var pending = _pendingChanges;
+        if (pending == PendingStorageChanges.None) return;
+        _pendingChanges = PendingStorageChanges.None;
+
+        if ((pending & PendingStorageChanges.StorageQuotas) != 0)
+        {
+            AudioSourceFactory.GlobalCache?.UpdateMaxCacheSizeMb(AudioCacheLimitMb);
+            Log.Info($"[Settings] Storage quotas updated -> AudioCache={AudioCacheLimitMb}MB, ImageCache={ImageCacheLimitMb}MB");
+        }
+
+        if ((pending & (PendingStorageChanges.StorageQuotas | PendingStorageChanges.BitmapCacheItems)) != 0)
+            _imageCache.EnforceLimits();
+
+        if ((pending & PendingStorageChanges.BitmapCacheItems) != 0)
+            Log.Info($"[Settings] MaxBitmapCacheItems -> {MaxBitmapCacheItems}");
+
+        if ((pending & PendingStorageChanges.DownloadsLimit) != 0)
+            Log.Info($"[Settings] DownloadedTracksLimitMb -> {DownloadedTracksLimitMb}MB");
+
+        UpdateCacheStats();
+    }
+
     partial void OnAutoSaveToDownloadsChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Storage.AutoSaveToDownloads = value);
+        Log.Info($"[Settings] AutoSaveToDownloads -> {value}");
     }
 
     partial void OnDownloadedTracksLimitMbChanged(int value)
     {
         if (_isLoading) return;
-        _downloadsLimitDebounceTimer?.Stop();
-        _downloadsLimitDebounceTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(500),
-            DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _downloadsLimitDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.Storage.DownloadedTracksLimitMb = value);
-                UpdateCacheStats();
-            });
-        _downloadsLimitDebounceTimer.Start();
+        _library.UpdateSettings(s => s.Storage.DownloadedTracksLimitMb = value);
+        ScheduleDebounce(PendingStorageChanges.DownloadsLimit);
     }
 
-    partial void OnImageCacheLimitMbChanged(int value) => ScheduleStorageSettingsSave();
-    partial void OnAudioCacheLimitMbChanged(int value) => ScheduleStorageSettingsSave();
+    partial void OnImageCacheLimitMbChanged(int value) => ScheduleStorageQuotasUpdate();
+    partial void OnAudioCacheLimitMbChanged(int value) => ScheduleStorageQuotasUpdate();
 
-    private void ScheduleStorageSettingsSave()
+    private void ScheduleStorageQuotasUpdate()
     {
         if (_isLoading) return;
-        _storageDebounceTimer?.Stop();
-        _storageDebounceTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(500),
-            DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _storageDebounceTimer?.Stop();
-                _library.UpdateSettings(s =>
-                {
-                    s.Storage.ImageCacheLimitMb = ImageCacheLimitMb;
-                    s.Storage.AudioCacheLimitMb = AudioCacheLimitMb;
-                });
-                AudioSourceFactory.GlobalCache?.UpdateMaxCacheSizeMb(AudioCacheLimitMb);
-                _imageCache.EnforceLimits();
-                UpdateCacheStats();
-            });
-        _storageDebounceTimer.Start();
+        _library.UpdateSettings(s =>
+        {
+            s.Storage.ImageCacheLimitMb = ImageCacheLimitMb;
+            s.Storage.AudioCacheLimitMb = AudioCacheLimitMb;
+        });
+        ScheduleDebounce(PendingStorageChanges.StorageQuotas);
     }
 
     partial void OnSelectedImageCachePresetChanged(LocalizedItem<ImageCachePreset>? value)
@@ -183,7 +209,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Storage.MaxBitmapCacheItems = value);
-        _imageCache.EnforceLimits();
+        ScheduleDebounce(PendingStorageChanges.BitmapCacheItems);
 
         if (_isUpdatingPreset) return;
 
@@ -200,18 +226,36 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 
     public void UpdateCacheStats()
     {
-        var (memItems, _, imgCount, imgSizeMb) = _imageCache.GetStats();
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            _ = Task.Run(ComputeAndPublishCacheStats);
+        }
+        else
+        {
+            ComputeAndPublishCacheStats();
+        }
+    }
 
+    private void ComputeAndPublishCacheStats()
+    {
+        var (memItems, _, imgCount, imgSizeMb) = _imageCache.GetStats();
         var (audioFileCount, audioSizeMb) = AudioSourceFactory.GlobalCache.GetStatsCompact();
         var (downloadFileCount, downloadSizeMb) = AudioCacheManager.GetDownloadsStats(_library.DownloadPath);
 
-        ImageCacheStats = $"{imgSizeMb} MB / {ImageCacheLimitMb} MB ({imgCount} {SL["Common_Files"]}, RAM: {memItems})";
-        AudioCacheStats = $"{audioSizeMb} MB / {AudioCacheLimitMb} MB ({audioFileCount} {SL["Common_Files"]})";
-        DownloadsStats = $"{downloadSizeMb} MB / {DownloadedTracksLimitMb} MB ({downloadFileCount} {SL["Common_Files"]})";
+        Dispatcher.UIThread.Post(() =>
+        {
+            int imgLimit = ImageCacheLimitMb;
+            int audLimit = AudioCacheLimitMb;
+            int dlLimit = DownloadedTracksLimitMb;
 
-        ImageCacheUsagePercent = ImageCacheLimitMb > 0 ? Math.Clamp((double)imgSizeMb / ImageCacheLimitMb, 0, 1) : 0;
-        AudioCacheUsagePercent = AudioCacheLimitMb > 0 ? Math.Clamp((double)audioSizeMb / AudioCacheLimitMb, 0, 1) : 0;
-        DownloadsUsagePercent = DownloadedTracksLimitMb > 0 ? Math.Clamp((double)downloadSizeMb / DownloadedTracksLimitMb, 0, 1) : 0;
+            ImageCacheStats = $"{imgSizeMb} MB / {imgLimit} MB ({imgCount} {SL["Common_Files"]}, RAM: {memItems})";
+            AudioCacheStats = $"{audioSizeMb} MB / {audLimit} MB ({audioFileCount} {SL["Common_Files"]})";
+            DownloadsStats = $"{downloadSizeMb} MB / {dlLimit} MB ({downloadFileCount} {SL["Common_Files"]})";
+
+            ImageCacheUsagePercent = imgLimit > 0 ? Math.Clamp((double)imgSizeMb / imgLimit, 0, 1) : 0;
+            AudioCacheUsagePercent = audLimit > 0 ? Math.Clamp((double)audioSizeMb / audLimit, 0, 1) : 0;
+            DownloadsUsagePercent = dlLimit > 0 ? Math.Clamp((double)downloadSizeMb / dlLimit, 0, 1) : 0;
+        });
     }
 
     private async Task BrowseDownloadPathAsync()
@@ -220,12 +264,14 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
         if (string.IsNullOrEmpty(newPath)) return;
         DownloadPath = newPath;
         _library.DownloadPath = newPath;
+        Log.Info($"[Settings] DownloadPath -> '{newPath}'");
         UpdateCacheStats();
     }
 
     private async Task ClearImageCacheAsync()
     {
         await _imageCache.ClearDiskCacheAsync();
+        Log.Info("[Settings] Image disk cache cleared by user");
         UpdateCacheStats();
     }
 
@@ -233,9 +279,14 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
     {
         var cache = AudioSourceFactory.GlobalCache;
         if (cache is not null)
+        {
             await cache.ClearAllAsync();
+            Log.Info("[Settings] Audio cache cleared by user");
+        }
         else
+        {
             Log.Warn("[AudioCache] AudioCacheManager not initialized, cannot clear cache.");
+        }
 
         UpdateCacheStats();
     }
@@ -246,6 +297,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
 
         await AudioCacheManager.ClearDownloadsAsync(_library.DownloadPath);
         await _library.ClearDownloadsMetadataAsync();
+        Log.Info("[Settings] Downloaded tracks cleared by user");
 
         UpdateCacheStats();
     }
@@ -262,8 +314,7 @@ public sealed partial class StorageCacheSettingsViewModel : ViewModelBase
                 cache.OnEntryEvicted -= OnAudioEntryEvicted;
             }
 
-            _storageDebounceTimer?.Stop();
-            _downloadsLimitDebounceTimer?.Stop();
+            FlushPendingChanges();
         }
         base.Dispose(disposing);
     }

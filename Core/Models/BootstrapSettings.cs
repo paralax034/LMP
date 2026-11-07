@@ -119,10 +119,16 @@ public sealed class BootstrapSettings
         }
     }
 
+    private static bool _isInitialized;
+
     public static BootstrapSettings Current { get; private set; } = new();
 
-    public static void Initialize()
+    public static void Initialize(bool forceReload = false)
     {
+        if (_isInitialized && !forceReload)
+            return;
+
+        _isInitialized = true;
         Current = Load();
     }
 }

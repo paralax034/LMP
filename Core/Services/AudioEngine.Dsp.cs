@@ -292,15 +292,14 @@ public sealed partial class AudioEngine
     public void UpdateEqualizerSettings()
     {
         var pipeline = _player.GetActivePipeline();
-        if (pipeline == null) return;
-
         ApplyEqualizerToPipelineCore(pipeline, CurrentTrack?.Id, snapImmediately: false);
     }
 
     private string? _lastLoggedEqPresetId;
     private bool _lastLoggedEqEnabled;
+    private bool _lastLoggedEqForceGlobal;
 
-    private void ApplyEqualizerToPipelineCore(AudioPipeline pipeline, string? trackId, bool snapImmediately)
+    private void ApplyEqualizerToPipelineCore(AudioPipeline? pipeline, string? trackId, bool snapImmediately)
     {
         var audioSettings = _library.Settings.Audio;
         TrackInfo? track = null;
@@ -315,26 +314,32 @@ public sealed partial class AudioEngine
         Span<float> bands = stackalloc float[LMP.Core.Audio.Helpers.EqualizerProcessor.BandCount];
         string effectivePresetId = LMP.Core.Audio.Helpers.EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
 
-        pipeline.Equalizer.Configure(
-             audioSettings.EqualizerEnabled,
-             bands,
-             audioSettings.EqualizerPreampDb,
-             autoPreamp: true);
+        if (pipeline != null)
+        {
+            pipeline.Equalizer.Configure(
+                audioSettings.EqualizerEnabled,
+                bands,
+                audioSettings.EqualizerPreampDb,
+                autoPreamp: true);
+        }
 
         if (snapImmediately)
         {
-            pipeline.Equalizer.SnapToTarget();
+            pipeline?.Equalizer.SnapToTarget();
             _lastLoggedEqPresetId = effectivePresetId;
             _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
+            _lastLoggedEqForceGlobal = audioSettings.ForceGlobalEqualizer;
             Log.Debug(
                 $"[AudioEngine] Equalizer initial config for '{trackId}': enabled={audioSettings.EqualizerEnabled}, " +
                 $"preset='{effectivePresetId}', preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB");
         }
         else if (_lastLoggedEqEnabled != audioSettings.EqualizerEnabled
+              || _lastLoggedEqForceGlobal != audioSettings.ForceGlobalEqualizer
               || !string.Equals(_lastLoggedEqPresetId, effectivePresetId, StringComparison.Ordinal))
         {
             _lastLoggedEqPresetId = effectivePresetId;
             _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
+            _lastLoggedEqForceGlobal = audioSettings.ForceGlobalEqualizer;
             Log.Info(
                 $"[AudioEngine] Equalizer updated: enabled={audioSettings.EqualizerEnabled}, " +
                 $"preset='{effectivePresetId}' (forceGlobal={audioSettings.ForceGlobalEqualizer}, " +

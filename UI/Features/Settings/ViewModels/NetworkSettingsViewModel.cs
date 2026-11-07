@@ -117,6 +117,7 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
     {
         if (_isLoading || value is null) return;
         _library.UpdateSettings(s => s.InternetProfile = value.Value);
+        Log.Info($"[Settings] InternetProfile -> {value.Value}");
         _ = AudioEngine.ReinitializeWithProfileAsync(value.Value);
     }
 
@@ -140,7 +141,7 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
         if (_isLoading) return;
 
         _proxyDebounceTimer?.Stop();
-        _proxyDebounceTimer = new DispatcherTimer(
+        _proxyDebounceTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(400),
             DispatcherPriority.Normal,
             (_, _) =>
@@ -322,7 +323,11 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
     {
         if (disposing)
         {
-            _proxyDebounceTimer?.Stop();
+            if (_proxyDebounceTimer?.IsEnabled == true)
+            {
+                _proxyDebounceTimer.Stop();
+                SaveNetworkSettings();
+            }
         }
         base.Dispose(disposing);
     }

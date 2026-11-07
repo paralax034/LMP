@@ -110,15 +110,40 @@ public partial class App : Application
             await auth.InitializeAsync().ConfigureAwait(false);
             _splash?.SetProgress(10);
 
+            // Library Service initialized before AudioCacheManager so Settings.Storage.AudioCacheLimitMb is honored
+            _splash?.UpdateStatus(L["Splash_LoadingLibrary"]);
+            var library = AppEntry.Services.GetRequiredService<LibraryService>();
+            await library.InitializeAsync().ConfigureAwait(false);
+            _splash?.SetProgress(30);
+
+            // Resolve AudioEngine after LibraryService initialization so saved volume and profile are applied
+            var audioEngine = AppEntry.Services.GetRequiredService<AudioEngine>();
+
+            // LANGUAGE SYNCHRONIZATION
+            var savedLang = library.Settings.LanguageCode;
+            var currentLang = L.CurrentLanguageCode;
+
+            if (!string.IsNullOrEmpty(savedLang) && savedLang != currentLang)
+            {
+                if (savedLang == "en" && currentLang != "en")
+                {
+                    Log.Info($"First run: saving auto-detected '{currentLang}' to DB (was default 'en')");
+                    library.Settings.LanguageCode = currentLang;
+                }
+                else if (savedLang != "en")
+                {
+                    Log.Info($"Applying saved language from DB: {savedLang}");
+                    L.CurrentLanguage = savedLang;
+                }
+            }
+
             AudioCacheManager? audioCacheManager = null;
 
             if (!isFast)
             {
-                // Bind static SharedHttpClient to NetworkManager singleton
                 var networkManager = AppEntry.Services.GetRequiredService<NetworkManager>();
-                SharedHttpClient.Initialize(networkManager);
 
-                // Audio Cache
+                // Audio Cache (resolved after LibraryService so configured AudioCacheLimitMb is active)
                 _splash?.UpdateStatus(L["Splash_InitAudioCache"]);
                 var audioCacheTask = Task.Run(() =>
                     AppEntry.Services.GetRequiredService<AudioCacheManager>());
@@ -132,7 +157,6 @@ public partial class App : Application
                 await Task.WhenAll(audioCacheTask, statsLoadTask).ConfigureAwait(false);
 
                 audioCacheManager = audioCacheTask.Result;
-                AudioSourceFactory.InitializeGlobalCache(audioCacheManager);
 
                 // Fire-and-forget: warm up top CDN clusters while UI continues initialization
                 _ = CdnHostStatsStore.PreWarmTopClustersAsync(
@@ -148,7 +172,7 @@ public partial class App : Application
                 });
             }
 
-            _splash?.SetProgress(20);
+            _splash?.SetProgress(45);
 
             _ = Task.Run(async () =>
             {
@@ -173,36 +197,6 @@ public partial class App : Application
             // Memory Monitor
             MemoryCleanupHelper.StartAutoCleanup();
             Log.Info("[Startup] Memory auto-cleanup scheduled");
-            _splash?.SetProgress(25);
-
-            // Library Service
-            _splash?.UpdateStatus(L["Splash_LoadingLibrary"]);
-            var library = AppEntry.Services.GetRequiredService<LibraryService>();
-            await library.InitializeAsync().ConfigureAwait(false);
-            _splash?.SetProgress(45);
-
-            // Apply settings loaded from DB to the audio engine
-            var audioEngine = AppEntry.Services.GetRequiredService<AudioEngine>();
-            audioEngine.InitializeVolumeFromSettings();
-
-            // LANGUAGE SYNCHRONIZATION
-            var savedLang = library.Settings.LanguageCode;
-            var currentLang = L.CurrentLanguageCode;
-
-            if (!string.IsNullOrEmpty(savedLang) && savedLang != currentLang)
-            {
-                if (savedLang == "en" && currentLang != "en")
-                {
-                    Log.Info($"First run: saving auto-detected '{currentLang}' to DB (was default 'en')");
-                    library.Settings.LanguageCode = currentLang;
-                }
-                else if (savedLang != "en")
-                {
-                    Log.Info($"Applying saved language from DB: {savedLang}");
-                    L.CurrentLanguage = savedLang;
-                }
-            }
-
             _splash?.SetProgress(50);
 
             // CRITICAL: NotificationService after LibraryService
@@ -246,11 +240,7 @@ public partial class App : Application
                 });
 
                 _splash?.SetProgress(80);
-
-                // Create Main Window
                 _splash?.UpdateStatus(L["Splash_BuildingInterface"]);
-                await Task.Delay(200); // No overload
-                _splash?.SetProgress(85);
             }
             else
             {
@@ -397,10 +387,19 @@ public partial class App : Application
             // Post-Startup GC Compaction
             _ = Task.Run(async () =>
             {
-                await Task.Delay(2500);
-                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
-                GC.WaitForPendingFinalizers();
-                Log.Info("[Memory] Post-startup GC compaction complete. Cold memory reclaimed.");
+                try
+                {
+                    using var compactionTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(2500));
+                    if (!await compactionTimer.WaitForNextTickAsync(_appLifetimeCts.Token).ConfigureAwait(false))
+                        return;
+
+                    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                    GC.WaitForPendingFinalizers();
+                    Log.Info("[Memory] Post-startup GC compaction complete. Cold memory reclaimed.");
+                }
+                catch (OperationCanceledException)
+                {
+                }
             });
 
             // Shutdown Handler

@@ -300,17 +300,6 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
         StreamInfo = AudioStreamInfo.Empty;
 
-        ApplyStreamingProfile();
-
-        if (_library.IsInitialized)
-        {
-            InitializeFromSettings();
-        }
-        else
-        {
-            _library.OnInitialized += InitializeFromSettings;
-        }
-
         _positionChangedHandler = HandlePositionChangedInternal;
         _raisePositionChangedOnUIDelegate = () => OnPositionChanged?.Invoke(TimeSpan.FromTicks(Volatile.Read(ref _currentPositionTicks)));
 
@@ -338,6 +327,16 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
             OnStarvationDetected = NotifyNetworkStarvation
         });
 
+        if (_library.IsInitialized)
+        {
+            InitializeFromSettings();
+        }
+        else
+        {
+            ApplyStreamingProfile();
+            _library.OnInitialized += InitializeFromSettings;
+        }
+
         SubscribeToPlayerEvents();
         SubscribeNetworkManagerEvents();
 
@@ -364,6 +363,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     private void InitializeFromSettings()
     {
+        ApplyStreamingProfile();
+
         var settings = _library.Settings;
         ShuffleEnabled = settings.ShuffleEnabled;
         RepeatMode = settings.RepeatMode;

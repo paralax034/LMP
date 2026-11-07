@@ -1,12 +1,17 @@
 <Project>
   <PropertyGroup>
-    <!-- Explicit default configuration: properties below (lock file path) are evaluated before the SDK assigns Debug by default -->
+    <!-- Explicit default configuration: evaluated before SDK defaults -->
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 
     <VersionMajor>0</VersionMajor>
     <VersionMinor>0</VersionMinor>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
-    <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+
+    <!-- Common language and runtime settings across all projects -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- Ensures IDE diagnostics are also included in the build (important for CI) -->
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
@@ -20,9 +25,16 @@
     -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
 
-    <!-- Separate lock files per configuration across all projects (prevents Debug/Release cross-overwrites) -->
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <NuGetLockFilePath>packages.$(Configuration).lock.json</NuGetLockFilePath>
+    <!--
+      Suppress IL20xx/IL30xx warnings during AOT/trimming analysis and NU1603
+      (Concentus.Native 1.5.2 requests unlisted Concentus.Native.NetCore >= 1.5.1, resolved to 1.5.2)
+    -->
+    <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002;NU1603</NoWarn>
+
+    <!-- Central Package Management (Directory.Packages.props) + global.json pin the graph without lock file churn -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
 
     <!-- Disable generation and resolution of resource satellite assemblies: localization uses JSON -->
     <SatelliteResourceLanguages>none</SatelliteResourceLanguages>

@@ -146,6 +146,7 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase
         if (_isLoadingSettings) return;
         _library.UpdateSettings(s => s.UseWaveAnimation = value);
         AudioWaveBorder.ConfigureGlobal(value, SelectedTrackAnimationSpeed?.Value ?? TrackAnimationSpeed.Medium);
+        Log.Info($"[Settings] UseWaveAnimation -> {value}");
     }
 
     partial void OnSelectedTrackAnimationSpeedChanged(LocalizedItem<TrackAnimationSpeed>? value)
@@ -153,6 +154,7 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase
         if (_isLoadingSettings || value is null) return;
         _library.UpdateSettings(s => s.TrackAnimationSpeed = value.Value);
         AudioWaveBorder.ConfigureGlobal(UseWaveAnimation, value.Value);
+        Log.Info($"[Settings] TrackAnimationSpeed -> {value.Value}");
     }
 
     private void OnColorPickerChanged()
@@ -164,35 +166,50 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase
     private void ApplyTheme()
     {
         static string GetRgbHex(Color c) => $"{c.R:X2}{c.G:X2}{c.B:X2}";
+        static string FormatHexColor(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
 
         var current = _themeManager.GetCurrentTheme();
+        ThemeSettings theme;
 
-        var theme = new ThemeSettings
+        if (SelectedPreset is { IsBuiltIn: true } preset && IsMatchingPresetColors(preset))
         {
-            Name = SelectedPreset?.Name ?? SL["Theme_Custom"],
-            AccentColor = AccentColor.ToString(),
-            AccentHover = SmartAccentHover(AccentColor).ToString(),
-            BgPrimary = BgPrimaryColor.ToString(),
-            BgSecondary = BgSecondaryColor.ToString(),
-            BgElevated = BgElevatedColor.ToString(),
-            BgHighlight = LightenColor(BgSecondaryColor, 0.1).ToString(),
-            BgHover = LightenColor(BgSecondaryColor, 0.2).ToString(),
-            BgSkeleton = LightenColor(BgSecondaryColor, 0.05).ToString(),
-            BgSkeletonDeep = DarkenColor(BgSecondaryColor, 0.2).ToString(),
-            BgOverlay = $"#CC{GetRgbHex(BgPrimaryColor)}",
-            TextPrimary = TextPrimaryColor.ToString(),
-            TextSecondary = TextSecondaryColor.ToString(),
-            TextMuted = DarkenColor(TextSecondaryColor, 0.3).ToString(),
-            TextDark = BgPrimaryColor.ToString(),
-            SystemError = current.SystemError,
-            SystemErrorBg = current.SystemErrorBg,
-            SystemInfoBlue = current.SystemInfoBlue,
-            SystemWarnOrange = current.SystemWarnOrange,
-        };
+            theme = preset;
+        }
+        else
+        {
+            string customName = SelectedPreset is { IsBuiltIn: false } customPreset
+                ? customPreset.Name
+                : SL["Theme_Custom"];
+
+            theme = new ThemeSettings
+            {
+                Name = customName,
+                IsBuiltIn = false,
+                AccentColor = FormatHexColor(AccentColor),
+                AccentHover = FormatHexColor(SmartAccentHover(AccentColor)),
+                BgPrimary = FormatHexColor(BgPrimaryColor),
+                BgSecondary = FormatHexColor(BgSecondaryColor),
+                BgElevated = FormatHexColor(BgElevatedColor),
+                BgHighlight = FormatHexColor(LightenColor(BgSecondaryColor, 0.1)),
+                BgHover = FormatHexColor(LightenColor(BgSecondaryColor, 0.2)),
+                BgSkeleton = FormatHexColor(LightenColor(BgSecondaryColor, 0.05)),
+                BgSkeletonDeep = FormatHexColor(DarkenColor(BgSecondaryColor, 0.2)),
+                BgOverlay = $"#CC{GetRgbHex(BgPrimaryColor)}",
+                TextPrimary = FormatHexColor(TextPrimaryColor),
+                TextSecondary = FormatHexColor(TextSecondaryColor),
+                TextMuted = FormatHexColor(DarkenColor(TextSecondaryColor, 0.3)),
+                TextDark = FormatHexColor(BgPrimaryColor),
+                SystemError = current.SystemError,
+                SystemErrorBg = current.SystemErrorBg,
+                SystemInfoBlue = current.SystemInfoBlue,
+                SystemWarnOrange = current.SystemWarnOrange,
+            };
+        }
 
         _themeManager.SaveTheme(theme);
         _themeManager.ApplyTheme(theme);
         HasUnsavedThemeChanges = false;
+        Log.Info($"[Settings] Theme applied: '{theme.Name}' (builtIn={theme.IsBuiltIn}, accent={theme.AccentColor}, bg={theme.BgPrimary})");
 
         RefreshPresets();
 
@@ -203,11 +220,20 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase
         _isLoadingTheme = false;
     }
 
+    private bool IsMatchingPresetColors(ThemeSettings preset) =>
+        AccentColor == ParseColorSafe(preset.AccentColor) &&
+        BgPrimaryColor == ParseColorSafe(preset.BgPrimary) &&
+        BgSecondaryColor == ParseColorSafe(preset.BgSecondary) &&
+        BgElevatedColor == ParseColorSafe(preset.BgElevated) &&
+        TextPrimaryColor == ParseColorSafe(preset.TextPrimary) &&
+        TextSecondaryColor == ParseColorSafe(preset.TextSecondary);
+
     private void ResetTheme()
     {
         _themeManager.ResetToDefault();
         LoadThemeColors();
         SelectedPreset = ThemePresets.FirstOrDefault();
+        Log.Info("[Settings] Theme reset to default");
     }
 
     private static Color SmartAccentHover(Color accent)

@@ -59,9 +59,16 @@ public static class AudioSourceFactory
     /// <summary>
     /// Updates the streaming configuration.
     /// </summary>
+    private static bool _isConfigInitialized;
+
     public static void SetStreamingConfig(StreamingConfig config)
     {
-        _currentConfig = config ?? throw new ArgumentNullException(nameof(config));
+        ArgumentNullException.ThrowIfNull(config);
+        if (_isConfigInitialized && ReferenceEquals(_currentConfig, config))
+            return;
+
+        _currentConfig = config;
+        _isConfigInitialized = true;
         Log.Info($"[AudioSourceFactory] Config updated: " +
                  $"align={config.RequestAlignmentBytes / 1024}KB, " +
                  $"request={config.MinRequestSizeBytes / 1024}-{config.MaxRequestSizeBytes / 1024}KB, " +

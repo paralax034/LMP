@@ -261,6 +261,14 @@ public sealed partial class UpdateService : IDisposable
                 error = LocalizationService.Instance["Settings_UpdateNoAssets"];
                 Log.Warn($"[UpdateService] Remote build #{remoteCommit} is newer, but no .zip asset was found in release '{candidateRelease.TagName}'.");
             }
+            else if (hasUpdate)
+            {
+                Log.Info($"[UpdateService] Update available: '{versionName}' (remote #{remoteCommit} > local #{currentCommit}).");
+            }
+            else
+            {
+                Log.Info($"[UpdateService] Up to date (local #{currentCommit}, remote #{remoteCommit} '{versionName}').");
+            }
 
             var result = new UpdateCheckResult(
                 IsSuccess: true,

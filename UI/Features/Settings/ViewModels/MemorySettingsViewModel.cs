@@ -81,45 +81,54 @@ public sealed partial class MemorySettingsViewModel : ViewModelBase
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Memory.AutoCleanupEnabled = value);
         MemoryCleanupHelper.RestartAutoCleanup();
+        Log.Info($"[Settings] MemoryAutoCleanupEnabled -> {value}");
     }
 
     partial void OnMemoryCleanupIntervalMinutesChanged(int value)
     {
         if (_isLoading) return;
+        _library.UpdateSettings(s => s.Memory.AutoCleanupIntervalMinutes = value);
         _memoryIntervalDebounceTimer?.Stop();
-        _memoryIntervalDebounceTimer = new DispatcherTimer(
+        _memoryIntervalDebounceTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(500),
             DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _memoryIntervalDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.Memory.AutoCleanupIntervalMinutes = value);
-                MemoryCleanupHelper.RestartAutoCleanup();
-            });
+            (_, _) => FlushMemoryIntervalChange());
         _memoryIntervalDebounceTimer.Start();
+    }
+
+    private void FlushMemoryIntervalChange()
+    {
+        _memoryIntervalDebounceTimer?.Stop();
+        MemoryCleanupHelper.RestartAutoCleanup();
+        Log.Info($"[Settings] MemoryAutoCleanupInterval -> {MemoryCleanupIntervalMinutes}m");
     }
 
     partial void OnMemoryPressureThresholdMbChanged(int value)
     {
         if (_isLoading) return;
+        _library.UpdateSettings(s => s.Memory.PressureThresholdMb = value);
         _memoryPressureDebounceTimer?.Stop();
-        _memoryPressureDebounceTimer = new DispatcherTimer(
+        _memoryPressureDebounceTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(500),
             DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _memoryPressureDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.Memory.PressureThresholdMb = value);
-            });
+            (_, _) => FlushMemoryPressureChange());
         _memoryPressureDebounceTimer.Start();
+    }
+
+    private void FlushMemoryPressureChange()
+    {
+        _memoryPressureDebounceTimer?.Stop();
+        Log.Info($"[Settings] MemoryPressureThresholdMb -> {MemoryPressureThresholdMb}MB");
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _memoryIntervalDebounceTimer?.Stop();
-            _memoryPressureDebounceTimer?.Stop();
+            if (_memoryIntervalDebounceTimer?.IsEnabled == true)
+                FlushMemoryIntervalChange();
+            if (_memoryPressureDebounceTimer?.IsEnabled == true)
+                FlushMemoryPressureChange();
         }
         base.Dispose(disposing);
     }

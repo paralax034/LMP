@@ -9,8 +9,17 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase
     private readonly DialogService _dialog;
     private readonly UpdateService _updateService;
 
-    private DispatcherTimer? _suggestionsDebounceTimer;
-    private DispatcherTimer? _updateIntervalDebounceTimer;
+    [Flags]
+    private enum PendingGeneralChanges : uint
+    {
+        None = 0,
+        UpdateInterval = 1 << 0,
+        SearchCacheTtl = 1 << 1,
+        MaxSuggestions = 1 << 2
+    }
+
+    private DispatcherTimer? _debounceTimer;
+    private PendingGeneralChanges _pendingChanges;
     private bool _isLoading;
 
     [ObservableProperty] public partial bool DiscordRpcEnabled { get; set; }
@@ -203,62 +212,78 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase
         DownloadUpdateCommand.NotifyCanExecuteChanged();
     }
 
+    private void ScheduleDebounce(PendingGeneralChanges flag)
+    {
+        _pendingChanges |= flag;
+        _debounceTimer?.Stop();
+        _debounceTimer ??= new DispatcherTimer(
+            TimeSpan.FromMilliseconds(400),
+            DispatcherPriority.Normal,
+            (_, _) => FlushPendingChanges());
+        _debounceTimer.Start();
+    }
+
+    private void FlushPendingChanges()
+    {
+        _debounceTimer?.Stop();
+        var pending = _pendingChanges;
+        if (pending == PendingGeneralChanges.None) return;
+        _pendingChanges = PendingGeneralChanges.None;
+
+        if ((pending & PendingGeneralChanges.UpdateInterval) != 0)
+            Log.Info($"[Settings] UpdateCheckIntervalHours -> {UpdateCheckIntervalHours}h");
+
+        if ((pending & PendingGeneralChanges.SearchCacheTtl) != 0)
+        {
+            Log.Info($"[Settings] SearchCacheTtlMinutes -> {SearchCacheTtlMinutes}m");
+            _ = _searchCache.CleanupExpiredAsync();
+        }
+
+        if ((pending & PendingGeneralChanges.MaxSuggestions) != 0)
+            Log.Info($"[Settings] MaxSuggestionsCount -> {MaxSuggestionsCount}");
+    }
+
     partial void OnAutoCheckUpdatesChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.Updates.AutoCheckUpdates = value);
+        Log.Info($"[Settings] AutoCheckUpdates -> {value}");
     }
 
     partial void OnUpdateCheckIntervalHoursChanged(int value)
     {
         if (_isLoading) return;
         OnPropertyChanged(nameof(UpdateIntervalDisplayString));
-
-        _updateIntervalDebounceTimer?.Stop();
-        _updateIntervalDebounceTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(400),
-            DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _updateIntervalDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.Updates.UpdateCheckIntervalHours = value);
-                Log.Info($"[GeneralSettings] Update check interval saved: {value}h.");
-            });
-        _updateIntervalDebounceTimer.Start();
+        _library.UpdateSettings(s => s.Updates.UpdateCheckIntervalHours = value);
+        ScheduleDebounce(PendingGeneralChanges.UpdateInterval);
     }
 
     partial void OnDiscordRpcEnabledChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.DiscordRpcEnabled = value);
+        Log.Info($"[Settings] DiscordRpcEnabled -> {value}");
     }
 
     partial void OnEnableSearchCacheChanged(bool value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.EnableSearchCache = value);
+        Log.Info($"[Settings] EnableSearchCache -> {value}");
     }
 
     partial void OnSearchCacheTtlMinutesChanged(int value)
     {
         if (_isLoading) return;
         _library.UpdateSettings(s => s.SearchCacheTtlMinutes = value);
-        _ = _searchCache.CleanupExpiredAsync();
+        ScheduleDebounce(PendingGeneralChanges.SearchCacheTtl);
     }
 
     partial void OnMaxSuggestionsCountChanged(int value)
     {
         if (_isLoading) return;
-        _suggestionsDebounceTimer?.Stop();
-        _suggestionsDebounceTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(400),
-            DispatcherPriority.Normal,
-            (_, _) =>
-            {
-                _suggestionsDebounceTimer?.Stop();
-                _library.UpdateSettings(s => s.MaxSuggestionsCount = value);
-            });
-        _suggestionsDebounceTimer.Start();
+        _library.UpdateSettings(s => s.MaxSuggestionsCount = value);
+        ScheduleDebounce(PendingGeneralChanges.MaxSuggestions);
     }
 
     partial void OnDownloadProgressChanged(double value)
@@ -447,8 +472,7 @@ public sealed partial class GeneralSettingsViewModel : ViewModelBase
         if (disposing)
         {
             _updateService.StateChanged -= OnUpdateServiceStateChanged;
-            _suggestionsDebounceTimer?.Stop();
-            _updateIntervalDebounceTimer?.Stop();
+            FlushPendingChanges();
         }
         base.Dispose(disposing);
     }

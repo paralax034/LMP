@@ -144,6 +144,11 @@
             "console": "internalConsole",
             "justMyCode": false,
             "suppressJITOptimizations": false,
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": false,
+                "searchNuGetOrgSymbolServer": false,
+                "searchPaths": ["${workspaceFolder}/bin/Release/net11.0"]
+            },
             "logging": {
                 "moduleLoad": false,
                 "exceptions": false,

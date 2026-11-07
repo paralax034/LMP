@@ -58,20 +58,34 @@ public sealed partial class AccountLanguageSettingsViewModel : ViewModelBase
         LoadSettings();
     }
 
+    private bool _isLoading;
+
     public void LoadSettings()
     {
-        IsAuthenticated = _auth.IsAuthenticated;
-        RaiseAccountProperties();
+        _isLoading = true;
+        try
+        {
+            IsAuthenticated = _auth.IsAuthenticated;
+            RaiseAccountProperties();
 
-        var langCode = _library.Settings.LanguageCode;
-        SelectedLanguage = Languages.FirstOrDefault(x => x.Code == langCode) ?? Languages[0];
+            var langCode = _library.Settings.LanguageCode;
+            SelectedLanguage = Languages.FirstOrDefault(x => x.Code == langCode) ?? Languages[0];
+        }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
     partial void OnSelectedLanguageChanged(LanguageItem? value)
     {
-        if (value is null) return;
+        if (_isLoading || value is null) return;
+        if (string.Equals(_library.Settings.LanguageCode, value.Code, StringComparison.Ordinal))
+            return;
+
         LocalizationService.Instance.CurrentLanguage = value.Code;
         _library.UpdateSettings(s => s.LanguageCode = value.Code);
+        Log.Info($"[Settings] LanguageCode -> '{value.Code}'");
     }
 
     protected override void OnAccountChanged()

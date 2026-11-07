@@ -6,20 +6,14 @@
       Deliberate choice: synchronized with the root project.
     -->
     <TargetFramework>net11.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <LangVersion>latest</LangVersion>
+    <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
     <AssemblyName>LMP.Core</AssemblyName>
     <RootNamespace>LMP.Core</RootNamespace>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <!-- Disable JSON reflection in Release for Native AOT -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <!-- Suppress trimming/AOT analyzer warnings for third-party dependencies synchronously with the root project -->
-    <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002</NoWarn>
   </PropertyGroup>
 
   <ItemGroup Label="UI Core Dependencies">

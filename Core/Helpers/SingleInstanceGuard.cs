@@ -119,7 +119,8 @@ public sealed partial class SingleInstanceGuard : IDisposable
             catch (AbandonedMutexException)
             {
                 mutex = new Mutex(true, MutexName, out _);
-                return new SingleInstanceGuard(new Mutex(true, MutexName, out _));
+                isOnlyInstance = true;
+                return new SingleInstanceGuard(mutex);
             }
             finally
             {
