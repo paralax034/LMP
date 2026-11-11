@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -e
+
+if python -c "import sys" >/dev/null 2>&1; then
+    exec python build.py pre-commit nopause
+elif python3 -c "import sys" >/dev/null 2>&1; then
+    exec python3 build.py pre-commit nopause
+else
+    echo "[LMP pre-commit] ERROR: Python 3 interpreter not found in PATH." >&2
+    exit 1
+fi

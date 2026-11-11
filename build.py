@@ -180,9 +180,39 @@ def configure_utf8_io():
         except (AttributeError, OSError):
             pass
 
+def ensure_git_hooks(root: Path):
+    git_dir = root / ".git"
+    hook_file = root / "Tools" / "githooks" / "pre-commit"
+    if not git_dir.exists() or not hook_file.is_file():
+        return
+
+    try:
+        raw = hook_file.read_bytes()
+        if b"\r\n" in raw:
+            hook_file.write_bytes(raw.replace(b"\r\n", b"\n"))
+        if not sys.platform.startswith("win"):
+            hook_file.chmod(hook_file.stat().st_mode | 0o111)
+
+        current_path = subprocess.run(
+            ["git", "config", "--local", "--get", "core.hooksPath"],
+            cwd=str(root),
+            capture_output=True,
+            text=True
+        ).stdout.strip()
+
+        if current_path != "Tools/githooks":
+            subprocess.run(
+                ["git", "config", "--local", "core.hooksPath", "Tools/githooks"],
+                cwd=str(root),
+                check=False
+            )
+    except Exception:
+        pass
+
 def main():
     configure_utf8_io()
     root = Path(__file__).resolve().parent
+    ensure_git_hooks(root)
 
     args = sys.argv[1:]
     mode = "debug"
@@ -210,10 +240,13 @@ def main():
     print(f"  Platform RID : {Color.BOLD}{rid}{Color.RESET}")
     print(f"  Version      : {Color.BOLD}v{full_version}{Color.RESET}\n")
 
-    valid_modes = {"debug", "fast", "release", "publish", "aot", "restore", "clean", "test", "aot-debug", "aot-test", "asm-audit"}
+    valid_modes = {
+        "debug", "fast", "release", "publish", "aot", "restore",
+        "clean", "test", "aot-debug", "aot-test", "asm-audit", "pre-commit"
+    }
     if mode not in valid_modes:
         print(f"{Color.RED}[ERROR] Unknown build mode '{mode}'.{Color.RESET}")
-        print("Available: aot-debug | aot-test | asm-audit | clean | debug | fast | publish (aot) | release | restore | test\n")
+        print("Available: aot-debug | aot-test | asm-audit | clean | debug | fast | pre-commit | publish (aot) | release | restore | test\n")
         sys.exit(1)
 
     try:
@@ -295,6 +328,31 @@ def main():
                 run_step(["dotnet", "build", "LMP.sln", "-c", "Debug"], root, "Building Debug configuration")
             run_step([str(exe_path)] + test_args, root, f"Running LMP Tests ({' '.join(test_args)})")
 
+        elif mode == "pre-commit":
+            run_step([
+                "dotnet", "build", "LMP.sln",
+                "-c", "Debug",
+                "--nologo",
+                "-v", "q"
+            ], root, "Pre-commit Gate 1/3: Building Debug configuration")
+
+            exe_path = get_debug_executable(root)
+            run_step([
+                str(exe_path),
+                "--test",
+                "--test-category=Unit"
+            ], root, "Pre-commit Gate 2/3: Running isolated Unit test suite")
+
+            run_step([
+                "dotnet", "build", "LMP.sln",
+                "-c", "Release",
+                "--no-restore",
+                "--nologo",
+                "-v", "q",
+                "-p:DebugType=None",
+                "-p:DebugSymbols=false"
+            ], root, "Pre-commit Gate 3/3: Verifying Release compilation")
+
         elif mode == "asm-audit":
             asm_tool = root / "Tools" / "audit_asm.py"
             run_step([sys.executable, str(asm_tool)] + extra_args, root, "Running Native AOT Binary Assembler Linter (LMP.AsmAudit)")
@@ -305,7 +363,7 @@ def main():
         print(f"\n{Color.YELLOW}[ABORTED] Interrupted by user.{Color.RESET}")
         sys.exit(130)
 
-    if pause_on_exit and sys.platform.startswith("win") and mode not in ("test", "fast", "aot-test", "asm-audit"):
+    if pause_on_exit and sys.platform.startswith("win") and mode not in ("test", "fast", "aot-test", "asm-audit", "pre-commit"):
         try:
             os.system("pause")
         except Exception:
