@@ -214,8 +214,6 @@
   "Eq_Band_Vocal": "Vocal",
   "Eq_Band_Warm": "Warmth",
   "Eq_Description": "Drag the wave anywhere in a column (double or right-click to reset to 0 dB)",
-  "Eq_ForceGlobal_Active_Tip": "All tracks: ON",
-  "Eq_ForceGlobal_Inactive_Tip": "All tracks: OFF",
   "Eq_Hint10_0": "Sub-bass (rumble)",
   "Eq_Hint10_1": "Kick punch",
   "Eq_Hint10_2": "Upper bass",
@@ -251,7 +249,6 @@
   "Eq_Track_AssignedWithPreset_Tip": "This track only: {0}",
   "Eq_Track_Assigned_Tip": "This track only: ON",
   "Eq_Track_NotAssigned_Tip": "This track only: no saved preset",
-  "Eq_Track_SavedButGlobal_Tip": "Track has \"{0}\" saved (global is active)",
 
   "Error_CacheInvalidated": "Track cache was deleted. Playback stopped.",
   "Error_Cdn_Unavailable": "CDN server blocked by provider. Zapret/VPN required.",

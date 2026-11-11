@@ -165,6 +165,163 @@ public static class EqualizerPresets
     /// Resolves effective 10 equalizer bands based on priority:
     /// <c>ForceGlobalEqualizer</c> -> <c>TrackInfo.EqualizerPresetId</c> -> <c>GlobalEqualizerPresetId</c>.
     /// </summary>
+    public const string CustomTrackPrefix = "custom:";
+
+    /// <summary>
+    /// Determines whether the specified preset identifier represents a global or per-track custom curve.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsCustomPresetId(string? presetId) =>
+        string.Equals(presetId, CustomId, StringComparison.Ordinal) ||
+        (presetId != null && presetId.StartsWith(CustomTrackPrefix, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Determines whether the specified preset identifier is a built-in preset.
+    /// </summary>
+    public static bool IsBuiltInPreset(string? presetId)
+    {
+        if (string.IsNullOrEmpty(presetId)) return false;
+        var builtIn = BuiltInIds;
+        for (int i = 0; i < builtIn.Length; i++)
+        {
+            if (string.Equals(builtIn[i], presetId, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Determines whether the specified preset identifier is a valid custom curve, built-in preset, or existing user preset.
+    /// </summary>
+    public static bool IsKnownPresetId(AudioSettings audioSettings, string? presetId)
+    {
+        if (string.IsNullOrEmpty(presetId))
+            return false;
+
+        if (IsCustomPresetId(presetId) || IsBuiltInPreset(presetId))
+            return true;
+
+        var userPresets = audioSettings.UserEqualizerPresets;
+        if (userPresets is { Count: > 0 })
+        {
+            for (int i = 0; i < userPresets.Count; i++)
+            {
+                if (string.Equals(userPresets[i].Id, presetId, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether any band or preamp gain deviates from 0 dB beyond the deadzone threshold.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool HasNonZeroBands(ReadOnlySpan<float> bands, float preampDb = 0f)
+    {
+        if (MathF.Abs(preampDb) > 0.05f)
+            return true;
+
+        for (int i = 0; i < bands.Length; i++)
+        {
+            if (MathF.Abs(bands[i]) > 0.05f)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Encodes 10 ISO bands into a compact per-track preset string (<c>custom:b0,b1,...,b9</c>)
+    /// so per-track custom curves persist in <see cref="TrackInfo.EqualizerPresetId"/>.
+    /// </summary>
+    public static string EncodeCustomTrackBands(ReadOnlySpan<float> bands)
+    {
+        if (!HasNonZeroBands(bands))
+            return FlatId;
+
+        Span<char> buf = stackalloc char[128];
+        CustomTrackPrefix.AsSpan().CopyTo(buf);
+        int pos = CustomTrackPrefix.Length;
+
+        for (int i = 0; i < EqualizerProcessor.BandCount; i++)
+        {
+            if (i > 0)
+                buf[pos++] = ',';
+
+            float clamped = i < bands.Length
+                ? Math.Clamp(bands[i], EqualizerProcessor.MinGainDb, EqualizerProcessor.MaxGainDb)
+                : 0f;
+            float val = MathF.Round(clamped * 2f) * 0.5f;
+
+            if (!val.TryFormat(
+                    buf[pos..],
+                    out int written,
+                    "0.#",
+                    System.Globalization.CultureInfo.InvariantCulture))
+            {
+                break;
+            }
+
+            pos += written;
+        }
+
+        return new string(buf[..pos]);
+    }
+
+    /// <summary>
+    /// Attempts to parse a per-track custom curve string (<c>custom:b0,b1,...,b9</c>) into 10 ISO bands.
+    /// </summary>
+    public static bool TryParseCustomTrackBands(string? presetId, Span<float> destinationBands)
+    {
+        if (presetId == null
+            || !presetId.StartsWith(CustomTrackPrefix, StringComparison.Ordinal)
+            || destinationBands.Length < EqualizerProcessor.BandCount)
+        {
+            return false;
+        }
+
+        destinationBands.Clear();
+        ReadOnlySpan<char> rem = presetId.AsSpan(CustomTrackPrefix.Length);
+        int bandIdx = 0;
+
+        while (!rem.IsEmpty && bandIdx < EqualizerProcessor.BandCount)
+        {
+            int commaIdx = rem.IndexOf(',');
+            ReadOnlySpan<char> token;
+            if (commaIdx >= 0)
+            {
+                token = rem[..commaIdx];
+                rem = rem[(commaIdx + 1)..];
+            }
+            else
+            {
+                token = rem;
+                rem = default;
+            }
+
+            if (float.TryParse(
+                    token,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out float val))
+            {
+                destinationBands[bandIdx] = Math.Clamp(
+                    val,
+                    EqualizerProcessor.MinGainDb,
+                    EqualizerProcessor.MaxGainDb);
+            }
+
+            bandIdx++;
+        }
+
+        return bandIdx > 0;
+    }
+
+    /// <summary>
+    /// Resolves effective 10 equalizer bands based on priority:
+    /// <c>ForceGlobalEqualizer</c> -> <c>TrackInfo.EqualizerPresetId</c> -> <c>GlobalEqualizerPresetId</c>.
+    /// </summary>
     public static string ResolveEffectiveBands(
         AudioSettings audioSettings,
         TrackInfo? track,
@@ -178,13 +335,16 @@ public static class EqualizerPresets
 
         if (!audioSettings.ForceGlobalEqualizer
             && track != null
-            && !string.IsNullOrEmpty(track.EqualizerPresetId))
+            && IsKnownPresetId(audioSettings, track.EqualizerPresetId))
         {
-            targetPresetId = track.EqualizerPresetId;
+            targetPresetId = track.EqualizerPresetId!;
         }
 
         if (string.IsNullOrEmpty(targetPresetId))
             targetPresetId = FlatId;
+
+        if (TryParseCustomTrackBands(targetPresetId, destinationBands))
+            return HasNonZeroBands(destinationBands) ? CustomId : FlatId;
 
         if (string.Equals(targetPresetId, CustomId, StringComparison.Ordinal))
         {
@@ -211,6 +371,9 @@ public static class EqualizerPresets
                 }
             }
         }
+
+        if (!IsBuiltInPreset(targetPresetId))
+            targetPresetId = FlatId;
 
         var builtIn = GetPresetBands(targetPresetId);
         builtIn.CopyTo(destinationBands);

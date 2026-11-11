@@ -837,10 +837,21 @@ public sealed class ThemeManagerService
     /// </summary>
     public static Color GetThemeColor(string key)
     {
-        if (Application.Current?.Resources
-                .TryGetResource(key, null, out var res) == true
-            && res is Color color)
-            return color;
+        var resources = Application.Current?.Resources;
+        if (resources != null)
+        {
+            if (resources.TryGetResource($"{key}Brush", null, out var brushRes)
+                && brushRes is ISolidColorBrush solidBrush)
+            {
+                return solidBrush.Color;
+            }
+
+            if (resources.TryGetResource(key, null, out var res)
+                && res is Color color)
+            {
+                return color;
+            }
+        }
 
         return Colors.Gray;
     }

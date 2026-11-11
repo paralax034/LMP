@@ -214,8 +214,6 @@
   "Eq_Band_Vocal": "Голос",
   "Eq_Band_Warm": "Теплота",
   "Eq_Description": "Тяните волну в любом месте колонки (двойной или правый клик — сброс в 0 дБ)",
-  "Eq_ForceGlobal_Active_Tip": "Для всех треков: ВКЛ",
-  "Eq_ForceGlobal_Inactive_Tip": "Для всех треков: ВЫКЛ",
   "Eq_Hint10_0": "Саб-бас (глубина)",
   "Eq_Hint10_1": "Удар бочки (панч)",
   "Eq_Hint10_2": "Верхний бас",
@@ -251,7 +249,6 @@
   "Eq_Track_AssignedWithPreset_Tip": "Только этот трек: {0}",
   "Eq_Track_Assigned_Tip": "Только этот трек: ВКЛ",
   "Eq_Track_NotAssigned_Tip": "Только этот трек: нет сохранения",
-  "Eq_Track_SavedButGlobal_Tip": "У трека сохранено «{0}» (сейчас играет общий)",
 
   "Error_CacheInvalidated": "Кэш трека был удалён. Воспроизведение остановлено.",
   "Error_Cdn_Unavailable": "CDN-сервер заблокирован провайдером. Требуется Zapret или VPN.",

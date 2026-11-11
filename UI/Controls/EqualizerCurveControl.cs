@@ -6,7 +6,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
-using Avalonia.VisualTree;
 using LMP.Core.Audio.Helpers;
 
 namespace LMP.UI.Controls;
@@ -603,10 +602,10 @@ public sealed class EqualizerCurveControl : Control
             float db = GetControlColumnGain(idx, useDisplay: false);
 
             int dbIdx = Math.Clamp((int)MathF.Round((db + 12.0f) * 2.0f), 0, DbStepCount - 1);
-            var dbFt = _cachedDbValueLabels[dbIdx];
+            var dbFt = GetOrCreateDbValueLabel(dbIdx);
             var subFt = _cachedHintSubLabels[idx];
 
-            if (dbFt != null && subFt != null)
+            if (subFt != null)
             {
                 const double gap = 6.0;
                 double totalW = dbFt.Width + gap + subFt.Width;
@@ -615,6 +614,25 @@ public sealed class EqualizerCurveControl : Control
                 context.DrawText(subFt, new Point(tipX + dbFt.Width + gap, 2.0));
             }
         }
+    }
+
+    private FormattedText GetOrCreateDbValueLabel(int dbIdx)
+    {
+        var cached = _cachedDbValueLabels[dbIdx];
+        if (cached != null)
+            return cached;
+
+        float dbVal = -12.0f + dbIdx * 0.5f;
+        string dbStr = dbVal > 0.05f ? $"+{dbVal:0.0} dB •" : $"{dbVal:0.0} dB •";
+        cached = new FormattedText(
+            dbStr,
+            CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            Typeface.Default,
+            10.5,
+            _activeLabelBrush);
+        _cachedDbValueLabels[dbIdx] = cached;
+        return cached;
     }
 
     private void EnsureWaveGeometries(double zeroY)
@@ -672,18 +690,8 @@ public sealed class EqualizerCurveControl : Control
 
         _lastLanguageCode = lang;
         _labelsDirty = false;
+        Array.Clear(_cachedDbValueLabels);
         var typeface = Typeface.Default;
-
-        if (_cachedDbValueLabels[0] == null)
-        {
-            for (int s = 0; s < DbStepCount; s++)
-            {
-                float dbVal = -12.0f + s * 0.5f;
-                string dbStr = dbVal > 0.05f ? $"+{dbVal:0.0} dB •" : $"{dbVal:0.0} dB •";
-                _cachedDbValueLabels[s] = new FormattedText(
-                    dbStr, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, 10.5, _activeLabelBrush);
-            }
-        }
 
         for (int i = 0; i < controlCount; i++)
         {
@@ -796,4 +804,150 @@ public sealed class EqualizerCurveControl : Control
     }
 
     #endregion
+}
+
+/// <summary>
+/// Interactive preset item for the equalizer dropdown menu in both the Player Bar and Audio Settings.
+/// </summary>
+public sealed partial class EqualizerPresetChipItem : ObservableObject
+{
+    public string Id { get; }
+    public bool IsBuiltIn { get; }
+
+    [ObservableProperty] public partial string Title { get; set; }
+    [ObservableProperty] public partial bool IsSelected { get; set; }
+    [ObservableProperty] public partial bool IsTrackPreset { get; set; }
+
+    public string? RightClickHint => IsBuiltIn
+        ? null
+        : LocalizationService.Instance["Eq_Preset_RightClickDelete"];
+
+    public EqualizerPresetChipItem(string id, string title, bool isBuiltIn)
+    {
+        Id = id;
+        Title = title;
+        IsBuiltIn = isBuiltIn;
+    }
+
+    /// <summary>
+    /// Synchronizes an <see cref="System.Collections.ObjectModel.ObservableCollection{EqualizerPresetChipItem}"/>
+    /// with built-in and user presets, updating selection and track assignment flags in-place.
+    /// </summary>
+    public static string SyncPresetsList(
+        System.Collections.ObjectModel.ObservableCollection<EqualizerPresetChipItem> targetList,
+        AudioSettings audioSettings,
+        TrackInfo? currentTrack,
+        string activePresetId)
+    {
+        var sl = LocalizationService.Instance;
+        var builtIn = EqualizerPresets.BuiltInIds;
+        var userPresets = audioSettings.UserEqualizerPresets;
+        int expectedCount = builtIn.Length + userPresets.Count;
+
+        bool needsRebuild = targetList.Count != expectedCount;
+        if (!needsRebuild)
+        {
+            for (int i = 0; i < userPresets.Count; i++)
+            {
+                var chip = targetList[builtIn.Length + i];
+                if (!string.Equals(chip.Id, userPresets[i].Id, StringComparison.Ordinal))
+                {
+                    needsRebuild = true;
+                    break;
+                }
+            }
+        }
+
+        if (needsRebuild)
+        {
+            targetList.Clear();
+            for (int i = 0; i < builtIn.Length; i++)
+            {
+                string id = builtIn[i];
+                string key = EqualizerPresets.GetLocalizationKey(id);
+                targetList.Add(new EqualizerPresetChipItem(id, sl[key], isBuiltIn: true));
+            }
+
+            for (int i = 0; i < userPresets.Count; i++)
+            {
+                var up = userPresets[i];
+                targetList.Add(new EqualizerPresetChipItem(up.Id, up.Name, isBuiltIn: false));
+            }
+        }
+        else
+        {
+            for (int i = 0; i < builtIn.Length; i++)
+            {
+                string id = builtIn[i];
+                string key = EqualizerPresets.GetLocalizationKey(id);
+                targetList[i].Title = sl[key];
+            }
+
+            for (int i = 0; i < userPresets.Count; i++)
+            {
+                var chip = targetList[builtIn.Length + i];
+                if (!string.Equals(chip.Title, userPresets[i].Name, StringComparison.Ordinal))
+                    chip.Title = userPresets[i].Name;
+            }
+        }
+
+        string? trackId = currentTrack?.EqualizerPresetId;
+        string activeTitle = sl["Eq_Preset_Custom"];
+
+        for (int i = 0; i < targetList.Count; i++)
+        {
+            var item = targetList[i];
+            bool match = string.Equals(item.Id, activePresetId, StringComparison.Ordinal);
+            item.IsSelected = match;
+            item.IsTrackPreset = !string.IsNullOrEmpty(trackId)
+                              && string.Equals(item.Id, trackId, StringComparison.Ordinal);
+
+            if (match)
+                activeTitle = item.Title;
+        }
+
+        return activeTitle;
+    }
+
+    /// <summary>
+    /// Resolves the localized tooltip for the per-track equalizer button.
+    /// </summary>
+    public static string FormatTrackEqualizerTooltip(
+        string? trackPresetId,
+        bool isTrackModeHighlighted,
+        IList<EqualizerPresetChipItem> presets)
+    {
+        var sl = LocalizationService.Instance;
+        if (!string.IsNullOrEmpty(trackPresetId))
+        {
+            string presetTitle = "";
+            if (EqualizerPresets.IsCustomPresetId(trackPresetId))
+            {
+                Span<float> tmp = stackalloc float[EqualizerProcessor.BandCount];
+                bool isFlatCustom = EqualizerPresets.TryParseCustomTrackBands(trackPresetId, tmp)
+                                 && !EqualizerPresets.HasNonZeroBands(tmp);
+                presetTitle = isFlatCustom ? sl["Eq_Preset_Flat"] : sl["Eq_Preset_Custom"];
+            }
+            else
+            {
+                for (int i = 0; i < presets.Count; i++)
+                {
+                    if (string.Equals(presets[i].Id, trackPresetId, StringComparison.Ordinal))
+                    {
+                        presetTitle = presets[i].Title;
+                        break;
+                    }
+                }
+                if (string.IsNullOrEmpty(presetTitle) && EqualizerPresets.IsBuiltInPreset(trackPresetId))
+                    presetTitle = sl[EqualizerPresets.GetLocalizationKey(trackPresetId)];
+            }
+
+            if (!string.IsNullOrEmpty(presetTitle))
+                return string.Format(sl["Eq_Track_AssignedWithPreset_Tip"], presetTitle);
+        }
+
+        return isTrackModeHighlighted
+            ? sl["Eq_Track_Assigned_Tip"]
+            : sl["Eq_Track_NotAssigned_Tip"];
+    }
 }

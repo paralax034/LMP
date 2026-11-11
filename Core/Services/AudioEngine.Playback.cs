@@ -177,6 +177,8 @@ public sealed partial class AudioEngine
         Log.Debug($"[AudioEngine] [PlayTrackCore] Initiating playback for track: {track.Id} | " +
                           $"Session: {session} | StartPlaying: {startPlaying}");
 
+        FlushPendingEqualizerSave();
+
         // Mute/stop the player only when switching to a DIFFERENT track.
         // On retry/resync of the same track, PlayAsync will atomically replace the pipeline without a 30-second silence gap.
         if (!string.Equals(CurrentTrack?.Id, track.Id, StringComparison.Ordinal))

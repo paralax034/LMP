@@ -3,11 +3,9 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.UI.Controls;

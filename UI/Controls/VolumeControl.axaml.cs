@@ -36,6 +36,9 @@ public partial class VolumeControl : UserControl
     public static readonly StyledProperty<int> MaxVolumeProperty =
         AvaloniaProperty.Register<VolumeControl, int>(nameof(MaxVolume), VolumeConstants.DefaultMaxVolume);
 
+    public static readonly StyledProperty<bool> VolumeBoostEnabledProperty =
+        AvaloniaProperty.Register<VolumeControl, bool>(nameof(VolumeBoostEnabled), true);
+
     #endregion
 
     #region Direct Properties
@@ -63,7 +66,7 @@ public partial class VolumeControl : UserControl
 
     #endregion
 
-    #region Backing Fields 
+    #region Backing Fields
 
     private bool _isMuted;
     private bool _isVolumeLow;
@@ -87,6 +90,12 @@ public partial class VolumeControl : UserControl
     {
         get => GetValue(MaxVolumeProperty);
         set => SetValue(MaxVolumeProperty, value);
+    }
+
+    public bool VolumeBoostEnabled
+    {
+        get => GetValue(VolumeBoostEnabledProperty);
+        set => SetValue(VolumeBoostEnabledProperty, value);
     }
 
     public bool IsMuted { get => _isMuted; private set => SetAndRaise(IsMutedProperty, ref _isMuted, value); }
@@ -132,7 +141,9 @@ public partial class VolumeControl : UserControl
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == VolumeProperty || change.Property == MaxVolumeProperty)
+        if (change.Property == VolumeProperty
+            || change.Property == MaxVolumeProperty
+            || change.Property == VolumeBoostEnabledProperty)
         {
             UpdateDependentProperties();
             UpdateVolumeVisual();
@@ -168,10 +179,11 @@ public partial class VolumeControl : UserControl
 
         VolumeSliderHeight = ComputeVolumeSliderHeight(maxVol);
 
-        int effectivePercent = (int)Math.Round((double)Volume / maxVol * 100);
+        int normalCap = VolumeBoostEnabled ? VolumeConstants.DefaultMaxVolume : maxVol;
+        int effectivePercent = normalCap > 0 ? (int)Math.Round((double)Volume / normalCap * 100) : 0;
         if (effectivePercent > 100) effectivePercent = 100;
 
-        bool isVolumeBoosted = Volume > VolumeConstants.DefaultMaxVolume;
+        bool isVolumeBoosted = VolumeBoostEnabled && Volume > VolumeConstants.DefaultMaxVolume;
         bool isMuted = Volume < 1;
         bool isVolumeLow = Volume >= 1 && !isVolumeBoosted && effectivePercent <= 33;
         bool isVolumeMedium = !isMuted && !isVolumeBoosted && effectivePercent > 33 && effectivePercent <= 66;
@@ -190,9 +202,13 @@ public partial class VolumeControl : UserControl
 
         // Direct and safe retrieval of system theme resources
         var accentBrush = (IBrush)(Application.Current?.Resources["AccentBrush"] ?? Brushes.Purple);
+        var textPrimaryBrush = (IBrush)(Application.Current?.Resources["TextPrimaryBrush"] ?? Brushes.White);
+        var warnOrangeBrush = (IBrush)(Application.Current?.Resources["SystemWarnOrangeBrush"] ?? accentBrush);
         var textMutedBrush = (IBrush)(Application.Current?.Resources["TextMutedBrush"] ?? Brushes.Gray);
         var textSecondaryBrush = (IBrush)(Application.Current?.Resources["TextSecondaryBrush"] ?? Brushes.LightGray);
         var transparent70PercentBg = GetOrCreateTransparentBg();
+
+        VolumeValueText.Foreground = isVolumeBoosted ? warnOrangeBrush : textPrimaryBrush;
 
         PopupBorder.Background = transparent70PercentBg;
 

@@ -195,6 +195,9 @@ public sealed partial class AudioEngine
 
             try
             {
+                FlushPendingEqualizerSave();
+                _eqSaveTimer?.Dispose();
+                _eqSaveTimer = null;
                 FlushPendingNormalizationWritesSync();
             }
             catch (Exception ex)
@@ -226,6 +229,17 @@ public sealed partial class AudioEngine
         UnsubscribeNetworkManagerEvents();
 
         lock (_sessionLock) { _sessionCts?.Cancel(); _sessionCts?.Dispose(); }
+
+        try
+        {
+            FlushPendingEqualizerSave();
+            _eqSaveTimer?.Dispose();
+            _eqSaveTimer = null;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[AudioEngine] Equalizer flush on async dispose: {ex.Message}");
+        }
 
         using (var flushCts = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
         {

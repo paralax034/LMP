@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
-using LMP.UI.Features.Player;
+using LMP.UI.Controls;
 using LMP.UI.Features.Settings.ViewModels;
 
 namespace LMP.UI.Features.Settings.Pages;
@@ -23,18 +23,48 @@ public partial class AudioPage : UserControl
         };
     }
 
+    private AudioSettingsViewModel? _subscribedVm;
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         if (DataContext is AudioSettingsViewModel vm)
+        {
+            if (!ReferenceEquals(_subscribedVm, vm))
+            {
+                if (_subscribedVm != null)
+                    _subscribedVm.PresetInputFocusRequested -= FocusNewPresetTextBox;
+
+                _subscribedVm = vm;
+                _subscribedVm.PresetInputFocusRequested += FocusNewPresetTextBox;
+            }
             vm.LoadSettings();
+        }
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _presetsHoverCloseTimer?.Stop();
         SettingsPresetsPopup.IsOpen = false;
+        if (_subscribedVm != null)
+        {
+            _subscribedVm.CancelPresetRename();
+            _subscribedVm.PresetInputFocusRequested -= FocusNewPresetTextBox;
+            _subscribedVm = null;
+        }
         base.OnDetachedFromVisualTree(e);
+    }
+
+    private void FocusNewPresetTextBox()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (SettingsPresetsPopup.IsOpen)
+            {
+                NewPresetTextBox.Focus();
+                NewPresetTextBox.SelectAll();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private void OnEqHeaderButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -48,6 +78,13 @@ public partial class AudioPage : UserControl
                     ToolTip.SetIsOpen(button, true);
             }, DispatcherPriority.Input);
         }
+    }
+
+    private void OnPresetsTriggerButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        _presetsHoverCloseTimer?.Stop();
+        ToolTip.SetIsOpen(SettingsPresetsButton, false);
+        SettingsPresetsPopup.IsOpen = !SettingsPresetsPopup.IsOpen;
     }
 
     private void OnPresetsTriggerPointerEntered(object? sender, PointerEventArgs e)
@@ -76,6 +113,8 @@ public partial class AudioPage : UserControl
         SchedulePopupClose();
     }
 
+    private bool IsPresetsPopupEditing() => NewPresetTextBox.IsFocused;
+
     private void SchedulePopupClose()
     {
         _presetsHoverCloseTimer ??= new DispatcherTimer(
@@ -84,9 +123,10 @@ public partial class AudioPage : UserControl
                 (_, _) =>
                 {
                     _presetsHoverCloseTimer?.Stop();
-                    if (!_isPointerInTrigger && !_isPointerInPopup)
+                    if (!_isPointerInTrigger && !_isPointerInPopup && !IsPresetsPopupEditing())
                     {
                         SettingsPresetsPopup.IsOpen = false;
+                        _subscribedVm?.CancelPresetRename();
                     }
                 });
         _presetsHoverCloseTimer.Stop();
@@ -95,10 +135,19 @@ public partial class AudioPage : UserControl
 
     private void OnNewPresetTextBoxKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && DataContext is AudioSettingsViewModel vm)
+        if (DataContext is AudioSettingsViewModel vm)
         {
-            vm.SaveInlinePresetCommand.Execute(null);
-            e.Handled = true;
+            if (e.Key == Key.Enter)
+            {
+                vm.SaveInlinePresetCommand.Execute(null);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                vm.CancelPresetRename();
+                SettingsPresetsButton.Focus();
+                e.Handled = true;
+            }
         }
     }
 
@@ -113,31 +162,6 @@ public partial class AudioPage : UserControl
             _presetsHoverCloseTimer?.Stop();
             vm.DeleteEqualizerPresetCommand.Execute(chip);
             e.Handled = true;
-        }
-    }
-
-    private void OnRenamePresetTextBoxKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (sender is not Control { DataContext: EqualizerPresetChipItem chip }) return;
-
-        if (e.Key == Key.Enter && DataContext is AudioSettingsViewModel vm)
-        {
-            vm.CommitRenamePresetCommand.Execute(chip);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            chip.IsRenaming = false;
-            e.Handled = true;
-        }
-    }
-
-    private void OnRenamePresetTextBoxLostFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: EqualizerPresetChipItem { IsRenaming: true } chip }
-            && DataContext is AudioSettingsViewModel vm)
-        {
-            vm.CommitRenamePresetCommand.Execute(chip);
         }
     }
 }

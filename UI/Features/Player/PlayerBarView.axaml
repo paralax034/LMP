@@ -375,7 +375,8 @@
                     <Border Width="1" Height="28" Margin="6,0"
                         Background="{DynamicResource BgHighlightBrush}" />
                     <controls:VolumeControl Volume="{Binding Volume}"
-                        MaxVolume="{Binding MaxVolume}" />
+                        MaxVolume="{Binding MaxVolume}"
+                        VolumeBoostEnabled="{Binding VolumeBoostEnabled}" />
                     <Button x:Name="EqualizerButton" Width="38" Height="38" Classes="playback-btn"
                         CornerRadius="19"
                         ToolTip.Tip="{Binding L[Eq_Title]}" ToolTip.Placement="Top"
@@ -398,7 +399,7 @@
                                             ToolTip.VerticalOffset="-6"
                                             VerticalAlignment="Center" Margin="0,0,4,0" />
 
-                                        <!-- Block 2: Binding modes (Note vs Globe) -->
+                                        <!-- Block 2: Per-track binding mode (Note) -->
                                         <StackPanel Grid.Column="1" Orientation="Horizontal"
                                             Spacing="4" VerticalAlignment="Center">
                                             <Border Width="1" Height="16"
@@ -426,42 +427,22 @@
                                                         IsVisible="{Binding IsTrackModeHighlighted}" />
                                                 </Panel>
                                             </Button>
-
-                                            <!-- Global for all (Globe) -->
-                                            <Button Width="28" Height="28" CornerRadius="6"
-                                                Classes="icon-btn"
-                                                Command="{Binding ToggleForceGlobalEqualizerCommand}"
-                                                Click="OnEqHeaderButtonClicked"
-                                                ToolTip.Tip="{Binding ForceGlobalEqualizerTooltip}"
-                                                ToolTip.Placement="Top"
-                                                ToolTip.VerticalOffset="-6"
-                                                ToolTip.ShowDelay="50">
-                                                <Panel>
-                                                    <PathIcon Width="14" Height="14"
-                                                        Foreground="{DynamicResource TextSecondaryBrush}"
-                                                        Data="{StaticResource Icon.Web}"
-                                                        IsVisible="{Binding !ForceGlobalEqualizer}" />
-                                                    <PathIcon Width="14" Height="14"
-                                                        Foreground="{DynamicResource AccentBrush}"
-                                                        Data="{StaticResource Icon.Web}"
-                                                        IsVisible="{Binding ForceGlobalEqualizer}" />
-                                                </Panel>
-                                            </Button>
                                         </StackPanel>
 
-                                        <!-- Block 3: Preset dropdown menu (hover only) -->
+                                        <!-- Block 3: Preset dropdown menu (hover + 1-click) -->
                                         <Panel Grid.Column="3" Margin="0,0,4,0"
                                             PointerEntered="OnPresetsTriggerPointerEntered"
                                             PointerExited="OnPresetsTriggerPointerExited">
                                             <Button x:Name="EqPresetsButton" Padding="9,4"
                                                 CornerRadius="6" VerticalAlignment="Center"
+                                                Click="OnPresetsTriggerButtonClicked"
                                                 ToolTip.Tip="{Binding L[Eq_Presets_Tooltip]}"
                                                 ToolTip.Placement="Top"
                                                 ToolTip.VerticalOffset="-6">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <TextBlock FontSize="11" FontWeight="SemiBold"
                                                         Text="{Binding ActiveEqualizerPresetTitle}"
-                                                        MaxWidth="105"
+                                                        MaxWidth="120"
                                                         TextTrimming="CharacterEllipsis"
                                                         VerticalAlignment="Center" />
                                                     <PathIcon Width="10" Height="10"
@@ -492,74 +473,48 @@
                                                                     ItemsSource="{Binding EqualizerPresetsList}">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate
-                                                                            x:DataType="vm:EqualizerPresetChipItem">
-                                                                            <Panel>
-                                                                                <!-- Regular preset
-                                                                                row (styled like
-                                                                                playlist submenu) -->
-                                                                                <Button
-                                                                                    HorizontalAlignment="Stretch"
-                                                                                    HorizontalContentAlignment="Stretch"
-                                                                                    Padding="10,7"
-                                                                                    Margin="0,1"
-                                                                                    Classes="format-item-btn"
-                                                                                    Classes.active="{Binding IsSelected}"
-                                                                                    IsVisible="{Binding !IsRenaming}"
-                                                                                    ToolTip.Tip="{Binding RightClickHint}"
-                                                                                    ToolTip.Placement="Top"
-                                                                                    ToolTip.VerticalOffset="-4"
-                                                                                    PointerReleased="OnPresetItemPointerReleased"
-                                                                                    Command="{Binding $parent[UserControl].((vm:PlayerBarViewModel)DataContext).SelectEqualizerPresetCommand}"
-                                                                                    CommandParameter="{Binding}">
-                                                                                    <Grid
-                                                                                        ColumnDefinitions="22,*">
-                                                                                        <PathIcon
-                                                                                            Grid.Column="0"
-                                                                                            Width="14"
-                                                                                            Height="14"
-                                                                                            Data="{StaticResource Icon.Check}"
-                                                                                            Foreground="{DynamicResource AccentBrush}"
-                                                                                            IsVisible="{Binding IsSelected}"
-                                                                                            HorizontalAlignment="Left"
-                                                                                            VerticalAlignment="Center" />
-                                                                                        <TextBlock
-                                                                                            Grid.Column="1"
-                                                                                            FontSize="12"
-                                                                                            Text="{Binding Title}"
-                                                                                            TextTrimming="CharacterEllipsis"
-                                                                                            VerticalAlignment="Center" />
-                                                                                    </Grid>
-                                                                                </Button>
-
-                                                                                <!-- Inline renaming
-                                                                                mode for active preset
-                                                                                directly in list -->
+                                                                            x:DataType="controls:EqualizerPresetChipItem">
+                                                                            <Button
+                                                                                HorizontalAlignment="Stretch"
+                                                                                HorizontalContentAlignment="Stretch"
+                                                                                Padding="10,7"
+                                                                                Margin="0,1"
+                                                                                Classes="format-item-btn"
+                                                                                Classes.active="{Binding IsSelected}"
+                                                                                ToolTip.Tip="{Binding RightClickHint}"
+                                                                                ToolTip.Placement="Top"
+                                                                                ToolTip.VerticalOffset="-4"
+                                                                                PointerReleased="OnPresetItemPointerReleased"
+                                                                                Command="{Binding $parent[UserControl].((vm:PlayerBarViewModel)DataContext).SelectEqualizerPresetCommand}"
+                                                                                CommandParameter="{Binding}">
                                                                                 <Grid
-                                                                                    ColumnDefinitions="*,Auto"
-                                                                                    ColumnSpacing="4"
-                                                                                    Margin="0,1"
-                                                                                    IsVisible="{Binding IsRenaming}">
-                                                                                    <TextBox
+                                                                                    ColumnDefinitions="22,*,Auto">
+                                                                                    <PathIcon
                                                                                         Grid.Column="0"
-                                                                                        Text="{Binding EditTitle}"
-                                                                                        FontSize="12"
-                                                                                        Padding="8,5"
-                                                                                        KeyDown="OnRenamePresetTextBoxKeyDown"
-                                                                                        LostFocus="OnRenamePresetTextBoxLostFocus" />
-                                                                                    <Button
+                                                                                        Width="14"
+                                                                                        Height="14"
+                                                                                        Data="{StaticResource Icon.Check}"
+                                                                                        Foreground="{DynamicResource AccentBrush}"
+                                                                                        IsVisible="{Binding IsSelected}"
+                                                                                        HorizontalAlignment="Left"
+                                                                                        VerticalAlignment="Center" />
+                                                                                    <TextBlock
                                                                                         Grid.Column="1"
-                                                                                        Width="28"
-                                                                                        Height="28"
-                                                                                        Classes="icon-btn active"
-                                                                                        Command="{Binding $parent[UserControl].((vm:PlayerBarViewModel)DataContext).CommitRenamePresetCommand}"
-                                                                                        CommandParameter="{Binding}">
-                                                                                        <PathIcon
-                                                                                            Width="12"
-                                                                                            Height="12"
-                                                                                            Data="{StaticResource Icon.Check}" />
-                                                                                    </Button>
+                                                                                        FontSize="12"
+                                                                                        Text="{Binding Title}"
+                                                                                        TextTrimming="CharacterEllipsis"
+                                                                                        VerticalAlignment="Center" />
+                                                                                    <PathIcon
+                                                                                        Grid.Column="2"
+                                                                                        Width="12"
+                                                                                        Height="12"
+                                                                                        Margin="6,0,0,0"
+                                                                                        Data="{StaticResource Icon.MusicNote}"
+                                                                                        Foreground="{DynamicResource AccentBrush}"
+                                                                                        IsVisible="{Binding IsTrackPreset}"
+                                                                                        VerticalAlignment="Center" />
                                                                                 </Grid>
-                                                                            </Panel>
+                                                                            </Button>
                                                                         </DataTemplate>
                                                                     </ItemsControl.ItemTemplate>
                                                                 </ItemsControl>

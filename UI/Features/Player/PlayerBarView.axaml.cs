@@ -5,6 +5,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
+using LMP.UI.Controls;
 
 namespace LMP.UI.Features.Player;
 
@@ -139,6 +140,9 @@ public partial class PlayerBarView : UserControl
     {
         EqualizerButton.Classes.Remove("active");
         EqPresetsPopup.IsOpen = false;
+        _currentViewModel?.CancelPresetRename();
+        _currentViewModel?.FlushEqualizerPendingSave();
+        _currentViewModel?.SyncEqualizerStateFromSettings();
     }
 
     private void OnEqHeaderButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -154,28 +158,11 @@ public partial class PlayerBarView : UserControl
         }
     }
 
-    private void OnRenamePresetTextBoxKeyDown(object? sender, KeyEventArgs e)
+    private void OnPresetsTriggerButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (sender is not Control { DataContext: EqualizerPresetChipItem chip }) return;
-
-        if (e.Key == Key.Enter)
-        {
-            _currentViewModel?.CommitRenamePresetCommand.Execute(chip);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            chip.IsRenaming = false;
-            e.Handled = true;
-        }
-    }
-
-    private void OnRenamePresetTextBoxLostFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: EqualizerPresetChipItem { IsRenaming: true } chip })
-        {
-            _currentViewModel?.CommitRenamePresetCommand.Execute(chip);
-        }
+        _presetsHoverCloseTimer?.Stop();
+        ToolTip.SetIsOpen(EqPresetsButton, false);
+        EqPresetsPopup.IsOpen = !EqPresetsPopup.IsOpen;
     }
 
     private void OnPresetsTriggerPointerEntered(object? sender, PointerEventArgs e)
@@ -204,6 +191,8 @@ public partial class PlayerBarView : UserControl
         SchedulePresetsPopupClose();
     }
 
+    private bool IsPresetsPopupEditing() => NewPresetTextBox.IsFocused;
+
     private void SchedulePresetsPopupClose()
     {
         _presetsHoverCloseTimer ??= new DispatcherTimer(
@@ -212,13 +201,26 @@ public partial class PlayerBarView : UserControl
                 (_, _) =>
                 {
                     _presetsHoverCloseTimer?.Stop();
-                    if (!_isPointerInPresetsTrigger && !_isPointerInPresetsPopup)
+                    if (!_isPointerInPresetsTrigger && !_isPointerInPresetsPopup && !IsPresetsPopupEditing())
                     {
                         EqPresetsPopup.IsOpen = false;
+                        _currentViewModel?.CancelPresetRename();
                     }
                 });
         _presetsHoverCloseTimer.Stop();
         _presetsHoverCloseTimer.Start();
+    }
+
+    private void FocusNewPresetTextBox()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (EqPresetsPopup.IsOpen)
+            {
+                NewPresetTextBox.Focus();
+                NewPresetTextBox.SelectAll();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private void OnNewPresetTextBoxKeyDown(object? sender, KeyEventArgs e)
@@ -226,6 +228,12 @@ public partial class PlayerBarView : UserControl
         if (e.Key == Key.Enter)
         {
             _currentViewModel?.SaveInlineEqualizerPresetCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            _currentViewModel?.CancelPresetRename();
+            EqualizerButton.Focus();
             e.Handled = true;
         }
     }
@@ -303,6 +311,7 @@ public partial class PlayerBarView : UserControl
             vm.PropertyChanged += OnViewModelPropertyChanged;
             vm.SuspendRequested += OnSuspend;
             vm.ResumeRequested += OnResume;
+            vm.PresetInputFocusRequested += FocusNewPresetTextBox;
 
             if (!_isSuspended) RefreshAllVisuals();
         }
@@ -314,6 +323,7 @@ public partial class PlayerBarView : UserControl
         _currentViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _currentViewModel.SuspendRequested -= OnSuspend;
         _currentViewModel.ResumeRequested -= OnResume;
+        _currentViewModel.PresetInputFocusRequested -= FocusNewPresetTextBox;
         _currentViewModel = null;
     }
 

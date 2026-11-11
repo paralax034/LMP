@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using LMP.Core.Audio;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;

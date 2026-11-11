@@ -1,9 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
-using CommunityToolkit.Mvvm.Input;
 using LMP.UI.Controls;
-using LMP.UI.Helpers;
 
 namespace LMP.UI.Features.Settings.ViewModels;
 

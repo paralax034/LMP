@@ -5,7 +5,6 @@ using System.Net.Sockets;
 using LMP.Core.Audio.Http;
 using LMP.Core.Youtube.Videos;
 using LMP.Tests.Framework;
-using LMP.Tests.Unit;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.Tests.Integration;

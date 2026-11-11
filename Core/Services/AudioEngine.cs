@@ -254,6 +254,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     public event Action? OnQueueChanged;
     public event Action<bool>? OnLoadingStateChanged;
     public event Action<int>? OnMaxVolumeChanged;
+    public event Action? OnEqualizerChanged;
+    public event Action? OnAudioSettingsChanged;
     public event Action<AudioStreamInfo>? OnStreamInfoChanged;
     public event Action<BufferState>? OnBufferStateChanged;
     public event Action? OnDeviceLost;

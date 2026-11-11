@@ -4,6 +4,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using LMP.Core.Audio.Helpers;
 using LMP.Core.Youtube.Exceptions;
+using LMP.UI.Controls;
 
 namespace LMP.UI.Features.Player;
 
@@ -39,12 +40,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private const int DefaultVolume = 50;
     private const int DefaultMaxVolume = 100;
-    private const int VolumeLowThresholdPercent = 33;
-    private const int VolumeMediumThresholdPercent = 66;
-    private const double VolumeBoostDivisor = 2.0;
-    private const float MaxGainClamp = 4.0f;
     private const int VolumeScrollStepDivisor = 200;
-    private const string OrangeWarnHex = "#FFB86C";
 
     #endregion
 
@@ -80,7 +76,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private string? _pendingStreamInfoTrackId;
     private string? _lastHandledTrackId;
     private string _lastValidStreamInfo = "";
-    private int _cachedEffectivePercent;
 
     private CancellationTokenSource? _activeHintCts;
 
@@ -143,36 +138,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     [ObservableProperty] public partial int Volume { get; set; }
     [ObservableProperty] public partial int MaxVolume { get; private set; } = DefaultMaxVolume;
-    [ObservableProperty] public partial bool IsVolumePopupOpen { get; set; }
-    [ObservableProperty] public partial bool IsVolumePreviewVisible { get; set; }
-
-    public float RealGain
-    {
-        get
-        {
-            float vol = _audio.GetVolume();
-            return vol > 0 ? Math.Clamp(vol / 100f, 0f, MaxGainClamp) : 0f;
-        }
-    }
-
-    public bool IsReallyBoosted
-    {
-        get
-        {
-            var settings = _library.Settings.Audio;
-            if (!settings.VolumeBoostEnabled) return false;
-            return Volume > AudioEngine.VolumeNormalRange;
-        }
-    }
+    [ObservableProperty] public partial bool VolumeBoostEnabled { get; private set; } = true;
 
     public bool IsMuted => Volume < 1;
-    public bool IsVolumeLow => Volume >= 1 && !IsReallyBoosted && _cachedEffectivePercent <= VolumeLowThresholdPercent;
-
-    public bool IsVolumeMedium => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeLowThresholdPercent &&
-                                  _cachedEffectivePercent <= VolumeMediumThresholdPercent;
-
-    public bool IsVolumeHigh => !IsMuted && !IsReallyBoosted && _cachedEffectivePercent > VolumeMediumThresholdPercent;
-    public bool IsVolumeBoosted => IsReallyBoosted;
 
     partial void OnVolumeChanged(int value)
     {
@@ -181,42 +149,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _playerControl.SetVolume(value);
         }
 
-        RecalcEffectivePercent();
         RaiseVolumePropertiesChanged();
-    }
-
-    private void RecalcEffectivePercent()
-    {
-        var settings = _library.Settings.Audio;
-
-        if (settings.VolumeBoostEnabled)
-        {
-            _cachedEffectivePercent = Volume <= AudioEngine.VolumeNormalRange
-                ? (int)(Volume / VolumeBoostDivisor)
-                : 100;
-        }
-        else
-        {
-            int maxVol = MaxVolume > 0 ? MaxVolume : DefaultMaxVolume;
-            _cachedEffectivePercent = (int)((double)Volume / maxVol * 100);
-        }
-    }
-
-    public IBrush VolumePercentBrush
-    {
-        get
-        {
-            var app = Application.Current;
-            if (app == null) return Brushes.White;
-
-            string resourceKey = IsReallyBoosted ? "SystemWarnOrangeBrush" : "TextPrimaryBrush";
-            if (app.Resources.TryGetResource(resourceKey, app.ActualThemeVariant, out var brush) && brush is IBrush b)
-                return b;
-
-            return IsReallyBoosted
-                ? new SolidColorBrush(Color.Parse(OrangeWarnHex))
-                : Brushes.White;
-        }
     }
 
     #endregion
@@ -260,8 +193,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     [ObservableProperty] public partial bool IsEqualizerEnabled { get; set; }
     [ObservableProperty] public partial bool IsSimple5BandMode { get; set; } = true;
-    [ObservableProperty] public partial bool ForceGlobalEqualizer { get; set; }
-    [ObservableProperty] public partial bool IsEditingTrackEqualizer { get; set; }
     [ObservableProperty] public partial float[] EqualizerBandGains { get; private set; } = new float[10];
     [ObservableProperty] public partial string ActiveEqualizerPresetId { get; private set; } = EqualizerPresets.FlatId;
     [ObservableProperty] public partial string ActiveEqualizerPresetTitle { get; private set; } = "";
@@ -278,28 +209,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     public string BandModeBadgeText => IsSimple5BandMode ? "5" : "10";
 
-    public string TrackEqualizerTooltip
-    {
-        get
-        {
-            string? trackPresetId = CurrentTrack?.EqualizerPresetId;
-            if (!string.IsNullOrEmpty(trackPresetId))
-            {
-                string presetTitle = ResolvePresetDisplayTitle(trackPresetId);
-                return ForceGlobalEqualizer
-                    ? string.Format(SL["Eq_Track_SavedButGlobal_Tip"], presetTitle)
-                    : string.Format(SL["Eq_Track_AssignedWithPreset_Tip"], presetTitle);
-            }
-
-            return IsTrackModeHighlighted
-                ? SL["Eq_Track_Assigned_Tip"]
-                : SL["Eq_Track_NotAssigned_Tip"];
-        }
-    }
-
-    public string ForceGlobalEqualizerTooltip => ForceGlobalEqualizer
-        ? SL["Eq_ForceGlobal_Active_Tip"]
-        : SL["Eq_ForceGlobal_Inactive_Tip"];
+    public string TrackEqualizerTooltip =>
+        EqualizerPresetChipItem.FormatTrackEqualizerTooltip(
+            CurrentTrack?.EqualizerPresetId,
+            IsTrackModeHighlighted,
+            EqualizerPresetsList);
 
     #endregion
 
@@ -370,9 +284,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     public IRelayCommand ResetEqualizerCommand { get; private set; } = null!;
     public IRelayCommand ToggleEqualizerModeCommand { get; private set; } = null!;
     public IRelayCommand ToggleTrackEqualizerModeCommand { get; private set; } = null!;
-    public IRelayCommand ToggleForceGlobalEqualizerCommand { get; private set; } = null!;
     public IRelayCommand<EqualizerPresetChipItem> SelectEqualizerPresetCommand { get; private set; } = null!;
-    public IRelayCommand<EqualizerPresetChipItem> CommitRenamePresetCommand { get; private set; } = null!;
     public IRelayCommand<EqualizerPresetChipItem> DeleteEqualizerPresetCommand { get; private set; } = null!;
     public IRelayCommand SaveInlineEqualizerPresetCommand { get; private set; } = null!;
     public IAsyncRelayCommand ClearTrackEqualizerCommand { get; private set; } = null!;
@@ -383,6 +295,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     public event Action? SuspendRequested;
     public event Action? ResumeRequested;
+    public event Action? PresetInputFocusRequested;
 
     #endregion
 
@@ -449,8 +362,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             AutoShuffleEnabled = _playerControl.ShuffleEnabled;
             RepeatMode = _playerControl.RepeatMode;
-
-            RecalcEffectivePercent();
+            VolumeBoostEnabled = settings.Audio.VolumeBoostEnabled;
 
             RaiseVolumePropertiesChanged();
             UpdateQueueState();
@@ -594,7 +506,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         ResetEqualizerCommand = new RelayCommand(() =>
         {
             if (!CanResetEqualizer) return;
-            ApplyEqualizerPresetSelection(EqualizerPresets.FlatId);
+            _audio.ResetEqualizer();
         });
 
         ToggleEqualizerModeCommand = new RelayCommand(() =>
@@ -602,33 +514,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             IsSimple5BandMode = !IsSimple5BandMode;
         });
 
-        ToggleTrackEqualizerModeCommand = new RelayCommand(async () =>
+        ToggleTrackEqualizerModeCommand = new RelayCommand(() =>
         {
-            if (!HasTrack || CurrentTrack == null) return;
-
-            if (!IsEditingTrackEqualizer)
-            {
-                ForceGlobalEqualizer = false;
-                IsEditingTrackEqualizer = true;
-            }
-            else
-            {
-                IsEditingTrackEqualizer = false;
-                if (HasTrackEqualizerAssigned)
-                    await _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
-            }
-
-            SyncEqualizerStateFromSettings();
-            _audio.UpdateEqualizerSettings();
-        });
-
-        ToggleForceGlobalEqualizerCommand = new RelayCommand(() =>
-        {
-            bool nextGlobal = !ForceGlobalEqualizer;
-            if (nextGlobal)
-                IsEditingTrackEqualizer = false;
-
-            ForceGlobalEqualizer = nextGlobal;
+            if (!HasTrack) return;
+            _audio.ToggleTrackEqualizerMode();
         });
 
         SelectEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(item =>
@@ -636,23 +525,49 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             if (item == null) return;
             if (item.IsSelected && !item.IsBuiltIn)
             {
-                BeginRenamePreset(item);
+                _renamingPresetId = item.Id;
+                NewPresetNameInput = item.Title;
+                PresetInputFocusRequested?.Invoke();
                 return;
             }
-            CancelAllPresetRenames();
-            ApplyEqualizerPresetSelection(item.Id);
+
+            _renamingPresetId = null;
+            _audio.SelectEqualizerPreset(item.Id);
         });
 
-        CommitRenamePresetCommand = new RelayCommand<EqualizerPresetChipItem>(CommitRenamePreset);
-        DeleteEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(DeleteCustomEqualizerPreset);
-        SaveInlineEqualizerPresetCommand = new RelayCommand(SaveInlineEqualizerPreset);
+        DeleteEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(item =>
+        {
+            if (item == null || item.IsBuiltIn) return;
+            if (string.Equals(_renamingPresetId, item.Id, StringComparison.Ordinal))
+            {
+                _renamingPresetId = null;
+                NewPresetNameInput = "";
+            }
+            _audio.DeleteUserEqualizerPreset(item.Id);
+        });
+
+        SaveInlineEqualizerPresetCommand = new RelayCommand(() =>
+        {
+            if (!string.IsNullOrEmpty(_renamingPresetId))
+            {
+                string targetId = _renamingPresetId;
+                _renamingPresetId = null;
+                _audio.RenameUserEqualizerPreset(targetId, NewPresetNameInput);
+                NewPresetNameInput = "";
+                return;
+            }
+
+            if (_audio.SaveUserEqualizerPreset(NewPresetNameInput, EqualizerBandGains) != null)
+            {
+                NewPresetNameInput = "";
+                ShowPresetRightClickHint = true;
+            }
+        });
 
         ClearTrackEqualizerCommand = new AsyncRelayCommand(async () =>
         {
             if (CurrentTrack == null) return;
             await _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
-            IsEditingTrackEqualizer = false;
-            SyncEqualizerStateFromSettings();
             _audio.UpdateEqualizerSettings();
         });
     }
@@ -671,6 +586,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         _audio.OnStreamInfoChanged += OnAudioStreamInfoChanged;
         _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
+        _audio.OnEqualizerChanged += SyncEqualizerStateFromSettings;
+        _audio.OnAudioSettingsChanged += HandleAudioSettingsChanged;
 
         _library.OnTrackUpdated += OnLibraryTrackUpdated;
 
@@ -678,6 +595,12 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         AudioSourceFactory.GlobalCache.OnCacheCleared += OnCacheClearedHandler;
 
         SubscribeHeavy();
+    }
+
+    private void HandleAudioSettingsChanged()
+    {
+        VolumeBoostEnabled = _library.Settings.Audio.VolumeBoostEnabled;
+        RaiseVolumePropertiesChanged();
     }
 
     private void SubscribeHeavy()
@@ -771,21 +694,24 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         if (CurrentTrack != null && t.Id == CurrentTrack.Id)
         {
-            if (Dispatcher.UIThread.CheckAccess())
+            void SyncUpdatedTrack()
             {
+                if (CurrentTrack == null || t.Id != CurrentTrack.Id) return;
                 IsLiked = t.IsLiked;
                 CurrentTrack.IsLiked = t.IsLiked;
                 OnPropertyChanged(nameof(LikeTooltip));
-            }
-            else
-            {
-                Dispatcher.UIThread.Post(() =>
+
+                if (!string.Equals(CurrentTrack.EqualizerPresetId, t.EqualizerPresetId, StringComparison.Ordinal))
                 {
-                    IsLiked = t.IsLiked;
-                    CurrentTrack.IsLiked = t.IsLiked;
-                    OnPropertyChanged(nameof(LikeTooltip));
-                });
+                    CurrentTrack.EqualizerPresetId = t.EqualizerPresetId;
+                    SyncEqualizerStateFromSettings();
+                }
             }
+
+            if (Dispatcher.UIThread.CheckAccess())
+                SyncUpdatedTrack();
+            else
+                Dispatcher.UIThread.Post(SyncUpdatedTrack);
         }
     }
 
@@ -1059,13 +985,14 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (_lastVolumeBeforeMute > MaxVolume)
             _lastVolumeBeforeMute = MaxVolume;
 
-        RecalcEffectivePercent();
         RaiseVolumePropertiesChanged();
         Log.Info($"[PlayerBar] MaxVolume changed: {oldMax} -> {newMax}");
     }
 
     private void HandleTrackChanged(TrackInfo? track)
     {
+        _audio.FlushPendingEqualizerSave();
+
         string? newTrackId = track?.Id;
         bool isNewTrack = newTrackId != _lastHandledTrackId;
         _lastHandledTrackId = newTrackId;
@@ -1100,6 +1027,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             var storedTrack = _library.GetTrack(track.Id);
             IsLiked = storedTrack?.IsLiked ?? track.IsLiked;
+            if (storedTrack != null && string.IsNullOrEmpty(track.EqualizerPresetId))
+                track.EqualizerPresetId = storedTrack.EqualizerPresetId;
         }
         else
         {
@@ -1109,8 +1038,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(DurationTooltip));
         UpdateQueueState();
         RefreshCommandStates();
-
-        IsEditingTrackEqualizer = !_library.Settings.Audio.ForceGlobalEqualizer && HasTrackEqualizerAssigned;
         SyncEqualizerStateFromSettings();
     }
 
@@ -1448,12 +1375,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private void RaiseVolumePropertiesChanged()
     {
         OnPropertyChanged(nameof(IsMuted));
-        OnPropertyChanged(nameof(IsVolumeLow));
-        OnPropertyChanged(nameof(IsVolumeMedium));
-        OnPropertyChanged(nameof(IsVolumeHigh));
-        OnPropertyChanged(nameof(IsVolumeBoosted));
-        OnPropertyChanged(nameof(IsReallyBoosted));
-        OnPropertyChanged(nameof(VolumePercentBrush));
         OnPropertyChanged(nameof(MuteTooltip));
     }
 
@@ -1795,7 +1716,22 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #region Equalizer Management
 
     private bool _isSyncingEq;
-    private DispatcherTimer? _eqSaveDebounceTimer;
+    private string? _renamingPresetId;
+
+    public void CancelPresetRename()
+    {
+        if (_renamingPresetId != null)
+        {
+            _renamingPresetId = null;
+            NewPresetNameInput = "";
+        }
+    }
+
+    partial void OnNewPresetNameInputChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            _renamingPresetId = null;
+    }
 
     public void SyncEqualizerStateFromSettings()
     {
@@ -1805,29 +1741,30 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             var audioSettings = _library.Settings.Audio;
             IsEqualizerEnabled = audioSettings.EqualizerEnabled;
             IsSimple5BandMode = audioSettings.UseSimple5BandMode;
-            ForceGlobalEqualizer = audioSettings.ForceGlobalEqualizer;
-
-            if (ForceGlobalEqualizer || !HasTrack)
-            {
-                IsEditingTrackEqualizer = false;
-            }
-            else if (HasTrackEqualizerAssigned)
-            {
-                IsEditingTrackEqualizer = true;
-            }
-
-            int expectedCount = EqualizerPresets.BuiltInIds.Length + audioSettings.UserEqualizerPresets.Count;
-            if (EqualizerPresetsList.Count != expectedCount)
-                RebuildEqualizerPresetsList();
 
             var bands = new float[EqualizerProcessor.BandCount];
             string resolvedPreset = EqualizerPresets.ResolveEffectiveBands(
                 audioSettings, CurrentTrack, bands);
 
+            if (_renamingPresetId != null
+                && !string.Equals(_renamingPresetId, resolvedPreset, StringComparison.Ordinal))
+            {
+                CancelPresetRename();
+            }
+
             ActiveEqualizerPresetId = resolvedPreset;
             EqualizerBandGains = bands;
-            UpdateActiveEqualizerChipSelection(resolvedPreset);
-            RefreshEqualizerButtonFlags(bands);
+            ActiveEqualizerPresetTitle = EqualizerPresetChipItem.SyncPresetsList(
+                EqualizerPresetsList,
+                audioSettings,
+                CurrentTrack,
+                resolvedPreset);
+
+            IsTrackModeHighlighted = audioSettings.EqualizerEnabled && _audio.IsTrackEqualizerActive;
+            CanResetEqualizer = EqualizerPresets.HasNonZeroBands(bands, audioSettings.EqualizerPreampDb);
+
+            OnPropertyChanged(nameof(HasTrackEqualizerAssigned));
+            OnPropertyChanged(nameof(TrackEqualizerTooltip));
             OnPropertyChanged(nameof(BandModeBadgeText));
         }
         finally
@@ -1836,302 +1773,31 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         }
     }
 
-    private void RefreshEqualizerButtonFlags(ReadOnlySpan<float> bands)
-    {
-        IsTrackModeHighlighted = HasTrack && !ForceGlobalEqualizer && (IsEditingTrackEqualizer || HasTrackEqualizerAssigned);
-
-        bool hasNonZeroBand = false;
-        for (int i = 0; i < bands.Length; i++)
-        {
-            if (MathF.Abs(bands[i]) > 0.05f)
-            {
-                hasNonZeroBand = true;
-                break;
-            }
-        }
-        CanResetEqualizer = hasNonZeroBand;
-
-        OnPropertyChanged(nameof(HasTrackEqualizerAssigned));
-        OnPropertyChanged(nameof(TrackEqualizerTooltip));
-        OnPropertyChanged(nameof(ForceGlobalEqualizerTooltip));
-    }
-
-    private string ResolvePresetDisplayTitle(string presetId)
-    {
-        for (int i = 0; i < EqualizerPresetsList.Count; i++)
-        {
-            if (string.Equals(EqualizerPresetsList[i].Id, presetId, StringComparison.Ordinal))
-                return EqualizerPresetsList[i].Title;
-        }
-        string key = EqualizerPresets.GetLocalizationKey(presetId);
-        return SL[key];
-    }
-
-    private void RebuildEqualizerPresetsList()
-    {
-        EqualizerPresetsList.Clear();
-        var builtIn = EqualizerPresets.BuiltInIds;
-        for (int i = 0; i < builtIn.Length; i++)
-        {
-            string id = builtIn[i];
-            string key = EqualizerPresets.GetLocalizationKey(id);
-            EqualizerPresetsList.Add(new EqualizerPresetChipItem(id, SL[key], isBuiltIn: true));
-        }
-
-        var userPresets = _library.Settings.Audio.UserEqualizerPresets;
-        for (int i = 0; i < userPresets.Count; i++)
-        {
-            var up = userPresets[i];
-            EqualizerPresetsList.Add(new EqualizerPresetChipItem(up.Id, up.Name, isBuiltIn: false));
-        }
-    }
-
-    private void UpdateActiveEqualizerChipSelection(string presetId)
-    {
-        string globalId = _library.Settings.Audio.GlobalEqualizerPresetId;
-        string? trackId = CurrentTrack?.EqualizerPresetId;
-
-        string activeTitle = SL["Eq_Preset_Custom"];
-        for (int i = 0; i < EqualizerPresetsList.Count; i++)
-        {
-            var item = EqualizerPresetsList[i];
-            bool match = string.Equals(item.Id, presetId, StringComparison.Ordinal);
-            item.IsSelected = match;
-            item.IsGlobalPreset = string.Equals(item.Id, globalId, StringComparison.Ordinal);
-            item.IsTrackPreset = !string.IsNullOrEmpty(trackId) && string.Equals(item.Id, trackId, StringComparison.Ordinal);
-
-            if (match)
-                activeTitle = item.Title;
-        }
-        ActiveEqualizerPresetTitle = activeTitle;
-    }
-
-    private void SaveInlineEqualizerPreset()
-    {
-        string name = NewPresetNameInput.Trim();
-        if (string.IsNullOrEmpty(name)) return;
-
-        string id = "user_" + Guid.NewGuid().ToString("N")[..8];
-        var bandsCopy = new float[EqualizerProcessor.BandCount];
-        for (int i = 0; i < EqualizerBandGains.Length && i < bandsCopy.Length; i++)
-            bandsCopy[i] = EqualizerBandGains[i];
-
-        _library.UpdateSettings(s =>
-        {
-            s.Audio.UserEqualizerPresets.Add(new EqualizerPreset
-            {
-                Id = id,
-                Name = name,
-                IsBuiltIn = false,
-                Bands = bandsCopy
-            });
-            s.Audio.GlobalEqualizerPresetId = id;
-            s.Audio.EqualizerEnabled = true;
-        });
-
-        NewPresetNameInput = "";
-        ShowPresetRightClickHint = true;
-        EqualizerPresetsList.Add(new EqualizerPresetChipItem(id, name, isBuiltIn: false));
-        SyncEqualizerStateFromSettings();
-        _audio.UpdateEqualizerSettings();
-    }
-
-    private void DeleteCustomEqualizerPreset(EqualizerPresetChipItem? item)
-    {
-        if (item == null || item.IsBuiltIn) return;
-
-        _eqSaveDebounceTimer?.Stop();
-        _library.UpdateSettings(s =>
-        {
-            s.Audio.UserEqualizerPresets.RemoveAll(p => string.Equals(p.Id, item.Id, StringComparison.Ordinal));
-            if (string.Equals(s.Audio.GlobalEqualizerPresetId, item.Id, StringComparison.Ordinal))
-                s.Audio.GlobalEqualizerPresetId = EqualizerPresets.FlatId;
-        });
-
-        if (CurrentTrack != null && string.Equals(CurrentTrack.EqualizerPresetId, item.Id, StringComparison.Ordinal))
-        {
-            _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
-            IsEditingTrackEqualizer = false;
-        }
-
-        EqualizerPresetsList.Remove(item);
-        SyncEqualizerStateFromSettings();
-        _audio.UpdateEqualizerSettings();
-    }
-
-    private void BeginRenamePreset(EqualizerPresetChipItem item)
-    {
-        for (int i = 0; i < EqualizerPresetsList.Count; i++)
-            EqualizerPresetsList[i].IsRenaming = ReferenceEquals(EqualizerPresetsList[i], item);
-
-        item.EditTitle = item.Title;
-    }
-
-    private void CancelAllPresetRenames()
-    {
-        for (int i = 0; i < EqualizerPresetsList.Count; i++)
-            EqualizerPresetsList[i].IsRenaming = false;
-    }
-
-    private void CommitRenamePreset(EqualizerPresetChipItem? item)
-    {
-        if (item == null || item.IsBuiltIn) return;
-        item.IsRenaming = false;
-
-        string newName = item.EditTitle.Trim();
-        if (string.IsNullOrEmpty(newName) || string.Equals(newName, item.Title, StringComparison.Ordinal))
-            return;
-
-        item.Title = newName;
-        _library.UpdateSettings(s =>
-        {
-            for (int i = 0; i < s.Audio.UserEqualizerPresets.Count; i++)
-            {
-                if (string.Equals(s.Audio.UserEqualizerPresets[i].Id, item.Id, StringComparison.Ordinal))
-                {
-                    s.Audio.UserEqualizerPresets[i].Name = newName;
-                    break;
-                }
-            }
-        });
-
-        if (item.IsSelected)
-            ActiveEqualizerPresetTitle = newName;
-    }
-
     partial void OnIsEqualizerEnabledChanged(bool value)
     {
-        if (_isSyncingEq || _library.Settings.Audio.EqualizerEnabled == value) return;
-        _eqSaveDebounceTimer?.Stop();
-        _library.UpdateSettings(s => s.Audio.EqualizerEnabled = value);
-        _audio.UpdateEqualizerSettings();
+        if (_isSyncingEq) return;
+        _audio.SetEqualizerEnabled(value);
     }
 
     partial void OnIsSimple5BandModeChanged(bool value)
     {
         OnPropertyChanged(nameof(BandModeBadgeText));
-        if (_isSyncingEq || _library.Settings.Audio.UseSimple5BandMode == value) return;
-        _library.UpdateSettings(s => s.Audio.UseSimple5BandMode = value);
-    }
-
-    partial void OnIsEditingTrackEqualizerChanged(bool value)
-    {
-        RefreshEqualizerButtonFlags(EqualizerBandGains);
-    }
-
-    partial void OnForceGlobalEqualizerChanged(bool value)
-    {
-        if (_isSyncingEq || _library.Settings.Audio.ForceGlobalEqualizer == value)
-        {
-            RefreshEqualizerButtonFlags(EqualizerBandGains);
-            return;
-        }
-        _eqSaveDebounceTimer?.Stop();
-        _library.UpdateSettings(s => s.Audio.ForceGlobalEqualizer = value);
-        SyncEqualizerStateFromSettings();
-        _audio.UpdateEqualizerSettings();
+        if (_isSyncingEq) return;
+        _audio.SetSimple5BandMode(value);
     }
 
     public void ApplyCustomEqualizerBandsFromUi(float[] newBands10)
     {
         if (_isSyncingEq || newBands10.Length < EqualizerProcessor.BandCount) return;
-
-        // 1. Instantly update in-memory state and audio engine (0 ms latency, exactly 1 call without duplicate from OnIsEqualizerEnabledChanged)
-        var audioSettings = _library.Settings.Audio;
-        audioSettings.EqualizerEnabled = true;
-        audioSettings.CustomEqualizerBands = newBands10;
-        if (!IsEditingTrackEqualizer || CurrentTrack == null)
-            audioSettings.GlobalEqualizerPresetId = EqualizerPresets.CustomId;
-        else
-            CurrentTrack.EqualizerPresetId = EqualizerPresets.CustomId;
-
-        bool presetChanged = !string.Equals(ActiveEqualizerPresetId, EqualizerPresets.CustomId, StringComparison.Ordinal);
-
-        _isSyncingEq = true;
-        try
-        {
-            IsEqualizerEnabled = true;
-            if (presetChanged)
-            {
-                ActiveEqualizerPresetId = EqualizerPresets.CustomId;
-                UpdateActiveEqualizerChipSelection(EqualizerPresets.CustomId);
-                RefreshEqualizerButtonFlags(newBands10);
-            }
-            else
-            {
-                bool hasNonZeroBand = false;
-                for (int i = 0; i < newBands10.Length; i++)
-                {
-                    if (MathF.Abs(newBands10[i]) > 0.05f)
-                    {
-                        hasNonZeroBand = true;
-                        break;
-                    }
-                }
-                CanResetEqualizer = hasNonZeroBand;
-            }
-        }
-        finally
-        {
-            _isSyncingEq = false;
-        }
-
-        _audio.UpdateEqualizerSettings();
-
-        // 2. Defer the physical JSON write to SQLite and the binding array update for 350 ms after slider release
-        _eqSaveDebounceTimer?.Stop();
-        _eqSaveDebounceTimer ??= new DispatcherTimer(
-            TimeSpan.FromMilliseconds(350),
-            DispatcherPriority.Background,
-          (_, _) =>
-            {
-                _eqSaveDebounceTimer?.Stop();
-                _isSyncingEq = true;
-                try
-                {
-                    EqualizerBandGains = _library.Settings.Audio.CustomEqualizerBands;
-                }
-                finally
-                {
-                    _isSyncingEq = false;
-                }
-
-                _library.UpdateSettings(s =>
-                {
-                    s.Audio.EqualizerEnabled = _library.Settings.Audio.EqualizerEnabled;
-                    s.Audio.CustomEqualizerBands = _library.Settings.Audio.CustomEqualizerBands;
-                    s.Audio.GlobalEqualizerPresetId = _library.Settings.Audio.GlobalEqualizerPresetId;
-                });
-                if (IsEditingTrackEqualizer && CurrentTrack != null)
-                    _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, CurrentTrack.EqualizerPresetId);
-            });
-        _eqSaveDebounceTimer.Start();
+        CancelPresetRename();
+        newBands10.AsSpan(0, EqualizerProcessor.BandCount).CopyTo(EqualizerBandGains);
+        CanResetEqualizer = EqualizerPresets.HasNonZeroBands(
+            EqualizerBandGains,
+            _library.Settings.Audio.EqualizerPreampDb);
+        _audio.ApplyCustomEqualizerBands(newBands10);
     }
 
-    private void ApplyEqualizerPresetSelection(string presetId)
-    {
-        _eqSaveDebounceTimer?.Stop();
-        bool enableEq = !IsEqualizerEnabled && !string.Equals(presetId, EqualizerPresets.FlatId, StringComparison.Ordinal);
-
-        if (IsEditingTrackEqualizer && CurrentTrack != null && !ForceGlobalEqualizer)
-        {
-            if (enableEq)
-                _library.UpdateSettings(s => s.Audio.EqualizerEnabled = true);
-            _ = _library.SetTrackEqualizerPresetAsync(CurrentTrack, presetId);
-        }
-        else
-        {
-            _library.UpdateSettings(s =>
-            {
-                s.Audio.GlobalEqualizerPresetId = presetId;
-                if (enableEq)
-                    s.Audio.EqualizerEnabled = true;
-            });
-        }
-
-        SyncEqualizerStateFromSettings();
-        _audio.UpdateEqualizerSettings();
-    }
+    public void FlushEqualizerPendingSave() => _audio.FlushPendingEqualizerSave();
 
     #endregion
 
@@ -2153,7 +1819,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsRepeatNone));
         OnPropertyChanged(nameof(IsRepeatOne));
         OnPropertyChanged(nameof(IsRepeatAll));
-        RebuildEqualizerPresetsList();
+        EqualizerPresetsList.Clear();
         SyncEqualizerStateFromSettings();
     }
 
@@ -2166,6 +1832,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     /// </summary>
     protected override void OnSuspend(SuspendLevel level)
     {
+        _audio.FlushPendingEqualizerSave();
         UnsubscribeHeavy();
         CancelFormatsLoading();
 
@@ -2196,6 +1863,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         IsFormatsLoading = false;
 
         SubscribeHeavy();
+        SyncEqualizerStateFromSettings();
 
         ResumeRequested?.Invoke();
 
@@ -2209,6 +1877,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         if (disposing)
         {
+            _audio.FlushPendingEqualizerSave();
+
             LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
             _youtube.AuthService.OnAuthStateChanged -= ClearRestrictedTracksCache;
 
@@ -2223,9 +1893,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             _shuffleAnimationTimer?.Stop();
             _shuffleAnimationTimer = null;
-
-            _eqSaveDebounceTimer?.Stop();
-            _eqSaveDebounceTimer = null;
 
             CancelFormatsLoading();
             UnsubscribeHeavy();
@@ -2242,6 +1909,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             _audio.OnStreamInfoChanged -= OnAudioStreamInfoChanged;
             _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
+            _audio.OnEqualizerChanged -= SyncEqualizerStateFromSettings;
+            _audio.OnAudioSettingsChanged -= HandleAudioSettingsChanged;
             _library.OnTrackUpdated -= OnLibraryTrackUpdated;
 
             AudioSourceFactory.GlobalCache.OnFormatCached -= OnFormatCachedHandler;
@@ -2252,35 +1921,4 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     #endregion
-}
-
-public sealed partial class EqualizerPresetChipItem : ObservableObject
-{
-    public string Id { get; }
-    public bool IsBuiltIn { get; }
-
-    [ObservableProperty] public partial string Title { get; set; }
-    [ObservableProperty] public partial string EditTitle { get; set; }
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanRename))]
-    public partial bool IsSelected { get; set; }
-
-    [ObservableProperty] public partial bool IsGlobalPreset { get; set; }
-    [ObservableProperty] public partial bool IsTrackPreset { get; set; }
-    [ObservableProperty] public partial bool IsRenaming { get; set; }
-
-    public bool CanRename => IsSelected && !IsBuiltIn;
-
-    public string? RightClickHint => IsBuiltIn
-        ? null
-        : LocalizationService.Instance["Eq_Preset_RightClickDelete"];
-
-    public EqualizerPresetChipItem(string id, string title, bool isBuiltIn)
-    {
-        Id = id;
-        Title = title;
-        EditTitle = title;
-        IsBuiltIn = isBuiltIn;
-    }
 }
