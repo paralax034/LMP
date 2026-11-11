@@ -70,7 +70,6 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     #endregion
 
-    private readonly AudioEngine _audio;
     private readonly PlayerControlService _playerControl;
     private readonly PlaylistService _playlistService;
     private readonly DownloadService _downloads;
@@ -166,7 +165,6 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     public TrackItemViewModel(
         TrackInfo track,
-        AudioEngine audio,
         PlayerControlService playerControl,
         PlaylistService playlistService,
         DownloadService downloads,
@@ -175,7 +173,6 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         Action<TrackInfo>? onPlay = null)
     {
         Track = track;
-        _audio = audio;
         _playerControl = playerControl;
         _playlistService = playlistService;
         _downloads = downloads;
@@ -452,7 +449,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     private void OnAddToQueue()
     {
         var targets = GetActionTargets();
-        _audio.EnqueueRangeUnique(targets);
+        _playerControl.EnqueueRangeUnique(targets);
     }
 
     private void OnStartRadio() => StartRadioAction?.Invoke(Track);
@@ -469,13 +466,13 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
         var targets = GetActionTargets();
         for (int i = 0; i < targets.Count; i++)
-            _audio.RemoveFromQueue(targets[i]);
+            _playerControl.RemoveFromQueue(targets[i]);
     }
 
     private async Task PlayAsync()
     {
-        if (_audio.CurrentTrack?.Id == Id)
-            await _audio.SetPlaybackStateAsync(!_audio.IsPlaying).ConfigureAwait(false);
+        if (_playerControl.CurrentTrack?.Id == Id)
+            await _playerControl.PlayPauseAsync().ConfigureAwait(false);
         else
             _onPlay?.Invoke(Track);
     }

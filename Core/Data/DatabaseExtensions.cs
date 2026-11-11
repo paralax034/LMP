@@ -2,7 +2,11 @@ using System.Data;
 using System.Data.Common;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using LMP.Core.Data.Repositories;
+using LMP.Core.Models;
+using LMP.Core.Services;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LMP.Core.Data;
 
@@ -572,4 +576,197 @@ public static class DatabaseExtensions
         p.Value = value ?? DBNull.Value;
         cmd.Parameters.Add(p);
     }
+
+    #region Startup Migration & Quarantine
+
+    private const int MigrationMaxAttempts = 3;
+    private const int MigrationRetryDelayMs = 250;
+
+    /// <summary>
+    /// Validates and updates the database schema. Recreates the database on corruption (SQLITE_CORRUPT, SQLITE_NOTADB),
+    /// retries on lock (SQLITE_BUSY, SQLITE_LOCKED), and treats any other error as fatal,
+    /// leaving the file untouched.
+    /// </summary>
+    /// <param name="services">Application service provider.</param>
+    /// <param name="fastMode">When <c>true</c>, skips the pre-migration safety backup and redundant DDL pass if up-to-date.</param>
+    /// <returns><c>true</c> if the database was migrated from a legacy schema version prior to v3; otherwise, <c>false</c>.</returns>
+    public static bool MigrateDatabaseSync(IServiceProvider services, bool fastMode = false)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var dbPath = G.FilePath.Database;
+        if (!File.Exists(dbPath))
+        {
+            CreateFreshDatabase(services);
+            return false;
+        }
+
+        if (!fastMode)
+        {
+            try
+            {
+                var bakPath = dbPath + ".bak";
+                CreateConsistentBackup(dbPath, bakPath);
+                Log.Info($"[DB] Safety backup created: {bakPath}");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[DB] Failed to create safety database backup: {ex.Message}");
+            }
+        }
+
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return MigrateExistingDatabase(services, fastMode);
+            }
+            catch (SqliteException ex) when (ex.IsTransientLockError() && attempt < MigrationMaxAttempts)
+            {
+                Log.Warn($"[DB] Database is locked (SQLite {ex.SqliteErrorCode}), retrying migration {attempt}/{MigrationMaxAttempts}...");
+                Thread.Sleep(MigrationRetryDelayMs * attempt);
+            }
+            catch (SqliteException ex) when (ex.IsCorruptionError())
+            {
+                Log.Error($"[DB] Database file is corrupted (SQLite {ex.SqliteErrorCode}): {ex.Message}");
+                BackupAndRecreateDatabase(services, dbPath);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal($"[DB] Schema migration failed, database left untouched: {ex.Message}");
+                throw;
+            }
+        }
+    }
+
+    private static bool MigrateExistingDatabase(IServiceProvider services, bool fastMode)
+    {
+        var connectionFactory = services.GetRequiredService<ISqliteConnectionFactory>();
+        using var connection = connectionFactory.CreateConnection();
+        connection.Open();
+
+        bool wasMigratedFromLegacy = false;
+        int dbVersion = connection.GetDatabaseVersionAsync(CancellationToken.None).GetAwaiter().GetResult();
+        if (dbVersion < CurrentDbVersion)
+        {
+            Log.Info($"[DB] Upgrading schema: v{dbVersion} -> v{CurrentDbVersion}");
+            connection.ApplySchemaMigrationAsync(CurrentDbVersion, CancellationToken.None)
+                .GetAwaiter().GetResult();
+
+            if (dbVersion < 3)
+                wasMigratedFromLegacy = true;
+
+            connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Log.Info($"[DB] Schema upgrade complete (Version: {CurrentDbVersion})");
+        }
+        else if (!fastMode)
+        {
+            connection.EnsureTablesCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+            connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Log.Info($"[DB] Database schema is current (Version: {dbVersion})");
+        }
+
+        return wasMigratedFromLegacy;
+    }
+
+    private static void CreateFreshDatabase(IServiceProvider services)
+    {
+        try
+        {
+            var connectionFactory = services.GetRequiredService<ISqliteConnectionFactory>();
+            using var connection = connectionFactory.CreateConnection();
+            connection.Open();
+            connection.ApplySchemaMigrationAsync(CurrentDbVersion, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            connection.OptimizeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Log.Info($"[DB] Fresh database created (Version: {CurrentDbVersion})");
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal($"[DB] Failed to create fresh database: {ex.Message}");
+            throw;
+        }
+    }
+
+    private static void MoveIfExists(string source, string destination)
+    {
+        if (File.Exists(source))
+            File.Move(source, destination, overwrite: true);
+    }
+
+    private static void BackupAndRecreateDatabase(IServiceProvider services, string dbPath)
+    {
+        SqliteConnection.ClearAllPools();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        var stamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+
+        try
+        {
+            var backupPath = dbPath + ".backup." + stamp;
+            CreateConsistentBackup(dbPath, backupPath);
+            Log.Info($"[DB] Consistent backup of damaged database created: {backupPath}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[DB] Consistent backup of damaged database failed, keeping raw files only: {ex.Message}");
+        }
+
+        var quarantinePath = dbPath + ".corrupt." + stamp;
+        MoveIfExists(dbPath + "-wal", quarantinePath + "-wal");
+        MoveIfExists(dbPath + "-shm", quarantinePath + "-shm");
+        MoveIfExists(dbPath, quarantinePath);
+        Log.Info($"[DB] Damaged database moved to quarantine: {quarantinePath}");
+
+        try
+        {
+            var auth = services.GetRequiredService<CookieAuthService>();
+            auth.Logout();
+            Log.Info("[DB] Authorization cleared after database recreation.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[DB] Failed to clear authorization after database recreation: {ex.Message}");
+        }
+
+        try
+        {
+            CreateFreshDatabase(services);
+            SaveEmergencyNotification(services);
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal($"[DB] Failed to recover database with a clean slate: {ex.Message}");
+            throw;
+        }
+    }
+
+    private static void SaveEmergencyNotification(IServiceProvider services)
+    {
+        try
+        {
+            var repo = services.GetRequiredService<INotificationRepository>();
+            var notification = new Notification
+            {
+                Id = Guid.NewGuid(),
+                Timestamp = DateTime.UtcNow,
+                TitleKey = "Dialog_Warning_Title",
+                MessageKey = "Auth_ProfileLoadError_Message",
+                RecommendationKey = "Recommendation_ContactDev",
+                Severity = NotificationSeverity.Warning,
+                IsRead = false
+            };
+
+            repo.AddAsync(notification, CancellationToken.None).GetAwaiter().GetResult();
+            Log.Info("[DB] Emergency recovery notification saved to database using NotificationRepository");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[DB] Failed to save emergency notification: {ex.Message}");
+        }
+    }
+
+    #endregion
 }

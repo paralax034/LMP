@@ -14,8 +14,19 @@ namespace LMP.Core.Audio;
 public static class AudioSourceFactory
 {
     private static AudioCacheManager? _globalCacheManager;
+    private static AudioCacheManager? _subscribedCacheManager;
     private static Func<AudioCacheManager>? _lazyCacheFactory;
     private static volatile StreamingConfig _currentConfig = StreamingProfiles.Medium;
+
+    /// <summary>
+    /// Raised when a track format is cached or exported, without forcing eager initialization of <see cref="GlobalCache"/> on subscription.
+    /// </summary>
+    public static event Action<string, AudioFormat, int, bool>? OnFormatCached;
+
+    /// <summary>
+    /// Raised when the audio cache is cleared, without forcing eager initialization of <see cref="GlobalCache"/> on subscription.
+    /// </summary>
+    public static event Action? OnCacheCleared;
 
     /// <summary>
     /// Runtime blacklist of CDN hosts blocked for media traffic by TSPU.
@@ -37,11 +48,12 @@ public static class AudioSourceFactory
     }
 
     /// <summary>
-    /// Initializes the global cache manager.
+    /// Initializes the global cache manager and wires static proxy events.
     /// </summary>
     public static void InitializeGlobalCache(AudioCacheManager cacheManager)
     {
-        _globalCacheManager = cacheManager ?? throw new ArgumentNullException(nameof(cacheManager));
+        ArgumentNullException.ThrowIfNull(cacheManager);
+        AttachGlobalCache(cacheManager);
         Log.Info("[AudioSourceFactory] Global cache initialized");
     }
 
@@ -49,12 +61,37 @@ public static class AudioSourceFactory
     /// Global cache manager (created lazily on first access if not explicitly initialized).
     /// </summary>
     public static AudioCacheManager GlobalCache =>
-        _globalCacheManager ??= _lazyCacheFactory?.Invoke() ?? new AudioCacheManager();
+        _globalCacheManager ?? AttachGlobalCache(_lazyCacheFactory?.Invoke() ?? new AudioCacheManager());
 
     /// <summary>
     /// Returns an already initialized instance of the global cache manager or <c>null</c> without triggering lazy creation.
     /// </summary>
     public static AudioCacheManager? TryGetInitializedGlobalCache() => _globalCacheManager;
+
+    private static AudioCacheManager AttachGlobalCache(AudioCacheManager cacheManager)
+    {
+        _globalCacheManager = cacheManager;
+        if (!ReferenceEquals(_subscribedCacheManager, cacheManager))
+        {
+            if (_subscribedCacheManager != null)
+            {
+                _subscribedCacheManager.OnFormatCached -= ForwardFormatCached;
+                _subscribedCacheManager.OnCacheCleared -= ForwardCacheCleared;
+            }
+
+            _subscribedCacheManager = cacheManager;
+            cacheManager.OnFormatCached += ForwardFormatCached;
+            cacheManager.OnCacheCleared += ForwardCacheCleared;
+        }
+
+        return cacheManager;
+    }
+
+    private static void ForwardFormatCached(string trackId, AudioFormat format, int bitrate, bool isDownloaded) =>
+        OnFormatCached?.Invoke(trackId, format, bitrate, isDownloaded);
+
+    private static void ForwardCacheCleared() =>
+        OnCacheCleared?.Invoke();
 
     /// <summary>
     /// Updates the streaming configuration.

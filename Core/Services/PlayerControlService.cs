@@ -1,30 +1,17 @@
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Unified playback management coordinator.
-/// Provides properties and events synchronized across all UI components.
+/// Unified playback management coordinator for transport commands, volume, track likes, and playlist queue purity.
 ///
 /// <para><b>Architecture:</b></para>
 /// <list type="bullet">
-///   <item>Acts as the sole subscriber to AudioEngine events for state tracking</item>
-///   <item>Provides ObservableObject properties and typed C# events for PlayerBar, TrayIcon, MediaKeys</item>
+///   <item>Subscribes to coarse-grained <see cref="AudioEngine"/> state transitions (<c>OnPlaybackStateChanged</c>, <c>OnTrackChanged</c>, <c>OnQueueChanged</c>, <c>OnLoadingStateChanged</c>) while leaving high-frequency stream/buffer/position telemetry and DSP directly on <see cref="AudioEngine"/></item>
+///   <item>Provides <see cref="ObservableObject"/> properties and typed C# events for PlayerBar, TrayIcon, TrackList, and MediaKeys</item>
 ///   <item>Operates independently of the window suspend/resume state</item>
-///   <item>Serves as the single point of volume control — the UI does not access AudioEngine directly</item>
+///   <item>Serves as the single point of volume and transport control</item>
 /// </list>
-///
-/// <para><b>ForceSync:</b></para>
-/// <para>Does not re-emit notifications for CurrentTrack if the object is the same (by Id).
-/// This prevents false TrackReset signals when restoring from the tray.</para>
-///
-/// <para><b>Shuffle:</b></para>
-/// <para>All ShuffleEnabled changes MUST go through this service (SetShuffleEnabled / ToggleAutoShuffle)
-/// to keep the state synchronized with AudioEngine at all times.</para>
-///
-/// <para><b>N-Token Warning:</b></para>
-/// <para>Complex decipher warning is published via <see cref="NTokenWarning"/>
-/// and simultaneously shown via <see cref="NotificationService"/> (if available).</para>
 /// </summary>
-public sealed partial class PlayerControlService : ObservableObject, IDisposable
+public sealed class PlayerControlService : IDisposable
 {
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
@@ -37,40 +24,37 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
     private readonly HashSet<string> _activePlaylistTrackIds = new(StringComparer.Ordinal);
     private int _expectedPlaylistTrackCount;
 
-    [ObservableProperty] public partial bool IsPlaying { get; set; }
+    public bool IsPlaying { get; private set; }
 
-    [ObservableProperty] public partial bool IsPaused { get; set; }
+    public bool IsPaused { get; private set; }
 
-    [ObservableProperty] public partial bool IsLoading { get; set; }
+    public bool IsLoading { get; private set; }
 
-    [ObservableProperty] public partial TrackInfo? CurrentTrack { get; set; }
+    public TrackInfo? CurrentTrack { get; private set; }
 
-    [ObservableProperty] public partial RepeatMode RepeatMode { get; set; }
+    public RepeatMode RepeatMode { get; private set; }
 
-    [ObservableProperty] public partial bool ShuffleEnabled { get; set; }
+    public bool ShuffleEnabled { get; private set; }
 
-    [ObservableProperty] public partial int QueueCount { get; set; }
+    public int QueueCount { get; private set; }
 
-    [ObservableProperty] public partial int CurrentVolume { get; set; }
+    public int CurrentVolume { get; private set; }
 
     /// <summary>
     /// ID of the playlist from which the current queue was launched.
     /// Null = source is not a playlist (Home, Search, single track).
     /// </summary>
-    [ObservableProperty]
-    public partial string? ActivePlaylistId { get; set; }
+    public string? ActivePlaylistId { get; private set; }
 
     /// <summary>
     /// Indicates whether the active playback queue matches the original composition of the launched playlist.
     /// </summary>
-    [ObservableProperty]
-    public partial bool IsQueuePure { get; private set; }
+    public bool IsQueuePure { get; private set; }
 
     /// <summary>
     /// Indicates whether the pristine queue of the launched playlist is currently playing.
     /// </summary>
-    [ObservableProperty]
-    public partial bool IsPlayingPure { get; private set; }
+    public bool IsPlayingPure { get; private set; }
 
     public bool HasTrack => CurrentTrack != null;
 
@@ -136,6 +120,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         _audio.OnTrackChanged += HandleTrackChanged;
         _audio.OnQueueChanged += HandleQueueChanged;
         _audio.OnLoadingStateChanged += HandleLoadingStateChanged;
+        _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
         _audio.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
 
         if (!_library.IsInitialized)
@@ -207,6 +192,18 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
         Log.Debug($"[PlayerControl] RepeatMode changed to {newMode}");
     }
+
+    /// <summary>
+    /// Adds a range of unique tracks to the playback queue via <see cref="AudioEngine"/>.
+    /// </summary>
+    public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks) =>
+        _audio.EnqueueRangeUnique(tracks);
+
+    /// <summary>
+    /// Removes a track from the playback queue via <see cref="AudioEngine"/>.
+    /// </summary>
+    public void RemoveFromQueue(TrackInfo track) =>
+        _audio.RemoveFromQueue(track);
 
     public void ShuffleQueue()
     {
@@ -492,6 +489,16 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         IsLoadingChanged?.Invoke(isLoading);
     }
 
+    private void HandleMaxVolumeChanged(int newMaxVolume)
+    {
+        int actualVolume = (int)Math.Round(_audio.GetVolume());
+        if (CurrentVolume != actualVolume)
+        {
+            CurrentVolume = actualVolume;
+            VolumeChanged?.Invoke(actualVolume);
+        }
+    }
+
     /// <summary>
     /// Publishes a complex n-token deciphering warning
     /// and, if permitted by settings, either adds it to the notification center
@@ -570,15 +577,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
 
     /// <summary>
     /// Forces synchronization of all states when restoring from tray.
-    ///
-    /// <para><b>IMPORTANT:</b> Does NOT re-emit CurrentTrack if the track is the same (by Id).
-    /// This prevents false TrackReset signals when restoring from tray.</para>
-    ///
-    /// <para>Instead, calls ForceSync, which PlayerBarViewModel
-    /// subscribes to for soft updates (position, buffer, stream info).</para>
-    ///
-    /// <para>If the actual track in AudioEngine differs from cached (by Id),
-    /// publishes the new track via CurrentTrack.</para>
     /// </summary>
     public void ForceSync()
     {
@@ -598,7 +596,6 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         }
         else
         {
-            // Update reference without re-emitting event
             CurrentTrack = actualTrack;
         }
 
@@ -622,6 +619,7 @@ public sealed partial class PlayerControlService : ObservableObject, IDisposable
         _audio.OnTrackChanged -= HandleTrackChanged;
         _audio.OnQueueChanged -= HandleQueueChanged;
         _audio.OnLoadingStateChanged -= HandleLoadingStateChanged;
+        _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
         _audio.OnNTokenDecryptionWarning -= HandleNTokenDecryptionWarning;
 
         Log.Debug("[PlayerControl] Service disposed");

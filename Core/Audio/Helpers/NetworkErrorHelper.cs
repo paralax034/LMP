@@ -120,7 +120,9 @@ public static class NetworkErrorHelper
     /// <returns><c>true</c> if DPI/handshake/timeout block is detected; otherwise <c>false</c>.</returns>
     public static bool IsSslOrTlsHandshakeFailure(Exception? exception)
     {
-        // Fast path: YoutubeNetworkException already classified
+        if (exception is null)
+            return false;
+
         if (exception is YoutubeNetworkException { IsSslFailure: true })
             return true;
 
@@ -132,6 +134,16 @@ public static class NetworkErrorHelper
             if (current is AuthenticationException or TimeoutException)
                 return true;
 
+            if (current is AggregateException agg)
+            {
+                var inners = agg.InnerExceptions;
+                for (int i = 0; i < inners.Count; i++)
+                {
+                    if (IsSslOrTlsHandshakeFailure(inners[i]))
+                        return true;
+                }
+            }
+
             if (current is IOException ioEx)
             {
                 var msg = ioEx.Message;
@@ -142,7 +154,8 @@ public static class NetworkErrorHelper
                     msg.Contains("decryption operation failed", StringComparison.OrdinalIgnoreCase) ||
                     msg.Contains("Connection reset", StringComparison.OrdinalIgnoreCase) ||
                     msg.Contains("Connection timed out", StringComparison.OrdinalIgnoreCase) ||
-                    msg.Contains("Response ended prematurely", StringComparison.OrdinalIgnoreCase))
+                    msg.Contains("Response ended prematurely", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("EnsureFullTlsFrame", StringComparison.Ordinal))
                 {
                     return true;
                 }
@@ -164,6 +177,20 @@ public static class NetworkErrorHelper
                 webEx.Status == System.Net.WebExceptionStatus.SecureChannelFailure)
             {
                 return true;
+            }
+
+            var rawMsg = current.Message;
+            if (!string.IsNullOrEmpty(rawMsg))
+            {
+                var span = rawMsg.AsSpan();
+                if (span.Contains("SSL".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("TLS".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("secure channel".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("authentication".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                    span.Contains("EnsureFullTlsFrame".AsSpan(), StringComparison.Ordinal))
+                {
+                    return true;
+                }
             }
         }
 

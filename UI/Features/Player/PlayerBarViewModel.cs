@@ -74,7 +74,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private DateTime _trackResetStartTime;
     private string? _pendingStreamInfoTrackId;
-    private string? _lastHandledTrackId;
     private string _lastValidStreamInfo = "";
 
     private CancellationTokenSource? _activeHintCts;
@@ -191,29 +190,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Properties - Equalizer
 
-    [ObservableProperty] public partial bool IsEqualizerEnabled { get; set; }
-    [ObservableProperty] public partial bool IsSimple5BandMode { get; set; } = true;
-    [ObservableProperty] public partial float[] EqualizerBandGains { get; private set; } = new float[10];
-    [ObservableProperty] public partial string ActiveEqualizerPresetId { get; private set; } = EqualizerPresets.FlatId;
-    [ObservableProperty] public partial string ActiveEqualizerPresetTitle { get; private set; } = "";
-    [ObservableProperty] public partial string NewPresetNameInput { get; set; } = "";
-    [ObservableProperty] public partial bool ShowPresetRightClickHint { get; private set; }
-
-    public ObservableCollection<EqualizerPresetChipItem> EqualizerPresetsList { get; } = [];
-
-    public bool HasTrackEqualizerAssigned =>
-        CurrentTrack != null && !string.IsNullOrEmpty(CurrentTrack.EqualizerPresetId);
-
-    [ObservableProperty] public partial bool IsTrackModeHighlighted { get; private set; }
-    [ObservableProperty] public partial bool CanResetEqualizer { get; private set; }
-
-    public string BandModeBadgeText => IsSimple5BandMode ? "5" : "10";
-
-    public string TrackEqualizerTooltip =>
-        EqualizerPresetChipItem.FormatTrackEqualizerTooltip(
-            CurrentTrack?.EqualizerPresetId,
-            IsTrackModeHighlighted,
-            EqualizerPresetsList);
+    /// <summary>
+    /// Shared equalizer state and preset management ViewModel.
+    /// </summary>
+    public EqualizerScopeViewModel Equalizer { get; }
 
     #endregion
 
@@ -277,17 +257,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     public IRelayCommand ToggleRepeatCommand { get; private set; } = null!;
     public IAsyncRelayCommand ToggleLikeCommand { get; private set; } = null!;
     public IRelayCommand ToggleMuteCommand { get; private set; } = null!;
-    public IRelayCommand CopyLinkCommand { get; private set; } = null!;
     public IAsyncRelayCommand LoadFormatsCommand { get; private set; } = null!;
     public IAsyncRelayCommand ForceLoadFormatsCommand { get; private set; } = null!;
     public IAsyncRelayCommand<StreamOption> SwitchFormatCommand { get; private set; } = null!;
-    public IRelayCommand ResetEqualizerCommand { get; private set; } = null!;
-    public IRelayCommand ToggleEqualizerModeCommand { get; private set; } = null!;
-    public IRelayCommand ToggleTrackEqualizerModeCommand { get; private set; } = null!;
-    public IRelayCommand<EqualizerPresetChipItem> SelectEqualizerPresetCommand { get; private set; } = null!;
-    public IRelayCommand<EqualizerPresetChipItem> DeleteEqualizerPresetCommand { get; private set; } = null!;
-    public IRelayCommand SaveInlineEqualizerPresetCommand { get; private set; } = null!;
-    public IAsyncRelayCommand ClearTrackEqualizerCommand { get; private set; } = null!;
 
     #endregion
 
@@ -295,7 +267,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     public event Action? SuspendRequested;
     public event Action? ResumeRequested;
-    public event Action? PresetInputFocusRequested;
 
     #endregion
 
@@ -313,6 +284,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         _youtube = youtube;
         _playerControl = playerControl;
         _notificationService = notificationService;
+        Equalizer = new EqualizerScopeViewModel(audio, library);
 
         Log.Debug("[PlayerBar] Created, initializing...");
 
@@ -366,7 +338,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             RaiseVolumePropertiesChanged();
             UpdateQueueState();
-            SyncEqualizerStateFromSettings();
+            Equalizer.SyncState();
         }
         finally
         {
@@ -500,76 +472,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             BeginTrackReset();
             await _audio.SwitchQualityAsync(option.Format, (int)option.Bitrate);
         });
-
-        CopyLinkCommand = new RelayCommand(() => { });
-
-        ResetEqualizerCommand = new RelayCommand(() =>
-        {
-            if (!CanResetEqualizer) return;
-            _audio.ResetEqualizer();
-        });
-
-        ToggleEqualizerModeCommand = new RelayCommand(() =>
-        {
-            IsSimple5BandMode = !IsSimple5BandMode;
-        });
-
-        ToggleTrackEqualizerModeCommand = new RelayCommand(() =>
-        {
-            if (!HasTrack) return;
-            _audio.ToggleTrackEqualizerMode();
-        });
-
-        SelectEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(item =>
-        {
-            if (item == null) return;
-            if (item.IsSelected && !item.IsBuiltIn)
-            {
-                _renamingPresetId = item.Id;
-                NewPresetNameInput = item.Title;
-                PresetInputFocusRequested?.Invoke();
-                return;
-            }
-
-            _renamingPresetId = null;
-            _audio.SelectEqualizerPreset(item.Id);
-        });
-
-        DeleteEqualizerPresetCommand = new RelayCommand<EqualizerPresetChipItem>(item =>
-        {
-            if (item == null || item.IsBuiltIn) return;
-            if (string.Equals(_renamingPresetId, item.Id, StringComparison.Ordinal))
-            {
-                _renamingPresetId = null;
-                NewPresetNameInput = "";
-            }
-            _audio.DeleteUserEqualizerPreset(item.Id);
-        });
-
-        SaveInlineEqualizerPresetCommand = new RelayCommand(() =>
-        {
-            if (!string.IsNullOrEmpty(_renamingPresetId))
-            {
-                string targetId = _renamingPresetId;
-                _renamingPresetId = null;
-                _audio.RenameUserEqualizerPreset(targetId, NewPresetNameInput);
-                NewPresetNameInput = "";
-                return;
-            }
-
-            if (_audio.SaveUserEqualizerPreset(NewPresetNameInput, EqualizerBandGains) != null)
-            {
-                NewPresetNameInput = "";
-                ShowPresetRightClickHint = true;
-            }
-        });
-
-        ClearTrackEqualizerCommand = new AsyncRelayCommand(async () =>
-        {
-            if (CurrentTrack == null) return;
-            await _library.SetTrackEqualizerPresetAsync(CurrentTrack, null);
-            _audio.UpdateEqualizerSettings();
-        });
     }
 
     private void SubscribeEvents()
@@ -586,13 +488,12 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         _audio.OnStreamInfoChanged += OnAudioStreamInfoChanged;
         _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
-        _audio.OnEqualizerChanged += SyncEqualizerStateFromSettings;
         _audio.OnAudioSettingsChanged += HandleAudioSettingsChanged;
 
         _library.OnTrackUpdated += OnLibraryTrackUpdated;
 
-        AudioSourceFactory.GlobalCache.OnFormatCached += OnFormatCachedHandler;
-        AudioSourceFactory.GlobalCache.OnCacheCleared += OnCacheClearedHandler;
+        AudioSourceFactory.OnFormatCached += OnFormatCachedHandler;
+        AudioSourceFactory.OnCacheCleared += OnCacheClearedHandler;
 
         SubscribeHeavy();
     }
@@ -700,12 +601,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                 IsLiked = t.IsLiked;
                 CurrentTrack.IsLiked = t.IsLiked;
                 OnPropertyChanged(nameof(LikeTooltip));
-
-                if (!string.Equals(CurrentTrack.EqualizerPresetId, t.EqualizerPresetId, StringComparison.Ordinal))
-                {
-                    CurrentTrack.EqualizerPresetId = t.EqualizerPresetId;
-                    SyncEqualizerStateFromSettings();
-                }
             }
 
             if (Dispatcher.UIThread.CheckAccess())
@@ -991,11 +886,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void HandleTrackChanged(TrackInfo? track)
     {
-        _audio.FlushPendingEqualizerSave();
-
-        string? newTrackId = track?.Id;
-        bool isNewTrack = newTrackId != _lastHandledTrackId;
-        _lastHandledTrackId = newTrackId;
+        Equalizer.FlushPendingSave();
 
         CurrentTrack = track;
         HasTrack = track != null;
@@ -1007,23 +898,20 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         if (track != null)
         {
-            if (isNewTrack)
-            {
-                _lastValidStreamInfo = "";
-                AvailableFormats.Clear();
-                _pendingStreamInfoTrackId = track.Id;
+            _lastValidStreamInfo = "";
+            AvailableFormats.Clear();
+            _pendingStreamInfoTrackId = track.Id;
 
-                CancelFormatsLoading();
-                BeginTrackReset();
+            CancelFormatsLoading();
+            BeginTrackReset();
 
-                Duration = track.Duration;
-                DurationSeconds = Duration.TotalSeconds > 0 ? Duration.TotalSeconds : 1;
+            Duration = track.Duration;
+            DurationSeconds = Duration.TotalSeconds > 0 ? Duration.TotalSeconds : 1;
 
-                ShowStreamInfo = true;
-                StreamInfo = SL["Player_StreamInfo_Loading"];
+            ShowStreamInfo = true;
+            StreamInfo = SL["Player_StreamInfo_Loading"];
 
-                Log.Debug($"[PlayerBar] New track: {track.Id}");
-            }
+            Log.Debug($"[PlayerBar] New track: {track.Id}");
 
             var storedTrack = _library.GetTrack(track.Id);
             IsLiked = storedTrack?.IsLiked ?? track.IsLiked;
@@ -1038,7 +926,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(DurationTooltip));
         UpdateQueueState();
         RefreshCommandStates();
-        SyncEqualizerStateFromSettings();
+        Equalizer.SyncState();
     }
 
     private void RefreshCommandStates()
@@ -1407,7 +1295,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (CurrentTrack == null || AvailableFormats.Count == 0)
             return;
 
-        var cachedFormats = AudioSourceFactory.GlobalCache.GetCachedFormats(CurrentTrack.Id) ?? [];
+        var cachedFormats = AudioSourceFactory.TryGetInitializedGlobalCache()?.GetCachedFormats(CurrentTrack.Id) ?? [];
 
         Log.Debug($"[PlayerBar] SyncDownloadStatus: track={CurrentTrack.Id}, " +
                   $"cachedFormats=[{string.Join(", ", cachedFormats.Select(f => $"{f.Format}/{f.Bitrate}"))}], " +
@@ -1713,94 +1601,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #endregion
 
-    #region Equalizer Management
-
-    private bool _isSyncingEq;
-    private string? _renamingPresetId;
-
-    public void CancelPresetRename()
-    {
-        if (_renamingPresetId != null)
-        {
-            _renamingPresetId = null;
-            NewPresetNameInput = "";
-        }
-    }
-
-    partial void OnNewPresetNameInputChanged(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            _renamingPresetId = null;
-    }
-
-    public void SyncEqualizerStateFromSettings()
-    {
-        _isSyncingEq = true;
-        try
-        {
-            var audioSettings = _library.Settings.Audio;
-            IsEqualizerEnabled = audioSettings.EqualizerEnabled;
-            IsSimple5BandMode = audioSettings.UseSimple5BandMode;
-
-            var bands = new float[EqualizerProcessor.BandCount];
-            string resolvedPreset = EqualizerPresets.ResolveEffectiveBands(
-                audioSettings, CurrentTrack, bands);
-
-            if (_renamingPresetId != null
-                && !string.Equals(_renamingPresetId, resolvedPreset, StringComparison.Ordinal))
-            {
-                CancelPresetRename();
-            }
-
-            ActiveEqualizerPresetId = resolvedPreset;
-            EqualizerBandGains = bands;
-            ActiveEqualizerPresetTitle = EqualizerPresetChipItem.SyncPresetsList(
-                EqualizerPresetsList,
-                audioSettings,
-                CurrentTrack,
-                resolvedPreset);
-
-            IsTrackModeHighlighted = audioSettings.EqualizerEnabled && _audio.IsTrackEqualizerActive;
-            CanResetEqualizer = EqualizerPresets.HasNonZeroBands(bands, audioSettings.EqualizerPreampDb);
-
-            OnPropertyChanged(nameof(HasTrackEqualizerAssigned));
-            OnPropertyChanged(nameof(TrackEqualizerTooltip));
-            OnPropertyChanged(nameof(BandModeBadgeText));
-        }
-        finally
-        {
-            _isSyncingEq = false;
-        }
-    }
-
-    partial void OnIsEqualizerEnabledChanged(bool value)
-    {
-        if (_isSyncingEq) return;
-        _audio.SetEqualizerEnabled(value);
-    }
-
-    partial void OnIsSimple5BandModeChanged(bool value)
-    {
-        OnPropertyChanged(nameof(BandModeBadgeText));
-        if (_isSyncingEq) return;
-        _audio.SetSimple5BandMode(value);
-    }
-
-    public void ApplyCustomEqualizerBandsFromUi(float[] newBands10)
-    {
-        if (_isSyncingEq || newBands10.Length < EqualizerProcessor.BandCount) return;
-        CancelPresetRename();
-        newBands10.AsSpan(0, EqualizerProcessor.BandCount).CopyTo(EqualizerBandGains);
-        CanResetEqualizer = EqualizerPresets.HasNonZeroBands(
-            EqualizerBandGains,
-            _library.Settings.Audio.EqualizerPreampDb);
-        _audio.ApplyCustomEqualizerBands(newBands10);
-    }
-
-    public void FlushEqualizerPendingSave() => _audio.FlushPendingEqualizerSave();
-
-    #endregion
-
     #region Language
 
     private void OnLanguageChanged(object? sender, string newLang)
@@ -1819,8 +1619,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsRepeatNone));
         OnPropertyChanged(nameof(IsRepeatOne));
         OnPropertyChanged(nameof(IsRepeatAll));
-        EqualizerPresetsList.Clear();
-        SyncEqualizerStateFromSettings();
     }
 
     #endregion
@@ -1832,7 +1630,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     /// </summary>
     protected override void OnSuspend(SuspendLevel level)
     {
-        _audio.FlushPendingEqualizerSave();
+        Equalizer.FlushPendingSave();
         UnsubscribeHeavy();
         CancelFormatsLoading();
 
@@ -1863,7 +1661,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         IsFormatsLoading = false;
 
         SubscribeHeavy();
-        SyncEqualizerStateFromSettings();
+        Equalizer.SyncState();
 
         ResumeRequested?.Invoke();
 
@@ -1877,7 +1675,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         if (disposing)
         {
-            _audio.FlushPendingEqualizerSave();
+            Equalizer.Dispose();
 
             LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
             _youtube.AuthService.OnAuthStateChanged -= ClearRestrictedTracksCache;
@@ -1909,12 +1707,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             _audio.OnStreamInfoChanged -= OnAudioStreamInfoChanged;
             _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
-            _audio.OnEqualizerChanged -= SyncEqualizerStateFromSettings;
             _audio.OnAudioSettingsChanged -= HandleAudioSettingsChanged;
             _library.OnTrackUpdated -= OnLibraryTrackUpdated;
 
-            AudioSourceFactory.GlobalCache.OnFormatCached -= OnFormatCachedHandler;
-            AudioSourceFactory.GlobalCache.OnCacheCleared -= OnCacheClearedHandler;
+            AudioSourceFactory.OnFormatCached -= OnFormatCachedHandler;
+            AudioSourceFactory.OnCacheCleared -= OnCacheClearedHandler;
         }
 
         base.Dispose(disposing);

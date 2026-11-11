@@ -148,228 +148,118 @@
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
                 <!--  Equalizer (EQ)  -->
-                <Grid ColumnDefinitions="*, Auto, Auto, Auto, Auto, Auto" VerticalAlignment="Center">
-                    <StackPanel VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <PathIcon Data="{StaticResource Icon.Equalizer}" Width="16" Height="16"
-                                Foreground="{DynamicResource AccentBrush}"
-                                VerticalAlignment="Center" />
-                            <TextBlock Classes="label" Text="{Binding L[Eq_Title]}" />
-                        </StackPanel>
-                        <TextBlock Classes="desc" Text="{Binding L[Eq_Description]}" />
-                    </StackPanel>
-
-                    <!-- Button: For current track (Note) -->
-                    <Button Grid.Column="1" Width="32" Height="32" CornerRadius="6"
-                        Margin="0,0,6,0" VerticalAlignment="Center"
-                        Classes="icon-btn"
-                        IsEnabled="{Binding HasTrack}"
-                        Command="{Binding ToggleTrackEqualizerModeCommand}"
-                        Click="OnEqHeaderButtonClicked"
-                        ToolTip.Tip="{Binding TrackEqualizerTooltip}"
-                        ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6"
-                        ToolTip.ShowDelay="80">
-                        <Panel>
-                            <PathIcon Width="15" Height="15"
-                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                Data="{StaticResource Icon.MusicNote}"
-                                IsVisible="{Binding !IsTrackModeHighlighted}" />
-                            <PathIcon Width="15" Height="15"
-                                Foreground="{DynamicResource AccentBrush}"
-                                Data="{StaticResource Icon.MusicNote}"
-                                IsVisible="{Binding IsTrackModeHighlighted}" />
-                        </Panel>
-                    </Button>
-
-                    <!-- Preset dropdown list (hover + 1-click) -->
-                    <Panel Grid.Column="2" Margin="0,0,6,0" VerticalAlignment="Center"
-                        PointerEntered="OnPresetsTriggerPointerEntered"
-                        PointerExited="OnPresetsTriggerPointerExited">
-                        <Button x:Name="SettingsPresetsButton" Padding="10,5"
-                            CornerRadius="6" VerticalAlignment="Center"
-                            Click="OnPresetsTriggerButtonClicked"
-                            ToolTip.Tip="{Binding L[Eq_Presets_Tooltip]}"
-                            ToolTip.Placement="Top"
-                            ToolTip.VerticalOffset="-6">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock FontSize="12" FontWeight="SemiBold"
-                                    Text="{Binding ActiveEqualizerPresetTitle}"
-                                    MaxWidth="140" TextTrimming="CharacterEllipsis"
+                <StackPanel Spacing="20"
+                    DataContext="{Binding Equalizer}"
+                    x:DataType="controls:EqualizerScopeViewModel">
+                    <Grid ColumnDefinitions="*, Auto, Auto, Auto, Auto, Auto" VerticalAlignment="Center">
+                        <StackPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <PathIcon Data="{StaticResource Icon.Equalizer}" Width="16" Height="16"
+                                    Foreground="{DynamicResource AccentBrush}"
                                     VerticalAlignment="Center" />
-                                <PathIcon Width="11" Height="11"
-                                    Data="{StaticResource Icon.ChevronUp}"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    VerticalAlignment="Center" />
+                                <TextBlock Classes="label" Text="{Binding L[Eq_Title]}" />
                             </StackPanel>
+                            <TextBlock Classes="desc" Text="{Binding L[Eq_Description]}" />
+                        </StackPanel>
+
+                        <!-- Button: For current track (Note) -->
+                        <Button Grid.Column="1" Width="32" Height="32" CornerRadius="6"
+                            Margin="0,0,6,0" VerticalAlignment="Center"
+                            Classes="icon-btn"
+                            IsEnabled="{Binding HasTrack}"
+                            Command="{Binding ToggleTrackEqualizerModeCommand}"
+                            Click="OnEqHeaderButtonClicked"
+                            ToolTip.Tip="{Binding TrackEqualizerTooltip}"
+                            ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6"
+                            ToolTip.ShowDelay="80">
+                            <Panel>
+                                <PathIcon Width="15" Height="15"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    Data="{StaticResource Icon.MusicNote}"
+                                    IsVisible="{Binding !IsTrackModeHighlighted}" />
+                                <PathIcon Width="15" Height="15"
+                                    Foreground="{DynamicResource AccentBrush}"
+                                    Data="{StaticResource Icon.MusicNote}"
+                                    IsVisible="{Binding IsTrackModeHighlighted}" />
+                            </Panel>
                         </Button>
 
-                        <Popup x:Name="SettingsPresetsPopup"
-                            ShouldUseOverlayLayer="True"
-                            Placement="TopEdgeAlignedRight"
-                            PlacementTarget="{Binding #SettingsPresetsButton}"
-                            VerticalOffset="0"
-                            IsLightDismissEnabled="False">
-                            <Border x:Name="SettingsPresetsPopupRoot"
-                                Padding="0,0,0,6" Background="Transparent"
-                                PointerEntered="OnPresetsPopupPointerEntered"
-                                PointerExited="OnPresetsPopupPointerExited">
-                                <Border Width="230" Padding="4"
-                                    Background="{DynamicResource BgPrimaryBrush}"
-                                    BorderBrush="{DynamicResource BgHighlightBrush}"
-                                    BorderThickness="1" CornerRadius="8"
-                                    BoxShadow="{StaticResource CardShadow}">
-                                    <StackPanel Spacing="2">
-                                        <ScrollViewer MaxHeight="210"
-                                            HorizontalScrollBarVisibility="Disabled">
-                                            <ItemsControl
-                                                ItemsSource="{Binding EqualizerPresetsList}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate
-                                                        x:DataType="controls:EqualizerPresetChipItem">
-                                                        <Button HorizontalAlignment="Stretch"
-                                                            HorizontalContentAlignment="Stretch"
-                                                            Padding="10,7" Margin="0,1"
-                                                            Classes="format-item-btn"
-                                                            Classes.active="{Binding IsSelected}"
-                                                            ToolTip.Tip="{Binding RightClickHint}"
-                                                            ToolTip.Placement="Top"
-                                                            ToolTip.VerticalOffset="-4"
-                                                            PointerReleased="OnPresetItemPointerReleased"
-                                                            Command="{Binding $parent[UserControl].((vm:AudioSettingsViewModel)DataContext).SelectEqualizerPresetCommand}"
-                                                            CommandParameter="{Binding}">
-                                                            <Grid ColumnDefinitions="22,*,Auto">
-                                                                <PathIcon Grid.Column="0"
-                                                                    Width="14"
-                                                                    Height="14"
-                                                                    Data="{StaticResource Icon.Check}"
-                                                                    Foreground="{DynamicResource AccentBrush}"
-                                                                    IsVisible="{Binding IsSelected}"
-                                                                    HorizontalAlignment="Left"
-                                                                    VerticalAlignment="Center" />
-                                                                <TextBlock Grid.Column="1"
-                                                                    FontSize="12"
-                                                                    Text="{Binding Title}"
-                                                                    TextTrimming="CharacterEllipsis"
-                                                                    VerticalAlignment="Center" />
-                                                                <PathIcon Grid.Column="2"
-                                                                    Width="12"
-                                                                    Height="12"
-                                                                    Margin="6,0,0,0"
-                                                                    Data="{StaticResource Icon.MusicNote}"
-                                                                    Foreground="{DynamicResource AccentBrush}"
-                                                                    IsVisible="{Binding IsTrackPreset}"
-                                                                    VerticalAlignment="Center" />
-                                                            </Grid>
-                                                        </Button>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </ScrollViewer>
+                        <!-- Shared preset dropdown list (hover + 1-click) -->
+                        <controls:EqualizerPresetsDropDown
+                            x:Name="SettingsPresetsDropDown"
+                            Grid.Column="2"
+                            Margin="0,0,6,0"
+                            VerticalAlignment="Center"
+                            Compact="False" />
 
-                                        <Separator Classes="menu-separator" Margin="6,3" />
-
-                                        <Border Padding="8,4" CornerRadius="6"
-                                            BorderBrush="{DynamicResource BgHighlightTransparentBrush}"
-                                            BorderThickness="1">
-                                            <Grid ColumnDefinitions="22,*,Auto"
-                                                VerticalAlignment="Center">
-                                                <PathIcon Grid.Column="0" Width="14" Height="14"
-                                                    Data="{StaticResource Icon.Plus}"
-                                                    Foreground="{DynamicResource AccentBrush}"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center" />
-                                                <TextBox x:Name="NewPresetTextBox" Grid.Column="1"
-                                                    Classes="flat-search-box"
-                                                    Text="{Binding NewPresetNameInput}"
-                                                    PlaceholderText="{Binding L[Eq_SavePreset_Watermark]}"
-                                                    FontSize="12"
-                                                    KeyDown="OnNewPresetTextBoxKeyDown" />
-                                                <Button Grid.Column="2" Width="24" Height="24"
-                                                    Classes="icon-btn"
-                                                    IsVisible="{Binding NewPresetNameInput, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                    Command="{Binding SaveInlinePresetCommand}"
-                                                    ToolTip.Tip="{Binding L[Eq_SavePreset]}"
-                                                    ToolTip.Placement="Top"
-                                                    ToolTip.VerticalOffset="-6">
-                                                    <PathIcon Width="12" Height="12"
-                                                        Foreground="{DynamicResource AccentBrush}"
-                                                        Data="{StaticResource Icon.Check}" />
-                                                </Button>
-                                            </Grid>
-                                        </Border>
-                                    </StackPanel>
-                                </Border>
-                            </Border>
-                        </Popup>
-                    </Panel>
-
-                    <!-- Square button 5 / 10 -->
-                    <Button Grid.Column="3" Width="32" Height="32" Padding="0"
-                        Margin="0,0,6,0" CornerRadius="6" VerticalAlignment="Center"
-                        Classes="icon-btn active"
-                        Command="{Binding ToggleEqualizerModeCommand}"
-                        Click="OnEqHeaderButtonClicked"
-                        ToolTip.Tip="{Binding L[Eq_Mode_Tooltip]}"
-                        ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6"
-                        ToolTip.ShowDelay="80">
-                        <TextBlock FontSize="12" FontWeight="Bold"
-                            Foreground="{DynamicResource AccentBrush}"
-                            Text="{Binding BandModeBadgeText}"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center" />
-                    </Button>
-
-                    <!-- Reset button with icon (accent color ONLY when CanResetEqualizer == true) -->
-                    <Button Grid.Column="4" Width="32" Height="32"
-                        Margin="0,0,10,0" VerticalAlignment="Center"
-                        Classes="icon-btn"
-                        Command="{Binding ResetEqualizerCommand}"
-                        Click="OnEqHeaderButtonClicked"
-                        ToolTip.Tip="{Binding L[Common_Reset]}"
-                        ToolTip.Placement="Top"
-                        ToolTip.VerticalOffset="-6"
-                        ToolTip.ShowDelay="80">
-                        <Panel>
-                            <PathIcon Width="15" Height="15"
-                                Foreground="{DynamicResource TextSecondaryBrush}"
-                                Data="{StaticResource Icon.Refresh}"
-                                IsVisible="{Binding !CanResetEqualizer}" />
-                            <PathIcon Width="15" Height="15"
+                        <!-- Square button 5 / 10 -->
+                        <Button Grid.Column="3" Width="32" Height="32" Padding="0"
+                            Margin="0,0,6,0" CornerRadius="6" VerticalAlignment="Center"
+                            Classes="icon-btn active"
+                            Command="{Binding ToggleEqualizerModeCommand}"
+                            Click="OnEqHeaderButtonClicked"
+                            ToolTip.Tip="{Binding L[Eq_Mode_Tooltip]}"
+                            ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6"
+                            ToolTip.ShowDelay="80">
+                            <TextBlock FontSize="12" FontWeight="Bold"
                                 Foreground="{DynamicResource AccentBrush}"
-                                Data="{StaticResource Icon.Refresh}"
-                                IsVisible="{Binding CanResetEqualizer}" />
-                        </Panel>
-                    </Button>
+                                Text="{Binding BandModeBadgeText}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Button>
 
-                    <!-- Power toggle switch -->
-                    <ToggleSwitch Grid.Column="5" IsChecked="{Binding EqualizerEnabled}"
-                        VerticalAlignment="Center" />
-                </Grid>
+                        <!-- Reset button with icon -->
+                        <Button Grid.Column="4" Width="32" Height="32"
+                            Margin="0,0,10,0" VerticalAlignment="Center"
+                            Classes="icon-btn"
+                            Command="{Binding ResetEqualizerCommand}"
+                            Click="OnEqHeaderButtonClicked"
+                            ToolTip.Tip="{Binding L[Common_Reset]}"
+                            ToolTip.Placement="Top"
+                            ToolTip.VerticalOffset="-6"
+                            ToolTip.ShowDelay="80">
+                            <Panel>
+                                <PathIcon Width="15" Height="15"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    Data="{StaticResource Icon.Refresh}"
+                                    IsVisible="{Binding !CanResetEqualizer}" />
+                                <PathIcon Width="15" Height="15"
+                                    Foreground="{DynamicResource AccentBrush}"
+                                    Data="{StaticResource Icon.Refresh}"
+                                    IsVisible="{Binding CanResetEqualizer}" />
+                            </Panel>
+                        </Button>
 
-                <StackPanel Spacing="12">
-                    <Border BorderBrush="{DynamicResource BgHighlightBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="6">
-                        <controls:EqualizerCurveControl
-                            x:Name="SettingsEqCurveControl"
-                            Height="185"
-                            BandGains="{Binding EqualizerBandGains}"
-                            IsSimple5BandMode="{Binding UseSimple5BandMode}"
-                            IsEqEnabled="{Binding EqualizerEnabled}" />
-                    </Border>
-
-                    <Grid ColumnDefinitions="*, 220, 70">
-                        <StackPanel>
-                            <TextBlock Classes="label" Text="{Binding L[Eq_ManualPreamp]}" />
-                            <TextBlock Classes="desc" Text="{Binding L[Eq_ManualPreamp_Desc]}" />
-                        </StackPanel>
-                        <Slider Grid.Column="1" Minimum="-12" Maximum="12"
-                            TickFrequency="0.5" IsSnapToTickEnabled="True"
-                            Value="{Binding EqualizerPreampDb}" Margin="0,0,10,0" />
-                        <TextBlock Grid.Column="2" Classes="value-label"
-                            Text="{Binding EqualizerPreampDb, StringFormat='{}{0:F1} dB'}" />
+                        <!-- Power toggle switch -->
+                        <ToggleSwitch Grid.Column="5" IsChecked="{Binding IsEqualizerEnabled}"
+                            VerticalAlignment="Center" />
                     </Grid>
+
+                    <StackPanel Spacing="12">
+                        <Border BorderBrush="{DynamicResource BgHighlightBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="6">
+                            <controls:EqualizerCurveControl
+                                x:Name="SettingsEqCurveControl"
+                                Height="185"
+                                BandGains="{Binding EqualizerBandGains}"
+                                IsSimple5BandMode="{Binding IsSimple5BandMode}"
+                                IsEqEnabled="{Binding IsEqualizerEnabled}" />
+                        </Border>
+
+                        <Grid ColumnDefinitions="*, 220, 70">
+                            <StackPanel>
+                                <TextBlock Classes="label" Text="{Binding L[Eq_ManualPreamp]}" />
+                                <TextBlock Classes="desc" Text="{Binding L[Eq_ManualPreamp_Desc]}" />
+                            </StackPanel>
+                            <Slider Grid.Column="1" Minimum="-12" Maximum="12"
+                                TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                Value="{Binding EqualizerPreampDb}" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="2" Classes="value-label"
+                                Text="{Binding EqualizerPreampDb, StringFormat='{}{0:F1} dB'}" />
+                        </Grid>
+                    </StackPanel>
                 </StackPanel>
 
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />

@@ -9,7 +9,6 @@ public sealed class TrackViewModelFactory
 {
     private readonly LibraryService _library;
     private readonly DialogService _dialog;
-    private readonly AudioEngine _audio;
     private readonly PlayerControlService _playerControl;
     private readonly PlaylistService _playlistService;
     private readonly DownloadService _downloads;
@@ -18,7 +17,6 @@ public sealed class TrackViewModelFactory
     public TrackViewModelFactory(
         LibraryService library,
         DialogService dialog,
-        AudioEngine audio,
         PlayerControlService playerControl,
         PlaylistService playlistService,
         DownloadService downloads,
@@ -26,7 +24,6 @@ public sealed class TrackViewModelFactory
     {
         _library = library;
         _dialog = dialog;
-        _audio = audio;
         _playerControl = playerControl;
         _playlistService = playlistService;
         _downloads = downloads;
@@ -54,7 +51,6 @@ public sealed class TrackViewModelFactory
     {
         return new TrackItemViewModel(
             track,
-            _audio,
             _playerControl,
             _playlistService,
             _downloads,

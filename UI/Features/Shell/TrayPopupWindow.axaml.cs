@@ -496,7 +496,9 @@ public partial class TrayPopupWindow : Window
         int delta = e.Delta.Y > 0 ? VolumeStep : -VolumeStep;
         int newVolume = _playerControl.AdjustVolume(delta);
 
-        UpdateVolumeDisplay();
+        if (!_isSubscribed)
+            UpdateVolumeDisplay();
+
         _onVolumeChanged?.Invoke(newVolume);
 
         e.Handled = true;

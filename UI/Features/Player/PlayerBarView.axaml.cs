@@ -81,10 +81,6 @@ public partial class PlayerBarView : UserControl
     private TimeSpan _glideStartTime;
     private bool _isGliding;
 
-    private DispatcherTimer? _presetsHoverCloseTimer;
-    private bool _isPointerInPresetsTrigger;
-    private bool _isPointerInPresetsPopup;
-
     #endregion
 
     #region Initialization
@@ -125,7 +121,7 @@ public partial class PlayerBarView : UserControl
             _formatFlyout.Closed += (_, _) => FormatButton.Classes.Remove("popup-open");
         }
 
-        EqCurveControl.BandsChanged += bands => _currentViewModel?.ApplyCustomEqualizerBandsFromUi(bands);
+        EqCurveControl.BandsChanged += bands => _currentViewModel?.Equalizer.ApplyCustomBandsFromUi(bands);
 
         KeyDown += OnKeyDown;
     }
@@ -133,123 +129,19 @@ public partial class PlayerBarView : UserControl
     private void OnEqualizerFlyoutOpened(object? sender, EventArgs e)
     {
         EqualizerButton.Classes.Add("active");
-        _currentViewModel?.SyncEqualizerStateFromSettings();
+        _currentViewModel?.Equalizer.SyncState();
     }
 
     private void OnEqualizerFlyoutClosed(object? sender, EventArgs e)
     {
         EqualizerButton.Classes.Remove("active");
-        EqPresetsPopup.IsOpen = false;
-        _currentViewModel?.CancelPresetRename();
-        _currentViewModel?.FlushEqualizerPendingSave();
-        _currentViewModel?.SyncEqualizerStateFromSettings();
+        EqPresetsDropDown.ClosePopup();
+        _currentViewModel?.Equalizer.FlushPendingSave();
+        _currentViewModel?.Equalizer.SyncState();
     }
 
-    private void OnEqHeaderButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is Control button)
-        {
-            ToolTip.SetIsOpen(button, false);
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (button.IsPointerOver)
-                    ToolTip.SetIsOpen(button, true);
-            }, DispatcherPriority.Input);
-        }
-    }
-
-    private void OnPresetsTriggerButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        _presetsHoverCloseTimer?.Stop();
-        ToolTip.SetIsOpen(EqPresetsButton, false);
-        EqPresetsPopup.IsOpen = !EqPresetsPopup.IsOpen;
-    }
-
-    private void OnPresetsTriggerPointerEntered(object? sender, PointerEventArgs e)
-    {
-        _isPointerInPresetsTrigger = true;
-        _presetsHoverCloseTimer?.Stop();
-        ToolTip.SetIsOpen(EqPresetsButton, false);
-        EqPresetsPopup.IsOpen = true;
-    }
-
-    private void OnPresetsTriggerPointerExited(object? sender, PointerEventArgs e)
-    {
-        _isPointerInPresetsTrigger = false;
-        SchedulePresetsPopupClose();
-    }
-
-    private void OnPresetsPopupPointerEntered(object? sender, PointerEventArgs e)
-    {
-        _isPointerInPresetsPopup = true;
-        _presetsHoverCloseTimer?.Stop();
-    }
-
-    private void OnPresetsPopupPointerExited(object? sender, PointerEventArgs e)
-    {
-        _isPointerInPresetsPopup = false;
-        SchedulePresetsPopupClose();
-    }
-
-    private bool IsPresetsPopupEditing() => NewPresetTextBox.IsFocused;
-
-    private void SchedulePresetsPopupClose()
-    {
-        _presetsHoverCloseTimer ??= new DispatcherTimer(
-                TimeSpan.FromMilliseconds(220),
-                DispatcherPriority.Normal,
-                (_, _) =>
-                {
-                    _presetsHoverCloseTimer?.Stop();
-                    if (!_isPointerInPresetsTrigger && !_isPointerInPresetsPopup && !IsPresetsPopupEditing())
-                    {
-                        EqPresetsPopup.IsOpen = false;
-                        _currentViewModel?.CancelPresetRename();
-                    }
-                });
-        _presetsHoverCloseTimer.Stop();
-        _presetsHoverCloseTimer.Start();
-    }
-
-    private void FocusNewPresetTextBox()
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (EqPresetsPopup.IsOpen)
-            {
-                NewPresetTextBox.Focus();
-                NewPresetTextBox.SelectAll();
-            }
-        }, DispatcherPriority.Input);
-    }
-
-    private void OnNewPresetTextBoxKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            _currentViewModel?.SaveInlineEqualizerPresetCommand.Execute(null);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            _currentViewModel?.CancelPresetRename();
-            EqualizerButton.Focus();
-            e.Handled = true;
-        }
-    }
-
-    private void OnPresetItemPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (e.InitialPressMouseButton == MouseButton.Right
-            && sender is Control { DataContext: EqualizerPresetChipItem chip }
-            && !chip.IsBuiltIn)
-        {
-            _isPointerInPresetsPopup = true;
-            _presetsHoverCloseTimer?.Stop();
-            _currentViewModel?.DeleteEqualizerPresetCommand.Execute(chip);
-            e.Handled = true;
-        }
-    }
+    private void OnEqHeaderButtonClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        EqualizerPresetsDropDown.RefreshHeaderButtonToolTip(sender);
 
     #endregion
 
@@ -286,8 +178,6 @@ public partial class PlayerBarView : UserControl
 
         _seekHintTimer?.Stop();
         _seekHintTimer = null;
-        _presetsHoverCloseTimer?.Stop();
-        _presetsHoverCloseTimer = null;
     }
 
     private void OnWindowActivated(object? sender, EventArgs e)
@@ -311,7 +201,6 @@ public partial class PlayerBarView : UserControl
             vm.PropertyChanged += OnViewModelPropertyChanged;
             vm.SuspendRequested += OnSuspend;
             vm.ResumeRequested += OnResume;
-            vm.PresetInputFocusRequested += FocusNewPresetTextBox;
 
             if (!_isSuspended) RefreshAllVisuals();
         }
@@ -323,7 +212,6 @@ public partial class PlayerBarView : UserControl
         _currentViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _currentViewModel.SuspendRequested -= OnSuspend;
         _currentViewModel.ResumeRequested -= OnResume;
-        _currentViewModel.PresetInputFocusRequested -= FocusNewPresetTextBox;
         _currentViewModel = null;
     }
 
@@ -694,7 +582,7 @@ public partial class PlayerBarView : UserControl
 
     private void CloseAllPopups()
     {
-        EqPresetsPopup.IsOpen = false;
+        EqPresetsDropDown.ClosePopup();
         SeekTooltip.Opacity = 0;
         SeekRangeSpan.Opacity = 0;
         SeekHint.Opacity = 0;

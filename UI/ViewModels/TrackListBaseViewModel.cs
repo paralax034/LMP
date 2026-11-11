@@ -103,7 +103,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         Downloads.OnProgress += HandleDownloadProgress;
         Downloads.OnCompleted += HandleDownloadCompleted;
 
-        AudioSourceFactory.GlobalCache.OnFormatCached += HandleFormatCached;
+        AudioSourceFactory.OnFormatCached += HandleFormatCached;
     }
 
     public override async Task OnNavigatedToAsync()
@@ -397,7 +397,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
             Downloads.OnProgress -= HandleDownloadProgress;
             Downloads.OnCompleted -= HandleDownloadCompleted;
 
-            AudioSourceFactory.GlobalCache.OnFormatCached -= HandleFormatCached;
+            AudioSourceFactory.OnFormatCached -= HandleFormatCached;
 
             _items.Dispose();
         }
