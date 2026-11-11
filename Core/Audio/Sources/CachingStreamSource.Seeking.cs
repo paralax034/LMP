@@ -1,6 +1,6 @@
 namespace LMP.Core.Audio.Sources;
 
-public sealed partial class CachingStreamSource
+internal sealed partial class CachingStreamSource
 {
     /// <inheritdoc/>
     public async ValueTask<bool> SeekAsync(long positionMs, CancellationToken ct)

@@ -393,13 +393,18 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         try
         {
             var playlist = await _playlistService.CreatePlaylistAsync(
-                result.Name,
+                result.Name.Trim(),
                 result.Description,
                 result.ThumbnailUrl,
                 result.CustomColor,
                 result.ComputedColor).ConfigureAwait(false);
 
             await _playlistService.AddTracksToPlaylistAsync(playlist.Id, targets).ConfigureAwait(false);
+
+            if (result.SyncToCloud)
+            {
+                await _playlistService.LinkToCloudAsync(playlist.Id).ConfigureAwait(false);
+            }
 
             var notif = AppEntry.Services.GetService<NotificationService>();
             if (notif != null)

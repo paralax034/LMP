@@ -9,7 +9,7 @@ namespace LMP.Core.Audio.Helpers;
 /// Extremely fast Lock-Free ring buffer for the Single-Producer / Single-Consumer scenario
 /// using memory pooling via <see cref="ArrayPool{T}.Shared"/> (0 B allocations in LOH when recreated).
 /// </summary>
-public sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
+internal sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
 {
     private T[]? _buffer;
     private readonly int _mask;

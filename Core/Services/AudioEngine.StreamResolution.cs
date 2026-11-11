@@ -933,7 +933,7 @@ public sealed partial class AudioEngine
     /// <param name="entry">The cache entry.</param>
     /// <param name="duration">The track duration from metadata.</param>
     /// <returns><c>true</c> if the file size conforms to codec physics.</returns>
-    private static bool IsCacheSizePlausible(AudioCacheEntry entry, TimeSpan duration)
+    internal static bool IsCacheSizePlausible(AudioCacheEntry entry, TimeSpan duration)
     {
         if (duration <= TimeSpan.FromSeconds(5))
             return entry.TotalSize > 32 * 1024;

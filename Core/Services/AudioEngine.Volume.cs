@@ -55,7 +55,7 @@ public sealed partial class AudioEngine
     }
 
     /// <summary>Initializes volume from settings at startup or after database load.</summary>
-    public void InitializeVolumeFromSettings()
+    private void InitializeVolumeFromSettings()
     {
         var settings = _library.Settings;
         lock (_volumeLock)

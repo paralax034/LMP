@@ -8,7 +8,7 @@ namespace LMP.Core.Audio.Parsers;
 /// <see cref="WebMParser"/> adapter for <see cref="IContainerParser"/>.
 /// Encapsulates memory management logic (Zero-Allocation) for audio frames.
 /// </summary>
-public sealed class WebMContainerParser : IContainerParser
+internal sealed class WebMContainerParser : IContainerParser
 {
     private readonly WebMParser _parser;
     private bool _disposed;

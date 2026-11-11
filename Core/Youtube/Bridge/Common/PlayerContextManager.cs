@@ -126,7 +126,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
     /// <see cref="PlayerContext.DetectVersionAsync"/> is unavailable.
     /// </summary>
     /// <returns>Player context or <c>null</c> if no valid cache exists.</returns>
-    public static PlayerContext? TryLoadFromDiskCache()
+    internal static PlayerContext? TryLoadFromDiskCache()
     {
         try
         {
@@ -189,7 +189,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
     /// Returns the cached signatureTimestamp.
     /// Single source of truth for all <see cref="VideoController"/> instances.
     /// </summary>
-    public string? GetCachedSignatureTimestamp() => _cachedSignatureTimestamp;
+    internal string? GetCachedSignatureTimestamp() => _cachedSignatureTimestamp;
 
     /// <summary>Writes signatureTimestamp to cache.</summary>
     /// <param name="sts">STS value or <c>null</c> to reset.</param>

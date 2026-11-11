@@ -27,7 +27,7 @@ namespace LMP.Core.Audio.Normalization;
 /// <para><b>Single writer:</b> used exclusively from the backend fill thread
 /// in <c>AudioCallback</c>. No write contention.</para>
 /// </summary>
-public struct GainCrossfader
+internal struct GainCrossfader
 {
     #region Constants
 

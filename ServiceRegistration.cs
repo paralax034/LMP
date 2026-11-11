@@ -144,7 +144,8 @@ internal static class ServiceRegistration
             sp.GetService<YoutubeProvider>(),
             sp.GetService<CookieAuthService>(),
             sp.GetService<TrackRegistry>(),
-            sp.GetService<PlaylistSyncService>()));
+            sp.GetService<PlaylistSyncService>(),
+            sp.GetService<PlaylistService>()));
 
         services.AddTransient<HomeViewModel>();
         services.AddTransient<SearchViewModel>();

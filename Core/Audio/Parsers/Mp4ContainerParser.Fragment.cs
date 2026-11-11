@@ -3,7 +3,7 @@ using LMP.Core.Exceptions;
 
 namespace LMP.Core.Audio.Parsers;
 
-public sealed partial class Mp4ContainerParser
+internal sealed partial class Mp4ContainerParser
 {
     /// <summary>
     /// Result of parsing the <c>tfhd</c> box.

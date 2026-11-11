@@ -18,7 +18,7 @@ namespace LMP.Core.Audio;
 ///   <item><c>AudioPlayer.Timers.cs</c> — management of UI update timers.</item>
 /// </list>
 /// </remarks>
-public sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
+internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 {
     #region Constants
 

@@ -1,6 +1,6 @@
 namespace LMP.Core.Audio.Sources;
 
-public sealed partial class CachingStreamSource
+internal sealed partial class CachingStreamSource
 {
     /// <summary>
     /// Stream wrapper over <see cref="CachingStreamSource"/> for container parsers (WebM/MP4).

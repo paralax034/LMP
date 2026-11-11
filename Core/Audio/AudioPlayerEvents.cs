@@ -3,7 +3,7 @@ namespace LMP.Core.Audio;
 /// <summary>
 /// All audio player events.
 /// </summary>
-public sealed class AudioPlayerEvents
+internal sealed class AudioPlayerEvents
 {
     /// <summary>Playback position changed.</summary>
     public event Action<TimeSpan>? PositionChanged;
@@ -55,7 +55,7 @@ public sealed class AudioPlayerEvents
     internal void RaiseDeviceRestored() => DeviceRestored?.Invoke();
 }
 
-public readonly record struct AudioPlayerError(string Message, Exception? Exception = null);
+internal readonly record struct AudioPlayerError(string Message, Exception? Exception = null);
 
 public readonly record struct BufferState(
     double Progress,           // 0-100%

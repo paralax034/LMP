@@ -737,10 +737,372 @@ public static class AudioLogicTests
     private static extern unsafe void CallEqRampScalar(EqualizerProcessor eq, float* pSamples, int rampFrames);
 
     /// <summary>
-    /// Verifies mathematical equivalence of FMA3, SSE2, and scalar paths of the Band-Major equalizer
-    /// (both in steady state and on a 30-ms sample-wise smoothing window) and accuracy of <see cref="SpanMathHelper.FastReciprocal"/>.
+    /// Verifies live playlist diff application to the active queue: additions (ordered and shuffled),
+    /// deduplication against manual queue items, removals (upcoming, played, and currently playing track),
+    /// ignoring pure playlist reorders, preserving manual queue edits, metadata-only updates, stale generation rejection,
+    /// and the O(1) allocation-free filter for the system "Liked" playlist.
     /// </summary>
-    [TestMethod(TestCategory.Unit, "Equalizer & Reciprocal SIMD Multi-Versioning Equivalence (0 Alloc)", Group = TestGroups.Audio, Order = 10)]
+    [TestMethod(TestCategory.Unit, "Playlist Live Diff -> Queue Ops", Group = TestGroups.Audio, Order = 10)]
+    public static Task TestPlaylistLiveDiffQueueOpsAsync()
+    {
+        static TrackInfo Track(string id, bool isLiked = false) => new() { Id = id, Title = id, IsLiked = isLiked };
+
+        // 1. +2 tracks, ShuffleEnabled = false -> both appended at the end in playlist order, currentIndex unchanged, queue stays pure
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 0;
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_A", "yt_B", "yt_C", "yt_D"],
+                addedTracks: [Track("yt_C"), Track("yt_D")],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.True(outcome.Applied, "Diff must be applied");
+            TestAssert.True(outcome.QueueMutated, "Adding 2 tracks must mutate the queue");
+            TestAssert.True(outcome.IsQueuePure, "Queue must remain pure after synced playlist addition");
+            TestAssert.Equal(0, currentIndex);
+            TestAssert.Equal(4, queue.Count);
+            TestAssert.Equal(4, source.SnapshotCount);
+            TestAssert.Equal("yt_C", queue[2].Id);
+            TestAssert.Equal("yt_D", queue[3].Id);
+        }
+
+        // 2. +1 track, ShuffleEnabled = true -> new track inserted strictly after currentIndex (deterministic Random seed)
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B"), Track("yt_C"), Track("yt_D") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 1; // Playing "yt_B"
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+            var rng = new Random(42);
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_A", "yt_B", "yt_C", "yt_D", "yt_E"],
+                addedTracks: [Track("yt_E")],
+                shuffleEnabled: true,
+                repeatAll: false,
+                random: rng);
+
+            int insertedPos = AudioEngine.FindTrackIndexById(queue, "yt_E");
+            TestAssert.True(outcome.Applied && outcome.QueueMutated);
+            TestAssert.Equal(1, currentIndex, "Current index must not change when inserting after current");
+            TestAssert.True(insertedPos > currentIndex, $"Shuffled insert index ({insertedPos}) must be strictly after currentIndex ({currentIndex})");
+            TestAssert.Equal(5, source.SnapshotCount);
+            TestAssert.True(outcome.IsQueuePure, "Queue must remain pure when shuffled addition is applied");
+        }
+
+        // 3. Added track that the user already placed in the queue manually -> no duplicate
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B") };
+            var queue = new List<TrackInfo> { Track("yt_A"), Track("yt_B"), Track("yt_X") }; // "yt_X" was manually enqueued
+            int currentIndex = 0;
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_A", "yt_B", "yt_X"],
+                addedTracks: [Track("yt_X")],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.True(outcome.Applied);
+            TestAssert.False(outcome.QueueMutated, "Track yt_X is already in the queue and must not be duplicated");
+            TestAssert.Equal(0, currentIndex);
+            TestAssert.Equal(3, queue.Count);
+            TestAssert.Equal(3, source.SnapshotCount);
+            TestAssert.True(outcome.IsQueuePure, "Queue now matches playlist composition [yt_A, yt_B, yt_X]");
+        }
+
+        // 4. Removed played track (before current) and upcoming track (after current) -> both removed, currentIndex adjusted
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B"), Track("yt_C"), Track("yt_D") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 2; // Playing "yt_C"
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_B", "yt_C"], // Removed "yt_A" (played) and "yt_D" (upcoming)
+                addedTracks: [],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.True(outcome.Applied && outcome.QueueMutated);
+            TestAssert.False(outcome.RemovedCurrent);
+            TestAssert.Equal(2, queue.Count);
+            TestAssert.Equal(2, source.SnapshotCount);
+            TestAssert.Equal(1, currentIndex, "Removing 'yt_A' before 'yt_C' must shift currentIndex from 2 to 1");
+            TestAssert.Equal("yt_C", queue[currentIndex].Id);
+            TestAssert.True(outcome.IsQueuePure);
+        }
+
+        // 5. Removed currently playing track -> immediately advances to the next track (#58 path)
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B"), Track("yt_C") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 0; // Playing "yt_A"
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_B", "yt_C"],
+                addedTracks: [],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.True(outcome.Applied && outcome.QueueMutated);
+            TestAssert.True(outcome.RemovedCurrent, "RemovedCurrent flag must be set when playing track is removed");
+            TestAssert.True(outcome.CanMoveNext, "CanMoveNext must be true when tracks remain after removing playing yt_A");
+            TestAssert.Equal(0, currentIndex, "Current index must point to yt_B at slot 0");
+            TestAssert.Equal(2, source.SnapshotCount);
+            TestAssert.Equal("yt_B", queue[currentIndex].Id);
+            TestAssert.True(outcome.IsQueuePure);
+        }
+
+        // 6. Tracks reordered in playlist -> zero queue operations, queue remains pure
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B"), Track("yt_C") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 1;
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_C", "yt_A", "yt_B"],
+                addedTracks: [],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.True(outcome.Applied);
+            TestAssert.False(outcome.QueueMutated, "Reordering tracks in playlist must not mutate the active queue");
+            TestAssert.Equal(1, currentIndex);
+            TestAssert.Equal(3, source.SnapshotCount);
+            TestAssert.Equal("yt_A", queue[0].Id);
+            TestAssert.Equal("yt_B", queue[1].Id);
+            TestAssert.Equal("yt_C", queue[2].Id);
+            TestAssert.True(outcome.IsQueuePure, "Purity is order-independent and must remain true");
+        }
+
+        // 7. Manual edits preserved: track manually removed by user does not return, manually added foreign track is untouched
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B"), Track("yt_C") };
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+
+            // User manually removed "yt_B" and manually added foreign track "yt_FOREIGN"
+            var queue = new List<TrackInfo> { Track("yt_A"), Track("yt_C"), Track("yt_FOREIGN") };
+            int currentIndex = 0;
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_A", "yt_B", "yt_C", "yt_D"], // "yt_D" added to playlist; "yt_B" was already in old snapshot
+                addedTracks: [Track("yt_D")],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.True(outcome.Applied && outcome.QueueMutated);
+            TestAssert.Equal(0, currentIndex);
+            TestAssert.Equal(4, source.SnapshotCount);
+            TestAssert.Equal(-1, AudioEngine.FindTrackIndexById(queue, "yt_B"), "Manually removed track 'yt_B' must not be re-added");
+            TestAssert.True(AudioEngine.FindTrackIndexById(queue, "yt_FOREIGN") >= 0, "Foreign track added manually must remain untouched");
+            TestAssert.Equal("yt_D", queue[^1].Id, "Newly added playlist track 'yt_D' must be appended");
+            TestAssert.False(outcome.IsQueuePure, "Queue with manual edits is not pure");
+        }
+
+        // 8. Metadata-only change (playlist renamed) -> zero queue operations, source name updated
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 0;
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "Old Name");
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: gen,
+                newPlaylistTrackIds: ["yt_A", "yt_B"],
+                addedTracks: [],
+                shuffleEnabled: false,
+                repeatAll: false,
+                newPlaylistName: "New Name");
+
+            TestAssert.True(outcome.Applied);
+            TestAssert.False(outcome.QueueMutated, "Metadata change must produce 0 queue operations");
+            TestAssert.True(outcome.SourceChanged, "SourceChanged must reflect renamed playlist");
+            TestAssert.Equal(0, currentIndex);
+            TestAssert.Equal("New Name", source.Name);
+            TestAssert.True(outcome.IsQueuePure);
+        }
+
+        // 9. Delta for stale generation -> rejected
+        {
+            int gen = 0;
+            var initial = new List<TrackInfo> { Track("yt_A"), Track("yt_B") };
+            var queue = new List<TrackInfo>(initial);
+            int currentIndex = 0;
+            var source = AudioEngine.TransitionOnStartQueue(ref gen, initial, "pl_1", "My Playlist");
+            int staleGen = gen;
+
+            // Advance generation by replacing source
+            source = AudioEngine.TransitionOnPlayTrack(source, ref gen, wasInQueue: false);
+
+            var outcome = AudioEngine.ApplyPlaylistDiffCore(
+                queue,
+                ref currentIndex,
+                ref source,
+                playlistId: "pl_1",
+                expectedGeneration: staleGen,
+                newPlaylistTrackIds: ["yt_A", "yt_B", "yt_C"],
+                addedTracks: [Track("yt_C")],
+                shuffleEnabled: false,
+                repeatAll: false);
+
+            TestAssert.False(outcome.Applied, "Delta with stale generation must be rejected");
+            TestAssert.False(outcome.QueueMutated);
+            TestAssert.Equal(2, gen);
+            TestAssert.Equal(0, currentIndex);
+            TestAssert.Equal(QueueSourceKind.Manual, source.Kind);
+            TestAssert.Equal(2, queue.Count);
+        }
+
+        // 10. Liked playlist O(1) filter: IsLiked matching snapshot (playback history, EQ change) -> no sync; mismatch -> sync
+        {
+            int gen = 0;
+            var likedInitial = new List<TrackInfo> { Track("yt_A", isLiked: true), Track("yt_B", isLiked: true) };
+            var likedSource = AudioEngine.TransitionOnStartQueue(ref gen, likedInitial, LibraryService.LikedPlaylistId, "Liked");
+            TestAssert.Equal(1, gen);
+
+            var playingLikedTrack = Track("yt_A", isLiked: true);
+            var unrelatedUnlikedTrack = Track("yt_Z", isLiked: false);
+            var unlikedFromPlayer = Track("yt_A", isLiked: false);
+            var newlyLikedFromPlayer = Track("yt_Z", isLiked: true);
+
+            TestAssert.False(
+                AudioEngine.ShouldSyncLikedOnTrackUpdated(likedSource, playingLikedTrack),
+                "History/EQ update where IsLiked=true matches snapshot must not trigger sync");
+            TestAssert.False(
+                AudioEngine.ShouldSyncLikedOnTrackUpdated(likedSource, unrelatedUnlikedTrack),
+                "Update of unliked track not in snapshot must not trigger sync");
+            TestAssert.True(
+                AudioEngine.ShouldSyncLikedOnTrackUpdated(likedSource, unlikedFromPlayer),
+                "Unliking a track present in Liked snapshot must trigger sync");
+            TestAssert.True(
+                AudioEngine.ShouldSyncLikedOnTrackUpdated(likedSource, newlyLikedFromPlayer),
+                "Liking a track absent from Liked snapshot must trigger sync");
+
+            TestAssert.ZeroAlloc(() =>
+            {
+                _ = AudioEngine.ShouldSyncLikedOnTrackUpdated(likedSource, playingLikedTrack);
+                _ = AudioEngine.ShouldSyncLikedOnTrackUpdated(likedSource, unlikedFromPlayer);
+            }, warmup: 5, iterations: 1000, context: "ShouldSyncLikedOnTrackUpdated O(1) Filter");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Verifies <see cref="QueueSource"/> lifecycle transitions and generation increments across
+    /// StartQueue, PlayTrack (in-queue vs external replacement), ClearQueue, and ShuffleQueue.
+    /// </summary>
+    [TestMethod(TestCategory.Unit, "QueueSource Lifecycle & Generation", Group = TestGroups.Audio, Order = 11)]
+    public static Task TestQueueSourceLifecycleAndGenerationAsync()
+    {
+        static TrackInfo Track(string id) => new() { Id = id, Title = id };
+
+        int generation = 0;
+        var tracksA = new List<TrackInfo> { Track("A1"), Track("A2"), Track("A3") };
+        var queue = new List<TrackInfo>(tracksA);
+
+        // 1. StartQueue with playlist A -> source A, generation +1
+        var source = AudioEngine.TransitionOnStartQueue(ref generation, queue, "playlist_A", "Playlist A");
+        TestAssert.Equal(QueueSourceKind.Playlist, source.Kind);
+        TestAssert.Equal("playlist_A", source.Id);
+        TestAssert.Equal("Playlist A", source.Name);
+        TestAssert.Equal(1, source.Generation);
+        TestAssert.True(AudioEngine.ComputeIsQueuePure(queue, source));
+
+        // 2. PlayTrack for a track already in the queue -> source and generation unchanged
+        source = AudioEngine.TransitionOnPlayTrack(source, ref generation, wasInQueue: true);
+        TestAssert.Equal(QueueSourceKind.Playlist, source.Kind);
+        TestAssert.Equal("playlist_A", source.Id);
+        TestAssert.Equal(1, source.Generation);
+        TestAssert.True(AudioEngine.ComputeIsQueuePure(queue, source));
+
+        // 3. ShuffleQueue -> source unchanged, queue remains pure regardless of track order
+        queue.Reverse();
+        TestAssert.Equal(QueueSourceKind.Playlist, source.Kind);
+        TestAssert.Equal("playlist_A", source.Id);
+        TestAssert.Equal(1, source.Generation);
+        TestAssert.True(AudioEngine.ComputeIsQueuePure(queue, source), "Shuffling queue must preserve purity");
+
+        // 4. PlayTrack for a track NOT in the queue (replacement branch) -> Manual, generation +1
+        queue.Clear();
+        queue.Add(Track("SEARCH_1"));
+        source = AudioEngine.TransitionOnPlayTrack(source, ref generation, wasInQueue: false);
+        TestAssert.Equal(QueueSourceKind.Manual, source.Kind);
+        TestAssert.True(source.Id is null);
+        TestAssert.Equal(2, source.Generation);
+        TestAssert.False(AudioEngine.ComputeIsQueuePure(queue, source));
+
+        // 5. StartQueue with playlist A again -> generation +1, then ClearQueue -> Manual, generation +1
+        queue.Clear();
+        queue.AddRange(tracksA);
+        source = AudioEngine.TransitionOnStartQueue(ref generation, queue, "playlist_A", "Playlist A");
+        TestAssert.Equal(3, source.Generation);
+        TestAssert.True(AudioEngine.ComputeIsQueuePure(queue, source));
+
+        source = AudioEngine.TransitionOnClearQueue(ref generation);
+        TestAssert.Equal(QueueSourceKind.Manual, source.Kind);
+        TestAssert.True(source.Id is null);
+        TestAssert.Equal(4, generation);
+        TestAssert.Equal(4, source.Generation);
+        TestAssert.False(AudioEngine.ComputeIsQueuePure(queue, source));
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Equalizer & Reciprocal SIMD Multi-Versioning Equivalence (0 Alloc)", Group = TestGroups.Audio, Order = 12)]
     public static unsafe Task TestEqualizerSimdMultiVersioningEquivalenceAsync()
     {
         // 1. Accuracy test for FastReciprocal (rcpss + 1 Newton-Raphson iteration: error <= 2e-7f)
@@ -815,9 +1177,6 @@ public static class AudioLogicTests
         // Initiate transition from Bypass -> VocalId (1440 smoothing frames)
         eqRampDefault.Process(rampBufDefault.AsSpan());
 
-        // For direct calling of inner kernels, synchronize published parameters via an empty slice
-        Span<float> empty = Span<float>.Empty;
-        _ = empty;
         eqRampSse2.Configure(true, preset, preampDb: -1.0f, autoPreamp: false);
         eqRampSse2.SnapToTarget();
         eqRampScalar.Configure(true, preset, preampDb: -1.0f, autoPreamp: false);

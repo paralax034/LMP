@@ -10,7 +10,7 @@ namespace LMP.Core.Youtube;
 /// Delegating HTTP request handler for YouTube API integration.
 /// Configures authorization headers, cookies, and request contexts.
 /// </summary>
-public partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? authService, bool disposeClient = false)
+internal partial class YoutubeHttpHandler(HttpClient http, CookieAuthService? authService, bool disposeClient = false)
     : ClientDelegatingHandler(http, disposeClient)
 {
     public const string FallbackMusicClientVersion = "1.20260126.03.00";

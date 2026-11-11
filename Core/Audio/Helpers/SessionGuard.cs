@@ -14,7 +14,7 @@ namespace LMP.Core.Audio.Helpers;
 /// <para><b>Thread safety:</b> All operations use <see cref="Interlocked"/>
 /// or <see cref="Volatile"/> — safe without additional locks.</para>
 /// </remarks>
-public struct SessionGuard
+internal struct SessionGuard
 {
     private int _currentSession;
 

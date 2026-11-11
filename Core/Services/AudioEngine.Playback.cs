@@ -69,13 +69,25 @@ public sealed partial class AudioEngine
 
         lock (_queueLock)
         {
-            int idx = _queue.FindIndex(t => t.Id == cmd.Track.Id);
-            if (idx >= 0) { _currentIndex = idx; _queue[idx] = cmd.Track; }
-            else { _queue.Clear(); _queue.Add(cmd.Track); _currentIndex = 0; }
+            int idx = FindTrackIndexById(_queue, cmd.Track.Id);
+            if (idx >= 0)
+            {
+                _currentIndex = idx;
+                _queue[idx] = cmd.Track;
+            }
+            else
+            {
+                _queue.Clear();
+                _queue.Add(cmd.Track);
+                _currentIndex = 0;
+            }
+
+            _queueSource = TransitionOnPlayTrack(_queueSource, ref _queueSourceGeneration, wasInQueue: idx >= 0);
+            RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
         }
 
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
         await PlayCurrentIndexAsync(cmd.Session, cmd.SeekPosition).ConfigureAwait(false);
     }
 
@@ -89,13 +101,21 @@ public sealed partial class AudioEngine
         {
             _queue.Clear();
             _queue.AddRange(cmd.Tracks);
-            _currentIndex = _queue.FindIndex(t => t.Id == cmd.StartTrack.Id);
+            _currentIndex = FindTrackIndexById(_queue, cmd.StartTrack.Id);
             if (_currentIndex == -1 && _queue.Count > 0) _currentIndex = 0;
+
+            _queueSource = TransitionOnStartQueue(
+                ref _queueSourceGeneration,
+                _queue,
+                cmd.PlaylistId,
+                cmd.PlaylistName);
+
             if (ShuffleEnabled && _queue.Count > 1) ApplyShuffleInPlace(preserveCurrentAtStart: true);
+            RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
         }
 
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
         await PlayCurrentIndexAsync(cmd.Session).ConfigureAwait(false);
     }
 
@@ -120,7 +140,7 @@ public sealed partial class AudioEngine
 
         int session = BeginNewSession();
 
-        if (queueMutated) RaiseOnUI(() => OnQueueChanged?.Invoke());
+        if (queueMutated) RaiseOnUI(_raiseQueueChangedOnUIDelegate);
 
         if (canMove)
             await PlayCurrentIndexAsync(session, startPlaying: cmd.StartPlaying).ConfigureAwait(false);

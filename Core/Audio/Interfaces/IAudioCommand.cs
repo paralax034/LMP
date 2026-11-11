@@ -3,7 +3,7 @@ namespace LMP.Core.Audio.Interfaces;
 /// <summary>
 /// Marker interface for all audio player commands.
 /// </summary>
-public interface IAudioCommand
+internal interface IAudioCommand
 {
     /// <summary>
     /// Unique session ID to cancel obsolete commands.
@@ -22,7 +22,7 @@ public interface IAudioCommand
 /// <param name="SeekPosition">
 /// Seek position BEFORE playback starts (atomic seek-before-play).
 /// null = start from the beginning of the track.
-/// 
+///
 /// <para><b>Why:</b> When switching quality (SwitchQualityAsync), playback must
 /// start from the current position rather than from the beginning. Without this field,
 /// an audio artifact is audible between PlayAsync and SeekAsync — 16-300ms of sound from position 0.</para>
@@ -30,7 +30,7 @@ public interface IAudioCommand
 /// <param name="ExternalCancellationToken">
 /// Cancellation token for the user playback session.
 /// Allows instantly aborting the launch of an obsolete track if the user has already switched.</param>
-public sealed record PlayCommand(
+internal sealed record PlayCommand(
     ResolvedStreamDescriptor Descriptor,
     int SessionId,
     TimeSpan? SeekPosition = null,
@@ -40,19 +40,19 @@ public sealed record PlayCommand(
 /// Command to completely stop playback.
 /// </summary>
 /// <param name="SessionId">Unique session ID.</param>
-public sealed record StopCommand(int SessionId) : IAudioCommand;
+internal sealed record StopCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
 /// Command to pause playback.
 /// </summary>
 /// <param name="SessionId">Unique session ID.</param>
-public sealed record PauseCommand(int SessionId) : IAudioCommand;
+internal sealed record PauseCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
 /// Command to resume playback after pause.
 /// </summary>
 /// <param name="SessionId">Unique session ID.</param>
-public sealed record ResumeCommand(int SessionId) : IAudioCommand;
+internal sealed record ResumeCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
 /// Command to seek to a new position within the current track.
@@ -64,7 +64,7 @@ public sealed record ResumeCommand(int SessionId) : IAudioCommand;
 /// Used to discard obsolete deferred resume completions.
 /// </param>
 /// <param name="Completion">Optional completion source for awaitable seek.</param>
-public sealed record SeekCommand(
+internal sealed record SeekCommand(
     TimeSpan Position,
     int SessionId,
     int SeekGeneration,
@@ -81,7 +81,7 @@ public sealed record SeekCommand(
 /// <c>false</c> if waiting completed due to timeout and resume must be forced.
 /// </param>
 /// <param name="BufferedSamples">Actual sample count in the ring buffer when waiting completed.</param>
-public sealed record DeferredResumeCommand(
+internal sealed record DeferredResumeCommand(
     int SessionId,
     int SeekGeneration,
     AudioPipeline Pipeline,
@@ -93,7 +93,7 @@ public sealed record DeferredResumeCommand(
 /// </summary>
 /// <param name="SessionId">Session at the time of device loss.</param>
 /// <param name="Pipeline">Pipeline associated with the device.</param>
-public sealed record DeviceLostCommand(
+internal sealed record DeviceLostCommand(
     int SessionId,
     AudioPipeline Pipeline) : IAudioCommand;
 
@@ -102,7 +102,7 @@ public sealed record DeviceLostCommand(
 /// </summary>
 /// <param name="SessionId">Session at the time of device arrival.</param>
 /// <param name="Pipeline">Pipeline awaiting device recovery.</param>
-public sealed record DeviceAvailableCommand(
+internal sealed record DeviceAvailableCommand(
     int SessionId,
     AudioPipeline Pipeline) : IAudioCommand;
 
@@ -112,7 +112,7 @@ public sealed record DeviceAvailableCommand(
 /// <param name="SessionId">Session in which the error occurred.</param>
 /// <param name="Pipeline">Pipeline from which the error originated.</param>
 /// <param name="Error">Error exception.</param>
-public sealed record PlayerErrorCommand(
+internal sealed record PlayerErrorCommand(
     int SessionId,
     AudioPipeline Pipeline,
     Exception Error) : IAudioCommand;
@@ -121,7 +121,7 @@ public sealed record PlayerErrorCommand(
 /// Command for final disposal of the player and its infrastructure.
 /// </summary>
 /// <param name="SessionId">Unique session ID.</param>
-public sealed record DisposeCommand(int SessionId) : IAudioCommand;
+internal sealed record DisposeCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
 /// Command for natural completion of the current track.
@@ -133,14 +133,14 @@ public sealed record DisposeCommand(int SessionId) : IAudioCommand;
 /// eliminates late stale callbacks that could reset a newly created pipeline.</para>
 /// </remarks>
 /// <param name="SessionId">Session in which the track ended.</param>
-public sealed record TrackEndedCommand(int SessionId) : IAudioCommand;
+internal sealed record TrackEndedCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
 /// Command to recover an audio device after loss (BT disconnect, etc.).
 /// The pipeline remains alive, while the backend is recreated via a retry loop.
 /// </summary>
 /// <param name="SessionId">Session at the time the command was sent.</param>
-public sealed record DeviceRecoveryCommand(int SessionId) : IAudioCommand;
+internal sealed record DeviceRecoveryCommand(int SessionId) : IAudioCommand;
 
 /// <summary>
 /// Command to notify the actor loop about critical audio buffer underrun (starvation).
@@ -153,6 +153,6 @@ public sealed record DeviceRecoveryCommand(int SessionId) : IAudioCommand;
 /// </remarks>
 /// <param name="SessionId">Session at the time starvation was detected.</param>
 /// <param name="Pipeline">Pipeline in which starvation occurred.</param>
-public sealed record StarvationCommand(
+internal sealed record StarvationCommand(
     int SessionId,
     AudioPipeline Pipeline) : IAudioCommand;

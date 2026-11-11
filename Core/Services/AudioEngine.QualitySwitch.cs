@@ -51,10 +51,8 @@ public sealed partial class AudioEngine
             Volatile.Write(ref _nTokenActiveTrackId, cmd.Track.Id);
             ct.ThrowIfCancellationRequested();
 
-            var descriptor = await Task.Run(async () =>
-                await _youtube.RefreshStreamAsync(cmd.Track, false, ct).ConfigureAwait(false)
-                ?? await _youtube.RefreshStreamAsync(cmd.Track, true, ct).ConfigureAwait(false),
-                ct).ConfigureAwait(false);
+            var descriptor = await _youtube.RefreshStreamAsync(cmd.Track, false, ct).ConfigureAwait(false)
+                             ?? await _youtube.RefreshStreamAsync(cmd.Track, true, ct).ConfigureAwait(false);
 
             if (descriptor == null)
             {

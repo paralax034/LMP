@@ -1,18 +1,15 @@
+using Avalonia.Threading;
+
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Unified playback management coordinator for transport commands, volume, track likes, and playlist queue purity.
-///
-/// <para><b>Architecture:</b></para>
-/// <list type="bullet">
-///   <item>Subscribes to coarse-grained <see cref="AudioEngine"/> state transitions (<c>OnPlaybackStateChanged</c>, <c>OnTrackChanged</c>, <c>OnQueueChanged</c>, <c>OnLoadingStateChanged</c>) while leaving high-frequency stream/buffer/position telemetry and DSP directly on <see cref="AudioEngine"/></item>
-///   <item>Provides <see cref="ObservableObject"/> properties and typed C# events for PlayerBar, TrayIcon, TrackList, and MediaKeys</item>
-///   <item>Operates independently of the window suspend/resume state</item>
-///   <item>Serves as the single point of volume and transport control</item>
-/// </list>
+/// Unified playback management coordinator for transport commands, volume, track likes,
+/// and live synchronization between the active playlist and the playback queue.
 /// </summary>
 public sealed class PlayerControlService : IDisposable
 {
+    private const int LiveSyncDebounceMs = 75;
+
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
     private readonly NotificationService? _notificationService;
@@ -20,9 +17,10 @@ public sealed class PlayerControlService : IDisposable
     private readonly CookieAuthService? _auth;
     private readonly TrackRegistry? _trackRegistry;
     private readonly PlaylistSyncService? _playlistSync;
+    private readonly PlaylistService? _playlistService;
 
-    private readonly HashSet<string> _activePlaylistTrackIds = new(StringComparer.Ordinal);
-    private int _expectedPlaylistTrackCount;
+    private readonly Lock _liveSyncLock = new();
+    private CancellationTokenSource? _liveSyncCts;
 
     public bool IsPlaying { get; private set; }
 
@@ -38,16 +36,26 @@ public sealed class PlayerControlService : IDisposable
 
     public int QueueCount { get; private set; }
 
+    /// <summary>
+    /// Snapshot of the current playback queue from <see cref="AudioEngine"/>.
+    /// </summary>
+    public IReadOnlyList<TrackInfo> Queue => _audio.Queue;
+
     public int CurrentVolume { get; private set; }
 
     /// <summary>
     /// ID of the playlist from which the current queue was launched.
-    /// Null = source is not a playlist (Home, Search, single track).
+    /// Null = source is not a playlist (Home, Search, single track, or cleared queue).
     /// </summary>
     public string? ActivePlaylistId { get; private set; }
 
     /// <summary>
-    /// Indicates whether the active playback queue matches the original composition of the launched playlist.
+    /// Display name of the active source playlist, or <see langword="null"/> if the source is manual.
+    /// </summary>
+    public string? ActivePlaylistName { get; private set; }
+
+    /// <summary>
+    /// Indicates whether the active playback queue matches the composition of the launched playlist.
     /// </summary>
     public bool IsQueuePure { get; private set; }
 
@@ -73,7 +81,7 @@ public sealed class PlayerControlService : IDisposable
     public event Action<int>? VolumeChanged;
 
     /// <summary>
-    /// Event raised when the purity of the active playlist queue changes.
+    /// Event raised when the active playlist source or queue purity changes.
     /// Arguments: ActivePlaylistId, IsQueuePure, IsPlayingPure.
     /// </summary>
     public event Action<string?, bool, bool>? PlaybackPurityChanged;
@@ -91,7 +99,8 @@ public sealed class PlayerControlService : IDisposable
         YoutubeProvider? youtube = null,
         CookieAuthService? auth = null,
         TrackRegistry? trackRegistry = null,
-        PlaylistSyncService? playlistSync = null)
+        PlaylistSyncService? playlistSync = null,
+        PlaylistService? playlistService = null)
     {
         _audio = audio;
         _library = library;
@@ -100,6 +109,7 @@ public sealed class PlayerControlService : IDisposable
         _auth = auth;
         _trackRegistry = trackRegistry;
         _playlistSync = playlistSync;
+        _playlistService = playlistService;
 
         if (_playlistSync != null)
         {
@@ -115,13 +125,23 @@ public sealed class PlayerControlService : IDisposable
         ShuffleEnabled = _audio.ShuffleEnabled;
         QueueCount = _audio.Queue.Count;
         CurrentVolume = (int)Math.Round(_audio.GetVolume());
+        SyncSourceAndPurityFromEngine(raiseEvent: false);
 
         _audio.OnPlaybackStateChanged += HandlePlaybackStateChanged;
         _audio.OnTrackChanged += HandleTrackChanged;
         _audio.OnQueueChanged += HandleQueueChanged;
+        _audio.OnQueueSourceChanged += HandleQueueSourceChanged;
         _audio.OnLoadingStateChanged += HandleLoadingStateChanged;
         _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
         _audio.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
+
+        if (_playlistService != null)
+        {
+            _playlistService.OnPlaylistChanged += HandlePlaylistChanged;
+            _playlistService.OnPlaylistRemoved += HandlePlaylistRemoved;
+        }
+
+        _library.OnTrackUpdated += HandleTrackUpdated;
 
         if (!_library.IsInitialized)
         {
@@ -205,6 +225,27 @@ public sealed class PlayerControlService : IDisposable
     public void RemoveFromQueue(TrackInfo track) =>
         _audio.RemoveFromQueue(track);
 
+    /// <summary>
+    /// Starts playback of a specific track via <see cref="AudioEngine"/>.
+    /// </summary>
+    public Task PlayTrackAsync(TrackInfo track) =>
+        _audio.PlayTrackAsync(track);
+
+    /// <summary>
+    /// Clears the playback queue (preserving the currently playing track if any).
+    /// </summary>
+    public void ClearQueue()
+    {
+        _audio.ClearQueue();
+        Log.Debug("[PlayerControl] Queue cleared");
+    }
+
+    /// <summary>
+    /// Moves a track within the playback queue from one index to another.
+    /// </summary>
+    public void MoveQueueItem(int from, int to) =>
+        _audio.MoveQueueItem(from, to);
+
     public void ShuffleQueue()
     {
         _audio.ShuffleQueue();
@@ -220,9 +261,6 @@ public sealed class PlayerControlService : IDisposable
         bool newState = !_audio.ShuffleEnabled;
         _audio.ShuffleEnabled = newState;
 
-        // When enabling shuffle — immediately shuffle the current queue.
-        // The user immediately sees the randomized order in QueueView.
-        // When disabling — order remains as is (already shuffled).
         if (newState)
             _audio.ShuffleQueue();
 
@@ -235,14 +273,9 @@ public sealed class PlayerControlService : IDisposable
 
     /// <summary>
     /// Directly sets the auto-shuffle state.
-    /// Used from PlaylistViewModel and other places that need
-    /// to explicitly set shuffle = false before starting a queue.
-    ///
-    /// <para><b>IMPORTANT:</b> All ShuffleEnabled changes must go through this method
-    /// or ToggleAutoShuffle() to keep the property synchronized.</para>
     /// </summary>
     /// <param name="enabled">New auto-shuffle state.</param>
-    public void SetShuffleEnabled(bool enabled)
+    private void SetShuffleEnabled(bool enabled)
     {
         if (_audio.ShuffleEnabled == enabled)
             return;
@@ -256,20 +289,24 @@ public sealed class PlayerControlService : IDisposable
     }
 
     /// <summary>
-    /// Starts playlist playback while fully registering its track composition to track queue purity in memory.
+    /// Starts playlist playback while registering its <see cref="QueueSource"/> atomically inside <see cref="AudioEngine"/>.
     /// Guarantees the presence of the start track in the playback queue even if it was deleted externally from the data source.
     /// </summary>
     /// <param name="playlistId">Playlist ID.</param>
     /// <param name="tracks">Full ordered list of playlist tracks.</param>
     /// <param name="startTrack">Track to start playback from (defaults to the first track).</param>
     /// <param name="enableShuffle">Whether to enable shuffle mode.</param>
+    /// <param name="playlistName">Optional playlist display name for the queue source header.</param>
     public async Task PlayPlaylistAsync(
         string playlistId,
         IReadOnlyList<TrackInfo> tracks,
         TrackInfo? startTrack = null,
-        bool? enableShuffle = null)
+        bool? enableShuffle = null,
+        string? playlistName = null)
     {
         if (tracks.Count == 0 && startTrack == null) return;
+
+        CancelPendingLiveSync();
 
         if (enableShuffle.HasValue)
         {
@@ -279,29 +316,20 @@ public sealed class PlayerControlService : IDisposable
         bool isShuffled = enableShuffle ?? ShuffleEnabled;
 
         IReadOnlyList<TrackInfo> effectiveTracks = tracks;
-        if (startTrack != null && !tracks.Any(t => string.Equals(t.Id, startTrack.Id, StringComparison.Ordinal)))
+        if (startTrack != null && AudioEngine.FindTrackIndexById(tracks, startTrack.Id) < 0)
         {
             var list = new List<TrackInfo>(tracks.Count + 1) { startTrack };
             list.AddRange(tracks);
             effectiveTracks = list;
         }
 
-        ActivePlaylistId = playlistId;
-        _activePlaylistTrackIds.Clear();
-        _expectedPlaylistTrackCount = effectiveTracks.Count;
-
-        for (int i = 0; i < effectiveTracks.Count; i++)
-        {
-            _activePlaylistTrackIds.Add(effectiveTracks[i].Id);
-        }
-
         var targetStartTrack = startTrack ??
                                (isShuffled
                                    ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)]
                                    : effectiveTracks[0]);
-        await _audio.StartQueueAsync(effectiveTracks, targetStartTrack).ConfigureAwait(false);
 
-        UpdatePurityState();
+        await _audio.StartQueueAsync(effectiveTracks, targetStartTrack, playlistId, playlistName)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -309,10 +337,6 @@ public sealed class PlayerControlService : IDisposable
     /// </summary>
     /// <param name="track">Track instance.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <remarks>
-    /// Resolves the canonical instance in the registry, ensuring flag consistency
-    /// across all UI views and collections.
-    /// </remarks>
     public async Task ToggleLikeAsync(TrackInfo track, CancellationToken ct = default)
     {
         var canonical = _trackRegistry?.RegisterOrUpdate(track, hasUserContext: true)
@@ -322,16 +346,13 @@ public sealed class PlayerControlService : IDisposable
         bool previousLikedState = canonical.IsLiked;
         bool targetLikedState = !previousLikedState;
 
-        canonical.SetLikedState(targetLikedState);
-        _trackRegistry?.UpdatePinStatus(canonical);
-
         bool syncToCloud = _auth?.IsAuthenticated == true && _library.Settings.LikeSyncMode != LikeSyncMode.LocalOnly;
 
         // Intent is pushed to Outbox synchronously before the first await: enqueue order matches click order
         if (syncToCloud && _playlistSync != null)
             _playlistSync.EnqueueLikeMutation(canonical.Id, targetLikedState, previousLikedState);
 
-        // Optimistic Local-First: commit state in SQLite and notify UI
+        // Optimistic Local-First: commit state in SQLite and notify UI (SetLikeStateAsync updates L1 and pin status)
         await _library.SetLikeStateAsync(canonical, targetLikedState, ct).ConfigureAwait(false);
 
         if (syncToCloud && _playlistSync == null && _youtube != null)
@@ -349,7 +370,6 @@ public sealed class PlayerControlService : IDisposable
 
     /// <summary>
     /// Changes volume by the specified step (positive or negative).
-    /// Used for tray mouse wheel and hotkeys.
     /// </summary>
     /// <param name="delta">Amount of volume change.</param>
     /// <returns>The new volume value.</returns>
@@ -366,7 +386,6 @@ public sealed class PlayerControlService : IDisposable
 
     /// <summary>
     /// Sets playback volume, applies it to the audio pipeline, and schedules background persistence.
-    /// Acts as the single entry point for volume modification across the application.
     /// </summary>
     /// <param name="volume">New volume value (0–MaxVolume).</param>
     public void SetVolume(int volume)
@@ -392,11 +411,166 @@ public sealed class PlayerControlService : IDisposable
 
     /// <summary>
     /// Requests Resume from MainWindow (via OnResumeRequested).
-    /// Called when the user interacts with the UI while in suspend mode.
     /// </summary>
     public void RequestResume()
     {
         ResumeRequested?.Invoke();
+    }
+
+    #endregion
+
+    #region Live Playlist Synchronization
+
+    private void HandlePlaylistRemoved(string playlistId)
+    {
+        if (_disposed || string.IsNullOrEmpty(playlistId)) return;
+
+        var source = _audio.QueueSource;
+        if (source.Kind == QueueSourceKind.Playlist
+            && string.Equals(source.Id, playlistId, StringComparison.Ordinal))
+        {
+            CancelPendingLiveSync();
+            _audio.DetachPlaylistSource(playlistId);
+        }
+    }
+
+    private void HandlePlaylistChanged(Playlist playlist)
+    {
+        if (_disposed || playlist == null) return;
+
+        var source = _audio.QueueSource;
+        if (source.Kind != QueueSourceKind.Playlist
+            || !string.Equals(source.Id, playlist.Id, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        ScheduleLivePlaylistSync(playlist.Id, source.Generation, playlist.Name);
+    }
+
+    private void HandleTrackUpdated(TrackInfo track)
+    {
+        if (_disposed) return;
+
+        var source = _audio.QueueSource;
+        if (!AudioEngine.ShouldSyncLikedOnTrackUpdated(source, track))
+            return;
+
+        ScheduleLivePlaylistSync(LibraryService.LikedPlaylistId, source.Generation, source.Name);
+    }
+
+    private void ScheduleLivePlaylistSync(string playlistId, int expectedGeneration, string? updatedName)
+    {
+        if (_playlistService == null) return;
+
+        CancellationTokenSource cts;
+        lock (_liveSyncLock)
+        {
+            if (_disposed) return;
+            _liveSyncCts?.Cancel();
+            _liveSyncCts?.Dispose();
+            cts = _liveSyncCts = new CancellationTokenSource();
+        }
+
+        _ = RunLivePlaylistSyncAsync(playlistId, expectedGeneration, updatedName, cts);
+    }
+
+    private void CancelPendingLiveSync()
+    {
+        lock (_liveSyncLock)
+        {
+            _liveSyncCts?.Cancel();
+            _liveSyncCts?.Dispose();
+            _liveSyncCts = null;
+        }
+    }
+
+    private async Task RunLivePlaylistSyncAsync(
+        string playlistId,
+        int expectedGeneration,
+        string? updatedName,
+        CancellationTokenSource cts)
+    {
+        var ct = cts.Token;
+        try
+        {
+            if (!await ct.DelayNoThrowAsync(LiveSyncDebounceMs, continueOnCapturedContext: false).ConfigureAwait(false))
+                return;
+
+            var source = _audio.QueueSource;
+            if (source.Kind != QueueSourceKind.Playlist
+                || source.Generation != expectedGeneration
+                || !string.Equals(source.Id, playlistId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var freshTrackIds = await _playlistService!
+                .GetPlaylistTrackIdsAsync(playlistId, ct)
+                .ConfigureAwait(false);
+
+            if (ct.IsCancellationRequested) return;
+
+            List<string>? addedIds = null;
+            for (int i = 0; i < freshTrackIds.Count; i++)
+            {
+                string id = freshTrackIds[i];
+                if (!string.IsNullOrEmpty(id) && !source.ContainsTrack(id))
+                {
+                    addedIds ??= [];
+                    addedIds.Add(id);
+                }
+            }
+
+            IReadOnlyList<TrackInfo> addedTracks = [];
+            if (addedIds != null && addedIds.Count > 0)
+            {
+                if (_trackRegistry != null)
+                {
+                    addedTracks = await _trackRegistry
+                        .PreloadAndReturnAsync(addedIds, ct)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    var loaded = new List<TrackInfo>(addedIds.Count);
+                    for (int i = 0; i < addedIds.Count; i++)
+                    {
+                        var t = await _library.GetTrackAsync(addedIds[i], ct).ConfigureAwait(false);
+                        if (t != null)
+                            loaded.Add(t);
+                    }
+                    addedTracks = loaded;
+                }
+            }
+
+            if (ct.IsCancellationRequested) return;
+
+            _audio.ApplyPlaylistDelta(
+                playlistId,
+                expectedGeneration,
+                freshTrackIds,
+                addedTracks,
+                updatedName);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[PlayerControl] Live playlist sync failed for '{playlistId}': {ex.Message}");
+        }
+        finally
+        {
+            lock (_liveSyncLock)
+            {
+                if (ReferenceEquals(_liveSyncCts, cts))
+                {
+                    cts.Dispose();
+                    _liveSyncCts = null;
+                }
+            }
+        }
     }
 
     #endregion
@@ -410,7 +584,7 @@ public sealed class PlayerControlService : IDisposable
         IsPlayingChanged?.Invoke(isPlaying);
         IsPausedChanged?.Invoke(isPaused);
 
-        UpdatePurityState();
+        SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
 
     /// <summary>
@@ -427,18 +601,7 @@ public sealed class PlayerControlService : IDisposable
             return;
 
         CurrentTrackChanged?.Invoke(track);
-
-        // Reset source only on actual stop (track → null).
-        // During track transitions (prev != null → new != null) source is retained —
-        // this is expected: user is listening to the same playlist.
-        if (track == null && ActivePlaylistId != null)
-        {
-            ActivePlaylistId = null;
-            _activePlaylistTrackIds.Clear();
-            _expectedPlaylistTrackCount = 0;
-            UpdatePurityState();
-            Log.Debug("[PlayerControl] ActivePlaylistId cleared (track → null)");
-        }
+        SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
 
     private void HandleQueueChanged()
@@ -446,40 +609,46 @@ public sealed class PlayerControlService : IDisposable
         QueueCount = _audio.Queue.Count;
         QueueCountChanged?.Invoke(QueueCount);
 
-        UpdatePurityState();
+        SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
 
-    private void UpdatePurityState()
+    private void HandleQueueSourceChanged()
     {
-        bool isPure = false;
+        SyncSourceAndPurityFromEngine(raiseEvent: true);
+    }
 
-        if (!string.IsNullOrEmpty(ActivePlaylistId) && _expectedPlaylistTrackCount > 0)
-        {
-            var queue = _audio.Queue;
-            if (queue.Count == _expectedPlaylistTrackCount)
-            {
-                isPure = true;
-                for (int i = 0; i < queue.Count; i++)
-                {
-                    if (!_activePlaylistTrackIds.Contains(queue[i].Id))
-                    {
-                        isPure = false;
-                        break;
-                    }
-                }
-            }
-        }
-
-        bool purityChanged = IsQueuePure != isPure;
+    private void SyncSourceAndPurityFromEngine(bool raiseEvent)
+    {
+        var source = _audio.QueueSource;
+        string? newPlaylistId = source.Kind == QueueSourceKind.Playlist ? source.Id : null;
+        string? newPlaylistName = source.Kind == QueueSourceKind.Playlist ? source.Name : null;
+        bool isPure = _audio.IsQueuePure;
         bool playingPure = isPure && IsPlaying;
+
+        bool sourceChanged = !string.Equals(ActivePlaylistId, newPlaylistId, StringComparison.Ordinal)
+                             || !string.Equals(ActivePlaylistName, newPlaylistName, StringComparison.Ordinal);
+        bool purityChanged = IsQueuePure != isPure;
         bool playingPureChanged = IsPlayingPure != playingPure;
 
+        ActivePlaylistId = newPlaylistId;
+        ActivePlaylistName = newPlaylistName;
         IsQueuePure = isPure;
         IsPlayingPure = playingPure;
 
-        if (purityChanged || playingPureChanged)
+        if (raiseEvent && (sourceChanged || purityChanged || playingPureChanged))
         {
-            PlaybackPurityChanged?.Invoke(ActivePlaylistId, IsQueuePure, IsPlayingPure);
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                PlaybackPurityChanged?.Invoke(ActivePlaylistId, IsQueuePure, IsPlayingPure);
+            }
+            else
+            {
+                string? capturedId = ActivePlaylistId;
+                bool capturedPure = IsQueuePure;
+                bool capturedPlayingPure = IsPlayingPure;
+                Dispatcher.UIThread.Post(() =>
+                    PlaybackPurityChanged?.Invoke(capturedId, capturedPure, capturedPlayingPure));
+            }
         }
     }
 
@@ -526,10 +695,6 @@ public sealed class PlayerControlService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Publishes a complex n-token deciphering notification
-    /// either as a toast or strictly in the notification center.
-    /// </summary>
     private static async Task PublishNTokenWarningAsync(
         NotificationService notificationService,
         AudioEngine.NTokenWarningInfo warning,
@@ -599,7 +764,7 @@ public sealed class PlayerControlService : IDisposable
             CurrentTrack = actualTrack;
         }
 
-        UpdatePurityState();
+        SyncSourceAndPurityFromEngine(raiseEvent: true);
         ForceSyncTriggered?.Invoke();
 
         Log.Debug("[PlayerControl] Forced sync completed (soft, no track reset)");
@@ -614,10 +779,21 @@ public sealed class PlayerControlService : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        CancelPendingLiveSync();
+
         _library.OnInitialized -= HandleLibraryInitialized;
+        _library.OnTrackUpdated -= HandleTrackUpdated;
+
+        if (_playlistService != null)
+        {
+            _playlistService.OnPlaylistChanged -= HandlePlaylistChanged;
+            _playlistService.OnPlaylistRemoved -= HandlePlaylistRemoved;
+        }
+
         _audio.OnPlaybackStateChanged -= HandlePlaybackStateChanged;
         _audio.OnTrackChanged -= HandleTrackChanged;
         _audio.OnQueueChanged -= HandleQueueChanged;
+        _audio.OnQueueSourceChanged -= HandleQueueSourceChanged;
         _audio.OnLoadingStateChanged -= HandleLoadingStateChanged;
         _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
         _audio.OnNTokenDecryptionWarning -= HandleNTokenDecryptionWarning;
@@ -627,4 +803,3 @@ public sealed class PlayerControlService : IDisposable
 
     #endregion
 }
-

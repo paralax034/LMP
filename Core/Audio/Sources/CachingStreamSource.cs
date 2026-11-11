@@ -31,7 +31,7 @@ namespace LMP.Core.Audio.Sources;
 ///   <item><c>CachingStreamSource.ReadStream.cs</c> — Stream wrapper for parsers</item>
 /// </list>
 /// </summary>
-public sealed partial class CachingStreamSource : IAudioSource
+internal sealed partial class CachingStreamSource : IAudioSource
 {
     #region Constants
 

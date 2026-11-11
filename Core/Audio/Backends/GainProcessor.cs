@@ -18,7 +18,7 @@ namespace LMP.Core.Audio.Backends;
 /// triggering the Windows mixer system limiter (<c>audiodg.exe</c>) near 100% volume.
 /// </para>
 /// </remarks>
-public sealed class GainProcessor
+internal sealed class GainProcessor
 {
     #region Constants
 

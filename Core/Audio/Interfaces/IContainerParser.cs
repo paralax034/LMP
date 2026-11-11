@@ -3,7 +3,7 @@ namespace LMP.Core.Audio.Interfaces;
 /// <summary>
 /// Container format parser (WebM, MP4, etc.).
 /// </summary>
-public interface IContainerParser : IAsyncDisposable, IDisposable
+internal interface IContainerParser : IAsyncDisposable, IDisposable
 {
     /// <summary>Duration in milliseconds.</summary>
     long DurationMs { get; }

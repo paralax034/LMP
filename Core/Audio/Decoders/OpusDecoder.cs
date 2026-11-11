@@ -12,7 +12,7 @@ namespace LMP.Core.Audio.Decoders;
 /// featuring automatic fallback to managed Concentus when the native library is missing.
 /// Optimized with SIMD short→float conversion and guaranteed unmanaged memory release.
 /// </summary>
-public sealed partial class OpusDecoder : IAudioDecoder
+internal sealed partial class OpusDecoder : IAudioDecoder
 {
     private const int MaxFrameDurationMs = 120;
     private const int DefaultFrameDurationMs = 20;

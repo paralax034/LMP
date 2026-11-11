@@ -9,7 +9,7 @@ namespace LMP.Core.Audio.Decoders;
 /// AAC decoder based on SharpJaad with HE-AAC (SBR) support.
 /// Optimized with SIMD conversion and buffer pooling.
 /// </summary>
-public sealed class AacDecoder : IAudioDecoder
+internal sealed class AacDecoder : IAudioDecoder
 {
     private const int DefaultSampleRate = 44100;
     private const int DefaultChannels = 2;
@@ -171,24 +171,14 @@ public sealed class AacDecoder : IAudioDecoder
         int samplingFrequencyIndex = ((asc[0] & 0x07) << 1) | ((asc[1] >> 7) & 0x01);
         int channelConfig = (asc[1] >> 3) & 0x0F;
 
-        int baseSampleRate = GetSampleRateFromIndex(samplingFrequencyIndex);
+        int baseSampleRate = AudioConstants.GetAacSampleRate(samplingFrequencyIndex);
 
         bool isHeAac = audioObjectType == 5 || audioObjectType == 29;
         int outputSampleRate = baseSampleRate;
         if (isHeAac && baseSampleRate > 0)
             outputSampleRate = baseSampleRate * 2;
 
-        int channels = channelConfig switch
-        {
-            1 => 1,
-            2 => 2,
-            3 => 3,
-            4 => 4,
-            5 => 5,
-            6 => 6,
-            7 => 8,
-            _ => 2
-        };
+        int channels = AudioConstants.GetAacChannels(channelConfig);
 
         return new AscInfo
         {
@@ -198,13 +188,6 @@ public sealed class AacDecoder : IAudioDecoder
             Channels = channels,
             IsHeAac = isHeAac
         };
-    }
-
-    private static int GetSampleRateFromIndex(int index)
-    {
-        int[] rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
-                       16000, 12000, 11025, 8000, 7350, 0, 0, 0];
-        return index >= 0 && index < rates.Length ? rates[index] : 44100;
     }
 
     private static int GetSampleFrequencyIndex(int sampleRate)
@@ -237,7 +220,7 @@ public sealed class AacDecoder : IAudioDecoder
         public bool IsHeAac { get; init; }
     }
 
-    public void Initialize(Profile profile, SampleFrequency sampleFrequency, int channels)
+    private void Initialize(Profile profile, SampleFrequency sampleFrequency, int channels)
     {
         if (_initialized) return;
 
@@ -261,11 +244,6 @@ public sealed class AacDecoder : IAudioDecoder
         {
             throw new AudioDecoderException($"Failed to initialize AAC decoder: {ex.Message}");
         }
-    }
-
-    public void Initialize(Profile profile, int sampleRate, int channels)
-    {
-        Initialize(profile, GetSampleFrequency(sampleRate), channels);
     }
 
     private void EnsureInitialized()

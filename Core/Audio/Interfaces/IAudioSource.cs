@@ -4,7 +4,7 @@ namespace LMP.Core.Audio.Interfaces;
 /// Audio data source (network stream, file, etc.).
 /// Provides compressed audio frames for decoding.
 /// </summary>
-public interface IAudioSource : IAsyncDisposable, IDisposable
+internal interface IAudioSource : IAsyncDisposable, IDisposable
 {
     /// <summary>
     /// Initializes the source and prepares it for streaming.
@@ -71,7 +71,7 @@ public interface IAudioSource : IAsyncDisposable, IDisposable
 /// <summary>
 /// Audio frame with metadata
 /// </summary>
-public readonly struct AudioFrame
+internal readonly struct AudioFrame
 {
     public required ReadOnlyMemory<byte> Data { get; init; }
     public required long TimestampMs { get; init; }

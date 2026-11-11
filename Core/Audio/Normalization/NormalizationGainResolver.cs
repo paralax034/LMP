@@ -5,7 +5,7 @@ namespace LMP.Core.Audio.Normalization;
 /// <para>Stateless, pure function. Gain is calculated exclusively from <see cref="TrackInfo.IntegratedLufs"/>
 /// and the current <see cref="NormalizationConfig"/>.</para>
 /// </summary>
-public static class NormalizationGainResolver
+internal static class NormalizationGainResolver
 {
     /// <summary>
     /// Resolves linear normalization gain according to the configuration.

@@ -62,7 +62,7 @@ public static class AudioVisualizerBuffer
     /// Returns true if levels were read by anyone within the last <see cref="ReaderLeaseMs"/> ms.
     /// Intended for the audio stream and does not extend the lease itself.
     /// </summary>
-    public static bool HasActiveReaders
+    internal static bool HasActiveReaders
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
@@ -107,7 +107,7 @@ public static class AudioVisualizerBuffer
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Update10Band(
+    internal static void Update10Band(
         ReadOnlySpan<float> bands10,
         float low,
         float mid,

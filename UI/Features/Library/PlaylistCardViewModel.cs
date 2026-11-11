@@ -425,6 +425,8 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
             Playlist.YoutubeId = playlist.YoutubeId;
             Playlist.IsCloudUnavailable = playlist.IsCloudUnavailable;
             ApplyCloudState(playlist);
+            OnPropertyChanged(nameof(YoutubeUrl));
+            OnPropertyChanged(nameof(CanCopyLink));
         }
 
         DeleteCommand.NotifyCanExecuteChanged();

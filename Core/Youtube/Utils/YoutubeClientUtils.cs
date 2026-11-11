@@ -7,7 +7,7 @@ namespace LMP.Core.Youtube.Utils;
 /// <summary>
 /// Centralized string identifiers for InnerTube API clients.
 /// </summary>
-public static class YoutubeClientNames
+internal static class YoutubeClientNames
 {
 	public const string AndroidVr = "ANDROID_VR";
 	public const string AndroidMusic = "ANDROID_MUSIC";
@@ -18,7 +18,7 @@ public static class YoutubeClientNames
 	public const string AndroidTestSuite = "ANDROID_TESTSUITE";
 }
 
-public static class YoutubeClientUtils
+internal static class YoutubeClientUtils
 {
 	public static YoutubeClientProfile CurrentProfile { get; set; } = YoutubeClientProfile.AndroidVR;
 

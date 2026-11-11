@@ -15,7 +15,7 @@ namespace LMP.Core.Audio.Helpers;
 /// <remarks>
 /// <para>Complies with RFC 8794 (EBML) and RFC 9559 (Matroska) specifications.</para>
 /// </remarks>
-public sealed class WebMParser : IDisposable
+internal sealed class WebMParser : IDisposable
 {
     //
     // EBML & Matroska Element IDs

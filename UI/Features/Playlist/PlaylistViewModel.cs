@@ -87,7 +87,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     {
         _items.IsPlaylistContext = value;
         OnPropertyChanged(nameof(CanReorderItems));
-        MergePlaylistCommand.NotifyCanExecuteChanged();
         EditPlaylistCommand.NotifyCanExecuteChanged();
     }
 
@@ -155,16 +154,11 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     #region Commands
 
     public IAsyncRelayCommand PlayAllCommand { get; }
-    public IAsyncRelayCommand DeletePlaylistCommand { get; }
-    public IAsyncRelayCommand UploadToCloudCommand { get; }
-    public IAsyncRelayCommand UnlinkFromCloudCommand { get; }
     public IAsyncRelayCommand ShufflePlayCommand { get; }
     public IAsyncRelayCommand DownloadAllCommand { get; }
-    public IAsyncRelayCommand MergePlaylistCommand { get; }
     public IAsyncRelayCommand RefreshPlaylistCommand { get; }
     public IRelayCommand AddToQueueCommand { get; }
     public IAsyncRelayCommand EditPlaylistCommand { get; }
-    public IAsyncRelayCommand CopyPlaylistLinkCommand { get; }
     public IRelayCommand OpenAuthorCommand { get; }
 
     #endregion
@@ -201,39 +195,15 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         PlayAllCommand = new AsyncRelayCommand(PlayAllAsync, () => TrackCount > 0);
 
-        DeletePlaylistCommand = new AsyncRelayCommand(async () =>
-        {
-            if (await _dialog.ConfirmAsync(
-                SL["Dialog_Confirm_Title"],
-                string.Format(SL["Playlist_DeleteConfirm"], PlaylistName)))
-            {
-                await _playlistService.DeletePlaylistAsync(_currentPlaylistId, deleteFromCloud: true);
-            }
-        });
-
-        UploadToCloudCommand = new AsyncRelayCommand(async () =>
-        {
-            await _playlistService.UploadPlaylistToAccountAsync(_currentPlaylistId);
-            await LoadPlaylistAsync(_currentPlaylistId);
-        });
-
-        UnlinkFromCloudCommand = new AsyncRelayCommand(async () =>
-        {
-            await _playlistService.ConvertToLocalAsync(_currentPlaylistId);
-            await LoadPlaylistAsync(_currentPlaylistId);
-        });
-
         RefreshPlaylistCommand = new AsyncRelayCommand(
             RefreshPlaylistAsync,
             () => CanRefreshFromCloud && !IsSyncing);
 
         ShufflePlayCommand = new AsyncRelayCommand(ShufflePlayAsync, () => TrackCount > 0);
         DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TrackCount > 0);
-        MergePlaylistCommand = new AsyncRelayCommand(MergePlaylistAsync, () => CanEdit);
         AddToQueueCommand = new RelayCommand(EnqueueUniquePlaylistTracks, () => TrackCount > 0);
 
         EditPlaylistCommand = new AsyncRelayCommand(EditPlaylistAsync, () => CanEdit);
-        CopyPlaylistLinkCommand = new AsyncRelayCommand(CopyPlaylistLinkAsync, () => HasYoutubeLink);
 
         OpenAuthorCommand = new RelayCommand(() =>
         {
@@ -273,7 +243,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     private void OnLibraryDataChanged()
     {
-        if (_isSuspended) return;
+        if (_isSuspended || !IsLikedPlaylist) return;
 
         if (!Dispatcher.UIThread.CheckAccess())
         {
@@ -291,9 +261,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             (_, _) =>
             {
                 _dataChangedDebounceTimer?.Stop();
-                if (_isSuspended) return;
-
-                if (string.IsNullOrEmpty(_currentPlaylistId)) return;
+                if (_isSuspended || !IsLikedPlaylist || string.IsNullOrEmpty(_currentPlaylistId)) return;
 
                 _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
             });
@@ -461,7 +429,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         OnPropertyChanged(nameof(PlaylistYoutubeUrl));
         HasYoutubeLink = PlaylistYoutubeUrl is not null;
-        CopyPlaylistLinkCommand.NotifyCanExecuteChanged();
 
         TrackCount = payload.TrackIds.Count;
         OnPropertyChanged(nameof(FormattedTrackCount));
@@ -521,10 +488,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         try
         {
-            // Suppress recursive LoadPlaylistAsync calls triggered by saving the computed header color
-            _lastLocalMutationTime = DateTime.Now;
             _currentPlaylist.ComputedColor = colorHex;
-            await _playlistService.AddOrUpdatePlaylistAsync(_currentPlaylist);
+            await _playlistService.UpdateComputedColorAsync(_currentPlaylist.Id, colorHex);
         }
         catch (Exception ex)
         {
@@ -553,7 +518,12 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         if (allTracks.Count == 0) return;
 
         IsShuffleActive = false;
-        await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, allTracks[0], enableShuffle: false);
+        await PlayerControl.PlayPlaylistAsync(
+            _currentPlaylistId,
+            allTracks,
+            allTracks[0],
+            enableShuffle: false,
+            playlistName: PlaylistName);
     }
 
     private async Task ShufflePlayAsync()
@@ -562,7 +532,11 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         var allTracks = GetPlaylistTracksSnapshot();
         if (allTracks.Count == 0) return;
 
-        await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, enableShuffle: true);
+        await PlayerControl.PlayPlaylistAsync(
+            _currentPlaylistId,
+            allTracks,
+            enableShuffle: true,
+            playlistName: PlaylistName);
 
         IsShuffleActive = true;
         _shuffleAnimationTimer?.Stop();
@@ -589,7 +563,12 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 allTracks = [track, .. allTracks];
             }
 
-            await PlayerControl.PlayPlaylistAsync(_currentPlaylistId, allTracks, track, enableShuffle: null);
+            await PlayerControl.PlayPlaylistAsync(
+                _currentPlaylistId,
+                allTracks,
+                track,
+                enableShuffle: null,
+                playlistName: PlaylistName);
             _ = LibService.AddToRecentlyPlayedAsync(track);
         }
         catch (Exception ex)
@@ -598,12 +577,16 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         }
     }
 
-    private async Task DownloadAllAsync()
+    private Task DownloadAllAsync()
     {
         IsDownloadingActive = true;
         var allTracks = GetPlaylistTracksSnapshot();
-        foreach (var track in allTracks.Where(static t => !t.IsDownloaded))
-            Downloads.StartDownload(track);
+        for (int i = 0; i < allTracks.Count; i++)
+        {
+            var track = allTracks[i];
+            if (!track.IsDownloaded)
+                Downloads.StartDownload(track);
+        }
 
         _downloadAnimationTimer?.Stop();
         _downloadAnimationTimer = new DispatcherTimer(
@@ -615,6 +598,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 _downloadAnimationTimer?.Stop();
             });
         _downloadAnimationTimer.Start();
+        return Task.CompletedTask;
     }
 
     private void EnqueueUniquePlaylistTracks()
@@ -777,44 +761,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         {
             _lastLocalMutationTime = DateTime.Now;
             await LoadPlaylistAsync(_currentPlaylistId);
-        }
-    }
-
-    private async Task CopyPlaylistLinkAsync()
-    {
-        if (_currentPlaylist?.YoutubeId is not { Length: > 0 } ytId)
-        {
-            CopyHintService.Instance.Show(
-                SL["Playlist_CopyLink_NotLinked"],
-                CopyHintKind.Warning);
-            return;
-        }
-
-        await Clipboard.SetTextAsync($"https://www.youtube.com/playlist?list={ytId}");
-        CopyHintService.Instance.Show(SL["Playlist_LinkCopied"], CopyHintKind.Success);
-    }
-
-    private async Task MergePlaylistAsync()
-    {
-        var otherPlaylists = (await _playlistService.GetAllPlaylistsAsync())
-            .Where(p => p.Id != _currentPlaylistId && p.IsLocal)
-            .ToList();
-
-        if (otherPlaylists.Count == 0)
-        {
-            await _dialog.ShowInfoAsync(
-                SL["Dialog_Merge_NoTarget_Title"],
-                SL["Dialog_Merge_NoTarget_Msg"]);
-            return;
-        }
-
-        var targetId = otherPlaylists.First().Id;
-        if (!string.IsNullOrEmpty(targetId))
-        {
-            bool ok = await _playlistService.MergePlaylistsAsync(_currentPlaylistId, targetId);
-            await _dialog.ShowInfoAsync(
-                ok ? SL["Dialog_Success"] : SL["Dialog_Error_Title"],
-                ok ? SL["Merge_Success_Msg"] : SL["Merge_Error_Msg"]);
         }
     }
 

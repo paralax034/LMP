@@ -310,7 +310,7 @@ public sealed partial class AudioEngine
     /// Applies the current equalizer configuration (taking into account ForceGlobal toggle and track preset) to the active pipeline
     /// and notifies all synchronized UI views.
     /// </summary>
-    public void UpdateEqualizerSettings()
+    private void UpdateEqualizerSettings()
     {
         var pipeline = _player.GetActivePipeline();
         ApplyEqualizerToPipelineCore(pipeline, CurrentTrack?.Id, snapImmediately: false);
@@ -813,8 +813,6 @@ public sealed partial class AudioEngine
 
     private string? _lastLoggedEqPresetId;
     private bool _lastLoggedEqEnabled;
-    private bool _lastLoggedEqForceGlobal;
-
     private void ApplyEqualizerToPipelineCore(AudioPipeline? pipeline, string? trackId, bool snapImmediately)
     {
         var audioSettings = _library.Settings.Audio;
@@ -847,22 +845,19 @@ public sealed partial class AudioEngine
             pipeline?.Equalizer.SnapToTarget();
             _lastLoggedEqPresetId = effectivePresetId;
             _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
-            _lastLoggedEqForceGlobal = audioSettings.ForceGlobalEqualizer;
             Log.Debug(
                 $"[AudioEngine] Equalizer initial config for '{trackId}': enabled={audioSettings.EqualizerEnabled}, " +
                 $"preset='{effectivePresetId}', preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB");
         }
         else if (_lastLoggedEqEnabled != audioSettings.EqualizerEnabled
-              || _lastLoggedEqForceGlobal != audioSettings.ForceGlobalEqualizer
               || !string.Equals(_lastLoggedEqPresetId, effectivePresetId, StringComparison.Ordinal))
         {
             _lastLoggedEqPresetId = effectivePresetId;
             _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
-            _lastLoggedEqForceGlobal = audioSettings.ForceGlobalEqualizer;
             Log.Info(
                 $"[AudioEngine] Equalizer updated: enabled={audioSettings.EqualizerEnabled}, " +
-                $"preset='{effectivePresetId}' (forceGlobal={audioSettings.ForceGlobalEqualizer}, " +
-                $"trackPreset='{track?.EqualizerPresetId ?? "none"}', preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB)");
+                $"preset='{effectivePresetId}' (trackPreset='{track?.EqualizerPresetId ?? "none"}', " +
+                $"preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB)");
         }
     }
 

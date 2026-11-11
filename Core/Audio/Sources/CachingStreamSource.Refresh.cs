@@ -6,7 +6,7 @@ using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Audio.Sources;
 
-public sealed partial class CachingStreamSource
+internal sealed partial class CachingStreamSource
 {
     // --- Refresh Outcome & Decision Table ---
 

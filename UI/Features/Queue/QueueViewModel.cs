@@ -16,7 +16,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     [ObservableProperty] public partial string FormattedTotalDuration { get; private set; } = string.Empty;
 
     public IVirtualTrackList QueueItems => Items;
-    public IVirtualTrackList QueueTracks => Items;
 
     public bool IsEmpty => TotalCount == 0;
     public override bool CanReorderItems => CanReorder && TotalCount > 1;
@@ -50,19 +49,18 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TotalCount > 0);
         SaveQueueToPlaylistCommand = new AsyncRelayCommand(SaveQueueToPlaylistAsync, () => TotalCount > 0);
 
-        Audio.OnQueueItemMoved += OnAudioQueueItemMoved;
         Audio.OnQueueChanged += OnAudioQueueChanged;
 
         SyncWithAudioQueue();
         IsLoading = false;
     }
 
-    private void AudioClearQueue() => Audio.ClearQueue();
-    private void AudioShuffleQueue() => Audio.ShuffleQueue();
+    private void AudioClearQueue() => PlayerControl.ClearQueue();
+    private void AudioShuffleQueue() => PlayerControl.ShuffleQueue();
 
     protected override void OnPlay(TrackInfo track)
     {
-        _ = Audio.PlayTrackAsync(track);
+        _ = PlayerControl.PlayTrackAsync(track);
     }
 
     protected override Task SaveMoveAsync(int fromVisualIndex, int toVisualIndex, CancellationToken ct)
@@ -70,7 +68,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         Interlocked.Increment(ref _selfMoveCounter);
         try
         {
-            Audio.MoveQueueItem(fromVisualIndex, toVisualIndex);
+            PlayerControl.MoveQueueItem(fromVisualIndex, toVisualIndex);
         }
         finally
         {
@@ -78,12 +76,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         }
 
         return Task.CompletedTask;
-    }
-
-    private void OnAudioQueueItemMoved(int from, int to)
-    {
-        if (Volatile.Read(ref _selfMoveCounter) > 0) return;
-        Dispatcher.UIThread.Post(SyncWithAudioQueue);
     }
 
     private void OnAudioQueueChanged()
@@ -94,7 +86,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
 
     private void SyncWithAudioQueue()
     {
-        var rawQueue = Audio.Queue;
+        var rawQueue = PlayerControl.Queue;
 
         TimeSpan duration = TimeSpan.Zero;
         for (int i = 0; i < rawQueue.Count; i++)
@@ -140,7 +132,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
 
     private Task DownloadAllAsync()
     {
-        var rawQueue = Audio.Queue;
+        var rawQueue = PlayerControl.Queue;
         for (int i = 0; i < rawQueue.Count; i++)
         {
             var track = rawQueue[i];
@@ -160,9 +152,14 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         if (result == null || string.IsNullOrWhiteSpace(result.Name)) return;
 
         var trimmedName = result.Name.Trim();
-        var playlist = await _playlistService.CreatePlaylistAsync(trimmedName);
+        var playlist = await _playlistService.CreatePlaylistAsync(
+            name: trimmedName,
+            description: result.Description,
+            thumbnailUrl: result.ThumbnailUrl,
+            customColor: result.CustomColor,
+            computedColor: result.ComputedColor);
 
-        var tracks = Audio.Queue.ToList();
+        var tracks = PlayerControl.Queue;
         if (tracks.Count > 0)
         {
             await _playlistService.AddTracksToPlaylistAsync(playlist.Id, tracks);
@@ -178,7 +175,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     {
         if (disposing)
         {
-            Audio.OnQueueItemMoved -= OnAudioQueueItemMoved;
             Audio.OnQueueChanged -= OnAudioQueueChanged;
         }
 

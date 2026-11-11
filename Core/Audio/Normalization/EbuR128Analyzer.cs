@@ -22,7 +22,7 @@ namespace LMP.Core.Audio.Normalization;
 ///   <item><see cref="_pendingNormReset"/> — volatile int, lock-free sync</item>
 /// </list>
 /// </summary>
-public sealed class EbuR128Analyzer
+internal sealed class EbuR128Analyzer
 {
     #region Constants (EBU R128 / ITU-R BS.1770-4)
 

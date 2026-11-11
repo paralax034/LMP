@@ -8,7 +8,6 @@ namespace LMP.Core.Audio.Http;
 internal static class CdnConnectionPreWarmer
 {
     private const string GoogleVideoCdnSuffix = ".googlevideo.com";
-    private const string GenerateEndpoint = "/generate_204";
     private const int MaxTrackedHosts = 4;
     private const int TunnelDeadTimeoutThreshold = 3;
 
@@ -156,7 +155,7 @@ internal static class CdnConnectionPreWarmer
 
             using var request = new HttpRequestMessage(
                 HttpMethod.Get,
-                $"https://{host}{GenerateEndpoint}");
+                $"https://{host}/generate_204");
 
             SharedHttpClient.ApplyUserAgentFromUrl(request, $"https://{host}/");
 

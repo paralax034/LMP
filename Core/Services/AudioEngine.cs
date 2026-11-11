@@ -33,7 +33,12 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         bool IsRetry = false) : IEngineCommand;
 
     /// <summary>Start the queue from the specified track.</summary>
-    private sealed record StartQueueCommand(IEnumerable<TrackInfo> Tracks, TrackInfo StartTrack, int Session) : IEngineCommand;
+    private sealed record StartQueueCommand(
+        IEnumerable<TrackInfo> Tracks,
+        TrackInfo StartTrack,
+        int Session,
+        string? PlaylistId = null,
+        string? PlaylistName = null) : IEngineCommand;
 
     /// <summary>Play the current queue index; when StartPlaying = false, the track is loaded in a paused state.</summary>
     private sealed record PlayCurrentIndexCommand(int Session, bool StartPlaying = true) : IEngineCommand;
@@ -252,6 +257,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     public event Action<TimeSpan>? OnSeekCompleted;
     public event Action<bool, bool>? OnPlaybackStateChanged;
     public event Action? OnQueueChanged;
+    public event Action? OnQueueSourceChanged;
     public event Action<bool>? OnLoadingStateChanged;
     public event Action<int>? OnMaxVolumeChanged;
     public event Action? OnEqualizerChanged;
@@ -262,6 +268,9 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     public event Action? OnDeviceRestored;
     public event Action<Exception>? OnErrorOccurred;
     public event Action<NTokenWarningInfo>? OnNTokenDecryptionWarning;
+
+    private readonly Action _raiseQueueChangedOnUIDelegate;
+    private readonly Action _raiseQueueSourceChangedOnUIDelegate;
 
     private readonly Action<TimeSpan> _positionChangedHandler;
     private readonly Action _raisePositionChangedOnUIDelegate;
@@ -301,6 +310,13 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         _trackRegistry = trackRegistry;
 
         StreamInfo = AudioStreamInfo.Empty;
+
+        _raiseQueueChangedOnUIDelegate = () =>
+        {
+            OnQueueChanged?.Invoke();
+            OnQueueSourceChanged?.Invoke();
+        };
+        _raiseQueueSourceChangedOnUIDelegate = () => OnQueueSourceChanged?.Invoke();
 
         _positionChangedHandler = HandlePositionChangedInternal;
         _raisePositionChangedOnUIDelegate = () => OnPositionChanged?.Invoke(TimeSpan.FromTicks(Volatile.Read(ref _currentPositionTicks)));
@@ -470,11 +486,15 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         return Task.CompletedTask;
     }
 
-    public Task StartQueueAsync(IEnumerable<TrackInfo> tracks, TrackInfo startTrack)
+    public Task StartQueueAsync(
+        IEnumerable<TrackInfo> tracks,
+        TrackInfo startTrack,
+        string? playlistId = null,
+        string? playlistName = null)
     {
         ResetSealedFailedTrack();
         int session = BeginNewSession();
-        EnqueueCommand(new StartQueueCommand(tracks, startTrack, session));
+        EnqueueCommand(new StartQueueCommand(tracks, startTrack, session, playlistId, playlistName));
         return Task.CompletedTask;
     }
 
@@ -507,12 +527,25 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         BeginNewSession();
         _player.Stop();
 
+        bool sourceChanged = false;
+        lock (_queueLock)
+        {
+            if (_queueSource.Kind != QueueSourceKind.Manual || _isQueuePure)
+            {
+                _queueSource = QueueSource.CreateManual(++_queueSourceGeneration);
+                _isQueuePure = false;
+                sourceChanged = true;
+            }
+        }
+
         CurrentTrack = null;
         StreamInfo = AudioStreamInfo.Empty;
 
         RaiseOnUI(() =>
         {
             OnTrackChanged?.Invoke(null);
+            if (sourceChanged)
+                OnQueueSourceChanged?.Invoke();
         });
     }
 

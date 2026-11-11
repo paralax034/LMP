@@ -45,7 +45,7 @@ public readonly record struct BiquadCoefficients(double B0, double B1, double B2
 /// Single-precision biquad IIR filter coefficients for the equalizer hot path.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct BiquadCoefficientsF
+internal struct BiquadCoefficientsF
 {
     public float B0;
     public float B1;
@@ -72,7 +72,7 @@ public struct BiquadCoefficientsF
 /// Double-precision biquad IIR filter state (Direct Form II Transposed).
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct BiquadState
+internal struct BiquadState
 {
     public double Z1;
     public double Z2;
@@ -221,7 +221,7 @@ public static class BiquadFilterMath
 /// <summary>
 /// K-weighting filter per ITU-R BS.1770-4 standard.
 /// </summary>
-public sealed class KWeightingFilter
+internal sealed class KWeightingFilter
 {
     private const double ShelfGainDb = 3.999843853973347;
     private const double ShelfFreqHz = 1500.0;

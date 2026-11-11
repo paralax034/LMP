@@ -6,7 +6,7 @@ namespace LMP.Core.Audio;
 /// <summary>
 /// Playback recovery after audio device loss.
 /// </summary>
-public sealed partial class AudioPlayer
+internal sealed partial class AudioPlayer
 {
     private const int PostDeviceRecoveryStabilizationMs = 100;
 

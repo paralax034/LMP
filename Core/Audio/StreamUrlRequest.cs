@@ -3,7 +3,7 @@ namespace LMP.Core.Audio;
 /// <summary>
 /// Purpose of the stream URL request from source.
 /// </summary>
-public enum StreamUrlRequestKind
+internal enum StreamUrlRequestKind
 {
     /// <summary>Initial retrieval of continuation URL from a partial-cache source without a live URL.</summary>
     Acquire,
@@ -27,7 +27,7 @@ public enum StreamUrlRequestKind
 /// <param name="ContentLength">Total size of the variant in bytes (<c>clen</c>); <c>0</c> if unknown.</param>
 /// <param name="CurrentUrl">Source URL at the time of request; empty string until continuation URL is acquired.</param>
 /// <param name="IsForbiddenDriven">Request was triggered by an HTTP 403 from CDN on <paramref name="CurrentUrl"/>.</param>
-public sealed record StreamUrlRequest(
+internal sealed record StreamUrlRequest(
     StreamUrlRequestKind Kind,
     string TrackId,
     AudioFormat Format,
@@ -59,4 +59,4 @@ public sealed record StreamUrlRequest(
 /// <param name="request">Explicit source request.</param>
 /// <param name="ct">Cancellation token.</param>
 /// <returns>Live URL of a compatible variant, or <c>null</c> if the URL could not be retrieved.</returns>
-public delegate ValueTask<string?> StreamUrlProvider(StreamUrlRequest request, CancellationToken ct);
+internal delegate ValueTask<string?> StreamUrlProvider(StreamUrlRequest request, CancellationToken ct);

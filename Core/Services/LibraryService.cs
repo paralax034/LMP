@@ -62,7 +62,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         _saveDebounceTimer = new Timer(OnSaveTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
-        LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
         _auth.OnAuthStateChanged += HandleAuthStateChanged;
     }
 
@@ -528,7 +527,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
     }
 
-    public void SaveSettingsImmediate() => SaveSettingsSync();
+    private void SaveSettingsImmediate() => SaveSettingsSync();
 
     #endregion
 
@@ -545,12 +544,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         var key = $"SearchHistory_{CurrentOwnerId}";
         await _settings.SetAsync(key, history, ct).ConfigureAwait(false);
     }
-
-    #endregion
-
-    #region События
-
-    private void OnLanguageChanged(object? _, string __) => OnDataChanged?.Invoke();
 
     #endregion
 
@@ -590,7 +583,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     public async ValueTask DisposeAsync()
     {
-        LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
         _auth.OnAuthStateChanged -= HandleAuthStateChanged;
 
         lock (_hydrationLock)

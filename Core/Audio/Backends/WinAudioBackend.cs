@@ -23,7 +23,7 @@ namespace LMP.Core.Audio.Backends;
 /// </list>
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed unsafe partial class WinAudioBackend : IPlaybackBackend
+internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 {
     #region WASAPI Constants & HRESULTs
 

@@ -3,8 +3,6 @@ using System.Data.Common;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using LMP.Core.Data.Repositories;
-using LMP.Core.Models;
-using LMP.Core.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 

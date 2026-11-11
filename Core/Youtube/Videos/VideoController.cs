@@ -153,7 +153,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
         return await GetPlayerResponseWithClientAsync(videoId, clientName, cancellationToken);
     }
 
-    public async ValueTask<PlayerResponse> GetPlayerResponseWithClientAsync(
+    internal async ValueTask<PlayerResponse> GetPlayerResponseWithClientAsync(
            VideoId videoId,
            string clientName,
            CancellationToken cancellationToken,
@@ -345,7 +345,7 @@ internal partial class VideoController(HttpClient http, PlayerContextManager pla
     /// Checks whether a player error message indicates Bot Detection.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsBotDetectionError(string? error)
+    internal static bool IsBotDetectionError(string? error)
     {
         if (string.IsNullOrEmpty(error)) return false;
 

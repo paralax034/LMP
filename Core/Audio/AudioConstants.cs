@@ -104,9 +104,6 @@ public static class AudioConstants
     // PLAYBACK BUFFER SETTINGS — PCM ring buffer
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>Maximum allowed player volume gain (Gain).</summary>
-    public const float MaxVolumeGain = 4.0f;
-
     /// <summary>PCM buffer size in seconds (2s = smooth playback).</summary>
     public const int BufferSizeSeconds = 2;
 

@@ -1179,7 +1179,12 @@ public sealed partial class LibraryViewModel : ViewModelBase
         var tracks = await _playlistService.GetPlaylistTracksAsync(p.Id);
         if (tracks.Count > 0)
         {
-            await _playerControl.PlayPlaylistAsync(p.Id, tracks, tracks[0], enableShuffle: false);
+            await _playerControl.PlayPlaylistAsync(
+                p.Id,
+                tracks,
+                tracks[0],
+                enableShuffle: false,
+                playlistName: p.Name);
         }
     }
 

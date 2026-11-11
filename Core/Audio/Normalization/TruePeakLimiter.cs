@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace LMP.Core.Audio.Normalization;
 
-public sealed class TruePeakLimiter
+internal sealed class TruePeakLimiter
 {
     #region Constants
 

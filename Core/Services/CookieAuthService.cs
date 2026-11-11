@@ -158,7 +158,7 @@ public partial class CookieAuthService
             OnAuthStateChanged?.Invoke();
     }
 
-    public void UpdateCachedAccounts(List<YoutubeAccountItem> accounts)
+    private void UpdateCachedAccounts(List<YoutubeAccountItem> accounts)
     {
         lock (_lock)
         {
@@ -467,7 +467,7 @@ public partial class CookieAuthService
         lock (_lock) return _cachedHeaderString;
     }
 
-    public string? GetCookieValue(string key)
+    internal string? GetCookieValue(string key)
     {
         lock (_lock)
             return _cookieMap.TryGetValue(key, out var val) ? val : null;
@@ -720,7 +720,7 @@ public partial class CookieAuthService
     /// Serializes the profile synchronously (CPU-bound, ~0.1 ms);
     /// disk write is fire-and-forget via <see cref="_authSaveSemaphore"/>.
     /// </summary>
-    public void SaveAuthData()
+    private void SaveAuthData()
     {
         string json;
         try

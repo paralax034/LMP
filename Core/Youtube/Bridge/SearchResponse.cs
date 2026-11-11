@@ -592,7 +592,7 @@ internal partial class SearchResponse
         /// Aggregates text from all runs via a centralized stack helper without extra allocations.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static string? GetRunText(JsonElement item, int columnIndex)
+        internal static string? GetRunText(JsonElement item, int columnIndex)
         {
             var runsElement = GetRunsElement(item, columnIndex);
             return YoutubeParsingHelpers.ConcatTextRuns(runsElement);

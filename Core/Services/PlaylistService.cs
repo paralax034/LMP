@@ -225,7 +225,7 @@ public sealed class PlaylistService
         }
     }
 
-    public void InvalidateIndex()
+    private void InvalidateIndex()
     {
         lock (_indexLock)
         {
@@ -471,6 +471,22 @@ public sealed class PlaylistService
     }
 
     /// <summary>
+    /// Persists the computed dominant header color for a playlist without raising <see cref="OnPlaylistChanged"/>.
+    /// </summary>
+    public async Task UpdateComputedColorAsync(string playlistId, string computedColor, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(playlistId) || playlistId == LibraryService.LikedPlaylistId)
+            return;
+
+        var existing = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
+        if (existing == null || string.Equals(existing.ComputedColor, computedColor, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        existing.ComputedColor = computedColor;
+        await _playlists.UpsertAsync(existing, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Enqueues cloud playlist metadata updates (name, description, cover) into the background Outbox queue using a Last-Write-Wins strategy.
     /// </summary>
     public void EnqueueCloudMetadataUpdate(
@@ -622,16 +638,16 @@ public sealed class PlaylistService
         {
             for (int i = 0; i < tracks.Count; i++)
             {
-                var t = tracks[i];
-                var trackInfo = _registry.TryGet(t.Id) ?? t;
-                bool wasLiked = trackInfo.IsLiked;
+                var canonical = _registry.RegisterOrUpdate(tracks[i]);
+                bool wasLiked = canonical.IsLiked;
+                canonical.SetLikedState(false);
 
-                await _tracks.SetLikedAsync(t.Id, CurrentOwnerId, false, ct: ct).ConfigureAwait(false);
-                trackInfo.SetLikedState(false);
-                trackInfo.InPlaylists.Remove(LibraryService.LikedPlaylistId);
-                _registry.UpdatePinStatus(trackInfo);
+                await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+                await _tracks.SetLikedAsync(canonical.Id, CurrentOwnerId, false, ct: ct).ConfigureAwait(false);
+                canonical.InPlaylists.Remove(LibraryService.LikedPlaylistId);
+                _registry.UpdatePinStatus(canonical);
 
-                _syncService.EnqueueLikeMutation(trackInfo.Id, targetLiked: false, baselineLiked: wasLiked);
+                _syncService.EnqueueLikeMutation(canonical.Id, targetLiked: false, baselineLiked: wasLiked);
             }
 
             var likedPlaylist = await GetPlaylistAsync(LibraryService.LikedPlaylistId, ct).ConfigureAwait(false);
@@ -788,76 +804,6 @@ public sealed class PlaylistService
         {
             OnPlaylistChanged?.Invoke(liked);
         }
-    }
-
-    /// <summary>
-    /// Delegates playlist upload to the YouTube cloud account.
-    /// </summary>
-    public async Task UploadPlaylistToAccountAsync(string localPlaylistId, CancellationToken ct = default)
-    {
-        var playlist = await GetPlaylistAsync(localPlaylistId, ct).ConfigureAwait(false);
-        if (playlist != null)
-        {
-            await _syncService.UploadPlaylistToAccountAsync(playlist, ct).ConfigureAwait(false);
-            OnPlaylistChanged?.Invoke(playlist);
-        }
-    }
-
-    /// <summary>
-    /// Converts a remote playlist to local format, resetting cloud parameters.
-    /// </summary>
-    public async Task ConvertToLocalAsync(string playlistId, CancellationToken ct = default)
-    {
-        var pl = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
-        if (pl == null) return;
-
-        var trackIds = await GetPlaylistTrackIdsAsync(playlistId, ct).ConfigureAwait(false);
-
-        var copy = new Playlist
-        {
-            Name = pl.Name + " (Local)",
-            SyncMode = PlaylistSyncMode.LocalOnly,
-            TrackIds = trackIds,
-            ThumbnailUrl = pl.ThumbnailUrl,
-            CustomColor = pl.CustomColor,
-            ComputedColor = pl.ComputedColor,
-            Author = "Me",
-            OwnerId = CurrentOwnerId
-        };
-
-        await AddOrUpdatePlaylistAsync(copy, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Merges tracks from two local playlists.
-    /// </summary>
-    public async Task<bool> MergePlaylistsAsync(string sourceId, string targetId, CancellationToken ct = default)
-    {
-        var source = await GetPlaylistAsync(sourceId, ct).ConfigureAwait(false);
-        var target = await GetPlaylistAsync(targetId, ct).ConfigureAwait(false);
-        if (source == null || target == null || !target.IsLocal) return false;
-
-        var sourceTrackIds = await GetPlaylistTrackIdsAsync(sourceId, ct).ConfigureAwait(false);
-        var targetTrackIds = await GetPlaylistTrackIdsAsync(targetId, ct).ConfigureAwait(false);
-        var existing = new HashSet<string>(targetTrackIds, StringComparer.Ordinal);
-        var toAdd = new List<TrackInfo>();
-
-        for (int i = 0; i < sourceTrackIds.Count; i++)
-        {
-            var id = sourceTrackIds[i];
-            if (existing.Add(id))
-            {
-                var track = await _registry.GetOrLoadAsync(id, ct).ConfigureAwait(false);
-                if (track != null) toAdd.Add(track);
-            }
-        }
-
-        if (toAdd.Count > 0)
-        {
-            await AddTracksToPlaylistAsync(targetId, toAdd, ct).ConfigureAwait(false);
-        }
-
-        return true;
     }
 
     #endregion

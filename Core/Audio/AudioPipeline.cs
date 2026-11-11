@@ -12,7 +12,7 @@ namespace LMP.Core.Audio;
 /// <summary>
 /// Full playback pipeline: Source → Decoder → PCM Buffer → Normalization → Gain → Backend.
 /// </summary>
-public sealed class AudioPipeline : IAsyncDisposable
+internal sealed class AudioPipeline : IAsyncDisposable
 {
     #region Constants
 

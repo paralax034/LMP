@@ -2,30 +2,136 @@ using LMP.Core.Audio.Http;
 
 namespace LMP.Core.Services;
 
+/// <summary>
+/// Identifies the origin of the active playback queue.
+/// </summary>
+public enum QueueSourceKind : byte
+{
+    /// <summary>Queue was assembled manually, from search/home, or detached from its original playlist.</summary>
+    Manual = 0,
+
+    /// <summary>Queue is bound to a specific library or system playlist.</summary>
+    Playlist = 1
+}
+
+/// <summary>
+/// Immutable snapshot of the active queue origin, track composition, and generation counter.
+/// Mutated exclusively under <see cref="AudioEngine._queueLock"/> alongside the queue itself.
+/// </summary>
+public sealed class QueueSource
+{
+    private readonly HashSet<string> _snapshotSet;
+
+    /// <summary>Singleton initial manual source at generation 0.</summary>
+    public static readonly QueueSource EmptyManual = new(
+        QueueSourceKind.Manual,
+        id: null,
+        name: null,
+        orderedIds: [],
+        snapshotSet: new HashSet<string>(StringComparer.Ordinal),
+        generation: 0);
+
+    /// <summary>Origin kind of the queue.</summary>
+    public QueueSourceKind Kind { get; }
+
+    /// <summary>Source playlist identifier, or <see langword="null"/> when <see cref="Kind"/> is <see cref="QueueSourceKind.Manual"/>.</summary>
+    public string? Id { get; }
+
+    /// <summary>Display name of the source playlist, or <see langword="null"/> when manual.</summary>
+    public string? Name { get; }
+
+    /// <summary>Ordered track identifiers in the source snapshot.</summary>
+    public IReadOnlyList<string> OrderedIds { get; }
+
+    /// <summary>Monotonically increasing generation counter incremented on every source transition.</summary>
+    public int Generation { get; }
+
+    /// <summary>Number of unique tracks in the source snapshot.</summary>
+    public int SnapshotCount => _snapshotSet.Count;
+
+    private QueueSource(
+        QueueSourceKind kind,
+        string? id,
+        string? name,
+        IReadOnlyList<string> orderedIds,
+        HashSet<string> snapshotSet,
+        int generation)
+    {
+        Kind = kind;
+        Id = id;
+        Name = name;
+        OrderedIds = orderedIds;
+        _snapshotSet = snapshotSet;
+        Generation = generation;
+    }
+
+    /// <summary>
+    /// Checks in O(1) whether the specified track identifier belongs to the source snapshot.
+    /// </summary>
+    public bool ContainsTrack(string trackId) => _snapshotSet.Contains(trackId);
+
+    /// <summary>
+    /// Creates a manual queue source with the specified generation.
+    /// </summary>
+    public static QueueSource CreateManual(int generation) =>
+        new(QueueSourceKind.Manual, id: null, name: null, orderedIds: [], new HashSet<string>(StringComparer.Ordinal), generation);
+
+    /// <summary>
+    /// Creates a playlist queue source with a deduplicated snapshot of track identifiers.
+    /// </summary>
+    public static QueueSource CreatePlaylist(
+        string playlistId,
+        string? name,
+        IReadOnlyList<string> trackIds,
+        int generation)
+    {
+        var set = new HashSet<string>(trackIds.Count, StringComparer.Ordinal);
+        var ordered = new List<string>(trackIds.Count);
+        for (int i = 0; i < trackIds.Count; i++)
+        {
+            string id = trackIds[i];
+            if (!string.IsNullOrEmpty(id) && set.Add(id))
+                ordered.Add(id);
+        }
+
+        return new QueueSource(QueueSourceKind.Playlist, playlistId, name, ordered, set, generation);
+    }
+
+    /// <summary>
+    /// Returns a new <see cref="QueueSource"/> of the same generation with an updated track composition snapshot and optional name.
+    /// </summary>
+    internal QueueSource WithUpdatedSnapshot(IReadOnlyList<string> newTrackIds, string? newName = null) =>
+        CreatePlaylist(Id ?? string.Empty, newName ?? Name, newTrackIds, Generation);
+
+    /// <summary>
+    /// Returns a new <see cref="QueueSource"/> of the same generation and snapshot with an updated display name.
+    /// </summary>
+    internal QueueSource WithName(string? newName) =>
+        new(Kind, Id, newName, OrderedIds, _snapshotSet, Generation);
+}
+
+/// <summary>
+/// Result of applying a live playlist diff to the playback queue.
+/// </summary>
+public readonly record struct PlaylistDiffOutcome(
+    bool Applied,
+    bool QueueMutated,
+    bool SourceChanged,
+    bool RemovedCurrent,
+    bool CanMoveNext,
+    bool IsQueuePure);
+
 public sealed partial class AudioEngine
 {
-    #region Granular Queue Events
-
-    /// <summary>Occurs when an item in the queue is moved. Parameters: (old index, new index).</summary>
-    public event Action<int, int>? OnQueueItemMoved;
-
-    /// <summary>Occurs when a single item is inserted into the queue. Parameters: (insertion index, inserted track).</summary>
-    public event Action<int, TrackInfo>? OnQueueItemInserted;
-
-    /// <summary>Occurs when a single item is removed from the queue. Parameters: (index of removed item, removed track).</summary>
-    public event Action<int, TrackInfo>? OnQueueItemRemoved;
-
-    /// <summary>Occurs when a range of items is batch-inserted into the queue. Parameters: (start insertion index, item count).</summary>
-    public event Action<int, int>? OnQueueRangeInserted;
-
-    #endregion
-
     #region Queue State
 
     private readonly List<TrackInfo> _queue = new(64);
     private IReadOnlyList<TrackInfo>? _queueSnapshot;
     private int _currentIndex = -1;
     private bool _queueMutatedByNavigation;
+    private QueueSource _queueSource = QueueSource.EmptyManual;
+    private int _queueSourceGeneration;
+    private bool _isQueuePure;
 
     public IReadOnlyList<TrackInfo> Queue
     {
@@ -39,12 +145,36 @@ public sealed partial class AudioEngine
         }
     }
 
+    /// <summary>
+    /// Current queue source snapshot read atomically under <see cref="_queueLock"/>.
+    /// </summary>
+    public QueueSource QueueSource
+    {
+        get
+        {
+            lock (_queueLock)
+                return _queueSource;
+        }
+    }
+
+    /// <summary>
+    /// Indicates whether the current queue composition matches the active playlist source snapshot.
+    /// </summary>
+    public bool IsQueuePure
+    {
+        get
+        {
+            lock (_queueLock)
+                return _isQueuePure;
+        }
+    }
+
     #endregion
 
     #region Public API
 
     /// <summary>
-    /// Adds a range of tracks to the queue, filtering out duplicates.
+    /// Adds a range of tracks to the queue, filtering out duplicates without LINQ allocations.
     /// If the queue was empty, automatically starts playback of the first added track.
     /// </summary>
     /// <param name="tracks">The list of tracks to add.</param>
@@ -52,33 +182,33 @@ public sealed partial class AudioEngine
     public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks)
     {
         int addedCount = 0;
-        int startIndex = -1;
         TrackInfo? playbackTrack = null;
         bool shouldAutoplay = false;
 
         lock (_queueLock)
         {
-            var existingIds = _queue.Select(static t => t.Id).ToHashSet(StringComparer.Ordinal);
-            var unique = new List<TrackInfo>();
+            var existingIds = new HashSet<string>(_queue.Count + 16, StringComparer.Ordinal);
+            for (int i = 0; i < _queue.Count; i++)
+                existingIds.Add(_queue[i].Id);
 
+            int initialCount = _queue.Count;
             foreach (var track in tracks)
             {
                 if (existingIds.Add(track.Id))
                 {
-                    unique.Add(track);
+                    _queue.Add(track);
                     addedCount++;
                 }
             }
 
-            if (unique.Count > 0)
+            if (addedCount > 0)
             {
-                startIndex = _queue.Count;
-                _queue.AddRange(unique);
+                RecalculateQueuePurityLocked();
                 InvalidateQueueSnapshot();
 
                 if (CurrentTrack == null && !IsPlaying && !IsLoading)
                 {
-                    _currentIndex = _queue.Count - unique.Count; // Seek to the first newly added track
+                    _currentIndex = initialCount;
                     playbackTrack = _queue[_currentIndex];
                     shouldAutoplay = true;
                 }
@@ -87,13 +217,7 @@ public sealed partial class AudioEngine
 
         if (addedCount > 0)
         {
-            RaiseOnUI(() =>
-            {
-                if (startIndex >= 0)
-                    OnQueueRangeInserted?.Invoke(startIndex, addedCount);
-
-                OnQueueChanged?.Invoke();
-            });
+            RaiseOnUI(_raiseQueueChangedOnUIDelegate);
 
             if (shouldAutoplay && playbackTrack != null)
             {
@@ -110,18 +234,14 @@ public sealed partial class AudioEngine
     {
         TrackInfo? playbackTrack = null;
         bool shouldAutoplay = false;
-        int insertedIndex = -1;
 
         lock (_queueLock)
         {
-            for (int i = 0; i < _queue.Count; i++)
-            {
-                if (string.Equals(_queue[i].Id, track.Id, StringComparison.Ordinal))
-                    return;
-            }
+            if (FindTrackIndexById(_queue, track.Id) >= 0)
+                return;
 
             _queue.Add(track);
-            insertedIndex = _queue.Count - 1;
+            RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
 
             if (CurrentTrack == null && !IsPlaying && !IsLoading)
@@ -132,13 +252,7 @@ public sealed partial class AudioEngine
             }
         }
 
-        RaiseOnUI(() =>
-        {
-            if (insertedIndex >= 0)
-                OnQueueItemInserted?.Invoke(insertedIndex, track);
-
-            OnQueueChanged?.Invoke();
-        });
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
 
         if (shouldAutoplay && playbackTrack != null)
         {
@@ -150,38 +264,37 @@ public sealed partial class AudioEngine
 
     public void EnqueueRange(IEnumerable<TrackInfo> tracks)
     {
-        int startIndex;
         int count;
 
         lock (_queueLock)
         {
-            startIndex = _queue.Count;
-            var list = tracks as IList<TrackInfo> ?? tracks.ToList();
-            count = list.Count;
+            if (tracks is ICollection<TrackInfo> coll && coll.Count == 0)
+                return;
+
+            int before = _queue.Count;
+            _queue.AddRange(tracks);
+            count = _queue.Count - before;
             if (count == 0) return;
 
-            _queue.AddRange(list);
+            RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
         }
 
-        RaiseOnUI(() =>
-        {
-            OnQueueRangeInserted?.Invoke(startIndex, count);
-            OnQueueChanged?.Invoke();
-        });
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
     }
 
-    public void ShuffleQueue()
+    internal void ShuffleQueue()
     {
         lock (_queueLock)
         {
             if (_queue.Count < 2) return;
             ApplyShuffleInPlace(preserveCurrentAtStart: true);
+            RecalculateQueuePurityLocked();
         }
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
     }
 
-    public void ClearQueue()
+    internal void ClearQueue()
     {
         lock (_queueLock)
         {
@@ -189,9 +302,11 @@ public sealed partial class AudioEngine
             _queue.Clear();
             _currentIndex = -1;
             if (current != null) { _queue.Add(current); _currentIndex = 0; }
+            _queueSource = QueueSource.CreateManual(++_queueSourceGeneration);
+            RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
         }
-        RaiseOnUI(() => OnQueueChanged?.Invoke());
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
     }
 
     /// <summary>
@@ -200,34 +315,25 @@ public sealed partial class AudioEngine
     /// </summary>
     public void RemoveFromQueue(TrackInfo track)
     {
-        int removedIndex = -1;
-        bool removedCurrent = false;
+        bool removedCurrent;
         bool canMove = false;
         // Intent to listen comes from engine state: after loading while paused, player is Stopped, and !IsPaused would start playback
         bool startPlaying = CurrentTrack != null && _playIntent;
-        var trackId = track.Id;
 
         lock (_queueLock)
         {
-            for (int i = 0; i < _queue.Count; i++)
-            {
-                if (_queue[i].Id == trackId) { removedIndex = i; break; }
-            }
-
+            int removedIndex = FindTrackIndexById(_queue, track.Id);
             if (removedIndex == -1) return;
 
             removedCurrent = removedIndex == _currentIndex;
             _queue.RemoveAt(removedIndex);
             _currentIndex = ComputeIndexAfterRemove(removedIndex, _currentIndex);
             if (removedCurrent) canMove = TryMoveNext(userInitiated: true);
+            RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
         }
 
-        RaiseOnUI(() =>
-        {
-            OnQueueItemRemoved?.Invoke(removedIndex, track);
-            OnQueueChanged?.Invoke();
-        });
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
 
         if (!removedCurrent) return;
 
@@ -243,10 +349,8 @@ public sealed partial class AudioEngine
         }
     }
 
-    public void MoveQueueItem(int from, int to)
+    internal void MoveQueueItem(int from, int to)
     {
-        bool moved = false;
-
         lock (_queueLock)
         {
             if (from < 0 || from >= _queue.Count || to < 0 || to >= _queue.Count || from == to) return;
@@ -257,17 +361,365 @@ public sealed partial class AudioEngine
             else if (from < _currentIndex && to >= _currentIndex) _currentIndex--;
             else if (from > _currentIndex && to <= _currentIndex) _currentIndex++;
             InvalidateQueueSnapshot();
-            moved = true;
         }
 
-        if (moved)
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
+    }
+
+    /// <summary>
+    /// Detaches the active playlist source (transitioning to <see cref="QueueSourceKind.Manual"/>) if the specified playlist was deleted,
+    /// leaving the queued tracks untouched.
+    /// </summary>
+    public bool DetachPlaylistSource(string playlistId)
+    {
+        bool detached = false;
+        lock (_queueLock)
         {
-            RaiseOnUI(() =>
+            if (_queueSource.Kind == QueueSourceKind.Playlist
+                && string.Equals(_queueSource.Id, playlistId, StringComparison.Ordinal))
             {
-                OnQueueItemMoved?.Invoke(from, to);
-                OnQueueChanged?.Invoke();
-            });
+                _queueSource = QueueSource.CreateManual(++_queueSourceGeneration);
+                _isQueuePure = false;
+                detached = true;
+            }
         }
+
+        if (detached)
+            RaiseOnUI(_raiseQueueSourceChangedOnUIDelegate);
+
+        return detached;
+    }
+
+    /// <summary>
+    /// Synchronously applies a live playlist diff under <see cref="_queueLock"/>, rejecting stale generations
+    /// and advancing playback immediately if the playing track was removed from the playlist.
+    /// </summary>
+    public PlaylistDiffOutcome ApplyPlaylistDelta(
+        string playlistId,
+        int expectedGeneration,
+        IReadOnlyList<string> newPlaylistTrackIds,
+        IReadOnlyList<TrackInfo> addedTracks,
+        string? newPlaylistName = null)
+    {
+        bool startPlaying = CurrentTrack != null && _playIntent;
+        PlaylistDiffOutcome outcome;
+        bool purityChanged;
+
+        lock (_queueLock)
+        {
+            outcome = ApplyPlaylistDiffCore(
+                _queue,
+                ref _currentIndex,
+                ref _queueSource,
+                playlistId,
+                expectedGeneration,
+                newPlaylistTrackIds,
+                addedTracks,
+                ShuffleEnabled,
+                RepeatMode == RepeatMode.All,
+                newPlaylistName);
+
+            purityChanged = outcome.Applied && _isQueuePure != outcome.IsQueuePure;
+            if (outcome.Applied)
+            {
+                _isQueuePure = outcome.IsQueuePure;
+
+                if (outcome.QueueMutated)
+                    InvalidateQueueSnapshot();
+            }
+        }
+
+        if (!outcome.Applied)
+            return outcome;
+
+        if (outcome.QueueMutated)
+        {
+            RaiseOnUI(_raiseQueueChangedOnUIDelegate);
+        }
+        else if (outcome.SourceChanged || purityChanged)
+        {
+            RaiseOnUI(_raiseQueueSourceChangedOnUIDelegate);
+        }
+
+        if (outcome.RemovedCurrent)
+        {
+            if (outcome.CanMoveNext)
+            {
+                ResetSealedFailedTrack();
+                int session = BeginNewSession();
+                EnqueueCommand(new PlayCurrentIndexCommand(session, startPlaying));
+            }
+            else
+            {
+                Stop();
+            }
+        }
+
+        return outcome;
+    }
+
+    #endregion
+
+    #region Pure QueueSource & Live Diff Algorithms
+
+    /// <summary>
+    /// Finds the index of a track with the specified identifier in a list without closure allocations.
+    /// </summary>
+    internal static int FindTrackIndexById(IReadOnlyList<TrackInfo> list, string? trackId)
+    {
+        if (string.IsNullOrEmpty(trackId)) return -1;
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i].Id, trackId, StringComparison.Ordinal))
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Determines whether the queue composition matches the source playlist snapshot (order-independent).
+    /// </summary>
+    internal static bool ComputeIsQueuePure(IReadOnlyList<TrackInfo> queue, QueueSource source)
+    {
+        if (source.Kind != QueueSourceKind.Playlist || source.SnapshotCount == 0)
+            return false;
+
+        if (queue.Count != source.SnapshotCount)
+            return false;
+
+        for (int i = 0; i < queue.Count; i++)
+        {
+            if (!source.ContainsTrack(queue[i].Id))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Inserts a track at a random position strictly after <paramref name="currentIndex"/> within the user queue.
+    /// </summary>
+    internal static int InsertRandomAfterCurrent(
+        List<TrackInfo> queue,
+        int currentIndex,
+        TrackInfo track,
+        Random? random = null)
+    {
+        int count = queue.Count;
+        if (count == 0 || currentIndex < 0 || currentIndex >= count)
+        {
+            queue.Add(track);
+            return count;
+        }
+
+        int minIndex = currentIndex + 1;
+        int maxExclusive = count + 1;
+        int insertIndex = minIndex >= count
+            ? count
+            : (random ?? Random.Shared).Next(minIndex, maxExclusive);
+
+        queue.Insert(insertIndex, track);
+        return insertIndex;
+    }
+
+    /// <summary>
+    /// O(1) allocation-free filter for <see cref="LibraryService.OnTrackUpdated"/>:
+    /// returns <see langword="true"/> only when the active source is the system "Liked" playlist
+    /// and <see cref="TrackInfo.IsLiked"/> diverges from the current source snapshot.
+    /// </summary>
+    internal static bool ShouldSyncLikedOnTrackUpdated(QueueSource source, TrackInfo? track)
+    {
+        if (track == null
+            || source.Kind != QueueSourceKind.Playlist
+            || !string.Equals(source.Id, LibraryService.LikedPlaylistId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return track.IsLiked != source.ContainsTrack(track.Id);
+    }
+
+    /// <summary>
+    /// Pure transition for starting a queue from a playlist or manually.
+    /// </summary>
+    internal static QueueSource TransitionOnStartQueue(
+        ref int generationCounter,
+        IReadOnlyList<TrackInfo> tracks,
+        string? playlistId,
+        string? playlistName)
+    {
+        int gen = ++generationCounter;
+        if (string.IsNullOrEmpty(playlistId))
+            return QueueSource.CreateManual(gen);
+
+        var ids = new List<string>(tracks.Count);
+        for (int i = 0; i < tracks.Count; i++)
+            ids.Add(tracks[i].Id);
+
+        return QueueSource.CreatePlaylist(playlistId, playlistName, ids, gen);
+    }
+
+    /// <summary>
+    /// Pure transition for playing a single track: preserves source if the track is already in the queue,
+    /// or resets to <see cref="QueueSourceKind.Manual"/> with a new generation if the queue was replaced.
+    /// </summary>
+    internal static QueueSource TransitionOnPlayTrack(
+        QueueSource currentSource,
+        ref int generationCounter,
+        bool wasInQueue)
+    {
+        return wasInQueue
+            ? currentSource
+            : QueueSource.CreateManual(++generationCounter);
+    }
+
+    /// <summary>
+    /// Pure transition for clearing the queue: resets source to <see cref="QueueSourceKind.Manual"/> with a new generation.
+    /// </summary>
+    internal static QueueSource TransitionOnClearQueue(ref int generationCounter) =>
+        QueueSource.CreateManual(++generationCounter);
+
+    /// <summary>
+    /// Pure function that applies a live playlist diff ("old snapshot -> new composition") to the queue:
+    /// - Rejects diffs for a stale generation or different playlist;
+    /// - Removes tracks deleted from the playlist (advancing immediately if the current track was removed) while leaving manually added foreign tracks intact;
+    /// - Inserts newly added playlist tracks without duplicates (at the end when <paramref name="shuffleEnabled"/> is <see langword="false"/>, or at a random index after <paramref name="currentIndex"/> when <see langword="true"/>), without re-adding tracks previously removed from the queue by the user;
+    /// - Ignores pure track reordering in the playlist;
+    /// - Updates source metadata and recalculates queue purity.
+    /// </summary>
+    internal static PlaylistDiffOutcome ApplyPlaylistDiffCore(
+        List<TrackInfo> queue,
+        ref int currentIndex,
+        ref QueueSource source,
+        string playlistId,
+        int expectedGeneration,
+        IReadOnlyList<string> newPlaylistTrackIds,
+        IReadOnlyList<TrackInfo> addedTracks,
+        bool shuffleEnabled,
+        bool repeatAll,
+        string? newPlaylistName = null,
+        Random? random = null)
+    {
+        if (source.Kind != QueueSourceKind.Playlist
+            || source.Generation != expectedGeneration
+            || !string.Equals(source.Id, playlistId, StringComparison.Ordinal))
+        {
+            return new PlaylistDiffOutcome(
+                Applied: false,
+                QueueMutated: false,
+                SourceChanged: false,
+                RemovedCurrent: false,
+                CanMoveNext: false,
+                IsQueuePure: ComputeIsQueuePure(queue, source));
+        }
+
+        var newSet = new HashSet<string>(newPlaylistTrackIds.Count, StringComparer.Ordinal);
+        for (int i = 0; i < newPlaylistTrackIds.Count; i++)
+        {
+            string id = newPlaylistTrackIds[i];
+            if (!string.IsNullOrEmpty(id))
+                newSet.Add(id);
+        }
+
+        bool queueMutated = false;
+        bool removedCurrent = false;
+
+        // 1. Remove tracks that were part of the previous playlist snapshot but are absent from the new composition
+        int idx = 0;
+        while (idx < queue.Count)
+        {
+            string trackId = queue[idx].Id;
+            if (source.ContainsTrack(trackId) && !newSet.Contains(trackId))
+            {
+                if (idx == currentIndex)
+                    removedCurrent = true;
+
+                queue.RemoveAt(idx);
+                currentIndex = ComputeIndexAfterRemove(idx, currentIndex);
+                queueMutated = true;
+                continue;
+            }
+
+            idx++;
+        }
+
+        bool canMoveNext = false;
+        if (removedCurrent && queue.Count > 0)
+        {
+            int nextIdx = ComputeNextIndex(currentIndex, queue.Count, repeatAll, userInitiated: true);
+            if (nextIdx >= 0)
+            {
+                currentIndex = nextIdx;
+                canMoveNext = true;
+            }
+            else
+            {
+                currentIndex = -1;
+            }
+        }
+
+        // 2. Insert tracks newly added to the playlist (absent from the previous snapshot) without duplicates
+        for (int i = 0; i < newPlaylistTrackIds.Count; i++)
+        {
+            string id = newPlaylistTrackIds[i];
+            if (string.IsNullOrEmpty(id) || source.ContainsTrack(id))
+                continue;
+
+            if (FindTrackIndexById(queue, id) >= 0)
+                continue;
+
+            int addedIdx = FindTrackIndexById(addedTracks, id);
+            if (addedIdx < 0)
+                continue;
+
+            var trackToInsert = addedTracks[addedIdx];
+            if (shuffleEnabled)
+            {
+                InsertRandomAfterCurrent(queue, currentIndex, trackToInsert, random);
+            }
+            else
+            {
+                queue.Add(trackToInsert);
+            }
+
+            queueMutated = true;
+
+            if (removedCurrent && !canMoveNext && queue.Count > 0)
+            {
+                currentIndex = 0;
+                canMoveNext = true;
+            }
+        }
+
+        // 3. Update snapshot and metadata
+        bool compositionChanged = newSet.Count != source.SnapshotCount
+            || !CloudOutboxCoalescer.SequenceEqualOrdinal(source.OrderedIds, newPlaylistTrackIds);
+        bool nameChanged = newPlaylistName != null
+            && !string.Equals(source.Name, newPlaylistName, StringComparison.Ordinal);
+
+        if (compositionChanged)
+        {
+            source = source.WithUpdatedSnapshot(newPlaylistTrackIds, newPlaylistName ?? source.Name);
+        }
+        else if (nameChanged)
+        {
+            source = source.WithName(newPlaylistName);
+        }
+
+        bool isPure = ComputeIsQueuePure(queue, source);
+
+        return new PlaylistDiffOutcome(
+            Applied: true,
+            QueueMutated: queueMutated,
+            SourceChanged: compositionChanged || nameChanged,
+            RemovedCurrent: removedCurrent,
+            CanMoveNext: canMoveNext,
+            IsQueuePure: isPure);
+    }
+
+    private void RecalculateQueuePurityLocked()
+    {
+        _isQueuePure = ComputeIsQueuePure(_queue, _queueSource);
     }
 
     #endregion

@@ -3,7 +3,7 @@ namespace LMP.Core.Audio.Interfaces;
 /// <summary>
 /// Compressed audio to PCM decoder.
 /// </summary>
-public interface IAudioDecoder : IDisposable
+internal interface IAudioDecoder : IDisposable
 {
     /// <summary>
     /// Decodes a compressed frame to float32 PCM.

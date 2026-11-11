@@ -98,7 +98,7 @@ public static class AudioSourceFactory
     /// </summary>
     private static bool _isConfigInitialized;
 
-    public static void SetStreamingConfig(StreamingConfig config)
+    internal static void SetStreamingConfig(StreamingConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         if (_isConfigInitialized && ReferenceEquals(_currentConfig, config))
@@ -124,7 +124,7 @@ public static class AudioSourceFactory
     /// <summary>
     /// Builds a unique cache key: trackId + format + **normalized** bitrate.
     /// </summary>
-    public static string BuildCacheKey(string trackId, AudioFormat format, int bitrate)
+    internal static string BuildCacheKey(string trackId, AudioFormat format, int bitrate)
     {
         int normalizedBitrate = NormalizeBitrate(bitrate);
         return $"{trackId}_{format}_{normalizedBitrate}";
@@ -133,7 +133,7 @@ public static class AudioSourceFactory
     /// <summary>
     /// Searches for a fully cached track of any format/bitrate.
     /// </summary>
-    public static (string Path, AudioCacheEntry Entry)? FindAnyCachedTrack(string trackId)
+    internal static (string Path, AudioCacheEntry Entry)? FindAnyCachedTrack(string trackId)
     {
         var cache = GlobalCache;
         if (cache == null) return null;
@@ -156,7 +156,7 @@ public static class AudioSourceFactory
     /// <returns>An initialized audio source instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the global cache has not been initialized.</exception>
     /// <exception cref="ArgumentException">Thrown when both URL and local cache are missing.</exception>
-    public static Task<IAudioSource> CreateAsync(
+    internal static Task<IAudioSource> CreateAsync(
         ResolvedStreamDescriptor descriptor,
         StreamUrlProvider? urlProvider = null,
         StreamingConfig? config = null)
@@ -314,7 +314,7 @@ public static class AudioSourceFactory
     /// <returns>An initialized audio source instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the global cache has not been initialized.</exception>
     /// <exception cref="ArgumentException">Thrown when URL is empty and no cache is available.</exception>
-    public static async Task<IAudioSource> CreateAsync(
+    internal static async Task<IAudioSource> CreateAsync(
           string url,
           HttpClient httpClient,
           StreamUrlProvider? urlProvider = null,
@@ -422,7 +422,7 @@ public static class AudioSourceFactory
     /// <summary>
     /// Triggers speculative TCP+TLS connection warmup to the last known CDN hosts.
     /// </summary>
-    public static void PreWarmCdnConnections(HttpClient httpClient, CancellationToken ct)
+    internal static void PreWarmCdnConnections(HttpClient httpClient, CancellationToken ct)
     {
         CdnConnectionPreWarmer.PreWarmRecentHosts(httpClient, ct);
     }
@@ -430,7 +430,7 @@ public static class AudioSourceFactory
     /// <summary>
     /// Returns cache information for the track.
     /// </summary>
-    public static AudioCacheEntry? GetCacheInfo(string trackId) =>
+    internal static AudioCacheEntry? GetCacheInfo(string trackId) =>
         _globalCacheManager?.FindBestCache(trackId);
 
     #region Format Detection

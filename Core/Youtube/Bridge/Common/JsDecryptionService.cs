@@ -134,7 +134,7 @@ public sealed class JsDecryptionService : IDisposable
     /// Force-reinitializes the native context with a new player.
     /// Called on YouTube version rotation or during 403 error recovery.
     /// </summary>
-    public async ValueTask ReinitializeAsync(CancellationToken ct = default)
+    private async ValueTask ReinitializeAsync(CancellationToken ct = default)
     {
         await _initLock.WaitAsync(ct).ConfigureAwait(false);
         try

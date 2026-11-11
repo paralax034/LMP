@@ -11,7 +11,7 @@ namespace LMP.Core.Audio.Backends;
 /// All device-loss callbacks are no-ops: NullBackend never loses
 /// a "device" and does not generate starvation events.</para>
 /// </summary>
-public sealed class NullAudioBackend : IPlaybackBackend
+internal sealed class NullAudioBackend : IPlaybackBackend
 {
     #region Fields
 

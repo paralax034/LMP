@@ -21,7 +21,7 @@ namespace LMP.Core.Audio.Sources;
 /// The calling code (<see cref="AudioPipeline"/>) guarantees sequential access:
 /// <c>StopDecoding → Seek → StartDecoding</c>.
 /// </summary>
-public sealed class LocalFileSource : IAudioSource
+internal sealed class LocalFileSource : IAudioSource
 {
     private const long StreamStartPosition = 0;
 

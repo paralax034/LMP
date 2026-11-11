@@ -26,7 +26,7 @@ public enum NormalizationMode
 ///   <item>60,000 ms — for full-cache (entire file available, accuracy prioritized).</item>
 /// </list>
 /// </param>
-public readonly record struct NormalizationConfig(
+internal readonly record struct NormalizationConfig(
     bool Enabled,
     float TargetLufs,
     float MaxGain,

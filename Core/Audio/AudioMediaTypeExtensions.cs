@@ -54,7 +54,7 @@ public static class AudioMediaTypeExtensions
     /// <param name="value">String representation of the codec.</param>
     /// <param name="fallbackFormat">Format used for fallback codec resolution.</param>
     /// <returns>Normalized codec.</returns>
-    public static AudioCodec ToAudioCodec(this string? value, AudioFormat fallbackFormat = AudioFormat.Unknown)
+    internal static AudioCodec ToAudioCodec(this string? value, AudioFormat fallbackFormat = AudioFormat.Unknown)
     {
         if (string.IsNullOrWhiteSpace(value))
             return AudioSourceFactory.GetCodecForFormat(fallbackFormat);

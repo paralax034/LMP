@@ -157,7 +157,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <param name="trackIds">List of track identifiers.</param>
     /// <param name="trackDurations">Optional dictionary of track durations for sanity check.</param>
     /// <returns><c>true</c> if at least one valid entry was restored.</returns>
-    public bool RecoverOrphansForTracks(
+    internal bool RecoverOrphansForTracks(
          IEnumerable<string> trackIds,
          IReadOnlyDictionary<string, TimeSpan>? trackDurations = null)
     {
@@ -312,7 +312,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
     }
 
-    public bool IsFullyCached(string cacheKey) =>
+    internal bool IsFullyCached(string cacheKey) =>
         _entries.TryGetValue(cacheKey, out var entry)
         && entry.IsComplete
         && EnsureCacheFileIntegrity(entry);
@@ -320,19 +320,19 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Returns the best local cache for fast startup of a partially cached track.
     /// </summary>
-    public AudioCacheEntry? FindBestStartupCache(string trackId, int minContiguousBytes) =>
+    internal AudioCacheEntry? FindBestStartupCache(string trackId, int minContiguousBytes) =>
         TryWithIdVariants(trackId, id => FindBestStartupCacheCore(id, minContiguousBytes));
 
     /// <summary>
     /// Returns the best fully cached version of a track.
     /// </summary>
-    public AudioCacheEntry? FindBestCache(string trackId) =>
+    internal AudioCacheEntry? FindBestCache(string trackId) =>
         TryWithIdVariants(trackId, FindBestCacheCore);
 
     /// <summary>
     /// Updates integrated loudness across ALL cache entries for the given track.
     /// </summary>
-    public bool TryUpdateIntegratedLufs(string trackId, float integratedLufs, LoudnessSource source)
+    internal bool TryUpdateIntegratedLufs(string trackId, float integratedLufs, LoudnessSource source)
     {
         if (string.IsNullOrEmpty(trackId) || !float.IsFinite(integratedLufs))
             return false;
@@ -523,16 +523,16 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         return null;
     }
 
-    public AudioCacheEntry? GetCacheInfo(string cacheKey) =>
+    internal AudioCacheEntry? GetCacheInfo(string cacheKey) =>
         _entries.TryGetValue(cacheKey, out var entry) ? entry : null;
 
-    public string GetCachePath(string cacheKey)
+    internal string GetCachePath(string cacheKey)
     {
         var safeId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cacheKey)))[..16];
         return Path.Combine(_cacheDirectory, safeId + CacheFileExtension);
     }
 
-    public void Touch(string cacheKey)
+    internal void Touch(string cacheKey)
     {
         if (_entries.TryGetValue(cacheKey, out var entry))
         {
@@ -544,7 +544,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Creates or updates a range-based cache metadata entry.
     /// </summary>
-    public AudioCacheEntry CreateOrUpdate(
+    internal AudioCacheEntry CreateOrUpdate(
         string cacheKey,
         string trackId,
         string url,
@@ -587,7 +587,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         return entry;
     }
 
-    public void RemoveCache(string cacheKey) => RemoveCacheCore(cacheKey, saveIndex: true);
+    private void RemoveCache(string cacheKey) => RemoveCacheCore(cacheKey, saveIndex: true);
 
     private void RemoveCacheCore(string cacheKey, bool saveIndex)
     {
@@ -626,7 +626,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Writes an arbitrary byte range to a cache file.
     /// </summary>
-    public async ValueTask WriteRangeAsync(
+    internal async ValueTask WriteRangeAsync(
         string cacheKey,
         long offset,
         ReadOnlyMemory<byte> data,
@@ -698,7 +698,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// Number of bytes read (buffer length truncated at end-of-file);
     /// <c>0</c> if the range is not cached, the file is unavailable, or read incomplete.
     /// </returns>
-    public async ValueTask<int> ReadRangeIntoAsync(
+    internal async ValueTask<int> ReadRangeIntoAsync(
         string cacheKey,
         long offset,
         Memory<byte> destination,
@@ -766,7 +766,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Registers a lifetime lease on a cache file.
     /// </summary>
-    public void AcquireLease(string cacheKey)
+    internal void AcquireLease(string cacheKey)
     {
         var entry = _fileHandles.GetOrAdd(cacheKey,
             key => new CacheFileHandle(GetCachePath(key)));
@@ -776,7 +776,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Releases a lifetime lease on a cache file.
     /// </summary>
-    public void ReleaseLease(string cacheKey)
+    internal void ReleaseLease(string cacheKey)
     {
         if (_fileHandles.TryGetValue(cacheKey, out var entry))
             entry.RemoveLease();
@@ -1249,7 +1249,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Invalidates a byte range in the cache.
     /// </summary>
-    public void InvalidateRange(string cacheKey, long offset, int length)
+    internal void InvalidateRange(string cacheKey, long offset, int length)
     {
         if (string.IsNullOrEmpty(cacheKey) || length <= 0) return;
 
@@ -1269,7 +1269,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Invalidates a byte range in all cached profiles for the specified track.
     /// </summary>
-    public void InvalidateRangeByTrackId(string trackId, long offset, int length)
+    internal void InvalidateRangeByTrackId(string trackId, long offset, int length)
     {
         if (string.IsNullOrEmpty(trackId) || length <= 0) return;
 

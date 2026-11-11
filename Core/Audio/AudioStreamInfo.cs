@@ -59,7 +59,7 @@ public sealed record AudioStreamInfo
     /// <param name="durationMs">Duration from the source.</param>
     /// <param name="isFromCache">Source is full disk cache.</param>
     /// <returns>Strongly-typed stream information.</returns>
-    public static AudioStreamInfo FromDescriptor(
+    internal static AudioStreamInfo FromDescriptor(
         ResolvedStreamDescriptor descriptor,
         int sampleRate,
         int channels,

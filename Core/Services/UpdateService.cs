@@ -584,7 +584,7 @@ public sealed partial class UpdateService : IDisposable
     /// Permanently deletes the downloaded local update archive and extracted files
     /// if a newer release appears in the repository before applying the previous one.
     /// </summary>
-    public static void PurgeDownloadedPayload()
+    private static void PurgeDownloadedPayload()
     {
         try
         {

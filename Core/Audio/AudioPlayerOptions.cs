@@ -6,7 +6,7 @@ namespace LMP.Core.Audio;
 /// <summary>
 /// Audio player initialization settings.
 /// </summary>
-public sealed class AudioPlayerOptions
+internal sealed class AudioPlayerOptions
 {
     /// <summary>
     /// Stream URL provider for source: primary continuation URL acquire for partial cache and refresh on 403.

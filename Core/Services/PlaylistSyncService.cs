@@ -6,7 +6,6 @@ using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Music;
 using LMP.Core.Youtube.Utils;
 using LMP.Core.Youtube.Videos;
-using Microsoft.Data.Sqlite;
 
 namespace LMP.Core.Services;
 
@@ -150,7 +149,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     /// <summary>
     /// Returns a snapshot of the current coalesced queue state for the specified playlist or likes bucket.
     /// </summary>
-    public CloudPlaylistOutboxState? GetPendingStateSnapshot(string targetId, string? ownerId = null)
+    internal CloudPlaylistOutboxState? GetPendingStateSnapshot(string targetId, string? ownerId = null)
     {
         var owner = ownerId ?? CurrentOwnerId;
         lock (_outboxLock)
@@ -165,7 +164,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     /// <summary>
     /// Queues Phase 0 of cloud playlist creation (offline-optimistic binding without blocking UI).
     /// </summary>
-    public void EnqueueCreatePlaylist(Playlist playlist, IReadOnlyList<string>? initialTrackIds = null)
+    internal void EnqueueCreatePlaylist(Playlist playlist, IReadOnlyList<string>? initialTrackIds = null)
     {
         if (_disposed || !_auth.IsAuthenticated)
             return;
@@ -279,7 +278,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     /// </summary>
     public void EnqueueLikeMutation(string trackId, bool targetLiked, bool? baselineLiked = null)
     {
-        if (_disposed || !_auth.IsAuthenticated || string.IsNullOrWhiteSpace(trackId))
+        if (_disposed || !_auth.IsAuthenticated || string.IsNullOrWhiteSpace(trackId) ||
+            _library?.Settings.LikeSyncMode == LikeSyncMode.LocalOnly)
             return;
 
         var normId = trackId.StartsWith("yt_", StringComparison.Ordinal) ? trackId : "yt_" + trackId;
@@ -696,7 +696,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     /// <summary>
     /// Forces an immediate flush of all accumulated mutations for a specific playlist or likes.
     /// </summary>
-    public async Task FlushPlaylistAsync(string playlistId, CancellationToken ct = default)
+    internal async Task FlushPlaylistAsync(string playlistId, CancellationToken ct = default)
     {
         if (_disposed || !_auth.IsAuthenticated || string.IsNullOrEmpty(playlistId))
             return;
@@ -726,7 +726,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     /// <summary>
     /// Forces an immediate flush of all accumulated like mutations.
     /// </summary>
-    public async Task FlushLikesAsync(CancellationToken ct = default) =>
+    internal async Task FlushLikesAsync(CancellationToken ct = default) =>
         await FlushPlaylistAsync(LikesOutboxTargetId, ct).ConfigureAwait(false);
 
     /// <summary>
@@ -2108,13 +2108,35 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         }
     }
 
+    private void FinalizeCommittedStateUnderLock(
+        string ownerId,
+        string targetId,
+        CloudPlaylistOutboxState state,
+        out CloudPlaylistOutboxState? snapshot,
+        out bool shouldDelete)
+    {
+        state.RetryCount = 0;
+        if (state.IsEmpty)
+        {
+            _outboxByKey.Remove((ownerId, targetId));
+            _lastFailureKind.Remove((ownerId, targetId));
+            shouldDelete = true;
+            snapshot = null;
+        }
+        else
+        {
+            shouldDelete = false;
+            snapshot = CloneStateUnderLock(state);
+        }
+    }
+
     private void CommitCompletedRemovePhase(
         string ownerId,
         string playlistId,
         List<CloudTrackRemoveEntry> completedRemoves)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2131,16 +2153,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 }
             }
 
-            state.RetryCount = 0;
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -2152,8 +2165,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         IReadOnlyList<string> completedAdds,
         IReadOnlyList<(string TrackId, string SetVideoId)> mappings)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2162,18 +2175,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             // Deletions queued in-flight receive real SetVideoId values of newly added tracks
             CloudOutboxCoalescer.CommitAdds(state, completedAdds, mappings);
-
-            state.RetryCount = 0;
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                _lastFailureKind.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -2184,8 +2186,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         string playlistId,
         List<string> syncedOrder)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2203,16 +2205,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 state.BaselineTrackOrder = [.. syncedOrder];
             }
 
-            state.RetryCount = 0;
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -2220,8 +2213,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
     private void CommitCompletedNamePhase(string ownerId, string playlistId, string syncedName)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2239,16 +2232,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 state.BaselineName = syncedName;
             }
 
-            state.RetryCount = 0;
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -2256,8 +2240,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
     private void CommitCompletedDescriptionPhase(string ownerId, string playlistId, string syncedDescription)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2275,16 +2259,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 state.BaselineDescription = syncedDescription;
             }
 
-            state.RetryCount = 0;
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -2292,8 +2267,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
     private void CommitCompletedThumbnailPhase(string ownerId, string playlistId, string syncedThumbUrl)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2306,16 +2281,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
                 state.TargetThumbnailUrl = null;
             }
 
-            state.RetryCount = 0;
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -2403,8 +2369,8 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
     private void CommitCompletedCreatePhase(string ownerId, string playlistId, string createdYoutubeId)
     {
-        CloudPlaylistOutboxState? snapshot = null;
-        bool shouldDelete = false;
+        CloudPlaylistOutboxState? snapshot;
+        bool shouldDelete;
 
         lock (_outboxLock)
         {
@@ -2413,17 +2379,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             state.PendingCreatePlaylist = false;
             state.YoutubePlaylistId = createdYoutubeId;
-            state.RetryCount = 0;
-
-            if (state.IsEmpty)
-            {
-                _outboxByKey.Remove((ownerId, playlistId));
-                shouldDelete = true;
-            }
-            else
-            {
-                snapshot = CloneStateUnderLock(state);
-            }
+            FinalizeCommittedStateUnderLock(ownerId, playlistId, state, out snapshot, out shouldDelete);
         }
 
         PersistOrDeleteAsyncFireAndForget(ownerId, playlistId, snapshot, shouldDelete);
@@ -3231,18 +3187,6 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         return overrides;
     }
 
-    /// <summary>
-    /// Enqueues the remote playlist creation and track list upload into the background Outbox queue non-blockingly.
-    /// </summary>
-    public async Task UploadPlaylistToAccountAsync(Playlist playlist, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(playlist);
-
-        if (!_auth.IsAuthenticated || playlist.SyncMode != PlaylistSyncMode.LocalOnly) return;
-
-        await LinkToCloudAsync(playlist, ct).ConfigureAwait(false);
-    }
-
     private async Task DowngradeForeignPlaylistOnForbiddenAsync(Playlist playlist, CancellationToken ct)
     {
         if (playlist.Ownership == PlaylistOwnership.Foreign)
@@ -3256,7 +3200,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
     /// <summary>
     /// Converts a remote playlist to local mode upon receiving a 404 Not Found status from the cloud.
     /// </summary>
-    public async Task DowngradeDeadCloudPlaylistAsync(Playlist playlist, CancellationToken ct = default)
+    internal async Task DowngradeDeadCloudPlaylistAsync(Playlist playlist, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(playlist);
 

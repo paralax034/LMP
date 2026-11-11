@@ -1,6 +1,6 @@
 namespace LMP.Core.Audio;
 
-public sealed partial class AudioPlayer
+internal sealed partial class AudioPlayer
 {
     private Timer? _positionTimer;
     private Timer? _bufferTimer;

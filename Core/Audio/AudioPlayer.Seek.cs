@@ -7,7 +7,7 @@ using static LMP.Core.Audio.AudioConstants;
 
 namespace LMP.Core.Audio;
 
-public sealed partial class AudioPlayer
+internal sealed partial class AudioPlayer
 {
     #region Seek Constants
 

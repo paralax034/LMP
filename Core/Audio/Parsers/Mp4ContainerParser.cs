@@ -18,7 +18,7 @@ namespace LMP.Core.Audio.Parsers;
 /// <para><b>Performance:</b> Uses <see cref="Mp4BinaryReader"/> for zero-alloc header parsing
 /// and a reusable buffer from <see cref="ArrayPool{T}.Shared"/> for frame reading without heap allocations.</para>
 /// </remarks>
-public sealed partial class Mp4ContainerParser : IContainerParser
+internal sealed partial class Mp4ContainerParser : IContainerParser
 {
     private const int InitialFrameBufferSize = 4096;
 

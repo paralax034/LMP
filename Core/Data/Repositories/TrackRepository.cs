@@ -1,4 +1,3 @@
-using System.Data;
 using System.Data.Common;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -132,51 +131,29 @@ public sealed partial class TrackRepository : ITrackRepository
 
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        var models = new List<TrackInfo>(limit);
         var pattern = $"%{query}%";
         var patternLower = $"%{query.ToLowerInvariant()}%";
         var patternUpper = $"%{query.ToUpperInvariant()}%";
         var patternTitle = $"%{CultureInfo.InvariantCulture.TextInfo.ToTitleCase(query.ToLowerInvariant())}%";
 
-        await using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = $"""
-                SELECT {TrackColumnsSelect}
-                FROM Tracks t
-                WHERE t.Title LIKE @pattern OR t.Author LIKE @pattern
-                   OR t.Title LIKE @patternLower OR t.Author LIKE @patternLower
-                   OR t.Title LIKE @patternUpper OR t.Author LIKE @patternUpper
-                   OR t.Title LIKE @patternTitle OR t.Author LIKE @patternTitle
-                ORDER BY t.Title
-                LIMIT @limit OFFSET @offset;
-                """;
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT {TrackColumnsSelect}
+            FROM Tracks t
+            WHERE t.Title LIKE @pattern OR t.Author LIKE @pattern
+               OR t.Title LIKE @patternLower OR t.Author LIKE @patternLower
+               OR t.Title LIKE @patternUpper OR t.Author LIKE @patternUpper
+               OR t.Title LIKE @patternTitle OR t.Author LIKE @patternTitle
+            ORDER BY t.Title
+            LIMIT @limit OFFSET @offset;
+            """;
 
-            AddParameter(cmd, "@pattern", pattern);
-            AddParameter(cmd, "@patternLower", patternLower);
-            AddParameter(cmd, "@patternUpper", patternUpper);
-            AddParameter(cmd, "@patternTitle", patternTitle);
-            AddParameter(cmd, "@limit", limit);
-            AddParameter(cmd, "@offset", offset);
+        AddParameter(cmd, "@pattern", pattern);
+        AddParameter(cmd, "@patternLower", patternLower);
+        AddParameter(cmd, "@patternUpper", patternUpper);
+        AddParameter(cmd, "@patternTitle", patternTitle);
 
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                models.Add(ReadTrackInfo(reader));
-            }
-        }
-
-        if (models.Count > 0)
-        {
-            var trackIds = models.Select(m => m.Id).ToList();
-            var likedTrackIds = await GetLikedTrackIdsSubsetAsync(connection, trackIds, ownerId, ct).ConfigureAwait(false);
-
-            for (int i = 0; i < models.Count; i++)
-            {
-                models[i].IsLiked = likedTrackIds.Contains(models[i].Id);
-            }
-        }
-
-        return models;
+        return await ExecutePagedTrackQueryAsync(connection, cmd, ownerId, limit, offset, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -269,45 +246,8 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <inheritdoc />
-    public async Task<List<TrackInfo>> GetDownloadedAsync(string ownerId, int limit = 100, int offset = 0, CancellationToken ct = default)
-    {
-        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
-
-        var models = new List<TrackInfo>(limit);
-
-        await using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = $"""
-                SELECT {TrackColumnsSelect}
-                FROM Tracks t
-                WHERE t.IsDownloaded = 1
-                ORDER BY t.UpdatedAt DESC
-                LIMIT @limit OFFSET @offset;
-                """;
-
-            AddParameter(cmd, "@limit", limit);
-            AddParameter(cmd, "@offset", offset);
-
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                models.Add(ReadTrackInfo(reader));
-            }
-        }
-
-        if (models.Count > 0)
-        {
-            var trackIds = models.Select(m => m.Id).ToList();
-            var likedTrackIds = await GetLikedTrackIdsSubsetAsync(connection, trackIds, ownerId, ct).ConfigureAwait(false);
-
-            for (int i = 0; i < models.Count; i++)
-            {
-                models[i].IsLiked = likedTrackIds.Contains(models[i].Id);
-            }
-        }
-
-        return models;
-    }
+    public Task<List<TrackInfo>> GetDownloadedAsync(string ownerId, int limit = 100, int offset = 0, CancellationToken ct = default) =>
+        QueryPagedTracksAsync("t.IsDownloaded = 1", ownerId, limit, offset, ct);
 
     /// <inheritdoc />
     public async Task<List<TrackInfo>> GetRecentlyPlayedAsync(string ownerId, int limit = 50, CancellationToken ct = default)
@@ -698,75 +638,57 @@ public sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <inheritdoc />
-    public async Task<List<TrackInfo>> GetAllAsync(string ownerId, int limit = 10000, int offset = 0, CancellationToken ct = default)
-    {
-        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
-
-        var models = new List<TrackInfo>(limit);
-
-        await using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = $"""
-                SELECT {TrackColumnsSelect}
-                FROM Tracks t
-                ORDER BY t.UpdatedAt DESC
-                LIMIT @limit OFFSET @offset;
-                """;
-            AddParameter(cmd, "@limit", limit);
-            AddParameter(cmd, "@offset", offset);
-
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                models.Add(ReadTrackInfo(reader));
-            }
-        }
-
-        if (models.Count > 0)
-        {
-            var trackIds = models.Select(m => m.Id).ToList();
-            var likedTrackIds = await GetLikedTrackIdsSubsetAsync(connection, trackIds, ownerId, ct).ConfigureAwait(false);
-
-            for (int i = 0; i < models.Count; i++)
-            {
-                models[i].IsLiked = likedTrackIds.Contains(models[i].Id);
-            }
-        }
-
-        return models;
-    }
+    public Task<List<TrackInfo>> GetAllAsync(string ownerId, int limit = 10000, int offset = 0, CancellationToken ct = default) =>
+        QueryPagedTracksAsync(string.Empty, ownerId, limit, offset, ct);
 
     /// <inheritdoc />
-    public async Task<List<TrackInfo>> GetLocalTracksAsync(string ownerId, int limit = 1000, int offset = 0, CancellationToken ct = default)
+    public Task<List<TrackInfo>> GetLocalTracksAsync(string ownerId, int limit = 1000, int offset = 0, CancellationToken ct = default) =>
+        QueryPagedTracksAsync("t.Id LIKE 'local_%' OR t.IsDownloaded = 1", ownerId, limit, offset, ct);
+
+    private async Task<List<TrackInfo>> QueryPagedTracksAsync(
+        string whereClause,
+        string ownerId,
+        int limit,
+        int offset,
+        CancellationToken ct)
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = string.IsNullOrEmpty(whereClause)
+            ? $"SELECT {TrackColumnsSelect} FROM Tracks t ORDER BY t.UpdatedAt DESC LIMIT @limit OFFSET @offset;"
+            : $"SELECT {TrackColumnsSelect} FROM Tracks t WHERE {whereClause} ORDER BY t.UpdatedAt DESC LIMIT @limit OFFSET @offset;";
 
-        var models = new List<TrackInfo>(limit);
+        return await ExecutePagedTrackQueryAsync(connection, cmd, ownerId, limit, offset, ct).ConfigureAwait(false);
+    }
 
-        await using (var cmd = connection.CreateCommand())
+    private static async Task<List<TrackInfo>> ExecutePagedTrackQueryAsync(
+        DbConnection connection,
+        DbCommand cmd,
+        string ownerId,
+        int limit,
+        int offset,
+        CancellationToken ct)
+    {
+        AddParameter(cmd, "@limit", limit);
+        AddParameter(cmd, "@offset", offset);
+
+        int initialCapacity = Math.Clamp(limit, 0, 256);
+        var models = new List<TrackInfo>(initialCapacity);
+        var trackIds = new List<string>(initialCapacity);
+
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            cmd.CommandText = $"""
-                SELECT {TrackColumnsSelect}
-                FROM Tracks t
-                WHERE t.Id LIKE 'local_%' OR t.IsDownloaded = 1
-                ORDER BY t.UpdatedAt DESC
-                LIMIT @limit OFFSET @offset;
-                """;
-            AddParameter(cmd, "@limit", limit);
-            AddParameter(cmd, "@offset", offset);
-
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                models.Add(ReadTrackInfo(reader));
+                var track = ReadTrackInfo(reader);
+                models.Add(track);
+                trackIds.Add(track.Id);
             }
         }
 
         if (models.Count > 0)
         {
-            var trackIds = models.Select(m => m.Id).ToList();
             var likedTrackIds = await GetLikedTrackIdsSubsetAsync(connection, trackIds, ownerId, ct).ConfigureAwait(false);
-
             for (int i = 0; i < models.Count; i++)
             {
                 models[i].IsLiked = likedTrackIds.Contains(models[i].Id);

@@ -31,7 +31,7 @@ namespace LMP.Core.Audio.Interfaces;
 /// </code>
 /// <para>All callbacks are invoked from a background thread — implementations must not block.</para>
 /// </summary>
-public interface IPlaybackBackend : IDisposable
+internal interface IPlaybackBackend : IDisposable
 {
     /// <summary>
     /// Initial initialization of the backend.
@@ -189,4 +189,4 @@ public interface IPlaybackBackend : IDisposable
 /// </summary>
 /// <param name="buffer">Buffer to fill (float32, interleaved).</param>
 /// <returns>Number of frames filled (samples / channels).</returns>
-public delegate int AudioDataCallback(Span<float> buffer);
+internal delegate int AudioDataCallback(Span<float> buffer);

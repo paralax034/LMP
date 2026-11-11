@@ -10,7 +10,7 @@ namespace LMP.Core.Audio.Helpers;
 /// High-precision 10-band real-time spectrum analyzer (31 Hz .. 16 kHz) + vocal and kick transient detector
 /// based on isolated <see cref="BiquadFilterMath"/> filters with 0 B allocations.
 /// </summary>
-public sealed class AudioSpectrumAnalyzer
+internal sealed class AudioSpectrumAnalyzer
 {
     private const int BandCount = 10;
 

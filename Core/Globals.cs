@@ -7,7 +7,6 @@ namespace LMP;
 public static class G
 {
     public const string AppId = "LMP";
-    public const string AppName = "Lite Music Player";
     public const string GitHubUrl = "https://github.com/paralax034/LMP";
 
     /// <summary>

@@ -158,7 +158,7 @@ public sealed class PlaylistClient(HttpClient http)
     /// Asynchronously gets playlist videos in batches.
     /// Performs fallback to Next response if browse result is empty.
     /// </summary>
-    public async IAsyncEnumerable<Batch<TrackInfo>> GetVideoBatchesAsync(
+    private async IAsyncEnumerable<Batch<TrackInfo>> GetVideoBatchesAsync(
         PlaylistId playlistId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

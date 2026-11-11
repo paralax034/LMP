@@ -98,7 +98,7 @@ public sealed partial class PlayerContext
     /// <summary>
     /// Extracts the current InnerTube Web client version from the player code.
     /// </summary>
-    public static string? ExtractClientVersion(string baseJs)
+    private static string? ExtractClientVersion(string baseJs)
     {
         if (string.IsNullOrEmpty(baseJs)) return null;
 
@@ -145,6 +145,9 @@ public sealed partial class PlayerContext
     {
         lock (_prepLock)
         {
+            if (string.IsNullOrEmpty(BaseJs) && PreprocessedJs is null)
+                return;
+
             BaseJs = string.Empty;
             PreprocessedJs = null;
             Log.Debug($"[PlayerContext] Discarded raw base.js and preprocessed script from memory for player version: {Version}.");
@@ -160,7 +163,7 @@ public sealed partial class PlayerContext
     /// <summary>
     /// Asynchronously writes the optimized JS version and STS timestamp to disk.
     /// </summary>
-    public async Task SavePreprocessedCacheAsync()
+    private async Task SavePreprocessedCacheAsync()
     {
         try
         {

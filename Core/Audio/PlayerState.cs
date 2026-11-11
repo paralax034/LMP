@@ -6,7 +6,7 @@ namespace LMP.Core.Audio;
 /// State machine states of the player.
 /// Transitions are strictly defined in AudioPlayerStateMachine.
 /// </summary>
-public enum PlayerState
+internal enum PlayerState
 {
     /// <summary>Initial state, nothing is loaded.</summary>
     Idle,
@@ -36,7 +36,7 @@ public enum PlayerState
 /// <summary>
 /// Valid state transitions.
 /// </summary>
-public static class PlayerStateTransitions
+internal static class PlayerStateTransitions
 {
     public static bool CanTransition(PlayerState from, PlayerState to)
     {

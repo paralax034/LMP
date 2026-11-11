@@ -117,7 +117,7 @@ public partial class YoutubeProvider : IDisposable
     /// Recreates the internal <see cref="YoutubeClient"/> based on the current ApiClient from <see cref="NetworkManager"/>.
     /// Called when switching accounts, changing network interfaces (VPN), or updating proxy settings.
     /// </summary>
-    public void ReloadClient()
+    private void ReloadClient()
     {
         if (_disposed) return;
 
@@ -637,8 +637,7 @@ public partial class YoutubeProvider : IDisposable
             if (AudioSourceFactory.GlobalCache.IsFullyCached(cacheKey))
             {
                 var entry = AudioSourceFactory.GlobalCache.GetCacheInfo(cacheKey);
-                // Sanity check: filter out truncated files whose size does not match the duration
-                if (entry != null && (track.Duration <= TimeSpan.FromSeconds(5) || entry.TotalSize >= (long)(track.Duration.TotalSeconds * entry.Bitrate * 1000.0 / 8.0 * 0.50)))
+                if (entry != null && AudioEngine.IsCacheSizePlausible(entry, track.Duration))
                 {
                     var d = CreateDescriptorFromCacheEntry(track.Id, entry);
                     Log.Info($"[YouTube] RefreshStreamAsync FULL CACHE (exact) -> {d}");
@@ -650,7 +649,7 @@ public partial class YoutubeProvider : IDisposable
         if (!forceRefresh && !requested.HasFormat)
         {
             var anyCache = AudioSourceFactory.FindAnyCachedTrack(rawVideoId);
-            if (anyCache != null && (track.Duration <= TimeSpan.FromSeconds(5) || anyCache.Value.Entry.TotalSize >= (long)(track.Duration.TotalSeconds * anyCache.Value.Entry.Bitrate * 1000.0 / 8.0 * 0.50)))
+            if (anyCache != null && AudioEngine.IsCacheSizePlausible(anyCache.Value.Entry, track.Duration))
             {
                 var d = CreateDescriptorFromCacheEntry(track.Id, anyCache.Value.Entry);
                 Log.Info($"[YouTube] RefreshStreamAsync FULL CACHE (any) -> {d}");
@@ -1027,11 +1026,11 @@ public partial class YoutubeProvider : IDisposable
     /// <summary>
     /// Performs a streaming search for music content on YouTube.
     /// </summary>
-    public async IAsyncEnumerable<List<TrackInfo>> SearchStreamingAsync(
-     string query,
-     int maxResults = 300,
-     SearchFilter filter = SearchFilter.MusicSong,
-     [EnumeratorCancellation] CancellationToken ct = default)
+    private async IAsyncEnumerable<List<TrackInfo>> SearchStreamingAsync(
+        string query,
+        int maxResults = 300,
+        SearchFilter filter = SearchFilter.MusicSong,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query))
             yield break;
@@ -1895,25 +1894,6 @@ public partial class YoutubeProvider : IDisposable
 
     #region Diagnostic Logging & Cache Clear
 
-    private static string SanitizeFileName(string name)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-
-        Span<char> buffer = name.Length <= 256
-            ? stackalloc char[name.Length]
-            : new char[name.Length];
-
-        int pos = 0;
-        for (int i = 0; i < name.Length && pos < 200; i++)
-        {
-            var c = name[i];
-            if (Array.IndexOf(invalid, c) < 0)
-                buffer[pos++] = c;
-        }
-
-        return new string(buffer[..pos]);
-    }
-
     /// <summary>
     /// Attempts to quickly retrieve a stream descriptor from the RAM manifest cache without disk or network requests.
     /// Supports both full trackId (with yt_ prefix) and clean 11-character videoId.
@@ -2001,10 +1981,4 @@ public sealed partial class StreamOption : ObservableObject
 
     [ObservableProperty] public partial bool IsDownloaded { get; set; }
     [ObservableProperty] public partial bool IsActive { get; set; }
-}
-
-public sealed class HomeSection
-{
-    public string Title { get; set; } = "";
-    public List<TrackInfo> Tracks { get; set; } = [];
 }

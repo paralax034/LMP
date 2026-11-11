@@ -541,7 +541,7 @@ public sealed class EqualizerProcessor
     private volatile bool _isBypassed = true;
     private volatile bool _hasPositiveBoost;
 
-    public EqualizerProcessor(int sampleRate, int channels)
+    internal EqualizerProcessor(int sampleRate, int channels)
     {
         _sampleRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
         _channels = Math.Max(1, channels);
@@ -620,10 +620,10 @@ public sealed class EqualizerProcessor
         };
     }
 
-    public bool IsBypassed => _isBypassed;
-    public bool HasPositiveBoost => _hasPositiveBoost;
+    internal bool IsBypassed => _isBypassed;
+    internal bool HasPositiveBoost => _hasPositiveBoost;
 
-    public void Configure(
+    internal void Configure(
         bool enabled,
         ReadOnlySpan<float> bandGainsDb,
         float preampDb = 0f,
@@ -737,7 +737,7 @@ public sealed class EqualizerProcessor
         return true;
     }
 
-    public void SnapToTarget()
+    internal void SnapToTarget()
     {
         SyncPublishedParameters();
         _currentCoeffs = _targetCoeffs;
@@ -747,13 +747,13 @@ public sealed class EqualizerProcessor
         _hasPositiveBoost = _targetHasPositiveBoost;
     }
 
-    public void Reset()
+    internal void Reset()
     {
         for (int i = 0; i < BandCount; i++)
             _states[i].Reset();
     }
 
-    public unsafe void Process(Span<float> samples)
+    internal unsafe void Process(Span<float> samples)
     {
         if (samples.IsEmpty) return;
 

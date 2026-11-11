@@ -1,6 +1,6 @@
 namespace LMP.Core.Audio.Parsers;
 
-public sealed partial class Mp4ContainerParser
+internal sealed partial class Mp4ContainerParser
 {
     /// <summary>
     /// Parses the <c>moov</c> box and its child elements.

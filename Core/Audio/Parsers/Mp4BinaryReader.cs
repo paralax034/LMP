@@ -14,7 +14,7 @@ namespace LMP.Core.Audio.Parsers;
 /// matching via numeric constants — no string allocations.</para>
 /// <para><b>Thread safety:</b> Not thread-safe. One instance per parser.</para>
 /// </remarks>
-public sealed class Mp4BinaryReader
+internal sealed class Mp4BinaryReader
 {
     #region FourCC Constants
 
