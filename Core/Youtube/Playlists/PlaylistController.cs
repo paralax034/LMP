@@ -8,7 +8,7 @@ using LMP.Core.Youtube.Videos;
 
 namespace LMP.Core.Youtube.Playlists;
 
-internal class PlaylistController(HttpClient http)
+internal sealed class PlaylistController(HttpClient http)
 {
     private static readonly MediaTypeHeaderValue JsonContentType = new("application/json");
 

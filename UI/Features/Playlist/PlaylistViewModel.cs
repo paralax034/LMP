@@ -164,7 +164,6 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     #endregion
 
     public PlaylistViewModel(
-        AudioEngine audio,
         DownloadService downloads,
         DialogService dialog,
         TrackViewModelFactory vmFactory,
@@ -174,7 +173,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         PlaylistEditService editService,
         PlayerControlService playerControl,
         CookieAuthService auth)
-        : base(audio, downloads, vmFactory, playerControl)
+        : base(downloads, vmFactory, playerControl)
     {
         _dialog = dialog;
         _dominantColor = dominantColor;
@@ -553,28 +552,15 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     private async Task PlayFromPlaylistAsync(TrackInfo track)
     {
-        try
-        {
-            IsShuffleActive = false;
-            var allTracks = GetPlaylistTracksSnapshot();
+        IsShuffleActive = false;
+        var allTracks = GetPlaylistTracksSnapshot();
 
-            if (_items.IndexOfTrackId(track.Id) < 0)
-            {
-                allTracks = [track, .. allTracks];
-            }
-
-            await PlayerControl.PlayPlaylistAsync(
-                _currentPlaylistId,
-                allTracks,
-                track,
-                enableShuffle: null,
-                playlistName: PlaylistName);
-            _ = LibService.AddToRecentlyPlayedAsync(track);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"[Playlist] PlayFromPlaylist error: {ex.Message}");
-        }
+        await PlayerControl.PlayPlaylistAsync(
+            _currentPlaylistId,
+            allTracks,
+            track,
+            enableShuffle: null,
+            playlistName: PlaylistName);
     }
 
     private Task DownloadAllAsync()
@@ -605,7 +591,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     {
         var tracks = GetPlaylistTracksSnapshot();
         if (tracks.Count == 0) return;
-        Audio.EnqueuePlaylistWithNotification(tracks, PlaylistName);
+        PlayerControl.EnqueuePlaylistWithNotification(tracks, PlaylistName);
     }
 
     private void OnPlaybackPurityChanged(string? activeId, bool isPure, bool isPlayingPure) => UpdatePlaybackState();

@@ -10,7 +10,7 @@ namespace LMP.Core.Data.Repositories;
 /// Implemented using raw ADO.NET for full Native AOT compatibility without LINQ trees.
 /// JSON processing strictly uses <see cref="AppJsonContext"/> metadata, ensuring identical behavior in Debug and Release.
 /// </summary>
-public sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISettingsRepository
+internal sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISettingsRepository
 {
     private readonly ISqliteConnectionFactory _factory = factory;
 

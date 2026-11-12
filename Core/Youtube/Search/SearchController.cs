@@ -7,7 +7,7 @@ using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Youtube.Search;
 
-internal class SearchController(HttpClient http)
+internal sealed class SearchController(HttpClient http)
 {
     private static readonly FrozenDictionary<SearchFilter, string> MusicFilterParams = new Dictionary<SearchFilter, string>
     {

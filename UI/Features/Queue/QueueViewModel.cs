@@ -29,14 +29,13 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     /// Initializes a new instance of the <see cref="QueueViewModel"/> class.
     /// </summary>
     public QueueViewModel(
-        AudioEngine audio,
         PlaylistService playlistService,
         CookieAuthService auth,
         DialogService dialog,
         TrackViewModelFactory vmFactory,
         DownloadService downloads,
         PlayerControlService? playerControl = null)
-        : base(audio, downloads, vmFactory, playerControl)
+        : base(downloads, vmFactory, playerControl)
     {
         _playlistService = playlistService;
         _auth = auth;
@@ -49,7 +48,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         DownloadAllCommand = new AsyncRelayCommand(DownloadAllAsync, () => TotalCount > 0);
         SaveQueueToPlaylistCommand = new AsyncRelayCommand(SaveQueueToPlaylistAsync, () => TotalCount > 0);
 
-        Audio.OnQueueChanged += OnAudioQueueChanged;
+        PlayerControl.QueueChanged += OnAudioQueueChanged;
 
         SyncWithAudioQueue();
         IsLoading = false;
@@ -175,7 +174,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     {
         if (disposing)
         {
-            Audio.OnQueueChanged -= OnAudioQueueChanged;
+            PlayerControl.QueueChanged -= OnAudioQueueChanged;
         }
 
         base.Dispose(disposing);

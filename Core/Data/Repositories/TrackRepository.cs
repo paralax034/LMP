@@ -11,7 +11,7 @@ namespace LMP.Core.Data.Repositories;
 /// Implementation of the track management repository in SQLite storage.
 /// Operates via asynchronous ADO.NET commands (Microsoft.Data.Sqlite) without blocking calling threads.
 /// </summary>
-public sealed partial class TrackRepository : ITrackRepository
+internal sealed partial class TrackRepository : ITrackRepository
 {
     private static readonly string[] ParameterNames500 = GenerateParameterNames(500);
     private static readonly string QueryChunk500 = $"SELECT {TrackColumnsSelect} FROM Tracks t WHERE t.Id IN ({string.Join(',', ParameterNames500)});";

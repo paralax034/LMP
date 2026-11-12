@@ -23,7 +23,6 @@ public sealed partial class LibraryViewModel : ViewModelBase
 
     #region Dependencies
 
-    private readonly AudioEngine _audio;
     private readonly LibraryService _library;
     private readonly PlaylistService _playlistService;
     private readonly PlaylistSyncService _playlistSync;
@@ -116,12 +115,10 @@ public sealed partial class LibraryViewModel : ViewModelBase
         CookieAuthService auth,
         MainWindowViewModel mainWindow,
         DialogService dialog,
-        AudioEngine audio,
         NotificationService notifications,
         PlaylistEditService editService,
         PlayerControlService playerControl)
     {
-        _audio = audio;
         _library = library;
         _playlistService = playlistService;
         _playlistSync = playlistSync;
@@ -1165,7 +1162,7 @@ public sealed partial class LibraryViewModel : ViewModelBase
     private async Task AddPlaylistToQueueAsync(Core.Models.Playlist p)
     {
         var tracks = await _playlistService.GetPlaylistTracksAsync(p.Id);
-        _audio.EnqueuePlaylistWithNotification(tracks, p.Name);
+        _playerControl.EnqueuePlaylistWithNotification(tracks, p.Name);
     }
 
     private async Task PlayPlaylistFromCardAsync(Core.Models.Playlist p)

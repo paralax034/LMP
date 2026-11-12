@@ -43,8 +43,12 @@ internal sealed class StreamUrlEgressGuard
         if (previous is null || string.Equals(previous, ip, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        Log.Warn($"[EgressGuard] YouTube-visible egress IP changed: {previous} -> {ip}. " +
-                 "Cached stream URLs bound to the previous IP will be rejected.");
+        if (ReferenceEquals(this, Shared))
+        {
+            Log.Warn($"[EgressGuard] YouTube-visible egress IP changed: {previous} -> {ip}. " +
+                     "Cached stream URLs bound to the previous IP will be rejected.");
+        }
+
         return true;
     }
 
@@ -54,6 +58,12 @@ internal sealed class StreamUrlEgressGuard
     /// <param name="url">Cached videoplayback URL.</param>
     /// <returns><c>false</c> only if both IPs are known and differ.</returns>
     internal bool IsBoundToCurrentEgress(string? url) => IsBoundTo(url, ObservedIp);
+
+    /// <summary>
+    /// Restores or resets the observed external IP address (used for deterministic test isolation).
+    /// </summary>
+    /// <param name="ip">The previously saved IP address, or <c>null</c> to reset.</param>
+    internal void RestoreObservedIp(string? ip) => Volatile.Write(ref _observedIp, ip);
 
     /// <summary>
     /// Compares the URL binding IP with the observed external IP. An unknown side is not considered a mismatch.

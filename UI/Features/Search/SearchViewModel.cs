@@ -390,13 +390,13 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     #region Constructor
 
     public SearchViewModel(
-        AudioEngine audio,
         DownloadService downloads,
         TrackViewModelFactory vmFactory,
         YoutubeProvider youtube,
         SearchCacheService searchCache,
-        ImageCacheService imageCache)
-        : base(audio, downloads, vmFactory)
+        ImageCacheService imageCache,
+        PlayerControlService playerControl)
+        : base(downloads, vmFactory, playerControl)
     {
         _youtube = youtube;
         _searchCache = searchCache;
@@ -537,8 +537,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     protected override void OnPlay(TrackInfo track)
     {
         if (_isDisposed) return;
-        _ = Audio.StartQueueAsync([track], track);
-        _ = LibService.AddToRecentlyPlayedAsync(track);
+        _ = PlayerControl.PlayTrackAsync(track);
     }
 
     protected override async Task<List<TrackInfo>> FetchMoreFromNetworkAsync(CancellationToken ct)
@@ -802,7 +801,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
         await InitializeItemsAsync(tracks, canFetchMore: false);
 
         if (track != null && LibService.Settings.AutoPlayOnUrlPaste)
-            _ = Audio.PlayTrackAsync(track);
+            _ = PlayerControl.PlayTrackAsync(track);
 
         HasResults = tracks.Count > 0;
         if (!HasResults) ErrorMessage = SL["Search_NoResults"];
@@ -823,7 +822,14 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             await InitializeItemsAsync(tracks, canFetchMore: false);
 
             if (tracks.Count > 0 && LibService.Settings.AutoPlayOnUrlPaste)
-                _ = Audio.StartQueueAsync(tracks, tracks[0]);
+            {
+                _ = PlayerControl.PlayPlaylistAsync(
+                    string.Empty,
+                    tracks,
+                    tracks[0],
+                    enableShuffle: false,
+                    playlistName: playlist?.Name);
+            }
 
             HasResults = tracks.Count > 0;
             if (!HasResults) ErrorMessage = SL["Search_NoResults"];

@@ -10,7 +10,7 @@ namespace LMP.Core.Data.Repositories;
 /// Implementation of persistent notification storage based on pure ADO.NET SQLite.
 /// Fully compatible with Native AOT and aggressive trimming builds (zero reflection).
 /// </summary>
-public sealed class NotificationRepository : INotificationRepository
+internal sealed class NotificationRepository : INotificationRepository
 {
     private readonly ISqliteConnectionFactory _connectionFactory;
 

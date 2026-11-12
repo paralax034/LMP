@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
-using LMP.Core.Audio.Helpers;
 using LMP.Core.Youtube.Exceptions;
 using LMP.UI.Controls;
 

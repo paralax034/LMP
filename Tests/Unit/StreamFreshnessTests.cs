@@ -1,7 +1,7 @@
-using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Sources;
 using LMP.Tests.Framework;
+using static LMP.Tests.Unit.StreamRefreshResilienceTests;
 using RefreshOutcome = LMP.Core.Audio.Sources.CachingStreamSource.RefreshOutcome;
 
 namespace LMP.Tests.Unit;
@@ -114,6 +114,7 @@ public static class StreamFreshnessTests
     [TestMethod(TestCategory.Unit, "403 Refresh Outcomes: NoUrl Network Deferral, SameUrl Budget & SessionCache Purge", Group = TestGroups.Network, Order = 4)]
     public static async Task Test403RefreshOutcomesAndSessionCachePurgeAsync()
     {
+        var savedObservedIp = Core.Youtube.Utils.StreamUrlEgressGuard.Shared.ObservedIp;
         var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         const string trackId = "yt_403_edge_test";
         var initialUrl = $"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=initialNToken12&itag=251&clen=1000000";
@@ -212,6 +213,7 @@ public static class StreamFreshnessTests
         finally
         {
             Core.Audio.Http.SessionCacheStore.Invalidate(trackId);
+            Core.Youtube.Utils.StreamUrlEgressGuard.Shared.RestoreObservedIp(savedObservedIp);
         }
     }
 
@@ -242,29 +244,5 @@ public static class StreamFreshnessTests
 
         TestAssert.Equal(0, Volatile.Read(ref providerCalls),
             "Resume freshness check must not issue a TTL refresh while the source has no URL yet");
-    }
-
-    private sealed class TempCacheManager : IDisposable
-    {
-        private readonly string _tempDir;
-        public AudioCacheManager Manager { get; }
-
-        public TempCacheManager()
-        {
-            _tempDir = Path.Combine(Path.GetTempPath(), $"lmp_cache_test_{Guid.NewGuid():N}");
-            Directory.CreateDirectory(_tempDir);
-            Manager = new AudioCacheManager(_tempDir, maxCacheSizeMb: 16);
-        }
-
-        public void Dispose()
-        {
-            try
-            {
-                Manager.Dispose();
-                if (Directory.Exists(_tempDir))
-                    Directory.Delete(_tempDir, recursive: true);
-            }
-            catch { }
-        }
     }
 }

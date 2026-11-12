@@ -10,7 +10,7 @@ namespace LMP.Core.Data.Repositories;
 /// Completely devoid of LINQ to Entities runtime expression generation to guarantee Native AOT compatibility.
 /// Provides strict account-level playlist isolation.
 /// </summary>
-public sealed class PlaylistRepository : IPlaylistRepository
+internal sealed class PlaylistRepository : IPlaylistRepository
 {
     private readonly ISqliteConnectionFactory _factory;
 

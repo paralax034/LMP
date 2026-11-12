@@ -8,18 +8,18 @@ public static class AudioEngineExtensions
     /// <summary>
     /// Safely adds a list of tracks to the queue with duplicate filtering and displays a toast hint.
     /// </summary>
-    /// <param name="audio">The audio engine instance.</param>
+    /// <param name="playerControl">The player control service instance.</param>
     /// <param name="tracks">The list of tracks to add.</param>
     /// <param name="playlistName">The source (playlist) name for logging.</param>
     public static void EnqueuePlaylistWithNotification(
-        this AudioEngine audio,
+        this PlayerControlService playerControl,
         IEnumerable<TrackInfo> tracks,
         string playlistName)
     {
         var trackList = tracks as List<TrackInfo> ?? [.. tracks];
         if (trackList.Count == 0) return;
 
-        int addedCount = audio.EnqueueRangeUnique(trackList);
+        int addedCount = playerControl.EnqueueRangeUnique(trackList);
         int skippedCount = trackList.Count - addedCount;
 
         var L = LocalizationService.Instance;

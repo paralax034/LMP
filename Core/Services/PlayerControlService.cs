@@ -77,6 +77,7 @@ public sealed class PlayerControlService : IDisposable
     public event Action<TrackInfo?>? CurrentTrackChanged;
     public event Action<RepeatMode>? RepeatModeChanged;
     public event Action<bool>? ShuffleEnabledChanged;
+    public event Action? QueueChanged;
     public event Action<int>? QueueCountChanged;
     public event Action<int>? VolumeChanged;
 
@@ -214,40 +215,80 @@ public sealed class PlayerControlService : IDisposable
     }
 
     /// <summary>
-    /// Adds a range of unique tracks to the playback queue via <see cref="AudioEngine"/>.
+    /// Validates, registers, and adds a range of unique tracks to the playback queue.
     /// </summary>
-    public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks) =>
-        _audio.EnqueueRangeUnique(tracks);
+    public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks)
+    {
+        if (_disposed || tracks is null) return 0;
+
+        if (_trackRegistry != null)
+        {
+            foreach (var track in tracks)
+            {
+                if (track != null)
+                    _trackRegistry.RegisterOrUpdate(track);
+            }
+        }
+
+        return _audio.EnqueueRangeUnique(tracks);
+    }
 
     /// <summary>
-    /// Removes a track from the playback queue via <see cref="AudioEngine"/>.
+    /// Safely removes a track from the playback queue.
     /// </summary>
-    public void RemoveFromQueue(TrackInfo track) =>
+    public void RemoveFromQueue(TrackInfo track)
+    {
+        if (_disposed || track is null) return;
         _audio.RemoveFromQueue(track);
+    }
 
     /// <summary>
-    /// Starts playback of a specific track via <see cref="AudioEngine"/>.
+    /// Coordinates single-track playback: cancels pending playlist live-sync, registers the track,
+    /// records playback history, and starts playback with an error boundary.
     /// </summary>
-    public Task PlayTrackAsync(TrackInfo track) =>
-        _audio.PlayTrackAsync(track);
+    public async Task PlayTrackAsync(TrackInfo track)
+    {
+        if (_disposed || track is null) return;
+
+        CancelPendingLiveSync();
+
+        var canonical = _trackRegistry?.RegisterOrUpdate(track) ?? track;
+        _ = _library.AddToRecentlyPlayedAsync(canonical);
+
+        try
+        {
+            await _audio.PlayTrackAsync(canonical).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlayerControl] PlayTrack error for '{canonical.Id}': {ex.Message}");
+        }
+    }
 
     /// <summary>
-    /// Clears the playback queue (preserving the currently playing track if any).
+    /// Cancels active playlist synchronization and clears the playback queue.
     /// </summary>
     public void ClearQueue()
     {
+        if (_disposed) return;
+
+        CancelPendingLiveSync();
         _audio.ClearQueue();
         Log.Debug("[PlayerControl] Queue cleared");
     }
 
     /// <summary>
-    /// Moves a track within the playback queue from one index to another.
+    /// Moves a track within the playback queue after validating indices.
     /// </summary>
-    public void MoveQueueItem(int from, int to) =>
+    public void MoveQueueItem(int from, int to)
+    {
+        if (_disposed || from == to || from < 0 || to < 0) return;
         _audio.MoveQueueItem(from, to);
+    }
 
     public void ShuffleQueue()
     {
+        if (_disposed) return;
         _audio.ShuffleQueue();
         Log.Debug("[PlayerControl] Queue shuffled");
     }
@@ -258,6 +299,8 @@ public sealed class PlayerControlService : IDisposable
     /// </summary>
     public void ToggleAutoShuffle()
     {
+        if (_disposed) return;
+
         bool newState = !_audio.ShuffleEnabled;
         _audio.ShuffleEnabled = newState;
 
@@ -289,10 +332,10 @@ public sealed class PlayerControlService : IDisposable
     }
 
     /// <summary>
-    /// Starts playlist playback while registering its <see cref="QueueSource"/> atomically inside <see cref="AudioEngine"/>.
-    /// Guarantees the presence of the start track in the playback queue even if it was deleted externally from the data source.
+    /// Starts playlist or multi-track playback while registering its <see cref="QueueSource"/> atomically inside <see cref="AudioEngine"/>.
+    /// Guarantees the presence of the start track in the playback queue and records history.
     /// </summary>
-    /// <param name="playlistId">Playlist ID.</param>
+    /// <param name="playlistId">Playlist ID (or empty string for an ad-hoc track list).</param>
     /// <param name="tracks">Full ordered list of playlist tracks.</param>
     /// <param name="startTrack">Track to start playback from (defaults to the first track).</param>
     /// <param name="enableShuffle">Whether to enable shuffle mode.</param>
@@ -304,7 +347,7 @@ public sealed class PlayerControlService : IDisposable
         bool? enableShuffle = null,
         string? playlistName = null)
     {
-        if (tracks.Count == 0 && startTrack == null) return;
+        if (_disposed || (tracks.Count == 0 && startTrack == null)) return;
 
         CancelPendingLiveSync();
 
@@ -328,8 +371,19 @@ public sealed class PlayerControlService : IDisposable
                                    ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)]
                                    : effectiveTracks[0]);
 
-        await _audio.StartQueueAsync(effectiveTracks, targetStartTrack, playlistId, playlistName)
-            .ConfigureAwait(false);
+        _ = _library.AddToRecentlyPlayedAsync(targetStartTrack);
+
+        string? normalizedPlaylistId = string.IsNullOrWhiteSpace(playlistId) ? null : playlistId;
+
+        try
+        {
+            await _audio.StartQueueAsync(effectiveTracks, targetStartTrack, normalizedPlaylistId, playlistName)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlayerControl] PlayPlaylist error for '{playlistId}': {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -608,6 +662,7 @@ public sealed class PlayerControlService : IDisposable
     {
         QueueCount = _audio.Queue.Count;
         QueueCountChanged?.Invoke(QueueCount);
+        QueueChanged?.Invoke();
 
         SyncSourceAndPurityFromEngine(raiseEvent: true);
     }

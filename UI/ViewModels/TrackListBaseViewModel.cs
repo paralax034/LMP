@@ -11,7 +11,6 @@ namespace LMP.UI.ViewModels;
 public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterable
 {
     protected readonly LibraryService LibService;
-    protected readonly AudioEngine Audio;
     protected readonly DownloadService Downloads;
     protected readonly PlayerControlService PlayerControl;
     protected readonly TrackViewModelFactory VmFactory;
@@ -78,12 +77,10 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
     protected override bool HandlesAccountChanges => true;
 
     protected TrackListBaseViewModel(
-        AudioEngine audio,
         DownloadService downloads,
         TrackViewModelFactory vmFactory,
         PlayerControlService? playerControl = null)
     {
-        Audio = audio;
         Downloads = downloads;
         VmFactory = vmFactory;
         PlayerControl = playerControl ?? AppEntry.Services.GetRequiredService<PlayerControlService>();

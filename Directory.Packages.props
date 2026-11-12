@@ -7,7 +7,7 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <!-- Avalonia packages must only be updated synchronously -->
-    <AvaloniaVersion>12.1.5</AvaloniaVersion>
+    <AvaloniaVersion>12.1.6</AvaloniaVersion>
   </PropertyGroup>
 
   <ItemGroup Label="Avalonia">
@@ -22,13 +22,13 @@
 
   <ItemGroup Label="MVVM &amp; Extensions">
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Data &amp; Security">
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.14" />
-    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
-    <PackageVersion Include="MemoryPack" Version="1.21.4" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="11.0.0" />
+    <PackageVersion Include="MemoryPack" Version="1.22.0" />
   </ItemGroup>
 
   <ItemGroup Label="Audio &amp; Scripting">

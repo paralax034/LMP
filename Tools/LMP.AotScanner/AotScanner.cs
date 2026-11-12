@@ -22,7 +22,8 @@ public static partial class AotScanner
         Field,
         Event,
         PrivateCandidate,
-        DeadInterface
+        DeadInterface,
+        LayerViolation
     }
 
     private readonly record struct SourceFile(
@@ -115,6 +116,7 @@ public static partial class AotScanner
         Console.WriteLine($"  Dead Methods:              {stats.DeadMethods:N0}");
         Console.WriteLine($"  Dead Fields / Constants:   {stats.DeadFields:N0}");
         Console.WriteLine($"  Dead Events:               {stats.DeadEvents:N0}");
+        Console.WriteLine($"  Layer Violations:          {stats.LayerViolations:N0}");
         Console.WriteLine($"  Over-exposed Public APIs:  {stats.PrivateCandidates:N0}");
         Console.WriteLine($"  Duplicate Code Clusters:   {duplicates.Count:N0}");
         Console.WriteLine($"  Total Hard Defects:        {stats.TotalDefects:N0}");
@@ -500,7 +502,7 @@ public static partial class AotScanner
         return sb.ToString();
     }
 
-    private static (int FilesCount, int DeadTypes, int DeadMethods, int DeadFields, int DeadEvents, int PrivateCandidates, int TotalDefects)
+    private static (int FilesCount, int DeadTypes, int DeadMethods, int DeadFields, int DeadEvents, int LayerViolations, int PrivateCandidates, int TotalDefects)
         AnalyzeAndWriteReport(
             string assemblyPath,
             string[] survivedSymbols,
@@ -631,6 +633,8 @@ public static partial class AotScanner
         }
 
         var deadEntries = new ConcurrentBag<DeadCodeEntry>();
+
+        DetectLayerViolations(sources, deadEntries);
 
         // --- 0. INTERFACE CHECK ---
         foreach (var (fullIfaceName, cleanIfaceName) in interfaceNames)
@@ -874,8 +878,9 @@ public static partial class AotScanner
         int deadMethodsCount = deadEntries.Count(x => x.Kind == MemberKind.Method);
         int deadFieldsCount = deadEntries.Count(x => x.Kind == MemberKind.Field);
         int deadEventsCount = deadEntries.Count(x => x.Kind == MemberKind.Event);
+        int layerViolationsCount = deadEntries.Count(x => x.Kind == MemberKind.LayerViolation);
         int privateCandidatesCount = deadEntries.Count(x => x.Kind == MemberKind.PrivateCandidate);
-        int totalHardDefects = deadTypesCount + deadMethodsCount + deadFieldsCount + deadEventsCount;
+        int totalHardDefects = deadTypesCount + deadMethodsCount + deadFieldsCount + deadEventsCount + layerViolationsCount;
 
         var groupedByFile = deadEntries
             .GroupBy(x => x.FilePath, StringComparer.OrdinalIgnoreCase)
@@ -908,6 +913,7 @@ public static partial class AotScanner
             var methodsGroup = fileIssues.Where(x => x.Kind == MemberKind.Method).ToList();
             var fieldsGroup = fileIssues.Where(x => x.Kind == MemberKind.Field).ToList();
             var eventsGroup = fileIssues.Where(x => x.Kind == MemberKind.Event).ToList();
+            var layerGroup = fileIssues.Where(x => x.Kind == MemberKind.LayerViolation).ToList();
             var visGroup = fileIssues.Where(x => x.Kind == MemberKind.PrivateCandidate).ToList();
 
             if (typesGroup.Count > 0)
@@ -958,6 +964,18 @@ public static partial class AotScanner
                 writer.WriteLine();
             }
 
+            if (layerGroup.Count > 0)
+            {
+                writer.WriteLine("  [ARCHITECTURE LAYER VIOLATIONS]");
+                foreach (var entry in layerGroup)
+                {
+                    writer.WriteLine($"    {entry.FilePath}({entry.LineNumber}): [LAYER VIOLATION] {entry.MemberName} — {entry.Description}");
+                    if (!string.IsNullOrWhiteSpace(entry.LineText))
+                        writer.WriteLine($"      {entry.LineText}");
+                }
+                writer.WriteLine();
+            }
+
             if (visGroup.Count > 0)
             {
                 writer.WriteLine("  [OVER-EXPOSED PUBLIC API -> CAN BE PRIVATE]");
@@ -988,7 +1006,105 @@ public static partial class AotScanner
             }
         }
 
-        return (groupedByFile.Count, deadTypesCount, deadMethodsCount, deadFieldsCount, deadEventsCount, privateCandidatesCount, totalHardDefects);
+        return (groupedByFile.Count, deadTypesCount, deadMethodsCount, deadFieldsCount, deadEventsCount, layerViolationsCount, privateCandidatesCount, totalHardDefects);
+    }
+
+    private static readonly string[] ForbiddenCoreTypesInUi =
+    [
+        "TrackRepository",
+        "PlaylistRepository",
+        "SettingsRepository",
+        "NotificationRepository",
+        "LowMemorySqliteConnectionFactory",
+        "PlaylistController",
+        "PlaylistMutationController",
+        "PlaylistSyncController",
+        "SearchController"
+    ];
+
+    private static readonly string[] UiFeatureFoldersForAudioEngineRule =
+    [
+        @"UI\ViewModels\",
+        @"UI\Helpers\",
+        @"UI\Features\Home\",
+        @"UI\Features\Search\",
+        @"UI\Features\Library\",
+        @"UI\Features\Playlist\",
+        @"UI\Features\Queue\"
+    ];
+
+    private static void DetectLayerViolations(SourceFile[] sources, ConcurrentBag<DeadCodeEntry> deadEntries)
+    {
+        for (int s = 0; s < sources.Length; s++)
+        {
+            var src = sources[s];
+            if (!src.FilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string normRel = src.RelativePath.Replace('/', '\\');
+            if (!normRel.StartsWith(@"UI\", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            for (int f = 0; f < ForbiddenCoreTypesInUi.Length; f++)
+            {
+                string forbidden = ForbiddenCoreTypesInUi[f];
+                if (CountOccurrences(src.CodeOnlyContent, forbidden) == 0)
+                    continue;
+
+                for (int l = 0; l < src.Lines.Length; l++)
+                {
+                    string line = src.Lines[l];
+                    if (line.TrimStart().StartsWith("//", StringComparison.Ordinal))
+                        continue;
+
+                    if (CountOccurrences(line, forbidden) > 0)
+                    {
+                        deadEntries.Add(new DeadCodeEntry(
+                            src.FilePath,
+                            l + 1,
+                            line.Trim(),
+                            MemberKind.LayerViolation,
+                            forbidden,
+                            "UI",
+                            "UI layer must not reference internal Core repositories or controllers directly"));
+                        break;
+                    }
+                }
+            }
+
+            bool checkAudioEngine = false;
+            for (int d = 0; d < UiFeatureFoldersForAudioEngineRule.Length; d++)
+            {
+                if (normRel.StartsWith(UiFeatureFoldersForAudioEngineRule[d], StringComparison.OrdinalIgnoreCase))
+                {
+                    checkAudioEngine = true;
+                    break;
+                }
+            }
+
+            if (checkAudioEngine && CountOccurrences(src.CodeOnlyContent, "AudioEngine") > 0)
+            {
+                for (int l = 0; l < src.Lines.Length; l++)
+                {
+                    string line = src.Lines[l];
+                    if (line.TrimStart().StartsWith("//", StringComparison.Ordinal))
+                        continue;
+
+                    if (CountOccurrences(line, "AudioEngine") > 0)
+                    {
+                        deadEntries.Add(new DeadCodeEntry(
+                            src.FilePath,
+                            l + 1,
+                            line.Trim(),
+                            MemberKind.LayerViolation,
+                            "AudioEngine",
+                            "UI",
+                            "UI feature/list ViewModels must use PlayerControlService instead of AudioEngine directly"));
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     private static string ResolveEntitySimpleName(MetadataReader reader, EntityHandle handle)

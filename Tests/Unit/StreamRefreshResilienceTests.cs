@@ -581,7 +581,7 @@ public static class StreamRefreshResilienceTests
     /// <summary>
     /// Temporary disk cache removed after the test.
     /// </summary>
-    private sealed class TempCacheManager : IDisposable
+    internal sealed class TempCacheManager : IDisposable
     {
         private readonly string _tempDir;
 

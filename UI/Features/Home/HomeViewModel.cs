@@ -56,10 +56,10 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
         YoutubeProvider youtube,
         SearchCacheService searchCache,
         ImageCacheService imageCache,
-        AudioEngine audio,
         DownloadService downloads,
-        TrackViewModelFactory vmFactory)
-        : base(audio, downloads, vmFactory)
+        TrackViewModelFactory vmFactory,
+        PlayerControlService playerControl)
+        : base(downloads, vmFactory, playerControl)
     {
         _youtube = youtube;
         _searchCache = searchCache;
@@ -100,11 +100,8 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
 
     #region Base Implementation
 
-    protected override void OnPlay(TrackInfo track)
-    {
-        Task.Run(async () => await Audio.PlayTrackAsync(track));
-        _ = LibService.AddToRecentlyPlayedAsync(track);
-    }
+    protected override void OnPlay(TrackInfo track) =>
+        _ = PlayerControl.PlayTrackAsync(track);
 
     /// <inheritdoc />
     protected override void OnAccountChanged()
