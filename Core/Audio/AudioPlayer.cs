@@ -440,7 +440,19 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             await cachingSource.EnsureStreamFreshnessAsync(_lifetimeCts.Token).ConfigureAwait(false);
         }
 
-        int minBytes = pipeline.SampleRate * pipeline.Channels * sizeof(float) * ResumeMinBufferMs / 1000;
+        if (_session.IsStale(cmd.SessionId) || _activePipeline != pipeline || CurrentPlaybackIntent != PlaybackIntent.Play)
+            return;
+
+        int minSamples = pipeline.SampleRate * pipeline.Channels * ResumeMinBufferMs / 1000;
+        if (pipeline.BufferedSamples < minSamples)
+        {
+            await pipeline.WaitForBufferAsync(minSamples, ResumeWarmupTimeoutMs, _lifetimeCts.Token).ConfigureAwait(false);
+        }
+
+        if (_session.IsStale(cmd.SessionId) || _activePipeline != pipeline || CurrentPlaybackIntent != PlaybackIntent.Play)
+            return;
+
+        int minBytes = minSamples * sizeof(float);
         if (_sharedBackend.BufferedBytes < minBytes)
         {
             pipeline.ActivateFillLoop();

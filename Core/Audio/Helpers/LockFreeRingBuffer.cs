@@ -14,6 +14,7 @@ internal sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
     private T[]? _buffer;
     private readonly int _mask;
     private readonly int _capacity;
+    private volatile int _frameAlignment;
 
     private ProducerState _producer;
     private ConsumerState _consumer;
@@ -36,12 +37,16 @@ internal sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
         public int CachedHead;
     }
 
-    public LockFreeRingBuffer(int requestedCapacity)
+    public LockFreeRingBuffer(int requestedCapacity, int frameAlignment = 1)
     {
         _capacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(requestedCapacity, 16));
         _mask = _capacity - 1;
+        _frameAlignment = Math.Max(1, frameAlignment);
         _buffer = ArrayPool<T>.Shared.Rent(_capacity);
     }
+
+    internal void SetFrameAlignment(int frameAlignment) =>
+        _frameAlignment = Math.Max(1, frameAlignment);
 
     /// <summary>Current number of elements in the buffer.</summary>
     public int Count
@@ -98,6 +103,9 @@ internal sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
         }
 
         int toWrite = Math.Min(data.Length, available);
+        int align = _frameAlignment;
+        if (align > 1)
+            toWrite = align == 2 ? (toWrite & ~1) : (toWrite - (toWrite % align));
         if (toWrite == 0) return 0;
 
         ref T bufferBase = ref MemoryMarshal.GetArrayDataReference(buffer);
@@ -137,6 +145,9 @@ internal sealed class LockFreeRingBuffer<T> : IDisposable where T : unmanaged
         }
 
         int toRead = Math.Min(output.Length, count);
+        int align = _frameAlignment;
+        if (align > 1)
+            toRead = align == 2 ? (toRead & ~1) : (toRead - (toRead % align));
         if (toRead == 0) return 0;
 
         ref T bufferBase = ref MemoryMarshal.GetArrayDataReference(buffer);

@@ -23,6 +23,7 @@ namespace SharpJaad.AAC.Syntax
         //only allocated if needed
         private TNS _tns;
         private GainControl _gainControl;
+        private readonly int[] _spectralBuf = new int[4];
         private int[] _pulseOffset, _pulseAmp;
         private int _pulseCount;
         private int _pulseStartSWB;
@@ -160,7 +161,9 @@ namespace SharpJaad.AAC.Syntax
             int windowGroups = _info.GetWindowGroupCount();
             int maxSFB = _info.GetMaxSFB();
             //0: spectrum, 1: noise, 2: intensity
-            int[] offset = { _globalGain, _globalGain - 90, 0 };
+            int offset0 = _globalGain;
+            int offset1 = _globalGain - 90;
+            int offset2 = 0;
 
             int tmp;
             bool noiseFlag = true;
@@ -183,8 +186,8 @@ namespace SharpJaad.AAC.Syntax
                         case HCB.INTENSITY_HCB2:
                             for (; sfb < end; sfb++, idx++)
                             {
-                                offset[2] += HuffmanDec.DecodeScaleFactor(input) - SF_DELTA;
-                                tmp = Math.Min(Math.Max(offset[2], -155), 100);
+                                offset2 += HuffmanDec.DecodeScaleFactor(input) - SF_DELTA;
+                                tmp = Math.Min(Math.Max(offset2, -155), 100);
                                 _scaleFactors[idx] = ScaleFactorTable.SCALEFACTOR_TABLE[-tmp + SF_OFFSET];
                             }
                             break;
@@ -193,20 +196,20 @@ namespace SharpJaad.AAC.Syntax
                             {
                                 if (noiseFlag)
                                 {
-                                    offset[1] += input.ReadBits(9) - 256;
+                                    offset1 += input.ReadBits(9) - 256;
                                     noiseFlag = false;
                                 }
-                                else offset[1] += HuffmanDec.DecodeScaleFactor(input) - SF_DELTA;
-                                tmp = Math.Min(Math.Max(offset[1], -100), 155);
+                                else offset1 += HuffmanDec.DecodeScaleFactor(input) - SF_DELTA;
+                                tmp = Math.Min(Math.Max(offset1, -100), 155);
                                 _scaleFactors[idx] = -ScaleFactorTable.SCALEFACTOR_TABLE[tmp + SF_OFFSET];
                             }
                             break;
                         default:
                             for (; sfb < end; sfb++, idx++)
                             {
-                                offset[0] += HuffmanDec.DecodeScaleFactor(input) - SF_DELTA;
-                                if (offset[0] > 255) throw new AACException("scalefactor out of range: " + offset[0]);
-                                _scaleFactors[idx] = ScaleFactorTable.SCALEFACTOR_TABLE[offset[0] - 100 + SF_OFFSET];
+                                offset0 += HuffmanDec.DecodeScaleFactor(input) - SF_DELTA;
+                                if (offset0 > 255) throw new AACException("scalefactor out of range: " + offset0);
+                                _scaleFactors[idx] = ScaleFactorTable.SCALEFACTOR_TABLE[offset0 - 100 + SF_OFFSET];
                             }
                             break;
                     }
@@ -216,11 +219,11 @@ namespace SharpJaad.AAC.Syntax
 
         private void DecodeSpectralData(BitStream input)
         {
-            Arrays.Fill(_data, 0);
+            Array.Clear(_data);
             int maxSFB = _info.GetMaxSFB();
             int windowGroups = _info.GetWindowGroupCount();
             int[] offsets = _info.GetSWBOffsets();
-            int[] buf = new int[4];
+            int[] buf = _spectralBuf;
 
             int sfb, j, k, w, hcb, off, width, num;
             int groupOff = 0, idx = 0;
@@ -235,10 +238,7 @@ namespace SharpJaad.AAC.Syntax
                     width = offsets[sfb + 1] - offsets[sfb];
                     if (hcb == HCB.ZERO_HCB || hcb == HCB.INTENSITY_HCB || hcb == HCB.INTENSITY_HCB2)
                     {
-                        for (w = 0; w < groupLen; w++, off += 128)
-                        {
-                            Arrays.Fill(_data, off, off + width, 0);
-                        }
+                        continue;
                     }
                     else if (hcb == HCB.NOISE_HCB)
                     {

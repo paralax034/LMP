@@ -44,6 +44,7 @@ internal sealed class GainProcessor
     #region Fields
 
     private volatile float _targetGain = 1.0f;
+    private volatile int _channels = 2;
     private float _activeRampTarget = 1.0f;
     private float _currentGain = 1.0f;
     private float _rampStepPerFrame;
@@ -63,11 +64,23 @@ internal sealed class GainProcessor
         if (abs <= SoftKneeThreshold)
             return x;
 
+        float compressed = SoftCeilingPositive(abs);
+        return MathF.CopySign(compressed, x);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float SoftCeilingPositive(float abs)
+    {
         float u = (abs - SoftKneeThreshold) * InvSoftKneeHeadroom;
         float u2 = u * u;
         float sum = u + u2;
-        float compressed = SoftKneeThreshold + SoftKneeHeadroom * (sum * Helpers.SpanMathHelper.FastReciprocal(1.0f + sum));
-        return MathF.CopySign(compressed, x);
+        return SoftKneeThreshold + SoftKneeHeadroom * (sum * Helpers.SpanMathHelper.FastReciprocal(1.0f + sum));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void SetChannels(int channels)
+    {
+        _channels = Math.Max(1, channels);
     }
 
     /// <summary>
@@ -109,6 +122,7 @@ internal sealed class GainProcessor
         }
 
         ref float floatsRef = ref MemoryMarshal.GetReference(samples);
+        int chCount = Math.Max(1, _channels);
 
         if (_rampFramesRemaining > 0)
         {
@@ -116,9 +130,9 @@ internal sealed class GainProcessor
             float step = _rampStepPerFrame;
             int remaining = _rampFramesRemaining;
 
-            int i = 0;
-            int pairLimit = length & ~1;
-            for (; i < pairLimit; i += 2)
+            int frameCount = length / chCount;
+            int idx = 0;
+            for (int f = 0; f < frameCount; f++, idx += chCount)
             {
                 if (remaining > 0)
                 {
@@ -132,16 +146,40 @@ internal sealed class GainProcessor
                     current = target;
                 }
 
-                float s0 = Unsafe.Add(ref floatsRef, i) * current;
-                float s1 = Unsafe.Add(ref floatsRef, i + 1) * current;
-                Unsafe.Add(ref floatsRef, i) = SoftClipSample(s0);
-                Unsafe.Add(ref floatsRef, i + 1) = SoftClipSample(s1);
+                if (current <= 1.0f)
+                {
+                    for (int c = 0; c < chCount; c++)
+                    {
+                        float s = Unsafe.Add(ref floatsRef, idx + c) * current;
+                        Unsafe.Add(ref floatsRef, idx + c) = Math.Clamp(s, -SafeCeiling, SafeCeiling);
+                    }
+                }
+                else
+                {
+                    float framePeak = 0f;
+                    for (int c = 0; c < chCount; c++)
+                    {
+                        float s = Unsafe.Add(ref floatsRef, idx + c) * current;
+                        Unsafe.Add(ref floatsRef, idx + c) = s;
+                        float abs = MathF.Abs(s);
+                        if (abs > framePeak) framePeak = abs;
+                    }
+
+                    if (framePeak > SoftKneeThreshold)
+                    {
+                        float scale = SoftCeilingPositive(framePeak) * Helpers.SpanMathHelper.FastReciprocal(framePeak);
+                        for (int c = 0; c < chCount; c++)
+                            Unsafe.Add(ref floatsRef, idx + c) *= scale;
+                    }
+                }
             }
 
-            for (; i < length; i++)
+            for (; idx < length; idx++)
             {
-                float sample = Unsafe.Add(ref floatsRef, i) * current;
-                Unsafe.Add(ref floatsRef, i) = SoftClipSample(sample);
+                float s = Unsafe.Add(ref floatsRef, idx) * current;
+                Unsafe.Add(ref floatsRef, idx) = current <= 1.0f
+                    ? Math.Clamp(s, -SafeCeiling, SafeCeiling)
+                    : SoftClipSample(s);
             }
 
             _currentGain = current;
@@ -176,10 +214,55 @@ internal sealed class GainProcessor
         else
         {
             float g = _currentGain;
-            for (int i = 0; i < length; i++)
+            if (chCount == 2)
             {
-                float sample = Unsafe.Add(ref floatsRef, i) * g;
-                Unsafe.Add(ref floatsRef, i) = SoftClipSample(sample);
+                int pairLimit = length & ~1;
+                int i = 0;
+                for (; i < pairLimit; i += 2)
+                {
+                    float s0 = Unsafe.Add(ref floatsRef, i) * g;
+                    float s1 = Unsafe.Add(ref floatsRef, i + 1) * g;
+                    float a0 = MathF.Abs(s0);
+                    float a1 = MathF.Abs(s1);
+                    float peak = a0 > a1 ? a0 : a1;
+                    if (peak > SoftKneeThreshold)
+                    {
+                        float scale = SoftCeilingPositive(peak) * Helpers.SpanMathHelper.FastReciprocal(peak);
+                        s0 *= scale;
+                        s1 *= scale;
+                    }
+                    Unsafe.Add(ref floatsRef, i) = s0;
+                    Unsafe.Add(ref floatsRef, i + 1) = s1;
+                }
+
+                for (; i < length; i++)
+                    Unsafe.Add(ref floatsRef, i) = SoftClipSample(Unsafe.Add(ref floatsRef, i) * g);
+            }
+            else
+            {
+                int frameCount = length / chCount;
+                int idx = 0;
+                for (int f = 0; f < frameCount; f++, idx += chCount)
+                {
+                    float peak = 0f;
+                    for (int c = 0; c < chCount; c++)
+                    {
+                        float s = Unsafe.Add(ref floatsRef, idx + c) * g;
+                        Unsafe.Add(ref floatsRef, idx + c) = s;
+                        float abs = MathF.Abs(s);
+                        if (abs > peak) peak = abs;
+                    }
+
+                    if (peak > SoftKneeThreshold)
+                    {
+                        float scale = SoftCeilingPositive(peak) * Helpers.SpanMathHelper.FastReciprocal(peak);
+                        for (int c = 0; c < chCount; c++)
+                            Unsafe.Add(ref floatsRef, idx + c) *= scale;
+                    }
+                }
+
+                for (; idx < length; idx++)
+                    Unsafe.Add(ref floatsRef, idx) = SoftClipSample(Unsafe.Add(ref floatsRef, idx) * g);
             }
         }
     }

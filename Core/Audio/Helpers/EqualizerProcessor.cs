@@ -514,9 +514,14 @@ public sealed class EqualizerProcessor
         private StereoSvfState _element0;
     }
 
-    private readonly int _sampleRate;
-    private readonly int _channels;
+    private int _sampleRate;
+    private int _channels;
     private readonly Lock _configureLock = new();
+    private StereoSvfState[]? _extraChannelStates;
+    private readonly float[] _lastBands = new float[BandCount];
+    private bool _lastEnabled;
+    private float _lastPreampDb;
+    private bool _lastAutoPreamp = true;
 
     // SeqLock fields for lock-free publishing from the UI thread to AudioCallback
     private long _publishedVersion;
@@ -545,6 +550,8 @@ public sealed class EqualizerProcessor
     {
         _sampleRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
         _channels = Math.Max(1, channels);
+        if (_channels > 2)
+            _extraChannelStates = new StereoSvfState[((_channels - 1) / 2) * BandCount];
 
         var freqs = BandFrequenciesHz;
         for (int i = 0; i < BandCount; i++)
@@ -581,6 +588,7 @@ public sealed class EqualizerProcessor
         if (bandIndex == 0)
         {
             const double q = 0.7071067811865475;
+            g /= Math.Sqrt(a);
             k = 1.0 / q;
             m0 = 1.0;
             m1 = k * (a - 1.0);
@@ -589,6 +597,7 @@ public sealed class EqualizerProcessor
         else if (bandIndex == BandCount - 1)
         {
             const double q = 0.7071067811865475;
+            g *= Math.Sqrt(a);
             k = 1.0 / q;
             m0 = a * a;
             m1 = k * (1.0 - a) * a;
@@ -623,12 +632,49 @@ public sealed class EqualizerProcessor
     internal bool IsBypassed => _isBypassed;
     internal bool HasPositiveBoost => _hasPositiveBoost;
 
+    internal void UpdateFormat(int sampleRate, int channels)
+    {
+        int newRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
+        int newCh = Math.Max(1, channels);
+        lock (_configureLock)
+        {
+            if (_sampleRate == newRate && _channels == newCh)
+                return;
+
+            _sampleRate = newRate;
+            _channels = newCh;
+            _extraChannelStates = newCh > 2
+                ? new StereoSvfState[((newCh - 1) / 2) * BandCount]
+                : null;
+
+            var freqs = BandFrequenciesHz;
+            for (int i = 0; i < BandCount; i++)
+                _unityCoeffs[i] = ComputeSvfBandCoefficients(newRate, freqs[i], i, 0f);
+        }
+
+        Configure(_lastEnabled, _lastBands, _lastPreampDb, _lastAutoPreamp);
+        SnapToTarget();
+    }
+
     internal void Configure(
         bool enabled,
         ReadOnlySpan<float> bandGainsDb,
         float preampDb = 0f,
         bool autoPreamp = true)
     {
+        int sampleRateSnapshot;
+        lock (_configureLock)
+        {
+            sampleRateSnapshot = _sampleRate;
+            _lastEnabled = enabled;
+            _lastPreampDb = preampDb;
+            _lastAutoPreamp = autoPreamp;
+            if (bandGainsDb.Length >= BandCount)
+                bandGainsDb[..BandCount].CopyTo(_lastBands);
+            else
+                Array.Clear(_lastBands);
+        }
+
         BandSvfCoeffArray nextCoeffs = default;
         Span<BiquadCoefficients> exactCoeffs = stackalloc BiquadCoefficients[BandCount];
         bool allFlat = true;
@@ -645,8 +691,8 @@ public sealed class EqualizerProcessor
                 if (db > maxBoostDb)
                     maxBoostDb = db;
 
-                exactCoeffs[i] = ComputeBandCoefficients(_sampleRate, freqs[i], i, db);
-                nextCoeffs[i] = ComputeSvfBandCoefficients(_sampleRate, freqs[i], i, db);
+                exactCoeffs[i] = ComputeBandCoefficients(sampleRateSnapshot, freqs[i], i, db);
+                nextCoeffs[i] = ComputeSvfBandCoefficients(sampleRateSnapshot, freqs[i], i, db);
             }
         }
         else
@@ -657,7 +703,7 @@ public sealed class EqualizerProcessor
         float effectivePreampDb = enabled ? Math.Clamp(preampDb, -12f, 12f) : 0f;
         if (enabled && autoPreamp && !allFlat)
         {
-            float peakResponseDb = ComputePeakResponseDb(exactCoeffs, _sampleRate);
+            float peakResponseDb = ComputePeakResponseDb(exactCoeffs, sampleRateSnapshot);
             if (peakResponseDb > 6.0f)
             {
                 effectivePreampDb -= (peakResponseDb - 6.0f) * 0.45f;
@@ -751,6 +797,12 @@ public sealed class EqualizerProcessor
     {
         for (int i = 0; i < BandCount; i++)
             _states[i].Reset();
+
+        if (_extraChannelStates != null)
+        {
+            for (int i = 0; i < _extraChannelStates.Length; i++)
+                _extraChannelStates[i].Reset();
+        }
     }
 
     internal unsafe void Process(Span<float> samples)
@@ -1312,6 +1364,7 @@ public sealed class EqualizerProcessor
         }
         else
         {
+            var extraStates = _extraChannelStates;
             for (int f = 0; f < totalFrames; f++)
             {
                 StepSmootherOneFrame();
@@ -1326,9 +1379,23 @@ public sealed class EqualizerProcessor
                 Unsafe.Add(ref bufRef, idx) = (float)left;
                 Unsafe.Add(ref bufRef, idx + 1) = (float)right;
 
-                float preampF = (float)preamp;
-                for (int ch = 2; ch < channels; ch++)
-                    Unsafe.Add(ref bufRef, idx + ch) *= preampF;
+                if (extraStates != null)
+                {
+                    for (int ch = 2, pair = 0; ch < channels; ch += 2, pair++)
+                    {
+                        int pairBase = pair * BandCount;
+                        double chA = Unsafe.Add(ref bufRef, idx + ch) * preamp;
+                        bool hasB = ch + 1 < channels;
+                        double chB = hasB ? Unsafe.Add(ref bufRef, idx + ch + 1) * preamp : 0.0;
+
+                        for (int b = 0; b < BandCount; b++)
+                            extraStates[pairBase + b].ProcessStereoScalar(ref chA, ref chB, in _currentCoeffs[b]);
+
+                        Unsafe.Add(ref bufRef, idx + ch) = (float)chA;
+                        if (hasB)
+                            Unsafe.Add(ref bufRef, idx + ch + 1) = (float)chB;
+                    }
+                }
             }
         }
     }

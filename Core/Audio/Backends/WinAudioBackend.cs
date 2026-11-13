@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Runtime.Versioning;
 using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Interfaces;
@@ -366,9 +368,19 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     /// <summary>End of the last silence range on the <see cref="_deviceFramesCommitted"/> scale; WASAPI thread only.</summary>
     private long _silenceRunEnd;
 
-    // State of 4-point C1 Hermite cubic resampler (for seamless playback of 44.1 kHz in a 48 kHz WASAPI session without recreating IAudioClient)
+    // Polyphase 32-tap Blackman-Harris Windowed-Sinc resampler (<= -92 dB stopband, zero-alloc SIMD)
+    private const int SincTaps = 64;
+    private const int SincHalfTaps = SincTaps / 2;
+    private const int SincPhases = 256;
+
     private readonly float[] _resampleSourceBuf = new float[4096 * 8];
-    private readonly float[] _resampleHistory = new float[4 * 8]; // 4 history frames [y_{-1}, y_0, y_1, y_2]
+    private readonly float[] _resampleHistory = new float[SincTaps * 8 * 2];
+    private float[]? _sincStereoTable;
+    private float[]? _sincScalarTable;
+    private int _sincTableSrcRate;
+    private int _sincTableDstRate;
+    private int _sincPrimeCount;
+    private int _sincHistPos;
     private int _resampleSourceValidFrames;
     private int _resampleSourceCursor;
     private double _resampleFracPhase;
@@ -394,6 +406,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
     private const int CrossfadeFrames = 576; // 12 ms @ 48 kHz
     private readonly float[] _crossfadeTail = new float[CrossfadeFrames * 8];
+    private int _crossfadeTailOffset;
+    private int _crossfadeTotalFrames;
     private int _crossfadeTailFrames;
 
     private long _interactiveUntilTick64;
@@ -474,6 +488,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
         _callback = dataCallback;
         _channels = channels > 0 ? channels : AudioConstants.DefaultChannels;
+        _gainProcessor.SetChannels(_channels);
         _sourceSampleRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
         // Lock the WASAPI hardware session to the canonical sample rate of 48000 Hz,
         // so that switching between 44.1 kHz (AAC) and 48 kHz (Opus) tracks never stops IAudioClient!
@@ -481,9 +496,13 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
         lock (_stateLock)
         {
+            if (_sourceSampleRate != _sampleRate)
+                EnsureSincTablesUnderLock(_sourceSampleRate, _sampleRate);
             ResetResamplerStateUnderLock();
             _isFlushSeamless = false;
             _crossfadeTailFrames = 0;
+            _crossfadeTailOffset = 0;
+            _crossfadeTotalFrames = 0;
             _gateOpen = false;
             _fadeState = FadeState.None;
             _fadeGain = 0f;
@@ -556,8 +575,13 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
             _callback = dataCallback;
             _sourceSampleRate = normalizedSourceRate;
+            _gainProcessor.SetChannels(normalizedCh);
+            if (_sourceSampleRate != _sampleRate)
+                EnsureSincTablesUnderLock(_sourceSampleRate, _sampleRate);
             ResetResamplerStateUnderLock();
             _isFlushSeamless = capturedTail;
+            _crossfadeTailOffset = 0;
+            _crossfadeTotalFrames = 0;
             _gateOpen = false;
             _fadeState = FadeState.None;
             _fadeGain = 0f;
@@ -844,10 +868,67 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         _resampleSourceCursor = 0;
         _resampleFracPhase = 0.0;
         _resampleHistoryPrimed = false;
+        _sincPrimeCount = 0;
+        _sincHistPos = 0;
         _resampleHistory.AsSpan().Clear();
 
         // Samples left in the resampler were dropped and will not play: render counter catches up with read samples
         Volatile.Write(ref _clockRenderedSamples, _clockPulledSamples);
+    }
+
+    private void EnsureSincTablesUnderLock(int srcRate, int dstRate)
+    {
+        if (srcRate <= 0 || dstRate <= 0 || srcRate == dstRate)
+            return;
+
+        if (_sincTableSrcRate == srcRate && _sincTableDstRate == dstRate && _sincStereoTable != null && _sincScalarTable != null)
+            return;
+
+        if (_sincTableSrcRate != 0)
+            ResetResamplerStateUnderLock();
+
+        _sincStereoTable ??= new float[(SincPhases + 1) * SincTaps * 2];
+        _sincScalarTable ??= new float[(SincPhases + 1) * SincTaps];
+
+        double ratio = Math.Min(1.0, (double)dstRate / srcRate);
+        double fc = (srcRate > dstRate ? 0.84 : 0.92) * ratio;
+        Span<double> raw = stackalloc double[SincTaps];
+
+        for (int p = 0; p <= SincPhases; p++)
+        {
+            double mu = (double)p / SincPhases;
+            double sum = 0.0;
+
+            for (int t = 0; t < SincTaps; t++)
+            {
+                int k = t - (SincHalfTaps - 1);
+                double d = mu - k;
+                double u = Math.Clamp((d + SincHalfTaps) / SincTaps, 0.0, 1.0);
+                double win = 0.35875
+                           - 0.48829 * Math.Cos(2.0 * Math.PI * u)
+                           + 0.14128 * Math.Cos(4.0 * Math.PI * u)
+                           - 0.01168 * Math.Cos(6.0 * Math.PI * u);
+                double x = Math.PI * fc * d;
+                double sinc = Math.Abs(x) < 1e-8 ? 1.0 : Math.Sin(x) / x;
+                double val = win * sinc;
+                raw[t] = val;
+                sum += val;
+            }
+
+            double invSum = sum != 0.0 ? 1.0 / sum : 1.0;
+            int scalarBase = p * SincTaps;
+            int stereoBase = scalarBase * 2;
+            for (int t = 0; t < SincTaps; t++)
+            {
+                float w = (float)(raw[t] * invSum);
+                _sincScalarTable[scalarBase + t] = w;
+                _sincStereoTable[stereoBase + t * 2] = w;
+                _sincStereoTable[stereoBase + t * 2 + 1] = w;
+            }
+        }
+
+        _sincTableSrcRate = srcRate;
+        _sincTableDstRate = dstRate;
     }
 
     /// <summary>
@@ -925,7 +1006,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
     /// <summary>
     /// Reads frames from <see cref="_callback"/> and, if the source sample rate (e.g., 44100 Hz AAC)
-    /// differs from the WASAPI engine sample rate (48000 Hz), performs 4-point C1 Hermite cubic interpolation with 0 B allocations.
+    /// differs from the WASAPI engine sample rate (48000 Hz), performs 32-tap Blackman-Harris Windowed-Sinc polyphase resampling with 0 B allocations.
     /// Inter-sample peaks generated by interpolation on top of the limiter's guarantee are pushed back
     /// under its ceiling frame-by-frame via <see cref="TruePeakLimiter.SoftCeilingScale"/> with stereo channel linking.
     /// Must be called strictly under <see cref="_stateLock"/>.
@@ -949,25 +1030,27 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             return directFrames;
         }
 
+        EnsureSincTablesUnderLock(srcRate, dstRate);
+
         double step = (double)srcRate / dstRate;
         int outFrame = 0;
-        Span<float> hist = _resampleHistory.AsSpan(0, 4 * ch);
         Span<float> srcBuf = _resampleSourceBuf.AsSpan();
+        int maxPullFrames = _resampleSourceBuf.Length / ch;
 
         if (ch == 2)
         {
             ref float srcRef = ref MemoryMarshal.GetArrayDataReference(_resampleSourceBuf);
             ref float dstRef = ref MemoryMarshal.GetReference(targetSpan);
-
-            float ym1L = hist[0], ym1R = hist[1];
-            float y0L = hist[2], y0R = hist[3];
-            float y1L = hist[4], y1R = hist[5];
-            float y2L = hist[6], y2R = hist[7];
+            ref float histRef = ref MemoryMarshal.GetArrayDataReference(_resampleHistory);
+            ref float tableRef = ref MemoryMarshal.GetArrayDataReference(_sincStereoTable!);
 
             int cursor = _resampleSourceCursor;
             int validFrames = _resampleSourceValidFrames;
             double fracPhase = _resampleFracPhase;
             bool primed = _resampleHistoryPrimed;
+            int primeCount = _sincPrimeCount;
+            int histPos = _sincHistPos;
+            const int stereoRingStride = SincTaps * 2;
 
             while (outFrame < requestedOutFrames)
             {
@@ -976,21 +1059,19 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                     if (cursor >= validFrames)
                     {
                         int neededInFrames = Math.Clamp(
-                            (int)Math.Ceiling((requestedOutFrames - outFrame) * step) + 4,
+                            (int)Math.Ceiling((requestedOutFrames - outFrame) * step) + SincHalfTaps + 4,
                             64,
-                            _resampleSourceBuf.Length / 2);
+                            maxPullFrames);
 
                         int readIn = _callback(srcBuf[..(neededInFrames * 2)]);
                         if (readIn <= 0)
                         {
-                            hist[0] = ym1L; hist[1] = ym1R;
-                            hist[2] = y0L; hist[3] = y0R;
-                            hist[4] = y1L; hist[5] = y1R;
-                            hist[6] = y2L; hist[7] = y2R;
                             _resampleSourceCursor = cursor;
                             _resampleSourceValidFrames = validFrames;
                             _resampleFracPhase = fracPhase;
                             _resampleHistoryPrimed = primed;
+                            _sincPrimeCount = primeCount;
+                            _sincHistPos = histPos;
                             UpdateRenderedSamplesUnderLock(2);
                             return outFrame;
                         }
@@ -1000,61 +1081,108 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                         cursor = 0;
                     }
 
+                    int inIdx = cursor * 2;
+                    float sL = Unsafe.Add(ref srcRef, inIdx);
+                    float sR = Unsafe.Add(ref srcRef, inIdx + 1);
+                    cursor++;
+
                     if (!primed)
                     {
-                        int firstIdx = cursor * 2;
-                        float s0L = Unsafe.Add(ref srcRef, firstIdx);
-                        float s0R = Unsafe.Add(ref srcRef, firstIdx + 1);
-                        ym1L = y0L = y1L = y2L = s0L;
-                        ym1R = y0R = y1R = y2R = s0R;
-                        cursor++;
-
-                        if (cursor < validFrames)
+                        if (primeCount == 0)
                         {
-                            int idx2 = cursor * 2;
-                            y1L = Unsafe.Add(ref srcRef, idx2);
-                            y1R = Unsafe.Add(ref srcRef, idx2 + 1);
-                            y2L = y1L;
-                            y2R = y1R;
-                            cursor++;
+                            for (int k = 0; k < SincHalfTaps; k++)
+                            {
+                                int off = k * 2;
+                                Unsafe.Add(ref histRef, off) = sL;
+                                Unsafe.Add(ref histRef, off + 1) = sR;
+                                Unsafe.Add(ref histRef, stereoRingStride + off) = sL;
+                                Unsafe.Add(ref histRef, stereoRingStride + off + 1) = sR;
+                            }
+                            primeCount = SincHalfTaps;
+                        }
+                        else
+                        {
+                            int off = primeCount * 2;
+                            Unsafe.Add(ref histRef, off) = sL;
+                            Unsafe.Add(ref histRef, off + 1) = sR;
+                            Unsafe.Add(ref histRef, stereoRingStride + off) = sL;
+                            Unsafe.Add(ref histRef, stereoRingStride + off + 1) = sR;
+                            primeCount++;
                         }
 
-                        if (cursor < validFrames)
+                        if (primeCount >= SincTaps)
                         {
-                            int idx3 = cursor * 2;
-                            y2L = Unsafe.Add(ref srcRef, idx3);
-                            y2R = Unsafe.Add(ref srcRef, idx3 + 1);
-                            cursor++;
+                            primed = true;
+                            histPos = 0;
+                            fracPhase = 0.0;
                         }
-
-                        fracPhase = 0.0;
-                        primed = true;
                     }
                     else
                     {
-                        ym1L = y0L; ym1R = y0R;
-                        y0L = y1L; y0R = y1R;
-                        y1L = y2L; y1R = y2R;
-
-                        int nextIdx = cursor * 2;
-                        y2L = Unsafe.Add(ref srcRef, nextIdx);
-                        y2R = Unsafe.Add(ref srcRef, nextIdx + 1);
-
-                        cursor++;
+                        int off = histPos * 2;
+                        Unsafe.Add(ref histRef, off) = sL;
+                        Unsafe.Add(ref histRef, off + 1) = sR;
+                        Unsafe.Add(ref histRef, stereoRingStride + off) = sL;
+                        Unsafe.Add(ref histRef, stereoRingStride + off + 1) = sR;
+                        histPos = (histPos + 1) & (SincTaps - 1);
                         fracPhase -= 1.0;
                     }
                 }
 
-                float t = (float)fracPhase;
-                float c1L = 0.5f * (y1L - ym1L);
-                float c2L = ym1L - 2.5f * y0L + 2.0f * y1L - 0.5f * y2L;
-                float c3L = 0.5f * (y2L - ym1L) + 1.5f * (y0L - y1L);
-                float outL = ((c3L * t + c2L) * t + c1L) * t + y0L;
+                double scaledPhase = fracPhase * SincPhases;
+                int phaseIdx = (int)scaledPhase;
+                if ((uint)phaseIdx >= SincPhases) phaseIdx = SincPhases - 1;
+                float phaseFrac = (float)(scaledPhase - phaseIdx);
 
-                float c1R = 0.5f * (y1R - ym1R);
-                float c2R = ym1R - 2.5f * y0R + 2.0f * y1R - 0.5f * y2R;
-                float c3R = 0.5f * (y2R - ym1R) + 1.5f * (y0R - y1R);
-                float outR = ((c3R * t + c2R) * t + c1R) * t + y0R;
+                ref float sBase = ref Unsafe.Add(ref histRef, histPos * 2);
+                ref float w0Base = ref Unsafe.Add(ref tableRef, phaseIdx * stereoRingStride);
+                ref float w1Base = ref Unsafe.Add(ref w0Base, stereoRingStride);
+
+                float outL, outR;
+                if (Vector128.IsHardwareAccelerated)
+                {
+                    Vector128<float> acc0 = Vector128<float>.Zero;
+                    Vector128<float> acc1 = Vector128<float>.Zero;
+
+                    for (int t = 0; t < stereoRingStride; t += 4)
+                    {
+                        Vector128<float> vS = Vector128.LoadUnsafe(ref sBase, (nuint)t);
+                        Vector128<float> vW0 = Vector128.LoadUnsafe(ref w0Base, (nuint)t);
+                        Vector128<float> vW1 = Vector128.LoadUnsafe(ref w1Base, (nuint)t);
+                        if (Fma.IsSupported)
+                        {
+                            acc0 = Fma.MultiplyAdd(vS, vW0, acc0);
+                            acc1 = Fma.MultiplyAdd(vS, vW1, acc1);
+                        }
+                        else
+                        {
+                            acc0 += vS * vW0;
+                            acc1 += vS * vW1;
+                        }
+                    }
+
+                    Vector128<float> vRes = acc0 + (acc1 - acc0) * Vector128.Create(phaseFrac);
+                    Vector128<float> vPair = vRes + Vector128.Shuffle(vRes, Vector128.Create(2, 3, 0, 1));
+                    outL = vPair.GetElement(0);
+                    outR = vPair.GetElement(1);
+                }
+                else
+                {
+                    float l0 = 0f, r0 = 0f, l1 = 0f, r1 = 0f;
+                    for (int t = 0; t < stereoRingStride; t += 2)
+                    {
+                        float sL = Unsafe.Add(ref sBase, t);
+                        float sR = Unsafe.Add(ref sBase, t + 1);
+                        float w0 = Unsafe.Add(ref w0Base, t);
+                        float w1 = Unsafe.Add(ref w1Base, t);
+                        l0 += sL * w0;
+                        r0 += sR * w0;
+                        l1 += sL * w1;
+                        r1 += sR * w1;
+                    }
+                    outL = l0 + (l1 - l0) * phaseFrac;
+                    outR = r0 + (r1 - r0) * phaseFrac;
+                }
 
                 float absL = MathF.Abs(outL);
                 float absR = MathF.Abs(outR);
@@ -1074,29 +1202,30 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 fracPhase += step;
             }
 
-            hist[0] = ym1L; hist[1] = ym1R;
-            hist[2] = y0L; hist[3] = y0R;
-            hist[4] = y1L; hist[5] = y1R;
-            hist[6] = y2L; hist[7] = y2R;
             _resampleSourceCursor = cursor;
             _resampleSourceValidFrames = validFrames;
             _resampleFracPhase = fracPhase;
             _resampleHistoryPrimed = primed;
+            _sincPrimeCount = primeCount;
+            _sincHistPos = histPos;
             UpdateRenderedSamplesUnderLock(2);
             return outFrame;
         }
 
+        ref float genHistRef = ref MemoryMarshal.GetArrayDataReference(_resampleHistory);
+        ref float genTableRef = ref MemoryMarshal.GetArrayDataReference(_sincScalarTable!);
+        int ringStride = SincTaps * ch;
+
         while (outFrame < requestedOutFrames)
         {
-            // Fetch new input frames into history [y_{-1}, y_0, y_1, y_2] while phase >= 1.0 or history is uninitialized
             while (!_resampleHistoryPrimed || _resampleFracPhase >= 1.0)
             {
                 if (_resampleSourceCursor >= _resampleSourceValidFrames)
                 {
                     int neededInFrames = Math.Clamp(
-                        (int)Math.Ceiling((requestedOutFrames - outFrame) * step) + 4,
+                        (int)Math.Ceiling((requestedOutFrames - outFrame) * step) + SincHalfTaps + 4,
                         64,
-                        _resampleSourceBuf.Length / ch);
+                        maxPullFrames);
 
                     int readIn = _callback(srcBuf[..(neededInFrames * ch)]);
                     if (readIn <= 0)
@@ -1110,69 +1239,84 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                     _resampleSourceCursor = 0;
                 }
 
+                int srcIdx = _resampleSourceCursor * ch;
+                _resampleSourceCursor++;
+
                 if (!_resampleHistoryPrimed)
                 {
-                    int firstIdx = _resampleSourceCursor * ch;
-                    for (int c = 0; c < ch; c++)
+                    if (_sincPrimeCount == 0)
                     {
-                        float s0 = srcBuf[firstIdx + c];
-                        hist[c] = s0;
-                        hist[ch + c] = s0;
-                        hist[2 * ch + c] = s0;
-                        hist[3 * ch + c] = s0;
-                    }
-
-                    _resampleSourceCursor++;
-                    for (int k = 2; k <= 3; k++)
-                    {
-                        if (_resampleSourceCursor < _resampleSourceValidFrames)
+                        for (int k = 0; k < SincHalfTaps; k++)
                         {
-                            int idx = _resampleSourceCursor * ch;
+                            int off = k * ch;
                             for (int c = 0; c < ch; c++)
-                                hist[k * ch + c] = srcBuf[idx + c];
-                            _resampleSourceCursor++;
+                            {
+                                float v = srcBuf[srcIdx + c];
+                                Unsafe.Add(ref genHistRef, off + c) = v;
+                                Unsafe.Add(ref genHistRef, ringStride + off + c) = v;
+                            }
                         }
+                        _sincPrimeCount = SincHalfTaps;
+                    }
+                    else
+                    {
+                        int off = _sincPrimeCount * ch;
+                        for (int c = 0; c < ch; c++)
+                        {
+                            float v = srcBuf[srcIdx + c];
+                            Unsafe.Add(ref genHistRef, off + c) = v;
+                            Unsafe.Add(ref genHistRef, ringStride + off + c) = v;
+                        }
+                        _sincPrimeCount++;
                     }
 
-                    _resampleFracPhase = 0.0;
-                    _resampleHistoryPrimed = true;
+                    if (_sincPrimeCount >= SincTaps)
+                    {
+                        _resampleHistoryPrimed = true;
+                        _sincHistPos = 0;
+                        _resampleFracPhase = 0.0;
+                    }
                 }
                 else
                 {
-                    // Shift window by 1 input frame: [y_0, y_1, y_2, newSample]
-                    hist.Slice(ch, 3 * ch).CopyTo(hist[..(3 * ch)]);
-                    int nextIdx = _resampleSourceCursor * ch;
+                    int off = _sincHistPos * ch;
                     for (int c = 0; c < ch; c++)
-                        hist[3 * ch + c] = srcBuf[nextIdx + c];
-
-                    _resampleSourceCursor++;
+                    {
+                        float v = srcBuf[srcIdx + c];
+                        Unsafe.Add(ref genHistRef, off + c) = v;
+                        Unsafe.Add(ref genHistRef, ringStride + off + c) = v;
+                    }
+                    _sincHistPos = (_sincHistPos + 1) & (SincTaps - 1);
                     _resampleFracPhase -= 1.0;
                 }
             }
 
-            float t = (float)_resampleFracPhase;
+            double scaledPhase = _resampleFracPhase * SincPhases;
+            int phaseIdx = (int)scaledPhase;
+            if ((uint)phaseIdx >= SincPhases) phaseIdx = SincPhases - 1;
+            float phaseFrac = (float)(scaledPhase - phaseIdx);
+
+            int w0Base = phaseIdx * SincTaps;
+            int w1Base = w0Base + SincTaps;
+            int histBase = _sincHistPos * ch;
             int outBase = outFrame * ch;
             float framePeak = 0f;
 
             for (int c = 0; c < ch; c++)
             {
-                float ym1 = hist[c];
-                float y0 = hist[ch + c];
-                float y1 = hist[2 * ch + c];
-                float y2 = hist[3 * ch + c];
+                float s0 = 0f, s1 = 0f;
+                for (int t = 0; t < SincTaps; t++)
+                {
+                    float sample = Unsafe.Add(ref genHistRef, histBase + t * ch + c);
+                    s0 += sample * Unsafe.Add(ref genTableRef, w0Base + t);
+                    s1 += sample * Unsafe.Add(ref genTableRef, w1Base + t);
+                }
 
-                // 4-point, 3rd-order Hermite (Catmull-Rom C1 continuous) interpolation
-                float c0 = y0;
-                float c1 = 0.5f * (y1 - ym1);
-                float c2 = ym1 - 2.5f * y0 + 2.0f * y1 - 0.5f * y2;
-                float c3 = 0.5f * (y2 - ym1) + 1.5f * (y0 - y1);
-
-                float y = ((c3 * t + c2) * t + c1) * t + c0;
+                float y = s0 + (s1 - s0) * phaseFrac;
                 targetSpan[outBase + c] = y;
                 framePeak = MathF.Max(framePeak, MathF.Abs(y));
             }
 
-            // Cubic interpolation exceeds samples seen by the limiter: push frame peak back under its ceiling without touching signal below the knee
             float guardScale = TruePeakLimiter.SoftCeilingScale(framePeak);
             if (guardScale < 1.0f)
             {
@@ -1220,11 +1364,11 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         if (framesRead > 0)
         {
             Span<float> validTail = tailSpan[..(framesRead * ch)];
+            _gainProcessor.Process(validTail);
             if (_fadeState != FadeState.None)
             {
                 _ = ApplyFadeEnvelope(validTail, framesRead, ch, _fadeState, ref _fadeGain);
             }
-            _gainProcessor.Process(validTail);
 
             rawTail0L = validTail[0];
             rawTail0R = ch >= 2 ? validTail[1] : validTail[0];
@@ -1432,6 +1576,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                         {
                             ResetLastWasapiSamples();
                             _crossfadeTailFrames = 0;
+                            _crossfadeTailOffset = 0;
+                            _crossfadeTotalFrames = 0;
                             _isFlushSeamless = false;
                         }
 #if AUDIO_SPLICE_AUDIT
@@ -1474,6 +1620,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                     if (paddingFrames == 0 && _crossfadeTailFrames > 0)
                     {
                         _crossfadeTailFrames = 0;
+                        _crossfadeTailOffset = 0;
+                        _crossfadeTotalFrames = 0;
                         ResetLastWasapiSamples();
                     }
                     hasSeamlessPending = _isFlushSeamless;
@@ -1488,6 +1636,46 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 uint availableFrames = targetFillFrames > paddingFrames
                     ? targetFillFrames - paddingFrames
                     : 0;
+
+                if (!wasapiStarted && paddingFrames == 0 && availableFrames > 0)
+                {
+                    // Commit a 10 ms silent lead-in before AudioClientStart so hardware/APO wake-up after Reset() never clicks on FadeIn.
+                    uint leadInFrames = Math.Min((uint)Math.Max(1, _sampleRate / 100), availableFrames);
+                    int hrGetLead = RenderClientGetBuffer(_renderClient, leadInFrames, out _);
+                    if (hrGetLead < 0)
+                    {
+                        if (IsDeviceInvalidatedHr(hrGetLead) && TryHotSwapEndpointOnRenderThread(ref wasapiStarted))
+                            continue;
+
+                        HandleFatalDeviceLossOnRenderThread(hrGetLead);
+                        break;
+                    }
+
+                    int hrRelLead = RenderClientReleaseBuffer(_renderClient, leadInFrames, AUDCLNT_BUFFERFLAGS_SILENT);
+                    if (hrRelLead < 0)
+                    {
+                        if (IsDeviceInvalidatedHr(hrRelLead) && TryHotSwapEndpointOnRenderThread(ref wasapiStarted))
+                            continue;
+
+                        HandleFatalDeviceLossOnRenderThread(hrRelLead);
+                        break;
+                    }
+
+                    TrackDeviceCommit(leadInFrames, fromSource: false);
+
+                    int hrStartLead = AudioClientStart(_audioClient);
+                    if (hrStartLead < 0)
+                    {
+                        if (IsDeviceInvalidatedHr(hrStartLead) && TryHotSwapEndpointOnRenderThread(ref wasapiStarted))
+                            continue;
+
+                        HandleFatalDeviceLossOnRenderThread(hrStartLead);
+                        break;
+                    }
+
+                    wasapiStarted = true;
+                    continue;
+                }
 
                 if (availableFrames > 0)
                 {
@@ -1584,37 +1772,67 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                                     }
                                 }
 
+                                int bridgeStartOffset = 0;
+                                int bridgeTotalFrames = 0;
+                                bool useCapturedTail = false;
+
                                 if (_isFlushSeamless)
                                 {
-                                    _isFlushSeamless = false;
                                     doSeamlessBridge = true;
+                                    if (_crossfadeTotalFrames == 0)
+                                    {
+                                        _crossfadeTailOffset = 0;
+                                        if (_crossfadeTailFrames > 0 && (MathF.Abs(prevLBeforeChunk) > 0.0005f || MathF.Abs(prevRBeforeChunk) > 0.0005f))
+                                        {
+                                            _crossfadeTotalFrames = _crossfadeTailFrames;
+                                        }
+                                        else
+                                        {
+                                            _crossfadeTailFrames = 0;
+                                            _crossfadeTotalFrames = FadeFrames;
+                                        }
+                                    }
+
+                                    bridgeStartOffset = _crossfadeTailOffset;
+                                    bridgeTotalFrames = _crossfadeTotalFrames;
                                     tailFramesAvailable = _crossfadeTailFrames;
-                                    _crossfadeTailFrames = 0;
+                                    useCapturedTail = _crossfadeTailFrames > 0;
+
+                                    int consumedBridge = Math.Min(validPcmFrames, bridgeTotalFrames - bridgeStartOffset);
+                                    _crossfadeTailOffset = bridgeStartOffset + consumedBridge;
+                                    if (_crossfadeTailOffset >= bridgeTotalFrames)
+                                    {
+                                        _isFlushSeamless = false;
+                                        _crossfadeTailFrames = 0;
+                                        _crossfadeTailOffset = 0;
+                                        _crossfadeTotalFrames = 0;
+                                    }
                                 }
 
                                 rawFirstNewL = validPcmSpan[0];
                                 rawFirstNewR = _channels >= 2 ? validPcmSpan[1] : rawFirstNewL;
 
-                                if (doSeamlessBridge)
+                                if (doSeamlessBridge && bridgeTotalFrames > 0)
                                 {
 #if AUDIO_SPLICE_AUDIT
                                     postSpliceAuditTicksRemaining = 5;
 #endif
                                     int ch = Math.Clamp(_channels, 1, 8);
+                                    int mixFrames = Math.Min(validPcmFrames, bridgeTotalFrames - bridgeStartOffset);
+                                    float invTotal = 1.0f / bridgeTotalFrames;
 
-                                    if (tailFramesAvailable > 0 && (MathF.Abs(prevLBeforeChunk) > 0.0005f || MathF.Abs(prevRBeforeChunk) > 0.0005f))
+                                    if (useCapturedTail)
                                     {
-                                        int mixFrames = Math.Min(validPcmFrames, tailFramesAvailable);
-                                        float invMix = 1.0f / mixFrames;
                                         ReadOnlySpan<float> tail = _crossfadeTail.AsSpan(0, tailFramesAvailable * ch);
 
                                         for (int f = 0; f < mixFrames; f++)
                                         {
-                                            float t = f * invMix;
+                                            int globalFrame = bridgeStartOffset + f;
+                                            float t = globalFrame * invTotal;
                                             float wNew = t * t * (3.0f - 2.0f * t);
                                             float wOld = 1.0f - wNew;
                                             int bIdx = f * _channels;
-                                            int tIdx = f * ch;
+                                            int tIdx = globalFrame * ch;
 
                                             validPcmSpan[bIdx] = Math.Clamp(tail[tIdx] * wOld + validPcmSpan[bIdx] * wNew, -0.985f, 0.985f);
                                             if (_channels >= 2)
@@ -1626,16 +1844,13 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                                     }
                                     else
                                     {
-                                        int fadeInFrames = Math.Min(validPcmFrames, FadeFrames);
-                                        float invFadeIn = 1.0f / fadeInFrames;
-                                        for (int f = 0; f < fadeInFrames; f++)
+                                        for (int f = 0; f < mixFrames; f++)
                                         {
-                                            float t = (f + 1) * invFadeIn;
+                                            float t = (bridgeStartOffset + f + 1) * invTotal;
                                             float wNew = t * t * (3.0f - 2.0f * t);
                                             int bIdx = f * _channels;
-                                            validPcmSpan[bIdx] *= wNew;
-                                            if (_channels >= 2)
-                                                validPcmSpan[bIdx + 1] *= wNew;
+                                            for (int c = 0; c < _channels; c++)
+                                                validPcmSpan[bIdx + c] *= wNew;
                                         }
                                     }
                                 }
@@ -1685,6 +1900,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                                     ResetLastWasapiSamples();
                                     _isFlushSeamless = true;
                                     _crossfadeTailFrames = 0;
+                                    _crossfadeTailOffset = 0;
+                                    _crossfadeTotalFrames = 0;
                                     if (_fadeState == FadeState.FadingOut)
                                     {
                                         _gateOpen = false;
@@ -1973,6 +2190,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 _fadeState = FadeState.FadingIn;
                 _isFlushSeamless = false;
                 _crossfadeTailFrames = 0;
+                _crossfadeTailOffset = 0;
+                _crossfadeTotalFrames = 0;
             }
             else if (_isFlushSeamless)
             {
@@ -2006,6 +2225,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             _fadeState = FadeState.FadingOut;
             _isFlushSeamless = false;
             _crossfadeTailFrames = 0;
+            _crossfadeTailOffset = 0;
+            _crossfadeTotalFrames = 0;
         }
 
         Volatile.Write(ref _interactiveUntilTick64, Environment.TickCount64 + InteractiveHoldDurationMs);
@@ -2032,6 +2253,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             }
 
             ResetResamplerStateUnderLock();
+            _crossfadeTailOffset = 0;
+            _crossfadeTotalFrames = 0;
             _gateOpen = false;
             _fadeState = FadeState.None;
             _fadeGain = 0f;

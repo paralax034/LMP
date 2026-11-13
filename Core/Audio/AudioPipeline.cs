@@ -50,8 +50,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts;
     private readonly EbuR128Analyzer _analyzer;
     private readonly EqualizerProcessor _equalizer;
-    private readonly TruePeakLimiter _truePeakLimiter;
-    private readonly AudioSpectrumAnalyzer _analyzer3Band;
+    private volatile TruePeakLimiter _truePeakLimiter;
+    private volatile AudioSpectrumAnalyzer _analyzer3Band;
+    private volatile int _activeSampleRate;
+    private volatile int _activeChannels;
     private GainCrossfader _gainCrossfader;
 
     private CancellationTokenSource? _decoderCts;
@@ -118,10 +120,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
     public bool IsDisposed => _disposed;
 
     /// <summary>Decoder sample rate.</summary>
-    public int SampleRate => _decoder.SampleRate;
+    public int SampleRate => _activeSampleRate;
 
     /// <summary>Decoder channel count.</summary>
-    public int Channels => _decoder.Channels;
+    public int Channels => _activeChannels;
 
     /// <summary>
     /// Stream position in samples (frames × channels) actually rendered on the device.
@@ -192,6 +194,8 @@ internal sealed class AudioPipeline : IAsyncDisposable
         _streamInfo = streamInfo;
         _lifetimeCts = lifetimeCts;
 
+        _activeSampleRate = decoder.SampleRate;
+        _activeChannels = decoder.Channels;
         _analyzer = new EbuR128Analyzer();
         _equalizer = new EqualizerProcessor(decoder.SampleRate, decoder.Channels);
         _truePeakLimiter = new TruePeakLimiter(decoder.SampleRate);
@@ -273,11 +277,12 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
             decoder = CreateDecoder(source);
 
-            int rawSize = decoder.SampleRate * decoder.Channels * BufferSizeSeconds;
+            int maxChannels = Math.Max(decoder.Channels, 2);
+            int rawSize = Math.Max(decoder.SampleRate, DefaultSampleRate) * maxChannels * BufferSizeSeconds;
             int bufferSize = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(rawSize, 16));
-            pcmBuffer = new LockFreeRingBuffer<float>(bufferSize);
+            pcmBuffer = new LockFreeRingBuffer<float>(bufferSize, decoder.Channels);
 
-            decodeBuffer = ArrayPool<float>.Shared.Rent(DecoderBufferFrames * decoder.Channels);
+            decodeBuffer = ArrayPool<float>.Shared.Rent(DecoderBufferFrames * maxChannels);
 
             var streamInfo = BuildStreamInfo(descriptor, source, decoder);
 
@@ -727,7 +732,8 @@ internal sealed class AudioPipeline : IAsyncDisposable
                         {
                             if (frameTs + DecoderPreRollMs >= seekTarget)
                             {
-                                _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                                _ = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                                EnsureRuntimeFormatMatchesDecoder();
                                 // Decrement the required decoder warmup counter only when a pre-roll frame has actually been decoded!
                                 int remSkip = Volatile.Read(ref _skipFramesCounter);
                                 if (remSkip > 0)
@@ -746,15 +752,18 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     {
                         // Warm up codec internal overlap/prediction state only; never touch render-thread DSP state from decoder thread.
                         _ = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                        EnsureRuntimeFormatMatchesDecoder();
                         Interlocked.Decrement(ref _skipFramesCounter);
                         continue;
                     }
 
                     int samplesDecoded = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
+                    if (samplesDecoded > 0)
+                        EnsureRuntimeFormatMatchesDecoder();
 
                     if (samplesDecoded > 0)
                     {
-                        int totalSamples = samplesDecoded * _decoder.Channels;
+                        int totalSamples = samplesDecoded * _activeChannels;
                         int written = 0;
                         while (true)
                         {
@@ -850,6 +859,40 @@ internal sealed class AudioPipeline : IAsyncDisposable
         Volatile.Write(ref _skipFramesCounter, skipFrames);
         Volatile.Write(ref _decoderResetNeeded, skipFrames > 0 ? 1 : 0);
         Volatile.Write(ref _seekTargetMs, targetMs);
+    }
+
+    private void EnsureRuntimeFormatMatchesDecoder()
+    {
+        int decRate = _decoder.SampleRate;
+        int decCh = _decoder.Channels;
+        if (decRate == _activeSampleRate && decCh == _activeChannels)
+            return;
+
+        _activeSampleRate = decRate;
+        _activeChannels = decCh;
+
+        _pcmBuffer.SetFrameAlignment(decCh);
+        _equalizer.UpdateFormat(decRate, decCh);
+        _truePeakLimiter = new TruePeakLimiter(decRate);
+        _analyzer3Band = new AudioSpectrumAnalyzer(decRate, decCh);
+
+        try
+        {
+            _backend.Reinitialize(decRate, decCh, AudioCallback);
+            _backend.SetDeviceLostCallback(NotifyDeviceLost);
+            _backend.SetStarvationCallback(NotifyStarvation);
+            _backend.SetDeviceAvailableCallback(NotifyDeviceAvailable);
+        }
+        catch (AudioDeviceException ex)
+        {
+            _deviceLost = true;
+            Log.Warn($"[AudioPipeline] Runtime format change Reinitialize degraded: {ex.Message}");
+        }
+
+        if (_pcmBuffer.IsEmpty)
+            RebaseRenderClock(Interlocked.Read(ref _decodedSamples));
+
+        Log.Info($"[AudioPipeline] Runtime format change applied: {decRate}Hz, {decCh}ch");
     }
 
     private static int GetSkipFramesAfterSeek(AudioCodec codec)
@@ -1175,7 +1218,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
         int read = _pcmBuffer.Read(buffer);
         if (read < buffer.Length) buffer[read..].Clear();
 
-        int channels = _decoder.Channels;
+        int channels = _activeChannels;
+        var limiter = _truePeakLimiter;
+        var analyzer3Band = _analyzer3Band;
+
         if (read > 0)
         {
             var samples = buffer[..read];
@@ -1230,10 +1276,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
                 ? _analyzer.ProcessSamples()
                 : 1.0f;
 
-            _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, channels);
+            _gainCrossfader.SetTarget(normGain, _activeSampleRate, channels);
 
             // 2. Always run signal through TruePeakLimiter (0 B allocations)
-            _truePeakLimiter.Process(samples, ref _gainCrossfader);
+            limiter.Process(samples, channels, ref _gainCrossfader);
 
 #if AUDIO_SPLICE_AUDIT
             float maxLimStep = 0f, maxLimD2 = 0f;
@@ -1274,20 +1320,20 @@ internal sealed class AudioPipeline : IAsyncDisposable
                 // BufferedSamples is already normalized to source sample rate by the backend
                 long delayTicks = ComputePresentationDelayTicks(
                     _backend.BufferedSamples,
-                    _decoder.SampleRate,
+                    _activeSampleRate,
                     channels);
 
-                _analyzer3Band.ProcessBlock(samples, channels, delayTicks);
+                analyzer3Band.ProcessBlock(samples, channels, delayTicks);
             }
             else if (!_spectrumSuspended)
             {
                 _spectrumSuspended = true;
-                _analyzer3Band.Reset();
+                analyzer3Band.Reset();
             }
         }
         else if (_isPaused || !_backend.IsPlaying)
         {
-            _analyzer3Band.Reset();
+            analyzer3Band.Reset();
         }
 
         return read / channels;

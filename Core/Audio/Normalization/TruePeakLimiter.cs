@@ -97,10 +97,17 @@ internal sealed class TruePeakLimiter
     /// <param name="samples">Interleaved PCM samples (in-place processing).</param>
     /// <param name="crossfader">Reference to the crossfader for per-sample gain interpolation.</param>
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
-    public void Process(Span<float> samples, ref GainCrossfader crossfader)
+    public void Process(Span<float> samples, ref GainCrossfader crossfader) =>
+        Process(samples, channels: 2, ref crossfader);
+
+    /// <summary>
+    /// Processes an interleaved PCM buffer in-place with channel-aware frame linking (0 allocations).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    public void Process(Span<float> samples, int channels, ref GainCrossfader crossfader)
     {
         int length = samples.Length;
-        if (length == 0) return;
+        if (length == 0 || channels <= 0) return;
 
         ref float samplesRef = ref MemoryMarshal.GetReference(samples);
 
@@ -111,90 +118,188 @@ internal sealed class TruePeakLimiter
         float attackCoef = _attackCoef;
         float releaseCoef = _releaseCoef;
 
-        int i = 0;
-        int pairLimit = length & ~1;
-
-        for (; i < pairLimit; i += 2)
+        if (channels == 2)
         {
-            float gain = crossfader.AdvanceFrame(2);
-            float inL = Unsafe.Add(ref samplesRef, i) * gain;
-            float inR = Unsafe.Add(ref samplesRef, i + 1) * gain;
+            int i = 0;
+            int pairLimit = length & ~1;
 
-            float absL = MathF.Abs(inL);
-            float absR = MathF.Abs(inR);
-            float absPeak = absL > absR ? absL : absR;
-            float neededGain = absPeak > KneeStart
-                ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absPeak)
-                : 1.0f;
+            for (; i < pairLimit; i += 2)
+            {
+                float gain = crossfader.AdvanceFrame(2);
+                float inL = Unsafe.Add(ref samplesRef, i) * gain;
+                float inR = Unsafe.Add(ref samplesRef, i + 1) * gain;
 
-            if (neededGain <= targetEnv)
-            {
-                targetEnv = neededGain;
-                holdRem = holdMax;
-            }
-            else if (neededGain <= targetEnv * 1.06f && neededGain < 1.0f)
-            {
-                holdRem = holdMax;
-            }
-            else if (holdRem > 0)
-            {
-                holdRem--;
-            }
-            else
-            {
-                targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
+                float absL = MathF.Abs(inL);
+                float absR = MathF.Abs(inR);
+                float absPeak = absL > absR ? absL : absR;
+                float neededGain = absPeak > KneeStart
+                    ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absPeak)
+                    : 1.0f;
+
+                if (neededGain <= targetEnv)
+                {
+                    targetEnv = neededGain;
+                    holdRem = holdMax;
+                }
+                else if (neededGain <= targetEnv * 1.06f && neededGain < 1.0f)
+                {
+                    holdRem = holdMax;
+                }
+                else if (holdRem > 0)
+                {
+                    holdRem--;
+                }
+                else
+                {
+                    targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
+                }
+
+                float coef = targetEnv < envGain ? attackCoef : releaseCoef;
+                envGain = targetEnv + coef * (envGain - targetEnv);
+
+                float outL = inL * envGain;
+                float outR = inR * envGain;
+                float outPeak = absPeak * envGain;
+                if (outPeak > KneeStart)
+                {
+                    float softScale = SoftCeilingPositive(outPeak) * Helpers.SpanMathHelper.FastReciprocal(outPeak);
+                    outL *= softScale;
+                    outR *= softScale;
+                }
+
+                Unsafe.Add(ref samplesRef, i) = outL;
+                Unsafe.Add(ref samplesRef, i + 1) = outR;
             }
 
-            float coef = targetEnv < envGain ? attackCoef : releaseCoef;
-            envGain = targetEnv + coef * (envGain - targetEnv);
-
-            float outL = inL * envGain;
-            float outR = inR * envGain;
-            float outPeak = absPeak * envGain;
-            if (outPeak > KneeStart)
+            for (; i < length; i++)
             {
-                float softScale = SoftCeilingPositive(outPeak) * Helpers.SpanMathHelper.FastReciprocal(outPeak);
-                outL *= softScale;
-                outR *= softScale;
-            }
+                float gain = crossfader.AdvanceFrame(1);
+                float amplified = Unsafe.Add(ref samplesRef, i) * gain;
+                float absAmp = MathF.Abs(amplified);
 
-            Unsafe.Add(ref samplesRef, i) = outL;
-            Unsafe.Add(ref samplesRef, i + 1) = outR;
+                float neededGain = absAmp > KneeStart
+                    ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absAmp)
+                    : 1.0f;
+
+                if (neededGain <= targetEnv)
+                {
+                    targetEnv = neededGain;
+                    holdRem = holdMax;
+                }
+                else if (neededGain <= targetEnv * 1.06f && neededGain < 1.0f)
+                {
+                    holdRem = holdMax;
+                }
+                else if (holdRem > 0)
+                {
+                    holdRem--;
+                }
+                else
+                {
+                    targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
+                }
+
+                float coef = targetEnv < envGain ? attackCoef : releaseCoef;
+                envGain = targetEnv + coef * (envGain - targetEnv);
+
+                float outM = amplified * envGain;
+                float outAbs = absAmp * envGain;
+                if (outAbs > KneeStart)
+                    outM = MathF.CopySign(SoftCeilingPositive(outAbs), outM);
+
+                Unsafe.Add(ref samplesRef, i) = outM;
+            }
         }
-
-        for (; i < length; i++)
+        else if (channels == 1)
         {
-            float gain = crossfader.AdvanceFrame(1);
-            float amplified = Unsafe.Add(ref samplesRef, i) * gain;
-            float absAmp = MathF.Abs(amplified);
-
-            float neededGain = absAmp > KneeStart
-                ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absAmp)
-                : 1.0f;
-
-            if (neededGain < targetEnv)
+            for (int i = 0; i < length; i++)
             {
-                targetEnv = neededGain;
-                holdRem = holdMax;
+                float gain = crossfader.AdvanceFrame(1);
+                float amplified = Unsafe.Add(ref samplesRef, i) * gain;
+                float absAmp = MathF.Abs(amplified);
+
+                float neededGain = absAmp > KneeStart
+                    ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absAmp)
+                    : 1.0f;
+
+                if (neededGain <= targetEnv)
+                {
+                    targetEnv = neededGain;
+                    holdRem = holdMax;
+                }
+                else if (neededGain <= targetEnv * 1.06f && neededGain < 1.0f)
+                {
+                    holdRem = holdMax;
+                }
+                else if (holdRem > 0)
+                {
+                    holdRem--;
+                }
+                else
+                {
+                    targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
+                }
+
+                float coef = targetEnv < envGain ? attackCoef : releaseCoef;
+                envGain = targetEnv + coef * (envGain - targetEnv);
+
+                float outM = amplified * envGain;
+                float outAbs = absAmp * envGain;
+                if (outAbs > KneeStart)
+                    outM = MathF.CopySign(SoftCeilingPositive(outAbs), outM);
+
+                Unsafe.Add(ref samplesRef, i) = outM;
             }
-            else if (holdRem > 0)
+        }
+        else
+        {
+            int frameCount = length / channels;
+            int idx = 0;
+            for (int f = 0; f < frameCount; f++, idx += channels)
             {
-                holdRem--;
+                float gain = crossfader.AdvanceFrame(channels);
+                float absPeak = 0f;
+                for (int c = 0; c < channels; c++)
+                {
+                    float s = Unsafe.Add(ref samplesRef, idx + c) * gain;
+                    Unsafe.Add(ref samplesRef, idx + c) = s;
+                    float abs = MathF.Abs(s);
+                    if (abs > absPeak) absPeak = abs;
+                }
+
+                float neededGain = absPeak > KneeStart
+                    ? KneeStart * Helpers.SpanMathHelper.FastReciprocal(absPeak)
+                    : 1.0f;
+
+                if (neededGain <= targetEnv)
+                {
+                    targetEnv = neededGain;
+                    holdRem = holdMax;
+                }
+                else if (neededGain <= targetEnv * 1.06f && neededGain < 1.0f)
+                {
+                    holdRem = holdMax;
+                }
+                else if (holdRem > 0)
+                {
+                    holdRem--;
+                }
+                else
+                {
+                    targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
+                }
+
+                float coef = targetEnv < envGain ? attackCoef : releaseCoef;
+                envGain = targetEnv + coef * (envGain - targetEnv);
+
+                float outPeak = absPeak * envGain;
+                float scale = outPeak > KneeStart
+                    ? SoftCeilingPositive(outPeak) * Helpers.SpanMathHelper.FastReciprocal(outPeak) * envGain
+                    : envGain;
+
+                for (int c = 0; c < channels; c++)
+                    Unsafe.Add(ref samplesRef, idx + c) *= scale;
             }
-            else
-            {
-                targetEnv = 1.0f + releaseCoef * (targetEnv - 1.0f);
-            }
-
-            float coef = targetEnv < envGain ? attackCoef : releaseCoef;
-            envGain = targetEnv + coef * (envGain - targetEnv);
-
-            float outM = amplified * envGain;
-            float outAbs = absAmp * envGain;
-            if (outAbs > KneeStart)
-                outM = MathF.CopySign(SoftCeilingPositive(outAbs), outM);
-
-            Unsafe.Add(ref samplesRef, i) = outM;
         }
 
         _envelopeGain = envGain;

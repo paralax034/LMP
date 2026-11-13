@@ -394,12 +394,54 @@ internal sealed partial class Mp4ContainerParser
         int channelConfig = (asc[1] >> 3) & 0x0F;
 
         int baseSampleRate = AudioConstants.GetAacSampleRate(samplingFrequencyIndex);
-        bool isHeAac = audioObjectType is 5 or 29;
+        int baseChannels = AudioConstants.GetAacChannels(channelConfig);
+
+        if (audioObjectType is 5 or 29)
+        {
+            int extRate = 0;
+            if (asc.Length >= 3 && samplingFrequencyIndex != 15)
+            {
+                int extFreqIdx = ((asc[1] & 0x07) << 1) | ((asc[2] >> 7) & 0x01);
+                if (extFreqIdx < 13)
+                    extRate = AudioConstants.GetAacSampleRate(extFreqIdx);
+            }
+
+            _sampleRate = extRate > 0 ? extRate : (baseSampleRate > 0 ? baseSampleRate * 2 : _sampleRate);
+            _channels = audioObjectType == 29 ? Math.Max(2, baseChannels) : baseChannels;
+            return;
+        }
+
+        if (audioObjectType == 2 && asc.Length >= 5 && samplingFrequencyIndex != 15)
+        {
+            int syncExt = ((asc[2] & 0x1F) << 6) | ((asc[3] >> 2) & 0x3F);
+            if (syncExt == 0x2B7)
+            {
+                int extAot = ((asc[3] & 0x03) << 3) | ((asc[4] >> 5) & 0x07);
+                if (extAot == 5 && ((asc[4] >> 4) & 0x01) == 1)
+                {
+                    int extFreqIdx = asc[4] & 0x0F;
+                    int extRate = extFreqIdx < 13 ? AudioConstants.GetAacSampleRate(extFreqIdx) : 0;
+                    _sampleRate = extRate > 0 ? extRate : (baseSampleRate > 0 ? baseSampleRate * 2 : _sampleRate);
+
+                    if (asc.Length >= 7)
+                    {
+                        int psSync = (asc[5] << 3) | ((asc[6] >> 5) & 0x07);
+                        _channels = psSync == 0x548 && ((asc[6] >> 4) & 0x01) == 1
+                            ? Math.Max(2, baseChannels)
+                            : baseChannels;
+                        return;
+                    }
+
+                    _channels = baseChannels;
+                    return;
+                }
+            }
+        }
 
         if (baseSampleRate > 0)
-            _sampleRate = isHeAac ? baseSampleRate * 2 : baseSampleRate;
+            _sampleRate = baseSampleRate;
 
-        _channels = AudioConstants.GetAacChannels(channelConfig);
+        _channels = baseChannels;
     }
 
     /// <summary>

@@ -13,7 +13,7 @@ internal sealed class AacDecoder : IAudioDecoder
 {
     private const int DefaultSampleRate = 44100;
     private const int DefaultChannels = 2;
-    private const int DefaultMaxFrameSize = 2048;
+    private const int DefaultMaxFrameSize = 1024;
     private const int MaxConsecutiveSilentErrors = 15;
 
     private Decoder? _decoder;
@@ -28,6 +28,7 @@ internal sealed class AacDecoder : IAudioDecoder
 
     private bool _isHeAac;
     private int _outputSampleRate;
+    private int _outputChannels;
     private int _consecutiveErrors;
 
     public AacDecoder(int sampleRate = DefaultSampleRate, int channels = DefaultChannels)
@@ -40,9 +41,19 @@ internal sealed class AacDecoder : IAudioDecoder
 
     public int SampleRate => _outputSampleRate > 0 ? _outputSampleRate :
                              _config?.GetSampleFrequency().GetFrequency() ?? _requestedSampleRate;
-    public int Channels => (int?)_config?.GetChannelConfiguration() ?? _requestedChannels;
-    public int MaxFrameSize => _isHeAac ? DefaultMaxFrameSize * 2 :
-                               _config?.GetFrameLength() ?? DefaultMaxFrameSize;
+    public int Channels => _outputChannels > 0
+        ? _outputChannels
+        : (int?)_config?.GetChannelConfiguration() ?? _requestedChannels;
+    public int MaxFrameSize
+    {
+        get
+        {
+            int baseLen = _config?.GetFrameLength() ?? DefaultMaxFrameSize;
+            return (_isHeAac || (_outputSampleRate > 0 && _outputSampleRate <= 24000))
+                ? baseLen * 2
+                : baseLen;
+        }
+    }
     public AudioCodec Codec => AudioCodec.Aac;
     public bool IsInitialized => _initialized;
 
@@ -60,7 +71,7 @@ internal sealed class AacDecoder : IAudioDecoder
 
             Log.Debug($"[AacDecoder] ASC analysis: objectType={ascInfo.ObjectType}, " +
                      $"baseRate={ascInfo.BaseSampleRate}, outputRate={ascInfo.OutputSampleRate}, " +
-                     $"channels={ascInfo.Channels}, isHE-AAC={ascInfo.IsHeAac}");
+                     $"baseCh={ascInfo.BaseChannels}, outCh={ascInfo.OutputChannels}, isHE-AAC={ascInfo.IsHeAac}");
 
             if (ascInfo.IsHeAac)
                 InitializeHeAac(ascInfo);
@@ -81,6 +92,7 @@ internal sealed class AacDecoder : IAudioDecoder
     {
         _isHeAac = true;
         _outputSampleRate = ascInfo.OutputSampleRate;
+        _outputChannels = ascInfo.OutputChannels;
 
         byte[] modifiedAsc = CreateAacLcAsc(ascInfo);
 
@@ -92,7 +104,7 @@ internal sealed class AacDecoder : IAudioDecoder
         _decoder = new Decoder(_config);
 
         Log.Info($"[AacDecoder] HE-AAC initialized: core={ascInfo.BaseSampleRate}Hz, " +
-                $"output={_outputSampleRate}Hz, channels={ascInfo.Channels}");
+                $"output={_outputSampleRate}Hz, baseCh={ascInfo.BaseChannels}, outCh={_outputChannels}");
     }
 
     private void InitializeStandard(byte[] decoderSpecificInfo)
@@ -102,6 +114,7 @@ internal sealed class AacDecoder : IAudioDecoder
         _config = DecoderConfig.ParseMP4DecoderSpecificInfo(decoderSpecificInfo);
         _decoder = new Decoder(_config);
         _outputSampleRate = _config.GetSampleFrequency().GetFrequency();
+        _outputChannels = (int)_config.GetChannelConfiguration();
 
         Log.Debug($"[AacDecoder] AAC-LC initialized: profile={_config.GetProfile()}, " +
                  $"sampleRate={_config.GetSampleFrequency()}, channels={_config.GetChannelConfiguration()}");
@@ -148,7 +161,7 @@ internal sealed class AacDecoder : IAudioDecoder
         int objectType = 2; // AAC-LC
 
         byte byte0 = (byte)((objectType << 3) | ((freqIndex >> 1) & 0x07));
-        byte byte1 = (byte)(((freqIndex & 0x01) << 7) | ((info.Channels & 0x0F) << 3));
+        byte byte1 = (byte)(((freqIndex & 0x01) << 7) | ((info.BaseChannels & 0x0F) << 3));
 
         return [byte0, byte1];
     }
@@ -162,7 +175,8 @@ internal sealed class AacDecoder : IAudioDecoder
                 ObjectType = 2,
                 BaseSampleRate = 44100,
                 OutputSampleRate = 44100,
-                Channels = 2,
+                BaseChannels = 2,
+                OutputChannels = 2,
                 IsHeAac = false
             };
         }
@@ -172,20 +186,54 @@ internal sealed class AacDecoder : IAudioDecoder
         int channelConfig = (asc[1] >> 3) & 0x0F;
 
         int baseSampleRate = AudioConstants.GetAacSampleRate(samplingFrequencyIndex);
+        int baseChannels = AudioConstants.GetAacChannels(channelConfig);
 
-        bool isHeAac = audioObjectType == 5 || audioObjectType == 29;
+        bool isHeAac = audioObjectType is 5 or 29;
         int outputSampleRate = baseSampleRate;
-        if (isHeAac && baseSampleRate > 0)
-            outputSampleRate = baseSampleRate * 2;
+        int outputChannels = audioObjectType == 29 ? Math.Max(2, baseChannels) : baseChannels;
 
-        int channels = AudioConstants.GetAacChannels(channelConfig);
+        if (isHeAac)
+        {
+            int extRate = 0;
+            if (asc.Length >= 3 && samplingFrequencyIndex != 15)
+            {
+                int extFreqIdx = ((asc[1] & 0x07) << 1) | ((asc[2] >> 7) & 0x01);
+                if (extFreqIdx < 13)
+                    extRate = AudioConstants.GetAacSampleRate(extFreqIdx);
+            }
+
+            outputSampleRate = extRate > 0 ? extRate : (baseSampleRate > 0 ? baseSampleRate * 2 : 44100);
+        }
+        else if (audioObjectType == 2 && asc.Length >= 5 && samplingFrequencyIndex != 15)
+        {
+            int syncExt = ((asc[2] & 0x1F) << 6) | ((asc[3] >> 2) & 0x3F);
+            if (syncExt == 0x2B7)
+            {
+                int extAot = ((asc[3] & 0x03) << 3) | ((asc[4] >> 5) & 0x07);
+                if (extAot == 5 && ((asc[4] >> 4) & 0x01) == 1)
+                {
+                    isHeAac = true;
+                    int extFreqIdx = asc[4] & 0x0F;
+                    int extRate = extFreqIdx < 13 ? AudioConstants.GetAacSampleRate(extFreqIdx) : 0;
+                    outputSampleRate = extRate > 0 ? extRate : (baseSampleRate > 0 ? baseSampleRate * 2 : 44100);
+
+                    if (asc.Length >= 7)
+                    {
+                        int psSync = (asc[5] << 3) | ((asc[6] >> 5) & 0x07);
+                        if (psSync == 0x548 && ((asc[6] >> 4) & 0x01) == 1)
+                            outputChannels = Math.Max(2, baseChannels);
+                    }
+                }
+            }
+        }
 
         return new AscInfo
         {
             ObjectType = audioObjectType,
             BaseSampleRate = baseSampleRate,
             OutputSampleRate = outputSampleRate,
-            Channels = channels,
+            BaseChannels = baseChannels,
+            OutputChannels = outputChannels,
             IsHeAac = isHeAac
         };
     }
@@ -216,7 +264,8 @@ internal sealed class AacDecoder : IAudioDecoder
         public int ObjectType { get; init; }
         public int BaseSampleRate { get; init; }
         public int OutputSampleRate { get; init; }
-        public int Channels { get; init; }
+        public int BaseChannels { get; init; }
+        public int OutputChannels { get; init; }
         public bool IsHeAac { get; init; }
     }
 
@@ -257,12 +306,13 @@ internal sealed class AacDecoder : IAudioDecoder
         ObjectDisposedException.ThrowIf(_disposed, this);
         EnsureInitialized();
 
+        int nominalFrameSize = (_isHeAac ? 2 : 1) * (_config?.GetFrameLength() ?? DefaultMaxFrameSize);
+
         if (encodedData.IsEmpty)
         {
-            int silenceSamples = MaxFrameSize;
-            int totalSamples = silenceSamples * Channels;
+            int totalSamples = nominalFrameSize * Channels;
             outputBuffer[..Math.Min(totalSamples, outputBuffer.Length)].Clear();
-            return silenceSamples;
+            return nominalFrameSize;
         }
 
         try
@@ -273,10 +323,16 @@ internal sealed class AacDecoder : IAudioDecoder
                 outputBuffer,
                 targetCh,
                 out int decodedRate,
-                out _);
+                out int decodedChannels);
 
             if (decodedRate > _outputSampleRate)
+            {
                 _outputSampleRate = decodedRate;
+                _isHeAac = true;
+            }
+
+            if (decodedChannels > _outputChannels)
+                _outputChannels = decodedChannels;
 
             _consecutiveErrors = 0;
             return sampleCount;
@@ -294,10 +350,9 @@ internal sealed class AacDecoder : IAudioDecoder
                 if (_consecutiveErrors % 5 == 0)
                     _decoder?.Flush();
 
-                int silenceSamples = MaxFrameSize;
-                int totalSamples = silenceSamples * Channels;
+                int totalSamples = nominalFrameSize * Channels;
                 outputBuffer[..Math.Min(totalSamples, outputBuffer.Length)].Clear();
-                return silenceSamples;
+                return nominalFrameSize;
             }
 
             // Last resort: complete recreation
@@ -306,10 +361,9 @@ internal sealed class AacDecoder : IAudioDecoder
             Log.Warn($"[AacDecoder] Persistent decode error after {_consecutiveErrors} attempts: {ex.Message}");
 
             // Return silence instead of throwing an exception — do not crash playback
-            int silence = MaxFrameSize;
-            int total = silence * Channels;
+            int total = nominalFrameSize * Channels;
             outputBuffer[..Math.Min(total, outputBuffer.Length)].Clear();
-            return silence;
+            return nominalFrameSize;
         }
     }
 

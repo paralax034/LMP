@@ -439,7 +439,10 @@ namespace SharpJaad.AAC.Syntax
                 return 0;
             }
 
-            int chs = targetChannels > 0 ? targetChannels : Math.Max(data.Length, 2);
+            int detectedChannels = data.Length;
+            int chs = (psPresent && detectedChannels > targetChannels)
+                ? detectedChannels
+                : (targetChannels > 0 ? targetChannels : Math.Max(detectedChannels, 2));
             int mult = sbrPresent && config.IsSBREnabled() ? 2 : 1;
             int length = mult * config.GetFrameLength();
             sampleRate = mult * config.GetSampleFrequency().GetFrequency();

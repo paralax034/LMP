@@ -233,7 +233,8 @@ public static class AudioLogicTests
                 $"GainProcessor linear scaling mismatch at {i}");
         }
 
-        // 2. Strict asymptotic SafeCeiling (0.985f) and monotonicity during Volume Boost (> 1.0f)
+        // 2. Strict asymptotic SafeCeiling (0.985f), transfer curve (1ch) and stereo link (2ch) during Volume Boost (> 1.0f)
+        processor.SetChannels(1);
         processor.SetVolumeGain(2.5f);
         processor.Process(warmup.AsSpan());
 
@@ -251,6 +252,26 @@ public static class AudioLogicTests
             TestAssert.True(boostOutputs[i] > boostOutputs[i - 1], "Soft-clip transfer function must be strictly monotonic");
             TestAssert.True(boostOutputs[i] <= 0.985f, $"Soft-clip output {boostOutputs[i]:F6} exceeded SafeCeiling (0.985f)");
         }
+
+        // Stereo-linked boost preserves L/R balance on asymmetric peaks
+        processor.SetChannels(Channels);
+        processor.SetVolumeGain(2.0f);
+        processor.Process(warmup.AsSpan());
+        float[] asymmetricBoost = [0.8f, 0.2f, 0.8f, 0.2f];
+        processor.Process(asymmetricBoost.AsSpan());
+        TestAssert.True(asymmetricBoost[0] <= 0.985f);
+        TestAssert.True(MathF.Abs(asymmetricBoost[0] / asymmetricBoost[1] - 4.0f) < 1e-3f,
+            $"Stereo-linked GainProcessor must preserve 4:1 L/R balance, got {asymmetricBoost[0] / asymmetricBoost[1]:F4}");
+
+        // Ramp <= 1.0f stays bit-exact linear below SafeCeiling (no premature SoftClipSample distortion)
+        processor.SetVolumeGain(0.95f);
+        processor.Process(warmup.AsSpan());
+        processor.SetVolumeGain(1.0f);
+        float[] rampLinearProbe = [0.95f, 0.95f];
+        processor.Process(rampLinearProbe.AsSpan());
+        float expectedRampSample = 0.95f * (0.95f + 0.05f / 1200f);
+        TestAssert.True(MathF.Abs(rampLinearProbe[0] - expectedRampSample) < 1e-6f,
+            "Ramp <= 1.0f must remain strictly linear without soft-clipping");
 
         // 3. Ramp continuity and L/R identity during on-the-fly gain retargeting
         processor.SetVolumeGain(0.2f);
@@ -848,6 +869,197 @@ public static class AudioLogicTests
         public void SetPlaybackActive(bool active) { }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         public void Dispose() { }
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ReadCallbackWithResamplingUnderLock")]
+    private static extern int CallWinAudioResample(WinAudioBackend backend, Span<float> targetSpan, int requestedOutFrames);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_sourceSampleRate")]
+    private static extern ref int WinAudioSourceRateField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_sampleRate")]
+    private static extern ref int WinAudioSampleRateField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_channels")]
+    private static extern ref int WinAudioChannelsField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_callback")]
+    private static extern ref AudioDataCallback? WinAudioCallbackField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_crossfadeTailFrames")]
+    private static extern ref int WinAudioCrossfadeTailFramesField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_crossfadeTail")]
+    private static extern ref float[] WinAudioCrossfadeTailField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lastWasapiL")]
+    private static extern ref float WinAudioLastLField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lastWasapiR")]
+    private static extern ref float WinAudioLastRField(WinAudioBackend backend);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "CaptureCrossfadeTailUnderLock")]
+    private static extern void CallWinAudioCaptureTail(WinAudioBackend backend);
+
+    [TestMethod(TestCategory.Unit, "Ring Alignment, Resampler -90dB Aliasing, Shelf SVF, Multi-Ch Limiter/EQ & WebM CodecPrivate", Group = TestGroups.Audio, Order = 15)]
+    [SupportedOSPlatform("windows")]
+    public static async Task TestAudioPipelineIntegrityInvariantsAsync()
+    {
+        // 1. LockFreeRingBuffer frame alignment prevents splitting stereo (L, R) frames on partial writes
+        using (var alignedRing = new LockFreeRingBuffer<float>(16, frameAlignment: 2))
+        {
+            float[] write20 = new float[20];
+            for (int i = 0; i < 20; i++) write20[i] = i;
+            int written = alignedRing.Write(write20);
+            TestAssert.Equal(14, written, "Frame-aligned ring must write an even sample count when capacity-1 is odd");
+
+            float[] read3 = new float[3];
+            int read = alignedRing.Read(read3);
+            TestAssert.Equal(2, read, "Frame-aligned ring must never consume half a stereo frame");
+        }
+
+        // 2. EqualizerProcessor Cytomic Shelf (+12 dB at 31.25 Hz / 16 kHz -> +6.0 dB at cutoff) & 6-channel processing
+        var eq6 = new EqualizerProcessor(SampleRate, 6);
+        Span<float> shelfBands = stackalloc float[EqualizerProcessor.BandCount];
+        shelfBands.Clear();
+        shelfBands[0] = 12.0f;
+        eq6.Configure(enabled: true, shelfBands, preampDb: 0f, autoPreamp: false);
+        eq6.SnapToTarget();
+
+        float[] multi6 = new float[4096 * 6];
+        for (int f = 0; f < 4096; f++)
+        {
+            float s = MathF.Sin(2f * MathF.PI * 31.25f * f / SampleRate) * 0.1f;
+            for (int c = 0; c < 6; c++) multi6[f * 6 + c] = s;
+        }
+        eq6.Process(multi6.AsSpan());
+        float peakCh0 = 0f, peakCh5 = 0f;
+        for (int f = 3072; f < 4096; f++)
+        {
+            peakCh0 = MathF.Max(peakCh0, MathF.Abs(multi6[f * 6]));
+            peakCh5 = MathF.Max(peakCh5, MathF.Abs(multi6[f * 6 + 5]));
+        }
+        float shelfDb = 20f * MathF.Log10(peakCh0 / 0.1f);
+        TestAssert.True(MathF.Abs(shelfDb - 6.0f) < 0.35f, $"Low-shelf +12 dB at corner freq must be ~+6.0 dB, got {shelfDb:F2} dB");
+        TestAssert.True(MathF.Abs(peakCh0 - peakCh5) < 1e-4f, "All 6 channels in EqualizerProcessor must receive identical filtering");
+
+        // 3. TruePeakLimiter mono envelope timing & 6-channel link
+        var limiter = new TruePeakLimiter(SampleRate);
+        var xf = new GainCrossfader(1.0f);
+        float[] pulse6 = [1.8f, 0.9f, 0.45f, 0.225f, 0.1f, 0.05f];
+        limiter.Process(pulse6.AsSpan(), 6, ref xf);
+        TestAssert.True(MathF.Abs(pulse6[0] / pulse6[2] - 4.0f) < 1e-4f, "6-channel TruePeakLimiter must preserve exact channel ratios");
+
+        // 4. AacDecoder HE-AAC v2 (AOT=29, mono core -> 2ch output) & MaxFrameSize
+        byte[] aot29Asc = [0xEB, 0x09, 0x88, 0x00]; // AOT=29 (PS), idx=6 (24kHz), ch=1, extIdx=3 (48kHz)
+        using (var psDec = new LMP.Core.Audio.Decoders.AacDecoder(24000, 1))
+        {
+            psDec.Initialize(aot29Asc);
+            TestAssert.Equal(2, psDec.Channels, "HE-AAC v2 (AOT=29) must report 2 output channels");
+            TestAssert.Equal(48000, psDec.SampleRate);
+            TestAssert.Equal(2048, psDec.MaxFrameSize);
+        }
+
+        // 5. WebMParser preserves Audio CodecPrivate when a Video track follows
+        using (var ms = new MemoryStream())
+        {
+            // Tracks element containing Track 1 (Audio, CodecPrivate='OpusHead...') and Track 2 (Video, CodecPrivate='VID')
+            byte[] opusPriv = "OpusHead\x01\x02\x38\x01\x80\xBB\x00\x00\x00\xFC\x00"u8.ToArray();
+            byte[] vidPriv = [0x56, 0x49, 0x44, 0x45, 0x4F];
+            static byte[] Elem(uint id, byte[] payload)
+            {
+                using var m = new MemoryStream();
+                for (int shift = 24; shift >= 0; shift -= 8)
+                {
+                    byte b = (byte)(id >> shift);
+                    if (b != 0 || m.Length > 0) m.WriteByte(b);
+                }
+                m.WriteByte((byte)(0x80 | payload.Length));
+                m.Write(payload);
+                return m.ToArray();
+            }
+            byte[] t1 = Elem(0xAE, [.. Elem(0xD7, [1]), .. Elem(0x83, [2]), .. Elem(0x63A2, opusPriv)]);
+            byte[] t2 = Elem(0xAE, [.. Elem(0xD7, [2]), .. Elem(0x83, [1]), .. Elem(0x63A2, vidPriv)]);
+            byte[] tracks = Elem(0x1654AE6B, [.. t1, .. t2]);
+            byte[] clusterHdr = [0x1F, 0x43, 0xB6, 0x75, 0x80];
+            ms.Write(tracks);
+            ms.Write(clusterHdr);
+            ms.Position = 0;
+
+            using var webm = new WebMParser(ms);
+            bool ok = await webm.ParseHeadersAsync().ConfigureAwait(false);
+            TestAssert.True(ok);
+            TestAssert.True(webm.CodecPrivate != null && webm.CodecPrivate.AsSpan().SequenceEqual(opusPriv),
+                "Video track CodecPrivate must not overwrite Audio OpusHead");
+        }
+
+        // 6. WinAudioBackend Windowed-Sinc Resampler: <= -90 dBFS alias rejection (44.1->48 @ 15kHz & 96->48 @ 30kHz)
+        if (OperatingSystem.IsWindows())
+        {
+            using var backend = new WinAudioBackend();
+            WinAudioSampleRateField(backend) = 48000;
+            WinAudioChannelsField(backend) = 2;
+
+            static double MeasureMaxSpuriousDb(WinAudioBackend b, int srcRate, double toneHz)
+            {
+                WinAudioSourceRateField(b) = srcRate;
+                int inPhase = 0;
+                WinAudioCallbackField(b) = span =>
+                {
+                    int frames = span.Length / 2;
+                    for (int f = 0; f < frames; f++)
+                    {
+                        float s = (float)(Math.Sin(2.0 * Math.PI * toneHz * inPhase++ / srcRate) * 0.5);
+                        span[f * 2] = s;
+                        span[f * 2 + 1] = s;
+                    }
+                    return frames;
+                };
+
+                const int outFrames = 4096;
+                float[] outBuf = new float[outFrames * 2];
+                _ = CallWinAudioResample(b, outBuf.AsSpan(), 1024); // Prime past initial edge
+                int got = CallWinAudioResample(b, outBuf.AsSpan(), outFrames);
+                TestAssert.Equal(outFrames, got);
+
+                // Blackman-Harris windowed DFT on steady output, skipping bins within +-8 bins of DC and fundamental toneHz
+                const int N = 2048;
+                int offset = outFrames - N;
+                double maxSpurious = 0.0;
+                double fundamentalBin = toneHz * N / 48000.0;
+                double norm = 0.0;
+                double[] win = new double[N];
+                for (int n = 0; n < N; n++)
+                {
+                    double u = (double)n / N;
+                    win[n] = 0.35875 - 0.48829 * Math.Cos(2 * Math.PI * u) + 0.14128 * Math.Cos(4 * Math.PI * u) - 0.01168 * Math.Cos(6 * Math.PI * u);
+                    norm += win[n];
+                }
+
+                for (int k = 1; k < N / 2; k++)
+                {
+                    if (toneHz < 24000.0 && Math.Abs(k - fundamentalBin) < 8.0) continue;
+                    double re = 0.0, im = 0.0;
+                    for (int n = 0; n < N; n++)
+                    {
+                        double x = outBuf[(offset + n) * 2] * win[n];
+                        (double s, double c) = Math.SinCos(2.0 * Math.PI * k * n / N);
+                        re += x * c;
+                        im -= x * s;
+                    }
+                    double mag = Math.Sqrt(re * re + im * im) * 2.0 / (norm * 0.5);
+                    if (mag > maxSpurious) maxSpurious = mag;
+                }
+                return 20.0 * Math.Log10(Math.Max(maxSpurious, 1e-12));
+            }
+
+            double alias15k = MeasureMaxSpuriousDb(backend, 44100, 15000.0);
+            double alias11k = MeasureMaxSpuriousDb(backend, 44100, 11025.0);
+            double alias30kDown = MeasureMaxSpuriousDb(backend, 96000, 30000.0);
+            TestAssert.True(alias15k <= -88.0, $"44.1->48 15kHz image/alias too high: {alias15k:F1} dB");
+            TestAssert.True(alias11k <= -88.0, $"44.1->48 11.025kHz image/alias too high: {alias11k:F1} dB");
+            TestAssert.True(alias30kDown <= -88.0, $"96->48 30kHz alias too high: {alias30kDown:F1} dB");
+        }
     }
 
     /// <summary>

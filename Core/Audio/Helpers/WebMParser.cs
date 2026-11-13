@@ -475,6 +475,7 @@ internal sealed class WebMParser : IDisposable
         long endPosition = size == UNKNOWN_SIZE ? long.MaxValue : StreamPositionWithBuffer() + size;
         int trackNumber = 0;
         int trackType = 0;
+        byte[]? trackCodecPrivate = null;
 
         while (StreamPositionWithBuffer() < endPosition)
         {
@@ -494,8 +495,8 @@ internal sealed class WebMParser : IDisposable
                     break;
 
                 case CODEC_PRIVATE_ID:
-                    CodecPrivate = new byte[elementSize];
-                    await ReadExactAsync(CodecPrivate, ct).ConfigureAwait(false);
+                    trackCodecPrivate = new byte[elementSize];
+                    await ReadExactAsync(trackCodecPrivate, ct).ConfigureAwait(false);
                     break;
 
                 case AUDIO_ID:
@@ -509,7 +510,11 @@ internal sealed class WebMParser : IDisposable
         }
 
         if (trackType == 2 && trackNumber > 0)
+        {
             _audioTrackNumber = trackNumber;
+            if (trackCodecPrivate != null)
+                CodecPrivate = trackCodecPrivate;
+        }
     }
 
     private async ValueTask ParseAudioSettingsAsync(long size, CancellationToken ct)
