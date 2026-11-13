@@ -49,29 +49,53 @@ public sealed class LifecycleRegistry
     }
 
     /// <summary>
+    /// Unregisters a background service from suspension notifications.
+    /// </summary>
+    /// <param name="item">Service implementing <see cref="ISuspendable"/>.</param>
+    public void UnregisterBackgroundSuspendable(ISuspendable item)
+    {
+        lock (_lock)
+        {
+            for (int i = _backgroundSuspendableItems.Count - 1; i >= 0; i--)
+            {
+                if (!_backgroundSuspendableItems[i].TryGetTarget(out var target) || ReferenceEquals(target, item))
+                    _backgroundSuspendableItems.RemoveAt(i);
+            }
+        }
+    }
+
+    /// <summary>
     /// Broadcasts an account change notification to all registered components.
     /// </summary>
     public void BroadcastAccountChanged()
     {
+        List<IAccountAware>? targets = null;
         lock (_lock)
         {
             for (int i = _accountAwareItems.Count - 1; i >= 0; i--)
             {
                 if (_accountAwareItems[i].TryGetTarget(out var item))
                 {
-                    try
-                    {
-                        item.OnAccountChanged();
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"[Lifecycle] Error broadcasting AccountChanged: {ex.Message}");
-                    }
+                    targets ??= new List<IAccountAware>(_accountAwareItems.Count);
+                    targets.Add(item);
                 }
                 else
                 {
                     _accountAwareItems.RemoveAt(i);
                 }
+            }
+        }
+
+        if (targets == null) return;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            try
+            {
+                targets[i].OnAccountChanged();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[Lifecycle] Error broadcasting AccountChanged: {ex.Message}");
             }
         }
     }
@@ -82,25 +106,33 @@ public sealed class LifecycleRegistry
     /// <param name="level">Suspension level.</param>
     public void BroadcastBackgroundSuspend(SuspendLevel level)
     {
+        List<ISuspendable>? targets = null;
         lock (_lock)
         {
             for (int i = _backgroundSuspendableItems.Count - 1; i >= 0; i--)
             {
                 if (_backgroundSuspendableItems[i].TryGetTarget(out var item))
                 {
-                    try
-                    {
-                        item.OnSuspend(level);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"[Lifecycle] Error broadcasting Suspend to background service: {ex.Message}");
-                    }
+                    targets ??= new List<ISuspendable>(_backgroundSuspendableItems.Count);
+                    targets.Add(item);
                 }
                 else
                 {
                     _backgroundSuspendableItems.RemoveAt(i);
                 }
+            }
+        }
+
+        if (targets == null) return;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            try
+            {
+                targets[i].OnSuspend(level);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[Lifecycle] Error broadcasting Suspend to background service: {ex.Message}");
             }
         }
     }
@@ -111,25 +143,33 @@ public sealed class LifecycleRegistry
     /// <param name="previousLevel">Previous suspension level.</param>
     public void BroadcastBackgroundResume(SuspendLevel previousLevel)
     {
+        List<ISuspendable>? targets = null;
         lock (_lock)
         {
             for (int i = _backgroundSuspendableItems.Count - 1; i >= 0; i--)
             {
                 if (_backgroundSuspendableItems[i].TryGetTarget(out var item))
                 {
-                    try
-                    {
-                        item.OnResume(previousLevel);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"[Lifecycle] Error broadcasting Resume to background service: {ex.Message}");
-                    }
+                    targets ??= new List<ISuspendable>(_backgroundSuspendableItems.Count);
+                    targets.Add(item);
                 }
                 else
                 {
                     _backgroundSuspendableItems.RemoveAt(i);
                 }
+            }
+        }
+
+        if (targets == null) return;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            try
+            {
+                targets[i].OnResume(previousLevel);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[Lifecycle] Error broadcasting Resume to background service: {ex.Message}");
             }
         }
     }

@@ -71,6 +71,9 @@ public sealed partial class AudioCacheEntry
     public List<SerializedDownloadedRange>? DownloadedRangesData { get; set; }
 
     [MemoryPackIgnore]
+    internal string? CachedFilePath { get; set; }
+
+    [MemoryPackIgnore]
     private long _downloadedBytes;
 
     [MemoryPackIgnore]
@@ -329,8 +332,43 @@ public sealed partial class AudioCacheEntry
     }
 
     /// <summary>
-    /// Returns a snapshot of downloaded ranges.
+    /// Finds the first aligned probe offset in <c>[minProbe, endExclusive)</c> fully covered by a cached range.
+    /// Returns <see cref="long.MaxValue"/> if no probe is covered.
     /// </summary>
+    internal long FindFirstCoveredProbeOffset(long minProbe, long endExclusive, int alignment, long originStart)
+    {
+        lock (_rangesLock)
+        {
+            if (_downloadedRanges is not { Count: > 0 })
+                return long.MaxValue;
+
+            for (int i = 0; i < _downloadedRanges.Count; i++)
+            {
+                var current = _downloadedRanges[i];
+                if (current.Start >= endExclusive) break;
+                if (current.EndExclusive <= minProbe) continue;
+
+                long candidate = current.Start <= minProbe
+                    ? minProbe
+                    : originStart + AlignUpOffset(current.Start - originStart, alignment);
+
+                if (candidate >= endExclusive) continue;
+
+                long probeEnd = Math.Min(endExclusive, candidate + alignment);
+                if (current.Start <= candidate && current.EndExclusive >= probeEnd)
+                    return candidate;
+            }
+        }
+
+        return long.MaxValue;
+    }
+
+    private static long AlignUpOffset(long value, int alignment)
+    {
+        long remainder = value % alignment;
+        return remainder == 0 ? value : value + (alignment - remainder);
+    }
+
     internal CacheByteRange[] GetDownloadedRangesSnapshot() =>
           GetDownloadedRangesSnapshot(out _);
 

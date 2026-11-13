@@ -84,6 +84,7 @@ internal sealed class EbuR128Analyzer
     private float _targetLufs = -14f;
     private float _maxGain = DefaultMaxNormalizationGain;
     private NormalizationMode _mode = NormalizationMode.Bidirectional;
+    private int _preScanDurationMs = 30_000;
 
     private sealed record ConfigSnapshot(NormalizationConfig Value);
     private volatile ConfigSnapshot? _pendingConfig;
@@ -96,11 +97,11 @@ internal sealed class EbuR128Analyzer
     public bool IsEnabled => _enabled;
 
     /// <summary>Whether gain is locked.</summary>
-    public bool IsGainLocked => !float.IsNaN(_lockedGain);
+    public bool IsGainLocked => !float.IsNaN(Volatile.Read(ref _lockedGain));
 
     /// <summary>Current configuration (snapshot reflecting pending settings).</summary>
     public NormalizationConfig CurrentConfig =>
-        _pendingConfig?.Value ?? new(_enabled, _targetLufs, _maxGain, _mode);
+        _pendingConfig?.Value ?? new(_enabled, _targetLufs, _maxGain, _mode, _preScanDurationMs);
 
     #endregion
 
@@ -128,7 +129,8 @@ internal sealed class EbuR128Analyzer
         bool changed = !wasEnabled
             || MathF.Abs(_targetLufs - normalizedConfig.TargetLufs) > 0.01f
             || MathF.Abs(_maxGain - normalizedConfig.MaxGain) > 0.01f
-            || _mode != normalizedConfig.Mode;
+            || _mode != normalizedConfig.Mode
+            || _preScanDurationMs != normalizedConfig.PreScanDurationMs;
 
         if (!changed) return;
 
@@ -174,6 +176,8 @@ internal sealed class EbuR128Analyzer
         _targetLufs = cfg.TargetLufs;
         _maxGain = Math.Max(1f, cfg.MaxGain);
         _mode = cfg.Mode;
+        if (cfg.PreScanDurationMs > 0)
+            _preScanDurationMs = cfg.PreScanDurationMs;
     }
 
     /// <inheritdoc cref="SetIntegratedLufsCallback"/>
@@ -221,15 +225,15 @@ internal sealed class EbuR128Analyzer
     /// </summary>
     public void LockGain(float gain)
     {
-        ApplyPendingConfig();
-
-        if (_mode == NormalizationMode.DownwardOnly)
+        // Read active config without mutating fill-thread fields so background pre-scan remains lock-free.
+        var cfg = CurrentConfig;
+        if (cfg.Mode == NormalizationMode.DownwardOnly)
             gain = MathF.Min(gain, 1.0f);
 
-        gain = Math.Clamp(gain, MinNormalizationGain, _maxGain);
+        gain = Math.Clamp(gain, MinNormalizationGain, Math.Max(1f, cfg.MaxGain));
 
         _pendingNormReset = 0;
-        _lockedGain = gain;
+        Volatile.Write(ref _lockedGain, gain);
     }
 
     /// <summary>
@@ -238,7 +242,8 @@ internal sealed class EbuR128Analyzer
     public float GetLockedGain()
     {
         if (!_enabled) return 1.0f;
-        return float.IsNaN(_lockedGain) ? _startingNormGain : _lockedGain;
+        float locked = Volatile.Read(ref _lockedGain);
+        return float.IsNaN(locked) ? _startingNormGain : locked;
     }
 
     #endregion
@@ -264,7 +269,8 @@ internal sealed class EbuR128Analyzer
         else if (pendingOp == 2)
             ExecuteRecalculate();
 
-        return float.IsNaN(_lockedGain) ? _startingNormGain : _lockedGain;
+        float locked = Volatile.Read(ref _lockedGain);
+        return float.IsNaN(locked) ? _startingNormGain : locked;
     }
 
     #endregion
@@ -283,7 +289,7 @@ internal sealed class EbuR128Analyzer
         if (_mode == NormalizationMode.DownwardOnly)
             gain = MathF.Min(gain, 1.0f);
 
-        _lockedGain = gain;
+        Volatile.Write(ref _lockedGain, gain);
 
         Log.Debug($"[EbuR128] Recalculated from LUFS={_lastIntegratedLufs:F2}: " +
                   $"gain={gain:F3}x (target={_targetLufs}, mode={_mode})");
@@ -294,7 +300,7 @@ internal sealed class EbuR128Analyzer
     /// </summary>
     private void ExecuteReset()
     {
-        _lockedGain = float.NaN;
+        Volatile.Write(ref _lockedGain, float.NaN);
         _lastIntegratedLufs = float.NaN;
 
 #if DEBUG

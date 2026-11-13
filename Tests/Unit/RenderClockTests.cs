@@ -138,7 +138,7 @@ public static class RenderClockTests
         {
             // 1. Without a device queue (NullBackend), exactly what was written was played
             ConsumeTick(backend, block, SamplesPerSecond);
-            TestAssert.Equal((long)blockSamples, pipeline.PlayedSamples);
+            TestAssert.Equal(blockSamples, pipeline.PlayedSamples);
 
             // 2. Seek to 60 s: audio written before rebinding does not advance the new position
             const long seekBase = 60L * SamplesPerSecond;

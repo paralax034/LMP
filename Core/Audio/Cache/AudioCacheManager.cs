@@ -54,6 +54,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _trackIndex = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _saveLock = new(1, 1);
     private readonly SemaphoreSlim _evictLock = new(1, 1);
+    private readonly SemaphoreSlim _maintenanceLock = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CacheFileHandle> _fileHandles = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _timerCts = new();
@@ -414,7 +415,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             if (!_entries.TryGetValue(key, out var entry))
                 continue;
 
-            string path = GetCachePath(entry.CacheKey);
+            string path = GetCachePath(entry);
             if (!File.Exists(path))
                 continue;
 
@@ -526,10 +527,23 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     internal AudioCacheEntry? GetCacheInfo(string cacheKey) =>
         _entries.TryGetValue(cacheKey, out var entry) ? entry : null;
 
+    internal string GetCachePath(AudioCacheEntry entry) =>
+        entry.CachedFilePath ??= GetCachePath(entry.CacheKey);
+
     internal string GetCachePath(string cacheKey)
     {
-        var safeId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cacheKey)))[..16];
-        return Path.Combine(_cacheDirectory, safeId + CacheFileExtension);
+        Span<byte> utf8Buf = cacheKey.Length <= 64
+            ? stackalloc byte[256]
+            : new byte[Encoding.UTF8.GetMaxByteCount(cacheKey.Length)];
+
+        int written = Encoding.UTF8.GetBytes(cacheKey.AsSpan(), utf8Buf);
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(utf8Buf[..written], hash);
+
+        Span<char> fileName = stackalloc char[16 + CacheFileExtension.Length];
+        Convert.TryToHexString(hash[..8], fileName, out _);
+        CacheFileExtension.AsSpan().CopyTo(fileName[16..]);
+        return Path.Join(_cacheDirectory, fileName);
     }
 
     internal void Touch(string cacheKey)
@@ -594,18 +608,17 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         if (!_entries.TryRemove(cacheKey, out var entry)) return;
 
         RemoveFromTrackIndex(entry.TrackId, cacheKey);
-        DisposeHandle(cacheKey);
+        _fileLocks.TryRemove(cacheKey, out _);
 
-        if (_fileLocks.TryGetValue(cacheKey, out var fileLock) && fileLock.CurrentCount == 1)
+        var filePath = GetCachePath(entry);
+        if (_fileHandles.TryRemove(cacheKey, out var handle))
         {
-            if (_fileLocks.TryRemove(cacheKey, out var removedLock))
-            {
-                try { removedLock.Dispose(); } catch { }
-            }
+            handle.MarkForDeleteOnClose();
         }
-
-        var filePath = GetCachePath(cacheKey);
-        try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
+        else
+        {
+            try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
+        }
 
         MarkDirty();
         if (saveIndex)
@@ -632,7 +645,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         ReadOnlyMemory<byte> data,
         CancellationToken ct = default)
     {
-        if (!_entries.TryGetValue(cacheKey, out var entry)) return;
+        if (_disposed || !_entries.TryGetValue(cacheKey, out var entry)) return;
         if (data.IsEmpty) return;
         if (offset < 0 || offset >= entry.TotalSize) return;
 
@@ -643,7 +656,20 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             data = data[..(int)remaining];
 
         var fileLock = _fileLocks.GetOrAdd(cacheKey, static _ => new SemaphoreSlim(1, 1));
-        await fileLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await fileLock.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            return;
+        }
+
+        if (_disposed || !_entries.TryGetValue(cacheKey, out var currentEntry) || !ReferenceEquals(currentEntry, entry))
+        {
+            try { fileLock.Release(); } catch (ObjectDisposedException) { }
+            return;
+        }
 
         var fileHandle = GetFileHandle(cacheKey);
         fileHandle.BeginIo();
@@ -676,7 +702,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         finally
         {
             fileHandle.EndIo();
-            fileLock.Release();
+            try { fileLock.Release(); } catch (ObjectDisposedException) { }
         }
 
         if (completedNow)
@@ -820,7 +846,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
         foreach (var entry in _entries.Values)
         {
-            UpdateFileSizeCache(entry);
+            if (entry.ActualFileSize <= 0)
+                UpdateFileSizeCache(entry);
 
             if (entry.ActualFileSize > 0)
             {
@@ -910,7 +937,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         CancellationToken ct,
         string? targetDirectory = null)
     {
-        if (!await _saveLock.WaitAsync(1000, ct).ConfigureAwait(false))
+        if (!await _maintenanceLock.WaitAsync(1000, ct).ConfigureAwait(false))
             return false;
 
         try
@@ -928,7 +955,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 return true;
             }
 
-            var cachePath = GetCachePath(entry.CacheKey);
+            var cachePath = GetCachePath(entry);
             if (!File.Exists(cachePath))
             {
                 Log.Warn($"[AudioCache] Cache file not found: {cachePath}");
@@ -982,7 +1009,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _saveLock.Release();
+            _maintenanceLock.Release();
         }
     }
 
@@ -1023,7 +1050,8 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             for (int i = 0; i < entriesSnapshot.Count; i++)
             {
                 var entry = entriesSnapshot[i];
-                UpdateFileSizeCache(entry);
+                if (entry.ActualFileSize <= 0)
+                    UpdateFileSizeCache(entry);
                 currentTotalSize += entry.ActualFileSize;
             }
 
@@ -1033,18 +1061,19 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             // Eviction priority:
             // 1. Incomplete (IsComplete == false) entries, ordered by last access time (oldest first).
             // 2. Complete entries, ordered by last access time (LRU).
-            var candidates = entriesSnapshot
-                .OrderBy(e => e.IsComplete ? 1 : 0)
-                .ThenBy(e => e.LastAccessedAt)
-                .ToList();
+            entriesSnapshot.Sort(static (a, b) =>
+            {
+                int compCmp = (a.IsComplete ? 1 : 0).CompareTo(b.IsComplete ? 1 : 0);
+                return compCmp != 0 ? compCmp : a.LastAccessedAt.CompareTo(b.LastAccessedAt);
+            });
 
             int evictedCount = 0;
 
-            for (int i = 0; i < candidates.Count && currentTotalSize > limit; i++)
+            for (int i = 0; i < entriesSnapshot.Count && currentTotalSize > limit; i++)
             {
                 if (ct.IsCancellationRequested) break;
 
-                var candidate = candidates[i];
+                var candidate = entriesSnapshot[i];
                 var key = candidate.CacheKey;
 
                 if (_fileHandles.TryGetValue(key, out var handle))
@@ -1091,14 +1120,18 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
 
     public async Task ClearAllAsync(CancellationToken ct = default)
     {
-        if (!await _saveLock.WaitAsync(5000, ct).ConfigureAwait(false))
+        if (!await _maintenanceLock.WaitAsync(5000, ct).ConfigureAwait(false))
         {
             Log.Warn("[AudioCache] ClearAllAsync: couldn't acquire lock");
             return;
         }
 
+        bool saveLockAcquired = false;
         try
         {
+            saveLockAcquired = await _saveLock.WaitAsync(5000, ct).ConfigureAwait(false);
+            Interlocked.Exchange(ref _dirty, 0);
+
             Log.Info("[AudioCache] Clearing all cache...");
             _entries.Clear();
             _trackIndex.Clear();
@@ -1110,7 +1143,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _saveLock.Release();
+            if (saveLockAcquired)
+                try { _saveLock.Release(); } catch (ObjectDisposedException) { }
+            _maintenanceLock.Release();
         }
 
         try { OnCacheCleared?.Invoke(); }
@@ -1174,7 +1209,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     {
         if (!entry.IsComplete) return false;
 
-        var filePath = GetCachePath(entry.CacheKey);
+        var filePath = GetCachePath(entry);
 
         try
         {
@@ -1342,10 +1377,9 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     {
         try
         {
-            var filePath = GetCachePath(entry.CacheKey);
-            entry.ActualFileSize = File.Exists(filePath)
-                ? new FileInfo(filePath).Length
-                : 0;
+            var filePath = GetCachePath(entry);
+            var fi = new FileInfo(filePath);
+            entry.ActualFileSize = fi.Exists ? fi.Length : 0;
         }
         catch
         {
@@ -1404,11 +1438,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                         var entry = envelope.Entries[i];
                         if (string.IsNullOrEmpty(entry.CacheKey)) continue;
 
-                        string filePath = GetCachePath(entry.CacheKey);
-                        if (!File.Exists(filePath)) continue;
+                        string filePath = GetCachePath(entry);
+                        var fi = new FileInfo(filePath);
+                        if (!fi.Exists) continue;
 
                         entry.RestoreAfterLoad();
-                        UpdateFileSizeCache(entry);
+                        entry.ActualFileSize = fi.Length;
                         _entries.TryAdd(entry.CacheKey, entry);
                         AddToTrackIndex(entry.TrackId, entry.CacheKey);
                         restoredCount++;
@@ -1583,17 +1618,29 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     {
         if (_disposed) return;
         if (Volatile.Read(ref _dirty) == 0) return;
-        if (!await _saveLock.WaitAsync(CacheSaveLockTimeoutMs).ConfigureAwait(false)) return;
 
         try
         {
-            if (Interlocked.Exchange(ref _dirty, 0) == 0)
+            if (!await _saveLock.WaitAsync(CacheSaveLockTimeoutMs).ConfigureAwait(false))
+                return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_disposed || Interlocked.Exchange(ref _dirty, 0) == 0)
                 return;
 
             var envelope = BuildIndexEnvelope();
             byte[] bytes = MemoryPackSerializer.Serialize(envelope);
             var binPath = Path.Combine(_cacheDirectory, CacheMetadataBinFileName);
             await AtomicFile.WriteBytesAsync(binPath, bytes, createBackup: false, ct: CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
         }
         catch (Exception ex)
         {
@@ -1602,7 +1649,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _saveLock.Release();
+            try { _saveLock.Release(); } catch (ObjectDisposedException) { }
         }
     }
 
@@ -1760,10 +1807,12 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
     {
         if (_disposed) return;
 
+        _timerCts.Cancel();
+        try { _autoSaveTask.Wait(200); } catch { }
+
         SaveIndexSync();
 
         _disposed = true;
-        _timerCts.Cancel();
         ForceCloseAllHandles();
 
         foreach (var fileLock in _fileLocks.Values)
@@ -1772,6 +1821,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
 
         _timerCts.Dispose();
+        _maintenanceLock.Dispose();
         _evictLock.Dispose();
         _saveLock.Dispose();
     }
@@ -1795,6 +1845,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         }
 
         _timerCts.Dispose();
+        _maintenanceLock.Dispose();
         _evictLock.Dispose();
         _saveLock.Dispose();
     }
@@ -1812,6 +1863,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         private SafeFileHandle? _handle;
         private int _leaseCount;
         private int _activeIoCount;
+        private bool _deleteOnClose;
         private TaskCompletionSource? _quiescenceWaiter;
 
         public CacheFileHandle(string filePath) => _filePath = filePath;
@@ -1866,13 +1918,65 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
             }
         }
 
+private void TryCloseIfQuiescent()
+{
+    if (_leaseCount > 0 || _activeIoCount > 0) return;
+
+    var waiter = _quiescenceWaiter;
+    _quiescenceWaiter = null;
+
+    if (_handle is { IsClosed: false })
+    {
+        try { _handle.Dispose(); } catch { }
+        _handle = null;
+    }
+
+    if (_deleteOnClose)
+    {
+        try { if (File.Exists(_filePath)) File.Delete(_filePath); } catch { }
+    }
+
+    waiter?.TrySetResult();
+}
+
+        public void MarkForDeleteOnClose()
+        {
+            TaskCompletionSource? waiter = null;
+            bool deleteNow = false;
+            lock (_lock)
+            {
+                _deleteOnClose = true;
+                if (_leaseCount <= 0 && _activeIoCount <= 0)
+                {
+                    waiter = _quiescenceWaiter;
+                    _quiescenceWaiter = null;
+
+                    if (_handle is { IsClosed: false })
+                    {
+                        try { _handle.Dispose(); } catch { }
+                    }
+                    _handle = null;
+                    deleteNow = true;
+                }
+            }
+
+            if (deleteNow)
+            {
+                try { if (File.Exists(_filePath)) File.Delete(_filePath); } catch { }
+            }
+
+            waiter?.TrySetResult();
+        }
+
         public void ForceClose()
         {
             TaskCompletionSource? waiter;
+            bool deleteFile;
             lock (_lock)
             {
                 waiter = _quiescenceWaiter;
                 _quiescenceWaiter = null;
+                deleteFile = _deleteOnClose;
 
                 if (_handle is { IsClosed: false })
                 {
@@ -1880,20 +1984,10 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 }
                 _handle = null;
             }
-            waiter?.TrySetResult();
-        }
 
-        private void TryCloseIfQuiescent()
-        {
-            if (_leaseCount > 0 || _activeIoCount > 0) return;
-
-            var waiter = _quiescenceWaiter;
-            _quiescenceWaiter = null;
-
-            if (_handle is { IsClosed: false })
+            if (deleteFile)
             {
-                try { _handle.Dispose(); } catch { }
-                _handle = null;
+                try { if (File.Exists(_filePath)) File.Delete(_filePath); } catch { }
             }
 
             waiter?.TrySetResult();

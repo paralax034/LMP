@@ -200,9 +200,15 @@ public static class AudioSourceFactory
             // If Partial Cache is explicitly enabled, prevent fallback to LocalFileSource: launch CachingStreamSource
             if (descriptor.Origin == StreamSource.DiskCachePartial)
             {
-                int bootstrapBytes = Math.Min(config.InitialPrebufferBytes, int.MaxValue);
-                var startupEntry = cacheManager.FindBestStartupCache(trackId, bootstrapBytes)
-                                ?? (!string.IsNullOrEmpty(resolvedCacheKey) ? cacheManager.GetCacheInfo(resolvedCacheKey) : null);
+                AudioCacheEntry? startupEntry = !string.IsNullOrEmpty(resolvedCacheKey)
+                    ? cacheManager.GetCacheInfo(resolvedCacheKey)
+                    : null;
+
+                if (startupEntry == null)
+                {
+                    int bootstrapBytes = Math.Min(config.InitialPrebufferBytes, int.MaxValue);
+                    startupEntry = cacheManager.FindBestStartupCache(trackId, bootstrapBytes);
+                }
 
                 long effectiveLength = contentLength > 0
                     ? contentLength

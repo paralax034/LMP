@@ -27,6 +27,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     // Serializes like operations: rapid clicks write the latest state to SQLite rather than task completion order
     private readonly SemaphoreSlim _likeWriteGate = new(1, 1);
+    private readonly SemaphoreSlim _eqPresetWriteGate = new(1, 1);
     private readonly Timer _saveDebounceTimer;
 
     private string _lastHydratedOwnerId = string.Empty;
@@ -364,8 +365,18 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         var canonical = _registry.RegisterOrUpdate(track, hasUserContext: true);
         canonical.EqualizerPresetId = string.IsNullOrWhiteSpace(presetId) ? null : presetId;
 
-        await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
-        await _tracks.SetEqualizerPresetAsync(canonical.Id, canonical.EqualizerPresetId, ct).ConfigureAwait(false);
+        await _eqPresetWriteGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            string? latestPreset = canonical.EqualizerPresetId;
+            await _tracks.UpsertAsync(canonical, ct).ConfigureAwait(false);
+            await _tracks.SetEqualizerPresetAsync(canonical.Id, latestPreset, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _eqPresetWriteGate.Release();
+        }
+
         OnTrackUpdated?.Invoke(canonical);
     }
 
@@ -491,7 +502,17 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     private async Task SaveSettingsAsync(CancellationToken ct = default)
     {
-        if (!await _settingsLock.WaitAsync(SettingsSaveTimeout, ct).ConfigureAwait(false))
+        bool acquired;
+        try
+        {
+            acquired = await _settingsLock.WaitAsync(SettingsSaveTimeout, ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        if (!acquired)
             return;
 
         try
@@ -505,14 +526,23 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _settingsLock.Release();
+            try { _settingsLock.Release(); } catch (ObjectDisposedException) { }
         }
     }
 
     private void SaveSettingsSync()
     {
-        _saveDebounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
-        _settingsLock.Wait();
+        try { _saveDebounceTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
+
+        try
+        {
+            _settingsLock.Wait();
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
         try
         {
             _settings.Set("AppSettings", Settings);
@@ -523,7 +553,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _settingsLock.Release();
+            try { _settingsLock.Release(); } catch (ObjectDisposedException) { }
         }
     }
 
@@ -576,9 +606,20 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     public void Dispose()
     {
+        _auth.OnAuthStateChanged -= HandleAuthStateChanged;
+
+        lock (_hydrationLock)
+        {
+            _hydrationCts?.Cancel();
+            _hydrationCts?.Dispose();
+            _hydrationCts = null;
+        }
+
         SaveSettingsSync();
         _saveDebounceTimer.Dispose();
         _settingsLock.Dispose();
+        _likeWriteGate.Dispose();
+        _eqPresetWriteGate.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -597,6 +638,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         SaveSettingsSync();
         await _saveDebounceTimer.DisposeAsync().ConfigureAwait(false);
         _settingsLock.Dispose();
+        _likeWriteGate.Dispose();
+        _eqPresetWriteGate.Dispose();
     }
 
     #endregion

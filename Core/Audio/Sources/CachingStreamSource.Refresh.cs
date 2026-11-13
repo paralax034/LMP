@@ -394,8 +394,9 @@ internal sealed partial class CachingStreamSource
             }
         }
 
+        // Bind shared acquisition to source lifetime so an epoch reset on one reader does not abort other readers.
         if (isInitiator && _urlProvider != null)
-            _ = ResolveContinuationUrlSingleFlightAsync(ct);
+            _ = ResolveContinuationUrlSingleFlightAsync(_lifetimeCts?.Token ?? CancellationToken.None);
 
         try
         {
@@ -558,17 +559,15 @@ internal sealed partial class CachingStreamSource
 
     // --- 403 Diagnostics ---
 
-    /// <summary>
-    /// Logs diagnostic parameters of a 403 response: n-token, c-param, UA, response body.
-    /// </summary>
     private async Task LogAndDiagnose403Async(
         int logicalIndex, HttpRequestMessage request, HttpResponseMessage response)
     {
         int count = Volatile.Read(ref _consecutive403Count);
         SessionCacheStore.Invalidate(_trackId);
 
-        var nParam = UrlEx.TryGetQueryParameterValue(_currentUrl, "n");
-        var cParam = UrlEx.TryGetQueryParameterValue(_currentUrl, "c");
+        string requestUrl = request.RequestUri?.OriginalString ?? _currentUrl;
+        var nParam = UrlEx.TryGetQueryParameterValue(requestUrl, "n");
+        var cParam = UrlEx.TryGetQueryParameterValue(requestUrl, "c");
         var reqUa = request.Headers.UserAgent.ToString();
 
         Log.Warn($"[CachingSource] 403 DIAGNOSTIC range@{logicalIndex} (consecutive={count})");
@@ -600,14 +599,14 @@ internal sealed partial class CachingStreamSource
     /// <summary>
     /// Builds an HTTP range request considering the host type (YouTube vs generic CDN).
     /// </summary>
-    private HttpRequestMessage CreateRangeRequest(int logicalIndex, long start, long end, int rn)
+    private static HttpRequestMessage CreateRangeRequest(string baseUrl, int logicalIndex, long start, long end, int rn)
     {
-        bool isYouTube = _currentUrl.Contains(
+        bool isYouTube = baseUrl.Contains(
             "googlevideo.com/videoplayback", StringComparison.Ordinal);
 
         if (isYouTube)
         {
-            string url = BuildYouTubeRangeUrl(_currentUrl, rn);
+            string url = BuildYouTubeRangeUrl(baseUrl, rn);
             LogRangeRequestParams(logicalIndex, url);
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Range = new RangeHeaderValue(start, end);
@@ -617,7 +616,7 @@ internal sealed partial class CachingStreamSource
             return request;
         }
 
-        var genericRequest = new HttpRequestMessage(HttpMethod.Get, _currentUrl);
+        var genericRequest = new HttpRequestMessage(HttpMethod.Get, baseUrl);
         genericRequest.Headers.Range = new RangeHeaderValue(start, end);
         genericRequest.Headers.TryAddWithoutValidation("User-Agent", YoutubeClientUtils.UaWebRemix);
         return genericRequest;

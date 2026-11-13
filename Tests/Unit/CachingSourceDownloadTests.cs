@@ -257,6 +257,38 @@ public static class CachingSourceDownloadTests
         return Task.CompletedTask;
     }
 
+    [TestMethod(TestCategory.Unit, "Coverage Probe Offset Lookup Matches Alignment Boundaries", Group = TestGroups.Audio, Order = 32)]
+    public static Task TestCoverageProbeOffsetLookupAsync()
+    {
+        const int alignment = 65_536;
+        using var cache = new SlidingRamCache();
+        AddBlock(cache, 100_000, 92_000); // covers aligned probe [131_072, 196_608)? 100_000 + 92_000 = 192_000 < 196_608 -> no
+        AddBlock(cache, 262_144, 65_536); // covers [262_144, 327_680) -> yes
+
+        long foundRam = cache.FindFirstCoveredProbeOffset(
+            minProbe: alignment,
+            endExclusive: 524_288,
+            alignment: alignment,
+            originStart: 0);
+        TestAssert.Equal(262_144L, foundRam);
+
+        var entry = new Core.Audio.Cache.AudioCacheEntry
+        {
+            CacheKey = "probe_test",
+            TrackId = "yt_probe",
+            TotalSize = 1_000_000
+        };
+        entry.MarkRangeDownloaded(131_072, 65_536);
+        long foundDisk = entry.FindFirstCoveredProbeOffset(
+            minProbe: alignment,
+            endExclusive: 524_288,
+            alignment: alignment,
+            originStart: 0);
+        TestAssert.Equal(131_072L, foundDisk);
+
+        return Task.CompletedTask;
+    }
+
     private static void AddBlock(SlidingRamCache cache, long offset, int length)
     {
         if (!TryAddBlock(cache, offset, length))

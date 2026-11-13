@@ -2,6 +2,10 @@
 using SharpJaad.AAC.Sbr;
 using SharpJaad.AAC.Tools;
 using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace SharpJaad.AAC.Syntax
 {
@@ -418,6 +422,97 @@ namespace SharpJaad.AAC.Syntax
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Writes decoded float samples directly into an interleaved <see cref="Span{T}"/> scaled to [-1.0, +1.0],
+        /// bypassing 16-bit integer quantization, <see cref="Math.Round(double)"/>, and <see cref="SampleBuffer"/> byte packing.
+        /// </summary>
+        public int SendToFloatOutput(Span<float> output, int targetChannels, out int sampleRate, out int channels)
+        {
+            const float Scale = 1.0f / 32768.0f;
+
+            if (data == null || data.Length == 0)
+            {
+                sampleRate = 0;
+                channels = 0;
+                return 0;
+            }
+
+            int chs = targetChannels > 0 ? targetChannels : Math.Max(data.Length, 2);
+            int mult = sbrPresent && config.IsSBREnabled() ? 2 : 1;
+            int length = mult * config.GetFrameLength();
+            sampleRate = mult * config.GetSampleFrequency().GetFrequency();
+            channels = chs;
+
+            int maxFrames = output.Length / chs;
+            if (length > maxFrames)
+                length = maxFrames;
+
+            if (length <= 0)
+                return 0;
+
+            ref float outRef = ref MemoryMarshal.GetReference(output);
+
+            if (chs == 2)
+            {
+                float[] ch0 = data[0];
+                float[] ch1 = data.Length > 1 ? data[1] : ch0;
+                ref float r0 = ref MemoryMarshal.GetArrayDataReference(ch0);
+                ref float r1 = ref MemoryMarshal.GetArrayDataReference(ch1);
+
+                int j = 0;
+                if (Sse.IsSupported && length >= 4)
+                {
+                    var vScale = Vector128.Create(Scale);
+                    for (; j <= length - 4; j += 4)
+                    {
+                        var vL = Vector128.LoadUnsafe(ref r0, (nuint)j) * vScale;
+                        var vR = Vector128.LoadUnsafe(ref r1, (nuint)j) * vScale;
+                        var lo = Sse.UnpackLow(vL, vR);
+                        var hi = Sse.UnpackHigh(vL, vR);
+                        nuint dstOffset = (nuint)(j * 2);
+                        lo.StoreUnsafe(ref outRef, dstOffset);
+                        hi.StoreUnsafe(ref outRef, dstOffset + 4);
+                    }
+                }
+
+                for (; j < length; j++)
+                {
+                    int dstIdx = j * 2;
+                    Unsafe.Add(ref outRef, dstIdx) =
+                        Unsafe.Add(ref r0, j) * Scale;
+                    Unsafe.Add(ref outRef, dstIdx + 1) =
+                        Unsafe.Add(ref r1, j) * Scale;
+                }
+
+                return length;
+            }
+
+            if (chs == 1)
+            {
+                float[] ch0 = data[0];
+                ref float r0 = ref MemoryMarshal.GetArrayDataReference(ch0);
+                for (int j = 0; j < length; j++)
+                {
+                    Unsafe.Add(ref outRef, j) =
+                        Unsafe.Add(ref r0, j) * Scale;
+                }
+                return length;
+            }
+
+            for (int i = 0; i < chs; i++)
+            {
+                float[] cur = data[i < data.Length ? i : 0];
+                ref float curRef = ref MemoryMarshal.GetArrayDataReference(cur);
+                for (int j = 0; j < length; j++)
+                {
+                    Unsafe.Add(ref outRef, j * chs + i) =
+                        Unsafe.Add(ref curRef, j) * Scale;
+                }
+            }
+
+            return length;
         }
 
         public void SendToOutput(SampleBuffer buffer)

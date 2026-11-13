@@ -750,7 +750,7 @@ internal sealed partial class CachingStreamSource
 
         // Base request URL: 403 on an already replaced URL must not consume refresh budget.
         string requestBaseUrl = _currentUrl;
-        using var request = CreateRangeRequest(logicalIndex, plan.Start, end, rn);
+        using var request = CreateRangeRequest(requestBaseUrl, logicalIndex, plan.Start, end, rn);
         HttpResponseMessage response;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -822,7 +822,7 @@ internal sealed partial class CachingStreamSource
                 ResetForbiddenRefreshBudget();
 
             // After first successful response, remember CDN node for speculative pre-warm.
-            Http.CdnConnectionPreWarmer.RecordHost(_currentUrl);
+            Http.CdnConnectionPreWarmer.RecordHost(requestBaseUrl);
 
             if (response.Content.Headers.ContentType?.MediaType?.Contains("yt-ump") == true)
                 throw new ChunkDownloadFatalException(

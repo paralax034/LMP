@@ -9,6 +9,7 @@ namespace SharpJaad.AAC.Syntax
         private const int WORD_BYTES = 4;
         private const int BYTE_MASK = 0xff;
         private byte[] _buffer;
+        private int _bufferLen;
         private int _pos; //offset in the buffer array
         private int _cache; //current 4 bytes, that are read from the buffer
         protected int _bitsCached; //remaining bits in current cache
@@ -26,9 +27,13 @@ namespace SharpJaad.AAC.Syntax
         {
             Reset();
             _buffer = null;
+            _bufferLen = 0;
         }
 
-        public void SetData(byte[] data)
+        public void SetData(byte[] data) =>
+            SetData(data != null ? data.AsSpan() : ReadOnlySpan<byte>.Empty);
+
+        public void SetData(ReadOnlySpan<byte> data)
         {
             Reset();
 
@@ -49,11 +54,13 @@ namespace SharpJaad.AAC.Syntax
 
             size -= shift;
 
-            //only reallocate if needed
-            if (_buffer == null || _buffer.Length != size)
+            // Grow-only reusable backing array eliminates per-frame allocations on VBR AAC packets.
+            if (_buffer == null || _buffer.Length < size)
                 _buffer = new byte[size];
 
-            Buffer.BlockCopy(data, shift, _buffer, 0, _buffer.Length);
+            _bufferLen = size;
+            if (size > 0)
+                data.Slice(shift, size).CopyTo(_buffer);
         }
 
         public void ByteAlign()
@@ -77,7 +84,7 @@ namespace SharpJaad.AAC.Syntax
 
         public int GetBitsLeft()
         {
-            return 8 * (_buffer.Length - _pos) + _bitsCached;
+            return 8 * (_bufferLen - _pos) + _bitsCached;
         }
 
         /**
@@ -87,7 +94,7 @@ namespace SharpJaad.AAC.Syntax
         protected int ReadCache(bool peek)
         {
             int i;
-            if (_pos > _buffer.Length - WORD_BYTES) throw new AACException("end of stream", true);
+            if (_pos > _bufferLen - WORD_BYTES) throw new AACException("end of stream", true);
             else i = (_buffer[_pos] & BYTE_MASK) << 24
                         | (_buffer[_pos + 1] & BYTE_MASK) << 16
                         | (_buffer[_pos + 2] & BYTE_MASK) << 8

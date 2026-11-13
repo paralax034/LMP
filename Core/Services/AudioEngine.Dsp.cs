@@ -256,6 +256,9 @@ public sealed partial class AudioEngine
         float gain = NormalizationGainResolver.ComputeGainFromIntegratedLufs(integratedLufs, normConfig);
         if (float.IsNaN(gain)) return;
 
+        if (pipeline.Analyzer.IsGainLocked && MathF.Abs(pipeline.GetLockedNormalizationGain() - gain) < 0.0005f)
+            return;
+
         pipeline.Analyzer.LockResolvedGain(gain);
         Log.Info(
             $"[AudioEngine] Normalization gain updated from YouTube LUFS: {gain:F4}x (lufs={integratedLufs:F2}) for {trackId}");
@@ -394,24 +397,28 @@ public sealed partial class AudioEngine
     {
         float clamped = Math.Clamp(preampDb, -12f, 12f);
         var audioSettings = _library.Settings.Audio;
-        if (MathF.Abs(audioSettings.EqualizerPreampDb - clamped) < 1e-4f)
-            return;
 
         lock (_eqPersistenceLock)
         {
+            if (MathF.Abs(audioSettings.EqualizerPreampDb - clamped) < 1e-4f)
+                return;
+
             audioSettings.EqualizerPreampDb = clamped;
             _pendingEqGlobalSave = true;
 
-            if (_eqSaveTimer == null)
+            if (Volatile.Read(ref _disposeState) == 0)
             {
-                _eqSaveTimer = new Timer(static state =>
+                if (_eqSaveTimer == null)
                 {
-                    ((AudioEngine)state!).FlushPendingEqualizerSave();
-                }, this, 300, Timeout.Infinite);
-            }
-            else
-            {
-                _eqSaveTimer.Change(300, Timeout.Infinite);
+                    _eqSaveTimer = new Timer(static state =>
+                    {
+                        ((AudioEngine)state!).FlushPendingEqualizerSave();
+                    }, this, 300, Timeout.Infinite);
+                }
+                else
+                {
+                    _eqSaveTimer.Change(300, Timeout.Infinite);
+                }
             }
         }
 
@@ -515,9 +522,12 @@ public sealed partial class AudioEngine
 
         _library.UpdateSettings(s =>
         {
-            s.Audio.EqualizerPreampDb = 0f;
-            if (!isTrackScope && s.Audio.CustomEqualizerBands != null)
-                Array.Clear(s.Audio.CustomEqualizerBands);
+            lock (_eqPersistenceLock)
+            {
+                s.Audio.EqualizerPreampDb = 0f;
+                if (!isTrackScope && s.Audio.CustomEqualizerBands != null)
+                    Array.Clear(s.Audio.CustomEqualizerBands);
+            }
         });
 
         SelectEqualizerPreset(EqualizerPresets.FlatId);
@@ -535,10 +545,6 @@ public sealed partial class AudioEngine
             return;
 
         var audioSettings = _library.Settings.Audio;
-        bool wasEnabled = audioSettings.EqualizerEnabled;
-        audioSettings.EqualizerEnabled = true;
-
-        bool notifyUiHeaderImmediately = !wasEnabled;
         Span<float> clampedBands = stackalloc float[EqualizerProcessor.BandCount];
         for (int i = 0; i < EqualizerProcessor.BandCount; i++)
         {
@@ -548,8 +554,16 @@ public sealed partial class AudioEngine
                 EqualizerProcessor.MaxGainDb);
         }
 
+        bool notifyUiHeaderImmediately;
+        float preampDbSnapshot;
+
         lock (_eqPersistenceLock)
         {
+            bool wasEnabled = audioSettings.EqualizerEnabled;
+            audioSettings.EqualizerEnabled = true;
+            notifyUiHeaderImmediately = !wasEnabled;
+            preampDbSnapshot = audioSettings.EqualizerPreampDb;
+
             if (IsTrackEqualizerActive && GetCanonicalCurrentTrack() is { } track)
             {
                 clampedBands.CopyTo(_liveTrackCustomBands);
@@ -591,16 +605,19 @@ public sealed partial class AudioEngine
                 _pendingEqGlobalSave = true;
             }
 
-            if (_eqSaveTimer == null)
+            if (Volatile.Read(ref _disposeState) == 0)
             {
-                _eqSaveTimer = new Timer(static state =>
+                if (_eqSaveTimer == null)
                 {
-                    ((AudioEngine)state!).FlushPendingEqualizerSave();
-                }, this, 300, Timeout.Infinite);
-            }
-            else
-            {
-                _eqSaveTimer.Change(300, Timeout.Infinite);
+                    _eqSaveTimer = new Timer(static state =>
+                    {
+                        ((AudioEngine)state!).FlushPendingEqualizerSave();
+                    }, this, 300, Timeout.Infinite);
+                }
+                else
+                {
+                    _eqSaveTimer.Change(300, Timeout.Infinite);
+                }
             }
         }
 
@@ -608,7 +625,7 @@ public sealed partial class AudioEngine
         pipeline?.Equalizer.Configure(
             enabled: true,
             clampedBands,
-            audioSettings.EqualizerPreampDb,
+            preampDbSnapshot,
             autoPreamp: true);
 
         if (notifyUiHeaderImmediately)
@@ -816,11 +833,8 @@ public sealed partial class AudioEngine
     private void ApplyEqualizerToPipelineCore(AudioPipeline? pipeline, string? trackId, bool snapImmediately)
     {
         var audioSettings = _library.Settings.Audio;
-        if (audioSettings.ForceGlobalEqualizer)
-            audioSettings.ForceGlobalEqualizer = false;
 
         TrackInfo? track = null;
-
         if (!string.IsNullOrEmpty(trackId))
         {
             track = _trackRegistry.TryGet(trackId)
@@ -829,14 +843,26 @@ public sealed partial class AudioEngine
         }
 
         Span<float> bands = stackalloc float[EqualizerProcessor.BandCount];
-        string effectivePresetId = EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
+        string effectivePresetId;
+        bool eqEnabled;
+        float preampDb;
+
+        lock (_eqPersistenceLock)
+        {
+            if (audioSettings.ForceGlobalEqualizer)
+                audioSettings.ForceGlobalEqualizer = false;
+
+            eqEnabled = audioSettings.EqualizerEnabled;
+            preampDb = audioSettings.EqualizerPreampDb;
+            effectivePresetId = EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
+        }
 
         if (pipeline != null)
         {
             pipeline.Equalizer.Configure(
-                audioSettings.EqualizerEnabled,
+                eqEnabled,
                 bands,
-                audioSettings.EqualizerPreampDb,
+                preampDb,
                 autoPreamp: true);
         }
 
@@ -844,20 +870,20 @@ public sealed partial class AudioEngine
         {
             pipeline?.Equalizer.SnapToTarget();
             _lastLoggedEqPresetId = effectivePresetId;
-            _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
+            _lastLoggedEqEnabled = eqEnabled;
             Log.Debug(
-                $"[AudioEngine] Equalizer initial config for '{trackId}': enabled={audioSettings.EqualizerEnabled}, " +
-                $"preset='{effectivePresetId}', preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB");
+                $"[AudioEngine] Equalizer initial config for '{trackId}': enabled={eqEnabled}, " +
+                $"preset='{effectivePresetId}', preamp={preampDb:+0.0;-0.0;0.0}dB");
         }
-        else if (_lastLoggedEqEnabled != audioSettings.EqualizerEnabled
+        else if (_lastLoggedEqEnabled != eqEnabled
               || !string.Equals(_lastLoggedEqPresetId, effectivePresetId, StringComparison.Ordinal))
         {
+            _lastLoggedEqEnabled = eqEnabled;
             _lastLoggedEqPresetId = effectivePresetId;
-            _lastLoggedEqEnabled = audioSettings.EqualizerEnabled;
             Log.Info(
-                $"[AudioEngine] Equalizer updated: enabled={audioSettings.EqualizerEnabled}, " +
+                $"[AudioEngine] Equalizer updated: enabled={eqEnabled}, " +
                 $"preset='{effectivePresetId}' (trackPreset='{track?.EqualizerPresetId ?? "none"}', " +
-                $"preamp={audioSettings.EqualizerPreampDb:+0.0;-0.0;0.0}dB)");
+                $"preamp={preampDb:+0.0;-0.0;0.0}dB)");
         }
     }
 

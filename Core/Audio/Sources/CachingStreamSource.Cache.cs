@@ -278,11 +278,33 @@ internal sealed partial class CachingStreamSource
         }
 
         /// <summary>
-        /// Removes the block containing <paramref name="position"/> and returns it.
+        /// Removes and disposes all blocks overlapping the range <c>[startOffset, startOffset + length)</c>.
         /// </summary>
-        /// <param name="position">Position inside the target block.</param>
-        /// <param name="block">Extracted block; <c>null</c> if not found.</param>
-        /// <returns><c>true</c> if the block was found and removed.</returns>
+        public void RemoveOverlappingRange(long startOffset, int length)
+        {
+            if (length <= 0) return;
+            long endExclusive = startOffset + length;
+
+            lock (_lock)
+            {
+                bool modified = false;
+                for (int i = _blocks.Count - 1; i >= 0; i--)
+                {
+                    var current = _blocks[i];
+                    if (current.EndOffsetExclusive <= startOffset || current.StartOffset >= endExclusive)
+                        continue;
+
+                    _blocks.RemoveAt(i);
+                    _totalBytes -= current.Length;
+                    current.Dispose();
+                    modified = true;
+                }
+
+                if (modified)
+                    Interlocked.Increment(ref _version);
+            }
+        }
+
         public bool TryRemoveContaining(long position, out RamRangeBlock? block)
         {
             lock (_lock)
@@ -301,6 +323,40 @@ internal sealed partial class CachingStreamSource
             }
             block = null;
             return false;
+        }
+
+        /// <summary>
+        /// Finds the first aligned probe offset in <c>[minProbe, endExclusive)</c> fully covered by a RAM block.
+        /// Returns <see cref="long.MaxValue"/> if no probe is covered.
+        /// </summary>
+        public long FindFirstCoveredProbeOffset(long minProbe, long endExclusive, int alignment, long originStart)
+        {
+            lock (_lock)
+            {
+                for (int i = 0; i < _blocks.Count; i++)
+                {
+                    var current = _blocks[i];
+                    if (current.StartOffset >= endExclusive) break;
+                    if (current.EndOffsetExclusive <= minProbe) continue;
+
+                    long candidate = current.StartOffset <= minProbe
+                        ? minProbe
+                        : originStart + AlignUpOffset(current.StartOffset - originStart, alignment);
+
+                    if (candidate >= endExclusive) continue;
+
+                    long probeEnd = Math.Min(endExclusive, candidate + alignment);
+                    if (current.StartOffset <= candidate && current.EndOffsetExclusive >= probeEnd)
+                        return candidate;
+                }
+            }
+            return long.MaxValue;
+        }
+
+        private static long AlignUpOffset(long value, int alignment)
+        {
+            long remainder = value % alignment;
+            return remainder == 0 ? value : value + (alignment - remainder);
         }
 
         /// <summary>

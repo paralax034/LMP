@@ -7,8 +7,16 @@ namespace LMP.Core.Services;
 
 public sealed partial class AudioEngine
 {
-    private string? _lastSoftRefreshTrackId;
+    private sealed record PrimedContinuationEntry(
+        string TrackId,
+        AudioFormat Format,
+        long ContentLength,
+        string Url,
+        long TimestampTicks);
+
+    private volatile string? _lastSoftRefreshTrackId;
     private long _lastSoftRefreshTick;
+    private PrimedContinuationEntry? _lastPrimedContinuation;
 
     /// <summary>Lifetime of the excluded client list after a CDN 403 (ms).</summary>
     private const long CdnForbiddenClientsTtlMs = 10 * 60 * 1000;
@@ -106,6 +114,31 @@ public sealed partial class AudioEngine
                     Log.Info($"[AudioEngine] ResolveStreamAsync FULL CACHE (exact) -> {descriptor}");
                     return descriptor;
                 }
+            }
+        }
+
+        // --- Path 1a: Full disk cache (preferred format, any cached bitrate) ---
+        if (requested.HasFormat && !requested.HasBitrate)
+        {
+            var formatCache = FindBestCompleteCacheForFormat(track.Id, rawId, requested.Format!.Value);
+            if (formatCache != null && IsCacheSizePlausible(formatCache, track.Duration))
+            {
+                TrackNormalizationHydrator.HydrateNormalization(track, formatCache);
+                TryEnrichIntegratedLufsFromLocalSources(track);
+
+                var descriptor = new ResolvedStreamDescriptor
+                {
+                    TrackId = track.Id,
+                    Url = "",
+                    Format = formatCache.Format,
+                    Codec = formatCache.Codec,
+                    BitrateKbps = formatCache.Bitrate,
+                    ContentLengthBytes = formatCache.TotalSize,
+                    Origin = StreamSource.DiskCacheFull
+                };
+
+                Log.Info($"[AudioEngine] ResolveStreamAsync FULL CACHE (format match) -> {descriptor}");
+                return descriptor;
             }
         }
 
@@ -631,6 +664,15 @@ public sealed partial class AudioEngine
         // otherwise a WebM cache receives an MP4 URL, the guard rejects it, and playback stalls indefinitely.
         string trackId = request.TrackId;
 
+        var primed = Volatile.Read(ref _lastPrimedContinuation);
+        if (primed != null
+            && string.Equals(primed.TrackId, trackId, StringComparison.Ordinal)
+            && request.IsCompatible(primed.Format, primed.ContentLength)
+            && Environment.TickCount64 - primed.TimestampTicks < 60_000)
+        {
+            return primed.Url;
+        }
+
         var track = await TryResolveActiveTrackForCallbackAsync(trackId, ct).ConfigureAwait(false);
         if (track == null) return null;
 
@@ -742,6 +784,15 @@ public sealed partial class AudioEngine
                 return;
             }
 
+            Volatile.Write(
+                ref _lastPrimedContinuation,
+                new PrimedContinuationEntry(
+                    track.Id,
+                    result.Value.Format,
+                    result.Value.Size,
+                    result.Value.Url,
+                    Environment.TickCount64));
+
             TryAttachPrimedContinuationUrlToActiveSource(track, result.Value.Url);
 
             if (float.IsFinite(result.Value.IntegratedLufs))
@@ -769,6 +820,41 @@ public sealed partial class AudioEngine
     #endregion
 
     #region Cache & Metadata Helpers
+
+    private static AudioCacheEntry? FindBestCompleteCacheForFormat(string trackId, string rawId, AudioFormat format)
+    {
+        var cache = AudioSourceFactory.GlobalCache;
+        if (cache == null || format == AudioFormat.Unknown) return null;
+
+        AudioCacheEntry? best = FindBestCompleteCacheForFormatCore(cache, trackId, format);
+        if (best == null && !string.Equals(rawId, trackId, StringComparison.Ordinal))
+            best = FindBestCompleteCacheForFormatCore(cache, rawId, format);
+
+        return best;
+    }
+
+    private static AudioCacheEntry? FindBestCompleteCacheForFormatCore(
+        AudioCacheManager cache,
+        string id,
+        AudioFormat format)
+    {
+        var cachedFormats = cache.GetCachedFormats(id);
+        int bestBitrate = -1;
+
+        for (int i = 0; i < cachedFormats.Count; i++)
+        {
+            var (fmt, bitrate) = cachedFormats[i];
+            if (fmt == format && bitrate > bestBitrate)
+                bestBitrate = bitrate;
+        }
+
+        if (bestBitrate < 0)
+            return null;
+
+        string key = AudioSourceFactory.BuildCacheKey(id, format, bestBitrate);
+        var entry = cache.GetCacheInfo(key);
+        return entry is { IsComplete: true } ? entry : null;
+    }
 
     /// <summary>
     /// Selects a suitable stereo variant from a manifest entry, filtering out multichannel (Surround 5.1) streams and CDN blacklisted hosts.

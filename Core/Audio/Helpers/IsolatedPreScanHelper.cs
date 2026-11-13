@@ -72,7 +72,7 @@ internal static class IsolatedPreScanHelper
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete,
                 bufferSize: AudioConstants.CacheFileBufferSize,
-                useAsync: false);
+                useAsync: true);
 
             var format = await DetectFormatAsync(fs, ct).ConfigureAwait(false);
             if (format == AudioFormat.Unknown)
@@ -158,7 +158,7 @@ internal static class IsolatedPreScanHelper
     private static IAudioDecoder CreateDecoder(
         AudioCodec codec, IContainerParser parser, int sampleRate, int channels) => codec switch
         {
-            AudioCodec.Opus => new Decoders.OpusDecoder(sampleRate, channels),
+            AudioCodec.Opus => new Decoders.OpusDecoder(sampleRate, channels, parser.DecoderConfig),
             AudioCodec.Aac => CreateAacDecoder(parser, sampleRate, channels),
             _ => throw new NotSupportedException(
                 $"[IsolatedPreScanHelper] Unsupported codec: {codec}")
@@ -191,81 +191,123 @@ internal static class IsolatedPreScanHelper
         CancellationToken ct)
     {
         var scanFilter = new KWeightingFilter(sampleRate, channels);
-        var blockSumSq = new double[channels];
-        var blockPowers = new double[EbuR128Analyzer.MaxScanGatingBlocks];
+        double[] blockSumSq = ArrayPool<double>.Shared.Rent(channels);
+        double[] blockPowers = ArrayPool<double>.Shared.Rent(EbuR128Analyzer.MaxScanGatingBlocks);
 
         int blockCount = 0;
         int blockFrameCount = 0;
         long totalFrames = 0;
         long maxFrames = (long)(sampleRate * scanMaxSeconds);
         int gatingBlockSize = (int)(sampleRate * GatingBlockSeconds);
-        int frameIndex = 0;
 
-        while (!ct.IsCancellationRequested && totalFrames < maxFrames)
+        // Block-stride decimation: decode 2 warmup frames + 1 full 400ms continuous gating block (preserving MDCT overlap & K-filter IIR state),
+        // then skip (strideBlocks - 1) blocks of compressed packets to cut AAC pre-scan CPU load by 4x without breaking codec continuity.
+        int nominal = Math.Max(1, nominalSamplesPerFrame);
+        int framesPerGatingBlock = Math.Max(1, (gatingBlockSize + nominal - 1) / nominal);
+        const int WarmupFramesPerWindow = 2;
+        int activeWindowFrames = WarmupFramesPerWindow + framesPerGatingBlock;
+        int strideFactor = decimationFactor >= 8 ? 4 : 2;
+        int cycleFrames = activeWindowFrames * strideFactor;
+        int cycleCursor = 0;
+
+        try
         {
-            var frame = await parser.ReadNextFrameAsync(ct).ConfigureAwait(false);
-            if (frame == null) break;
+            Array.Clear(blockSumSq, 0, channels);
 
-            totalFrames += nominalSamplesPerFrame;
-            frameIndex++;
-
-            if (frameIndex % decimationFactor != 0)
-                continue;
-
-            scanFilter.Reset();
-
-            int decoded = decoder.Decode(frame.Value.Data.Span, decodeBuffer);
-            if (decoded <= 0) continue;
-
-            int samplesToProcess = decoded * channels;
-
-            scanFilter.ProcessBlock(
-                decodeBuffer.AsSpan(0, samplesToProcess),
-                filteredBuffer.AsSpan(0, samplesToProcess));
-
-            ref double filteredRef = ref System.Runtime.InteropServices.MemoryMarshal
-                .GetArrayDataReference(filteredBuffer);
-            ref double sumSqRef = ref System.Runtime.InteropServices.MemoryMarshal
-                .GetArrayDataReference(blockSumSq);
-
-            for (int f = 0; f < decoded; f++)
+            while (!ct.IsCancellationRequested
+                   && totalFrames < maxFrames
+                   && blockCount < EbuR128Analyzer.MaxScanGatingBlocks)
             {
-                int offset = f * channels;
-                for (int ch = 0; ch < channels; ch++)
+                var frame = await parser.ReadNextFrameAsync(ct).ConfigureAwait(false);
+                if (frame == null) break;
+
+                int posInCycle = cycleCursor++;
+                if (cycleCursor >= cycleFrames)
+                    cycleCursor = 0;
+
+                if (posInCycle >= activeWindowFrames)
                 {
-                    double val = System.Runtime.CompilerServices.Unsafe
-                        .Add(ref filteredRef, offset + ch);
-                    System.Runtime.CompilerServices.Unsafe.Add(ref sumSqRef, ch) += val * val;
+                    totalFrames += nominalSamplesPerFrame;
+                    continue;
                 }
 
-                if (++blockFrameCount >= gatingBlockSize)
+                if (posInCycle == 0)
                 {
-                    double channelPowerSum = 0.0;
-                    for (int ch = 0; ch < channels; ch++)
-                        channelPowerSum += System.Runtime.CompilerServices.Unsafe
-                            .Add(ref sumSqRef, ch) / blockFrameCount;
-
-                    double blockLufs = LufsOffset + 10.0 * Math.Log10(
-                        Math.Max(channelPowerSum, 1e-20));
-
-                    if (blockLufs > AbsoluteGateThresholdLufs
-                        && blockCount < EbuR128Analyzer.MaxScanGatingBlocks)
-                    {
-                        blockPowers[blockCount++] = channelPowerSum;
-                    }
-
+                    decoder.FlushState();
+                    scanFilter.Reset();
                     Array.Clear(blockSumSq, 0, channels);
                     blockFrameCount = 0;
                 }
+
+                int decoded = decoder.Decode(frame.Value.Data.Span, decodeBuffer);
+                if (decoded <= 0) continue;
+
+                if (posInCycle < WarmupFramesPerWindow)
+                {
+                    int warmupSamples = decoded * channels;
+                    scanFilter.ProcessBlock(
+                        decodeBuffer.AsSpan(0, warmupSamples),
+                        filteredBuffer.AsSpan(0, warmupSamples));
+                    continue;
+                }
+
+                // Decode every frame continuously within the active window so codec overlap/SBR and K-weighting IIR states stay intact.
+                totalFrames += decoded;
+                int samplesToProcess = decoded * channels;
+
+                scanFilter.ProcessBlock(
+                    decodeBuffer.AsSpan(0, samplesToProcess),
+                    filteredBuffer.AsSpan(0, samplesToProcess));
+
+                ref double filteredRef = ref System.Runtime.InteropServices.MemoryMarshal
+                    .GetArrayDataReference(filteredBuffer);
+                ref double sumSqRef = ref System.Runtime.InteropServices.MemoryMarshal
+                    .GetArrayDataReference(blockSumSq);
+
+                for (int f = 0; f < decoded; f++)
+                {
+                    int offset = f * channels;
+                    for (int ch = 0; ch < channels; ch++)
+                    {
+                        double val = System.Runtime.CompilerServices.Unsafe
+                            .Add(ref filteredRef, offset + ch);
+                        System.Runtime.CompilerServices.Unsafe.Add(ref sumSqRef, ch) += val * val;
+                    }
+
+                    if (++blockFrameCount >= gatingBlockSize)
+                    {
+                        double channelPowerSum = 0.0;
+                        for (int ch = 0; ch < channels; ch++)
+                            channelPowerSum += System.Runtime.CompilerServices.Unsafe
+                                .Add(ref sumSqRef, ch) / blockFrameCount;
+
+                        double blockLufs = LufsOffset + 10.0 * Math.Log10(
+                            Math.Max(channelPowerSum, 1e-20));
+
+                        if (blockLufs > AbsoluteGateThresholdLufs
+                            && blockCount < EbuR128Analyzer.MaxScanGatingBlocks)
+                        {
+                            blockPowers[blockCount++] = channelPowerSum;
+                        }
+
+                        Array.Clear(blockSumSq, 0, channels);
+                        blockFrameCount = 0;
+                    }
+                }
             }
+
+            float integratedLufs = EbuR128Analyzer.ComputeIntegratedLufsFromBlocks(
+                blockPowers, blockCount);
+            float rawGain = EbuR128Analyzer.ComputeGainFromLufs(
+                integratedLufs, targetLufs, maxGain);
+
+            return (integratedLufs, rawGain);
         }
-
-        float integratedLufs = EbuR128Analyzer.ComputeIntegratedLufsFromBlocks(
-            blockPowers, blockCount);
-        float rawGain = EbuR128Analyzer.ComputeGainFromLufs(
-            integratedLufs, targetLufs, maxGain);
-
-        return (integratedLufs, rawGain);
+        finally
+        {
+            ArrayPool<double>.Shared.Return(blockSumSq);
+            ArrayPool<double>.Shared.Return(blockPowers);
+        }
     }
 
     #endregion

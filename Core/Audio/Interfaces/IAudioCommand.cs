@@ -34,7 +34,8 @@ internal sealed record PlayCommand(
     ResolvedStreamDescriptor Descriptor,
     int SessionId,
     TimeSpan? SeekPosition = null,
-    CancellationToken ExternalCancellationToken = default) : IAudioCommand;
+    CancellationToken ExternalCancellationToken = default,
+    TaskCompletionSource<bool>? Completion = null) : IAudioCommand;
 
 /// <summary>
 /// Command to completely stop playback.

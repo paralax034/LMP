@@ -1,4 +1,8 @@
-﻿using SharpJaad.AAC.Syntax;
+﻿using System;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using SharpJaad.AAC.Syntax;
 using static SharpJaad.AAC.Syntax.ICSInfo;
 
 namespace SharpJaad.AAC.Filterbank
@@ -37,8 +41,9 @@ namespace SharpJaad.AAC.Filterbank
             _mdctShort = new MDCT(_shortLen * 2);
             _mdctLong = new MDCT(_length * 2);
 
-            _overlaps = new float[channels][];
-            for (int i = 0; i < channels; i++)
+            int allocatedChannels = Math.Max(channels, 2);
+            _overlaps = new float[allocatedChannels][];
+            for (int i = 0; i < allocatedChannels; i++)
             {
                 _overlaps[i] = new float[_length];
             }
@@ -50,100 +55,152 @@ namespace SharpJaad.AAC.Filterbank
         {
             int i;
             float[] overlap = _overlaps[channel];
+            float[] buf = _buf;
+            int len = _length;
+            int shortLen = _shortLen;
+            int mid = _mid;
+            int trans = _trans;
+
+            ref float outRef = ref MemoryMarshal.GetArrayDataReference(output);
+            ref float ovlRef = ref MemoryMarshal.GetArrayDataReference(overlap);
+            ref float bufRef = ref MemoryMarshal.GetArrayDataReference(buf);
+
             switch (windowSequence)
             {
                 case WindowSequence.ONLY_LONG_SEQUENCE:
-                    _mdctLong.Process(input, 0, _buf, 0);
-                    //add second half output of previous frame to windowed output of current frame
-                    for (i = 0; i < _length; i++)
                     {
-                        output[i] = overlap[i] + _buf[i] * _LONG_WINDOWS[windowShapePrev][i];
+                        _mdctLong.Process(input, 0, buf, 0);
+                        ref float wpRef = ref MemoryMarshal.GetArrayDataReference(_LONG_WINDOWS[windowShapePrev]);
+                        ref float wcRef = ref MemoryMarshal.GetArrayDataReference(_LONG_WINDOWS[windowShape]);
+
+                        MultiplyAddWindow(ref outRef, ref ovlRef, ref bufRef, ref wpRef, len);
+
+                        int lastIdx = len - 1;
+                        for (i = 0; i < len; i++)
+                        {
+                            Unsafe.Add(ref ovlRef, i) = Unsafe.Add(ref bufRef, len + i) * Unsafe.Add(ref wcRef, lastIdx - i);
+                        }
+                        break;
                     }
 
-                    //window the second half and save as overlap for next frame
-                    for (i = 0; i < _length; i++)
-                    {
-                        overlap[i] = _buf[_length + i] * _LONG_WINDOWS[windowShape][_length - 1 - i];
-                    }
-                    break;
                 case WindowSequence.LONG_START_SEQUENCE:
-                    _mdctLong.Process(input, 0, _buf, 0);
-                    //add second half output of previous frame to windowed output of current frame
-                    for (i = 0; i < _length; i++)
                     {
-                        output[i] = overlap[i] + _buf[i] * _LONG_WINDOWS[windowShapePrev][i];
+                        _mdctLong.Process(input, 0, buf, 0);
+                        ref float wpRef = ref MemoryMarshal.GetArrayDataReference(_LONG_WINDOWS[windowShapePrev]);
+                        ref float wsCurrRef = ref MemoryMarshal.GetArrayDataReference(_SHORT_WINDOWS[windowShape]);
+
+                        MultiplyAddWindow(ref outRef, ref ovlRef, ref bufRef, ref wpRef, len);
+
+                        buf.AsSpan(len, mid).CopyTo(overlap.AsSpan(0, mid));
+
+                        int lastShortIdx = shortLen - 1;
+                        int bufMidOffset = len + mid;
+                        for (i = 0; i < shortLen; i++)
+                        {
+                            Unsafe.Add(ref ovlRef, mid + i) = Unsafe.Add(ref bufRef, bufMidOffset + i) * Unsafe.Add(ref wsCurrRef, lastShortIdx - i);
+                        }
+
+                        overlap.AsSpan(mid + shortLen, mid).Clear();
+                        break;
                     }
 
-                    //window the second half and save as overlap for next frame
-                    for (i = 0; i < _mid; i++)
-                    {
-                        overlap[i] = _buf[_length + i];
-                    }
-                    for (i = 0; i < _shortLen; i++)
-                    {
-                        overlap[_mid + i] = _buf[_length + _mid + i] * _SHORT_WINDOWS[windowShape][_shortLen - i - 1];
-                    }
-                    for (i = 0; i < _mid; i++)
-                    {
-                        overlap[_mid + _shortLen + i] = 0;
-                    }
-                    break;
                 case WindowSequence.EIGHT_SHORT_SEQUENCE:
-                    for (i = 0; i < 8; i++)
                     {
-                        _mdctShort.Process(input, i * _shortLen, _buf, 2 * i * _shortLen);
+                        for (i = 0; i < 8; i++)
+                        {
+                            _mdctShort.Process(input, i * shortLen, buf, 2 * i * shortLen);
+                        }
+
+                        overlap.AsSpan(0, mid).CopyTo(output.AsSpan(0, mid));
+
+                        ref float wsPrevRef = ref MemoryMarshal.GetArrayDataReference(_SHORT_WINDOWS[windowShapePrev]);
+                        ref float wsCurrRef = ref MemoryMarshal.GetArrayDataReference(_SHORT_WINDOWS[windowShape]);
+                        int lastShortIdx = shortLen - 1;
+
+                        for (i = 0; i < shortLen; i++)
+                        {
+                            float wCurr = Unsafe.Add(ref wsCurrRef, i);
+                            float wCurrRev = Unsafe.Add(ref wsCurrRef, lastShortIdx - i);
+
+                            output[mid + i] = overlap[mid + i] + buf[i] * Unsafe.Add(ref wsPrevRef, i);
+                            output[mid + shortLen + i] = overlap[mid + shortLen + i] + buf[shortLen + i] * wCurrRev + buf[shortLen * 2 + i] * wCurr;
+                            output[mid + 2 * shortLen + i] = overlap[mid + shortLen * 2 + i] + buf[shortLen * 3 + i] * wCurrRev + buf[shortLen * 4 + i] * wCurr;
+                            output[mid + 3 * shortLen + i] = overlap[mid + shortLen * 3 + i] + buf[shortLen * 5 + i] * wCurrRev + buf[shortLen * 6 + i] * wCurr;
+                            if (i < trans)
+                                output[mid + 4 * shortLen + i] = overlap[mid + shortLen * 4 + i] + buf[shortLen * 7 + i] * wCurrRev + buf[shortLen * 8 + i] * wCurr;
+                        }
+
+                        for (i = 0; i < shortLen; i++)
+                        {
+                            float wCurr = Unsafe.Add(ref wsCurrRef, i);
+                            float wCurrRev = Unsafe.Add(ref wsCurrRef, lastShortIdx - i);
+
+                            if (i >= trans)
+                                overlap[mid + 4 * shortLen + i - len] = buf[shortLen * 7 + i] * wCurrRev + buf[shortLen * 8 + i] * wCurr;
+                            overlap[mid + 5 * shortLen + i - len] = buf[shortLen * 9 + i] * wCurrRev + buf[shortLen * 10 + i] * wCurr;
+                            overlap[mid + 6 * shortLen + i - len] = buf[shortLen * 11 + i] * wCurrRev + buf[shortLen * 12 + i] * wCurr;
+                            overlap[mid + 7 * shortLen + i - len] = buf[shortLen * 13 + i] * wCurrRev + buf[shortLen * 14 + i] * wCurr;
+                            overlap[mid + 8 * shortLen + i - len] = buf[shortLen * 15 + i] * wCurrRev;
+                        }
+
+                        overlap.AsSpan(mid + shortLen, mid).Clear();
+                        break;
                     }
 
-                    //add second half output of previous frame to windowed output of current frame
-                    for (i = 0; i < _mid; i++)
-                    {
-                        output[i] = overlap[i];
-                    }
-                    for (i = 0; i < _shortLen; i++)
-                    {
-                        output[_mid + i] = overlap[_mid + i] + _buf[i] * _SHORT_WINDOWS[windowShapePrev][i];
-                        output[_mid + 1 * _shortLen + i] = overlap[_mid + _shortLen * 1 + i] + _buf[_shortLen * 1 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 2 + i] * _SHORT_WINDOWS[windowShape][i];
-                        output[_mid + 2 * _shortLen + i] = overlap[_mid + _shortLen * 2 + i] + _buf[_shortLen * 3 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 4 + i] * _SHORT_WINDOWS[windowShape][i];
-                        output[_mid + 3 * _shortLen + i] = overlap[_mid + _shortLen * 3 + i] + _buf[_shortLen * 5 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 6 + i] * _SHORT_WINDOWS[windowShape][i];
-                        if (i < _trans) output[_mid + 4 * _shortLen + i] = overlap[_mid + _shortLen * 4 + i] + _buf[_shortLen * 7 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 8 + i] * _SHORT_WINDOWS[windowShape][i];
-                    }
-
-                    //window the second half and save as overlap for next frame
-                    for (i = 0; i < _shortLen; i++)
-                    {
-                        if (i >= _trans) overlap[_mid + 4 * _shortLen + i - _length] = _buf[_shortLen * 7 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 8 + i] * _SHORT_WINDOWS[windowShape][i];
-                        overlap[_mid + 5 * _shortLen + i - _length] = _buf[_shortLen * 9 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 10 + i] * _SHORT_WINDOWS[windowShape][i];
-                        overlap[_mid + 6 * _shortLen + i - _length] = _buf[_shortLen * 11 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 12 + i] * _SHORT_WINDOWS[windowShape][i];
-                        overlap[_mid + 7 * _shortLen + i - _length] = _buf[_shortLen * 13 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i] + _buf[_shortLen * 14 + i] * _SHORT_WINDOWS[windowShape][i];
-                        overlap[_mid + 8 * _shortLen + i - _length] = _buf[_shortLen * 15 + i] * _SHORT_WINDOWS[windowShape][_shortLen - 1 - i];
-                    }
-                    for (i = 0; i < _mid; i++)
-                    {
-                        overlap[_mid + _shortLen + i] = 0;
-                    }
-                    break;
                 case WindowSequence.LONG_STOP_SEQUENCE:
-                    _mdctLong.Process(input, 0, _buf, 0);
-                    //add second half output of previous frame to windowed output of current frame
-                    //construct first half window using padding with 1's and 0's
-                    for (i = 0; i < _mid; i++)
                     {
-                        output[i] = overlap[i];
+                        _mdctLong.Process(input, 0, buf, 0);
+                        ref float wsPrevRef = ref MemoryMarshal.GetArrayDataReference(_SHORT_WINDOWS[windowShapePrev]);
+                        ref float wcRef = ref MemoryMarshal.GetArrayDataReference(_LONG_WINDOWS[windowShape]);
+
+                        overlap.AsSpan(0, mid).CopyTo(output.AsSpan(0, mid));
+
+                        MultiplyAddWindow(
+                            ref Unsafe.Add(ref outRef, mid),
+                            ref Unsafe.Add(ref ovlRef, mid),
+                            ref Unsafe.Add(ref bufRef, mid),
+                            ref wsPrevRef,
+                            shortLen);
+
+                        int tailOffset = mid + shortLen;
+                        for (i = 0; i < mid; i++)
+                        {
+                            Unsafe.Add(ref outRef, tailOffset + i) = Unsafe.Add(ref ovlRef, tailOffset + i) + Unsafe.Add(ref bufRef, tailOffset + i);
+                        }
+
+                        int lastIdx = len - 1;
+                        for (i = 0; i < len; i++)
+                        {
+                            Unsafe.Add(ref ovlRef, i) = Unsafe.Add(ref bufRef, len + i) * Unsafe.Add(ref wcRef, lastIdx - i);
+                        }
+                        break;
                     }
-                    for (i = 0; i < _shortLen; i++)
-                    {
-                        output[_mid + i] = overlap[_mid + i] + _buf[_mid + i] * _SHORT_WINDOWS[windowShapePrev][i];
-                    }
-                    for (i = 0; i < _mid; i++)
-                    {
-                        output[_mid + _shortLen + i] = overlap[_mid + _shortLen + i] + _buf[_mid + _shortLen + i];
-                    }
-                    //window the second half and save as overlap for next frame
-                    for (i = 0; i < _length; i++)
-                    {
-                        overlap[i] = _buf[_length + i] * _LONG_WINDOWS[windowShape][_length - 1 - i];
-                    }
-                    break;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MultiplyAddWindow(
+            ref float outRef,
+            ref float ovlRef,
+            ref float bufRef,
+            ref float winRef,
+            int count)
+        {
+            int i = 0;
+            if (Vector.IsHardwareAccelerated && count >= Vector<float>.Count)
+            {
+                int vecSize = Vector<float>.Count;
+                for (; i <= count - vecSize; i += vecSize)
+                {
+                    var vOvl = Unsafe.ReadUnaligned<Vector<float>>(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref ovlRef, i)));
+                    var vBuf = Unsafe.ReadUnaligned<Vector<float>>(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref bufRef, i)));
+                    var vWin = Unsafe.ReadUnaligned<Vector<float>>(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref winRef, i)));
+                    Unsafe.WriteUnaligned(ref Unsafe.As<float, byte>(ref Unsafe.Add(ref outRef, i)), vOvl + vBuf * vWin);
+                }
+            }
+            for (; i < count; i++)
+            {
+                Unsafe.Add(ref outRef, i) = Unsafe.Add(ref ovlRef, i) + Unsafe.Add(ref bufRef, i) * Unsafe.Add(ref winRef, i);
             }
         }
 

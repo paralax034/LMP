@@ -731,46 +731,50 @@ public sealed partial class AudioEngine
     /// </summary>
     private void PreWarmNextTracksInQueue(int currentIndex, HttpClient httpClient, CancellationToken ct)
     {
-        const int LookaheadCount = 2;
+        TrackInfo? next1 = null;
+        TrackInfo? next2 = null;
 
-        var queue = Queue;
-
-        for (int i = 1; i <= LookaheadCount; i++)
+        lock (_queueLock)
         {
-            int idx = currentIndex + i;
-            if (idx >= queue.Count)
-                break;
+            int idx1 = currentIndex + 1;
+            int idx2 = currentIndex + 2;
+            if ((uint)idx1 < (uint)_queue.Count) next1 = _queue[idx1];
+            if ((uint)idx2 < (uint)_queue.Count) next2 = _queue[idx2];
+        }
 
-            var next = queue[idx];
+        PreWarmSingleQueueTrack(next1, currentIndex + 1, httpClient, ct);
+        PreWarmSingleQueueTrack(next2, currentIndex + 2, httpClient, ct);
+    }
 
-            if (AudioSourceFactory.FindAnyCachedTrack(next.Id) != null)
-                continue;
+    private void PreWarmSingleQueueTrack(TrackInfo? next, int queueIdx, HttpClient httpClient, CancellationToken ct)
+    {
+        if (next == null) return;
+        if (AudioSourceFactory.FindAnyCachedTrack(next.Id) != null) return;
 
-            string? targetUrl = null;
+        string? targetUrl = null;
 
-            var manifest = SessionCacheStore.GetManifest(next.Id);
-            if (manifest is { Variants.Count: > 0 })
-            {
-                targetUrl = manifest.Variants[0].Url;
-            }
-            else
-            {
-                string rawId = next.GetRawIdSpan().ToString();
-                var hint = StreamSelectionHint.FromTrack(next, _library.Settings.RememberTrackFormat);
-                var descriptor = _youtube.TryGetCachedStreamDescriptor(
-                    rawId,
-                    hint.Format,
-                    hint.BitrateKbps);
+        var manifest = SessionCacheStore.GetManifest(next.Id);
+        if (manifest is { Variants.Count: > 0 })
+        {
+            targetUrl = manifest.Variants[0].Url;
+        }
+        else
+        {
+            string rawId = next.GetRawIdSpan().ToString();
+            var hint = StreamSelectionHint.FromTrack(next, _library.Settings.RememberTrackFormat);
+            var descriptor = _youtube.TryGetCachedStreamDescriptor(
+                rawId,
+                hint.Format,
+                hint.BitrateKbps);
 
-                if (descriptor is { HasLiveUrl: true } d)
-                    targetUrl = d.Url;
-            }
+            if (descriptor is { HasLiveUrl: true } d)
+                targetUrl = d.Url;
+        }
 
-            if (!string.IsNullOrEmpty(targetUrl))
-            {
-                CdnConnectionPreWarmer.PreWarmHost(httpClient, targetUrl, ct);
-                Log.Debug($"[AudioEngine] Lookahead CDN prewarm queue[{idx}]: {next.Id}");
-            }
+        if (!string.IsNullOrEmpty(targetUrl))
+        {
+            CdnConnectionPreWarmer.PreWarmHost(httpClient, targetUrl, ct);
+            Log.Debug($"[AudioEngine] Lookahead CDN prewarm queue[{queueIdx}]: {next.Id}");
         }
     }
 

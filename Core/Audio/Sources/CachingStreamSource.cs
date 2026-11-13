@@ -199,15 +199,81 @@ internal sealed partial class CachingStreamSource : IAudioSource
     /// Lightweight gate to control the background preload loop.
     /// Set = playback active, Reset = player paused.
     /// </summary>
-    private readonly ManualResetEventSlim _playbackGate = new(initialState: true);
+    private sealed class AsyncManualResetGate
+    {
+        private readonly Lock _lock = new();
+        private TaskCompletionSource _tcs;
+        private volatile bool _isSet;
+
+        public AsyncManualResetGate(bool initialState)
+        {
+            _isSet = initialState;
+            _tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (initialState)
+                _tcs.TrySetResult();
+        }
+
+        public bool IsSet => _isSet;
+
+        public void Set()
+        {
+            TaskCompletionSource toComplete;
+            lock (_lock)
+            {
+                if (_isSet) return;
+                _isSet = true;
+                toComplete = _tcs;
+            }
+            toComplete.TrySetResult();
+        }
+
+        public void Reset()
+        {
+            lock (_lock)
+            {
+                if (!_isSet) return;
+                _isSet = false;
+                if (_tcs.Task.IsCompleted)
+                    _tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        public Task WaitAsync(CancellationToken ct)
+        {
+            Task task;
+            lock (_lock)
+            {
+                if (_isSet) return Task.CompletedTask;
+                task = _tcs.Task;
+            }
+            return task.WaitAsync(ct);
+        }
+
+        public async Task WaitAsync(int timeoutMs, CancellationToken ct)
+        {
+            Task task;
+            lock (_lock)
+            {
+                if (_isSet || ct.IsCancellationRequested) return;
+                task = _tcs.Task;
+            }
+
+            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var delayTask = Task.Delay(timeoutMs, delayCts.Token);
+            var completed = await Task.WhenAny(task, delayTask).ConfigureAwait(false);
+            if (completed == task)
+                delayCts.Cancel();
+        }
+    }
+
+    private readonly AsyncManualResetGate _playbackGate = new(initialState: true);
 
     /// <summary>
-    /// ManualResetEventSlim to block the preload loop during suspend.
-    /// Set = running, Reset = paused.
+    /// Async gate to pause the preload loop during suspend without blocking ThreadPool threads.
     /// </summary>
-    private readonly ManualResetEventSlim _suspendGate = new(initialState: true);
+    private readonly AsyncManualResetGate _suspendGate = new(initialState: true);
 
-    //  Lifecycle 
+    //  Lifecycle
     private CancellationTokenSource? _lifetimeCts;
     private Task? _preloadTask;
 
@@ -225,10 +291,10 @@ internal sealed partial class CachingStreamSource : IAudioSource
     private TaskCompletionSource<string?>? _continuationUrlTcs;
     private readonly Lock _continuationLock = new();
 
-    //  Position tracking 
+    //  Position tracking
     private long _currentReadOffset;
     private long _positionMs;
-    private string _currentUrl;
+    private volatile string _currentUrl;
 
     //  Refresh / retry state 
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -904,8 +970,7 @@ internal sealed partial class CachingStreamSource : IAudioSource
 
         _cacheManager.InvalidateRange(_cacheKey, rangeStart, rangeLength);
 
-        if (_ramCache.TryRemoveContaining(absoluteBytePosition, out var badBlock) && badBlock is not null)
-            badBlock.Dispose();
+        _ramCache.RemoveOverlappingRange(rangeStart, rangeLength);
 
         var healResult = await EnsureRangeAsync(rangeStart, rangeLength, ct, isCritical: true)
             .ConfigureAwait(false);

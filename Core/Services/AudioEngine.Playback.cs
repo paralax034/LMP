@@ -215,6 +215,9 @@ public sealed partial class AudioEngine
         try
         {
             var canonical = await _library.GetTrackAsync(track.Id, ct).ConfigureAwait(false);
+            if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
+                return;
+
             if (canonical != null)
             {
                 canonical.UpdateMetadata(track);
@@ -280,14 +283,6 @@ public sealed partial class AudioEngine
                     await _player.PlayAsync(descriptor, ct, seekPosition: seekPosition)
                         .ConfigureAwait(false);
 
-                    if (descriptor.HasPerceptualLufs)
-                    {
-                        AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(
-                            track.Id,
-                            descriptor.IntegratedLufs,
-                            Audio.Normalization.LoudnessSource.YoutubePerceptual);
-                    }
-
                     PreWarmNextTracksInQueue(
                         CurrentQueueIndex,
                         Audio.Http.SharedHttpClient.Instance,
@@ -312,7 +307,8 @@ public sealed partial class AudioEngine
                     Audio.Http.SessionCacheStore.Invalidate(track.Id);
 
                     _player.Stop();
-                    await Task.Delay(300, ct).ConfigureAwait(false);
+                    if (!await ct.DelayNoThrowAsync(300, continueOnCapturedContext: false).ConfigureAwait(false))
+                        return;
                 }
                 catch (OperationCanceledException ex)
                     when (!ct.IsCancellationRequested && attempt < maxStartupAttempts)
@@ -320,7 +316,8 @@ public sealed partial class AudioEngine
                     Log.Warn($"[AudioEngine] Transient internal timeout during track startup " +
                              $"(attempt {attempt}/{maxStartupAttempts}): {ex.Message}");
                     _player.Stop();
-                    await Task.Delay(150, ct).ConfigureAwait(false);
+                    if (!await ct.DelayNoThrowAsync(150, continueOnCapturedContext: false).ConfigureAwait(false))
+                        return;
                 }
             }
 
@@ -344,7 +341,9 @@ public sealed partial class AudioEngine
         }
         finally
         {
-            SetManualLoading(false);
+            if (!_session.IsStale(session))
+                SetManualLoading(false);
+
             Interlocked.CompareExchange(ref _nTokenActiveTrackId, null, track.Id);
         }
     }
@@ -390,9 +389,12 @@ public sealed partial class AudioEngine
 
     private void HandlePlayerStateChanged(PlaybackState state)
     {
-        // Intention is checked against state: quality change and recovery trigger PlayAsync bypassing SetPlaybackStateAsync
-        if (state == PlaybackState.Playing) _playIntent = true;
-        else if (state == PlaybackState.Paused) _playIntent = false;
+        // Intention is checked against state: quality change and recovery trigger PlayAsync bypassing SetPlaybackStateAsync.
+        // Preserve _playIntent across device-loss pauses so queue mutations continue auto-advancing on reconnect.
+        if (state == PlaybackState.Playing)
+            _playIntent = true;
+        else if (state == PlaybackState.Paused && _player.GetActivePipeline()?.IsDeviceLost != true)
+            _playIntent = false;
 
         ApplyLifecycleSourceSuspendPolicy();
 

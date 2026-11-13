@@ -61,7 +61,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private const int SteadyTargetBufferMs = 75;
 
     /// <summary>WASAPI thread sleep step in steady-state mode (20 ms) — completely eliminates padBefore dropping to 0.</summary>
-    private const uint SteadySleepMs = 20;
+    private const uint SteadySleepMs = 15;
 
     /// <summary>Compressed buffer fill horizon during active volume changes or micro-fade (40 ms — prevents buffer underrun to 0 during OS micro-delays).</summary>
     private const int InteractiveTargetBufferMs = 40;
@@ -155,6 +155,9 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         in Guid riid,
         out void* ppv);
 
+    private const uint CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = 0x00000002;
+    private const uint TIMER_ALL_ACCESS = 0x001F0003;
+
     [LibraryImport("kernel32.dll", SetLastError = true)]
     private static partial nint CreateEventW(nint lpEventAttributes, int bManualReset, int bInitialState, nint lpName);
 
@@ -162,7 +165,16 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private static partial int SetEvent(nint hEvent);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nint CreateWaitableTimerExW(nint lpTimerAttributes, nint lpTimerName, uint dwFlags, uint dwDesiredAccess);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial int SetWaitableTimer(nint hTimer, in long lpDueTime, int lPeriod, nint pfnCompletionRoutine, nint lpArgToCompletionRoutine, int fResume);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     private static partial uint WaitForSingleObject(nint hHandle, uint dwMilliseconds);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial uint WaitForMultipleObjects(uint nCount, nint* lpHandles, int bWaitAll, uint dwMilliseconds);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     private static partial int CloseHandle(nint hObject);
@@ -316,6 +328,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
     private void* _renderClient;
 
     private nint _wakeControlEvent;
+    private nint _highResWaitableTimer;
     private uint _bufferFrameCount;
 
     private Thread? _playbackThread;
@@ -465,7 +478,17 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         // Lock the WASAPI hardware session to the canonical sample rate of 48000 Hz,
         // so that switching between 44.1 kHz (AAC) and 48 kHz (Opus) tracks never stops IAudioClient!
         _sampleRate = AudioConstants.DefaultSampleRate;
-        ResetResamplerStateUnderLock();
+
+        lock (_stateLock)
+        {
+            ResetResamplerStateUnderLock();
+            _isFlushSeamless = false;
+            _crossfadeTailFrames = 0;
+            _gateOpen = false;
+            _fadeState = FadeState.None;
+            _fadeGain = 0f;
+            _bufferedSamples = 0;
+        }
 
         bool wasDeviceLost = _deviceLost;
         int maxAttempts = wasDeviceLost ? DeviceRecoveryMaxRetries : 0;
@@ -524,15 +547,17 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         lock (_stateLock)
         {
             // If Flush() hasn't captured the tail of the outgoing track yet, capture it with the old _sourceSampleRate before replacing _callback!
-            if (_crossfadeTailFrames == 0 && (_gateOpen || MathF.Abs(_lastWasapiL) > 0.0001f || MathF.Abs(_lastWasapiR) > 0.0001f))
+            bool capturedTail = _crossfadeTailFrames > 0;
+            if (!capturedTail && (_gateOpen || MathF.Abs(_lastWasapiL) > 0.0001f || MathF.Abs(_lastWasapiR) > 0.0001f))
             {
                 CaptureCrossfadeTailUnderLock();
+                capturedTail = _crossfadeTailFrames > 0;
             }
 
             _callback = dataCallback;
             _sourceSampleRate = normalizedSourceRate;
             ResetResamplerStateUnderLock();
-            _isFlushSeamless = true;
+            _isFlushSeamless = capturedTail;
             _gateOpen = false;
             _fadeState = FadeState.None;
             _fadeGain = 0f;
@@ -615,6 +640,11 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             _wakeControlEvent = CreateEventW(0, bManualReset: 0, bInitialState: 0, 0);
             if (_wakeControlEvent == 0)
                 throw new InvalidOperationException("CreateEventW for control event failed");
+        }
+
+        if (_highResWaitableTimer == 0)
+        {
+            _highResWaitableTimer = CreateWaitableTimerExW(0, 0, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         }
 
         OpenDefaultEndpointOnRenderThread(_sampleRate, _channels);
@@ -790,6 +820,12 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         ReleaseEndpointInterfacesOnRenderThread();
         SafeRelease(ref _deviceEnumerator);
 
+        if (_highResWaitableTimer != 0)
+        {
+            _ = CloseHandle(_highResWaitableTimer);
+            _highResWaitableTimer = 0;
+        }
+
         if (_wakeControlEvent != 0)
         {
             _ = CloseHandle(_wakeControlEvent);
@@ -917,6 +953,138 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         int outFrame = 0;
         Span<float> hist = _resampleHistory.AsSpan(0, 4 * ch);
         Span<float> srcBuf = _resampleSourceBuf.AsSpan();
+
+        if (ch == 2)
+        {
+            ref float srcRef = ref MemoryMarshal.GetArrayDataReference(_resampleSourceBuf);
+            ref float dstRef = ref MemoryMarshal.GetReference(targetSpan);
+
+            float ym1L = hist[0], ym1R = hist[1];
+            float y0L = hist[2], y0R = hist[3];
+            float y1L = hist[4], y1R = hist[5];
+            float y2L = hist[6], y2R = hist[7];
+
+            int cursor = _resampleSourceCursor;
+            int validFrames = _resampleSourceValidFrames;
+            double fracPhase = _resampleFracPhase;
+            bool primed = _resampleHistoryPrimed;
+
+            while (outFrame < requestedOutFrames)
+            {
+                while (!primed || fracPhase >= 1.0)
+                {
+                    if (cursor >= validFrames)
+                    {
+                        int neededInFrames = Math.Clamp(
+                            (int)Math.Ceiling((requestedOutFrames - outFrame) * step) + 4,
+                            64,
+                            _resampleSourceBuf.Length / 2);
+
+                        int readIn = _callback(srcBuf[..(neededInFrames * 2)]);
+                        if (readIn <= 0)
+                        {
+                            hist[0] = ym1L; hist[1] = ym1R;
+                            hist[2] = y0L; hist[3] = y0R;
+                            hist[4] = y1L; hist[5] = y1R;
+                            hist[6] = y2L; hist[7] = y2R;
+                            _resampleSourceCursor = cursor;
+                            _resampleSourceValidFrames = validFrames;
+                            _resampleFracPhase = fracPhase;
+                            _resampleHistoryPrimed = primed;
+                            UpdateRenderedSamplesUnderLock(2);
+                            return outFrame;
+                        }
+
+                        _clockPulledSamples += (long)readIn * 2;
+                        validFrames = readIn;
+                        cursor = 0;
+                    }
+
+                    if (!primed)
+                    {
+                        int firstIdx = cursor * 2;
+                        float s0L = Unsafe.Add(ref srcRef, firstIdx);
+                        float s0R = Unsafe.Add(ref srcRef, firstIdx + 1);
+                        ym1L = y0L = y1L = y2L = s0L;
+                        ym1R = y0R = y1R = y2R = s0R;
+                        cursor++;
+
+                        if (cursor < validFrames)
+                        {
+                            int idx2 = cursor * 2;
+                            y1L = Unsafe.Add(ref srcRef, idx2);
+                            y1R = Unsafe.Add(ref srcRef, idx2 + 1);
+                            y2L = y1L;
+                            y2R = y1R;
+                            cursor++;
+                        }
+
+                        if (cursor < validFrames)
+                        {
+                            int idx3 = cursor * 2;
+                            y2L = Unsafe.Add(ref srcRef, idx3);
+                            y2R = Unsafe.Add(ref srcRef, idx3 + 1);
+                            cursor++;
+                        }
+
+                        fracPhase = 0.0;
+                        primed = true;
+                    }
+                    else
+                    {
+                        ym1L = y0L; ym1R = y0R;
+                        y0L = y1L; y0R = y1R;
+                        y1L = y2L; y1R = y2R;
+
+                        int nextIdx = cursor * 2;
+                        y2L = Unsafe.Add(ref srcRef, nextIdx);
+                        y2R = Unsafe.Add(ref srcRef, nextIdx + 1);
+
+                        cursor++;
+                        fracPhase -= 1.0;
+                    }
+                }
+
+                float t = (float)fracPhase;
+                float c1L = 0.5f * (y1L - ym1L);
+                float c2L = ym1L - 2.5f * y0L + 2.0f * y1L - 0.5f * y2L;
+                float c3L = 0.5f * (y2L - ym1L) + 1.5f * (y0L - y1L);
+                float outL = ((c3L * t + c2L) * t + c1L) * t + y0L;
+
+                float c1R = 0.5f * (y1R - ym1R);
+                float c2R = ym1R - 2.5f * y0R + 2.0f * y1R - 0.5f * y2R;
+                float c3R = 0.5f * (y2R - ym1R) + 1.5f * (y0R - y1R);
+                float outR = ((c3R * t + c2R) * t + c1R) * t + y0R;
+
+                float absL = MathF.Abs(outL);
+                float absR = MathF.Abs(outR);
+                float framePeak = absL > absR ? absL : absR;
+                float guardScale = TruePeakLimiter.SoftCeilingScale(framePeak);
+                if (guardScale < 1.0f)
+                {
+                    outL *= guardScale;
+                    outR *= guardScale;
+                }
+
+                int outBase = outFrame * 2;
+                Unsafe.Add(ref dstRef, outBase) = outL;
+                Unsafe.Add(ref dstRef, outBase + 1) = outR;
+
+                outFrame++;
+                fracPhase += step;
+            }
+
+            hist[0] = ym1L; hist[1] = ym1R;
+            hist[2] = y0L; hist[3] = y0R;
+            hist[4] = y1L; hist[5] = y1R;
+            hist[6] = y2L; hist[7] = y2R;
+            _resampleSourceCursor = cursor;
+            _resampleSourceValidFrames = validFrames;
+            _resampleFracPhase = fracPhase;
+            _resampleHistoryPrimed = primed;
+            UpdateRenderedSamplesUnderLock(2);
+            return outFrame;
+        }
 
         while (outFrame < requestedOutFrames)
         {
@@ -1145,7 +1313,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         int idleGateClosedTicks = 0;
         uint steadyTargetFrames = Math.Min(_bufferFrameCount, (uint)(_sampleRate * SteadyTargetBufferMs / 1000));
         uint interactiveTargetFrames = Math.Min(_bufferFrameCount, (uint)(_sampleRate * InteractiveTargetBufferMs / 1000));
-        uint safeSteadySleepPaddingFrames = (uint)(_sampleRate * 50 / 1000);
+        uint safeSteadySleepPaddingFrames = (uint)(_sampleRate * 55 / 1000);
         uint lowIdlePaddingThreshold = (uint)(_sampleRate * 22 / 1000);
 
 #if AUDIO_SPLICE_AUDIT
@@ -1251,7 +1419,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                             lastSleepStartTick64 = Environment.TickCount64;
                             lastRequestedSleepMs = InteractiveSleepMs;
 #endif
-                            _ = WaitForSingleObject(_wakeControlEvent, InteractiveSleepMs);
+                            SleepOrWakeOnRenderThread(InteractiveSleepMs);
                             continue;
                         }
 
@@ -1346,6 +1514,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                         int validPcmFrames = 0;
                         FadeState currentFadeState;
                         float currentFadeGain;
+                        bool gateActiveDuringPull = false;
                         bool doSeamlessBridge = false;
                         int tailFramesAvailable = 0;
                         float prevLBeforeChunk;
@@ -1364,9 +1533,18 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                             prevSlopeL = _lastWasapiL - _prevWasapiL;
                             prevSlopeR = _lastWasapiR - _prevWasapiR;
 
-                            if ((_gateOpen || currentFadeState == FadeState.FadingOut) && _callback != null)
+                            gateActiveDuringPull = _gateOpen || currentFadeState == FadeState.FadingOut;
+                            if (gateActiveDuringPull && _callback != null)
                             {
-                                pcmFramesRead = ReadCallbackWithResamplingUnderLock(targetSpan, (int)availableFrames);
+                                int framesToPull = (int)availableFrames;
+                                if (currentFadeState == FadeState.FadingOut)
+                                {
+                                    int fadeRemainingFrames = Math.Max(1, (int)MathF.Ceiling(currentFadeGain * FadeFrames));
+                                    if (framesToPull > fadeRemainingFrames)
+                                        framesToPull = fadeRemainingFrames;
+                                }
+
+                                pcmFramesRead = ReadCallbackWithResamplingUnderLock(targetSpan, framesToPull);
                             }
 
                             if (pcmFramesRead > 0)
@@ -1483,7 +1661,12 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
 
                         if (pcmFramesRead <= 0)
                         {
-                            if (paddingFrames > (uint)(_sampleRate / 50))
+                            if (!gateActiveDuringPull)
+                            {
+                                // Gate was closed concurrently by Flush()/Stop(): avoid mistaking a seamless flush for underrun.
+                                framesToCommit = 0;
+                            }
+                            else if (paddingFrames > (uint)(_sampleRate / 80))
                             {
                                 framesToCommit = 0;
                             }
@@ -1512,7 +1695,14 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                             }
                             else
                             {
-                                releaseFlags = AUDCLNT_BUFFERFLAGS_SILENT;
+                                // Never commit 75ms of silence on a transient decoder hiccup: cap silence to <= 8ms (or 0 if padded)
+                                // so decoded audio is picked up on the very next interactive tick without time-stretching!
+                                uint minSilenceFrames = (uint)Math.Max(1, _sampleRate / 125); // 8 ms
+                                framesToCommit = paddingFrames >= minSilenceFrames
+                                    ? 0u
+                                    : Math.Min(availableFrames, minSilenceFrames - paddingFrames);
+                                releaseFlags = framesToCommit > 0 ? AUDCLNT_BUFFERFLAGS_SILENT : 0u;
+
                                 lock (_stateLock)
                                 {
                                     if (_fadeState == FadeState.FadingOut)
@@ -1524,7 +1714,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                                 }
                             }
 
-                            if (_gateOpen)
+                            if (gateActiveDuringPull && _gateOpen)
                             {
                                 int underruns = Interlocked.Increment(ref _consecutiveUnderrunCount);
                                 if (underruns == UnderrunLogThreshold)
@@ -1643,7 +1833,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
                 lastSleepStartTick64 = Environment.TickCount64;
                 lastRequestedSleepMs = sleepMs;
 #endif
-                _ = WaitForSingleObject(_wakeControlEvent, sleepMs);
+                SleepOrWakeOnRenderThread(sleepMs);
             }
         }
         catch (Exception ex)
@@ -1832,10 +2022,13 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             if (_gateOpen || _bufferedSamples > 0 || MathF.Abs(_lastWasapiL) > 0.0001f || MathF.Abs(_lastWasapiR) > 0.0001f)
             {
                 if (_crossfadeTailFrames == 0)
-                {
                     CaptureCrossfadeTailUnderLock();
-                }
-                _isFlushSeamless = true;
+
+                _isFlushSeamless = _crossfadeTailFrames > 0;
+            }
+            else
+            {
+                _isFlushSeamless = false;
             }
 
             ResetResamplerStateUnderLock();
@@ -1856,6 +2049,29 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         _gainProcessor.SetVolumeGain(gain);
         Volatile.Write(ref _interactiveUntilTick64, Environment.TickCount64 + InteractiveHoldDurationMs);
         SignalWakeEvent();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SleepOrWakeOnRenderThread(uint sleepMs)
+    {
+        if (sleepMs == 0) return;
+
+        nint timer = _highResWaitableTimer;
+        nint wake = _wakeControlEvent;
+        if (timer != 0 && wake != 0 && sleepMs != INFINITE)
+        {
+            long dueTime100ns = -(long)sleepMs * HnsPerMillisecond;
+            if (SetWaitableTimer(timer, in dueTime100ns, 0, 0, 0, 0) != 0)
+            {
+                nint* handles = stackalloc nint[2];
+                handles[0] = wake;
+                handles[1] = timer;
+                _ = WaitForMultipleObjects(2, handles, bWaitAll: 0, sleepMs + 15);
+                return;
+            }
+        }
+
+        _ = WaitForSingleObject(wake, sleepMs);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1894,7 +2110,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             return;
         }
 
-        _ = CoInitializeEx(0, COINIT_MULTITHREADED);
+        int hrInit = CoInitializeEx(0, COINIT_MULTITHREADED);
         void* pEnum = null;
         void* pDev = null;
 
@@ -1928,7 +2144,8 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         {
             SafeRelease(ref pDev);
             SafeRelease(ref pEnum);
-            CoUninitialize();
+            if (hrInit >= 0)
+                CoUninitialize();
         }
     }
 

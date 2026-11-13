@@ -20,10 +20,12 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     private static readonly bool IsNativeSupported = CheckNativeSupport();
 
     private IntPtr _nativeDecoder;
+    private int _nativeRefCount;
+    private int _nativeDisposeSignaled;
     private readonly IOpusDecoder? _managedDecoder;
     private int _lastPacketSamples;
     private float _headerGainLinear = 1.0f;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     /// <summary>
     /// Checks the availability of the native <c>opus</c> library in the current environment.
@@ -79,6 +81,7 @@ internal sealed partial class OpusDecoder : IAudioDecoder
             }
             else
             {
+                Volatile.Write(ref _nativeRefCount, 1);
                 Log.Debug($"[OpusDecoder] Created (Native libopus Float32 Zero-Alloc): {sampleRate}Hz, {channels}ch");
             }
         }
@@ -118,20 +121,27 @@ internal sealed partial class OpusDecoder : IAudioDecoder
         if (maxFrames <= 0)
             return 0;
 
-        if (_nativeDecoder != IntPtr.Zero)
+        if (TryAcquireNativeDecoder(out IntPtr nativeDec))
         {
             int samples;
-            fixed (byte* inPtr = &MemoryMarshal.GetReference(encodedData))
-            fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
+            try
             {
-                // Native decode directly to IEEE 754 float32 (without 16-bit quantization and without hard-clipping peaks > 1.0f!)
-                samples = NativeOpus.opus_decode_float(
-                    _nativeDecoder,
-                    inPtr,
-                    encodedData.Length,
-                    outPtr,
-                    maxFrames,
-                    0);
+                fixed (byte* inPtr = &MemoryMarshal.GetReference(encodedData))
+                fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
+                {
+                    // Native decode directly to IEEE 754 float32 (without 16-bit quantization and without hard-clipping peaks > 1.0f!)
+                    samples = NativeOpus.opus_decode_float(
+                        nativeDec,
+                        inPtr,
+                        encodedData.Length,
+                        outPtr,
+                        maxFrames,
+                        0);
+                }
+            }
+            finally
+            {
+                ReleaseNativeDecoderRef();
             }
 
             if (samples < 0)
@@ -150,9 +160,11 @@ internal sealed partial class OpusDecoder : IAudioDecoder
             return samples;
         }
 
+        ObjectDisposedException.ThrowIf(_disposed || _managedDecoder == null, this);
+
         try
         {
-            int samples = _managedDecoder!.Decode(encodedData, outputBuffer, maxFrames, false);
+            int samples = _managedDecoder.Decode(encodedData, outputBuffer, maxFrames, false);
 
             if (samples > 0)
             {
@@ -189,10 +201,17 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     {
         if (_disposed) return;
 
-        if (_nativeDecoder != IntPtr.Zero)
+        if (TryAcquireNativeDecoder(out IntPtr nativeDec))
         {
-            const int OPUS_RESET_STATE = 4028;
-            _ = NativeOpus.opus_decoder_ctl(_nativeDecoder, OPUS_RESET_STATE);
+            try
+            {
+                const int OPUS_RESET_STATE = 4028;
+                _ = NativeOpus.opus_decoder_ctl(nativeDec, OPUS_RESET_STATE);
+            }
+            finally
+            {
+                ReleaseNativeDecoderRef();
+            }
         }
         else
         {
@@ -206,18 +225,25 @@ internal sealed partial class OpusDecoder : IAudioDecoder
         if (expectedSamples <= 0)
             return 0;
 
-        if (_nativeDecoder != IntPtr.Zero)
+        if (TryAcquireNativeDecoder(out IntPtr nativeDec))
         {
             int samples;
-            fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
+            try
             {
-                samples = NativeOpus.opus_decode_float(
-                    _nativeDecoder,
-                    null,
-                    0,
-                    outPtr,
-                    expectedSamples,
-                    0);
+                fixed (float* outPtr = &MemoryMarshal.GetReference(outputBuffer))
+                {
+                    samples = NativeOpus.opus_decode_float(
+                        nativeDec,
+                        null,
+                        0,
+                        outPtr,
+                        expectedSamples,
+                        0);
+                }
+            }
+            finally
+            {
+                ReleaseNativeDecoderRef();
             }
 
             if (samples > 0)
@@ -272,13 +298,46 @@ internal sealed partial class OpusDecoder : IAudioDecoder
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryAcquireNativeDecoder(out IntPtr handle)
+    {
+        while (true)
+        {
+            int count = Volatile.Read(ref _nativeRefCount);
+            if (count <= 0)
+            {
+                handle = IntPtr.Zero;
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _nativeRefCount, count + 1, count) == count)
+            {
+                handle = Volatile.Read(ref _nativeDecoder);
+                if (handle != IntPtr.Zero)
+                    return true;
+
+                ReleaseNativeDecoderRef();
+                handle = IntPtr.Zero;
+                return false;
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ReleaseNativeDecoderRef()
+    {
+        if (Interlocked.Decrement(ref _nativeRefCount) == 0)
+        {
+            IntPtr handle = Interlocked.Exchange(ref _nativeDecoder, IntPtr.Zero);
+            if (handle != IntPtr.Zero)
+                NativeOpus.opus_decoder_destroy(handle);
+        }
+    }
+
     private void ReleaseNativeDecoder()
     {
-        IntPtr handle = Interlocked.Exchange(ref _nativeDecoder, IntPtr.Zero);
-        if (handle != IntPtr.Zero)
-        {
-            NativeOpus.opus_decoder_destroy(handle);
-        }
+        if (Interlocked.Exchange(ref _nativeDisposeSignaled, 1) == 0 && _nativeDecoder != IntPtr.Zero)
+            ReleaseNativeDecoderRef();
     }
 
     public void Dispose()

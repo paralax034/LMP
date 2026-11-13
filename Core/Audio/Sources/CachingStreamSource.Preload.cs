@@ -67,15 +67,15 @@ internal sealed partial class CachingStreamSource
                 bool isSuspended = !_suspendGate.IsSet;
                 bool isPaused = !_playbackGate.IsSet;
 
-                // Paused: waiting for gate to open without periodic idle wakeups
+                // Paused: await gate asynchronously without holding a ThreadPool thread
                 if (isPaused)
                 {
-                    try { _playbackGate.Wait(ct); }
-                    catch (OperationCanceledException) { break; }
+                    await _playbackGate.WaitAsync(ct).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                    if (ct.IsCancellationRequested) break;
                     continue;
                 }
 
-                // Suspend mode: critical read-ahead only 
+                // Suspend mode: critical read-ahead only
                 if (isSuspended)
                 {
                     long current = Volatile.Read(ref _currentReadOffset);
@@ -119,8 +119,8 @@ internal sealed partial class CachingStreamSource
                             ? 1000
                             : PlaybackGateCriticalTimeoutMs;
 
-                    try { _suspendGate.Wait(suspendWaitMs, ct); }
-                    catch (OperationCanceledException) { break; }
+                    await _suspendGate.WaitAsync(suspendWaitMs, ct).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                    if (ct.IsCancellationRequested) break;
 
                     if (_suspendGate.IsSet)
                         justResumed = true;
@@ -423,12 +423,10 @@ internal sealed partial class CachingStreamSource
 
         if (entry.IsComplete)
         {
-            if (_cachedBufferedRanges.Length > 0)
+            lock (_bufferedRangesCacheLock)
             {
-                lock (_bufferedRangesCacheLock)
-                {
+                if (_cachedBufferedRanges.Length > 0)
                     _cachedBufferedRanges = [];
-                }
             }
             return AudioConstants.FullBufferedRanges;
         }
@@ -460,7 +458,7 @@ internal sealed partial class CachingStreamSource
             _cachedRamRangesVersion = snapRamVer;
             _cachedBufferedRanges = merged;
         }
-            return _cachedBufferedRanges;
+        return merged;
         }
 
     #endregion

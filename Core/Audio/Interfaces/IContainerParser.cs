@@ -19,6 +19,9 @@ internal interface IContainerParser : IAsyncDisposable, IDisposable
     
     /// <summary>Channels (0 if unknown).</summary>
     int Channels { get; }
+
+    /// <summary>Indicates whether container resynchronization was required after corruption.</summary>
+    bool ResyncOccurred => false;
     
     /// <summary>
     /// Parses container headers.

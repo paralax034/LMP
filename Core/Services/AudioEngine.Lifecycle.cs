@@ -180,46 +180,10 @@ public sealed partial class AudioEngine
 
     private void Dispose(bool disposing)
     {
-        if (disposing && !_disposed)
-        {
-            _disposed = true;
+        if (!disposing || Interlocked.Exchange(ref _disposeState, 1) != 0)
+            return;
 
-            _library.OnInitialized -= InitializeFromSettings;
-            _youtube.OnNTokenDecryptionStarted -= HandleNTokenDecryptionStarted;
-            CdnConnectionPreWarmer.OnTunnelDeadDetected -= HandleCdnTunnelDead;
-            Audio.Sources.CachingStreamSource.OnNetworkStalled -= HandleSourceNetworkStalled;
-            Audio.Sources.CachingStreamSource.OnNetworkRecovered -= HandleSourceNetworkRecovered;
-            UnsubscribeNetworkManagerEvents();
-
-            lock (_sessionLock) { _sessionCts?.Cancel(); _sessionCts?.Dispose(); }
-
-            try
-            {
-                FlushPendingEqualizerSave();
-                _eqSaveTimer?.Dispose();
-                _eqSaveTimer = null;
-                FlushPendingNormalizationWritesSync();
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"[AudioEngine] Sync normalization flush on dispose failed: {ex.Message}");
-            }
-
-            _commandQueue.Writer.TryComplete();
-            _lifetimeCts.Cancel();
-
-            try { _commandProcessorTask?.Wait(millisecondsTimeout: 500); } catch { }
-            try { _volumeSaveTask?.Wait(millisecondsTimeout: 200); } catch { }
-
-            _player.Dispose();
-            _lifetimeCts.Dispose();
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
+        LifecycleRegistry.Instance?.UnregisterBackgroundSuspendable(this);
 
         _library.OnInitialized -= InitializeFromSettings;
         _youtube.OnNTokenDecryptionStarted -= HandleNTokenDecryptionStarted;
@@ -228,13 +192,71 @@ public sealed partial class AudioEngine
         Audio.Sources.CachingStreamSource.OnNetworkRecovered -= HandleSourceNetworkRecovered;
         UnsubscribeNetworkManagerEvents();
 
-        lock (_sessionLock) { _sessionCts?.Cancel(); _sessionCts?.Dispose(); }
+        lock (_sessionLock)
+        {
+            var scts = _sessionCts;
+            _sessionCts = null;
+            try { scts?.Cancel(); } catch (ObjectDisposedException) { }
+            try { scts?.Dispose(); } catch (ObjectDisposedException) { }
+        }
 
         try
         {
             FlushPendingEqualizerSave();
-            _eqSaveTimer?.Dispose();
-            _eqSaveTimer = null;
+            lock (_eqPersistenceLock)
+            {
+                _eqSaveTimer?.Dispose();
+                _eqSaveTimer = null;
+            }
+            FlushPendingNormalizationWritesSync();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[AudioEngine] Sync normalization flush on dispose failed: {ex.Message}");
+        }
+
+        _commandQueue.Writer.TryComplete();
+        _lifetimeCts.Cancel();
+
+        try { _commandProcessorTask?.Wait(millisecondsTimeout: 500); } catch { }
+        try { _volumeSaveTask?.Wait(millisecondsTimeout: 200); } catch { }
+        try { Volatile.Read(ref _activePlayTask)?.Wait(millisecondsTimeout: 500); } catch { }
+
+        _player.Dispose();
+        _persistenceSignal.Dispose();
+        _lifetimeCts.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
+            return;
+
+        LifecycleRegistry.Instance?.UnregisterBackgroundSuspendable(this);
+
+        _library.OnInitialized -= InitializeFromSettings;
+        _youtube.OnNTokenDecryptionStarted -= HandleNTokenDecryptionStarted;
+        CdnConnectionPreWarmer.OnTunnelDeadDetected -= HandleCdnTunnelDead;
+        Audio.Sources.CachingStreamSource.OnNetworkStalled -= HandleSourceNetworkStalled;
+        Audio.Sources.CachingStreamSource.OnNetworkRecovered -= HandleSourceNetworkRecovered;
+        UnsubscribeNetworkManagerEvents();
+
+        lock (_sessionLock)
+        {
+            var scts = _sessionCts;
+            _sessionCts = null;
+            try { scts?.Cancel(); } catch (ObjectDisposedException) { }
+            try { scts?.Dispose(); } catch (ObjectDisposedException) { }
+        }
+
+        try
+        {
+            FlushPendingEqualizerSave();
+            lock (_eqPersistenceLock)
+            {
+                _eqSaveTimer?.Dispose();
+                _eqSaveTimer = null;
+            }
         }
         catch (Exception ex)
         {
@@ -283,7 +305,20 @@ public sealed partial class AudioEngine
             catch (Exception ex) when (ex is OperationCanceledException or AggregateException) { }
         }
 
+        var activePlay = Volatile.Read(ref _activePlayTask);
+        if (activePlay != null && !activePlay.IsCompleted)
+        {
+            try
+            {
+                await activePlay
+                    .WaitAsync(TimeSpan.FromMilliseconds(loopDrainTimeoutMs))
+                    .ConfigureAwait(false);
+            }
+            catch { }
+        }
+
         await _player.DisposeAsync().ConfigureAwait(false);
+        _persistenceSignal.Dispose();
         _lifetimeCts.Dispose();
     }
 

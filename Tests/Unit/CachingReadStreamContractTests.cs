@@ -75,7 +75,7 @@ public static class CachingReadStreamContractTests
 
                 int syncRead = stream.Read(buffer, 0, buffer.Length);
                 TestAssert.Equal(buffer.Length, syncRead, "Sync Read must serve a RAM hit in full");
-                TestAssert.Equal((long)buffer.Length, stream.Position, "Sync RAM hit must advance position");
+                TestAssert.Equal(buffer.Length, stream.Position, "Sync RAM hit must advance position");
                 TestAssert.True(buffer.AsSpan().SequenceEqual(payload.AsSpan(0, buffer.Length)),
                     "Sync RAM hit must copy bytes from position 0");
 

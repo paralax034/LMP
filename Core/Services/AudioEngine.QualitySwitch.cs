@@ -24,32 +24,44 @@ public sealed partial class AudioEngine
             track.PreferredBitrate = bitrate;
         }
 
-        EnqueueCommand(new SwitchQualityCommand(track, CurrentPosition, format, bitrate, session));
+        EnqueueCommand(new SwitchQualityCommand(track, TimeSpan.Zero, format, bitrate, session));
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Quality switch command handler. Executed strictly sequentially within the actor loop.
+    /// Schedules quality switching outside the command actor so cooldown and resolution never freeze queue commands.
     /// </summary>
-    private async Task HandleSwitchQualityAsync(SwitchQualityCommand cmd)
+    private Task HandleSwitchQualityAsync(SwitchQualityCommand cmd)
     {
         var ct = GetSessionToken();
-        if (_session.IsStale(cmd.Session)) return;
+        if (_session.IsStaleOrCancelled(cmd.Session, ct))
+            return Task.CompletedTask;
+
+        var previousTask = Interlocked.Exchange(ref _activePlayTask, null);
+        var switchTask = SwitchQualityCoreAsync(cmd, ct, previousTask);
+        Volatile.Write(ref _activePlayTask, switchTask);
+        return Task.CompletedTask;
+    }
+
+    private async Task SwitchQualityCoreAsync(SwitchQualityCommand cmd, CancellationToken ct, Task? previousTask)
+    {
+        if (_session.IsStaleOrCancelled(cmd.Session, ct)) return;
 
         try
         {
             var elapsed = (DateTime.UtcNow - _lastQualitySwitchTime).TotalMilliseconds;
-            // Cooldown without exceptions: session cancellation (new track or quality) simply completes the handler
             if (elapsed < QualitySwitchCooldownMs &&
                 !await ct.DelayNoThrowAsync(QualitySwitchCooldownMs - (int)elapsed, continueOnCapturedContext: false).ConfigureAwait(false))
                 return;
 
+            if (_session.IsStaleOrCancelled(cmd.Session, ct) || IsSealedFailedTrack(cmd.Track.Id))
+                return;
+
             _lastQualitySwitchTime = DateTime.UtcNow;
 
-            Log.Info($"[AudioEngine] SwitchQuality start: track={cmd.Track.Id}, requestedFormat={cmd.Track.TransientFormat?.ToContainerName() ?? "-"}, requestedBitrate={cmd.Track.TransientBitrate}, resumePos={cmd.Position.TotalMilliseconds}ms");
+            Log.Info($"[AudioEngine] SwitchQuality start: track={cmd.Track.Id}, requestedFormat={cmd.Track.TransientFormat?.ToContainerName() ?? "-"}, requestedBitrate={cmd.Track.TransientBitrate}");
 
             Volatile.Write(ref _nTokenActiveTrackId, cmd.Track.Id);
-            ct.ThrowIfCancellationRequested();
 
             var descriptor = await _youtube.RefreshStreamAsync(cmd.Track, false, ct).ConfigureAwait(false)
                              ?? await _youtube.RefreshStreamAsync(cmd.Track, true, ct).ConfigureAwait(false);
@@ -84,27 +96,18 @@ public sealed partial class AudioEngine
                 CommitIntegratedLufs(cmd.Track.Id, d.IntegratedLufs, LoudnessSource.YoutubePerceptual);
             }
 
-            var previousTask = Volatile.Read(ref _activePlayTask);
             if (previousTask is { IsCompleted: false })
-            {
-                try { await previousTask.ConfigureAwait(false); } catch { }
-            }
+                await previousTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
-            if (_session.IsStaleOrCancelled(cmd.Session, ct)) return;
+            if (_session.IsStaleOrCancelled(cmd.Session, ct) || IsSealedFailedTrack(cmd.Track.Id)) return;
 
-            var playTask = _player.PlayAsync(
+            // Sample live position after cooldown/resolution so playback does not rewind by 2 seconds.
+            TimeSpan resumePosition = CurrentPosition;
+            await _player.PlayAsync(
                 d,
                 ct,
-                seekPosition: cmd.Position.TotalSeconds > 1 ? cmd.Position : null);
-
-            Volatile.Write(ref _activePlayTask, playTask);
-            await playTask.ConfigureAwait(false);
-
-            if (d.HasPerceptualLufs)
-            {
-                AudioSourceFactory.GlobalCache.TryUpdateIntegratedLufs(
-                    cmd.Track.Id, d.IntegratedLufs, LoudnessSource.YoutubePerceptual);
-            }
+                seekPosition: resumePosition.TotalSeconds > 1 ? resumePosition : null)
+                .ConfigureAwait(false);
 
             ApplyGainToPipeline();
         }

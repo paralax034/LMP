@@ -57,12 +57,6 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         Play = 2
     }
 
-    private sealed record PlayAsyncContext(
-        AudioPlayer Player,
-        Action<PlaybackState> OnState,
-        Action<AudioPlayerError> OnError,
-        CancellationTokenRegistration Reg);
-
     #endregion
 
     #region Fields
@@ -80,6 +74,9 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private int _playbackIntent = (int)PlaybackIntent.Stop;
     private int _seekGeneration;
+
+    private TaskCompletionSource<bool>? _pendingPlayCompletion;
+    private CancellationTokenSource? _activePlayCts;
 
     /// <summary>
     /// Task for disposing the previous pipeline.
@@ -123,12 +120,20 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     {
         _options = options ?? new AudioPlayerOptions();
 
-        _commandChannel = Channel.CreateBounded<IAudioCommand>(new BoundedChannelOptions(CommandChannelCapacity)
-        {
-            SingleReader = true,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest
-        });
+        _commandChannel = Channel.CreateBounded<IAudioCommand>(
+            new BoundedChannelOptions(CommandChannelCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            },
+            static dropped =>
+            {
+                if (dropped is PlayCommand { Completion: { } playTcs })
+                    playTcs.TrySetCanceled();
+                else if (dropped is SeekCommand { Completion: { } seekTcs })
+                    seekTcs.TrySetCanceled();
+            });
 
         _sharedBackend = CreateSharedBackend(_options);
         _commandProcessorTask = Task.Run(ProcessCommandsAsync);
@@ -167,17 +172,28 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private void Play(
         ResolvedStreamDescriptor descriptor,
         TimeSpan? seekPosition = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        TaskCompletionSource<bool>? completion = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        CompletePendingPlayCanceled();
+        if (completion != null)
+            Volatile.Write(ref _pendingPlayCompletion, completion);
+
         SetPlaybackIntent(PlaybackIntent.Play);
         CancelActiveSeek();
+        CancelActivePlayInit();
 
         int session = _session.BeginNew();
 
-        _commandChannel.Writer.TryWrite(
-            new PlayCommand(descriptor, session, seekPosition, ct));
+        if (!_commandChannel.Writer.TryWrite(
+            new PlayCommand(descriptor, session, seekPosition, ct, completion)))
+        {
+            if (completion != null)
+                Interlocked.CompareExchange(ref _pendingPlayCompletion, null, completion);
+            completion?.TrySetCanceled();
+        }
     }
 
     /// <summary>
@@ -192,38 +208,16 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         if (ct.IsCancellationRequested) return Task.FromCanceled(ct);
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Play(descriptor, seekPosition, ct, tcs);
+        return ct.CanBeCanceled ? AwaitPlayCompletionAsync(tcs, ct) : tcs.Task;
+    }
 
-        void OnState(PlaybackState s)
-        {
-            if (s == PlaybackState.Playing)
-                tcs.TrySetResult(true);
-        }
-
-        void OnError(AudioPlayerError e)
-        {
-            tcs.TrySetException(e.Exception ?? new Exception(e.Message));
-        }
-
-        _events.StateChanged += OnState;
-        _events.ErrorOccurred += OnError;
-
-        var reg = ct.UnsafeRegister(static state =>
+    private static async Task AwaitPlayCompletionAsync(TaskCompletionSource<bool> tcs, CancellationToken ct)
+    {
+        using var reg = ct.UnsafeRegister(static state =>
             ((TaskCompletionSource<bool>)state!).TrySetCanceled(), tcs);
 
-        tcs.Task.ContinueWith((_, state) =>
-        {
-            var ctx = (PlayAsyncContext)state!;
-            ctx.Player._events.StateChanged -= ctx.OnState;
-            ctx.Player._events.ErrorOccurred -= ctx.OnError;
-            ctx.Reg.Dispose();
-        },
-        new PlayAsyncContext(this, OnState, OnError, reg),
-        CancellationToken.None,
-        TaskContinuationOptions.ExecuteSynchronously,
-        TaskScheduler.Default);
-
-        Play(descriptor, seekPosition, ct);
-        return tcs.Task;
+        await tcs.Task.ConfigureAwait(false);
     }
 
     /// <summary>Pauses playback.</summary>
@@ -248,22 +242,29 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     /// <summary>Stops playback.</summary>
     public void Stop()
     {
-        if (_state is PlayerState.Idle or PlayerState.Disposed) return;
-
         SetPlaybackIntent(PlaybackIntent.Stop);
         CancelActiveSeek();
+        CancelActivePlayInit();
+        CompletePendingPlayCanceled();
 
-        _commandChannel.Writer.TryWrite(new StopCommand(_session.BeginNew()));
+        int session = _session.BeginNew();
+        if (_state is PlayerState.Idle or PlayerState.Disposed)
+            return;
+
+        _commandChannel.Writer.TryWrite(new StopCommand(session));
     }
 
     /// <summary>Asynchronous stop.</summary>
     public async Task StopAsync()
     {
-        if (_state is PlayerState.Idle or PlayerState.Disposed) return;
-
         SetPlaybackIntent(PlaybackIntent.Stop);
+        CancelActiveSeek();
+        CancelActivePlayInit();
+        CompletePendingPlayCanceled();
 
         int session = _session.BeginNew();
+        if (_state is PlayerState.Idle or PlayerState.Disposed)
+            return;
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         void OnState(PlaybackState s)
@@ -308,6 +309,8 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 {
                     if (command is SeekCommand { Completion: { } tcs })
                         tcs.TrySetCanceled();
+                    else if (command is PlayCommand { Completion: { } stalePlayTcs })
+                        stalePlayTcs.TrySetCanceled();
 
                     continue;
                 }
@@ -318,6 +321,8 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
                     if (command is SeekCommand { Completion: { } failTcs })
                         failTcs.TrySetResult(false);
+                    else if (command is PlayCommand { Completion: { } rejectPlayTcs })
+                        rejectPlayTcs.TrySetCanceled();
 
                     continue;
                 }
@@ -401,6 +406,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     private Task HandlePauseAsync()
     {
         SetPlaybackIntent(PlaybackIntent.Pause);
+        CancelActiveSeek();
         StopTimers();
 
         var pipeline = _activePipeline;
@@ -409,6 +415,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         if (_state is not (PlayerState.Idle or PlayerState.Disposed))
             SetState(PlayerState.Paused);
 
+        CompletePendingPlayResult(false);
         return Task.CompletedTask;
     }
 
@@ -448,16 +455,17 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         SetPlaybackIntent(PlaybackIntent.Stop);
         CancelActiveSeek();
         StopTimers();
+        CompletePendingPlayCanceled();
 
         var pipeline = Interlocked.Exchange(ref _activePipeline, null);
+        // Capture tail and flush backend BEFORE starting background disposal so AudioCallback never hits a disposed ring buffer.
+        _sharedBackend.Flush();
         if (pipeline != null)
         {
-            // Do not block the command loop waiting for network request completion and disk drain of the old source (up to 1-2 sec).
-            // Disposal safely completes in a background Task.Run.
+            pipeline.Source.CancelPendingOperations();
             TrackAndFirePipelineDispose(pipeline);
         }
 
-        _sharedBackend.Flush();
         SetState(PlayerState.Idle);
 
         return Task.CompletedTask;
@@ -510,6 +518,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             StartTimers();
 
         SetState(PlayerState.Playing);
+        CompletePendingPlayResult(true);
     }
 
     /// <summary>
@@ -609,7 +618,8 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         PlayCommand cmd,
         CancellationToken ct)
     {
-        await pipeline.PreScanNormalizationAsync(ct).ConfigureAwait(false);
+        // Launch normalization pre-scan concurrently so decoder startup does not stall on disk/codec I/O.
+        pipeline.StartPreScanNormalization();
 
         if (cmd.SeekPosition is { TotalMilliseconds: > 0 } seekPos)
         {
@@ -636,6 +646,10 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     {
         Log.Info($"[AudioPlayer] HandlePlayAsync -> {cmd.Descriptor}, seek={cmd.SeekPosition?.TotalMilliseconds ?? 0}ms");
 
+        var prevCompletion = Interlocked.Exchange(ref _pendingPlayCompletion, cmd.Completion);
+        if (!ReferenceEquals(prevCompletion, cmd.Completion))
+            prevCompletion?.TrySetCanceled();
+
         SetPlaybackIntent(PlaybackIntent.Play);
         SetState(PlayerState.Loading);
         CancelActiveSeek();
@@ -644,6 +658,8 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             _lifetimeCts.Token, cmd.ExternalCancellationToken);
+        var prevPlayCts = Interlocked.Exchange(ref _activePlayCts, linkedCts);
+        CancelCtsAsync(prevPlayCts);
         var ct = linkedCts.Token;
 
         float previousGain = _activePipeline?.GetLockedNormalizationGain() ?? 1.0f;
@@ -672,6 +688,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
             if (_session.IsStale(cmd.SessionId))
             {
+                CompletePendingPlayCanceled();
                 await pipeline.DisposeAsync().ConfigureAwait(false);
                 return;
             }
@@ -682,11 +699,13 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
             var oldPipeline = Interlocked.Exchange(ref _activePipeline, pipeline);
             if (oldPipeline != null)
+            {
+                _sharedBackend.Flush();
+                oldPipeline.Source.CancelPendingOperations();
                 TrackAndFirePipelineDispose(oldPipeline);
+            }
 
-            _sharedBackend.Flush();
-
-            // Flush captured the tail of the crossfade and reset the resampler: the new track clock counts from the current render counter
+            // Reinitialize inside AudioPipeline.CreateAsync already captured the tail and rebased the render clock to 0.
             pipeline.SetDecodedSamplesPosition(0);
 
             _events.RaiseStreamInfo(pipeline.StreamInfo);
@@ -711,6 +730,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             {
                 await PrepareAndStartDecodingAsync(pipeline, cmd, ct).ConfigureAwait(false);
                 SetState(PlayerState.Paused);
+                CompletePendingPlayResult(false);
                 _events.RaiseDeviceLost();
                 return;
             }
@@ -729,6 +749,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
             if (_session.IsStale(cmd.SessionId))
             {
+                CompletePendingPlayCanceled();
                 var stale = Interlocked.Exchange(ref _activePipeline, null);
                 if (stale != null)
                     await stale.DisposeAsync().ConfigureAwait(false);
@@ -741,6 +762,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             {
                 pipeline.Stop();
                 SetState(PlayerState.Paused);
+                CompletePendingPlayResult(false);
                 return;
             }
 
@@ -751,11 +773,13 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         }
         catch (OperationCanceledException)
         {
+            CompletePendingPlayCanceled();
             if (_state is PlayerState.Loading or PlayerState.Buffering)
                 SetState(PlayerState.Idle);
         }
         catch (AudioDeviceException ex)
         {
+            CompletePendingPlayException(ex);
             SetState(PlayerState.Error);
             _events.RaiseError(new AudioPlayerError(GetDeviceErrorMessage(), ex));
         }
@@ -764,14 +788,26 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             _session.IsStale(cmd.SessionId) ||
             CancellationHelper.IsCancellationLike(ex))
         {
+            CompletePendingPlayCanceled();
             if (_state is PlayerState.Loading or PlayerState.Buffering)
                 SetState(PlayerState.Idle);
         }
         catch (Exception ex)
         {
+            CompletePendingPlayException(ex);
             SetState(PlayerState.Error);
             _events.RaiseError(new AudioPlayerError(ex.Message, ex));
         }
+        finally
+        {
+            Interlocked.CompareExchange(ref _activePlayCts, null, linkedCts);
+        }
+    }
+
+    private void CancelActivePlayInit()
+    {
+        var cts = Interlocked.Exchange(ref _activePlayCts, null);
+        CancelCtsAsync(cts);
     }
 
     private async Task WatchPipelineLifetimeAsync(AudioPipeline pipeline, int sessionId)
@@ -874,6 +910,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void TrackAndFirePipelineDispose(AudioPipeline pipeline)
     {
+        var previousDispose = Volatile.Read(ref _oldPipelineDisposeTask);
         var disposeTask = Task.Run(async () =>
         {
             try
@@ -882,6 +919,17 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             }
             catch
             {
+            }
+
+            if (previousDispose is { IsCompleted: false })
+            {
+                try
+                {
+                    await previousDispose.ConfigureAwait(false);
+                }
+                catch
+                {
+                }
             }
         });
 
@@ -1092,6 +1140,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private void HandleError(Exception ex)
     {
+        CompletePendingPlayException(ex);
         SetState(PlayerState.Error);
 
         string message = ex switch
@@ -1103,6 +1152,15 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
         _events.RaiseError(new AudioPlayerError(message, ex));
     }
+
+    private void CompletePendingPlayResult(bool started) =>
+        Interlocked.Exchange(ref _pendingPlayCompletion, null)?.TrySetResult(started);
+
+    private void CompletePendingPlayCanceled() =>
+        Interlocked.Exchange(ref _pendingPlayCompletion, null)?.TrySetCanceled();
+
+    private void CompletePendingPlayException(Exception ex) =>
+        Interlocked.Exchange(ref _pendingPlayCompletion, null)?.TrySetException(ex);
 
     private static string GetDeviceErrorMessage() =>
         LocalizationService.Instance["Error_NoAudioDevice"];
@@ -1128,14 +1186,14 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         return true;
     }
 
-    private static PlaybackState MapState(PlayerState state) => state switch
+    private PlaybackState MapState(PlayerState state) => state switch
     {
         PlayerState.Idle => PlaybackState.Stopped,
         PlayerState.Loading => PlaybackState.Loading,
         PlayerState.Buffering => PlaybackState.Buffering,
         PlayerState.Playing => PlaybackState.Playing,
         PlayerState.Paused => PlaybackState.Paused,
-        PlayerState.Seeking => PlaybackState.Playing,
+        PlayerState.Seeking => CurrentPlaybackIntent == PlaybackIntent.Pause ? PlaybackState.Paused : PlaybackState.Playing,
         PlayerState.Error => PlaybackState.Error,
         PlayerState.Disposed => PlaybackState.Stopped,
         _ => PlaybackState.Stopped

@@ -71,6 +71,14 @@ internal sealed class AudioPipeline : IAsyncDisposable
     private Action? _onStarvationExternal;
 
     private Task? _deviceEventTask;
+    private Task? _preScanTask;
+
+    private readonly Lock _lifecycleLock = new();
+    private readonly Lock _pauseGateLock = new();
+    private TaskCompletionSource? _pauseGateTcs;
+    private volatile bool _isPaused;
+    private int _pendingRingClear;
+    private int _initialCrossfadePending = 1;
 
     /// <summary>
     /// Render clock anchor point to the stream: position <c>BaseSamples</c> corresponds to
@@ -227,7 +235,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
             {
                 initialized = await source.InitializeAsync(lifetimeCts.Token).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is CdnUnavailableException or UrlExpiredException or HttpRequestException
+            catch (Exception ex) when (ex is CdnUnavailableException or HttpRequestException
                                        && source is Sources.CachingStreamSource { HasUrlProvider: true } cachingSource)
             {
                 if (ex is CdnUnavailableException cdnEx && !string.IsNullOrEmpty(cdnEx.Host))
@@ -375,9 +383,22 @@ internal sealed class AudioPipeline : IAsyncDisposable
         Log.Error("[AudioPipeline] Audio device lost — soft pause (pipeline alive)");
         try { _decoderCts?.Cancel(); } catch (ObjectDisposedException) { }
 
-        var handler = _onDeviceLostExternal;
-        if (handler != null)
-            Volatile.Write(ref _deviceEventTask, Task.Run(handler));
+        EnqueueDeviceEvent(_onDeviceLostExternal);
+    }
+
+    private void EnqueueDeviceEvent(Action? handler)
+    {
+        if (handler == null) return;
+
+        var prev = Volatile.Read(ref _deviceEventTask);
+        var next = Task.Run(async () =>
+        {
+            if (prev is { IsCompleted: false })
+                await prev.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+            handler();
+        });
+        Volatile.Write(ref _deviceEventTask, next);
     }
 
     internal void SetDeviceLostHandler(Action handler) => _onDeviceLostExternal = handler;
@@ -414,9 +435,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
     internal void NotifyDeviceAvailable()
     {
         if (_disposed || !_deviceLost) return;
-        var handler = _onDeviceAvailableExternal;
-        if (handler != null)
-            Volatile.Write(ref _deviceEventTask, Task.Run(handler));
+        EnqueueDeviceEvent(_onDeviceAvailableExternal);
     }
 
     internal void SetDeviceAvailableHandler(Action handler) => _onDeviceAvailableExternal = handler;
@@ -435,29 +454,33 @@ internal sealed class AudioPipeline : IAsyncDisposable
      Action? onTrackEnded,
      Action<Exception>? onError)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        Task? previousTask;
+        CancellationTokenSource? previousCts;
+        bool previousAlive;
+        CancellationToken token;
 
-        var previousTask = _decoderTask;
-        var previousCts = _decoderCts;
-        bool previousAlive = previousTask is { IsCompleted: false };
-        if (previousAlive && previousCts?.IsCancellationRequested != true) return;
+        lock (_lifecycleLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!previousAlive)
-            previousCts?.Dispose();
+            previousTask = _decoderTask;
+            previousCts = _decoderCts;
+            previousAlive = previousTask is { IsCompleted: false };
+            if (previousAlive && previousCts?.IsCancellationRequested != true) return;
 
-        _decoderCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
-        var token = _decoderCts.Token;
+            if (!previousAlive)
+                previousCts?.Dispose();
+
+            _decoderCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+            token = _decoderCts.Token;
+
+            _decoderTask = previousAlive
+                ? Task.Run(() => RunAfterPreviousLoopAsync(previousTask!, previousCts, options, onTrackEnded, onError, token))
+                : Task.Run(() => DecoderLoopAsync(options, onTrackEnded, onError, token));
+        }
 
 #if AUDIO_SPLICE_AUDIT
         int restartCount = Interlocked.Increment(ref _decoderRestartCount);
-#endif
-
-        _decoderTask = previousAlive
-            ? Task.Run(() => RunAfterPreviousLoopAsync(previousTask!, previousCts, options, onTrackEnded, onError, token))
-            : Task.Run(
-            () => DecoderLoopAsync(options, onTrackEnded, onError, token));
-
-#if AUDIO_SPLICE_AUDIT
         const int ShortTrackIdLength = 8;
 
         var trackIdShort = _streamInfo.TrackId?.Length > ShortTrackIdLength
@@ -473,8 +496,13 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     public async Task StopDecodingAsync(TimeSpan timeout)
     {
-        var cts = _decoderCts;
-        var task = _decoderTask;
+        CancellationTokenSource? cts;
+        Task? task;
+        lock (_lifecycleLock)
+        {
+            cts = _decoderCts;
+            task = _decoderTask;
+        }
         if (cts == null || task == null) return;
 
         try { cts.Cancel(); } catch (ObjectDisposedException) { }
@@ -493,9 +521,12 @@ internal sealed class AudioPipeline : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex) { Log.Warn($"[AudioPipeline] Decoder stop error: {ex.Message}"); }
 
-        // While waiting, a new loop could start: reset only what was owned at entry
-        if (ReferenceEquals(_decoderTask, task)) _decoderTask = null;
-        if (ReferenceEquals(_decoderCts, cts)) _decoderCts = null;
+        lock (_lifecycleLock)
+        {
+            // While waiting, a new loop could start: reset only what was owned at entry
+            if (ReferenceEquals(_decoderTask, task)) _decoderTask = null;
+            if (ReferenceEquals(_decoderCts, cts)) _decoderCts = null;
+        }
         try { cts.Dispose(); } catch (ObjectDisposedException) { }
     }
 
@@ -513,8 +544,37 @@ internal sealed class AudioPipeline : IAsyncDisposable
         await previousTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         try { previousCts?.Dispose(); } catch (ObjectDisposedException) { }
 
+        if (Interlocked.Exchange(ref _pendingRingClear, 0) == 1)
+            _pcmBuffer.Clear();
+
         if (ct.IsCancellationRequested) return;
         await DecoderLoopAsync(options, onTrackEnded, onError, ct).ConfigureAwait(false);
+    }
+
+    private Task WaitForResumeOrCancelAsync(CancellationToken ct)
+    {
+        TaskCompletionSource tcs;
+        lock (_pauseGateLock)
+        {
+            if (!_isPaused || _disposed || ct.IsCancellationRequested)
+                return Task.CompletedTask;
+
+            tcs = _pauseGateTcs ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        return tcs.Task.WaitAsync(ct);
+    }
+
+    private void ReleasePauseGate()
+    {
+        TaskCompletionSource? tcs;
+        lock (_pauseGateLock)
+        {
+            _isPaused = false;
+            tcs = _pauseGateTcs;
+            _pauseGateTcs = null;
+        }
+        tcs?.TrySetResult();
     }
 
     private async Task DecoderLoopAsync(
@@ -523,6 +583,9 @@ internal sealed class AudioPipeline : IAsyncDisposable
            Action<Exception>? onError,
            CancellationToken ct)
     {
+        if (Interlocked.Exchange(ref _pendingRingClear, 0) == 1)
+            _pcmBuffer.Clear();
+
         int retryCount = 0;
         int requiredSpace = _decoder.MaxFrameSize * _decoder.Channels;
         int batchRefillSpace = Math.Max(requiredSpace * MinBatchRefillFrames, _pcmBuffer.Capacity / BatchRefillCapacityDivisor);
@@ -537,6 +600,12 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     {
                         while (_pcmBuffer.Available < batchRefillSpace && !ct.IsCancellationRequested)
                         {
+                            if (_isPaused)
+                            {
+                                await WaitForResumeOrCancelAsync(ct).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                                break;
+                            }
+
                             int delayMs = ComputeBufferFullDelayMs(_pcmBuffer.Count, _decoder.SampleRate, _decoder.Channels);
                             if (!await ct.DelayNoThrowAsync(delayMs, continueOnCapturedContext: false).ConfigureAwait(false))
                                 break;
@@ -567,19 +636,6 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     Log.Error($"[AudioPipeline] Read failed after {retryCount} transient retries: {ex.Message}");
                     onError?.Invoke(ex);
                     break;
-                }
-                catch (UrlExpiredException) when (_source is Sources.CachingStreamSource { HasUrlProvider: true } cachingSource)
-                {
-                    Log.Warn($"[AudioPipeline] UrlExpiredException: track={_streamInfo.TrackId}, attempting refresh");
-                    var newUrl = await cachingSource.RequestUrlAsync(StreamUrlRequestKind.Refresh, ct).ConfigureAwait(false);
-                    Log.Warn($"[AudioPipeline] UrlExpiredException refresh result: track={_streamInfo.TrackId}, success={!string.IsNullOrEmpty(newUrl)}");
-                    if (!string.IsNullOrEmpty(newUrl))
-                    {
-                        cachingSource.UpdateUrl(newUrl);
-                        Log.Warn($"[AudioPipeline] Refreshed URL applied to source: track={_streamInfo.TrackId}");
-                        continue;
-                    }
-                    throw;
                 }
                 catch (ChunkDownloadFatalException) { throw; }
                 catch (FileNotFoundException ex)
@@ -688,15 +744,8 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     int skipCount = Volatile.Read(ref _skipFramesCounter);
                     if (skipCount > 0)
                     {
-                        int warmupDecoded = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
-                        if (warmupDecoded > 0 && _pcmBuffer.IsEmpty)
-                        {
-                            var warmupSpan = _decodeBuffer.AsSpan(0, warmupDecoded * _decoder.Channels);
-                            _equalizer.Process(warmupSpan);
-                            float normGain = _analyzer.IsEnabled ? _analyzer.ProcessSamples() : 1.0f;
-                            _gainCrossfader.SetTarget(normGain, _decoder.SampleRate, _decoder.Channels);
-                            _truePeakLimiter.Process(warmupSpan, ref _gainCrossfader);
-                        }
+                        // Warm up codec internal overlap/prediction state only; never touch render-thread DSP state from decoder thread.
+                        _ = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
                         Interlocked.Decrement(ref _skipFramesCounter);
                         continue;
                     }
@@ -721,6 +770,13 @@ internal sealed class AudioPipeline : IAsyncDisposable
                             {
                                 Volatile.Write(ref _warmupThreshold, 0);
                                 Interlocked.Exchange(ref _warmupTcs, null)?.TrySetResult();
+                            }
+
+                            if (_isPaused)
+                            {
+                                await WaitForResumeOrCancelAsync(ct).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                                if (ct.IsCancellationRequested) break;
+                                continue;
                             }
 
                             // The ring buffer accepted only a part of the block: the remainder is written as space becomes available, rather than dropped
@@ -838,7 +894,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
     public void Start()
     {
         if (_disposed) return;
+        ReleasePauseGate();
         _source.SetPlaybackActive(true);
+        if (Interlocked.Exchange(ref _initialCrossfadePending, 0) == 1)
+            SnapCrossfaderToGain();
         _backend.Start();
     }
 
@@ -848,6 +907,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
     public void Stop()
     {
         if (_disposed) return;
+        lock (_pauseGateLock)
+        {
+            _isPaused = true;
+        }
         _source.SetPlaybackActive(false);
         _backend.Stop();
         _analyzer3Band.RequestReset();
@@ -864,7 +927,21 @@ internal sealed class AudioPipeline : IAsyncDisposable
         // WinAudioBackend.Flush() will synchronously fetch 480 frames (10 ms) of the live old-wave continuation
         // via AudioCallback for a true wave-to-wave crossfade, and only after that do we clear _pcmBuffer!
         _backend.Flush();
-        _pcmBuffer.Clear();
+
+        lock (_lifecycleLock)
+        {
+            if (_decoderTask is { IsCompleted: false })
+            {
+                Volatile.Write(ref _pendingRingClear, 1);
+            }
+            else
+            {
+                Volatile.Write(ref _pendingRingClear, 0);
+                _pcmBuffer.Clear();
+            }
+        }
+
+        ReleasePauseGate();
 
         Volatile.Write(ref _warmupThreshold, 0);
         var tcs = Interlocked.Exchange(ref _warmupTcs, null);
@@ -880,9 +957,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
         var decoderAlive = _decoderTask is { IsCompleted: false };
         Log.Error($"[AudioPipeline] Starvation: decoder={(decoderAlive ? "alive" : "dead")}, ring={_pcmBuffer.Count}");
 
-        var handler = _onStarvationExternal;
-        if (handler != null)
-            Volatile.Write(ref _deviceEventTask, Task.Run(handler));
+        EnqueueDeviceEvent(_onStarvationExternal);
     }
 
     /// <summary>
@@ -910,15 +985,43 @@ internal sealed class AudioPipeline : IAsyncDisposable
         tcs?.TrySetResult();
     }
 
+    public void StartPreScanNormalization()
+    {
+        if (_disposed || !_analyzer.IsEnabled || _analyzer.IsGainLocked)
+            return;
+
+        if (Volatile.Read(ref _preScanTask) != null)
+            return;
+
+        var task = RunDeferredPreScanAsync(_lifetimeCts.Token);
+        Volatile.Write(ref _preScanTask, task);
+    }
+
+    private async Task RunDeferredPreScanAsync(CancellationToken ct)
+    {
+        // Let the primary playback decoder fill the initial 250ms warmup window first so managed AAC pre-scan never starves startup!
+        if (!await ct.DelayNoThrowAsync(250, continueOnCapturedContext: false).ConfigureAwait(false))
+            return;
+
+        await PreScanNormalizationAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task PreScanNormalizationAsync(CancellationToken ct)
     {
         if (!_analyzer.IsEnabled) return;
         if (_analyzer.IsGainLocked) return;
 
+        float maxScanSeconds = _analyzer.CurrentConfig.PreScanDurationMs > 0
+            ? Math.Clamp(_analyzer.CurrentConfig.PreScanDurationMs / 1000f, MinPreScanSeconds, 120f)
+            : IsolatedScanMaxSeconds;
+
+        if (_source.Codec == AudioCodec.Aac)
+            maxScanSeconds = Math.Min(maxScanSeconds, IsolatedScanMaxSeconds);
+
         if (_source is Sources.LocalFileSource localSource)
         {
             await RunPreScanForFileAsync(
-                localSource.FilePath, localSource.Codec, ct).ConfigureAwait(false);
+                localSource.FilePath, localSource.Codec, ct, maxScanSeconds).ConfigureAwait(false);
             return;
         }
 
@@ -942,7 +1045,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
             if (!File.Exists(cachePath)) return;
 
             float prefixSeconds = (float)(contiguousBytes / (Math.Max(1, bitrate) * 1000.0 / 8.0));
-            float scanSeconds = Math.Min(prefixSeconds, IsolatedScanMaxSeconds);
+            float scanSeconds = Math.Min(prefixSeconds, maxScanSeconds);
 
             await RunPreScanForFileAsync(
                 cachePath, cachingSource.Codec, ct, scanSeconds).ConfigureAwait(false);
@@ -969,13 +1072,12 @@ internal sealed class AudioPipeline : IAsyncDisposable
                 _analyzer.NotifyIntegratedLufs(integratedLufs);
 
             _analyzer.LockGain(rawGain);
-            SnapCrossfaderToGain();
 
             Log.Debug($"[AudioPipeline] Pre-scan complete: lufs={integratedLufs:F2}, " +
                       $"gain={rawGain:F4}x, limit={scanMaxSeconds:F1}s, " +
                       $"file={Path.GetFileName(filePath)}");
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             Log.Warn($"[AudioPipeline] Pre-scan failed: {ex.Message}");
@@ -1031,6 +1133,16 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     private bool IsPrematureEndOfStream()
     {
+        IContainerParser? parser = _source switch
+        {
+            Sources.CachingStreamSource cs => cs.Parser,
+            Sources.LocalFileSource lf => lf.Parser,
+            _ => null
+        };
+
+        if (parser is not { ResyncOccurred: true })
+            return false;
+
         long durationMs = _streamInfo.DurationMs;
         if (durationMs <= 0) return false;
 
@@ -1159,11 +1271,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
                 // Spectrum is calculated only for active readers: UI polling extends the lease; without it, callback skips render work
                 _spectrumSuspended = false;
 
-                // Levels are published relative to actual playback time of the block; device queue is calculated using its native sample rate
-                int deviceRate = _backend.DeviceSampleRate;
+                // BufferedSamples is already normalized to source sample rate by the backend
                 long delayTicks = ComputePresentationDelayTicks(
                     _backend.BufferedSamples,
-                    deviceRate > 0 ? deviceRate : _decoder.SampleRate,
+                    _decoder.SampleRate,
                     channels);
 
                 _analyzer3Band.ProcessBlock(samples, channels, delayTicks);
@@ -1174,7 +1285,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
                 _analyzer3Band.Reset();
             }
         }
-        else
+        else if (_isPaused || !_backend.IsPlaying)
         {
             _analyzer3Band.Reset();
         }
@@ -1231,13 +1342,34 @@ internal sealed class AudioPipeline : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
+        Task? decoderTask;
+        lock (_lifecycleLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            decoderTask = _decoderTask;
+        }
 
         _analyzer3Band.RequestReset();
+        ReleasePauseGate();
 
         try { _lifetimeCts.Cancel(); } catch (ObjectDisposedException) { }
         try { _decoderCts?.Cancel(); } catch (ObjectDisposedException) { }
+
+        if (_source is Sources.CachingStreamSource cachingSource)
+            cachingSource.CancelActiveReads();
+
+        var preScanTask = Volatile.Read(ref _preScanTask);
+        if (preScanTask != null && !preScanTask.IsCompleted)
+        {
+            try
+            {
+                await preScanTask
+                    .WaitAsync(TimeSpan.FromMilliseconds(DecoderStopTimeoutMs))
+                    .ConfigureAwait(false);
+            }
+            catch { }
+        }
 
         var deviceTask = Volatile.Read(ref _deviceEventTask);
         if (deviceTask != null && !deviceTask.IsCompleted)
@@ -1251,30 +1383,56 @@ internal sealed class AudioPipeline : IAsyncDisposable
             catch { }
         }
 
-        if (_decoderTask != null)
+        bool decoderCompleted = decoderTask == null || decoderTask.IsCompleted;
+        if (!decoderCompleted)
         {
             try
             {
-                await _decoderTask
+                await decoderTask!
                     .WaitAsync(TimeSpan.FromMilliseconds(DecoderStopTimeoutMs))
                     .ConfigureAwait(false);
+                decoderCompleted = true;
             }
-            catch { }
+            catch
+            {
+                decoderCompleted = decoderTask!.IsCompleted;
+            }
         }
 
-        _decoder.Dispose();
-        await _source.DisposeAsync().ConfigureAwait(false);
-        _pcmBuffer.Dispose();
-        ArrayPool<float>.Shared.Return(_decodeBuffer);
-
-        try { _decoderCts?.Dispose(); } catch (ObjectDisposedException) { }
-        try { _lifetimeCts.Dispose(); } catch (ObjectDisposedException) { }
+        if (decoderCompleted)
+        {
+            await _source.DisposeAsync().ConfigureAwait(false);
+            CleanupOwnedDecoderAndBuffers();
+        }
+        else
+        {
+            Log.Warn("[AudioPipeline] Decoder task did not stop within DisposeAsync timeout; deferring buffer/decoder release until exit.");
+            _ = FinishHungDisposeAsync(decoderTask!);
+        }
 
 #if AUDIO_SPLICE_AUDIT
         Log.Debug($"[AudioPipeline] Disposed (decoder restarts: {_decoderRestartCount})");
 #else
         Log.Info("[AudioPipeline] Disposed");
 #endif
+    }
+
+    private void CleanupOwnedDecoderAndBuffers()
+    {
+        _decoder.Dispose();
+        _pcmBuffer.Dispose();
+        ArrayPool<float>.Shared.Return(_decodeBuffer);
+
+        try { _decoderCts?.Dispose(); } catch (ObjectDisposedException) { }
+        try { _lifetimeCts.Dispose(); } catch (ObjectDisposedException) { }
+    }
+
+    private async Task FinishHungDisposeAsync(Task decoderTask)
+    {
+        await decoderTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+        try { await _source.DisposeAsync().ConfigureAwait(false); } catch { }
+        CleanupOwnedDecoderAndBuffers();
     }
 
     #endregion

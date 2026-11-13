@@ -46,6 +46,7 @@ internal static class PlayerStateTransitions
             (PlayerState.Idle, PlayerState.Disposed) => true,
 
             (PlayerState.Loading, PlayerState.Buffering) => true,
+            (PlayerState.Loading, PlayerState.Paused) => true,
             (PlayerState.Loading, PlayerState.Error) => true,
             (PlayerState.Loading, PlayerState.Idle) => true,
             (PlayerState.Loading, PlayerState.Loading) => true,
@@ -105,10 +106,10 @@ internal static class PlayerStateTransitions
             PlayCommand => true,
             StopCommand => state is not PlayerState.Idle,
 
-            PauseCommand => state is PlayerState.Playing or PlayerState.Buffering or PlayerState.Seeking,
+            PauseCommand => state is PlayerState.Loading or PlayerState.Playing or PlayerState.Buffering or PlayerState.Seeking,
             ResumeCommand => state is PlayerState.Paused,
 
-            SeekCommand => state is PlayerState.Playing or PlayerState.Paused or PlayerState.Buffering,
+            SeekCommand => state is PlayerState.Playing or PlayerState.Paused or PlayerState.Buffering or PlayerState.Seeking,
 
             StarvationCommand => state is PlayerState.Playing or PlayerState.Buffering,
 

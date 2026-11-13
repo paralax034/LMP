@@ -390,6 +390,48 @@ public static class CacheTests
         return Task.CompletedTask;
     }
 
+    [TestMethod(TestCategory.Unit, "AudioCache Concurrent Write/Remove Race & GetCachePath Determinism", Group = TestGroups.Storage, Order = 9)]
+    public static async Task TestAudioCacheConcurrentWriteRemoveAndPathAsync()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "LMP_CacheRaceTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            await using var manager = new Core.Audio.Cache.AudioCacheManager(tempDir, maxCacheSizeMb: 16);
+
+            const string key = "yt_race123_WebM_160";
+            string pathA = manager.GetCachePath(key);
+            string pathB = manager.GetCachePath(key);
+            TestAssert.Equal(pathA, pathB, "GetCachePath must be deterministic");
+            TestAssert.True(pathA.EndsWith(".audio", StringComparison.Ordinal));
+
+            byte[] chunk = new byte[8_192];
+            Array.Fill(chunk, (byte)0x3C);
+
+            for (int i = 0; i < 25; i++)
+            {
+                string iterKey = $"yt_race_{i}_WebM_160";
+                string trackId = $"yt_race_{i}";
+                _ = manager.CreateOrUpdate(
+                    iterKey, trackId, "https://example.com/a.webm", 65_536,
+                    AudioFormat.WebM, Core.Audio.Interfaces.AudioCodec.Opus, 160);
+
+                var writeTask = manager.WriteRangeAsync(iterKey, 0, chunk).AsTask();
+                manager.RemoveTrackCache(trackId);
+                await writeTask.ConfigureAwait(false);
+            }
+
+            TestAssert.Equal(0, Directory.GetFiles(tempDir, "*.audio").Length, "Removed cache entries must delete their .audio file once in-flight WriteRangeAsync completes");
+            await manager.ClearAllAsync().ConfigureAwait(false);
+            TestAssert.Equal(0, Directory.GetFiles(tempDir, "*.audio").Length, "No orphan .audio files must remain after ClearAllAsync");
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
     private sealed class TempFileCookie : IDisposable
     {
         public string Path { get; } = System.IO.Path.GetTempFileName();

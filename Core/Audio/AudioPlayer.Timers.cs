@@ -2,6 +2,7 @@ namespace LMP.Core.Audio;
 
 internal sealed partial class AudioPlayer
 {
+    private readonly Lock _timersLock = new();
     private Timer? _positionTimer;
     private Timer? _bufferTimer;
     private volatile bool _uiTimersSuspended;
@@ -44,10 +45,15 @@ internal sealed partial class AudioPlayer
 
         int interval = (int)_options.PositionUpdateInterval.TotalMilliseconds;
 
-        if (_positionTimer == null)
-            _positionTimer = new Timer(_ => _events.RaisePositionChanged(Position), null, 0, interval);
-        else
-            _positionTimer.Change(0, interval);
+        lock (_timersLock)
+        {
+            if (_uiTimersSuspended || _disposed) return;
+
+            if (_positionTimer == null)
+                _positionTimer = new Timer(_ => _events.RaisePositionChanged(Position), null, 0, interval);
+            else
+                _positionTimer.Change(0, interval);
+        }
 
         StartBufferTimer();
     }
@@ -57,17 +63,25 @@ internal sealed partial class AudioPlayer
     {
         if (_uiTimersSuspended || _disposed) return;
 
-        if (_bufferTimer == null)
-            _bufferTimer = new Timer(_ => RaiseBufferState(), null, 0, AudioConstants.BufferStateUpdateIntervalMs);
-        else
-            _bufferTimer.Change(0, AudioConstants.BufferStateUpdateIntervalMs);
+        lock (_timersLock)
+        {
+            if (_uiTimersSuspended || _disposed) return;
+
+            if (_bufferTimer == null)
+                _bufferTimer = new Timer(_ => RaiseBufferState(), null, 0, AudioConstants.BufferStateUpdateIntervalMs);
+            else
+                _bufferTimer.Change(0, AudioConstants.BufferStateUpdateIntervalMs);
+        }
     }
 
     /// <summary>Stops timers without dispose.</summary>
     private void StopTimers()
     {
-        _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-        _bufferTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+        lock (_timersLock)
+        {
+            _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            _bufferTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+        }
     }
 
     /// <summary>Starts the position timer with a delayed first tick (post-seek) and ensures the buffer timer is running.</summary>
@@ -75,12 +89,26 @@ internal sealed partial class AudioPlayer
     {
         if (_uiTimersSuspended || _disposed) return;
 
-        int interval = (int)_options.PositionUpdateInterval.TotalMilliseconds;
+        if (_state == PlayerState.Playing || (_state == PlayerState.Seeking && CurrentPlaybackIntent == PlaybackIntent.Play))
+        {
+            int interval = (int)_options.PositionUpdateInterval.TotalMilliseconds;
 
-        if (_positionTimer == null)
-            _positionTimer = new Timer(_ => _events.RaisePositionChanged(Position), null, interval, interval);
+            lock (_timersLock)
+            {
+                if (!_uiTimersSuspended && !_disposed)
+                {
+                    if (_positionTimer == null)
+                        _positionTimer = new Timer(_ => _events.RaisePositionChanged(Position), null, interval, interval);
+                    else
+                        _positionTimer.Change(interval, interval);
+                }
+            }
+        }
         else
-            _positionTimer.Change(interval, interval);
+        {
+            StopPositionTimer();
+            _events.RaisePositionChanged(Position);
+        }
 
         if (_state is PlayerState.Playing or PlayerState.Buffering)
         {
@@ -95,16 +123,22 @@ internal sealed partial class AudioPlayer
     /// <summary>Stops the position timer only.</summary>
     private void StopPositionTimer()
     {
-        _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+        lock (_timersLock)
+        {
+            _positionTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+        }
     }
 
     /// <summary>Full timer finalization. Dispose only.</summary>
     private void DisposeTimers()
     {
-        _positionTimer?.Dispose();
-        _positionTimer = null;
-        _bufferTimer?.Dispose();
-        _bufferTimer = null;
+        lock (_timersLock)
+        {
+            _positionTimer?.Dispose();
+            _positionTimer = null;
+            _bufferTimer?.Dispose();
+            _bufferTimer = null;
+        }
     }
 
     /// <summary>

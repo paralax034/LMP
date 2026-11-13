@@ -51,6 +51,7 @@ internal sealed partial class Mp4ContainerParser : IContainerParser
     public byte[]? DecoderConfig => _decoderConfig;
     public int SampleRate => _sampleRate > 0 ? _sampleRate : 44100;
     public int Channels => _channels > 0 ? _channels : 2;
+    public bool ResyncOccurred { get; private set; }
 
     public Mp4ContainerParser(Stream stream)
     {
@@ -188,7 +189,9 @@ internal sealed partial class Mp4ContainerParser : IContainerParser
         if (ct.IsCancellationRequested)
             return new ValueTask<AudioFrame?>((AudioFrame?)null);
 
-        _reader.Position = sample.Offset;
+        if (_reader.Position != sample.Offset)
+            _reader.Position = sample.Offset;
+
         var memory = RentFrameMemory(sample.Size);
 
         try
@@ -262,6 +265,7 @@ internal sealed partial class Mp4ContainerParser : IContainerParser
 
     public void Reset()
     {
+        ResyncOccurred = false;
         _currentSampleIndex = 0;
         _fragmentSamples.Clear();
     }
@@ -279,6 +283,7 @@ internal sealed partial class Mp4ContainerParser : IContainerParser
     /// <inheritdoc/>
     public void RequireResync()
     {
+        ResyncOccurred = true;
         long currentPos = _reader.Position;
 
         if (_isFragmented)

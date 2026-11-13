@@ -246,7 +246,9 @@ internal static class SessionCacheStore
     /// </summary>
     public static void Save()
     {
-        SessionCacheEnvelope snapshot;
+        byte[] binary;
+        int manifestCount;
+        int variants = 0;
 
         lock (_lock)
         {
@@ -254,24 +256,21 @@ internal static class SessionCacheStore
                 return;
 
             EvictExpiredMustHoldLock();
-            snapshot = _data;
+            binary = MemoryPackSerializer.Serialize(_data);
+            manifestCount = _data.Manifests.Count;
+            for (int i = 0; i < manifestCount; i++)
+                variants += _data.Manifests[i].Variants.Count;
             _dirty = false;
         }
 
         try
         {
-            byte[] binary = MemoryPackSerializer.Serialize(snapshot);
-
             lock (_saveIoLock)
             {
                 AtomicFile.WriteBytes(G.FilePath.SessionCache, binary, createBackup: false);
             }
 
-            int variants = 0;
-            for (int i = 0; i < snapshot.Manifests.Count; i++)
-                variants += snapshot.Manifests[i].Variants.Count;
-
-            Log.Debug($"[SessionCache] Saved {snapshot.Manifests.Count} manifest(s), {variants} variant(s) [binary]");
+            Log.Debug($"[SessionCache] Saved {manifestCount} manifest(s), {variants} variant(s) [binary]");
         }
         catch (Exception ex)
         {

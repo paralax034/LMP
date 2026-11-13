@@ -44,7 +44,7 @@ public static class RenderClockDriftTests
                 state ^= state << 13;
                 state ^= state >> 17;
                 state ^= state << 5;
-                step += (long)(state % (uint)(periodTicks / 5)) - periodTicks / 10;
+                step += state % (uint)(periodTicks / 5) - periodTicks / 10;
             }
 
             now += step;

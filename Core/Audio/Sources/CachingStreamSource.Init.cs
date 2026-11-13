@@ -80,9 +80,7 @@ internal sealed partial class CachingStreamSource
             Log.Info($"[CachingSource] Parser ready: track={_trackId}, codec={Codec}, " +
                      $"sampleRate={SampleRate}, channels={Channels}, duration={DurationMs}ms");
 
-            // Startup Prefetch: fill the warmup buffer in parallel with decoder init.
-            FireStartupPrefetchIfNeeded(initialBytes);
-
+            // PreloadLoopAsync starts immediately without initial delay and drives startup prefetching.
             _preloadTask = Task.Run(
                 () => PreloadLoopAsync(_lifetimeCts.Token), _lifetimeCts.Token);
 
@@ -107,60 +105,6 @@ internal sealed partial class CachingStreamSource
         {
             Log.Error($"[CachingSource] Init failed: {ex.Message}", ex);
             return false;
-        }
-    }
-
-    // --- Startup Prefetch ---
-
-    /// <summary>
-    /// Starts an immediate fire-and-forget prefetch right after successful parser init.
-    /// <para>
-    /// Bridges the dead time between <see cref="InitializeAsync"/> completion
-    /// and the first iteration of the preload loop (<see cref="StreamingConfig.PreloadIntervalMs"/>).
-    /// Without this, on channels with a 1–2.5 s TTFB, warmup waits 500 ms + N round-trips,
-    /// delaying playback by 1–1.5 s.
-    /// </para>
-    /// </summary>
-    /// <param name="alreadyFetchedBytes">
-    /// Amount of data already retrieved by the initial fetch. Prefetch starts seamlessly right after it.
-    /// </param>
-    private void FireStartupPrefetchIfNeeded(int alreadyFetchedBytes)
-    {
-        if (_cacheEntry is { IsComplete: true })
-            return;
-
-        long prefetchStart = alreadyFetchedBytes;
-        long remaining = _contentLength - prefetchStart;
-        if (remaining <= 0)
-            return;
-
-        int prefetchLength = (int)Math.Min(_config.StartupPrefetchBytes, remaining);
-        if (prefetchLength <= 0)
-            return;
-
-        Log.Debug(
-            $"[CachingSource] Startup prefetch: {prefetchLength / 1024}KB " +
-            $"at offset {prefetchStart} (initial={alreadyFetchedBytes / 1024}KB)");
-
-        _ = SafeStartupPrefetchAsync(prefetchStart, prefetchLength);
-    }
-
-    /// <summary>
-    /// Best-effort background prefetch to populate the warmup buffer.
-    /// Errors do not abort initialization — the preload loop will pick up remaining data.
-    /// </summary>
-    private async Task SafeStartupPrefetchAsync(long start, int length)
-    {
-        try
-        {
-            var token = CurrentDownloadToken;
-            await EnsureRangeAsync(start, length, token, isCritical: false)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            Log.Debug($"[CachingSource] Startup prefetch failed (non-fatal): {ex.Message}");
         }
     }
 

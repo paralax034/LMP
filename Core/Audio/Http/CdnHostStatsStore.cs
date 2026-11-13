@@ -92,6 +92,7 @@ internal static class CdnHostStatsStore
     private const int SaveIntervalMinutes = 5;
 
     private static readonly Lock _lock = new();
+    private static readonly Lock _saveIoLock = new();
     private static CdnHostStatsEnvelope _data = new();
     private static bool _dirty;
     private static DateTime _lastSaveTime = DateTime.MinValue;
@@ -189,7 +190,8 @@ internal static class CdnHostStatsStore
     /// </summary>
     public static void Save()
     {
-        CdnHostStatsEnvelope snapshot;
+        byte[] binary;
+        int clusterCount;
 
         lock (_lock)
         {
@@ -197,16 +199,19 @@ internal static class CdnHostStatsStore
                 return;
 
             _data.LastSavedUtc = DateTime.UtcNow;
-            snapshot = _data;
+            binary = MemoryPackSerializer.Serialize(_data);
+            clusterCount = _data.Clusters.Count;
             _dirty = false;
             _lastSaveTime = DateTime.UtcNow;
         }
 
         try
         {
-            byte[] binary = MemoryPackSerializer.Serialize(snapshot);
-            AtomicFile.WriteBytes(G.FilePath.CdnHostStats, binary, createBackup: false);
-            Log.Debug($"[CdnHostStats] Saved {snapshot.Clusters.Count} cluster(s) [binary]");
+            lock (_saveIoLock)
+            {
+                AtomicFile.WriteBytes(G.FilePath.CdnHostStats, binary, createBackup: false);
+            }
+            Log.Debug($"[CdnHostStats] Saved {clusterCount} cluster(s) [binary]");
         }
         catch (Exception ex)
         {
@@ -351,14 +356,17 @@ internal static class CdnHostStatsStore
     /// </summary>
     /// <param name="httpClient">HTTP client sharing a connection pool.</param>
     /// <param name="ct">Cancellation token (application lifetime).</param>
-    public static async Task PreWarmTopClustersAsync(HttpClient httpClient, CancellationToken ct)
+    public static Task PreWarmTopClustersAsync(HttpClient httpClient, CancellationToken ct)
     {
         string[] targets;
 
         lock (_lock)
         {
             if (_data.Clusters.Count == 0)
-                return;
+                return Task.CompletedTask;
+
+            while (_data.Clusters.Count > MaxClusters)
+                EvictLowestScoreClusterMustHoldLock();
 
             var (minHits, maxClusters) = ComputeAdaptivePolicy(_data.TotalHits);
 
@@ -366,11 +374,11 @@ internal static class CdnHostStatsStore
             int count = 0;
             var buffer = new string[Math.Min(maxClusters, _data.Clusters.Count)];
 
-            // Allocation-free sort: insertion sort by score (N ≤ 12)
-            Span<(double Score, int Index)> scored = stackalloc (double, int)[_data.Clusters.Count];
+            // Allocation-free sort: insertion sort by score (bounded by MaxClusters = 12)
+            Span<(double Score, int Index)> scored = stackalloc (double, int)[MaxClusters];
             int scoredCount = 0;
 
-            for (int i = 0; i < _data.Clusters.Count; i++)
+            for (int i = 0; i < _data.Clusters.Count && scoredCount < MaxClusters; i++)
             {
                 var c = _data.Clusters[i];
                 if (c.HitCount < minHits)
@@ -400,13 +408,14 @@ internal static class CdnHostStatsStore
         }
 
         if (targets.Length == 0)
-            return;
+            return Task.CompletedTask;
 
         Log.Debug($"[CdnHostStats] Startup warmup: {targets.Length} cluster(s)");
 
         for (int i = 0; i < targets.Length; i++)
             _ = CdnConnectionPreWarmer.WarmSingleHostAsync(httpClient, targets[i], ct);
 
+        return Task.CompletedTask;
     }
 
     // Periodic Save

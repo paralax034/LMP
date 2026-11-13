@@ -200,7 +200,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// Flag indicating completed disposal. Prevents double disposal
     /// when both paths (<see cref="DisposeAsync"/> and <see cref="Dispose(bool)"/>) are invoked.
     /// </summary>
-    private volatile bool _disposed;
+    private int _disposeState;
+    private bool _disposed => Volatile.Read(ref _disposeState) != 0;
 
     /// <summary>
     /// Automatic retry counter for the current track on recoverable cache errors.
@@ -442,6 +443,21 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     #region Session Management
 
+    private sealed class DeferredSessionCtsCleanup(CancellationTokenSource cts)
+    {
+        private Timer? _timer;
+
+        public void Schedule(int delayMs) =>
+            _timer = new Timer(static state =>
+            {
+                var self = (DeferredSessionCtsCleanup)state!;
+                try { self._timer?.Dispose(); } catch { }
+                try { self.Cts.Dispose(); } catch (ObjectDisposedException) { }
+            }, this, delayMs, Timeout.Infinite);
+
+        private CancellationTokenSource Cts => cts;
+    }
+
     private int BeginNewSession()
     {
         int session = _session.BeginNew();
@@ -450,18 +466,19 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         lock (_sessionLock)
         {
             oldCts = _sessionCts;
-            _sessionCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+            _sessionCts = Volatile.Read(ref _disposeState) == 0
+                ? CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token)
+                : null;
         }
 
         if (oldCts != null)
         {
-            // Perform cancellation and socket closing on the thread pool,
-            // to avoid freezing the UI dispatcher with synchronous CancellationToken callbacks.
+            // Cancel on ThreadPool to keep UI thread responsive, and defer Dispose() past concurrent CreateLinkedTokenSource readers.
             ThreadPool.UnsafeQueueUserWorkItem(static state =>
             {
                 var cts = (CancellationTokenSource)state!;
                 try { cts.Cancel(); } catch (ObjectDisposedException) { }
-                try { cts.Dispose(); } catch (ObjectDisposedException) { }
+                new DeferredSessionCtsCleanup(cts).Schedule(3_000);
             }, oldCts);
         }
 
@@ -470,7 +487,13 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     private CancellationToken GetSessionToken()
     {
-        lock (_sessionLock) return _sessionCts?.Token ?? _lifetimeCts.Token;
+        lock (_sessionLock)
+        {
+            if (Volatile.Read(ref _disposeState) != 0 || _sessionCts == null)
+                return new CancellationToken(canceled: true);
+
+            return _sessionCts.Token;
+        }
     }
 
     #endregion
@@ -502,7 +525,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// Starts or pauses playback and records user playback intent.
     /// </summary>
     /// <param name="shouldPlay">true to play, false to pause.</param>
-    public async Task SetPlaybackStateAsync(bool shouldPlay)
+    public Task SetPlaybackStateAsync(bool shouldPlay)
     {
         _playIntent = shouldPlay;
         if (shouldPlay)
@@ -516,6 +539,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
             }
         }
         else _player.Pause();
+
+        return Task.CompletedTask;
     }
 
     /// <summary>

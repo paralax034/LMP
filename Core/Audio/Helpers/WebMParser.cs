@@ -611,6 +611,7 @@ internal sealed class WebMParser : IDisposable
     /// </summary>
     public void RequireResync()
     {
+        ResyncOccurred = true;
         _requiresResync = true;
         _bufPos = 0;
         _bufLen = 0;
@@ -1498,6 +1499,8 @@ internal sealed class WebMParser : IDisposable
         _bufPos = 0;
         _bufLen = 0;
         _currentClusterTimecode = 0;
+        _requiresResync = false;
+        ResyncOccurred = false;
 
         while (_lacedFrames.TryDequeue(out var frame))
             frame.Owner.Dispose();

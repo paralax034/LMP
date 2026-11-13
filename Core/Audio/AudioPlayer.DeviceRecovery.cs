@@ -46,6 +46,7 @@ internal sealed partial class AudioPlayer
 
         Log.Warn("[AudioPlayer] Device lost — actor paused playback");
         SetState(PlayerState.Paused);
+        CompletePendingPlayResult(false);
         _events.RaiseDeviceLost();
 
         return Task.CompletedTask;
@@ -107,7 +108,11 @@ internal sealed partial class AudioPlayer
                 return;
             }
 
-            await Task.Delay(PostDeviceRecoveryStabilizationMs, _lifetimeCts.Token).ConfigureAwait(false);
+            if (!await _lifetimeCts.Token.DelayNoThrowAsync(
+                    PostDeviceRecoveryStabilizationMs, continueOnCapturedContext: false).ConfigureAwait(false))
+            {
+                return;
+            }
 
             if (_activePipeline != pipeline || _lifetimeCts.Token.IsCancellationRequested)
                 return;

@@ -94,7 +94,78 @@ namespace SharpJaad.AAC
 		/// <exception cref="AACException">if decoding fails</exception>
         public void DecodeFrame(byte[] frame, SampleBuffer buffer)
         {
-            if (frame != null) _input.SetData(frame);
+            if (frame != null) _input.SetData(frame.AsSpan());
+            DecodeFrameCore(buffer);
+        }
+
+        /// <summary>
+        /// Decodes one frame of AAC data from a read-only span without intermediate byte[] allocations.
+        /// </summary>
+        /// <param name="frame">The AAC frame bytes.</param>
+        /// <param name="buffer">A buffer to hold the decoded PCM data.</param>
+        /// <exception cref="AACException">if decoding fails</exception>
+        public void DecodeFrame(ReadOnlySpan<byte> frame, SampleBuffer buffer)
+        {
+            _input.SetData(frame);
+            DecodeFrameCore(buffer);
+        }
+
+        /// <summary>
+        /// Decodes one AAC frame directly into an interleaved float32 span without intermediate PCM16 byte conversion.
+        /// </summary>
+        public int DecodeFrameToFloat(ReadOnlySpan<byte> frame, Span<float> outputBuffer, int targetChannels, out int sampleRate, out int channels)
+        {
+            _input.SetData(frame);
+            sampleRate = 0;
+            channels = 0;
+
+            try
+            {
+                return DecodeToFloat(outputBuffer, targetChannels, out sampleRate, out channels);
+            }
+            catch (AACException e)
+            {
+                if (!e.IsEndOfStream)
+                    throw;
+
+                return 0;
+            }
+        }
+
+        private int DecodeToFloat(Span<float> outputBuffer, int targetChannels, out int sampleRate, out int channels)
+        {
+            if (ADIFHeader.IsPresent(_input))
+            {
+                _adifHeader = ADIFHeader.ReadHeader(_input);
+                PCE pce = _adifHeader.GetFirstPCE();
+                _config.SetProfile(pce.GetProfile());
+                _config.SetSampleFrequency(pce.GetSampleFrequency());
+                _config.SetChannelConfiguration((ChannelConfiguration)pce.GetChannelCount());
+            }
+
+            if (!CanDecode(_config.GetProfile()))
+                throw new AACException("unsupported profile: " + _config.GetProfile());
+
+            _syntacticElements.StartNewFrame();
+
+            try
+            {
+                _syntacticElements.Decode(_input);
+                _syntacticElements.Process(_filterBank);
+                return _syntacticElements.SendToFloatOutput(outputBuffer, targetChannels, out sampleRate, out channels);
+            }
+            catch (AACException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                throw new AACException(e.Message);
+            }
+        }
+
+        private void DecodeFrameCore(SampleBuffer buffer)
+        {
             try
             {
                 Decode(buffer);
@@ -133,12 +204,12 @@ namespace SharpJaad.AAC
             }
             catch (AACException)
             {
-                buffer.SetData(new byte[0], 0, 0, 0, 0);
+                buffer.SetData(Array.Empty<byte>(), 0, 0, 0, 0);
                 throw;
             }
             catch (Exception e)
             {
-                buffer.SetData(new byte[0], 0, 0, 0, 0);
+                buffer.SetData(Array.Empty<byte>(), 0, 0, 0, 0);
                 throw new AACException(e.Message);
             }
         }

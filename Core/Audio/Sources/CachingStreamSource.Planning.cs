@@ -72,23 +72,25 @@ internal sealed partial class CachingStreamSource
         long endExclusive = position + localBuffered;
         if (endExclusive >= _contentLength) return _contentLength - position;
 
-        bool extended;
-        do
+        lock (_activeDownloadsLock)
         {
-            extended = false;
-            lock (_activeDownloadsLock)
+            if (_activeDownloads.Count == 0)
+                return endExclusive - position;
+
+            bool extended;
+            do
             {
+                extended = false;
                 foreach (var active in _activeDownloads.Values)
                 {
-                    if (active.Start > endExclusive) continue;
-                    if (active.EndExclusive <= endExclusive) continue;
-                    if (active.EndExclusive <= position) continue;
+                    if (active.Start > endExclusive || active.EndExclusive <= endExclusive || active.EndExclusive <= position)
+                        continue;
                     endExclusive = active.EndExclusive;
                     extended = true;
                 }
             }
+            while (extended && endExclusive < _contentLength);
         }
-        while (extended && endExclusive < _contentLength);
 
         return endExclusive - position;
     }
@@ -106,40 +108,6 @@ internal sealed partial class CachingStreamSource
         if (position < 0 || position >= _contentLength) return false;
         if (_ramCache.ContainsRange(position, length)) return true;
         return _cacheEntry?.IsRangeDownloaded(position, length) == true;
-    }
-
-    /// <summary>
-    /// Checks whether the range is fully covered either locally or by an active in-flight download.
-    /// </summary>
-    /// <param name="position">Range start.</param>
-    /// <param name="length">Range length.</param>
-    /// <returns><c>true</c> if the range is already available or guaranteed to be downloading.</returns>
-    private bool IsRangeKnownAvailable(long position, int length)
-    {
-        if (length <= 0) return true;
-        if (IsRangeLocallyAvailable(position, length)) return true;
-        return IsRangeCoveredByInflight(position, length);
-    }
-
-    /// <summary>
-    /// Checks whether the range is fully covered by an already registered active download.
-    /// </summary>
-    /// <param name="position">Range start.</param>
-    /// <param name="length">Range length.</param>
-    /// <returns><c>true</c> if the range lies entirely within an in-flight range.</returns>
-    private bool IsRangeCoveredByInflight(long position, int length)
-    {
-        long endExclusive = position + length;
-        lock (_activeDownloadsLock)
-        {
-            foreach (var active in _activeDownloads.Values)
-            {
-                if (position < active.Start) continue;
-                if (endExclusive > active.EndExclusive) continue;
-                return true;
-            }
-        }
-        return false;
     }
 
     // --- Read Length ---
@@ -178,22 +146,40 @@ internal sealed partial class CachingStreamSource
         if (length <= _requestAlignmentBytes) return length;
 
         long endExclusive = start + length;
-        long probe = start + _requestAlignmentBytes;
+        long minProbe = start + _requestAlignmentBytes;
 
-        while (probe < endExclusive)
+        long earliest = _ramCache.FindFirstCoveredProbeOffset(minProbe, endExclusive, _requestAlignmentBytes, start);
+
+        if (_cacheEntry != null)
         {
-            int probeLength = (int)Math.Min(_requestAlignmentBytes, endExclusive - probe);
-            bool covered = includeInflight
-                ? IsRangeKnownAvailable(probe, probeLength)
-                : IsRangeLocallyAvailable(probe, probeLength);
-
-            if (covered)
-                return (int)(probe - start);
-
-            probe += _requestAlignmentBytes;
+            long diskFirst = _cacheEntry.FindFirstCoveredProbeOffset(minProbe, endExclusive, _requestAlignmentBytes, start);
+            if (diskFirst < earliest) earliest = diskFirst;
         }
 
-        return length;
+        if (includeInflight)
+        {
+            lock (_activeDownloadsLock)
+            {
+                foreach (var active in _activeDownloads.Values)
+                {
+                    if (active.Start >= endExclusive || active.EndExclusive <= minProbe)
+                        continue;
+
+                    long candidate = active.Start <= minProbe
+                        ? minProbe
+                        : start + AlignUp(active.Start - start, _requestAlignmentBytes);
+
+                    if (candidate >= endExclusive || candidate >= earliest)
+                        continue;
+
+                    long probeEnd = Math.Min(endExclusive, candidate + _requestAlignmentBytes);
+                    if (active.Start <= candidate && active.EndExclusive >= probeEnd)
+                        earliest = candidate;
+                }
+            }
+        }
+
+        return earliest < endExclusive ? (int)(earliest - start) : length;
     }
 
     // --- Throttle ---

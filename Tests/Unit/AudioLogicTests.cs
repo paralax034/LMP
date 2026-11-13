@@ -103,6 +103,12 @@ public static class AudioLogicTests
         TestAssert.True(
             PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new DisposeCommand(1)),
             "Disposed state must accept DisposeCommand");
+        TestAssert.True(
+            PlayerStateTransitions.CanTransition(PlayerState.Loading, PlayerState.Paused),
+            "Loading state must allow transitioning to Paused on degraded-mode init");
+        TestAssert.True(
+            PlayerStateTransitions.CanAcceptCommand(PlayerState.Loading, new PauseCommand(1)),
+            "PauseCommand must be accepted while Loading");
 
         return Task.CompletedTask;
     }
@@ -117,7 +123,7 @@ public static class AudioLogicTests
         const int frames = 960; // Full micro-fade duration (20 ms @ 48 kHz)
         const int sampleCount = frames * Channels;
 
-        float* nativeBuffer = (float*)NativeMemory.AllocZeroed((nuint)(sampleCount * sizeof(float)));
+        float* nativeBuffer = (float*)NativeMemory.AllocZeroed(sampleCount * sizeof(float));
         try
         {
             using var ring = new LockFreeRingBuffer<float>(sampleCount * 4);
@@ -603,6 +609,47 @@ public static class AudioLogicTests
         analyzer.LockGain(2.2f);
         TestAssert.Equal(1.0f, analyzer.GetLockedGain());
         TestAssert.Equal(1.0f, analyzer.ProcessSamples());
+        TestAssert.Equal(45_000, analyzer.CurrentConfig.PreScanDurationMs);
+
+        // Zero-alloc Span reuse in SharpJaad BitStream across varying AAC packet lengths
+        var bitStream = new SharpJaad.AAC.Syntax.BitStream();
+        ReadOnlySpan<byte> frameA = [0xAA, 0xBB, 0xCC, 0xDD, 0x12, 0x34];
+        ReadOnlySpan<byte> frameB = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09];
+        bitStream.SetData(frameB);
+        TestAssert.Equal(72, bitStream.GetBitsLeft());
+        TestAssert.Equal(0x01, bitStream.ReadBits(8));
+        bitStream.SetData(frameA);
+        TestAssert.Equal(48, bitStream.GetBitsLeft());
+        TestAssert.Equal(0xAA, bitStream.ReadBits(8));
+        TestAssert.Equal(0xBB, bitStream.ReadBits(8));
+        TestAssert.Equal(0xCCDD, bitStream.ReadBits(16));
+
+        // Direct float output in AacDecoder (silence/empty frame fast path & FilterBank SIMD windowing)
+        using var aacDecoder = new LMP.Core.Audio.Decoders.AacDecoder(44100, 2);
+        float[] aacOut = new float[2048 * 2];
+        int aacSilenceFrames = aacDecoder.Decode(ReadOnlySpan<byte>.Empty, aacOut);
+        TestAssert.Equal(aacDecoder.MaxFrameSize, aacSilenceFrames);
+
+        var fb = new SharpJaad.AAC.Filterbank.FilterBank(smallFrames: false, channels: 2);
+        float[] fbIn = new float[1024];
+        float[] fbOut = new float[1024];
+        Array.Fill(fbIn, 0.25f);
+
+        fb.Process(SharpJaad.AAC.Syntax.ICSInfo.WindowSequence.LONG_START_SEQUENCE, 0, 0, fbIn, fbOut, 0);
+        bool anyNonZeroStart = false;
+        for (int i = 0; i < fbOut.Length; i++)
+        {
+            if (MathF.Abs(fbOut[i]) > 1e-6f) { anyNonZeroStart = true; break; }
+        }
+        TestAssert.True(anyNonZeroStart, "FilterBank LONG_START_SEQUENCE must execute IMDCT and populate output");
+
+        fb.Process(SharpJaad.AAC.Syntax.ICSInfo.WindowSequence.EIGHT_SHORT_SEQUENCE, 0, 0, fbIn, fbOut, 0);
+        fb.Process(SharpJaad.AAC.Syntax.ICSInfo.WindowSequence.LONG_STOP_SEQUENCE, 0, 0, fbIn, fbOut, 0);
+
+        TestAssert.ZeroAlloc(() =>
+        {
+            fb.Process(SharpJaad.AAC.Syntax.ICSInfo.WindowSequence.ONLY_LONG_SEQUENCE, 0, 0, fbIn, fbOut, 0);
+        }, warmup: 5, iterations: 200, context: "SharpJaad.FilterBank.Process ONLY_LONG_SEQUENCE");
 
         // 3. Dynamic recalculation of Gain upon settings change (Bidirectional vs DownwardOnly) without re-scanning
         float? callbackLufs = null;
@@ -634,6 +681,174 @@ public static class AudioLogicTests
 
     [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_bufferTimer")]
     private static extern ref Timer? BufferTimerField(AudioPlayer player);
+
+    [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = "_positionTimer")]
+    private static extern ref Timer? PositionTimerField(AudioPlayer player);
+
+    /// <summary>Verifies parser ResyncOccurred propagation, premature-EOF filtering without resync, Seek state transitions/timers in Paused state, PlayAsync cancellation, and OpusDecoder safe dispose.</summary>
+    [TestMethod(TestCategory.Unit, "Premature EOF Resync Guard, Paused Seek Timer, PlayAsync Cancel & Opus Safe Dispose", Group = TestGroups.Audio, Order = 14, TimeoutSeconds = 10)]
+    public static async Task TestPrematureEofResyncPausedSeekAndPlayCancelAsync()
+    {
+        // 1. Clean EOF well before DurationMs without parser resync must invoke onTrackEnded, not CacheInvalidatedException
+        var eofSource = new ShortCleanAudioSource(SampleRate, Channels, durationMs: 10_000, positionMs: 5_000);
+        var backend = new NullAudioBackend();
+        var pipeline = AudioPipelineTestHarness.Create(
+            eofSource,
+            new ConstantDecoder(SampleRate, Channels, framesPerDecode: 960, maxFrameSize: 960, value: 0.05f),
+            backend,
+            new LockFreeRingBuffer<float>(SampleRate * Channels),
+            new AudioStreamInfo { TrackId = "yt_clean_eof", DurationMs = 10_000 });
+
+        try
+        {
+            var endedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Exception? capturedError = null;
+
+            pipeline.StartDecoding(
+                new AudioPlayerOptions(),
+                () => endedTcs.TrySetResult(true),
+                ex =>
+                {
+                    capturedError = ex;
+                    endedTcs.TrySetResult(false);
+                });
+
+            bool ended = await endedTcs.Task.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+            TestAssert.True(ended, $"Clean early EOF without ResyncOccurred must invoke onTrackEnded, got error: {capturedError}");
+            TestAssert.True(capturedError is null);
+        }
+        finally
+        {
+            await pipeline.DisposeAsync().ConfigureAwait(false);
+            backend.Dispose();
+        }
+
+        // 2. WebMContainerParser & Mp4ContainerParser RequireResync / Reset flag contract
+        using (var ms = new MemoryStream())
+        {
+            using var webm = new LMP.Core.Audio.Parsers.WebMContainerParser(ms);
+            TestAssert.False(webm.ResyncOccurred);
+            webm.RequireResync();
+            TestAssert.True(webm.ResyncOccurred);
+            webm.Reset();
+            TestAssert.False(webm.ResyncOccurred);
+
+            using var mp4 = new LMP.Core.Audio.Parsers.Mp4ContainerParser(ms);
+            TestAssert.False(mp4.ResyncOccurred);
+            mp4.RequireResync();
+            TestAssert.True(mp4.ResyncOccurred);
+            mp4.Reset();
+            TestAssert.False(mp4.ResyncOccurred);
+        }
+
+        // 3. PlayerStateTransitions accepts SeekCommand in Seeking & Paused Seek must not start periodic _positionTimer
+        TestAssert.True(
+            PlayerStateTransitions.CanAcceptCommand(PlayerState.Seeking, new SeekCommand(TimeSpan.Zero, 1, 1)),
+            "SeekCommand must be accepted while in Seeking state");
+
+        await using var player = new AudioPlayer(new AudioPlayerOptions
+        {
+            UseNullBackend = true,
+            PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
+        });
+
+        PlayerStateField(player) = PlayerState.Paused;
+        StartPositionTimerDelayed(player);
+        TestAssert.True(PositionTimerField(player) is null, "Paused StartPositionTimerDelayed must not start _positionTimer");
+
+        // 4. Rejected PlayCommand (e.g., Disposed state) must deterministically cancel PlayAsync instead of hanging
+        PlayerStateField(player) = PlayerState.Disposed;
+        var playTask = player.PlayAsync(new ResolvedStreamDescriptor
+        {
+            TrackId = "yt_cancel_reject",
+            Format = AudioFormat.WebM,
+            Codec = AudioCodec.Opus,
+            BitrateKbps = 128,
+            Origin = StreamSource.DiskCacheFull
+        });
+
+        bool canceled = false;
+        try
+        {
+            await playTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            canceled = true;
+        }
+        TestAssert.True(canceled, "Rejected PlayAsync must complete as canceled promptly");
+        PlayerStateField(player) = PlayerState.Idle;
+
+        // 5. OpusDecoder ref-counted dispose safety: FlushState after Dispose is a safe no-op and Decode throws ObjectDisposedException
+        var opus = new LMP.Core.Audio.Decoders.OpusDecoder(SampleRate, Channels);
+        opus.FlushState();
+        opus.Dispose();
+        opus.FlushState();
+
+        bool threwDisposed = false;
+        try
+        {
+            Span<float> pcmOut = stackalloc float[960 * Channels];
+            _ = opus.Decode(ReadOnlySpan<byte>.Empty, pcmOut);
+        }
+        catch (ObjectDisposedException)
+        {
+            threwDisposed = true;
+        }
+        TestAssert.True(threwDisposed, "OpusDecoder.Decode after Dispose must throw ObjectDisposedException");
+
+        // 6. Immediate Stop() / StopAsync() right after PlayAsync() while PlayCommand is still in channel must cancel PlayAsync without hanging
+        var immediatePlayTask = player.PlayAsync(new ResolvedStreamDescriptor
+        {
+            TrackId = "yt_immediate_stop",
+            Format = AudioFormat.WebM,
+            Codec = AudioCodec.Opus,
+            BitrateKbps = 128,
+            Origin = StreamSource.DiskCacheFull
+        });
+        await player.StopAsync().WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+
+        bool immediatePlayCanceled = false;
+        try
+        {
+            await immediatePlayTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            immediatePlayCanceled = true;
+        }
+        TestAssert.True(immediatePlayCanceled, "PlayAsync followed immediately by StopAsync must be canceled");
+
+        // 7. Ceiling division for 44.1 kHz AAC gating block (17640 samples / 1024 = 18 frames, 18 * 1024 = 18432 >= 17640)
+        const int aacGatingBlockSize = (int)(44100 * 0.4);
+        const int aacNominalSamples = 1024;
+        int framesPerBlock = (aacGatingBlockSize + aacNominalSamples - 1) / aacNominalSamples;
+        TestAssert.Equal(18, framesPerBlock);
+        TestAssert.True(framesPerBlock * aacNominalSamples >= aacGatingBlockSize);
+    }
+
+    private sealed class ShortCleanAudioSource(int sampleRate, int channels, long durationMs, long positionMs) : IAudioSource
+    {
+        public long DurationMs => durationMs;
+        public long PositionMs => positionMs;
+        public bool CanSeek => true;
+        public AudioCodec Codec => AudioCodec.Opus;
+        public double BufferProgress => 100.0;
+        public bool IsFullyBuffered => true;
+        public byte[]? DecoderConfig => null;
+        public int SampleRate => sampleRate;
+        public int Channels => channels;
+
+        public ValueTask<bool> InitializeAsync(CancellationToken ct = default) => ValueTask.FromResult(true);
+        public ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default) => ValueTask.FromResult<AudioFrame?>(null);
+        public ValueTask<bool> SeekAsync(long positionMs, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public IReadOnlyList<(double Start, double End)> GetBufferedRanges() => AudioConstants.FullBufferedRanges;
+        public void ReleaseRamBuffers() { }
+        public void CancelPendingOperations() { }
+        public void SetPlaybackActive(bool active) { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void Dispose() { }
+    }
 
     /// <summary>
     /// Verifies queue index arithmetic when deleting a track: a deleted playing track is immediately replaced by the next one in line

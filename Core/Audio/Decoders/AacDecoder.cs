@@ -267,13 +267,16 @@ internal sealed class AacDecoder : IAudioDecoder
 
         try
         {
-            byte[] frameData = encodedData.ToArray();
-            _decoder!.DecodeFrame(frameData, _sampleBuffer!);
+            int targetCh = Channels;
+            int sampleCount = _decoder!.DecodeFrameToFloat(
+                encodedData,
+                outputBuffer,
+                targetCh,
+                out int decodedRate,
+                out _);
 
-            byte[] pcmData = _sampleBuffer!.Data;
-            int sampleCount = pcmData.Length / (sizeof(short) * Channels);
-
-            ConvertBytesToFloat(pcmData, outputBuffer, sampleCount * Channels);
+            if (decodedRate > _outputSampleRate)
+                _outputSampleRate = decodedRate;
 
             _consecutiveErrors = 0;
             return sampleCount;
@@ -287,9 +290,9 @@ internal sealed class AacDecoder : IAudioDecoder
                 if (_consecutiveErrors <= 3)
                     Log.Debug($"[AacDecoder] Decode error (attempt {_consecutiveErrors}): {ex.Message}");
 
-                // Recreate decoder every 5 errors
+                // Soft-flush state on transient errors instead of full allocation-heavy recreation
                 if (_consecutiveErrors % 5 == 0)
-                    RecreateDecoder();
+                    _decoder?.Flush();
 
                 int silenceSamples = MaxFrameSize;
                 int totalSamples = silenceSamples * Channels;

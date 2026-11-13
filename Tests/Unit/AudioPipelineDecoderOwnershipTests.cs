@@ -1,5 +1,6 @@
 using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
+using LMP.Core.Audio.Interfaces;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
@@ -100,12 +101,123 @@ public static class AudioPipelineDecoderOwnershipTests
                 "Decoder must process the released frame");
 
             long decoded = ReadDecodedSamples(pipeline);
-            TestAssert.Equal((long)ring.Count, decoded,
+            TestAssert.Equal(ring.Count, decoded,
                 $"Decoded counter must equal samples accepted by the ring: ring={ring.Count}, counter={decoded}, produced={framesPerDecode * Channels}");
         }
         finally
         {
             await ShutdownAsync(pipeline, source, backend).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>When Decode outlives DisposeAsync's stop timeout, decoder and ring buffers are freed strictly after Decode exits.</summary>
+    [TestMethod(TestCategory.Unit, "DisposeAsync Defers Decoder & Buffer Release Until Hung Decode Exits", Group = TestGroups.Audio, Order = 19, TimeoutSeconds = 10)]
+    public static async Task TestDisposeAsyncDefersCleanupUntilHungDecodeExitsAsync()
+    {
+        var source = new BlockingAudioSource(SampleRate, Channels);
+        var decoder = new GateBlockingDecoder(SampleRate, Channels);
+        var backend = new NullAudioBackend();
+        var ring = new LockFreeRingBuffer<float>(SampleRate * Channels);
+        var pipeline = AudioPipelineTestHarness.Create(source, decoder, backend, ring);
+
+        try
+        {
+            source.Release(AudioPipelineTestHarness.Frame());
+            pipeline.StartDecoding(new AudioPlayerOptions(), null, null);
+
+            TestAssert.True(await AudioPipelineTestHarness.WaitUntilAsync(() => decoder.InDecode, 2_000).ConfigureAwait(false),
+                "Decoder must enter Decode()");
+
+            Task disposeTask = pipeline.DisposeAsync().AsTask();
+            await disposeTask.ConfigureAwait(false);
+
+            TestAssert.False(decoder.Disposed, "Decoder must not be disposed while Decode() is still executing");
+
+            decoder.Release();
+            TestAssert.True(await AudioPipelineTestHarness.WaitUntilAsync(() => decoder.Disposed, 2_000).ConfigureAwait(false),
+                "Decoder must be disposed immediately after Decode() exits");
+            TestAssert.False(decoder.DisposedWhileInDecode, "Dispose() must never race with active Decode()");
+        }
+        finally
+        {
+            source.Open();
+            decoder.Release();
+            backend.Dispose();
+        }
+    }
+
+    /// <summary>A Flush() performed after a StopDecodingAsync timeout defers clearing the ring until the previous loop exits.</summary>
+    [TestMethod(TestCategory.Unit, "Flush After Stop Timeout Preserves SPSC Invariant", Group = TestGroups.Audio, Order = 20, TimeoutSeconds = 10)]
+    public static async Task TestFlushAfterStopTimeoutPreservesSpscInvariantAsync()
+    {
+        var source = new BlockingAudioSource(SampleRate, Channels);
+        var backend = new NullAudioBackend();
+        var ring = new LockFreeRingBuffer<float>(SampleRate * Channels);
+        var pipeline = CreatePipeline(source, backend, ring);
+
+        try
+        {
+            var options = new AudioPlayerOptions();
+            pipeline.StartDecoding(options, null, null);
+            TestAssert.True(await AudioPipelineTestHarness.WaitUntilAsync(() => source.ReadCalls >= 1, 2_000).ConfigureAwait(false));
+
+            await pipeline.StopDecodingAsync(TimeSpan.FromMilliseconds(50)).ConfigureAwait(false);
+            pipeline.Flush();
+            pipeline.StartDecoding(options, null, null);
+
+            source.Release(AudioPipelineTestHarness.Frame());
+            await AudioPipelineTestHarness.WaitUntilAsync(() => source.ReadCalls >= 2, 1_000).ConfigureAwait(false);
+            TestAssert.Equal(1, source.MaxConcurrentReads, "SPSC single-producer invariant must hold across timeout + Flush()");
+        }
+        finally
+        {
+            await ShutdownAsync(pipeline, source, backend).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class GateBlockingDecoder(int sampleRate, int channels) : IAudioDecoder
+    {
+        private readonly ManualResetEventSlim _gate = new(false);
+        private int _inDecode;
+        private volatile bool _disposed;
+        private volatile bool _disposedWhileInDecode;
+
+        public bool InDecode => Volatile.Read(ref _inDecode) != 0;
+        public bool Disposed => _disposed;
+        public bool DisposedWhileInDecode => _disposedWhileInDecode;
+
+        public int SampleRate => sampleRate;
+        public int Channels => channels;
+        public int MaxFrameSize => 960;
+        public AudioCodec Codec => AudioCodec.Opus;
+        public bool IsInitialized => true;
+
+        public int Decode(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer)
+        {
+            Volatile.Write(ref _inDecode, 1);
+            try
+            {
+                _gate.Wait(TimeSpan.FromSeconds(5));
+                outputBuffer[..(960 * channels)].Clear();
+                return 960;
+            }
+            finally
+            {
+                Volatile.Write(ref _inDecode, 0);
+            }
+        }
+
+        public int DecodeWithReset(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer) => Decode(encodedData, outputBuffer);
+        public void FlushState() { }
+        public void Release() => _gate.Set();
+
+        public void Dispose()
+        {
+            if (Volatile.Read(ref _inDecode) != 0)
+                _disposedWhileInDecode = true;
+            _disposed = true;
+            _gate.Set();
+            _gate.Dispose();
         }
     }
 

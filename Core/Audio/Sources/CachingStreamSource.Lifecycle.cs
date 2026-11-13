@@ -8,27 +8,26 @@ internal sealed partial class CachingStreamSource
     /// Defers <see cref="IDisposable.Dispose"/> for the CTS,
     /// preventing <see cref="ObjectDisposedException"/> in concurrent execution paths.
     /// </summary>
+    private sealed class DeferredCtsTimerCleanup(CancellationTokenSource cts)
+    {
+        private Timer? _timer;
+
+        public void Schedule(int delayMs) =>
+            _timer = new Timer(static state =>
+            {
+                var self = (DeferredCtsTimerCleanup)state!;
+                try { self._timer?.Dispose(); } catch { }
+                try { self.Cts.Dispose(); } catch (ObjectDisposedException) { }
+            }, this, delayMs, Timeout.Infinite);
+
+        private CancellationTokenSource Cts => cts;
+    }
+
     private static void DeferDisposeCancellationTokenSource(
         CancellationTokenSource? cts, int delayMs)
     {
         if (cts == null) return;
-
-        _ = Task.Delay(delayMs).ContinueWith(
-            static (_, state) =>
-            {
-                var source = (CancellationTokenSource)state!;
-                try
-                {
-                    source.Dispose();
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-            },
-            cts,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        new DeferredCtsTimerCleanup(cts).Schedule(delayMs);
     }
 
     /// <summary>Cancels all downloads for the current epoch and creates a new one.</summary>
@@ -156,8 +155,8 @@ internal sealed partial class CachingStreamSource
         {
         }
 
-        _suspendGate.Dispose();
-        _playbackGate.Dispose();
+        _suspendGate.Set();
+        _playbackGate.Set();
 
         if (_leaseAcquired)
             _cacheManager.ReleaseLease(_cacheKey);
@@ -199,8 +198,11 @@ internal sealed partial class CachingStreamSource
             }
         }
 
-        await DrainPendingDiskWritesAsync().ConfigureAwait(false);
-        await Task.Delay(DisposalDelayMs).ConfigureAwait(false);
+        if (Volatile.Read(ref _pendingDiskWrites) > 0)
+        {
+            await DrainPendingDiskWritesAsync().ConfigureAwait(false);
+            await Task.Delay(DisposalDelayMs).ConfigureAwait(false);
+        }
 
         if (_parser != null)
             await _parser.DisposeAsync().ConfigureAwait(false);
