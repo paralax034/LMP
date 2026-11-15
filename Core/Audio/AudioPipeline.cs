@@ -89,6 +89,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
     private sealed record ClockOrigin(long BaseSamples, long RenderedSamples);
 
     private ClockOrigin _clockOrigin;
+    private int _activeCallbackDepth;
 
     /// <summary>Spectrum analysis paused due to lack of readers; mutated only by audio callback.</summary>
     private bool _spectrumSuspended;
@@ -118,6 +119,16 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     /// <summary>Pipeline disposed.</summary>
     public bool IsDisposed => _disposed;
+
+    /// <summary>Gets whether the decoder loop is currently running and not cancelled.</summary>
+    public bool IsDecoderAlive
+    {
+        get
+        {
+            lock (_lifecycleLock)
+                return _decoderTask is { IsCompleted: false } && _decoderCts?.IsCancellationRequested != true;
+        }
+    }
 
     /// <summary>Decoder sample rate.</summary>
     public int SampleRate => _activeSampleRate;
@@ -219,7 +230,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
     {
         Log.Info($"[AudioPipeline] CreateAsync -> {descriptor}");
 
-        var lifetimeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var lifetimeCts = new CancellationTokenSource();
 
         IAudioSource? source = null;
         IAudioDecoder? decoder = null;
@@ -237,7 +248,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
             bool initialized;
             try
             {
-                initialized = await source.InitializeAsync(lifetimeCts.Token).ConfigureAwait(false);
+                initialized = await source.InitializeAsync(ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is CdnUnavailableException or HttpRequestException
                                        && source is Sources.CachingStreamSource { HasUrlProvider: true } cachingSource)
@@ -248,19 +259,19 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     Log.Warn($"[AudioPipeline] CDN host '{cdnEx.Host}' blacklisted on pipeline init failure.");
                 }
 
-                lifetimeCts.Token.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested();
 
                 Log.Warn($"[AudioPipeline] Initial source initialization failed ({ex.GetType().Name}: {ex.Message}). Proactively refreshing stream URL...");
 
                 // Pipeline not yet published in AudioPlayer: request formed by source itself, context retained.
-                var refreshedUrl = await cachingSource.RequestUrlAsync(StreamUrlRequestKind.Refresh, lifetimeCts.Token).ConfigureAwait(false);
-                lifetimeCts.Token.ThrowIfCancellationRequested();
+                var refreshedUrl = await cachingSource.RequestUrlAsync(StreamUrlRequestKind.Refresh, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
 
                 if (!string.IsNullOrEmpty(refreshedUrl))
                 {
                     cachingSource.UpdateUrl(refreshedUrl);
                     Log.Info($"[AudioPipeline] Proactive URL refreshed for {descriptor.TrackId}. Retrying source initialization...");
-                    initialized = await source.InitializeAsync(lifetimeCts.Token).ConfigureAwait(false);
+                    initialized = await source.InitializeAsync(ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -270,7 +281,6 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
             if (!initialized)
             {
-                lifetimeCts.Token.ThrowIfCancellationRequested();
                 ct.ThrowIfCancellationRequested();
                 throw new AudioSourceException("Failed to initialize audio source: container parsing returned false");
             }
@@ -499,7 +509,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
 #endif
     }
 
-    public async Task StopDecodingAsync(TimeSpan timeout)
+    public async Task<bool> StopDecodingAsync(TimeSpan timeout)
     {
         CancellationTokenSource? cts;
         Task? task;
@@ -508,7 +518,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
             cts = _decoderCts;
             task = _decoderTask;
         }
-        if (cts == null || task == null) return;
+        if (cts == null || task == null) return true;
 
         try { cts.Cancel(); } catch (ObjectDisposedException) { }
 
@@ -521,7 +531,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
             // Hung loop remains registered ring owner alongside its CTS:
             // next StartDecoding waits for its exit instead of launching a second producer
             Log.Warn("[AudioPipeline] Decoder stop timeout");
-            return;
+            return false;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { Log.Warn($"[AudioPipeline] Decoder stop error: {ex.Message}"); }
@@ -533,6 +543,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
             if (ReferenceEquals(_decoderCts, cts)) _decoderCts = null;
         }
         try { cts.Dispose(); } catch (ObjectDisposedException) { }
+        return true;
     }
 
     /// <summary>
@@ -868,6 +879,9 @@ internal sealed class AudioPipeline : IAsyncDisposable
         if (decRate == _activeSampleRate && decCh == _activeChannels)
             return;
 
+        bool wasPlaying = _backend.IsPlaying;
+        _backend.Flush();
+
         _activeSampleRate = decRate;
         _activeChannels = decCh;
 
@@ -882,6 +896,9 @@ internal sealed class AudioPipeline : IAsyncDisposable
             _backend.SetDeviceLostCallback(NotifyDeviceLost);
             _backend.SetStarvationCallback(NotifyStarvation);
             _backend.SetDeviceAvailableCallback(NotifyDeviceAvailable);
+
+            if (wasPlaying)
+                _backend.Start();
         }
         catch (AudioDeviceException ex)
         {
@@ -1208,135 +1225,143 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     private int AudioCallback(Span<float> buffer)
     {
-        if (_disposed)
+        Interlocked.Increment(ref _activeCallbackDepth);
+        try
         {
-            buffer.Clear();
-            _analyzer3Band.Reset();
-            return 0;
-        }
+            if (_disposed)
+            {
+                buffer.Clear();
+                _analyzer3Band.Reset();
+                return 0;
+            }
 
-        int read = _pcmBuffer.Read(buffer);
-        if (read < buffer.Length) buffer[read..].Clear();
+            int read = _pcmBuffer.Read(buffer);
+            if (read < buffer.Length) buffer[read..].Clear();
 
-        int channels = _activeChannels;
-        var limiter = _truePeakLimiter;
-        var analyzer3Band = _analyzer3Band;
+            int channels = _activeChannels;
+            var limiter = _truePeakLimiter;
+            var analyzer3Band = _analyzer3Band;
 
-        if (read > 0)
-        {
-            var samples = buffer[..read];
+            if (read > 0)
+            {
+                var samples = buffer[..read];
 
 #if AUDIO_SPLICE_AUDIT
-            int frames = read / channels;
-            float maxRawStep = 0f, maxRawD2 = 0f;
-            int rawStepFrame = -1;
-            if (channels >= 2 && frames >= 2)
-            {
-                float pL = _dbgPrevRawL, pR = _dbgPrevRawR;
-                float ppL = pL;
-                for (int f = 0; f < frames; f++)
+                int frames = read / channels;
+                float maxRawStep = 0f, maxRawD2 = 0f;
+                int rawStepFrame = -1;
+                if (channels >= 2 && frames >= 2)
                 {
-                    float cL = samples[f * channels];
-                    float cR = samples[f * channels + 1];
-                    float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
-                    float d2 = MathF.Abs(cL - 2f * pL + ppL);
-                    if (st > maxRawStep) { maxRawStep = st; rawStepFrame = f; }
-                    if (d2 > maxRawD2) maxRawD2 = d2;
-                    ppL = pL; pL = cL; pR = cR;
+                    float pL = _dbgPrevRawL, pR = _dbgPrevRawR;
+                    float ppL = pL;
+                    for (int f = 0; f < frames; f++)
+                    {
+                        float cL = samples[f * channels];
+                        float cR = samples[f * channels + 1];
+                        float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
+                        float d2 = MathF.Abs(cL - 2f * pL + ppL);
+                        if (st > maxRawStep) { maxRawStep = st; rawStepFrame = f; }
+                        if (d2 > maxRawD2) maxRawD2 = d2;
+                        ppL = pL; pL = cL; pR = cR;
+                    }
+                    _dbgPrevRawL = pL; _dbgPrevRawR = pR;
                 }
-                _dbgPrevRawL = pL; _dbgPrevRawR = pR;
-            }
 #endif
 
-            // 1. Apply 10-band equalizer BEFORE the limiter and spectrum analyzer
-            _equalizer.Process(samples);
+                // 1. Apply 10-band equalizer BEFORE the limiter and spectrum analyzer
+                _equalizer.Process(samples);
 
 #if AUDIO_SPLICE_AUDIT
-            float maxEqStep = 0f, maxEqD2 = 0f;
-            int eqStepFrame = -1;
-            if (channels >= 2 && frames >= 2)
-            {
-                float pL = _dbgPrevEqL, pR = _dbgPrevEqR;
-                float ppL = pL;
-                for (int f = 0; f < frames; f++)
+                float maxEqStep = 0f, maxEqD2 = 0f;
+                int eqStepFrame = -1;
+                if (channels >= 2 && frames >= 2)
                 {
-                    float cL = samples[f * channels];
-                    float cR = samples[f * channels + 1];
-                    float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
-                    float d2 = MathF.Abs(cL - 2f * pL + ppL);
-                    if (st > maxEqStep) { maxEqStep = st; eqStepFrame = f; }
-                    if (d2 > maxEqD2) maxEqD2 = d2;
-                    ppL = pL; pL = cL; pR = cR;
+                    float pL = _dbgPrevEqL, pR = _dbgPrevEqR;
+                    float ppL = pL;
+                    for (int f = 0; f < frames; f++)
+                    {
+                        float cL = samples[f * channels];
+                        float cR = samples[f * channels + 1];
+                        float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
+                        float d2 = MathF.Abs(cL - 2f * pL + ppL);
+                        if (st > maxEqStep) { maxEqStep = st; eqStepFrame = f; }
+                        if (d2 > maxEqD2) maxEqD2 = d2;
+                        ppL = pL; pL = cL; pR = cR;
+                    }
+                    _dbgPrevEqL = pL; _dbgPrevEqR = pR;
                 }
-                _dbgPrevEqL = pL; _dbgPrevEqR = pR;
-            }
 #endif
 
-            float normGain = _analyzer.IsEnabled
-                ? _analyzer.ProcessSamples()
-                : 1.0f;
+                float normGain = _analyzer.IsEnabled
+                    ? _analyzer.ProcessSamples()
+                    : 1.0f;
 
-            _gainCrossfader.SetTarget(normGain, _activeSampleRate, channels);
+                _gainCrossfader.SetTarget(normGain, _activeSampleRate, channels);
 
-            // 2. Always run signal through TruePeakLimiter (0 B allocations)
-            limiter.Process(samples, channels, ref _gainCrossfader);
+                // 2. Always run signal through TruePeakLimiter (0 B allocations)
+                limiter.Process(samples, channels, ref _gainCrossfader);
 
 #if AUDIO_SPLICE_AUDIT
-            float maxLimStep = 0f, maxLimD2 = 0f;
-            int limStepFrame = -1;
-            if (channels >= 2 && frames >= 2)
-            {
-                float pL = _dbgPrevLimL, pR = _dbgPrevLimR;
-                float ppL = pL;
-                for (int f = 0; f < frames; f++)
+                float maxLimStep = 0f, maxLimD2 = 0f;
+                int limStepFrame = -1;
+                if (channels >= 2 && frames >= 2)
                 {
-                    float cL = samples[f * channels];
-                    float cR = samples[f * channels + 1];
-                    float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
-                    float d2 = MathF.Abs(cL - 2f * pL + ppL);
-                    if (st > maxLimStep) { maxLimStep = st; limStepFrame = f; }
-                    if (d2 > maxLimD2) maxLimD2 = d2;
-                    ppL = pL; pL = cL; pR = cR;
-                }
-                _dbgPrevLimL = pL; _dbgPrevLimR = pR;
+                    float pL = _dbgPrevLimL, pR = _dbgPrevLimR;
+                    float ppL = pL;
+                    for (int f = 0; f < frames; f++)
+                    {
+                        float cL = samples[f * channels];
+                        float cR = samples[f * channels + 1];
+                        float st = MathF.Max(MathF.Abs(cL - pL), MathF.Abs(cR - pR));
+                        float d2 = MathF.Abs(cL - 2f * pL + ppL);
+                        if (st > maxLimStep) { maxLimStep = st; limStepFrame = f; }
+                        if (d2 > maxLimD2) maxLimD2 = d2;
+                        ppL = pL; pL = cL; pR = cR;
+                    }
+                    _dbgPrevLimL = pL; _dbgPrevLimR = pR;
 
-                int cbTick = ++_dbgCallbackTickAfterSeek;
-                if (cbTick <= 3 || maxLimStep > 0.08f || maxLimD2 > 0.05f)
-                {
-                    Log.Debug(
-                        $"[Pipeline-Audit] tick#{cbTick} frames={frames} ringRem={_pcmBuffer.Count / channels}f | " +
-                        $"RAW(step={maxRawStep:F4}@{rawStepFrame}, d2={maxRawD2:F4}) -> " +
-                        $"EQ(step={maxEqStep:F4}@{eqStepFrame}, d2={maxEqD2:F4}) -> " +
-                        $"LIM(step={maxLimStep:F4}@{limStepFrame}, d2={maxLimD2:F4}, env={_truePeakLimiter.EnvelopeGain:F3}, norm={_gainCrossfader.CurrentGain:F3})");
+                    int cbTick = ++_dbgCallbackTickAfterSeek;
+                    if (cbTick <= 3 || maxLimStep > 0.08f || maxLimD2 > 0.05f)
+                    {
+                        Log.Debug(
+                            $"[Pipeline-Audit] tick#{cbTick} frames={frames} ringRem={_pcmBuffer.Count / channels}f | " +
+                            $"RAW(step={maxRawStep:F4}@{rawStepFrame}, d2={maxRawD2:F4}) -> " +
+                            $"EQ(step={maxEqStep:F4}@{eqStepFrame}, d2={maxEqD2:F4}) -> " +
+                            $"LIM(step={maxLimStep:F4}@{limStepFrame}, d2={maxLimD2:F4}, env={_truePeakLimiter.EnvelopeGain:F3}, norm={_gainCrossfader.CurrentGain:F3})");
+                    }
                 }
-            }
 #endif
 
-            if (AudioVisualizerBuffer.HasActiveReaders)
-            {
-                // Spectrum is calculated only for active readers: UI polling extends the lease; without it, callback skips render work
-                _spectrumSuspended = false;
+                if (AudioVisualizerBuffer.HasActiveReaders)
+                {
+                    // Spectrum is calculated only for active readers: UI polling extends the lease; without it, callback skips render work
+                    _spectrumSuspended = false;
 
-                // BufferedSamples is already normalized to source sample rate by the backend
-                long delayTicks = ComputePresentationDelayTicks(
-                    _backend.BufferedSamples,
-                    _activeSampleRate,
-                    channels);
+                    // BufferedSamples is already normalized to source sample rate by the backend
+                    long delayTicks = ComputePresentationDelayTicks(
+                        _backend.BufferedSamples,
+                        _activeSampleRate,
+                        channels);
 
-                analyzer3Band.ProcessBlock(samples, channels, delayTicks);
+                    analyzer3Band.ProcessBlock(samples, channels, delayTicks);
+                }
+                else if (!_spectrumSuspended)
+                {
+                    _spectrumSuspended = true;
+                    analyzer3Band.Reset();
+                }
             }
-            else if (!_spectrumSuspended)
+            else if (_isPaused || !_backend.IsPlaying)
             {
-                _spectrumSuspended = true;
                 analyzer3Band.Reset();
             }
-        }
-        else if (_isPaused || !_backend.IsPlaying)
-        {
-            analyzer3Band.Reset();
-        }
 
-        return read / channels;
+            return read / channels;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeCallbackDepth);
+        }
     }
 
     #endregion
@@ -1465,6 +1490,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     private void CleanupOwnedDecoderAndBuffers()
     {
+        var spin = new SpinWait();
+        while (Volatile.Read(ref _activeCallbackDepth) > 0)
+            spin.SpinOnce();
+
         _decoder.Dispose();
         _pcmBuffer.Dispose();
         ArrayPool<float>.Shared.Return(_decodeBuffer);

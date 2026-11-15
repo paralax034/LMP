@@ -28,6 +28,20 @@ public sealed class PlayerControlService : IDisposable
 
     public bool IsLoading { get; private set; }
 
+    public PlaybackState PlaybackState { get; private set; }
+
+    public bool CanGoNext { get; private set; }
+
+    public bool CanGoPrevious { get; private set; }
+
+    public TimeSpan CurrentPosition => _audio.CurrentPosition;
+
+    public bool HasSeekableDuration => _audio.TotalDuration > TimeSpan.Zero;
+
+    public TimeSpan TotalDuration => _audio.TotalDuration > TimeSpan.Zero
+        ? _audio.TotalDuration
+        : (CurrentTrack?.Duration ?? TimeSpan.Zero);
+
     public TrackInfo? CurrentTrack { get; private set; }
 
     public RepeatMode RepeatMode { get; private set; }
@@ -74,6 +88,10 @@ public sealed class PlayerControlService : IDisposable
     public event Action<bool>? IsPlayingChanged;
     public event Action<bool>? IsPausedChanged;
     public event Action<bool>? IsLoadingChanged;
+    public event Action<PlaybackState>? PlaybackStateChanged;
+    public event Action? CanNavigateChanged;
+    public event Action<TimeSpan>? SeekCompleted;
+    public event Action<TimeSpan>? PositionChanged;
     public event Action<TrackInfo?>? CurrentTrackChanged;
     public event Action<RepeatMode>? RepeatModeChanged;
     public event Action<bool>? ShuffleEnabledChanged;
@@ -122,6 +140,9 @@ public sealed class PlayerControlService : IDisposable
         IsPlaying = _audio.IsPlaying;
         IsPaused = _audio.IsPaused;
         IsLoading = _audio.IsLoading;
+        PlaybackState = _audio.EffectivePlaybackState;
+        CanGoNext = _audio.CanGoNext;
+        CanGoPrevious = _audio.CanGoPrevious;
         RepeatMode = _audio.RepeatMode;
         ShuffleEnabled = _audio.ShuffleEnabled;
         QueueCount = _audio.Queue.Count;
@@ -129,6 +150,10 @@ public sealed class PlayerControlService : IDisposable
         SyncSourceAndPurityFromEngine(raiseEvent: false);
 
         _audio.OnPlaybackStateChanged += HandlePlaybackStateChanged;
+        _audio.OnDetailedPlaybackStateChanged += HandleDetailedPlaybackStateChanged;
+        _audio.OnPlaybackModesChanged += HandlePlaybackModesChanged;
+        _audio.OnSeekCompleted += HandleSeekCompleted;
+        _audio.OnPositionChanged += HandlePositionChanged;
         _audio.OnTrackChanged += HandleTrackChanged;
         _audio.OnQueueChanged += HandleQueueChanged;
         _audio.OnQueueSourceChanged += HandleQueueSourceChanged;
@@ -161,16 +186,77 @@ public sealed class PlayerControlService : IDisposable
 
     #region Commands
 
+    public async Task PlayAsync()
+    {
+        try
+        {
+            await _audio.PlayAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlayerControl] Play error: {ex.Message}");
+        }
+    }
+
+    public async Task PauseAsync()
+    {
+        try
+        {
+            await _audio.PauseAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlayerControl] Pause error: {ex.Message}");
+        }
+    }
+
     public async Task PlayPauseAsync()
     {
         try
         {
-            await _audio.SetPlaybackStateAsync(!_audio.IsPlaying);
+            await _audio.TogglePlaybackStateAsync();
         }
         catch (Exception ex)
         {
             Log.Error($"[PlayerControl] PlayPause error: {ex.Message}");
         }
+    }
+
+    public void StopPlaybackKeepTrack()
+    {
+        try
+        {
+            _audio.StopPlaybackKeepTrack();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlayerControl] Stop error: {ex.Message}");
+        }
+    }
+
+    public async Task SeekAsync(TimeSpan position)
+    {
+        try
+        {
+            var duration = _audio.TotalDuration;
+            if (duration <= TimeSpan.Zero)
+                return;
+
+            var clamped = position < TimeSpan.Zero
+                ? TimeSpan.Zero
+                : position > duration ? duration : position;
+
+            await _audio.SeekAsync(clamped).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlayerControl] Seek error: {ex.Message}");
+        }
+    }
+
+    public Task SeekRelativeAsync(TimeSpan delta)
+    {
+        return SeekAsync(_audio.CurrentPosition + delta);
     }
 
     public async Task NextAsync()
@@ -209,6 +295,7 @@ public sealed class PlayerControlService : IDisposable
         _audio.RepeatMode = newMode;
         _library.UpdateSettings(s => s.RepeatMode = newMode);
         RepeatMode = newMode;
+        RefreshNavigationCapabilities();
         RepeatModeChanged?.Invoke(newMode);
 
         Log.Debug($"[PlayerControl] RepeatMode changed to {newMode}");
@@ -518,12 +605,18 @@ public sealed class PlayerControlService : IDisposable
         if (_playlistService == null) return;
 
         CancellationTokenSource cts;
+        CancellationTokenSource? previousCts;
         lock (_liveSyncLock)
         {
             if (_disposed) return;
-            _liveSyncCts?.Cancel();
-            _liveSyncCts?.Dispose();
+            previousCts = _liveSyncCts;
             cts = _liveSyncCts = new CancellationTokenSource();
+        }
+
+        if (previousCts != null)
+        {
+            try { previousCts.Cancel(); }
+            catch (ObjectDisposedException) { }
         }
 
         _ = RunLivePlaylistSyncAsync(playlistId, expectedGeneration, updatedName, cts);
@@ -531,11 +624,17 @@ public sealed class PlayerControlService : IDisposable
 
     private void CancelPendingLiveSync()
     {
+        CancellationTokenSource? previousCts;
         lock (_liveSyncLock)
         {
-            _liveSyncCts?.Cancel();
-            _liveSyncCts?.Dispose();
+            previousCts = _liveSyncCts;
             _liveSyncCts = null;
+        }
+
+        if (previousCts != null)
+        {
+            try { previousCts.Cancel(); }
+            catch (ObjectDisposedException) { }
         }
     }
 
@@ -619,11 +718,10 @@ public sealed class PlayerControlService : IDisposable
             lock (_liveSyncLock)
             {
                 if (ReferenceEquals(_liveSyncCts, cts))
-                {
-                    cts.Dispose();
                     _liveSyncCts = null;
-                }
             }
+
+            cts.Dispose();
         }
     }
 
@@ -651,6 +749,8 @@ public sealed class PlayerControlService : IDisposable
         var previous = CurrentTrack;
         CurrentTrack = track;
 
+        RefreshNavigationCapabilities();
+
         if (previous?.Id == track?.Id)
             return;
 
@@ -663,6 +763,7 @@ public sealed class PlayerControlService : IDisposable
         QueueCount = _audio.Queue.Count;
         QueueCountChanged?.Invoke(QueueCount);
         QueueChanged?.Invoke();
+        RefreshNavigationCapabilities();
 
         SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
@@ -711,6 +812,51 @@ public sealed class PlayerControlService : IDisposable
     {
         IsLoading = isLoading;
         IsLoadingChanged?.Invoke(isLoading);
+    }
+
+    private void HandleDetailedPlaybackStateChanged(PlaybackState state)
+    {
+        PlaybackState = state;
+        PlaybackStateChanged?.Invoke(state);
+    }
+
+    private void HandlePlaybackModesChanged(RepeatMode repeatMode, bool shuffleEnabled)
+    {
+        if (RepeatMode != repeatMode)
+        {
+            RepeatMode = repeatMode;
+            RepeatModeChanged?.Invoke(repeatMode);
+        }
+
+        if (ShuffleEnabled != shuffleEnabled)
+        {
+            ShuffleEnabled = shuffleEnabled;
+            ShuffleEnabledChanged?.Invoke(shuffleEnabled);
+        }
+
+        RefreshNavigationCapabilities();
+    }
+
+    private void HandleSeekCompleted(TimeSpan position)
+    {
+        SeekCompleted?.Invoke(position);
+    }
+
+    private void HandlePositionChanged(TimeSpan position)
+    {
+        PositionChanged?.Invoke(position);
+    }
+
+    private void RefreshNavigationCapabilities()
+    {
+        bool next = _audio.CanGoNext;
+        bool prev = _audio.CanGoPrevious;
+        if (CanGoNext == next && CanGoPrevious == prev)
+            return;
+
+        CanGoNext = next;
+        CanGoPrevious = prev;
+        CanNavigateChanged?.Invoke();
     }
 
     private void HandleMaxVolumeChanged(int newMaxVolume)
@@ -803,6 +949,9 @@ public sealed class PlayerControlService : IDisposable
         IsPlaying = _audio.IsPlaying;
         IsPaused = _audio.IsPaused;
         IsLoading = _audio.IsLoading;
+        PlaybackState = _audio.EffectivePlaybackState;
+        CanGoNext = _audio.CanGoNext;
+        CanGoPrevious = _audio.CanGoPrevious;
         RepeatMode = _audio.RepeatMode;
         ShuffleEnabled = _audio.ShuffleEnabled;
         QueueCount = _audio.Queue.Count;
@@ -819,6 +968,8 @@ public sealed class PlayerControlService : IDisposable
             CurrentTrack = actualTrack;
         }
 
+        PlaybackStateChanged?.Invoke(PlaybackState);
+        CanNavigateChanged?.Invoke();
         SyncSourceAndPurityFromEngine(raiseEvent: true);
         ForceSyncTriggered?.Invoke();
 
@@ -846,6 +997,10 @@ public sealed class PlayerControlService : IDisposable
         }
 
         _audio.OnPlaybackStateChanged -= HandlePlaybackStateChanged;
+        _audio.OnDetailedPlaybackStateChanged -= HandleDetailedPlaybackStateChanged;
+        _audio.OnPlaybackModesChanged -= HandlePlaybackModesChanged;
+        _audio.OnSeekCompleted -= HandleSeekCompleted;
+        _audio.OnPositionChanged -= HandlePositionChanged;
         _audio.OnTrackChanged -= HandleTrackChanged;
         _audio.OnQueueChanged -= HandleQueueChanged;
         _audio.OnQueueSourceChanged -= HandleQueueSourceChanged;

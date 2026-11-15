@@ -106,8 +106,8 @@ internal static class PlayerStateTransitions
             PlayCommand => true,
             StopCommand => state is not PlayerState.Idle,
 
-            PauseCommand => state is PlayerState.Loading or PlayerState.Playing or PlayerState.Buffering or PlayerState.Seeking,
-            ResumeCommand => state is PlayerState.Paused,
+            PauseCommand => state is PlayerState.Loading or PlayerState.Playing or PlayerState.Buffering or PlayerState.Paused or PlayerState.Seeking,
+            ResumeCommand => state is PlayerState.Paused or PlayerState.Playing or PlayerState.Loading or PlayerState.Buffering or PlayerState.Seeking,
 
             SeekCommand => state is PlayerState.Playing or PlayerState.Paused or PlayerState.Buffering or PlayerState.Seeking,
 

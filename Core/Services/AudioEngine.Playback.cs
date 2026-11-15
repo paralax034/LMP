@@ -29,7 +29,7 @@ public sealed partial class AudioEngine
                             break;
 
                         case PlayCurrentIndexCommand pci:
-                            await PlayCurrentIndexAsync(pci.Session, startPlaying: pci.StartPlaying).ConfigureAwait(false);
+                            await PlayCurrentIndexAsync(pci.Session, startPlaying: pci.StartPlaying, pauseEpoch: pci.PauseEpoch).ConfigureAwait(false);
                             break;
 
                         case NavigateCommand nav:
@@ -88,7 +88,7 @@ public sealed partial class AudioEngine
         }
 
         RaiseOnUI(_raiseQueueChangedOnUIDelegate);
-        await PlayCurrentIndexAsync(cmd.Session, cmd.SeekPosition).ConfigureAwait(false);
+        await PlayCurrentIndexAsync(cmd.Session, cmd.SeekPosition, startPlaying: true, isRetry: cmd.IsRetry, pauseEpoch: cmd.PauseEpoch).ConfigureAwait(false);
     }
 
     private async Task HandleStartQueueAsync(StartQueueCommand cmd)
@@ -116,11 +116,20 @@ public sealed partial class AudioEngine
         }
 
         RaiseOnUI(_raiseQueueChangedOnUIDelegate);
-        await PlayCurrentIndexAsync(cmd.Session).ConfigureAwait(false);
+        await PlayCurrentIndexAsync(cmd.Session, pauseEpoch: cmd.PauseEpoch).ConfigureAwait(false);
     }
 
     private async Task HandleNavigateAsync(NavigateCommand cmd)
     {
+        if (cmd.ReplaceSeq != Volatile.Read(ref _queueReplaceSeq))
+            return;
+
+        if (cmd.PauseEpoch >= 0 && cmd.PauseEpoch != Volatile.Read(ref _pauseEpoch))
+            return;
+
+        if (!cmd.UserInitiated && ((cmd.Session >= 0 && _session.IsStale(cmd.Session)) || !_playIntent))
+            return;
+
         bool canMove;
         bool queueMutated;
 
@@ -138,16 +147,46 @@ public sealed partial class AudioEngine
             queueMutated = _queueMutatedByNavigation;
         }
 
-        int session = BeginNewSession();
-
         if (queueMutated) RaiseOnUI(_raiseQueueChangedOnUIDelegate);
 
-        if (canMove)
-            await PlayCurrentIndexAsync(session, startPlaying: cmd.StartPlaying).ConfigureAwait(false);
-        else if (!cmd.Forward && _player.State != PlaybackState.Stopped)
+        bool shouldStartTrack = canMove
+            || (!cmd.Forward && _player.State == PlaybackState.Stopped && cmd.UserInitiated && CurrentTrack != null && cmd.StartPlaying);
+
+        if (shouldStartTrack)
+        {
+            int session;
+            lock (_playerDispatchLock)
+            {
+                if (cmd.ReplaceSeq != Volatile.Read(ref _queueReplaceSeq))
+                    return;
+
+                if (cmd.PauseEpoch >= 0 && cmd.PauseEpoch != Volatile.Read(ref _pauseEpoch))
+                    return;
+
+                if (!cmd.UserInitiated && ((cmd.Session >= 0 && _session.IsStale(cmd.Session)) || !_playIntent))
+                    return;
+
+                if (cmd.StartPlaying)
+                    _playIntent = true;
+                session = BeginNewSession();
+            }
+
+            await PlayCurrentIndexAsync(
+                session,
+                startPlaying: canMove ? cmd.StartPlaying : true,
+                pauseEpoch: cmd.PauseEpoch).ConfigureAwait(false);
+            return;
+        }
+
+        if (!cmd.Forward && _player.State != PlaybackState.Stopped)
+        {
+            Volatile.Write(ref _lastSwitchPositionTicks, 0);
             await _player.SeekAsync(TimeSpan.Zero).ConfigureAwait(false);
-        else
+        }
+        else if (!cmd.UserInitiated)
+        {
             Stop();
+        }
     }
 
     #endregion
@@ -160,7 +199,14 @@ public sealed partial class AudioEngine
     /// <param name="session">Playback session identifier.</param>
     /// <param name="seekPosition">Initial playback position when seeking.</param>
     /// <param name="startPlaying">Automatic playback start flag.</param>
-    private Task PlayCurrentIndexAsync(int session, TimeSpan? seekPosition = null, bool startPlaying = true)
+    /// <param name="isRetry">Whether this startup is an automatic cache recovery retry.</param>
+    /// <param name="pauseEpoch">Pause generation captured when the command was enqueued.</param>
+    private Task PlayCurrentIndexAsync(
+        int session,
+        TimeSpan? seekPosition = null,
+        bool startPlaying = true,
+        bool isRetry = false,
+        int pauseEpoch = -1)
     {
         TrackInfo? track;
         lock (_queueLock)
@@ -175,7 +221,7 @@ public sealed partial class AudioEngine
         // Do not block the actor thread waiting for the previous canceled task:
         // cancellation of the old session was already initiated via CancellationTokenSource in BeginNewSession().
         // The new task starts instantly, while the canceled one completes asynchronously on the ThreadPool.
-        var playTask = PlayTrackCoreAsync(track, session, GetSessionToken(), seekPosition, startPlaying);
+        var playTask = PlayTrackCoreAsync(track, session, GetSessionToken(), seekPosition, startPlaying, isRetry, pauseEpoch);
         Volatile.Write(ref _activePlayTask, playTask);
 
         return Task.CompletedTask;
@@ -189,7 +235,9 @@ public sealed partial class AudioEngine
        int session,
        CancellationToken ct,
        TimeSpan? seekPosition = null,
-       bool startPlaying = true)
+       bool startPlaying = true,
+       bool isRetry = false,
+       int pauseEpoch = -1)
     {
         if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
             return;
@@ -199,18 +247,30 @@ public sealed partial class AudioEngine
 
         FlushPendingEqualizerSave();
 
-        // Mute/stop the player only when switching to a DIFFERENT track.
-        // On retry/resync of the same track, PlayAsync will atomically replace the pipeline without a 30-second silence gap.
-        if (!string.Equals(CurrentTrack?.Id, track.Id, StringComparison.Ordinal))
+        bool effectiveStartPlaying;
+        lock (_playerDispatchLock)
         {
-            _player.Stop();
+            if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
+                return;
+
+            effectiveStartPlaying = startPlaying && (pauseEpoch < 0 || pauseEpoch == Volatile.Read(ref _pauseEpoch) || _playIntent);
+            _playIntent = effectiveStartPlaying;
+            SetManualLoading(true);
+
+            // Keep existing audio alive only on cache recovery retries; re-clicking the active track resets it.
+            if (!isRetry)
+            {
+                Volatile.Write(ref _lastSwitchPositionTicks, seekPosition?.Ticks ?? 0);
+                _player.Stop();
+            }
         }
 
         if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
+        {
+            if (!_session.IsStale(session))
+                SetManualLoading(false);
             return;
-
-        _playIntent = startPlaying;
-        SetManualLoading(true);
+        }
 
         try
         {
@@ -228,24 +288,43 @@ public sealed partial class AudioEngine
                 track = _trackRegistry.RegisterOrUpdate(track);
             }
 
-            CurrentTrack = track;
-            StreamInfo = AudioStreamInfo.Empty;
+            lock (_playerDispatchLock)
+            {
+                if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
+                    return;
+
+                if (!startPlaying || !_playIntent)
+                    effectiveStartPlaying = false;
+
+                CurrentTrack = track;
+                StreamInfo = AudioStreamInfo.Empty;
+            }
 
             RaiseOnUI(() =>
             {
+                if (_session.IsStale(session))
+                    return;
+
                 OnTrackChanged?.Invoke(track);
                 OnPositionChanged?.Invoke(TimeSpan.Zero);
             });
 
-            if (!startPlaying)
+            if (!effectiveStartPlaying)
             {
                 SetManualLoading(false);
                 return;
             }
 
             ct.ThrowIfCancellationRequested();
-            Volatile.Write(ref _nTokenActiveTrackId, track.Id);
-            Volatile.Write(ref _nTokenWarnedTrackId, null);
+            lock (_playerDispatchLock)
+            {
+                if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
+                    return;
+
+                Volatile.Write(ref _nTokenWarnedTrackId, null);
+                Volatile.Write(ref _nTokenActiveSession, session);
+                Volatile.Write(ref _nTokenActiveTrackId, track.Id);
+            }
 
             AudioSourceFactory.PreWarmCdnConnections(
                 Audio.Http.SharedHttpClient.Instance, _lifetimeCts.Token);
@@ -259,8 +338,6 @@ public sealed partial class AudioEngine
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    // Call asynchronous ResolveStreamAsync directly without an extra Task.Run wrapper,
-                    // which caused a cascade of duplicate TaskCanceledExceptions in the thread pool.
                     var descriptor = await ResolveStreamAsync(track, ct, seekPosition).ConfigureAwait(false);
 
                     if (descriptor.HasPerceptualLufs)
@@ -275,13 +352,23 @@ public sealed partial class AudioEngine
                             Audio.Normalization.LoudnessSource.YoutubePerceptual);
                     }
 
-                    if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
-                        return;
+                    Task? playTask;
+                    lock (_playerDispatchLock)
+                    {
+                        if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
+                            return;
 
-                    Log.Info($"[AudioEngine] PlayTrackCore resolved -> {descriptor}");
+                        if (!_playIntent)
+                        {
+                            Log.Debug($"[AudioEngine] PlayTrackCore paused before pipeline start: {track.Id}");
+                            return;
+                        }
 
-                    await _player.PlayAsync(descriptor, ct, seekPosition: seekPosition)
-                        .ConfigureAwait(false);
+                        Log.Info($"[AudioEngine] PlayTrackCore resolved -> {descriptor}");
+                        playTask = _player.PlayAsync(descriptor, ct, seekPosition: seekPosition);
+                    }
+
+                    await playTask.ConfigureAwait(false);
 
                     PreWarmNextTracksInQueue(
                         CurrentQueueIndex,
@@ -289,14 +376,15 @@ public sealed partial class AudioEngine
                         _lifetimeCts.Token);
                     break;
                 }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested || _session.IsStale(session))
                 {
                     // User switched track — exit instantly without retries
                     throw;
                 }
                 catch (Exception ex)
                     when (TryExtractCdnException(ex) is { } cdnEx
-                          && attempt < maxCdnFailoverAttempts)
+                          && attempt < maxCdnFailoverAttempts
+                          && !_session.IsStaleOrCancelled(session, ct))
                 {
                     Log.Warn($"[AudioEngine] CDN unavailable: host={cdnEx.Host}, " +
                              $"attempt={attempt}/{maxCdnFailoverAttempts}. " +
@@ -311,7 +399,7 @@ public sealed partial class AudioEngine
                         return;
                 }
                 catch (OperationCanceledException ex)
-                    when (!ct.IsCancellationRequested && attempt < maxStartupAttempts)
+                    when (!_session.IsStaleOrCancelled(session, ct) && attempt < maxStartupAttempts)
                 {
                     Log.Warn($"[AudioEngine] Transient internal timeout during track startup " +
                              $"(attempt {attempt}/{maxStartupAttempts}): {ex.Message}");
@@ -326,10 +414,15 @@ public sealed partial class AudioEngine
         }
         catch (OperationCanceledException ex)
         {
-            if (!ct.IsCancellationRequested)
+            if (!_session.IsStaleOrCancelled(session, ct))
             {
                 Log.Warn($"[AudioEngine] Playback startup aborted: {ex.Message}");
-                _player.Stop();
+                lock (_playerDispatchLock)
+                {
+                    _playIntent = false;
+                    Interlocked.Increment(ref _pauseEpoch);
+                    _player.Stop();
+                }
                 RaiseError(ex);
             }
         }
@@ -344,7 +437,14 @@ public sealed partial class AudioEngine
             if (!_session.IsStale(session))
                 SetManualLoading(false);
 
-            Interlocked.CompareExchange(ref _nTokenActiveTrackId, null, track.Id);
+            lock (_playerDispatchLock)
+            {
+                if (Volatile.Read(ref _nTokenActiveSession) == session)
+                {
+                    Volatile.Write(ref _nTokenActiveTrackId, null);
+                    Volatile.Write(ref _nTokenActiveSession, 0);
+                }
+            }
         }
     }
 
@@ -397,16 +497,7 @@ public sealed partial class AudioEngine
             _playIntent = false;
 
         ApplyLifecycleSourceSuspendPolicy();
-
-        RaiseOnUI(() =>
-        {
-            OnPropertyChanged(nameof(IsPlaying));
-            OnPropertyChanged(nameof(IsPaused));
-            OnPropertyChanged(nameof(IsLoading));
-            OnPropertyChanged(nameof(TotalDuration));
-            OnPlaybackStateChanged?.Invoke(state == PlaybackState.Playing, state == PlaybackState.Paused);
-            OnLoadingStateChanged?.Invoke(IsLoading);
-        });
+        RaiseOnUI(GetStateChangedUIDelegate(state, Volatile.Read(ref _manualLoadingFlag) != 0));
     }
 
     /// <summary>
@@ -415,8 +506,16 @@ public sealed partial class AudioEngine
     /// </summary>
     private void HandlePlayerTrackEnded()
     {
-        if (_player.State is PlaybackState.Loading or PlaybackState.Buffering) return;
-        EnqueueCommand(new NavigateCommand(Forward: true, UserInitiated: false, EndedTrackId: CurrentTrack?.Id));
+        if (_player.State == PlaybackState.Loading || Volatile.Read(ref _manualLoadingFlag) != 0)
+            return;
+
+        EnqueueCommand(new NavigateCommand(
+            Forward: true,
+            UserInitiated: false,
+            EndedTrackId: CurrentTrack?.Id,
+            ReplaceSeq: Volatile.Read(ref _queueReplaceSeq),
+            Session: _session.Current,
+            PauseEpoch: Volatile.Read(ref _pauseEpoch)));
     }
 
     private void HandleStreamInfoChanged(AudioStreamInfo info)

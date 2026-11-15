@@ -84,8 +84,93 @@ public static class SmartImage
     /// after the DI container is ready (first access no earlier than the first load).
     /// </summary>
     private static ImageCacheService? _imageCache;
+    private static int _cacheSubscribed;
+    private static readonly Lock _awaitingLock = new();
+    private static readonly Dictionary<string, List<WeakReference<Image>>> _awaitingImages = new(StringComparer.Ordinal);
 
     #endregion
+
+    private static ImageCacheService? EnsureImageCache()
+    {
+        var cache = _imageCache ??= AppEntry.Services.GetService<ImageCacheService>();
+        if (cache != null && Interlocked.Exchange(ref _cacheSubscribed, 1) == 0)
+        {
+            cache.OnImageCached += OnImageCachedByService;
+        }
+        return cache;
+    }
+
+    private static void RegisterAwaitingImage(string url, Image image)
+    {
+        lock (_awaitingLock)
+        {
+            if (!_awaitingImages.TryGetValue(url, out var list))
+            {
+                list = new List<WeakReference<Image>>(1);
+                _awaitingImages[url] = list;
+            }
+
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                if (!list[i].TryGetTarget(out var target))
+                    list.RemoveAt(i);
+                else if (ReferenceEquals(target, image))
+                    return;
+            }
+
+            list.Add(new WeakReference<Image>(image));
+        }
+    }
+
+    private static void OnImageCachedByService(string cachedUrl)
+    {
+        if (string.IsNullOrEmpty(cachedUrl)) return;
+
+        bool hasExactWaiters;
+        lock (_awaitingLock)
+        {
+            hasExactWaiters = _awaitingImages.ContainsKey(cachedUrl);
+        }
+
+        if (!hasExactWaiters) return;
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            List<Image>? toReload = null;
+
+            lock (_awaitingLock)
+            {
+                if (!_awaitingImages.TryGetValue(cachedUrl, out var list))
+                    return;
+
+                for (int i = list.Count - 1; i >= 0; i--)
+                {
+                    if (!list[i].TryGetTarget(out var img) || img.Source != null)
+                    {
+                        list.RemoveAt(i);
+                        continue;
+                    }
+
+                    var currentUrl = GetSource(img);
+                    if (string.Equals(currentUrl, cachedUrl, StringComparison.Ordinal))
+                    {
+                        list.RemoveAt(i);
+                        toReload ??= new List<Image>(2);
+                        toReload.Add(img);
+                    }
+                }
+
+                if (list.Count == 0)
+                    _awaitingImages.Remove(cachedUrl);
+            }
+
+            if (toReload != null)
+            {
+                for (int i = 0; i < toReload.Count; i++)
+                    BeginLoad(toReload[i]);
+            }
+        });
+    }
 
     static SmartImage()
     {
@@ -130,8 +215,8 @@ public static class SmartImage
 
         if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            _imageCache ??= AppEntry.Services.GetService<ImageCacheService>();
-            if (_imageCache != null && _imageCache.TryGetFromMemory(url, decodeWidth, out var memoryBitmap))
+            var cache = EnsureImageCache();
+            if (cache != null && cache.TryGetFromMemory(url, decodeWidth, out var memoryBitmap))
             {
                 CancelPending(image);
                 DisposeOwned(image);
@@ -174,11 +259,17 @@ public static class SmartImage
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cts.IsCancellationRequested)
         {
             Log.Debug($"[SmartImage] Load failed for '{url}': {ex.Message}");
-            DisposeOwned(image);
-            image.Source = null;
+            if (string.Equals(GetSource(image), url, StringComparison.Ordinal))
+            {
+                DisposeOwned(image);
+                image.Source = null;
+            }
+        }
+        catch (Exception)
+        {
         }
         finally
         {
@@ -195,8 +286,7 @@ public static class SmartImage
         if (_pending.TryGetValue(image, out var oldCts))
         {
             _pending.Remove(image);
-            try { oldCts.Cancel(); } catch { }
-            oldCts.Dispose();
+            try { oldCts.Cancel(); } catch (ObjectDisposedException) { }
         }
     }
 
@@ -212,12 +302,18 @@ public static class SmartImage
     /// </summary>
     private static async Task LoadHttpAsync(Image image, string url, int decodeWidth, CancellationToken ct)
     {
-        _imageCache ??= AppEntry.Services.GetService<ImageCacheService>();
-        if (_imageCache == null) return;
+        var cache = EnsureImageCache();
+        if (cache == null) return;
 
-        var bitmap = await _imageCache.GetImageAsync(url, decodeWidth, ct);
+        var bitmap = await cache.GetImageAsync(url, decodeWidth, ct);
 
-        if (bitmap == null || ct.IsCancellationRequested || GetSource(image) != url) return;
+        if (ct.IsCancellationRequested || GetSource(image) != url) return;
+
+        if (bitmap == null)
+        {
+            RegisterAwaitingImage(url, image);
+            return;
+        }
 
         DisposeOwned(image);
         image.Source = bitmap;

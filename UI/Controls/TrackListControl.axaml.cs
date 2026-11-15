@@ -952,10 +952,12 @@ public partial class TrackListControl : UserControl
         if (oldIndices.Count == 1)
         {
             int oldIndex = oldIndices[0];
-            int maxValidIndex = (Items is ICollection c ? c.Count : 1) - 1;
-            int clampedTarget = Math.Clamp(finalTargetIndex, 0, Math.Max(0, maxValidIndex));
+            int count = Items is ICollection c ? c.Count : 0;
+            bool isNoOp = finalTargetIndex == oldIndex || finalTargetIndex == oldIndex + 1;
+            int rawTarget = oldIndex < finalTargetIndex ? finalTargetIndex - 1 : finalTargetIndex;
+            int clampedTarget = Math.Clamp(rawTarget, 0, Math.Max(0, count - 1));
 
-            if (oldIndex != clampedTarget)
+            if (count > 1 && !isNoOp && oldIndex != clampedTarget)
             {
                 if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
                     await asyncCmd.ExecuteAsync((oldIndex, clampedTarget));
@@ -982,52 +984,70 @@ public partial class TrackListControl : UserControl
     {
         if (Items is not IVirtualTrackList virtualList || virtualList.FilteredCount == 0) return;
 
+        int listCount = virtualList.FilteredCount;
+        int clampedGap = Math.Clamp(targetIndex, 0, listCount);
+
         var sortedSources = sourceIndices.Distinct().OrderBy(x => x).ToList();
-        var movingVms = new List<TrackItemViewModel>(sortedSources.Count);
+        var downwardVms = new List<TrackItemViewModel>(sortedSources.Count);
+        var upwardVms = new List<TrackItemViewModel>(sortedSources.Count);
+        var allMovingVms = new List<TrackItemViewModel>(sortedSources.Count);
+
         for (int i = 0; i < sortedSources.Count; i++)
         {
             int idx = sortedSources[i];
-            if (idx >= 0 && idx < virtualList.FilteredCount)
-                movingVms.Add(virtualList[idx]);
+            if ((uint)idx >= (uint)listCount) continue;
+
+            var vm = virtualList[idx];
+            allMovingVms.Add(vm);
+            if (idx < clampedGap)
+                downwardVms.Add(vm);
+            else
+                upwardVms.Add(vm);
         }
 
-        if (movingVms.Count == 0) return;
+        if (allMovingVms.Count == 0) return;
 
-        int clampedTarget = Math.Clamp(targetIndex, 0, virtualList.FilteredCount - 1);
-        var targetVm = virtualList[clampedTarget];
-        if (targetVm == null || movingVms.Contains(targetVm)) return;
-
-        int initialTargetIdx = virtualList.IndexOf(targetVm);
-        bool isMovingDownwards = sortedSources[0] < initialTargetIdx;
-
-        var orderedMovingVms = isMovingDownwards
-            ? movingVms.AsEnumerable().Reverse()
-            : movingVms;
-
-        foreach (var vm in orderedMovingVms)
+        int downSlot = clampedGap - 1;
+        for (int i = downwardVms.Count - 1; i >= 0; i--)
         {
-            int currentFrom = virtualList.IndexOf(vm);
-            int currentTarget = virtualList.IndexOf(targetVm);
+            int currentFrom = virtualList.IndexOf(downwardVms[i]);
+            int dest = Math.Clamp(downSlot--, 0, listCount - 1);
+            if (currentFrom >= 0 && currentFrom != dest)
+            {
+                if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
+                    await asyncCmd.ExecuteAsync((currentFrom, dest));
+                else
+                    MoveItemCommand?.Execute((currentFrom, dest));
+            }
+        }
 
-            if (currentFrom < 0 || currentTarget < 0 || currentFrom == currentTarget)
-                continue;
-
-            if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
-                await asyncCmd.ExecuteAsync((currentFrom, currentTarget));
-            else
-                MoveItemCommand?.Execute((currentFrom, currentTarget));
+        int upSlot = clampedGap;
+        for (int i = 0; i < upwardVms.Count; i++)
+        {
+            int currentFrom = virtualList.IndexOf(upwardVms[i]);
+            int dest = Math.Clamp(upSlot++, 0, listCount - 1);
+            if (currentFrom >= 0 && currentFrom != dest)
+            {
+                if (MoveItemCommand is IAsyncRelayCommand asyncCmd)
+                    await asyncCmd.ExecuteAsync((currentFrom, dest));
+                else
+                    MoveItemCommand?.Execute((currentFrom, dest));
+            }
         }
 
         virtualList.ClearSelection();
-        for (int i = 0; i < movingVms.Count; i++)
+        int firstNewIdx = -1;
+        for (int i = 0; i < allMovingVms.Count; i++)
         {
-            int newIdx = virtualList.IndexOf(movingVms[i]);
+            int newIdx = virtualList.IndexOf(allMovingVms[i]);
             if (newIdx >= 0)
+            {
+                if (firstNewIdx < 0) firstNewIdx = newIdx;
                 virtualList.SetIndexSelected(newIdx, true);
+            }
         }
 
-        int newAnchor = virtualList.IndexOf(targetVm);
-        _selectionAnchorIndex = newAnchor >= 0 ? newAnchor : clampedTarget;
+        _selectionAnchorIndex = firstNewIdx >= 0 ? firstNewIdx : Math.Clamp(clampedGap, 0, listCount - 1);
         _leadIndex = _selectionAnchorIndex;
     }
 

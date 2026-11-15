@@ -14,7 +14,6 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 {
     #region Constants - UI & UX
 
-    private const int NavigationDebounceMs = 300;
     private const int HintDisplayDurationMs = 1500;
     private const int FallbackPositionIntervalMs = 500;
     private const int ShuffleAnimationDurationMs = 500;
@@ -63,8 +62,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private DispatcherTimer? _fallbackTimer;
     private DispatcherTimer? _shuffleAnimationTimer;
 
-    private CancellationTokenSource? _nextDebounceCts;
-    private CancellationTokenSource? _prevDebounceCts;
+    private TrackInfo? _observedTrack;
 
     private bool _isSeeking;
     private bool _isInitializing;
@@ -76,6 +74,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private string _lastValidStreamInfo = "";
 
     private CancellationTokenSource? _activeHintCts;
+    private Action<bool>? _activeHintSetter;
 
     #endregion
 
@@ -205,7 +204,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     public static string PreviousTooltip => SL["Player_Previous"];
     public static string NextTooltip => SL["Player_Next"];
 
-    public string PlayPauseTooltip => IsPlaying
+    public bool ShowPauseIcon => IsPlaying || (IsLoading && _audio.ShouldPlayIntent);
+
+    public string PlayPauseTooltip => ShowPauseIcon
         ? SL["Player_Pause"]
         : SL["Player_Play"];
 
@@ -355,44 +356,26 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         NextCommand = new AsyncRelayCommand(async () =>
         {
             IsNavigating = true;
-            _nextDebounceCts?.Cancel();
-            _nextDebounceCts?.Dispose();
-            var cts = new CancellationTokenSource();
-            _nextDebounceCts = cts;
-
             try
             {
-                if (!await cts.Token.DelayNoThrowAsync(NavigationDebounceMs))
-                    return;
-
                 await _playerControl.NextAsync();
             }
             finally
             {
-                if (ReferenceEquals(_nextDebounceCts, cts))
-                    IsNavigating = false;
+                IsNavigating = false;
             }
         }, () => HasTrack);
 
         PreviousCommand = new AsyncRelayCommand(async () =>
         {
             IsNavigating = true;
-            _prevDebounceCts?.Cancel();
-            _prevDebounceCts?.Dispose();
-            var cts = new CancellationTokenSource();
-            _prevDebounceCts = cts;
-
             try
             {
-                if (!await cts.Token.DelayNoThrowAsync(NavigationDebounceMs))
-                    return;
-
                 await _playerControl.PreviousAsync();
             }
             finally
             {
-                if (ReferenceEquals(_prevDebounceCts, cts))
-                    IsNavigating = false;
+                IsNavigating = false;
             }
         }, () => HasTrack);
 
@@ -467,7 +450,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
         SwitchFormatCommand = new AsyncRelayCommand<StreamOption>(async option =>
         {
-            if (option == null) return;
+            if (option == null || option.IsActive) return;
             BeginTrackReset();
             await _audio.SwitchQualityAsync(option.Format, (int)option.Bitrate);
         });
@@ -536,6 +519,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             IsSeekBusy = false;
         }
 
+        OnPropertyChanged(nameof(ShowPauseIcon));
         OnPropertyChanged(nameof(PlayPauseTooltip));
         if (isPlaying && IsTrackResetting)
         {
@@ -550,6 +534,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         {
             IsSeekBusy = false;
         }
+
+        OnPropertyChanged(nameof(ShowPauseIcon));
+        OnPropertyChanged(nameof(PlayPauseTooltip));
     }
 
     private void OnPlayerControlRepeatModeChanged(RepeatMode mode)
@@ -570,6 +557,18 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private void OnPlayerControlIsLoadingChanged(bool loading)
     {
         IsLoading = loading;
+        OnPropertyChanged(nameof(ShowPauseIcon));
+        OnPropertyChanged(nameof(PlayPauseTooltip));
+
+        if (!loading && !IsPlaying && !_audio.StreamInfo.IsValid)
+        {
+            EndTrackReset();
+            if (string.IsNullOrEmpty(_lastValidStreamInfo))
+            {
+                ShowStreamInfo = false;
+                StreamInfo = "";
+            }
+        }
     }
 
     private void OnPlayerControlQueueCountChanged(int count)
@@ -650,16 +649,31 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         _activeHintCts?.Cancel();
         _activeHintCts?.Dispose();
+        _activeHintSetter?.Invoke(false);
+
         var cts = new CancellationTokenSource();
         _activeHintCts = cts;
+        _activeHintSetter = setVisible;
 
         setText();
         setVisible(true);
 
-        if (!await cts.Token.DelayNoThrowAsync(durationMs))
-            return;
+        try
+        {
+            if (!await cts.Token.DelayNoThrowAsync(durationMs))
+                return;
 
-        setVisible(false);
+            setVisible(false);
+        }
+        finally
+        {
+            if (ReferenceEquals(_activeHintCts, cts))
+            {
+                _activeHintCts = null;
+                _activeHintSetter = null;
+                cts.Dispose();
+            }
+        }
     }
 
     #endregion
@@ -883,10 +897,53 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         Log.Info($"[PlayerBar] MaxVolume changed: {oldMax} -> {newMax}");
     }
 
+    private void AttachObservedTrack(TrackInfo? track)
+    {
+        if (ReferenceEquals(_observedTrack, track))
+            return;
+
+        if (_observedTrack != null)
+            _observedTrack.PropertyChanged -= OnObservedTrackPropertyChanged;
+
+        _observedTrack = track;
+
+        if (track != null)
+            track.PropertyChanged += OnObservedTrackPropertyChanged;
+    }
+
+    private void OnObservedTrackPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (sender is not TrackInfo track || !ReferenceEquals(track, CurrentTrack))
+            return;
+
+        if (e.PropertyName is nameof(TrackInfo.Title) or nameof(TrackInfo.Author) or nameof(TrackInfo.ThumbnailUrl) or nameof(TrackInfo.Url))
+        {
+            if (Dispatcher.UIThread.CheckAccess())
+                RaiseTrackInfoChanged();
+            else
+                Dispatcher.UIThread.Post(RaiseTrackInfoChanged);
+        }
+        else if (e.PropertyName == nameof(TrackInfo.IsLiked))
+        {
+            void SyncLiked()
+            {
+                if (!ReferenceEquals(track, CurrentTrack)) return;
+                IsLiked = track.IsLiked;
+                OnPropertyChanged(nameof(LikeTooltip));
+            }
+
+            if (Dispatcher.UIThread.CheckAccess())
+                SyncLiked();
+            else
+                Dispatcher.UIThread.Post(SyncLiked);
+        }
+    }
+
     private void HandleTrackChanged(TrackInfo? track)
     {
         Equalizer.FlushPendingSave();
 
+        AttachObservedTrack(track);
         CurrentTrack = track;
         HasTrack = track != null;
 
@@ -988,6 +1045,12 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     /// </summary>
     private void HandleForceSync()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(HandleForceSync);
+            return;
+        }
+
         if (!HasTrack || CurrentTrack == null)
             return;
 
@@ -1371,11 +1434,13 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private async Task LoadFormatsAsync(bool forceRefresh = false)
     {
-        if (CurrentTrack == null) return;
+        var track = CurrentTrack;
+        if (track == null) return;
 
-        string videoId = CurrentTrack.Id.Replace("yt_", "");
+        string trackId = track.Id;
+        string videoId = track.GetRawId();
 
-        if (!forceRefresh && _restrictedTracks.TryGetValue(CurrentTrack.Id, out var cachedReason))
+        if (!forceRefresh && _restrictedTracks.TryGetValue(trackId, out var cachedReason))
         {
             await HandleMissingFormatsNotificationAsync(
                 new LoginRequiredException(
@@ -1425,7 +1490,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             // Cache ONLY content restrictions, NOT bot detection (it is transient)
             if (ex.Reason != LoginRequiredReason.BotDetection)
             {
-                _restrictedTracks[CurrentTrack.Id] = ex.Reason;
+                _restrictedTracks[trackId] = ex.Reason;
             }
 
             formats = [];
@@ -1441,7 +1506,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                 (ex.Message.Contains("LoginRequired", StringComparison.OrdinalIgnoreCase) ||
                  ex.Message.Contains("403")))
             {
-                _restrictedTracks[CurrentTrack.Id] = LoginRequiredReason.Unknown;
+                _restrictedTracks[trackId] = LoginRequiredReason.Unknown;
             }
 
             formats = [];
@@ -1454,7 +1519,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             }
         }
 
-        if (token.IsCancellationRequested) return;
+        if (token.IsCancellationRequested || CurrentTrack?.Id != trackId) return;
 
         var (currentFormat, currentBitrate, _) = _audio.GetCurrentStreamInfo();
 
@@ -1486,7 +1551,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         {
             if (!_youtube.AuthService.IsAuthenticated && caughtException is not YoutubeNetworkException)
             {
-                _restrictedTracks.TryAdd(CurrentTrack.Id, LoginRequiredReason.Unknown);
+                _restrictedTracks.TryAdd(trackId, LoginRequiredReason.Unknown);
             }
 
             await HandleMissingFormatsNotificationAsync(caughtException, errorMessage);
@@ -1682,11 +1747,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _activeHintCts?.Cancel();
             _activeHintCts?.Dispose();
 
-            _nextDebounceCts?.Cancel();
-            _nextDebounceCts?.Dispose();
-
-            _prevDebounceCts?.Cancel();
-            _prevDebounceCts?.Dispose();
+            AttachObservedTrack(null);
 
             _shuffleAnimationTimer?.Stop();
             _shuffleAnimationTimer = null;

@@ -53,6 +53,7 @@ public partial class MainWindow : Window
     #region Fields — Services
 
     private PlayerControlService? _playerControl;
+    private MediaTransportCoordinator? _mediaTransport;
     private readonly LibraryService? _library;
     private readonly Grid? _rootGrid;
 
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
         InitializeChrome();
         InitializeLifecycle();
         SetupTrayIcon();
+        InitializeMediaTransport();
         InitializeCopyHint();
 
         SingleInstanceGuard.RegisterActivationCallback(() =>
@@ -126,10 +128,37 @@ public partial class MainWindow : Window
 
     #region Cleanup
 
+    private void InitializeMediaTransport()
+    {
+        _mediaTransport = AppEntry.Services.GetService<MediaTransportCoordinator>();
+        if (_mediaTransport == null) return;
+
+        var handle = TryGetPlatformHandle();
+        if (handle != null && handle.Handle != IntPtr.Zero)
+            _mediaTransport.AttachWindow(handle.Handle);
+        else
+            Opened += OnWindowOpenedAttachMediaTransport;
+    }
+
+    private void OnWindowOpenedAttachMediaTransport(object? sender, EventArgs e)
+    {
+        Opened -= OnWindowOpenedAttachMediaTransport;
+        var handle = TryGetPlatformHandle();
+        if (handle != null && handle.Handle != IntPtr.Zero)
+            _mediaTransport?.AttachWindow(handle.Handle);
+    }
+
+    private void DetachMediaTransport()
+    {
+        Opened -= OnWindowOpenedAttachMediaTransport;
+        _mediaTransport?.DetachWindow();
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         SingleInstanceGuard.RegisterActivationCallback(null);
 
+        DetachMediaTransport();
         CleanupLifecycle();
         CleanupTray();
         CleanupCopyHint();

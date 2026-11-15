@@ -14,6 +14,7 @@ public partial class MainWindow
     private Button? _maximizeButton;
     private Button? _closeButton;
     private Border? _dragArea;
+    private bool _isCloseDialogOpen;
 
     private void InitializeChrome()
     {
@@ -96,9 +97,11 @@ public partial class MainWindow
 
     protected override async void OnClosing(WindowClosingEventArgs e)
     {
-        if (_forceClose)
+        if (_forceClose || e.CloseReason is WindowCloseReason.OSShutdown or WindowCloseReason.ApplicationShutdown)
         {
             base.OnClosing(e);
+            if (!e.Cancel)
+                DetachMediaTransport();
             return;
         }
 
@@ -113,32 +116,43 @@ public partial class MainWindow
 
             case CloseAction.Ask:
                 e.Cancel = true;
-                await HandleAskCloseAsync();
+                if (!_isCloseDialogOpen)
+                    await HandleAskCloseAsync();
                 break;
 
             case CloseAction.Exit:
             default:
                 base.OnClosing(e);
+                if (!e.Cancel)
+                    DetachMediaTransport();
                 break;
         }
     }
 
     private async Task HandleAskCloseAsync()
     {
-        var dialog = AppEntry.Services.GetRequiredService<DialogService>();
-        var result = await dialog.ShowCloseActionDialogAsync();
-
-        if (result is null) return;
-
-        if (result.IsChecked)
-            _library?.UpdateSettings(s => s.CloseAction = result.Value);
-
-        if (result.Value == CloseAction.MinimizeToTray)
-            MinimizeToTray();
-        else
+        _isCloseDialogOpen = true;
+        try
         {
-            _forceClose = true;
-            Close();
+            var dialog = AppEntry.Services.GetRequiredService<DialogService>();
+            var result = await dialog.ShowCloseActionDialogAsync();
+
+            if (result is null) return;
+
+            if (result.IsChecked)
+                _library?.UpdateSettings(s => s.CloseAction = result.Value);
+
+            if (result.Value == CloseAction.MinimizeToTray)
+                MinimizeToTray();
+            else
+            {
+                _forceClose = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _isCloseDialogOpen = false;
         }
     }
 }

@@ -30,7 +30,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         TrackInfo Track,
         int Session,
         TimeSpan? SeekPosition = null,
-        bool IsRetry = false) : IEngineCommand;
+        bool IsRetry = false,
+        int PauseEpoch = -1) : IEngineCommand;
 
     /// <summary>Start the queue from the specified track.</summary>
     private sealed record StartQueueCommand(
@@ -38,17 +39,28 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         TrackInfo StartTrack,
         int Session,
         string? PlaylistId = null,
-        string? PlaylistName = null) : IEngineCommand;
+        string? PlaylistName = null,
+        int PauseEpoch = -1) : IEngineCommand;
 
     /// <summary>Play the current queue index; when StartPlaying = false, the track is loaded in a paused state.</summary>
-    private sealed record PlayCurrentIndexCommand(int Session, bool StartPlaying = true) : IEngineCommand;
+    private sealed record PlayCurrentIndexCommand(int Session, bool StartPlaying = true, int PauseEpoch = -1) : IEngineCommand;
 
     /// <summary>Navigate forward/backward.</summary>
     /// <param name="Forward">Navigation direction.</param>
     /// <param name="UserInitiated">Whether the action was user-initiated.</param>
     /// <param name="StartPlaying">Whether to start playback on the target track.</param>
     /// <param name="EndedTrackId">Id of the naturally finished track for auto-transition; null for transition without stale check.</param>
-    private sealed record NavigateCommand(bool Forward, bool UserInitiated, bool StartPlaying = true, string? EndedTrackId = null) : IEngineCommand;
+    /// <param name="ReplaceSeq">Queue replacement sequence captured when the command was enqueued.</param>
+    /// <param name="Session">Session identifier for auto-advance staleness checks.</param>
+    /// <param name="PauseEpoch">Pause generation captured when the command was enqueued.</param>
+    private sealed record NavigateCommand(
+        bool Forward,
+        bool UserInitiated,
+        bool StartPlaying = true,
+        string? EndedTrackId = null,
+        long ReplaceSeq = 0,
+        int Session = -1,
+        int PauseEpoch = -1) : IEngineCommand;
 
     /// <summary>Change format/quality of the active track (enqueued to prevent race conditions).</summary>
     private sealed record SwitchQualityCommand(
@@ -140,6 +152,11 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private readonly Channel<IEngineCommand> _commandQueue;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly Lock _queueLock = new();
+    private readonly Lock _playerDispatchLock = new();
+    private long _queueReplaceSeq;
+    private int _pauseEpoch;
+    private int _nTokenActiveSession;
+    private long _lastSwitchPositionTicks;
 
     private SessionGuard _session;
     private CancellationTokenSource? _sessionCts;
@@ -185,7 +202,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private string? _nTokenActiveTrackId;
     private string? _nTokenWarnedTrackId;
     private string? _sealedFailedTrackId;
-    private volatile bool _isManualLoading;
+    private int _manualLoadingFlag;
+    private int _lastDetailedPlaybackState = -1;
 
     // Playback intent. Not derived from _player.State: a track loaded "paused" stays in Stopped, not Paused
     private volatile bool _playIntent;
@@ -220,26 +238,92 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     #region Observable Properties
 
-    [ObservableProperty] public partial TrackInfo? CurrentTrack { get; private set; }
+    private TrackInfo? _currentTrack;
+    public TrackInfo? CurrentTrack
+    {
+        get => Volatile.Read(ref _currentTrack);
+        private set
+        {
+            if (ReferenceEquals(Interlocked.Exchange(ref _currentTrack, value), value))
+                return;
+
+            if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+                OnPropertyChanged();
+            else
+                RaiseOnUI(_raiseCurrentTrackPropertyChangedDelegate);
+        }
+    }
 
     private AudioStreamInfo _streamInfo = AudioStreamInfo.Empty;
     public AudioStreamInfo StreamInfo
     {
         get => _streamInfo;
-        private set => SetProperty(ref _streamInfo, value);
+        private set
+        {
+            if (EqualityComparer<AudioStreamInfo>.Default.Equals(_streamInfo, value))
+                return;
+
+            _streamInfo = value;
+            if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+                OnPropertyChanged();
+            else
+                RaiseOnUI(_raiseStreamInfoPropertyChangedDelegate);
+        }
     }
+
+    private volatile bool _shuffleEnabled;
+    private int _repeatMode = (int)RepeatMode.None;
 
     public bool IsPlaying => _player.State == PlaybackState.Playing;
     public bool IsPaused => _player.State == PlaybackState.Paused;
 
     /// <summary>
-    /// Returns true if the player is currently buffering, loading, or seeking.
+    /// Returns true if the player is currently buffering or loading.
     /// </summary>
-    public bool IsLoading => _isManualLoading || _player.State is PlaybackState.Loading or PlaybackState.Buffering || _player.DetailedState == PlayerState.Seeking;
+    public bool IsLoading => Volatile.Read(ref _manualLoadingFlag) != 0
+        || _player.State is PlaybackState.Loading or PlaybackState.Buffering;
+
+    /// <summary>
+    /// Effective playback state including manual loading before pipeline initialization.
+    /// </summary>
+    public PlaybackState EffectivePlaybackState
+    {
+        get
+        {
+            var state = _player.State;
+            if (Volatile.Read(ref _manualLoadingFlag) != 0 && state is PlaybackState.Stopped or PlaybackState.Error)
+                return PlaybackState.Loading;
+
+            return state;
+        }
+    }
+
+    /// <summary>Gets whether the user currently intends playback to be active.</summary>
+    public bool ShouldPlayIntent => _playIntent;
 
     public int CurrentQueueIndex => Volatile.Read(ref _currentIndex);
-    public bool ShuffleEnabled { get; set; }
-    public RepeatMode RepeatMode { get; set; }
+
+    public bool ShuffleEnabled
+    {
+        get => _shuffleEnabled;
+        set
+        {
+            if (_shuffleEnabled == value) return;
+            _shuffleEnabled = value;
+            RaiseOnUI(_raisePlaybackModesChangedOnUIDelegate);
+        }
+    }
+
+    public RepeatMode RepeatMode
+    {
+        get => (RepeatMode)Volatile.Read(ref _repeatMode);
+        set
+        {
+            int next = (int)value;
+            if (Interlocked.Exchange(ref _repeatMode, next) == next) return;
+            RaiseOnUI(_raisePlaybackModesChangedOnUIDelegate);
+        }
+    }
 
     public TimeSpan CurrentPosition => _player.Position;
     public TimeSpan TotalDuration => _player.Duration;
@@ -257,6 +341,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     public event Action<TimeSpan>? OnPositionChanged;
     public event Action<TimeSpan>? OnSeekCompleted;
     public event Action<bool, bool>? OnPlaybackStateChanged;
+    public event Action<PlaybackState>? OnDetailedPlaybackStateChanged;
+    public event Action<RepeatMode, bool>? OnPlaybackModesChanged;
     public event Action? OnQueueChanged;
     public event Action? OnQueueSourceChanged;
     public event Action<bool>? OnLoadingStateChanged;
@@ -272,6 +358,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     private readonly Action _raiseQueueChangedOnUIDelegate;
     private readonly Action _raiseQueueSourceChangedOnUIDelegate;
+    private readonly Action _raiseCurrentTrackPropertyChangedDelegate;
+    private readonly Action _raiseStreamInfoPropertyChangedDelegate;
 
     private readonly Action<TimeSpan> _positionChangedHandler;
     private readonly Action _raisePositionChangedOnUIDelegate;
@@ -291,6 +379,16 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     private readonly Action _deviceRestoredHandler;
     private readonly Action _raiseDeviceRestoredOnUIDelegate;
+    private readonly Action _raiseManualLoadingChangedOnUIDelegate;
+    private readonly Action _raisePlaybackModesChangedOnUIDelegate;
+    private readonly Action _raiseStateStoppedOnUIDelegate;
+    private readonly Action _raiseStateStoppedAsLoadingOnUIDelegate;
+    private readonly Action _raiseStateLoadingOnUIDelegate;
+    private readonly Action _raiseStateBufferingOnUIDelegate;
+    private readonly Action _raiseStatePlayingOnUIDelegate;
+    private readonly Action _raiseStatePausedOnUIDelegate;
+    private readonly Action _raiseStateErrorOnUIDelegate;
+    private readonly Action _raiseStateErrorAsLoadingOnUIDelegate;
 
     #endregion
 
@@ -318,6 +416,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
             OnQueueSourceChanged?.Invoke();
         };
         _raiseQueueSourceChangedOnUIDelegate = () => OnQueueSourceChanged?.Invoke();
+        _raiseCurrentTrackPropertyChangedDelegate = () => OnPropertyChanged(nameof(CurrentTrack));
+        _raiseStreamInfoPropertyChangedDelegate = () => OnPropertyChanged(nameof(StreamInfo));
 
         _positionChangedHandler = HandlePositionChangedInternal;
         _raisePositionChangedOnUIDelegate = () => OnPositionChanged?.Invoke(TimeSpan.FromTicks(Volatile.Read(ref _currentPositionTicks)));
@@ -333,6 +433,23 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
         _deviceRestoredHandler = HandleDeviceRestoredInternal;
         _raiseDeviceRestoredOnUIDelegate = () => OnDeviceRestored?.Invoke();
+        _raiseManualLoadingChangedOnUIDelegate = () =>
+        {
+            OnPropertyChanged(nameof(IsLoading));
+            OnLoadingStateChanged?.Invoke(IsLoading);
+            RaiseDetailedPlaybackStateIfChanged(EffectivePlaybackState);
+        };
+        _raisePlaybackModesChangedOnUIDelegate = () =>
+            OnPlaybackModesChanged?.Invoke(RepeatMode, ShuffleEnabled);
+
+        _raiseStateStoppedOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Stopped, effectiveStoppedAsLoading: false);
+        _raiseStateStoppedAsLoadingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Stopped, effectiveStoppedAsLoading: true);
+        _raiseStateLoadingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Loading, effectiveStoppedAsLoading: false);
+        _raiseStateBufferingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Buffering, effectiveStoppedAsLoading: false);
+        _raiseStatePlayingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Playing, effectiveStoppedAsLoading: false);
+        _raiseStatePausedOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Paused, effectiveStoppedAsLoading: false);
+        _raiseStateErrorOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Error, effectiveStoppedAsLoading: false);
+        _raiseStateErrorAsLoadingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Error, effectiveStoppedAsLoading: true);
 
         _player = new AudioPlayer(new AudioPlayerOptions
         {
@@ -443,20 +560,10 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     #region Session Management
 
-    private sealed class DeferredSessionCtsCleanup(CancellationTokenSource cts)
-    {
-        private Timer? _timer;
-
-        public void Schedule(int delayMs) =>
-            _timer = new Timer(static state =>
-            {
-                var self = (DeferredSessionCtsCleanup)state!;
-                try { self._timer?.Dispose(); } catch { }
-                try { self.Cts.Dispose(); } catch (ObjectDisposedException) { }
-            }, this, delayMs, Timeout.Infinite);
-
-        private CancellationTokenSource Cts => cts;
-    }
+    private const long SessionCtsDisposeGraceMs = 3_000;
+    private readonly ConcurrentQueue<(CancellationTokenSource Cts, long DisposeAfterTick)> _retiredSessionCts = new();
+    private readonly Lock _retiredCtsTimerLock = new();
+    private Timer? _retiredCtsTimer;
 
     private int BeginNewSession()
     {
@@ -471,18 +578,74 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
                 : null;
         }
 
+        DrainExpiredRetiredSessionCts();
+
         if (oldCts != null)
         {
-            // Cancel on ThreadPool to keep UI thread responsive, and defer Dispose() past concurrent CreateLinkedTokenSource readers.
+            long disposeAt = Environment.TickCount64 + SessionCtsDisposeGraceMs;
+            _retiredSessionCts.Enqueue((oldCts, disposeAt));
+            ArmRetiredCtsCleanupTimer();
+
+            // Cancel on ThreadPool to keep UI thread responsive while SessionGuard rejects stale callers synchronously.
             ThreadPool.UnsafeQueueUserWorkItem(static state =>
             {
-                var cts = (CancellationTokenSource)state!;
-                try { cts.Cancel(); } catch (ObjectDisposedException) { }
-                new DeferredSessionCtsCleanup(cts).Schedule(3_000);
+                try { ((CancellationTokenSource)state!).Cancel(); }
+                catch (ObjectDisposedException) { }
             }, oldCts);
         }
 
         return session;
+    }
+
+    private void ArmRetiredCtsCleanupTimer()
+    {
+        if (Volatile.Read(ref _disposeState) != 0)
+            return;
+
+        lock (_retiredCtsTimerLock)
+        {
+            if (Volatile.Read(ref _disposeState) != 0)
+                return;
+
+            _retiredCtsTimer ??= new Timer(static state => ((AudioEngine)state!).OnRetiredCtsCleanupTimer(), this, Timeout.Infinite, Timeout.Infinite);
+            _retiredCtsTimer.Change(SessionCtsDisposeGraceMs + 100, Timeout.Infinite);
+        }
+    }
+
+    private void OnRetiredCtsCleanupTimer()
+    {
+        DrainExpiredRetiredSessionCts();
+
+        if (!_retiredSessionCts.IsEmpty && Volatile.Read(ref _disposeState) == 0)
+            ArmRetiredCtsCleanupTimer();
+    }
+
+    private void DrainExpiredRetiredSessionCts()
+    {
+        long now = Environment.TickCount64;
+        while (_retiredSessionCts.TryPeek(out var head) && head.DisposeAfterTick <= now)
+        {
+            if (_retiredSessionCts.TryDequeue(out var item))
+            {
+                try { item.Cts.Dispose(); }
+                catch (ObjectDisposedException) { }
+            }
+        }
+    }
+
+    private void DisposeRetiredSessionCts()
+    {
+        lock (_retiredCtsTimerLock)
+        {
+            _retiredCtsTimer?.Dispose();
+            _retiredCtsTimer = null;
+        }
+
+        while (_retiredSessionCts.TryDequeue(out var item))
+        {
+            try { item.Cts.Dispose(); }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     private CancellationToken GetSessionToken()
@@ -504,8 +667,18 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     {
         if (track == null) return Task.CompletedTask;
         ResetSealedFailedTrack();
-        int session = BeginNewSession();
-        EnqueueCommand(new PlayTrackCommand(track, session, null));
+
+        int session;
+        int pauseEpoch;
+        lock (_playerDispatchLock)
+        {
+            _playIntent = true;
+            Interlocked.Increment(ref _queueReplaceSeq);
+            pauseEpoch = Volatile.Read(ref _pauseEpoch);
+            session = BeginNewSession();
+        }
+
+        EnqueueCommand(new PlayTrackCommand(track, session, null, PauseEpoch: pauseEpoch));
         return Task.CompletedTask;
     }
 
@@ -516,31 +689,120 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         string? playlistName = null)
     {
         ResetSealedFailedTrack();
-        int session = BeginNewSession();
-        EnqueueCommand(new StartQueueCommand(tracks, startTrack, session, playlistId, playlistName));
+
+        int session;
+        int pauseEpoch;
+        lock (_playerDispatchLock)
+        {
+            _playIntent = true;
+            Interlocked.Increment(ref _queueReplaceSeq);
+            pauseEpoch = Volatile.Read(ref _pauseEpoch);
+            session = BeginNewSession();
+        }
+
+        EnqueueCommand(new StartQueueCommand(tracks, startTrack, session, playlistId, playlistName, PauseEpoch: pauseEpoch));
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Starts or resumes playback idempotently and records user playback intent.
+    /// </summary>
+    public Task PlayAsync()
+    {
+        bool notifyManualLoadingPlay = false;
+
+        lock (_playerDispatchLock)
+        {
+            _playIntent = true;
+
+            var state = _player.State;
+            if (state is PlaybackState.Stopped or PlaybackState.Error)
+            {
+                if (Volatile.Read(ref _manualLoadingFlag) == 0 && CurrentTrack != null)
+                {
+                    ResetSealedFailedTrack();
+                    int pauseEpoch = Volatile.Read(ref _pauseEpoch);
+                    int session = BeginNewSession();
+                    EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: true, PauseEpoch: pauseEpoch));
+                }
+                else if (Volatile.Read(ref _manualLoadingFlag) != 0)
+                {
+                    notifyManualLoadingPlay = true;
+                }
+            }
+            else
+            {
+                _player.Resume();
+            }
+        }
+
+        if (notifyManualLoadingPlay)
+            RaiseOnUI(_raiseManualLoadingChangedOnUIDelegate);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Pauses playback idempotently and records user pause intent.
+    /// </summary>
+    public Task PauseAsync()
+    {
+        bool notifyManualLoadingPause = false;
+
+        lock (_playerDispatchLock)
+        {
+            _playIntent = false;
+            Interlocked.Increment(ref _pauseEpoch);
+            if (_player.State is PlaybackState.Stopped or PlaybackState.Error
+                && Volatile.Read(ref _manualLoadingFlag) != 0)
+            {
+                notifyManualLoadingPause = true;
+            }
+            _player.Pause();
+        }
+
+        if (notifyManualLoadingPause)
+            RaiseOnUI(_raiseManualLoadingChangedOnUIDelegate);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Atomically toggles playback intent under <see cref="_playerDispatchLock"/>.
+    /// </summary>
+    internal Task TogglePlaybackStateAsync()
+    {
+        lock (_playerDispatchLock)
+        {
+            return _playIntent ? PauseAsync() : PlayAsync();
+        }
     }
 
     /// <summary>
     /// Starts or pauses playback and records user playback intent.
     /// </summary>
     /// <param name="shouldPlay">true to play, false to pause.</param>
-    public Task SetPlaybackStateAsync(bool shouldPlay)
-    {
-        _playIntent = shouldPlay;
-        if (shouldPlay)
-        {
-            if (_player.State == PlaybackState.Paused) _player.Resume();
-            else if (_player.State is PlaybackState.Stopped or PlaybackState.Error && CurrentTrack != null)
-            {
-                ResetSealedFailedTrack();
-                int session = BeginNewSession();
-                EnqueueCommand(new PlayCurrentIndexCommand(session));
-            }
-        }
-        else _player.Pause();
+    public Task SetPlaybackStateAsync(bool shouldPlay) =>
+        shouldPlay ? PlayAsync() : PauseAsync();
 
-        return Task.CompletedTask;
+    /// <summary>
+    /// Stops active audio playback and resets position to zero while keeping the current track and queue intact.
+    /// </summary>
+    public void StopPlaybackKeepTrack()
+    {
+        lock (_playerDispatchLock)
+        {
+            _playIntent = false;
+            Interlocked.Increment(ref _pauseEpoch);
+            Interlocked.Increment(ref _queueReplaceSeq);
+            BeginNewSession();
+            _player.Stop();
+        }
+
+        SetManualLoading(false);
+        Volatile.Write(ref _lastSwitchPositionTicks, 0);
+        Volatile.Write(ref _currentPositionTicks, 0);
+        RaiseOnUI(_raisePositionChangedOnUIDelegate);
     }
 
     /// <summary>
@@ -548,9 +810,14 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     public void Stop()
     {
-        _playIntent = false;
-        BeginNewSession();
-        _player.Stop();
+        lock (_playerDispatchLock)
+        {
+            _playIntent = false;
+            Interlocked.Increment(ref _pauseEpoch);
+            Interlocked.Increment(ref _queueReplaceSeq);
+            BeginNewSession();
+            _player.Stop();
+        }
 
         bool sourceChanged = false;
         lock (_queueLock)
@@ -563,6 +830,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
             }
         }
 
+        Volatile.Write(ref _lastSwitchPositionTicks, 0);
         CurrentTrack = null;
         StreamInfo = AudioStreamInfo.Empty;
 
@@ -574,8 +842,35 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         });
     }
 
-    public Task PlayNextAsync(bool startPlaying = true) { ResetSealedFailedTrack(); EnqueueCommand(new NavigateCommand(true, true, startPlaying)); return Task.CompletedTask; }
-    public Task PlayPreviousAsync(bool startPlaying = true) { ResetSealedFailedTrack(); EnqueueCommand(new NavigateCommand(false, true, startPlaying)); return Task.CompletedTask; }
+    public Task PlayNextAsync(bool startPlaying = true)
+    {
+        ResetSealedFailedTrack();
+        long replaceSeq;
+        int pauseEpoch;
+        lock (_playerDispatchLock)
+        {
+            replaceSeq = Volatile.Read(ref _queueReplaceSeq);
+            pauseEpoch = startPlaying ? Volatile.Read(ref _pauseEpoch) : -1;
+        }
+
+        EnqueueCommand(new NavigateCommand(true, true, startPlaying, ReplaceSeq: replaceSeq, PauseEpoch: pauseEpoch));
+        return Task.CompletedTask;
+    }
+
+    public Task PlayPreviousAsync(bool startPlaying = true)
+    {
+        ResetSealedFailedTrack();
+        long replaceSeq;
+        int pauseEpoch;
+        lock (_playerDispatchLock)
+        {
+            replaceSeq = Volatile.Read(ref _queueReplaceSeq);
+            pauseEpoch = startPlaying ? Volatile.Read(ref _pauseEpoch) : -1;
+        }
+
+        EnqueueCommand(new NavigateCommand(false, true, startPlaying, ReplaceSeq: replaceSeq, PauseEpoch: pauseEpoch));
+        return Task.CompletedTask;
+    }
 
     #endregion
 
@@ -586,6 +881,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     public ValueTask SeekAsync(TimeSpan position)
     {
+        Volatile.Write(ref _lastSwitchPositionTicks, position.Ticks);
         return _player.SeekAsync(position);
     }
 
@@ -612,16 +908,44 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     private void SetManualLoading(bool loading)
     {
-        RaiseOnUI(() =>
-        {
-            if (_isManualLoading != loading)
-            {
-                _isManualLoading = loading;
-                OnPropertyChanged(nameof(IsLoading));
-                OnLoadingStateChanged?.Invoke(IsLoading);
-            }
-        });
+        int newVal = loading ? 1 : 0;
+        if (Interlocked.Exchange(ref _manualLoadingFlag, newVal) == newVal)
+            return;
+
+        RaiseOnUI(_raiseManualLoadingChangedOnUIDelegate);
     }
+
+    private void RaiseDetailedPlaybackStateIfChanged(PlaybackState effectiveState)
+    {
+        int next = (int)effectiveState;
+        if (Interlocked.Exchange(ref _lastDetailedPlaybackState, next) != next)
+            OnDetailedPlaybackStateChanged?.Invoke(effectiveState);
+    }
+
+    private void RaiseStateChangedOnUI(PlaybackState state, bool effectiveStoppedAsLoading)
+    {
+        OnPropertyChanged(nameof(IsPlaying));
+        OnPropertyChanged(nameof(IsPaused));
+        OnPropertyChanged(nameof(IsLoading));
+        OnPropertyChanged(nameof(TotalDuration));
+        OnPlaybackStateChanged?.Invoke(state == PlaybackState.Playing, state == PlaybackState.Paused);
+        OnLoadingStateChanged?.Invoke(IsLoading);
+
+        var effectiveState = effectiveStoppedAsLoading && state is PlaybackState.Stopped or PlaybackState.Error
+            ? PlaybackState.Loading
+            : state;
+        RaiseDetailedPlaybackStateIfChanged(effectiveState);
+    }
+
+    private Action GetStateChangedUIDelegate(PlaybackState state, bool isManualLoading) => state switch
+    {
+        PlaybackState.Loading => _raiseStateLoadingOnUIDelegate,
+        PlaybackState.Buffering => _raiseStateBufferingOnUIDelegate,
+        PlaybackState.Playing => _raiseStatePlayingOnUIDelegate,
+        PlaybackState.Paused => _raiseStatePausedOnUIDelegate,
+        PlaybackState.Error => isManualLoading ? _raiseStateErrorAsLoadingOnUIDelegate : _raiseStateErrorOnUIDelegate,
+        _ => isManualLoading ? _raiseStateStoppedAsLoadingOnUIDelegate : _raiseStateStoppedOnUIDelegate
+    };
 
     private static void RaiseOnUI(Action action)
     {

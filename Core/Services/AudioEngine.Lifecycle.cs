@@ -94,8 +94,13 @@ public sealed partial class AudioEngine
 
         if (!string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal)) return;
 
-        BeginNewSession();
-        _player.Stop();
+        lock (_playerDispatchLock)
+        {
+            _playIntent = false;
+            Interlocked.Increment(ref _pauseEpoch);
+            BeginNewSession();
+            _player.Stop();
+        }
     }
 
     /// <summary>
@@ -223,6 +228,7 @@ public sealed partial class AudioEngine
         try { Volatile.Read(ref _activePlayTask)?.Wait(millisecondsTimeout: 500); } catch { }
 
         _player.Dispose();
+        DisposeRetiredSessionCts();
         _persistenceSignal.Dispose();
         _lifetimeCts.Dispose();
     }
@@ -241,12 +247,12 @@ public sealed partial class AudioEngine
         Audio.Sources.CachingStreamSource.OnNetworkRecovered -= HandleSourceNetworkRecovered;
         UnsubscribeNetworkManagerEvents();
 
+        CancellationTokenSource? sessionCts;
         lock (_sessionLock)
         {
-            var scts = _sessionCts;
+            sessionCts = _sessionCts;
             _sessionCts = null;
-            try { scts?.Cancel(); } catch (ObjectDisposedException) { }
-            try { scts?.Dispose(); } catch (ObjectDisposedException) { }
+            try { sessionCts?.Cancel(); } catch (ObjectDisposedException) { }
         }
 
         try
@@ -318,6 +324,8 @@ public sealed partial class AudioEngine
         }
 
         await _player.DisposeAsync().ConfigureAwait(false);
+        try { sessionCts?.Dispose(); } catch (ObjectDisposedException) { }
+        DisposeRetiredSessionCts();
         _persistenceSignal.Dispose();
         _lifetimeCts.Dispose();
     }

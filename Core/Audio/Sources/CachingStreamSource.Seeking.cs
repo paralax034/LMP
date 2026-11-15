@@ -116,7 +116,7 @@ internal sealed partial class CachingStreamSource
 
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, CurrentDownloadToken);
             timeoutCts.CancelAfter(ComputeAdaptiveSeekCriticalTimeoutMs(prefetchLength));
 
             await EnsureRangeAsync(targetBytePos, prefetchLength, timeoutCts.Token, isCritical: true)

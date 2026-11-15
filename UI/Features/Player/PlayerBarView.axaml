@@ -327,9 +327,9 @@
                         ToolTip.VerticalOffset="-6">
                         <Panel>
                             <PathIcon Width="26" Height="26" Data="{StaticResource Icon.Pause}"
-                                IsVisible="{Binding IsPlaying}" />
+                                IsVisible="{Binding ShowPauseIcon}" />
                             <PathIcon Width="26" Height="26" Data="{StaticResource Icon.Play}"
-                                IsVisible="{Binding !IsPlaying}" />
+                                IsVisible="{Binding !ShowPauseIcon}" />
                         </Panel>
                     </Button>
                     <Button Width="40" Height="40" Classes="playback-btn"
@@ -530,10 +530,11 @@
                             <PathIcon Width="22" Height="22"
                                 Foreground="{DynamicResource TextMutedBrush}"
                                 Data="{StaticResource Icon.MusicNote}"
-                                IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}, ConverterParameter=invert}" />
-                            <Image controls:SmartImage.Source="{Binding SafeThumbnail}"
+                                IsVisible="{Binding #TrackCoverImage.Source, Converter={StaticResource NullToVisible}, ConverterParameter=invert}" />
+                            <Image x:Name="TrackCoverImage"
+                                controls:SmartImage.Source="{Binding SafeThumbnail}"
                                 controls:SmartImage.Quality="Low"
-                                IsVisible="{Binding SafeThumbnail, Converter={StaticResource NullToVisible}}"
+                                IsVisible="{Binding #TrackCoverImage.Source, Converter={StaticResource NullToVisible}}"
                                 Stretch="UniformToFill" />
                         </Panel>
                     </Border>

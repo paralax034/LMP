@@ -556,6 +556,8 @@ public sealed partial class AudioEngine
 
         bool notifyUiHeaderImmediately;
         float preampDbSnapshot;
+        TrackInfo? trackToSync = null;
+        string? presetToSync = null;
 
         lock (_eqPersistenceLock)
         {
@@ -578,7 +580,8 @@ public sealed partial class AudioEngine
                         notifyUiHeaderImmediately = true;
                     }
 
-                    SyncTrackPresetInMemory(track, encoded);
+                    trackToSync = track;
+                    presetToSync = encoded;
                 }
 
                 if (!wasEnabled)
@@ -621,6 +624,9 @@ public sealed partial class AudioEngine
             }
         }
 
+        if (trackToSync != null)
+            SyncTrackPresetInMemory(trackToSync, presetToSync);
+
         var pipeline = _player.GetActivePipeline();
         pipeline?.Equalizer.Configure(
             enabled: true,
@@ -656,7 +662,6 @@ public sealed partial class AudioEngine
             if (trackToSave != null)
             {
                 encodedTrackPreset = EqualizerPresets.EncodeCustomTrackBands(_liveTrackCustomBands);
-                SyncTrackPresetInMemory(trackToSave, encodedTrackPreset);
             }
             else
             {
@@ -702,6 +707,7 @@ public sealed partial class AudioEngine
 
         if (trackToSave != null)
         {
+            SyncTrackPresetInMemory(trackToSave, encodedTrackPreset);
             _ = _library.SetTrackEqualizerPresetAsync(trackToSave, encodedTrackPreset);
         }
 

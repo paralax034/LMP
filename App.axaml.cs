@@ -28,6 +28,7 @@ public partial class App : Application
         Log.Info("Framework initialization completed.");
         // The flag is raised from within the loop: synchronous theme, localization, and splash prevent false 400ms SPIKE pings
         Dispatcher.UIThread.Post(LMP.Core.Diagnostics.ProcessFlightRecorder.MarkUiDispatcherReady, DispatcherPriority.Background);
+        AudioSourceFactory.RegisterLazyFactory(() => AppEntry.Services.GetRequiredService<AudioCacheManager>());
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -406,10 +407,9 @@ public partial class App : Application
             bool isCleaningUp = false;
             desktop.ShutdownRequested += (sender, e) =>
             {
-                if (isCleaningUp) return;
-
-                // Cancel immediate synchronous OS process termination
+                // Cancel immediate synchronous OS process termination on first and duplicate requests
                 e.Cancel = true;
+                if (isCleaningUp) return;
                 isCleaningUp = true;
 
                 // Redirect cleanup execution to the UI thread queue tracking the Task (without async void)
@@ -425,8 +425,11 @@ public partial class App : Application
 
                         // GRACEFULLY release the audio engine and cache.
                         // Do this BEFORE canceling the token so threads terminate normally without throwing IOException
+                        AppEntry.Services.GetService<MediaTransportCoordinator>()?.Dispose();
+                        AppEntry.Services.GetService<PlayerControlService>()?.Dispose();
                         await audioEngine.DisposeAsync().ConfigureAwait(false);
-                        var cacheToDispose = audioCacheManager ?? AudioSourceFactory.GlobalCache;
+                        AppEntry.Services.GetService<ImageCacheService>()?.Dispose();
+                        var cacheToDispose = audioCacheManager ?? AudioSourceFactory.TryGetInitializedGlobalCache();
                         if (cacheToDispose != null)
                         {
                             await cacheToDispose.DisposeAsync().ConfigureAwait(false);

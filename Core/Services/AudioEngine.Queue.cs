@@ -169,6 +169,38 @@ public sealed partial class AudioEngine
         }
     }
 
+    /// <summary>
+    /// Gets whether manual next navigation can advance in the queue under current repeat settings.
+    /// </summary>
+    public bool CanGoNext
+    {
+        get
+        {
+            lock (_queueLock)
+            {
+                if (_queue.Count == 0 || _currentIndex < 0 || _currentIndex >= _queue.Count)
+                    return false;
+
+                return ComputeNextIndex(_currentIndex, _queue.Count, RepeatMode == RepeatMode.All, userInitiated: true) >= 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets whether manual previous navigation is available (jumps to previous track or restarts current track).
+    /// </summary>
+    public bool CanGoPrevious
+    {
+        get
+        {
+            lock (_queueLock)
+            {
+                return (_queue.Count > 0 && _currentIndex >= 0 && _currentIndex < _queue.Count)
+                       || CurrentTrack != null;
+            }
+        }
+    }
+
     #endregion
 
     #region Public API

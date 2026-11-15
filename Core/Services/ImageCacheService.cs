@@ -63,8 +63,13 @@ public sealed class ImageCacheService : IDisposable
     private long _currentDiskCacheBytes;
     private int _currentDiskFileCount;
     private long _currentMemoryCacheBytes;
-    private bool _isDisposed;
+    private volatile bool _isDisposed;
     private int _loadCounter;
+
+    /// <summary>
+    /// Raised when an image for the specified URL has been downloaded or added to the memory cache.
+    /// </summary>
+    public event Action<string>? OnImageCached;
     private const int CleanupInterval = 50;
 
     /// <summary>
@@ -163,7 +168,7 @@ public sealed class ImageCacheService : IDisposable
         }
 
         // 2. Cold path: deduplication
-        var appToken = _appCts.Token;
+        if (!TryGetAppToken(out var appToken)) return null;
         var lazyTask = _pendingLoads.GetOrAdd(
             memKey,
             static (k, state) => new Lazy<Task<Bitmap?>>(() =>
@@ -179,7 +184,7 @@ public sealed class ImageCacheService : IDisposable
         catch { return null; }
         finally
         {
-            _pendingLoads.TryRemove(memKey, out _);
+            _pendingLoads.TryRemove(KeyValuePair.Create(memKey, lazyTask));
 
             if (Interlocked.Increment(ref _loadCounter) % CleanupInterval == 0)
                 _ = Task.Run(PerformMaintenanceAsync, CancellationToken.None);
@@ -221,6 +226,8 @@ public sealed class ImageCacheService : IDisposable
         try
         {
             await EnsureDiskDownloadTaskAsync(url, diskHash, diskPath).WaitAsync(ct).ConfigureAwait(false);
+            if (File.Exists(diskPath))
+                OnImageCached?.Invoke(url);
         }
         catch { }
     }
@@ -234,21 +241,31 @@ public sealed class ImageCacheService : IDisposable
 
     private async Task DownloadThrottledAsync(string url, ulong diskHash, string diskPath)
     {
+        bool acquired = false;
         try
         {
+            if (_isDisposed) return;
+
             await _downloadSemaphore.WaitAsync(_appCts.Token).ConfigureAwait(false);
-            try
-            {
-                if (!File.Exists(diskPath))
-                    await DownloadDirectToDiskAsync(url, diskPath, _appCts.Token).ConfigureAwait(false);
-            }
-            finally
-            {
-                _downloadSemaphore.Release();
-            }
+            acquired = true;
+
+            if (!_isDisposed && !File.Exists(diskPath))
+                await DownloadDirectToDiskAsync(url, diskPath, _appCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_isDisposed)
+        {
+        }
+        catch (ObjectDisposedException) when (_isDisposed)
+        {
         }
         finally
         {
+            if (acquired)
+            {
+                try { _downloadSemaphore.Release(); }
+                catch (ObjectDisposedException) { }
+            }
+
             _pendingDiskDownloads.TryRemove(diskHash, out _);
         }
     }
@@ -304,7 +321,18 @@ public sealed class ImageCacheService : IDisposable
                 catch (Exception ex)
                 {
                     Log.Debug($"[ImageCache] Decode failed: {ex.Message}");
-                    try { File.Delete(diskPath); } catch { }
+                    try
+                    {
+                        if (File.Exists(diskPath))
+                        {
+                            long fileLen = new FileInfo(diskPath).Length;
+                            File.Delete(diskPath);
+                            if (fileLen > 0)
+                                Interlocked.Add(ref _currentDiskCacheBytes, -fileLen);
+                            Interlocked.Decrement(ref _currentDiskFileCount);
+                        }
+                    }
+                    catch { }
                     return null;
                 }
             }, CancellationToken.None).ConfigureAwait(false);
@@ -314,59 +342,79 @@ public sealed class ImageCacheService : IDisposable
             return null;
         }
 
-        if (bitmap != null && !ct.IsCancellationRequested)
-            AddToMemoryCache(memKey, bitmap);
+        if (bitmap != null)
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                AddToMemoryCache(memKey, bitmap);
+                OnImageCached?.Invoke(url);
+            }
+            else
+            {
+                bitmap.Dispose();
+                return null;
+            }
+        }
 
         return bitmap;
     }
 
     /// <summary>
-    /// Downloads a file to disk via isolated ImageClient from <see cref="NetworkManager"/>.
+    /// Downloads a file to disk via isolated ImageClient from <see cref="NetworkManager"/> with a single retry on transient failure.
     /// </summary>
     private async Task DownloadDirectToDiskAsync(string url, string finalPath, CancellationToken ct)
     {
-        // Unique temporary file to prevent IOException during parallel downloads of the same URL
         var tmpPath = $"{finalPath}.{Guid.NewGuid():N}.tmp";
 
-        try
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            using var response = await _networkManager.ImageClient
-                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
-                .ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode) return;
-
-            await using (var fs = new FileStream(
-                tmpPath, FileMode.Create, FileAccess.Write,
-                FileShare.None, 81920, useAsync: true))
-            await using (var net = await response.Content
-                .ReadAsStreamAsync(ct)
-                .ConfigureAwait(false))
-            {
-                await net.CopyToAsync(fs, ct).ConfigureAwait(false);
-            }
-
-            if (File.Exists(finalPath))
-            {
-                try { File.Delete(tmpPath); } catch { }
-                return;
-            }
-
             try
             {
-                File.Move(tmpPath, finalPath, overwrite: true);
-                Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
-                Interlocked.Increment(ref _currentDiskFileCount);
+                using var response = await _networkManager.ImageClient
+                    .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
+                    .ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode) return;
+
+                await using (var fs = new FileStream(
+                    tmpPath, FileMode.Create, FileAccess.Write,
+                    FileShare.None, 81920, useAsync: true))
+                await using (var net = await response.Content
+                    .ReadAsStreamAsync(ct)
+                    .ConfigureAwait(false))
+                {
+                    await net.CopyToAsync(fs, ct).ConfigureAwait(false);
+                }
+
+                if (File.Exists(finalPath))
+                {
+                    try { File.Delete(tmpPath); } catch { }
+                    return;
+                }
+
+                try
+                {
+                    File.Move(tmpPath, finalPath, overwrite: true);
+                    Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
+                    Interlocked.Increment(ref _currentDiskFileCount);
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException && File.Exists(finalPath))
+                {
+                    try { File.Delete(tmpPath); } catch { }
+                }
+
+                return;
             }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException && File.Exists(finalPath))
+            catch
             {
-                try { File.Delete(tmpPath); } catch { }
+                try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
+                if (attempt == 0 && !ct.IsCancellationRequested)
+                {
+                    if (await ct.DelayNoThrowAsync(300, continueOnCapturedContext: false).ConfigureAwait(false))
+                        continue;
+                }
+                throw;
             }
-        }
-        catch
-        {
-            try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
-            throw;
         }
     }
 
@@ -508,6 +556,8 @@ public sealed class ImageCacheService : IDisposable
 
     private async Task PerformMaintenanceAsync()
     {
+        if (_isDisposed) return;
+
         var memInfo = GC.GetGCMemoryInfo();
         bool highLoad = memInfo.MemoryLoadBytes > memInfo.HighMemoryLoadThresholdBytes * 0.85;
         EnforceMemoryLimits(aggressive: highLoad);
@@ -619,8 +669,8 @@ public sealed class ImageCacheService : IDisposable
             for (int i = 0; i < files.Length; i++)
                 total += files[i].Length;
 
-            Volatile.Write(ref _currentDiskCacheBytes, total);
-            Volatile.Write(ref _currentDiskFileCount, files.Length);
+            Interlocked.CompareExchange(ref _currentDiskCacheBytes, total, 0);
+            Interlocked.CompareExchange(ref _currentDiskFileCount, files.Length, 0);
         }
         catch { }
     }
@@ -640,6 +690,28 @@ public sealed class ImageCacheService : IDisposable
     /// </summary>
     public Task EnsureDiskFileAsync(string url, CancellationToken ct = default)
         => EnsureDiskCachedAsync(url, ct);
+
+    /// <summary>
+    /// Ensures the cover file exists on disk without decoding a raster into RAM and returns its path.
+    /// Returns synchronously on disk cache hit with zero task allocation.
+    /// </summary>
+    public ValueTask<string?> EnsureCoverDiskPathAsync(string? url, CancellationToken ct = default)
+    {
+        if (_isDisposed || string.IsNullOrEmpty(url))
+            return ValueTask.FromResult<string?>(null);
+
+        string diskPath = GetDiskCachePath(url);
+        if (File.Exists(diskPath))
+            return ValueTask.FromResult<string?>(diskPath);
+
+        return ResolveCoverDiskPathSlowAsync(url, diskPath, ct);
+    }
+
+    private async ValueTask<string?> ResolveCoverDiskPathSlowAsync(string url, string diskPath, CancellationToken ct)
+    {
+        await EnsureDiskCachedAsync(url, ct).ConfigureAwait(false);
+        return !ct.IsCancellationRequested && File.Exists(diskPath) ? diskPath : null;
+    }
 
     #region Cache Key Hashing (FNV-1a 64-bit → ulong)
 
@@ -709,13 +781,33 @@ public sealed class ImageCacheService : IDisposable
         _ = PerformMaintenanceAsync();
     }
 
+    private bool TryGetAppToken(out CancellationToken token)
+    {
+        if (_isDisposed)
+        {
+            token = default;
+            return false;
+        }
+
+        try
+        {
+            token = _appCts.Token;
+            return !token.IsCancellationRequested;
+        }
+        catch (ObjectDisposedException)
+        {
+            token = default;
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         if (_isDisposed) return;
         _isDisposed = true;
-        _appCts.Cancel();
-        _appCts.Dispose();
+        try { _appCts.Cancel(); } catch (ObjectDisposedException) { }
+        try { _appCts.Dispose(); } catch (ObjectDisposedException) { }
         ClearMemoryCache();
-        _downloadSemaphore.Dispose();
+        try { _downloadSemaphore.Dispose(); } catch (ObjectDisposedException) { }
     }
 }

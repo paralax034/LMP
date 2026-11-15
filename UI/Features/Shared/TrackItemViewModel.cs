@@ -191,8 +191,31 @@ public sealed partial class TrackItemViewModel : ViewModelBase
 
     private void OnTrackPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnTrackPropertyChanged(sender, e));
+            return;
+        }
+
         switch (e.PropertyName)
         {
+            case nameof(Track.Title):
+                OnPropertyChanged(nameof(Title));
+                break;
+
+            case nameof(Track.Author):
+                OnPropertyChanged(nameof(Author));
+                break;
+
+            case nameof(Track.Duration):
+                OnPropertyChanged(nameof(Duration));
+                OnPropertyChanged(nameof(FormattedDuration));
+                break;
+
+            case nameof(Track.ThumbnailUrl):
+                OnPropertyChanged(nameof(ThumbnailUrl));
+                break;
+
             case nameof(Track.IsLiked):
                 OnPropertyChanged(nameof(IsLiked));
                 break;

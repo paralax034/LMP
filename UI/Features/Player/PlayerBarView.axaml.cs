@@ -408,7 +408,7 @@ public partial class PlayerBarView : UserControl
             double seekRatio = displayPos / duration;
             ApplySeekVisual(seekRatio, width);
             CustomProgressBar.Value = displayPos;
-            return true;
+            return _isGliding || (_isDraggingSeek && _currentPreviewRatio.HasValue);
         }
 
         double enginePosition = vm.ReadCurrentPositionSeconds();

@@ -9,8 +9,13 @@ public sealed partial class AudioEngine
     {
         Interlocked.CompareExchange(ref _nTokenActiveTrackId, null, skippedTrackId);
 
-        int session = BeginNewSession();
-        _player.Stop();
+        int session;
+        lock (_playerDispatchLock)
+        {
+            Interlocked.Increment(ref _queueReplaceSeq);
+            session = BeginNewSession();
+            _player.Stop();
+        }
 
         bool canAdvance;
         lock (_queueLock) { canAdvance = TryMoveNextSkippingTrack(skippedTrackId); }
@@ -38,8 +43,8 @@ public sealed partial class AudioEngine
             || !currentTrack.GetRawIdSpan().SequenceEqual(rawVideoId.AsSpan()))
             return;
 
-        var previous = Interlocked.CompareExchange(ref _nTokenWarnedTrackId, activeTrackId, null);
-        if (previous != null) return;
+        var previous = Interlocked.Exchange(ref _nTokenWarnedTrackId, activeTrackId);
+        if (string.Equals(previous, activeTrackId, StringComparison.Ordinal)) return;
 
         bool wasSkipped = _library.Settings.Audio.SkipNTokenTracks;
         RaiseOnUI(() => OnNTokenDecryptionWarning?.Invoke(new NTokenWarningInfo(currentTrack, wasSkipped)));

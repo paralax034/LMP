@@ -147,6 +147,12 @@ internal static class ServiceRegistration
             sp.GetService<PlaylistSyncService>(),
             sp.GetService<PlaylistService>()));
 
+        services.AddSingleton<ISystemMediaTransport>(_ =>
+            OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)
+                ? new WindowsSystemMediaTransport()
+                : NullSystemMediaTransport.Instance);
+        services.AddSingleton<MediaTransportCoordinator>();
+
         services.AddTransient<HomeViewModel>();
         services.AddTransient<SearchViewModel>();
         services.AddTransient<LibraryViewModel>();

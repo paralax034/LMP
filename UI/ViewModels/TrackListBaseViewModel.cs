@@ -136,7 +136,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
             OnPropertyChanged(nameof(IsFilterEmpty));
             OnPropertyChanged(nameof(CanReorderItems));
             OnFilterApplied();
-        }, DispatcherPriority.Background, ct);
+        }, DispatcherPriority.Background);
     }
 
     protected virtual void OnFilterApplied()

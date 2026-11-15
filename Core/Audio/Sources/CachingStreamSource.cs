@@ -403,13 +403,19 @@ internal sealed partial class CachingStreamSource : IAudioSource
             if (position < 0) return 0;
             if (position >= _contentLength) return int.MaxValue;
 
-            long bufferedAhead = GetBufferedBytesAheadIncludingInflight(position);
+            long bufferedAhead = GetBufferedBytesAhead(position);
             if (position + bufferedAhead >= _contentLength)
                 return int.MaxValue;
 
             return ConvertBufferedBytesToMs(bufferedAhead);
         }
     }
+
+    /// <summary>
+    /// Forward contiguous span including in-flight range requests for diagnostic and planner inspection.
+    /// </summary>
+    internal long BufferedBytesAheadIncludingInflight =>
+        _initialized ? GetBufferedBytesAheadIncludingInflight(Volatile.Read(ref _currentReadOffset)) : 0;
 
     /// <summary>
     /// Indicates that all data from the current read position to the very end of the file (EOF) is locally available in RAM or on disk.
