@@ -26,6 +26,15 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoPlayOnPaste}" />
                 </Grid>
 
+                <!--  System Media Transport Controls (SMTC)  -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Settings_SystemMediaTransport]}" />
+                        <TextBlock Classes="desc" Text="{Binding L[Settings_SystemMediaTransportDesc]}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding SystemMediaTransportEnabled}" />
+                </Grid>
+
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
                 <!--  Error Handling & Warnings (Moved from AudioPage & Expanded)  -->

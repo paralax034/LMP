@@ -449,6 +449,7 @@ public sealed class AppSettings
     public string LanguageCode { get; set; } = "en";
     public string DownloadPath { get; set; } = string.Empty;
     public bool DiscordRpcEnabled { get; set; } = true;
+    public bool SystemMediaTransportEnabled { get; set; } = true;
     public bool AutoPlayOnUrlPaste { get; set; } = true;
     public int LoadBatchSize { get; set; } = 20;
     public int SearchBatchSize { get; set; } = 30;

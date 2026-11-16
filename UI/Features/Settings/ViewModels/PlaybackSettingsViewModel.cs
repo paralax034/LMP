@@ -3,9 +3,11 @@ namespace LMP.UI.Features.Settings.ViewModels;
 public sealed partial class PlaybackSettingsViewModel : ViewModelBase
 {
     private readonly LibraryService _library;
+    private readonly MediaTransportCoordinator? _mediaTransport;
     private bool _isLoading;
 
     [ObservableProperty] public partial bool AutoPlayOnPaste { get; set; }
+    [ObservableProperty] public partial bool SystemMediaTransportEnabled { get; set; }
     [ObservableProperty] public partial IReadOnlyList<LocalizedItem<PlaybackErrorBehavior>> ErrorBehaviorOptions { get; private set; } = [];
     [ObservableProperty] public partial LocalizedItem<PlaybackErrorBehavior>? SelectedErrorBehavior { get; set; }
     [ObservableProperty] public partial bool PlayErrorSound { get; set; }
@@ -16,9 +18,12 @@ public sealed partial class PlaybackSettingsViewModel : ViewModelBase
     [ObservableProperty] public partial LocalizedItem<PlaybackFailureBehavior>? SelectedPlaybackFailure { get; set; }
     [ObservableProperty] public partial bool IsPlaybackFailureActionEnabled { get; private set; } = true;
 
-    public PlaybackSettingsViewModel(LibraryService library)
+    public PlaybackSettingsViewModel(
+        LibraryService library,
+        MediaTransportCoordinator? mediaTransport = null)
     {
         _library = library;
+        _mediaTransport = mediaTransport;
 
         RefreshLists();
         LoadSettings();
@@ -56,6 +61,8 @@ public sealed partial class PlaybackSettingsViewModel : ViewModelBase
         {
             var s = _library.Settings;
             AutoPlayOnPaste = s.AutoPlayOnUrlPaste;
+            SystemMediaTransportEnabled = s.SystemMediaTransportEnabled;
+            _mediaTransport?.SetEnabled(s.SystemMediaTransportEnabled);
             PlayErrorSound = s.Audio.PlayErrorSound;
             SelectedErrorBehavior = ErrorBehaviorOptions.FindByValue(s.Audio.CriticalErrorBehavior, 1);
             SkipNTokenTracks = s.Audio.SkipNTokenTracks;
@@ -68,6 +75,14 @@ public sealed partial class PlaybackSettingsViewModel : ViewModelBase
         {
             _isLoading = false;
         }
+    }
+
+    partial void OnSystemMediaTransportEnabledChanged(bool value)
+    {
+        if (_isLoading) return;
+        _library.UpdateSettings(s => s.SystemMediaTransportEnabled = value);
+        _mediaTransport?.SetEnabled(value);
+        Log.Info($"[Settings] SystemMediaTransportEnabled -> {value}");
     }
 
     partial void OnAutoPlayOnPasteChanged(bool value)

@@ -19,9 +19,13 @@ public sealed class MediaTransportCoordinator : IDisposable
     private readonly Lock _publishLock = new();
     private readonly Lock _metadataLock = new();
 
+    private readonly LibraryService? _library;
+
     private TrackInfo? _observedTrack;
     private CancellationTokenSource? _coverCts;
     private long _trackGeneration;
+    private nint _windowHandle;
+    private volatile bool _enabled = true;
     private volatile bool _subscribed;
     private bool _hasLastCapabilities;
     private MediaTransportCapabilities _lastCapabilities;
@@ -34,7 +38,8 @@ public sealed class MediaTransportCoordinator : IDisposable
     public MediaTransportCoordinator(
         ISystemMediaTransport transport,
         PlayerControlService playerControl,
-        ImageCacheService imageCache)
+        ImageCacheService imageCache,
+        LibraryService? library = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(playerControl);
@@ -43,6 +48,49 @@ public sealed class MediaTransportCoordinator : IDisposable
         _transport = transport;
         _playerControl = playerControl;
         _imageCache = imageCache;
+        _library = library;
+
+        if (_library != null)
+        {
+            _enabled = _library.Settings.SystemMediaTransportEnabled;
+            if (!_library.IsInitialized)
+                _library.OnInitialized += HandleLibraryInitialized;
+        }
+    }
+
+    private void HandleLibraryInitialized()
+    {
+        if (_library != null)
+            SetEnabled(_library.Settings.SystemMediaTransportEnabled);
+    }
+
+    /// <summary>
+    /// Enables or disables OS media transport integration on the fly without restarting the application.
+    /// </summary>
+    public void SetEnabled(bool enabled)
+    {
+        if (Volatile.Read(ref _disposed) != 0 || !_transport.IsSupported)
+            return;
+
+        lock (_publishLock)
+        {
+            if (Volatile.Read(ref _disposed) != 0 || _enabled == enabled)
+                return;
+
+            _enabled = enabled;
+            if (!enabled)
+            {
+                DetachTransportCoreLocked();
+                Log.Info("[MediaTransport] Disabled by user setting");
+            }
+            else if (_windowHandle != 0)
+            {
+                _transport.AttachWindow(_windowHandle);
+                EnsureSubscribedLocked();
+                SyncAllLocked();
+                Log.Info("[MediaTransport] Enabled by user setting");
+            }
+        }
     }
 
     /// <summary>
@@ -56,6 +104,10 @@ public sealed class MediaTransportCoordinator : IDisposable
         lock (_publishLock)
         {
             if (Volatile.Read(ref _disposed) != 0)
+                return;
+
+            _windowHandle = windowHandle;
+            if (!_enabled)
                 return;
 
             _transport.AttachWindow(windowHandle);
@@ -74,12 +126,18 @@ public sealed class MediaTransportCoordinator : IDisposable
 
         lock (_publishLock)
         {
-            Interlocked.Increment(ref _trackGeneration);
-            UnsubscribeLocked();
-            CancelPendingCover();
-            ClearTransportLocked();
-            _transport.DetachWindow();
+            _windowHandle = 0;
+            DetachTransportCoreLocked();
         }
+    }
+
+    private void DetachTransportCoreLocked()
+    {
+        Interlocked.Increment(ref _trackGeneration);
+        UnsubscribeLocked();
+        CancelPendingCover();
+        ClearTransportLocked();
+        _transport.DetachWindow();
     }
 
     private void EnsureSubscribedLocked()
@@ -493,6 +551,9 @@ public sealed class MediaTransportCoordinator : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
+
+        if (_library != null)
+            _library.OnInitialized -= HandleLibraryInitialized;
 
         DetachWindow();
         _transport.Dispose();
