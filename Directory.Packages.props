@@ -34,7 +34,7 @@
   <ItemGroup Label="Audio &amp; Scripting">
     <PackageVersion Include="Concentus" Version="2.2.2" />
     <PackageVersion Include="Concentus.Native" Version="1.5.2" />
-    <PackageVersion Include="Acornima" Version="1.9.1" />
+    <PackageVersion Include="Acornima" Version="1.9.2" />
   </ItemGroup>
 
   <ItemGroup Label="Platform Interop">
