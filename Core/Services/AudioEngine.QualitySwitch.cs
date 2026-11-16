@@ -1,4 +1,3 @@
-using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Normalization;
 
 namespace LMP.Core.Services;
@@ -182,8 +181,9 @@ public sealed partial class AudioEngine
         }
         catch (Exception ex)
         {
-            if (!_session.IsStaleOrCancelled(cmd.Session, ct) && !CancellationHelper.IsCancellationLike(ex))
+            if (!_session.IsStaleOrCancelled(cmd.Session, ct))
             {
+                Log.Warn($"[AudioEngine] SwitchQuality aborted: {ex.Message}");
                 AbortCurrentTrackPlaybackAfterFatalError(cmd.Track.Id);
                 RaiseError(ex);
             }

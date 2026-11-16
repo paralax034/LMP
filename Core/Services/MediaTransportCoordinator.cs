@@ -77,7 +77,7 @@ public sealed class MediaTransportCoordinator : IDisposable
             Interlocked.Increment(ref _trackGeneration);
             UnsubscribeLocked();
             CancelPendingCover();
-            _transport.Clear();
+            ClearTransportLocked();
             _transport.DetachWindow();
         }
     }
@@ -302,6 +302,14 @@ public sealed class MediaTransportCoordinator : IDisposable
         _transport.UpdateTimeline(timeline);
     }
 
+    private void ClearTransportLocked()
+    {
+        lock (_metadataLock)
+        {
+            _transport.Clear();
+        }
+    }
+
     private void PublishTrackMetadataLocked(TrackInfo? track)
     {
         long generation = Interlocked.Increment(ref _trackGeneration);
@@ -309,7 +317,7 @@ public sealed class MediaTransportCoordinator : IDisposable
 
         if (track == null)
         {
-            _transport.Clear();
+            ClearTransportLocked();
             return;
         }
 

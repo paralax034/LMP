@@ -117,8 +117,16 @@ public partial class PlayerBarView : UserControl
         _formatFlyout = FormatButton.Flyout;
         if (_formatFlyout != null)
         {
-            _formatFlyout.Opened += (_, _) => FormatButton.Classes.Add("popup-open");
-            _formatFlyout.Closed += (_, _) => FormatButton.Classes.Remove("popup-open");
+            _formatFlyout.Opened += (_, _) =>
+            {
+                FormatButton.Classes.Add("popup-open");
+                _currentViewModel?.SetFormatsFlyoutOpen(true);
+            };
+            _formatFlyout.Closed += (_, _) =>
+            {
+                FormatButton.Classes.Remove("popup-open");
+                _currentViewModel?.SetFormatsFlyoutOpen(false);
+            };
         }
 
         EqCurveControl.BandsChanged += bands => _currentViewModel?.Equalizer.ApplyCustomBandsFromUi(bands);
@@ -583,6 +591,7 @@ public partial class PlayerBarView : UserControl
     private void CloseAllPopups()
     {
         EqPresetsDropDown.ClosePopup();
+        _formatFlyout?.Hide();
         SeekTooltip.Opacity = 0;
         SeekRangeSpan.Opacity = 0;
         SeekHint.Opacity = 0;

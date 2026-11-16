@@ -114,7 +114,7 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         if (_items.TotalCount != rawQueue.Count) return false;
         for (int i = 0; i < rawQueue.Count; i++)
         {
-            var existing = _items.GetTrackAt(i);
+            var existing = _items.GetMasterTrackAt(i);
             if (existing == null || !string.Equals(existing.Id, rawQueue[i].Id, StringComparison.Ordinal))
                 return false;
         }

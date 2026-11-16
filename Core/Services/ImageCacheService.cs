@@ -64,6 +64,8 @@ public sealed class ImageCacheService : IDisposable
     private int _currentDiskFileCount;
     private long _currentMemoryCacheBytes;
     private volatile bool _isDisposed;
+    private readonly Lock _diskStatsLock = new();
+    private bool _diskStatsInitialized;
     private int _loadCounter;
 
     /// <summary>
@@ -94,7 +96,7 @@ public sealed class ImageCacheService : IDisposable
         if (!Directory.Exists(G.Folder.ImageCache))
             Directory.CreateDirectory(G.Folder.ImageCache);
 
-        _ = Task.Run(InitializeDiskCacheAsync);
+        _ = Task.Run(InitializeDiskCache);
     }
 
     /// <summary>
@@ -325,11 +327,20 @@ public sealed class ImageCacheService : IDisposable
                     {
                         if (File.Exists(diskPath))
                         {
-                            long fileLen = new FileInfo(diskPath).Length;
-                            File.Delete(diskPath);
-                            if (fileLen > 0)
-                                Interlocked.Add(ref _currentDiskCacheBytes, -fileLen);
-                            Interlocked.Decrement(ref _currentDiskFileCount);
+                            string deleteTmpPath = $"{diskPath}.{Guid.NewGuid():N}.del.tmp";
+                            long fileLen;
+                            lock (_diskStatsLock)
+                            {
+                                File.Move(diskPath, deleteTmpPath, overwrite: false);
+                                fileLen = new FileInfo(deleteTmpPath).Length;
+                                if (_diskStatsInitialized)
+                                {
+                                    if (fileLen > 0)
+                                        Interlocked.Add(ref _currentDiskCacheBytes, -fileLen);
+                                    Interlocked.Decrement(ref _currentDiskFileCount);
+                                }
+                            }
+                            File.Delete(deleteTmpPath);
                         }
                     }
                     catch { }
@@ -386,17 +397,27 @@ public sealed class ImageCacheService : IDisposable
                     await net.CopyToAsync(fs, ct).ConfigureAwait(false);
                 }
 
-                if (File.Exists(finalPath))
-                {
-                    try { File.Delete(tmpPath); } catch { }
-                    return;
-                }
-
                 try
                 {
-                    File.Move(tmpPath, finalPath, overwrite: true);
-                    Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
-                    Interlocked.Increment(ref _currentDiskFileCount);
+                    bool moved = false;
+                    lock (_diskStatsLock)
+                    {
+                        if (!File.Exists(finalPath))
+                        {
+                            File.Move(tmpPath, finalPath, overwrite: false);
+                            if (_diskStatsInitialized)
+                            {
+                                Interlocked.Add(ref _currentDiskCacheBytes, new FileInfo(finalPath).Length);
+                                Interlocked.Increment(ref _currentDiskFileCount);
+                            }
+                            moved = true;
+                        }
+                    }
+
+                    if (!moved)
+                    {
+                        try { File.Delete(tmpPath); } catch { }
+                    }
                 }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or IOException && File.Exists(finalPath))
                 {
@@ -576,6 +597,11 @@ public sealed class ImageCacheService : IDisposable
         {
             try
             {
+                lock (_diskStatsLock)
+                {
+                    if (!_diskStatsInitialized) return;
+                }
+
                 var files = new DirectoryInfo(G.Folder.ImageCache)
                     .GetFiles()
                     .Where(static f => !f.Extension.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
@@ -648,29 +674,39 @@ public sealed class ImageCacheService : IDisposable
         ClearMemoryCache();
         await Task.Run(() =>
         {
-            foreach (var f in Directory.GetFiles(G.Folder.ImageCache))
-                try { File.Delete(f); } catch { }
+            lock (_diskStatsLock)
+            {
+                foreach (var f in Directory.GetFiles(G.Folder.ImageCache))
+                    try { File.Delete(f); } catch { }
 
-            Volatile.Write(ref _currentDiskCacheBytes, 0);
-            Volatile.Write(ref _currentDiskFileCount, 0);
+                Volatile.Write(ref _currentDiskCacheBytes, 0);
+                Volatile.Write(ref _currentDiskFileCount, 0);
+                _diskStatsInitialized = true;
+            }
         });
     }
 
-    private async Task InitializeDiskCacheAsync()
+    private void InitializeDiskCache()
     {
         try
         {
-            var files = new DirectoryInfo(G.Folder.ImageCache)
-                .GetFiles()
-                .Where(static f => !f.Extension.EndsWith(".tmp"))
-                .ToArray();
+            lock (_diskStatsLock)
+            {
+                if (_isDisposed || _diskStatsInitialized) return;
 
-            long total = 0;
-            for (int i = 0; i < files.Length; i++)
-                total += files[i].Length;
+                var files = new DirectoryInfo(G.Folder.ImageCache)
+                    .GetFiles()
+                    .Where(static f => !f.Extension.EndsWith(".tmp"))
+                    .ToArray();
 
-            Interlocked.CompareExchange(ref _currentDiskCacheBytes, total, 0);
-            Interlocked.CompareExchange(ref _currentDiskFileCount, files.Length, 0);
+                long total = 0;
+                for (int i = 0; i < files.Length; i++)
+                    total += files[i].Length;
+
+                Volatile.Write(ref _currentDiskCacheBytes, total);
+                Volatile.Write(ref _currentDiskFileCount, files.Length);
+                _diskStatsInitialized = true;
+            }
         }
         catch { }
     }

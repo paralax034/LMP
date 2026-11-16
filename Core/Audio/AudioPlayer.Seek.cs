@@ -214,12 +214,19 @@ internal sealed partial class AudioPlayer
                     TimeSpan.FromMilliseconds(300)).ConfigureAwait(false);
             }
 
-            if (!decoderStopped || _session.IsStale(cmd.SessionId) || seekCts.IsCancellationRequested)
+            if (_session.IsStale(cmd.SessionId) || seekCts.IsCancellationRequested)
             {
-                if (!decoderStopped)
-                    Log.Warn("[Seek] Aborting seek because decoder did not stop within timeout");
                 cmd.Completion?.TrySetCanceled();
                 _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(posMs));
+                return;
+            }
+
+            if (!decoderStopped)
+            {
+                Log.Warn("[Seek] Aborting seek because decoder did not stop within timeout");
+                RecoverPlaybackAfterSeekTimeout(pipeline, cmd.SessionId, launchDeferred: _state == PlayerState.Buffering);
+                cmd.Completion?.TrySetResult(false);
+                _events.RaiseSeekCompleted(pipeline.GetPlaybackPosition());
                 return;
             }
 
@@ -259,13 +266,18 @@ internal sealed partial class AudioPlayer
         finally
         {
             bool pipelineStillCurrent = !_disposed && _activePipeline == pipeline && !_session.IsStale(cmd.SessionId);
-            if (pipelineStillCurrent)
+            bool canResumePipeline = pipelineStillCurrent
+                                  && _state is not (PlayerState.Idle or PlayerState.Error or PlayerState.Disposed);
+
+            if (canResumePipeline)
             {
                 if (CurrentPlaybackIntent == PlaybackIntent.Play)
                     RestorePlaybackActiveState(pipeline);
 
                 StartPositionTimerDelayed();
             }
+
+            bool canReenqueueSeek = canResumePipeline && !pipeline.IsDeviceLost && !seekCts.IsCancellationRequested;
 
             lock (_seekStateLock)
             {
@@ -275,11 +287,12 @@ internal sealed partial class AudioPlayer
                     Volatile.Write(ref _backgroundSeekPipeline, null);
                     _backgroundSeekActive = false;
 
-                    if (lateSeekMs >= 0 && pipelineStillCurrent)
+                    if (lateSeekMs >= 0 && canReenqueueSeek)
                     {
                         int nextGen = Interlocked.Increment(ref _seekGeneration);
                         Volatile.Write(ref _pendingSeekMs, lateSeekMs);
-                        _commandChannel.Writer.TryWrite(new SeekCommand(TimeSpan.FromMilliseconds(lateSeekMs), cmd.SessionId, nextGen));
+                        if (!_commandChannel.Writer.TryWrite(new SeekCommand(TimeSpan.FromMilliseconds(lateSeekMs), cmd.SessionId, nextGen)))
+                            Volatile.Write(ref _pendingSeekMs, -1);
                     }
                 }
             }
@@ -321,7 +334,6 @@ internal sealed partial class AudioPlayer
                 if (preDrained >= 0)
                 {
                     currentTargetMs = preDrained;
-                    pipeline.Flush();
                     pipeline.PrepareForSeek(currentTargetMs);
                 }
 
@@ -341,7 +353,6 @@ internal sealed partial class AudioPlayer
                     if (drained >= 0)
                     {
                         currentTargetMs = drained;
-                        pipeline.Flush();
                         pipeline.PrepareForSeek(currentTargetMs);
                         Log.Debug($"[Seek] Phase A interrupted, coalescing to {drained}ms");
                         continue;
@@ -363,7 +374,6 @@ internal sealed partial class AudioPlayer
                 if (drainedAfterPhaseA >= 0 && !seekCt.IsCancellationRequested)
                 {
                     currentTargetMs = drainedAfterPhaseA;
-                    pipeline.Flush();
                     pipeline.PrepareForSeek(currentTargetMs);
                     Log.Debug($"[Seek] Phase A coalesced (no-throw) to {drainedAfterPhaseA}ms");
                     continue;
@@ -385,7 +395,6 @@ internal sealed partial class AudioPlayer
                 if (drainedAfterSeek >= 0)
                 {
                     currentTargetMs = drainedAfterSeek;
-                    pipeline.Flush();
                     pipeline.PrepareForSeek(currentTargetMs);
                     Log.Debug($"[Seek] Phase B: Coalesced to {drainedAfterSeek}ms");
                     continue;
@@ -421,41 +430,8 @@ internal sealed partial class AudioPlayer
                 if (CurrentPlaybackIntent == PlaybackIntent.Play)
                 {
                     var warmupPlan = ComputePlaybackWarmupPlan(pipeline, isSeek: true);
-                    bool pcmReady = false;
-
-                    using (var warmupPauseCts = CancellationTokenSource.CreateLinkedTokenSource(iterCt))
-                    {
-                        bool canWait;
-                        lock (_warmupCtsLock)
-                        {
-                            canWait = CurrentPlaybackIntent == PlaybackIntent.Play;
-                            if (canWait)
-                                _activeWarmupPauseCts = warmupPauseCts;
-                        }
-
-                        if (canWait)
-                        {
-                            try
-                            {
-                                pcmReady = await pipeline.WaitForBufferAsync(
-                                    warmupPlan.PcmThresholdSamples,
-                                    warmupPlan.WarmupTimeoutMs,
-                                    warmupPauseCts.Token).ConfigureAwait(false);
-                            }
-                            catch (OperationCanceledException) when (!iterCt.IsCancellationRequested && CurrentPlaybackIntent == PlaybackIntent.Pause)
-                            {
-                                pcmReady = false;
-                            }
-                            finally
-                            {
-                                lock (_warmupCtsLock)
-                                {
-                                    if (ReferenceEquals(_activeWarmupPauseCts, warmupPauseCts))
-                                        _activeWarmupPauseCts = null;
-                                }
-                            }
-                        }
-                    }
+                    bool pcmReady = await WaitForWarmupBufferInterruptibleAsync(pipeline, warmupPlan, iterCt)
+                        .ConfigureAwait(false);
 
                     phaseEMs = phaseSw.ElapsedMilliseconds;
 
@@ -509,10 +485,20 @@ internal sealed partial class AudioPlayer
         }
         catch (OperationCanceledException)
         {
-            Log.Debug($"[Seek] Seek to {initialPosMs}ms cancelled. " +
-                      $"Elapsed: {totalSw.ElapsedMilliseconds}ms");
-            cmd.Completion?.TrySetCanceled();
-            _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
+            if (!seekCt.IsCancellationRequested && ValidateSeekState(CancellationToken.None, pipeline, sessionAtStart))
+            {
+                Log.Warn($"[Seek] Seek to {initialPosMs}ms aborted on re-seek decoder timeout; recovering playback state");
+                RecoverPlaybackAfterSeekTimeout(pipeline, sessionAtStart, launchDeferred: true);
+                cmd.Completion?.TrySetResult(false);
+                _events.RaiseSeekCompleted(pipeline.GetPlaybackPosition());
+            }
+            else
+            {
+                Log.Debug($"[Seek] Seek to {initialPosMs}ms cancelled. " +
+                          $"Elapsed: {totalSw.ElapsedMilliseconds}ms");
+                cmd.Completion?.TrySetCanceled();
+                _events.RaiseSeekCompleted(TimeSpan.FromMilliseconds(initialPosMs));
+            }
         }
         catch (AudioDeviceException)
         {
@@ -717,6 +703,40 @@ internal sealed partial class AudioPlayer
     /// <summary>Atomically consumes the pending seek position.</summary>
     private long DrainPendingSeekMs() =>
         Interlocked.Exchange(ref _pendingSeekMs, -1);
+
+    private void ClearPendingSeekIfInactive()
+    {
+        lock (_seekStateLock)
+        {
+            if (!_backgroundSeekActive)
+                Volatile.Write(ref _pendingSeekMs, -1);
+        }
+    }
+
+    private void RecoverPlaybackAfterSeekTimeout(AudioPipeline pipeline, int sessionId, bool launchDeferred)
+    {
+        if (CurrentPlaybackIntent == PlaybackIntent.Play)
+        {
+            if (!pipeline.IsDeviceLost)
+            {
+                pipeline.StartDecoding(
+                    _options,
+                    CreateTrackEndedCallback(sessionId),
+                    CreateErrorCallback(sessionId, pipeline));
+            }
+
+            if (launchDeferred)
+                LaunchDeferredResume(pipeline, ComputePlaybackWarmupPlan(pipeline, isSeek: true), sessionId);
+            else
+                SetState(PlayerState.Playing);
+        }
+        else
+        {
+            if (launchDeferred)
+                pipeline.Stop();
+            SetState(PlayerState.Paused);
+        }
+    }
 
     /// <summary>
     /// Stops the decoder and clears buffers before re-seek.

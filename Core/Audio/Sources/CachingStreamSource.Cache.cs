@@ -305,26 +305,6 @@ internal sealed partial class CachingStreamSource
             }
         }
 
-        public bool TryRemoveContaining(long position, out RamRangeBlock? block)
-        {
-            lock (_lock)
-            {
-                for (int i = 0; i < _blocks.Count; i++)
-                {
-                    var current = _blocks[i];
-                    if (current.StartOffset > position) break;
-                    if (position >= current.EndOffsetExclusive) continue;
-                    _blocks.RemoveAt(i);
-                    _totalBytes -= current.Length;
-                    Interlocked.Increment(ref _version);
-                    block = current;
-                    return true;
-                }
-            }
-            block = null;
-            return false;
-        }
-
         /// <summary>
         /// Finds the first aligned probe offset in <c>[minProbe, endExclusive)</c> fully covered by a RAM block.
         /// Returns <see cref="long.MaxValue"/> if no probe is covered.

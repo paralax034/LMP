@@ -129,13 +129,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 SingleWriter = false,
                 FullMode = BoundedChannelFullMode.DropOldest
             },
-            static dropped =>
-            {
-                if (dropped is PlayCommand { Completion: { } playTcs })
-                    playTcs.TrySetCanceled();
-                else if (dropped is SeekCommand { Completion: { } seekTcs })
-                    seekTcs.TrySetCanceled();
-            });
+            dropped => CancelCommand(dropped, rejectedByState: false));
 
         _sharedBackend = CreateSharedBackend(_options);
         _commandProcessorTask = Task.Run(ProcessCommandsAsync);
@@ -228,7 +222,6 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         if (_disposed) return;
 
         SetPlaybackIntent(PlaybackIntent.Pause);
-        CancelDeferredResume();
         CancelActiveWarmupPause();
         _commandChannel.Writer.TryWrite(new PauseCommand(_session.Current));
     }
@@ -297,6 +290,24 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     #region Command Processing
 
+    private void CancelCommand(IAudioCommand command, bool rejectedByState)
+    {
+        switch (command)
+        {
+            case SeekCommand seekCmd:
+                ClearPendingSeekIfInactive();
+                if (rejectedByState)
+                    seekCmd.Completion?.TrySetResult(false);
+                else
+                    seekCmd.Completion?.TrySetCanceled();
+                break;
+
+            case PlayCommand { Completion: { } playTcs }:
+                playTcs.TrySetCanceled();
+                break;
+        }
+    }
+
     /// <summary>
     /// Main actor loop.
     /// </summary>
@@ -310,23 +321,14 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             {
                 if (_session.IsStale(command.SessionId) && command is not DisposeCommand)
                 {
-                    if (command is SeekCommand { Completion: { } tcs })
-                        tcs.TrySetCanceled();
-                    else if (command is PlayCommand { Completion: { } stalePlayTcs })
-                        stalePlayTcs.TrySetCanceled();
-
+                    CancelCommand(command, rejectedByState: false);
                     continue;
                 }
 
                 if (!PlayerStateTransitions.CanAcceptCommand(_state, command))
                 {
                     Log.Debug($"[AudioPlayer] Command {command.GetType().Name} rejected in state {_state}");
-
-                    if (command is SeekCommand { Completion: { } failTcs })
-                        failTcs.TrySetResult(false);
-                    else if (command is PlayCommand { Completion: { } rejectPlayTcs })
-                        rejectPlayTcs.TrySetCanceled();
-
+                    CancelCommand(command, rejectedByState: true);
                     continue;
                 }
 
@@ -426,8 +428,18 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private async Task HandleResumeAsync(ResumeCommand cmd)
     {
-        if (CurrentPlaybackIntent != PlaybackIntent.Play || _state != PlayerState.Paused)
+        if (CurrentPlaybackIntent != PlaybackIntent.Play)
             return;
+
+        if (_state != PlayerState.Paused)
+        {
+            if (_state != PlayerState.Buffering
+                || Volatile.Read(ref _deferredResumeCts) != null
+                || _backgroundSeekActive)
+            {
+                return;
+            }
+        }
 
         var pipeline = _activePipeline;
         if (pipeline == null) return;
@@ -713,7 +725,6 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             return;
         }
 
-        SetPlaybackIntent(PlaybackIntent.Play);
         SetState(PlayerState.Loading);
         CancelActiveSeek();
 
@@ -805,45 +816,28 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             }
 
             await PrepareAndStartDecodingAsync(pipeline, cmd, ct).ConfigureAwait(false);
+
+            if (_session.IsStale(cmd.SessionId))
+            {
+                CompletePlayCommandCanceled(cmd.Completion);
+                CleanupOrphanedPipelineOnCancel(pipeline);
+                return;
+            }
+
+            ct.ThrowIfCancellationRequested();
+
+            if (CurrentPlaybackIntent != PlaybackIntent.Play)
+            {
+                pipeline.Stop();
+                SetState(PlayerState.Paused);
+                CompletePlayCommandResult(cmd.Completion, false);
+                return;
+            }
+
             SetState(PlayerState.Buffering);
 
             var warmupPlan = ComputePlaybackWarmupPlan(pipeline, isSeek: false);
-            bool pcmReady = false;
-
-            if (CurrentPlaybackIntent == PlaybackIntent.Play)
-            {
-                using var warmupPauseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                bool canWait;
-                lock (_warmupCtsLock)
-                {
-                    canWait = CurrentPlaybackIntent == PlaybackIntent.Play;
-                    if (canWait)
-                        _activeWarmupPauseCts = warmupPauseCts;
-                }
-
-                if (canWait)
-                {
-                    try
-                    {
-                        pcmReady = await pipeline.WaitForBufferAsync(
-                            warmupPlan.PcmThresholdSamples,
-                            warmupPlan.WarmupTimeoutMs,
-                            warmupPauseCts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (!ct.IsCancellationRequested && CurrentPlaybackIntent == PlaybackIntent.Pause)
-                    {
-                        pcmReady = false;
-                    }
-                    finally
-                    {
-                        lock (_warmupCtsLock)
-                        {
-                            if (ReferenceEquals(_activeWarmupPauseCts, warmupPauseCts))
-                                _activeWarmupPauseCts = null;
-                        }
-                    }
-                }
-            }
+            bool pcmReady = await WaitForWarmupBufferInterruptibleAsync(pipeline, warmupPlan, ct).ConfigureAwait(false);
 
             bool sourceReady = IsSourceReadyForResume(pipeline, warmupPlan.SourceAheadMs);
 
@@ -867,8 +861,17 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
             ResumeOrDefer(pipeline, pcmReady, sourceReady, warmupPlan, cmd.SessionId,
                 startTimers: true, configurePipeline: false, logContext: "Initial warmup");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            if (!_session.IsStale(cmd.SessionId) && !cmd.ExternalCancellationToken.IsCancellationRequested)
+            {
+                Log.Warn($"[AudioPlayer] HandlePlayAsync cancelled internally: track={cmd.Descriptor.TrackId}, intent={CurrentPlaybackIntent}, msg={ex.Message}");
+            }
+            else
+            {
+                Log.Debug($"[AudioPlayer] HandlePlayAsync cancelled: track={cmd.Descriptor.TrackId}, stale={_session.IsStale(cmd.SessionId)}, externalCancel={cmd.ExternalCancellationToken.IsCancellationRequested}");
+            }
+
             CompletePlayCommandCanceled(cmd.Completion);
             CleanupOrphanedPipelineOnCancel(createdPipeline);
             if (_state is PlayerState.Loading or PlayerState.Buffering)
@@ -927,6 +930,44 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
     {
         var cts = Interlocked.Exchange(ref _activePlayCts, null);
         CancelCtsAsync(cts);
+    }
+
+    private async Task<bool> WaitForWarmupBufferInterruptibleAsync(
+        AudioPipeline pipeline,
+        PlaybackWarmupPlan warmupPlan,
+        CancellationToken outerCt)
+    {
+        using var warmupPauseCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
+        bool canWait;
+        lock (_warmupCtsLock)
+        {
+            canWait = CurrentPlaybackIntent == PlaybackIntent.Play;
+            if (canWait)
+                _activeWarmupPauseCts = warmupPauseCts;
+        }
+
+        if (!canWait)
+            return false;
+
+        try
+        {
+            return await pipeline.WaitForBufferAsync(
+                warmupPlan.PcmThresholdSamples,
+                warmupPlan.WarmupTimeoutMs,
+                warmupPauseCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!outerCt.IsCancellationRequested && CurrentPlaybackIntent == PlaybackIntent.Pause)
+        {
+            return false;
+        }
+        finally
+        {
+            lock (_warmupCtsLock)
+            {
+                if (ReferenceEquals(_activeWarmupPauseCts, warmupPauseCts))
+                    _activeWarmupPauseCts = null;
+            }
+        }
     }
 
     private void CancelActiveWarmupPause()
@@ -1258,6 +1299,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
 
     private void HandleError(Exception ex)
     {
+        CancelActiveSeek();
         CompletePendingPlayException(ex);
         SetState(PlayerState.Error);
 

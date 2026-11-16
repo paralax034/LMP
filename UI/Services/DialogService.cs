@@ -379,32 +379,6 @@ public sealed class DialogService
     }
 
     /// <summary>
-    /// "Add track to playlist" dialog — list of playlists with checkboxes.
-    /// </summary>
-    public async Task<List<string>> ShowAddToPlaylistDialogAsync(TrackInfo track)
-    {
-        var host = _getDialogHost();
-        var tcs = new TaskCompletionSource<List<string>>();
-
-        var playlistService = Microsoft.Extensions.DependencyInjection
-            .ServiceProviderServiceExtensions
-            .GetRequiredService<PlaylistService>(AppEntry.Services);
-        var playlists = await playlistService.GetAllPlaylistsAsync();
-
-        var vm = new AddToPlaylistDialogViewModel(track, playlists)
-        {
-            OnResult = result =>
-            {
-                host.CloseDialog(result);
-                tcs.TrySetResult(result);
-            }
-        };
-
-        _ = host.ShowAsync<object>(vm);
-        return await tcs.Task;
-    }
-
-    /// <summary>
     /// Edit playlist dialog.
     /// Automatically loads playlist tracks and resolves dependencies for the mosaic generator and color palette.
     /// </summary>

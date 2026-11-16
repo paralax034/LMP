@@ -100,9 +100,6 @@ public static class StreamingMemoryBenchmarkTests
     var bloatedInfo = GC.GetGCMemoryInfo();
     long bloatedCommitted = bloatedInfo.TotalCommittedBytes;
     long bloatedCommittedMb = bloatedCommitted / (1024 * 1024);
-    long lohBeforeBytes = bloatedInfo.GenerationInfo.Length > 3
-        ? bloatedInfo.GenerationInfo[3].SizeBeforeBytes
-        : 0;
 
     // 4. Release context scripts and measure STW compactification time
     ctx.ReleaseRawScripts();
@@ -113,10 +110,13 @@ public static class StreamingMemoryBenchmarkTests
     MemoryHelpers.CompactManagedHeapNow();
     sw.Stop();
 
-    var compactedInfo = GC.GetGCMemoryInfo();
+    var compactedInfo = GC.GetGCMemoryInfo(GCKind.FullBlocking);
     long compactedCommitted = compactedInfo.TotalCommittedBytes;
     long compactedCommittedMb = compactedCommitted / (1024 * 1024);
     long reclaimedMb = (bloatedCommitted - compactedCommitted) / (1024 * 1024);
+    long lohBeforeBytes = compactedInfo.GenerationInfo.Length > 3
+        ? compactedInfo.GenerationInfo[3].SizeBeforeBytes
+        : 0;
     long lohAfterBytes = compactedInfo.GenerationInfo.Length > 3
         ? compactedInfo.GenerationInfo[3].SizeAfterBytes
         : 0;

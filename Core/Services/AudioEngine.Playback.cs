@@ -497,7 +497,7 @@ public sealed partial class AudioEngine
             _playIntent = false;
 
         ApplyLifecycleSourceSuspendPolicy();
-        RaiseOnUI(GetStateChangedUIDelegate(state, Volatile.Read(ref _manualLoadingFlag) != 0));
+        RaiseOnUI(_raiseStateChangedOnUIDelegate);
     }
 
     /// <summary>

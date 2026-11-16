@@ -100,7 +100,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// <summary>Maximum gain (overdrive protection).</summary>
     public const float MaxGain = 4.0f;
 
-    private const int QualitySwitchCooldownMs = 2000;
+    private const int QualitySwitchCooldownMs = 250;
 
     /// <summary>
     /// Target size of the local contiguous prefix for Partial Cache Fast Start.
@@ -381,14 +381,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private readonly Action _raiseDeviceRestoredOnUIDelegate;
     private readonly Action _raiseManualLoadingChangedOnUIDelegate;
     private readonly Action _raisePlaybackModesChangedOnUIDelegate;
-    private readonly Action _raiseStateStoppedOnUIDelegate;
-    private readonly Action _raiseStateStoppedAsLoadingOnUIDelegate;
-    private readonly Action _raiseStateLoadingOnUIDelegate;
-    private readonly Action _raiseStateBufferingOnUIDelegate;
-    private readonly Action _raiseStatePlayingOnUIDelegate;
-    private readonly Action _raiseStatePausedOnUIDelegate;
-    private readonly Action _raiseStateErrorOnUIDelegate;
-    private readonly Action _raiseStateErrorAsLoadingOnUIDelegate;
+    private readonly Action _raiseStateChangedOnUIDelegate;
 
     #endregion
 
@@ -442,14 +435,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         _raisePlaybackModesChangedOnUIDelegate = () =>
             OnPlaybackModesChanged?.Invoke(RepeatMode, ShuffleEnabled);
 
-        _raiseStateStoppedOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Stopped, effectiveStoppedAsLoading: false);
-        _raiseStateStoppedAsLoadingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Stopped, effectiveStoppedAsLoading: true);
-        _raiseStateLoadingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Loading, effectiveStoppedAsLoading: false);
-        _raiseStateBufferingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Buffering, effectiveStoppedAsLoading: false);
-        _raiseStatePlayingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Playing, effectiveStoppedAsLoading: false);
-        _raiseStatePausedOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Paused, effectiveStoppedAsLoading: false);
-        _raiseStateErrorOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Error, effectiveStoppedAsLoading: false);
-        _raiseStateErrorAsLoadingOnUIDelegate = () => RaiseStateChangedOnUI(PlaybackState.Error, effectiveStoppedAsLoading: true);
+        _raiseStateChangedOnUIDelegate = RaiseStateChangedOnUI;
 
         _player = new AudioPlayer(new AudioPlayerOptions
         {
@@ -922,30 +908,18 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
             OnDetailedPlaybackStateChanged?.Invoke(effectiveState);
     }
 
-    private void RaiseStateChangedOnUI(PlaybackState state, bool effectiveStoppedAsLoading)
+    private void RaiseStateChangedOnUI()
     {
+        var liveState = _player.State;
         OnPropertyChanged(nameof(IsPlaying));
         OnPropertyChanged(nameof(IsPaused));
         OnPropertyChanged(nameof(IsLoading));
         OnPropertyChanged(nameof(TotalDuration));
-        OnPlaybackStateChanged?.Invoke(state == PlaybackState.Playing, state == PlaybackState.Paused);
+        OnPlaybackStateChanged?.Invoke(liveState == PlaybackState.Playing, liveState == PlaybackState.Paused);
         OnLoadingStateChanged?.Invoke(IsLoading);
 
-        var effectiveState = effectiveStoppedAsLoading && state is PlaybackState.Stopped or PlaybackState.Error
-            ? PlaybackState.Loading
-            : state;
-        RaiseDetailedPlaybackStateIfChanged(effectiveState);
+        RaiseDetailedPlaybackStateIfChanged(EffectivePlaybackState);
     }
-
-    private Action GetStateChangedUIDelegate(PlaybackState state, bool isManualLoading) => state switch
-    {
-        PlaybackState.Loading => _raiseStateLoadingOnUIDelegate,
-        PlaybackState.Buffering => _raiseStateBufferingOnUIDelegate,
-        PlaybackState.Playing => _raiseStatePlayingOnUIDelegate,
-        PlaybackState.Paused => _raiseStatePausedOnUIDelegate,
-        PlaybackState.Error => isManualLoading ? _raiseStateErrorAsLoadingOnUIDelegate : _raiseStateErrorOnUIDelegate,
-        _ => isManualLoading ? _raiseStateStoppedAsLoadingOnUIDelegate : _raiseStateStoppedOnUIDelegate
-    };
 
     private static void RaiseOnUI(Action action)
     {

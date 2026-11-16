@@ -1066,7 +1066,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
         await PreScanNormalizationAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task PreScanNormalizationAsync(CancellationToken ct)
+    private async Task PreScanNormalizationAsync(CancellationToken ct)
     {
         if (!_analyzer.IsEnabled) return;
         if (_analyzer.IsGainLocked) return;

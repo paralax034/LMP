@@ -848,6 +848,10 @@ public partial class YoutubeProvider : IDisposable
 
             return MapManifestToOptions(manifest);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Log.Error($"[YouTube] GetStreamOptions error: {ex.Message}");

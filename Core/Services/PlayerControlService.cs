@@ -337,7 +337,10 @@ public sealed class PlayerControlService : IDisposable
     {
         if (_disposed || track is null) return;
 
-        CancelPendingLiveSync();
+        if (AudioEngine.FindTrackIndexById(_audio.Queue, track.Id) < 0)
+        {
+            CancelPendingLiveSync();
+        }
 
         var canonical = _trackRegistry?.RegisterOrUpdate(track) ?? track;
         _ = _library.AddToRecentlyPlayedAsync(canonical);

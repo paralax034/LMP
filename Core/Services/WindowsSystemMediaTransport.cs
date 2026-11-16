@@ -123,6 +123,7 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
     private int _disposed;
     private volatile string? _lastCoverPath;
     private bool _hasActiveMetadata;
+    private int _lastPlaybackStatus = MediaPlaybackStatusClosed;
     private int _mtaIncremented;
 
     #endregion
@@ -279,6 +280,7 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
                 _ => MediaPlaybackStatusClosed
             };
 
+            _lastPlaybackStatus = smtcStatus;
             byte enabled = _hasActiveMetadata || state is PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Loading or PlaybackState.Buffering
                 ? (byte)1
                 : (byte)0;
@@ -350,6 +352,11 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
 
                     _hasActiveMetadata = true;
                     _ = ((delegate* unmanaged[Stdcall]<nint, byte, int>)GetVtableSlot(_smtc, 11))(_smtc, 1);
+                    if (_lastPlaybackStatus == MediaPlaybackStatusClosed)
+                    {
+                        _lastPlaybackStatus = MediaPlaybackStatusStopped;
+                        _ = ((delegate* unmanaged[Stdcall]<nint, int, int>)GetVtableSlot(_smtc, 7))(_smtc, MediaPlaybackStatusStopped);
+                    }
                     _ = ((delegate* unmanaged[Stdcall]<nint, int, int>)GetVtableSlot(_updater, 7))(_updater, MediaPlaybackTypeMusic);
 
                     if (_musicProps == 0)
@@ -431,6 +438,7 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
         lock (_comLock)
         {
             _hasActiveMetadata = false;
+            _lastPlaybackStatus = MediaPlaybackStatusClosed;
             _lastCoverPath = null;
             ReleaseCom(ref _musicProps);
 
@@ -463,6 +471,7 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
     {
         Volatile.Write(ref _detached, 1);
         _hasActiveMetadata = false;
+        _lastPlaybackStatus = MediaPlaybackStatusClosed;
         _lastCoverPath = null;
 
         if (_updater != 0)

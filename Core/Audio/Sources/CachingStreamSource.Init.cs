@@ -37,8 +37,11 @@ internal sealed partial class CachingStreamSource
                 Log.Info($"[CachingSource] Resuming: {_cacheEntry.DownloadedBytes}/{_cacheEntry.TotalSize} bytes");
             }
 
-            _lifetimeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _lifetimeCts = new CancellationTokenSource();
             InitializeFirstEpoch();
+
+            using var initCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetimeCts.Token);
+            var initToken = initCts.Token;
 
             int initialBytes = Math.Min(
                 _config.InitialPrebufferBytes,
@@ -50,14 +53,14 @@ internal sealed partial class CachingStreamSource
             {
                 if (string.IsNullOrWhiteSpace(_currentUrl))
                 {
-                    bool urlReady = await EnsureUrlAvailableAsync(_lifetimeCts.Token)
+                    bool urlReady = await EnsureUrlAvailableAsync(initToken)
                         .ConfigureAwait(false);
                     if (!urlReady)
                         throw new InvalidOperationException(
                             "Failed to acquire continuation URL for source initialization");
                 }
 
-                await EnsureRangeAsync(0, initialBytes, _lifetimeCts.Token, isCritical: true)
+                await EnsureRangeAsync(0, initialBytes, initToken, isCritical: true)
                     .ConfigureAwait(false);
             }
             else
@@ -68,7 +71,7 @@ internal sealed partial class CachingStreamSource
             _readStream = new AsyncCachingReadStream(this);
             _parser = CreateParser(_readStream);
 
-            if (!await _parser.ParseHeadersAsync(ct).ConfigureAwait(false))
+            if (!await _parser.ParseHeadersAsync(initToken).ConfigureAwait(false))
                 throw new InvalidOperationException("Failed to parse container headers");
 
             Codec = _parser.Codec;

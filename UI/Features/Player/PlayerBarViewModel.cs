@@ -65,6 +65,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private TrackInfo? _observedTrack;
 
     private bool _isSeeking;
+    private bool _isFormatsFlyoutOpen;
     private bool _isInitializing;
 
     private int _lastVolumeBeforeMute;
@@ -445,12 +446,17 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             }
         }, () => HasTrack);
 
-        LoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: false));
-        ForceLoadFormatsCommand = new AsyncRelayCommand(() => LoadFormatsAsync(forceRefresh: true));
+        LoadFormatsCommand = new AsyncRelayCommand(
+            () => LoadFormatsAsync(forceRefresh: false),
+            AsyncRelayCommandOptions.AllowConcurrentExecutions);
+        ForceLoadFormatsCommand = new AsyncRelayCommand(
+            () => LoadFormatsAsync(forceRefresh: true),
+            AsyncRelayCommandOptions.AllowConcurrentExecutions);
 
         SwitchFormatCommand = new AsyncRelayCommand<StreamOption>(async option =>
         {
             if (option == null || option.IsActive) return;
+            UpdateActiveFormat(option.Format, (int)option.Bitrate);
             BeginTrackReset();
             await _audio.SwitchQualityAsync(option.Format, (int)option.Bitrate);
         });
@@ -959,6 +965,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _pendingStreamInfoTrackId = track.Id;
 
             CancelFormatsLoading();
+            if (_isFormatsFlyoutOpen)
+                _ = LoadFormatsAsync(forceRefresh: false);
+
             BeginTrackReset();
 
             Duration = track.Duration;
@@ -1206,6 +1215,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     #endregion
 
     #region Public Interaction
+
+    internal void SetFormatsFlyoutOpen(bool isOpen) => _isFormatsFlyoutOpen = isOpen;
 
     public void StartSeek()
     {
