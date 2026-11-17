@@ -697,7 +697,7 @@ internal sealed partial class CachingStreamSource : IAudioSource
         if (avgLatencyMs > 3000) target = Math.Min(target * 4, 45_000);
         else if (avgLatencyMs > 1500) target = Math.Min(target * 3, 32_000);
         else if (avgLatencyMs > 800) target = Math.Min(target * 2, 24_000);
-        else if (avgLatencyMs > 300) target = Math.Min((target * 3) / 2, 18_000);
+        else if (avgLatencyMs > 300) target = Math.Min(target * 3 / 2, 18_000);
 
         if (bw > 0)
         {

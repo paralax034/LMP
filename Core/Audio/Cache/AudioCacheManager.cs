@@ -191,7 +191,7 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
                 : string.Concat("yt_", rawTrackId);
 
             TimeSpan duration = TimeSpan.Zero;
-            if (trackDurations != null && (!trackDurations.TryGetValue(rawTrackId, out duration) && !trackDurations.TryGetValue(trackId, out duration)))
+            if (trackDurations != null && !trackDurations.TryGetValue(rawTrackId, out duration) && !trackDurations.TryGetValue(trackId, out duration))
             {
                 duration = TimeSpan.Zero;
             }

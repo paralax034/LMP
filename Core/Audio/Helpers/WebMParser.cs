@@ -936,7 +936,7 @@ internal sealed class WebMParser : IDisposable
         if (eofError)
             ThrowXiphLacingEof();
 
-        Unsafe.Add(ref sizesRef, framesCount - 1) = (blockEndBufPos - pos) - totalSizes;
+        Unsafe.Add(ref sizesRef, framesCount - 1) = blockEndBufPos - pos - totalSizes;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
@@ -1008,7 +1008,7 @@ internal sealed class WebMParser : IDisposable
         if (badLen >= 0)
             ThrowInvalidSignedVIntLength(badLen);
 
-        Unsafe.Add(ref sizesRef, framesCount - 1) = (blockEndBufPos - pos) - totalSizes;
+        Unsafe.Add(ref sizesRef, framesCount - 1) = blockEndBufPos - pos - totalSizes;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]

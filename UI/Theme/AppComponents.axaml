@@ -71,12 +71,12 @@
     </Style>
 
     <Style Selector="TextBlock.track-title.is-active">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style Selector="TextBlock.track-title.is-active.is-selected">
-        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
 
@@ -313,5 +313,14 @@
 
     <Style Selector="Border.meta-chip:pointerover">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <!-- Metadata inline vertical divider -->
+    <Style Selector="Border.meta-divider">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="Height" Value="12" />
+        <Setter Property="Margin" Value="8,0" />
+        <Setter Property="Background" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 </Styles>

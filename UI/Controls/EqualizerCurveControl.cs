@@ -6,7 +6,9 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
+using Avalonia.Skia;
 using LMP.Core.Audio.Helpers;
+using SkiaSharp;
 
 namespace LMP.UI.Controls;
 
@@ -24,7 +26,7 @@ public sealed class EqualizerCurveControl : Control
     private const double LerpSpeed = 18.0;
     private const double SpectrumLerpUp = 28.0;
     private const double SpectrumLerpDown = 10.0;
-    private const double MinFrameIntervalSeconds = 0.0155; // ~60 FPS cap
+    private const double MinFrameIntervalSeconds = 0.0125;
 
     // Technical frequency labels in SI notation with a Latin "k", matching Hints5BandFreqs: do not translate
     private static readonly string[] Labels10Band = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
@@ -83,11 +85,155 @@ public sealed class EqualizerCurveControl : Control
     private readonly float[] _emitBufferB = new float[EqualizerProcessor.BandCount];
     private bool _emitBufferToggle;
 
+    [InlineArray(EqualizerProcessor.BandCount)]
+    private struct EqPoints10
+    {
+        private SKPoint _element0;
+    }
+
+    private sealed class EqWaveDrawOp : PooledDrawOperation<EqWaveDrawOp>
+    {
+        [ThreadStatic] private static SKPath? t_fillPath;
+        [ThreadStatic] private static SKPath? t_linePath;
+        [ThreadStatic] private static SKPaint? t_paint;
+        [ThreadStatic] private static SKShader? t_fillShader;
+        [ThreadStatic] private static uint t_shaderAccentKey;
+        [ThreadStatic] private static float t_shaderTop;
+        [ThreadStatic] private static float t_shaderBottom;
+        [ThreadStatic] private static SKColor[]? t_gradColors;
+        private static readonly float[] GradStops = [0.0f, 0.5f, 1.0f];
+
+        private Rect _bounds;
+        private EqPoints10 _points;
+        private float _zeroY;
+        private float _plotTop;
+        private float _plotBottom;
+        private SKColor _accentColor;
+        private SKColor _mutedColor;
+        private bool _isEqEnabled;
+
+        public override Rect Bounds => _bounds;
+
+        public static EqWaveDrawOp Rent(
+            Rect bounds,
+            Point[] pts,
+            float zeroY,
+            float plotTop,
+            float plotBottom,
+            SKColor accentColor,
+            SKColor mutedColor,
+            bool isEqEnabled)
+        {
+            var op = RentCore();
+            op._bounds = bounds;
+            for (int i = 0; i < EqualizerProcessor.BandCount; i++)
+                op._points[i] = new SKPoint((float)pts[i].X, (float)pts[i].Y);
+            op._zeroY = zeroY;
+            op._plotTop = plotTop;
+            op._plotBottom = plotBottom;
+            op._accentColor = accentColor;
+            op._mutedColor = mutedColor;
+            op._isEqEnabled = isEqEnabled;
+            return op;
+        }
+
+        public override void Render(ImmediateDrawingContext context)
+        {
+            var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
+            if (leaseFeature == null) return;
+
+            using var lease = leaseFeature.Lease();
+            float opacity = (float)Math.Clamp(lease.CurrentOpacity, 0.0, 1.0);
+            if (opacity <= 0.003f) return;
+
+            var fillPath = t_fillPath ??= new SKPath();
+            var linePath = t_linePath ??= new SKPath();
+            fillPath.Rewind();
+            linePath.Rewind();
+
+            ref readonly var first = ref _points[0];
+            fillPath.MoveTo(first.X, _zeroY);
+            fillPath.LineTo(first.X, first.Y);
+            linePath.MoveTo(first.X, first.Y);
+
+            const float tension = 1.0f / 6.0f;
+            for (int i = 0; i < EqualizerProcessor.BandCount - 1; i++)
+            {
+                SKPoint p0 = _points[i];
+                SKPoint p1 = _points[i + 1];
+                SKPoint pPrev = i > 0 ? _points[i - 1] : p0;
+                SKPoint pNext = i < EqualizerProcessor.BandCount - 2 ? _points[i + 2] : p1;
+
+                float c1X = p0.X + ((p1.X - pPrev.X) * tension);
+                float c1Y = p0.Y + ((p1.Y - pPrev.Y) * tension);
+                float c2X = p1.X - ((pNext.X - p0.X) * tension);
+                float c2Y = p1.Y - ((pNext.Y - p0.Y) * tension);
+
+                fillPath.CubicTo(c1X, c1Y, c2X, c2Y, p1.X, p1.Y);
+                linePath.CubicTo(c1X, c1Y, c2X, c2Y, p1.X, p1.Y);
+            }
+
+            ref readonly var last = ref _points[EqualizerProcessor.BandCount - 1];
+            fillPath.LineTo(last.X, _zeroY);
+            fillPath.Close();
+
+            var paint = t_paint ??= new SKPaint();
+            paint.Reset();
+            paint.IsAntialias = true;
+
+            uint accentKey = (uint)_accentColor;
+            if (t_fillShader == null
+                || t_shaderAccentKey != accentKey
+                || MathF.Abs(t_shaderTop - _plotTop) > 0.5f
+                || MathF.Abs(t_shaderBottom - _plotBottom) > 0.5f)
+            {
+                t_fillShader?.Dispose();
+                var colors = t_gradColors ??= new SKColor[3];
+                colors[0] = new SKColor(_accentColor.Red, _accentColor.Green, _accentColor.Blue, 72);
+                colors[1] = new SKColor(_accentColor.Red, _accentColor.Green, _accentColor.Blue, 14);
+                colors[2] = new SKColor(_accentColor.Red, _accentColor.Green, _accentColor.Blue, 62);
+
+                t_fillShader = SKShader.CreateLinearGradient(
+                    new SKPoint(0f, _plotTop),
+                    new SKPoint(0f, _plotBottom),
+                    colors,
+                    GradStops,
+                    SKShaderTileMode.Clamp);
+                t_shaderAccentKey = accentKey;
+                t_shaderTop = _plotTop;
+                t_shaderBottom = _plotBottom;
+            }
+
+            var canvas = lease.SkCanvas;
+            paint.Style = SKPaintStyle.Fill;
+            paint.Shader = t_fillShader;
+            paint.Color = new SKColor(255, 255, 255, (byte)(255f * opacity));
+            canvas.DrawPath(fillPath, paint);
+
+            paint.Shader = null;
+            paint.Style = SKPaintStyle.Stroke;
+            paint.StrokeCap = SKStrokeCap.Round;
+            paint.StrokeJoin = SKStrokeJoin.Round;
+
+            if (_isEqEnabled)
+            {
+                paint.StrokeWidth = 2.4f;
+                paint.Color = new SKColor(_accentColor.Red, _accentColor.Green, _accentColor.Blue,
+                    (byte)Math.Clamp((int)MathF.Round(_accentColor.Alpha * opacity), 0, 255));
+            }
+            else
+            {
+                paint.StrokeWidth = 1.8f;
+                paint.Color = new SKColor(_mutedColor.Red, _mutedColor.Green, _mutedColor.Blue,
+                    (byte)Math.Clamp((int)MathF.Round(115f * opacity), 0, 255));
+            }
+
+            canvas.DrawPath(linePath, paint);
+            paint.Reset();
+        }
+    }
+
     private readonly Point[] _wave10Points = new Point[EqualizerProcessor.BandCount];
-    private readonly Point[] _lastRenderedWavePoints = new Point[EqualizerProcessor.BandCount];
-    private StreamGeometry? _cachedFillGeometry;
-    private StreamGeometry? _cachedLineGeometry;
-    private double _lastRenderedZeroY = double.NaN;
 
     private const int DbStepCount = 49; // [-12.0 .. +12.0] in 0.5 dB steps
     private readonly FormattedText?[] _cachedNormalLabels = new FormattedText?[EqualizerProcessor.BandCount];
@@ -98,7 +244,8 @@ public sealed class EqualizerCurveControl : Control
     private string _lastLanguageCode = "";
 
     private readonly Action<TimeSpan> _rafCallback;
-    private Avalonia.Threading.DispatcherTimer? _idlePollTimer;
+    private readonly CompositionSilenceMonitor _silenceMonitor;
+    private TopLevel? _attachedTopLevel;
 
     private int _hoveredColumnIndex = -1;
     private bool _isDraggingWave;
@@ -107,12 +254,9 @@ public sealed class EqualizerCurveControl : Control
     private double _visPulsePhase;
 
     private Color _lastAccentColor;
-    private IPen? _curvePen;
-    private IPen? _disabledCurvePen;
     private IPen? _zeroLinePen;
     private IPen? _guideLinePen;
     private IPen? _activeGuidePen;
-    private IBrush? _fillGradientBrush;
     private IBrush? _labelBrush;
     private IBrush? _activeLabelBrush;
 
@@ -128,6 +272,12 @@ public sealed class EqualizerCurveControl : Control
     public EqualizerCurveControl()
     {
         _rafCallback = OnAnimationFrame;
+        _silenceMonitor = new CompositionSilenceMonitor(
+            this,
+            shouldAnimate: () => IsVisible,
+            onStateReevaluated: OnAnimationContextChanged,
+            onResumeFromSilence: EnsureAnimationLoop);
+
         ClipToBounds = true;
         Focusable = true;
         Cursor = new Cursor(StandardCursorType.Hand);
@@ -136,16 +286,19 @@ public sealed class EqualizerCurveControl : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _attachedTopLevel = TopLevel.GetTopLevel(this);
+        _silenceMonitor.Attach();
         SyncTargetFromProperty(snapImmediately: true);
         EnsureAnimationLoop();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        _silenceMonitor.Detach();
         _isRafActive = false;
         _isDraggingWave = false;
         _hoveredColumnIndex = -1;
-        _idlePollTimer?.Stop();
+        _attachedTopLevel = null;
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -176,9 +329,17 @@ public sealed class EqualizerCurveControl : Control
             else
             {
                 _isRafActive = false;
-                _idlePollTimer?.Stop();
+                _silenceMonitor.StopIdleTimer();
             }
         }
+    }
+
+    private void OnAnimationContextChanged()
+    {
+        if (_silenceMonitor.CanAnimateNow)
+            EnsureAnimationLoop();
+        else
+            _isRafActive = false;
     }
 
     private void SyncTargetFromProperty(bool snapImmediately)
@@ -203,19 +364,20 @@ public sealed class EqualizerCurveControl : Control
 
     private void EnsureAnimationLoop()
     {
-        if (_isRafActive || !PersistentPageHost.CanAnimateVisual(this)) return;
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel == null) return;
+        if (_isRafActive) return;
+        var topLevel = _attachedTopLevel ??= TopLevel.GetTopLevel(this);
+        if (topLevel == null || !_silenceMonitor.CanAnimateNow) return;
 
-        _idlePollTimer?.Stop();
+        _silenceMonitor.StopIdleTimer();
         _isRafActive = true;
-        _lastFrameTs = Stopwatch.GetTimestamp();
+        _lastFrameTs = Stopwatch.GetTimestamp() - (Stopwatch.Frequency / 60);
         topLevel.RequestAnimationFrame(_rafCallback);
     }
 
     private void OnAnimationFrame(TimeSpan ts)
     {
-        if (!_isRafActive || !PersistentPageHost.CanAnimateVisual(this) || ViewModelBase.CurrentSuspendLevel != SuspendLevel.None)
+        var topLevel = _attachedTopLevel;
+        if (!_isRafActive || topLevel == null || !_silenceMonitor.CanAnimateNow)
         {
             _isRafActive = false;
             return;
@@ -225,7 +387,7 @@ public sealed class EqualizerCurveControl : Control
         double rawDt = Stopwatch.GetElapsedTime(_lastFrameTs, now).TotalSeconds;
         if (rawDt < MinFrameIntervalSeconds)
         {
-            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+            topLevel.RequestAnimationFrame(_rafCallback);
             return;
         }
 
@@ -281,25 +443,16 @@ public sealed class EqualizerCurveControl : Control
         if (needsRedraw)
         {
             InvalidateVisual();
-            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+            topLevel.RequestAnimationFrame(_rafCallback);
         }
         else if (AudioVisualizerBuffer.HasRecentActivity)
         {
-            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_rafCallback);
+            topLevel.RequestAnimationFrame(_rafCallback);
         }
         else
         {
             _isRafActive = false;
-            _idlePollTimer ??= new Avalonia.Threading.DispatcherTimer(
-                TimeSpan.FromMilliseconds(250),
-                Avalonia.Threading.DispatcherPriority.Background,
-                (_, _) =>
-                {
-                    _idlePollTimer?.Stop();
-                    if (PersistentPageHost.CanAnimateVisual(this))
-                        EnsureAnimationLoop();
-                });
-            _idlePollTimer.Start();
+            _silenceMonitor.PostSilenceEntered();
         }
     }
 
@@ -501,7 +654,7 @@ public sealed class EqualizerCurveControl : Control
 
     public override void Render(DrawingContext context)
     {
-        if (!_isRafActive && PersistentPageHost.CanAnimateVisual(this))
+        if (!_isRafActive && !_silenceMonitor.IsWaitingForAudio && _silenceMonitor.CanAnimateNow)
             EnsureAnimationLoop();
 
         double w = Bounds.Width;
@@ -566,15 +719,17 @@ public sealed class EqualizerCurveControl : Control
                 context.DrawText(ft, new Point(colX - ft.Width * 0.5, plotBottom + 5.0));
         }
 
-        // 4. Rendering a unified smooth wave and its gradient (rebuilding StreamGeometry only when points change)
-        EnsureWaveGeometries(zeroY);
-
-        if (_fillGradientBrush != null && _cachedFillGeometry != null)
-            context.DrawGeometry(_fillGradientBrush, null, _cachedFillGeometry);
-
-        var mainPen = IsEqEnabled ? _curvePen : _disabledCurvePen;
-        if (mainPen != null && _cachedLineGeometry != null)
-            context.DrawGeometry(null, mainPen, _cachedLineGeometry);
+        // 4. Rendering a unified smooth wave and its gradient via pooled Skia draw op (zero StreamGeometry allocations)
+        var eqOp = EqWaveDrawOp.Rent(
+            new Rect(plotLeft - 4.0, plotTop - 16.0, plotW + 8.0, plotH + 24.0),
+            _wave10Points,
+            (float)zeroY,
+            (float)plotTop,
+            (float)plotBottom,
+            new SKColor(_lastAccentColor.R, _lastAccentColor.G, _lastAccentColor.B, _lastAccentColor.A),
+            new SKColor(_lastTextMutedColor.R, _lastTextMutedColor.G, _lastTextMutedColor.B, _lastTextMutedColor.A),
+            IsEqEnabled);
+        context.Custom(eqOp);
 
         // 5. Neat micro-dots directly on the wave + parameter text on top when hovered
         for (int i = 0; i < controlCount; i++)
@@ -635,52 +790,6 @@ public sealed class EqualizerCurveControl : Control
         return cached;
     }
 
-    private void EnsureWaveGeometries(double zeroY)
-    {
-        bool pointsChanged = _cachedFillGeometry == null
-                          || _cachedLineGeometry == null
-                          || Math.Abs(_lastRenderedZeroY - zeroY) > 0.35;
-
-        if (!pointsChanged)
-        {
-            for (int i = 0; i < EqualizerProcessor.BandCount; i++)
-            {
-                if (Math.Abs(_wave10Points[i].X - _lastRenderedWavePoints[i].X) > 0.35 ||
-                    Math.Abs(_wave10Points[i].Y - _lastRenderedWavePoints[i].Y) > 0.35)
-                {
-                    pointsChanged = true;
-                    break;
-                }
-            }
-        }
-
-        if (!pointsChanged)
-            return;
-
-        _lastRenderedZeroY = zeroY;
-        _wave10Points.AsSpan().CopyTo(_lastRenderedWavePoints);
-
-        var fillGeo = new StreamGeometry();
-        using (var ctx = fillGeo.Open())
-        {
-            ctx.BeginFigure(new Point(_wave10Points[0].X, zeroY), isFilled: true);
-            ctx.LineTo(_wave10Points[0]);
-            DrawCatmullRomSpline(ctx, _wave10Points, EqualizerProcessor.BandCount);
-            ctx.LineTo(new Point(_wave10Points[EqualizerProcessor.BandCount - 1].X, zeroY));
-            ctx.EndFigure(isClosed: true);
-        }
-        _cachedFillGeometry = fillGeo;
-
-        var lineGeo = new StreamGeometry();
-        using (var ctx = lineGeo.Open())
-        {
-            ctx.BeginFigure(_wave10Points[0], isFilled: false);
-            DrawCatmullRomSpline(ctx, _wave10Points, EqualizerProcessor.BandCount);
-            ctx.EndFigure(isClosed: false);
-        }
-        _cachedLineGeometry = lineGeo;
-    }
-
     private void EnsureLabelsCached(int controlCount)
     {
         var l10n = LocalizationService.Instance;
@@ -714,7 +823,7 @@ public sealed class EqualizerCurveControl : Control
             return _wave10Points[Math.Clamp(controlIdx, 0, 9)];
 
         // For 5 bands (u = 0, 0.25, 0.5, 0.75, 1.0), linearly interpolate Y on the 10-band wave
-        double exactIso = (controlIdx / 4.0) * 9.0;
+        double exactIso = controlIdx / 4.0 * 9.0;
         int i0 = Math.Clamp((int)exactIso, 0, 8);
         int i1 = i0 + 1;
         double frac = exactIso - i0;
@@ -724,23 +833,6 @@ public sealed class EqualizerCurveControl : Control
         return new Point(
             p0.X + (p1.X - p0.X) * frac,
             p0.Y + (p1.Y - p0.Y) * frac);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void DrawCatmullRomSpline(StreamGeometryContext ctx, Point[] pts, int count)
-    {
-        const double Tension = 1.0 / 6.0;
-        for (int i = 0; i < count - 1; i++)
-        {
-            Point p0 = pts[i];
-            Point p1 = pts[i + 1];
-            Point pPrev = i > 0 ? pts[i - 1] : p0;
-            Point pNext = i < count - 2 ? pts[i + 2] : p1;
-
-            Point c1 = new(p0.X + (p1.X - pPrev.X) * Tension, p0.Y + (p1.Y - pPrev.Y) * Tension);
-            Point c2 = new(p1.X - (pNext.X - p0.X) * Tension, p1.Y - (pNext.Y - p0.Y) * Tension);
-            ctx.CubicBezierTo(c1, c2, p1);
-        }
     }
 
     private Color _lastHighlightColor;
@@ -755,7 +847,7 @@ public sealed class EqualizerCurveControl : Control
         if (accent == _lastAccentColor
             && highlight == _lastHighlightColor
             && textMuted == _lastTextMutedColor
-            && _curvePen != null)
+            && _zeroLinePen != null)
         {
             return;
         }
@@ -763,18 +855,6 @@ public sealed class EqualizerCurveControl : Control
         _lastAccentColor = accent;
         _lastHighlightColor = highlight;
         _lastTextMutedColor = textMuted;
-
-        _curvePen = new ImmutablePen(
-            new ImmutableSolidColorBrush(accent),
-            2.4,
-            lineCap: PenLineCap.Round,
-            lineJoin: PenLineJoin.Round);
-
-        _disabledCurvePen = new ImmutablePen(
-            new ImmutableSolidColorBrush(textMuted, 0.45),
-            1.8,
-            lineCap: PenLineCap.Round,
-            lineJoin: PenLineJoin.Round);
 
         _zeroLinePen = new ImmutablePen(
             new ImmutableSolidColorBrush(highlight, 0.60),
@@ -787,15 +867,6 @@ public sealed class EqualizerCurveControl : Control
         _activeGuidePen = new ImmutablePen(
             new ImmutableSolidColorBrush(accent, 0.90),
             1.6);
-
-        _fillGradientBrush = new ImmutableLinearGradientBrush(
-            [
-                new ImmutableGradientStop(0.0, Color.FromArgb(72, accent.R, accent.G, accent.B)),
-                new ImmutableGradientStop(0.5, Color.FromArgb(14, accent.R, accent.G, accent.B)),
-                new ImmutableGradientStop(1.0, Color.FromArgb(62, accent.R, accent.G, accent.B))
-            ],
-            startPoint: new RelativePoint(0.5, 0.0, RelativeUnit.Relative),
-            endPoint: new RelativePoint(0.5, 1.0, RelativeUnit.Relative));
 
         _labelBrush = new ImmutableSolidColorBrush(textMuted);
         _activeLabelBrush = new ImmutableSolidColorBrush(accent);

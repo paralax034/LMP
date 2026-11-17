@@ -102,21 +102,6 @@
             <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         </Style>
 
-        <!-- Active Playing State: Glowing/Pulse Breathing Animation -->
-        <Style Selector="Button.playlist-main-btn.is-playing">
-            <Style.Animations>
-                <Animation Duration="0:0:1.8" IterationCount="Infinite"
-                           PlaybackDirection="Alternate" Easing="SineEaseInOut">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Opacity" Value="1" />
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Opacity" Value="0.6" />
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-
         <Style Selector="Button.playlist-main-btn PathIcon.state-replace">
             <Setter Property="Opacity" Value="0" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -136,7 +121,7 @@
             <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
         </Style>
 
-        <Style Selector="Button.playlist-main-btn StackPanel.state-pure">
+        <Style Selector="Button.playlist-main-btn Panel.state-pure">
             <Setter Property="Opacity" Value="0" />
             <Setter Property="Transitions">
                 <Transitions>
@@ -146,7 +131,7 @@
         </Style>
 
         <!-- STATE 1: PURE (Equalizer) -->
-        <Style Selector="Button.playlist-main-btn.is-pure StackPanel.state-pure">
+        <Style Selector="Button.playlist-main-btn.is-pure Panel.state-pure">
             <Setter Property="Opacity" Value="1" />
         </Style>
 
@@ -155,79 +140,18 @@
             <Setter Property="Opacity" Value="1" />
         </Style>
 
-        <!-- Equalizer Bars Base -->
-        <Style Selector="Border.eq-bar">
-            <Setter Property="Width" Value="4" />
-            <Setter Property="Height" Value="5" />
-            <Setter Property="CornerRadius" Value="2" />
-            <Setter Property="Background" Value="{DynamicResource TextSecondaryBrush}" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="Background" Duration="0:0:0.15" />
-                </Transitions>
-            </Setter>
+        <!-- Render-Thread Equalizer Bars (0 UI thread animations, 0 layout passes) -->
+        <Style Selector="Button.playlist-main-btn controls|PlayingBarsIndicator.eq-bars">
+            <Setter Property="BarBrush" Value="{DynamicResource TextSecondaryBrush}" />
         </Style>
-
-        <Style Selector="Button.playlist-main-btn:pointerover Border.eq-bar">
-            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Style Selector="Button.playlist-main-btn.is-pure controls|PlayingBarsIndicator.eq-bars">
+            <Setter Property="BarBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
-
-        <Style Selector="Button.playlist-main-btn.is-pure Border.eq-bar">
-            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Style Selector="Button.playlist-main-btn:pointerover controls|PlayingBarsIndicator.eq-bars">
+            <Setter Property="BarBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
-
-        <Style Selector="Button.playlist-main-btn.is-playing Border.eq-bar.b1">
-            <Style.Animations>
-                <Animation Duration="0:0:0.5" IterationCount="Infinite"
-                           PlaybackDirection="Alternate" Easing="SineEaseInOut">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Height" Value="6" />
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Height" Value="22" />
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-        <Style Selector="Button.playlist-main-btn.is-playing Border.eq-bar.b2">
-            <Style.Animations>
-                <Animation Duration="0:0:0.7" IterationCount="Infinite"
-                           PlaybackDirection="Alternate" Easing="SineEaseInOut">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Height" Value="26" />
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Height" Value="6" />
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-        <Style Selector="Button.playlist-main-btn.is-playing Border.eq-bar.b3">
-            <Style.Animations>
-                <Animation Duration="0:0:0.6" IterationCount="Infinite"
-                           PlaybackDirection="Alternate" Easing="SineEaseInOut">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Height" Value="8" />
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Height" Value="20" />
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-        <Style Selector="Button.playlist-main-btn.is-playing Border.eq-bar.b4">
-            <Style.Animations>
-                <Animation Duration="0:0:0.55" IterationCount="Infinite"
-                           PlaybackDirection="Alternate" Easing="SineEaseInOut">
-                    <KeyFrame Cue="0%">
-                        <Setter Property="Height" Value="18" />
-                    </KeyFrame>
-                    <KeyFrame Cue="100%">
-                        <Setter Property="Height" Value="6" />
-                    </KeyFrame>
-                </Animation>
-            </Style.Animations>
+        <Style Selector="Button.playlist-main-btn.is-pure:pointerover controls|PlayingBarsIndicator.eq-bars">
+            <Setter Property="BarBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
     </UserControl.Styles>
 
@@ -403,21 +327,20 @@
                             VerticalAlignment="Center">
                     <Button Classes="playlist-main-btn"
                             Classes.is-pure="{Binding IsQueuePure}"
-                            Classes.is-playing="{Binding IsPlayingPure}"
+                            Classes.is-playing="{Binding IsPlayingBarsActive}"
                             Command="{Binding PlayAllCommand}"
                             ToolTip.Tip="{Binding PlayButtonTooltip}">
                         <Panel>
                             <PathIcon Data="{StaticResource Icon.PlaylistPlay}"
                                       Width="28" Height="28" Classes="state-replace" />
-                            <StackPanel Classes="state-pure"
-                                        Orientation="Horizontal" Spacing="4"
-                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                        Height="28">
-                                <Border Classes="eq-bar b1" />
-                                <Border Classes="eq-bar b2" />
-                                <Border Classes="eq-bar b3" />
-                                <Border Classes="eq-bar b4" />
-                            </StackPanel>
+                            <Panel Classes="state-pure"
+                                   Width="28" Height="28"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <controls:PlayingBarsIndicator Classes="eq-bars"
+                                    IsPlaying="{Binding IsPlayingBarsActive}"
+                                    Width="28" Height="28"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Panel>
                         </Panel>
                     </Button>
 
@@ -491,15 +414,20 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <!-- Unified Bayer-dithered ambient backdrop (reactive only when playing this playlist) -->
+        <controls:AmbientBackdrop x:Name="AmbientBackdrop"
+            Grid.Row="0" Grid.RowSpan="3"
+            BaseColor="{Binding AmbientColor}"
+            IsPlaying="{Binding IsPlaybackActive}"
+            IsReactive="{Binding IsPlayingThisPlaylist}"
+            VolumeFactor="{Binding VolumeOverdriveFactor}"
+            IsHitTestVisible="False" />
+
         <!-- HEADER -->
         <Panel Grid.Row="0" HorizontalAlignment="Stretch">
 
-            <!-- 1. Base background -->
-            <Border Background="{DynamicResource BgPrimaryBrush}" />
-
             <!-- 2. Regular playlist -->
-            <Border Background="{Binding HeaderBackground}"
-                    IsVisible="{Binding !IsLikedPlaylist}"
+            <Border IsVisible="{Binding !IsLikedPlaylist}"
                     Padding="32,24,32,24">
                 <Grid ColumnDefinitions="Auto, *">
                     <!-- COVER -->
@@ -534,30 +462,21 @@
 
             <!-- 3. Liked Playlist -->
             <Panel IsVisible="{Binding IsLikedPlaylist}">
-                <Border Opacity="0.35">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="50%,0%" EndPoint="50%,100%">
-                            <GradientStop Color="{DynamicResource Accent}" Offset="0.0" />
-                            <GradientStop Color="{DynamicResource BgElevated}" Offset="1.0" />
-                        </LinearGradientBrush>
-                    </Border.Background>
-                </Border>
                 <Border Padding="32,24,32,24">
                     <Grid ColumnDefinitions="Auto, *">
                         <!-- COVER: Liked -->
                         <Border Grid.Column="0"
                                 Width="180" Height="180"
-                                CornerRadius="8" ClipToBounds="True"
-                                BoxShadow="{StaticResource CardShadow}"
+                                CornerRadius="8"
+                                Background="Transparent"
+                                BorderBrush="{DynamicResource BgHighlightBrush}"
+                                BorderThickness="1"
                                 VerticalAlignment="Bottom">
-                            <Border Classes="liked-gradient">
-                                <PathIcon Data="{StaticResource Icon.Heart}"
-                                          Width="72" Height="72"
-                                          Foreground="{DynamicResource AccentButtonTextBrush}"
-                                          HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"
-                                          Opacity="0.9" />
-                            </Border>
+                            <PathIcon Data="{StaticResource Icon.Heart}"
+                                      Width="84" Height="84"
+                                      Foreground="{DynamicResource AccentBrush}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center" />
                         </Border>
 
                         <!-- INFO & ACTIONS -->
@@ -576,11 +495,12 @@
                       HorizontalAlignment="Stretch" />
 
         <!-- TRACK LIST -->
-        <ScrollViewer Grid.Row="2"
+        <ScrollViewer x:Name="PlaylistScrollViewer"
+                      Grid.Row="2"
                       HorizontalScrollBarVisibility="Disabled"
                       UseLayoutRounding="True">
             <controls:TrackListControl
-                Margin="24,12,24,0"
+                Margin="24,12,24,24"
                 Items="{Binding Items}"
                 FilterText="{Binding FilterQuery}"
                 IsLoading="{Binding IsLoading}"

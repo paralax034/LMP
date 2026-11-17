@@ -97,6 +97,21 @@ public enum TrackAnimationSpeed
 }
 
 /// <summary>
+/// Visual style of the frequency-reactive ambient backdrop in Queue and Playlist views.
+/// </summary>
+public enum AmbientBackdropMode
+{
+    /// <summary>Disabled (0% rendering overhead).</summary>
+    Off = 0,
+
+    /// <summary>Smooth top and bottom gradient washes.</summary>
+    Wave = 1,
+
+    /// <summary>Traveling audio-reactive fluid wave horizon matching the active track border (default).</summary>
+    FluidWave = 2
+}
+
+/// <summary>
 /// Critical playback failure handling strategy.
 /// </summary>
 /// <remarks>
@@ -517,6 +532,16 @@ public sealed class AppSettings
     /// Animation speed of the playing track in the list.
     /// </summary>
     public TrackAnimationSpeed TrackAnimationSpeed { get; set; } = TrackAnimationSpeed.Medium;
+
+    /// <summary>
+    /// Visual style of the ambient playlist/queue backdrop.
+    /// </summary>
+    public AmbientBackdropMode AmbientBackdropMode { get; set; } = AmbientBackdropMode.FluidWave;
+
+    /// <summary>
+    /// Intensity multiplier for the ambient playlist/queue backdrop in percent (20–150, default 100).
+    /// </summary>
+    public int AmbientBackdropIntensity { get; set; } = 100;
 
     /// <summary>
     /// List of user-saved custom color themes.

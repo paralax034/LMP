@@ -25,6 +25,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     private const uint SpikeContextSwitchesDeltaThreshold = 6_000;
     private const uint SpikeHardFaultsDeltaThreshold = 5;
     private const double SpikeIoDeltaBytesThreshold = 8.0 * 1024 * 1024;
+    private const double SpikeGpuPercentThreshold = 35.0;
     private const ulong MinThreadCyclesDeltaToPrint = 1_500_000;
     private const int MaxTopThreadsToPrint = 10;
 
@@ -63,6 +64,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     private readonly uint[] _threadIdentityTids = new uint[MaxTrackedThreads];
     private readonly string[] _threadIdentityLabels = new string[MaxTrackedThreads];
     private int _threadIdentityCount;
+    private int _threadIdentityWriteIndex;
 
     // Previous process-level metrics
     private long _prevSampleTimestamp;
@@ -174,6 +176,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     {
         var token = _cts.Token;
         byte[]? queryBuffer = ArrayPool<byte>.Shared.Rent(256 * 1024);
+        using GpuTelemetryProbe? gpuProbe = OperatingSystem.IsWindows() ? GpuTelemetryProbe.TryCreate(_currentPid) : null;
         var sb = new StringBuilder(4096);
 
         try
@@ -198,10 +201,11 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
                 tickCounter++;
                 double uiLatencyMs = MeasureUiPingLatencyMs();
+                GpuSample gpuSample = gpuProbe is not null ? gpuProbe.Sample() : default;
 
                 if (OperatingSystem.IsWindows())
                 {
-                    if (!SampleWindowsProcessAndThreads(ref queryBuffer, uiLatencyMs, tickCounter, sb, writer))
+                    if (!SampleWindowsProcessAndThreads(ref queryBuffer, uiLatencyMs, gpuSample, tickCounter, sb, writer))
                     {
                         SampleCrossPlatformFallback(uiLatencyMs, tickCounter, sb, writer);
                     }
@@ -287,6 +291,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     private bool SampleWindowsProcessAndThreads(
         ref byte[] buffer,
         double uiLatencyMs,
+        GpuSample gpuSample,
         int tickCounter,
         StringBuilder sb,
         StreamWriter writer)
@@ -323,7 +328,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
                     var proc = (SYSTEM_PROCESS_INFORMATION*)ptr;
                     if ((uint)proc->UniqueProcessId == _currentPid)
                     {
-                        ProcessMatchedSnapshot(proc, nowTimestamp, uiLatencyMs, tickCounter, sb, writer);
+                        ProcessMatchedSnapshot(proc, nowTimestamp, uiLatencyMs, gpuSample, tickCounter, sb, writer);
                         return true;
                     }
 
@@ -342,6 +347,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         SYSTEM_PROCESS_INFORMATION* proc,
         long nowTimestamp,
         double uiLatencyMs,
+        GpuSample gpuSample,
         int tickCounter,
         StringBuilder sb,
         StreamWriter writer)
@@ -457,9 +463,9 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         long userDelta100Ns = Math.Max(0, proc->UserTime - _prevUserTime100Ns);
         long totalCpuDelta100Ns = kernelDelta100Ns + userDelta100Ns;
 
-        double cpuTotalPercent = (totalCpuDelta100Ns / (elapsed100Ns * _processorCount)) * 100.0;
-        double cpuUserPercent = (userDelta100Ns / (elapsed100Ns * _processorCount)) * 100.0;
-        double cpuKernelPercent = (kernelDelta100Ns / (elapsed100Ns * _processorCount)) * 100.0;
+        double cpuTotalPercent = totalCpuDelta100Ns / (elapsed100Ns * _processorCount) * 100.0;
+        double cpuUserPercent = userDelta100Ns / (elapsed100Ns * _processorCount) * 100.0;
+        double cpuKernelPercent = kernelDelta100Ns / (elapsed100Ns * _processorCount) * 100.0;
 
         ulong cyclesDeltaProc = totalProcessCycles >= _prevTotalCycles
             ? totalProcessCycles - _prevTotalCycles
@@ -487,7 +493,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         ulong otherBytesDelta = proc->OtherTransferCount - _prevOtherBytes;
 
         long allocDeltaBytes = Math.Max(0, gcAllocatedBytes - _prevGcAllocatedBytes);
-        double allocMbPerSec = (allocDeltaBytes / (1024.0 * 1024.0)) / elapsedSec;
+        double allocMbPerSec = allocDeltaBytes / (1024.0 * 1024.0) / elapsedSec;
 
         int gen0Delta = gen0 - _prevGen0;
         int gen1Delta = gen1 - _prevGen1;
@@ -499,7 +505,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             allocMbPerSec >= SpikeAllocMbPerSecThreshold ||
             ctxSwitchesDeltaProc >= SpikeContextSwitchesDeltaThreshold ||
             hardFaultsDelta >= SpikeHardFaultsDeltaThreshold ||
-            (readBytesDelta + writeBytesDelta) >= SpikeIoDeltaBytesThreshold;
+            (readBytesDelta + writeBytesDelta) >= SpikeIoDeltaBytesThreshold ||
+            (gpuSample.IsValid && gpuSample.MaxEnginePercent >= SpikeGpuPercentThreshold);
 
         bool isHeartbeat = (tickCounter % HeartbeatEveryTicks) == 0;
 
@@ -517,8 +524,13 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
                     ? ResolveThreadIdentity(topTid, _threadSortBuffer[0].FallbackStartAddress)
                     : "n/a";
 
+                string gpuInline = gpuSample.IsValid
+                    ? string.Create(CultureInfo.InvariantCulture,
+                        $" | GPU:{gpuSample.MaxEnginePercent:F1}%(3D:{gpuSample.Engine3dPercent:F1}% V:{gpuSample.DedicatedVramMb:F0}+{gpuSample.SharedVramMb:F0}MB)")
+                    : string.Empty;
+
                 Log.Warn(string.Create(CultureInfo.InvariantCulture,
-                    $"[PerfSpike] CPU:{cpuTotalPercent:F2}% (U:{cpuUserPercent:F2}% K:{cpuKernelPercent:F2}% dCyc:{FormatShortCount(cyclesDeltaProc)}) | " +
+                    $"[PerfSpike] CPU:{cpuTotalPercent:F2}% (U:{cpuUserPercent:F2}% K:{cpuKernelPercent:F2}% dCyc:{FormatShortCount(cyclesDeltaProc)}){gpuInline} | " +
                     $"UI:{uiLatencyMs:F1}ms | Alloc:{allocMbPerSec:F1}MB/s (Priv:{privateBytes / (1024.0 * 1024.0):F1}MB WS:{proc->WorkingSetSize / (1024.0 * 1024.0):F1}MB) | " +
                     $"dCtxSw:{ctxSwitchesDeltaProc} | dIO R:{readBytesDelta / 1024}KB W:{writeBytesDelta / 1024}KB | " +
                     $"TopThr:#{topTid}[{topMod}] dCyc:{FormatShortCount(topTidCycles)}"));
@@ -528,6 +540,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             AppendSummaryLine(
                 sb, isSpike ? "SPIKE" : "HEARTBEAT",
                 cpuTotalPercent, cpuUserPercent, cpuKernelPercent,
+                gpuSample,
                 cyclesDeltaProc, ctxSwitchesDeltaProc,
                 privateBytes, privateBytesDelta, (long)proc->WorkingSetSize,
                 gcHeapBytes, allocMbPerSec, gen0Delta, gen1Delta, gen2Delta,
@@ -541,6 +554,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
                 AppendSpikeDetailsAscii(
                     sb, proc, elapsed100Ns,
                     cpuTotalPercent, cpuUserPercent, cpuKernelPercent,
+                    gpuSample,
                     totalProcessCycles, cyclesDeltaProc,
                     kernelDelta100Ns, userDelta100Ns,
                     totalCtxSwitches, ctxSwitchesDeltaProc,
@@ -566,6 +580,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         StringBuilder sb,
         string tag,
         double cpuTotal, double cpuUser, double cpuKernel,
+        GpuSample gpuSample,
         ulong cyclesDelta, ulong ctxSwDelta,
         long privateBytes, long privateDelta, long workingSetBytes,
         long gcHeapBytes, double allocMbPerSec, int g0Delta, int g1Delta, int g2Delta,
@@ -582,8 +597,12 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             sb.Append('[').Append(DateTime.Now.ToString("HH:mm:ss.fff", inv)).Append("] ");
 
         sb.Append(inv, $"[{tag}] ")
-          .Append(inv, $"CPU:{cpuTotal:F2}%(U:{cpuUser:F2}%/K:{cpuKernel:F2}%) | ")
-          .Append(inv, $"dCyc:{FormatShortCount(cyclesDelta)} | ")
+          .Append(inv, $"CPU:{cpuTotal:F2}%(U:{cpuUser:F2}%/K:{cpuKernel:F2}%) | ");
+
+        if (gpuSample.IsValid)
+            sb.Append(inv, $"GPU:{gpuSample.MaxEnginePercent:F1}%(3D:{gpuSample.Engine3dPercent:F1}% V:{gpuSample.DedicatedVramMb:F0}/{gpuSample.SharedVramMb:F0}MB) | ");
+
+        sb.Append(inv, $"dCyc:{FormatShortCount(cyclesDelta)} | ")
           .Append(inv, $"dCtxSw:{ctxSwDelta} | ")
           .Append(inv, $"Priv:{privateBytes / (1024.0 * 1024.0):F2}MB({(privateDelta >= 0 ? "+" : "")}{privateDelta / 1024.0:F0}KB) | ")
           .Append(inv, $"WS:{workingSetBytes / (1024.0 * 1024.0):F2}MB | ")
@@ -601,6 +620,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         SYSTEM_PROCESS_INFORMATION* proc,
         double elapsed100Ns,
         double cpuTotal, double cpuUser, double cpuKernel,
+        GpuSample gpuSample,
         ulong totalCycles, ulong cyclesDelta,
         long kernelDelta100Ns, long userDelta100Ns,
         ulong totalCtxSw, ulong ctxSwDelta,
@@ -616,6 +636,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
         sb.AppendLine("  [Process Statistics]");
         sb.Append(inv, $"    CPU           : {cpuTotal:F2}% (User: {cpuUser:F2}%, Kernel: {cpuKernel:F2}%, Relative: {cpuTotal * _processorCount:F2}%)").AppendLine();
+        if (gpuSample.IsValid)
+            sb.Append(inv, $"    GPU           : MaxEngine={gpuSample.MaxEnginePercent:F2}%, 3D={gpuSample.Engine3dPercent:F2}%, VRAM_Ded={gpuSample.DedicatedVramMb:F1}MB, VRAM_Shared={gpuSample.SharedVramMb:F1}MB").AppendLine();
         sb.Append(inv, $"    Cycles        : {FormatGrouped(totalCycles)} (dCyc: +{FormatGrouped(cyclesDelta)}) | CtxSwitches: {FormatGrouped(totalCtxSw)} (dCtxSw: +{FormatGrouped(ctxSwDelta)})").AppendLine();
         sb.Append(inv, $"    Times         : Kernel={TimeSpan.FromTicks(proc->KernelTime):hh\\:mm\\:ss\\.fff} (+{kernelDelta100Ns / 10_000.0:F2}ms) | User={TimeSpan.FromTicks(proc->UserTime):hh\\:mm\\:ss\\.fff} (+{userDelta100Ns / 10_000.0:F2}ms)").AppendLine();
         sb.Append(inv, $"    Memory        : Priv={FormatBytes((ulong)privateBytes)} ({(privateDelta >= 0 ? "+" : "-")}{FormatBytes((ulong)Math.Abs(privateDelta))}, Peak={FormatBytes(proc->PeakPagefileUsage)}) | WS={FormatBytes(proc->WorkingSetSize)} (Peak={FormatBytes(proc->PeakWorkingSetSize)}, PrivWS={FormatBytes((ulong)proc->WorkingSetPrivateSize)})").AppendLine();
@@ -629,11 +651,166 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         for (int i = 0; i < printCount; i++)
         {
             ref ThreadDeltaEntry t = ref _threadSortBuffer[i];
-            double threadCpu = (t.KernelPlusUserDelta100Ns / (elapsed100Ns * _processorCount)) * 100.0;
+            double threadCpu = t.KernelPlusUserDelta100Ns / (elapsed100Ns * _processorCount) * 100.0;
             string identity = ResolveThreadIdentity(t.ThreadId, t.FallbackStartAddress);
 
             sb.Append(inv, $"    {t.ThreadId,-6} | {threadCpu,5:F2}% | {FormatGrouped(t.TotalCycles),16} | +{FormatGrouped(t.CyclesDelta),13} | {identity,-42} | {FormatThreadPriority(t.BasePriority),-13} | {FormatGrouped(t.TotalCtxSwitches),9} | +{FormatGrouped(t.CtxSwitchesDelta),6} | {FormatThreadState(t.State, t.WaitReason)}")
               .AppendLine();
+        }
+    }
+
+    private readonly record struct GpuSample(
+        bool IsValid,
+        double MaxEnginePercent,
+        double Engine3dPercent,
+        double DedicatedVramMb,
+        double SharedVramMb);
+
+    private sealed class GpuTelemetryProbe : IDisposable
+    {
+        private const uint PdhFmtDouble = 0x00000200;
+        private const uint PdhFmtLarge = 0x00000400;
+        private const int PdhMoreData = unchecked((int)0x800007D2);
+
+        private readonly IntPtr _hQuery;
+        private readonly IntPtr _hGpuEngine;
+        private readonly IntPtr _hVramDedicated;
+        private readonly IntPtr _hVramShared;
+        private byte[] _pdhBuffer = new byte[16 * 1024];
+        private bool _hasPrimed;
+
+        private GpuTelemetryProbe(IntPtr hQuery, IntPtr hGpuEngine, IntPtr hVramDedicated, IntPtr hVramShared)
+        {
+            _hQuery = hQuery;
+            _hGpuEngine = hGpuEngine;
+            _hVramDedicated = hVramDedicated;
+            _hVramShared = hVramShared;
+        }
+
+        public static GpuTelemetryProbe? TryCreate(uint pid)
+        {
+            if (PdhOpenQueryW(IntPtr.Zero, 0, out IntPtr hQuery) != 0 || hQuery == IntPtr.Zero)
+                return null;
+
+            string engPath = string.Create(CultureInfo.InvariantCulture, $@"\GPU Engine(pid_{pid}_*)\Utilization Percentage");
+            string dedPath = string.Create(CultureInfo.InvariantCulture, $@"\GPU Process Memory(pid_{pid}_*)\Dedicated Usage");
+            string shrPath = string.Create(CultureInfo.InvariantCulture, $@"\GPU Process Memory(pid_{pid}_*)\Shared Usage");
+
+            if (PdhAddEnglishCounterW(hQuery, engPath, 0, out IntPtr hEng) != 0)
+            {
+                PdhCloseQuery(hQuery);
+                return null;
+            }
+
+            PdhAddEnglishCounterW(hQuery, dedPath, 0, out IntPtr hDed);
+            PdhAddEnglishCounterW(hQuery, shrPath, 0, out IntPtr hShr);
+
+            var probe = new GpuTelemetryProbe(hQuery, hEng, hDed, hShr);
+            if (PdhCollectQueryData(hQuery) == 0)
+                probe._hasPrimed = true;
+            return probe;
+        }
+
+        public GpuSample Sample()
+        {
+            if (_hQuery == IntPtr.Zero || PdhCollectQueryData(_hQuery) != 0)
+                return default;
+
+            if (!_hasPrimed)
+            {
+                _hasPrimed = true;
+                return default;
+            }
+
+            (double maxPct, double eng3dPct) = ReadEngineUtilization();
+            long dedBytes = _hVramDedicated != IntPtr.Zero ? ReadSumLarge(_hVramDedicated) : 0;
+            long shrBytes = _hVramShared != IntPtr.Zero ? ReadSumLarge(_hVramShared) : 0;
+
+            return new GpuSample(
+                IsValid: true,
+                MaxEnginePercent: maxPct,
+                Engine3dPercent: eng3dPct,
+                DedicatedVramMb: dedBytes / (1024.0 * 1024.0),
+                SharedVramMb: shrBytes / (1024.0 * 1024.0));
+        }
+
+        private (double maxPct, double eng3dPct) ReadEngineUtilization()
+        {
+            if (!TryFetchArray(_hGpuEngine, PdhFmtDouble, out uint count))
+                return (0.0, 0.0);
+
+            double maxPct = 0.0;
+            double eng3dPct = 0.0;
+
+            fixed (byte* pBuf = _pdhBuffer)
+            {
+                var items = (PDH_FMT_COUNTERVALUE_ITEM_W*)pBuf;
+                for (uint i = 0; i < count; i++)
+                {
+                    ref readonly var item = ref items[i];
+                    if (item.FmtValue.CStatus > 1) continue;
+
+                    double val = Math.Clamp(item.FmtValue.doubleValue, 0.0, 100.0);
+                    if (val > maxPct) maxPct = val;
+
+                    if (item.szName != null)
+                    {
+                        var nameSpan = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(item.szName);
+                        if (nameSpan.Contains("engtype_3D".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                            eng3dPct += val;
+                    }
+                }
+            }
+
+            return (maxPct, Math.Min(100.0, eng3dPct));
+        }
+
+        private long ReadSumLarge(IntPtr hCounter)
+        {
+            if (!TryFetchArray(hCounter, PdhFmtLarge, out uint count))
+                return 0;
+
+            long total = 0;
+            fixed (byte* pBuf = _pdhBuffer)
+            {
+                var items = (PDH_FMT_COUNTERVALUE_ITEM_W*)pBuf;
+                for (uint i = 0; i < count; i++)
+                {
+                    ref readonly var item = ref items[i];
+                    if (item.FmtValue.CStatus <= 1 && item.FmtValue.largeValue > 0)
+                        total += item.FmtValue.largeValue;
+                }
+            }
+            return total;
+        }
+
+        private bool TryFetchArray(IntPtr hCounter, uint format, out uint itemCount)
+        {
+            uint bufSize = (uint)_pdhBuffer.Length;
+            int status;
+            fixed (byte* pBuf = _pdhBuffer)
+            {
+                status = PdhGetFormattedCounterArrayW(hCounter, format, ref bufSize, out itemCount, pBuf);
+            }
+
+            if (status == PdhMoreData)
+            {
+                int nextSize = Math.Max(_pdhBuffer.Length * 2, (int)bufSize + 1024);
+                _pdhBuffer = new byte[nextSize];
+                bufSize = (uint)_pdhBuffer.Length;
+                fixed (byte* pBuf = _pdhBuffer)
+                {
+                    status = PdhGetFormattedCounterArrayW(hCounter, format, ref bufSize, out itemCount, pBuf);
+                }
+            }
+
+            return status == 0 && itemCount > 0;
+        }
+
+        public void Dispose()
+        {
+            if (_hQuery != IntPtr.Zero)
+                PdhCloseQuery(_hQuery);
         }
     }
 
@@ -657,7 +834,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         }
 
         double elapsedSec = Math.Max(0.001, Stopwatch.GetElapsedTime(_prevSampleTimestamp, now).TotalSeconds);
-        double allocMbPerSec = ((gcAlloc - _prevGcAllocatedBytes) / (1024.0 * 1024.0)) / elapsedSec;
+        double allocMbPerSec = (gcAlloc - _prevGcAllocatedBytes) / (1024.0 * 1024.0) / elapsedSec;
         bool isSpike = uiLatencyMs >= SpikeUiLatencyMsThreshold || allocMbPerSec >= SpikeAllocMbPerSecThreshold;
 
         if (isSpike || (tickCounter % HeartbeatEveryTicks) == 0)
@@ -814,6 +991,13 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             _threadIdentityTids[_threadIdentityCount] = tid;
             _threadIdentityLabels[_threadIdentityCount] = label;
             _threadIdentityCount++;
+        }
+        else
+        {
+            int slot = _threadIdentityWriteIndex;
+            _threadIdentityTids[slot] = tid;
+            _threadIdentityLabels[slot] = label;
+            _threadIdentityWriteIndex = (slot + 1) % MaxTrackedThreads;
         }
 
         return label;
@@ -1116,6 +1300,41 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
     [LibraryImport("kernel32.dll", EntryPoint = "K32GetModuleBaseNameW")]
     private static partial uint GetModuleBaseNameW(IntPtr hProcess, IntPtr hModule, char* lpBaseName, uint nSize);
+
+    [StructLayout(LayoutKind.Explicit, Size = 16)]
+    private struct PDH_FMT_COUNTERVALUE
+    {
+        [FieldOffset(0)] public uint CStatus;
+        [FieldOffset(8)] public long largeValue;
+        [FieldOffset(8)] public double doubleValue;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PDH_FMT_COUNTERVALUE_ITEM_W
+    {
+        public char* szName;
+        public PDH_FMT_COUNTERVALUE FmtValue;
+    }
+
+    [LibraryImport("pdh.dll")]
+    private static partial int PdhOpenQueryW(IntPtr szDataSource, nuint dwUserData, out IntPtr phQuery);
+
+    [LibraryImport("pdh.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int PdhAddEnglishCounterW(IntPtr hQuery, string szFullCounterPath, nuint dwUserData, out IntPtr phCounter);
+
+    [LibraryImport("pdh.dll")]
+    private static partial int PdhCollectQueryData(IntPtr hQuery);
+
+    [LibraryImport("pdh.dll")]
+    private static partial int PdhGetFormattedCounterArrayW(
+        IntPtr hCounter,
+        uint dwFormat,
+        ref uint lpdwBufferSize,
+        out uint lpdwItemCount,
+        void* pItemBuffer);
+
+    [LibraryImport("pdh.dll")]
+    private static partial int PdhCloseQuery(IntPtr hQuery);
 
     #endregion
 }

@@ -219,7 +219,7 @@
                                             FontSize="14" />
                                         <TextBlock
                                             Text="{Binding Author}"
-                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                             TextWrapping="NoWrap"
                                             TextTrimming="CharacterEllipsis"
                                             MaxLines="1"
@@ -287,7 +287,7 @@
                                                VerticalAlignment="Center"
                                                Margin="0,0,10,0"
                                                TextAlignment="Center"
-                                               Foreground="{DynamicResource TextMutedBrush}"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
                                                FontSize="12"
                                                Text="{Binding FormattedDuration}"
                                                IsHitTestVisible="False" />
@@ -313,6 +313,7 @@
                                                       IsActive="{Binding IsActive}"
                                                       IsPlaying="{Binding IsPlaying}"
                                                       IsSelected="{Binding IsSelected}"
+                                                      WaveBrush="{DynamicResource AccentBrush}"
                                                       IsHitTestVisible="False" />
                             </Panel>
                         </Border>

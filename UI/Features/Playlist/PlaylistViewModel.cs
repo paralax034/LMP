@@ -35,6 +35,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     private const int LocalMutationDebounceMs = 1500;
 
     private volatile bool _isSuspended;
+    private volatile bool _disposed;
     private int _syncInProgressGate;
 
     #endregion
@@ -47,7 +48,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     [ObservableProperty] public partial int TrackCount { get; private set; }
     [ObservableProperty] public partial TimeSpan TotalDuration { get; private set; }
     [ObservableProperty] public partial string FormattedDuration { get; set; } = "";
-    [ObservableProperty] public partial IBrush? HeaderBackground { get; private set; }
+    [ObservableProperty] public partial Color? AmbientColor { get; private set; }
     [ObservableProperty] public partial bool IsLikedPlaylist { get; private set; }
     [ObservableProperty] public partial string? FormattedViewCount { get; private set; }
     [ObservableProperty] public partial string? FormattedReleaseDate { get; private set; }
@@ -111,10 +112,18 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     #region Properties — Playback State
 
     [ObservableProperty] public partial bool IsPlayingThisPlaylist { get; private set; }
+    [ObservableProperty] public partial bool IsPlaybackActive { get; private set; }
+    [ObservableProperty] public partial double VolumeOverdriveFactor { get; private set; } = 1.0;
+    [ObservableProperty] public partial double TopGlowAttenuation { get; set; } = 1.0;
     [ObservableProperty] public partial bool IsShuffleActive { get; private set; }
     [ObservableProperty] public partial bool IsDownloadingActive { get; private set; }
     [ObservableProperty] public partial bool IsQueuePure { get; private set; }
-    [ObservableProperty] public partial bool IsPlayingPure { get; private set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPlayingBarsActive))]
+    public partial bool IsPlayingPure { get; private set; }
+
+    public bool IsPageActive { get; private set; }
+    public bool IsPlayingBarsActive => IsPlayingPure && IsPageActive && !_isSuspended;
 
     public string PlayButtonTooltip
     {
@@ -226,13 +235,19 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         LibService.OnDataChanged += OnLibraryDataChanged;
         _playlistService.OnPlaylistChanged += OnServicePlaylistChanged;
         PlayerControl.PlaybackPurityChanged += OnPlaybackPurityChanged;
+        PlayerControl.IsPlayingChanged += OnPlayerIsPlayingChanged;
+        PlayerControl.VolumeOverdriveChanged += OnPlayerVolumeOverdriveChanged;
+
+        IsPlaybackActive = PlayerControl.IsPlaying;
+        VolumeOverdriveFactor = PlayerControl.VolumeOverdriveFactor;
     }
 
     private void OnServicePlaylistChanged(Core.Models.Playlist playlist)
     {
-        if (_isSuspended || playlist.Id != _currentPlaylistId) return;
+        if (_disposed || _isSuspended || playlist.Id != _currentPlaylistId) return;
         Dispatcher.UIThread.Post(() =>
         {
+            if (_disposed || _isSuspended || playlist.Id != _currentPlaylistId) return;
             if ((DateTime.Now - _lastLocalMutationTime).TotalMilliseconds >= LocalMutationDebounceMs)
             {
                 _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
@@ -242,7 +257,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     private void OnLibraryDataChanged()
     {
-        if (_isSuspended || !IsLikedPlaylist) return;
+        if (_disposed || _isSuspended || !IsLikedPlaylist) return;
 
         if (!Dispatcher.UIThread.CheckAccess())
         {
@@ -253,8 +268,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         if ((DateTime.Now - _lastLocalMutationTime).TotalMilliseconds < LocalMutationDebounceMs)
             return;
 
-        _dataChangedDebounceTimer?.Stop();
-        _dataChangedDebounceTimer = new DispatcherTimer(
+        _dataChangedDebounceTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(600),
             DispatcherPriority.Background,
             (_, _) =>
@@ -264,17 +278,46 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
                 _ = LoadPlaylistAsync(_currentPlaylistId, showLoader: false, CancellationToken.None);
             });
+
+        _dataChangedDebounceTimer.Stop();
         _dataChangedDebounceTimer.Start();
     }
 
     #region Lifecycle
 
-    protected override void OnSuspend() => _isSuspended = true;
+    public override Task OnNavigatedToAsync()
+    {
+        _isSuspended = ViewModelBase.CurrentSuspendLevel != SuspendLevel.None;
+        IsPageActive = true;
+        IsPlaybackActive = PlayerControl.IsPlaying;
+        VolumeOverdriveFactor = PlayerControl.VolumeOverdriveFactor;
+        if (IsLikedPlaylist)
+            AmbientColor = LMP.UI.Services.ThemeManagerService.GetThemeColor("Accent");
+
+        OnPropertyChanged(nameof(IsPlayingBarsActive));
+        return base.OnNavigatedToAsync();
+    }
+
+    public override void OnNavigatedFrom()
+    {
+        IsPageActive = false;
+        OnPropertyChanged(nameof(IsPlayingBarsActive));
+        base.OnNavigatedFrom();
+    }
+
+    protected override void OnSuspend()
+    {
+        _isSuspended = true;
+        OnPropertyChanged(nameof(IsPlayingBarsActive));
+    }
 
     protected override void OnResume()
     {
         _isSuspended = false;
+        IsPlaybackActive = PlayerControl.IsPlaying;
+        VolumeOverdriveFactor = PlayerControl.VolumeOverdriveFactor;
         UpdatePlaybackState();
+        OnPropertyChanged(nameof(IsPlayingBarsActive));
         OnPropertyChanged(nameof(FormattedTrackCount));
     }
 
@@ -292,7 +335,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     private async void HandleRemoveFromPlaylistAction(IReadOnlyList<TrackInfo> targets)
     {
-        if (!CanEdit || targets.Count == 0) return;
+        if (_disposed || !CanEdit || targets.Count == 0) return;
 
         _lastLocalMutationTime = DateTime.Now;
 
@@ -316,7 +359,14 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             FormatDuration();
         }
 
-        await _playlistService.RemoveTracksFromPlaylistAsync(_currentPlaylistId, targets);
+        try
+        {
+            await _playlistService.RemoveTracksFromPlaylistAsync(_currentPlaylistId, targets);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[Playlist] Failed to remove tracks from '{_currentPlaylistId}': {ex.Message}");
+        }
     }
 
     #endregion
@@ -336,12 +386,22 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     private async Task LoadPlaylistAsync(string playlistId, bool showLoader, CancellationToken ct)
     {
+        if (_disposed) return;
+
         var loadCts = ReplacePlaylistLoadCts(ct);
         var loadCt = loadCts.Token;
 
         if (!string.Equals(_currentPlaylistId, playlistId, StringComparison.Ordinal))
         {
             FilterQuery = string.Empty;
+            IsLikedPlaylist = string.Equals(playlistId, LibraryService.LikedPlaylistId, StringComparison.Ordinal);
+            AmbientColor = IsLikedPlaylist
+                ? LMP.UI.Services.ThemeManagerService.GetThemeColor("Accent")
+                : null;
+            IsPlayingThisPlaylist = false;
+            IsQueuePure = false;
+            IsPlayingPure = false;
+            OnPropertyChanged(nameof(IsPlayingBarsActive));
         }
 
         _currentPlaylistId = playlistId;
@@ -380,7 +440,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 ApplyLoadedPayload(payload);
                 SetTracks(payload.Tracks, payload.TrackIds);
 
-                _ = LoadHeaderGradientAsync();
+                _ = LoadAmbientColorAsync(playlistId);
                 _ = HydrateCacheStatusAsync(loadCt);
 
                 UpdatePlaybackState();
@@ -436,25 +496,33 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         FormatDuration();
     }
 
-    private async Task LoadHeaderGradientAsync()
+    private async Task LoadAmbientColorAsync(string targetPlaylistId)
     {
         try
         {
-            if (_currentPlaylist?.EffectiveColor is { } colorStr)
+            if (IsLikedPlaylist)
             {
-                try
+                await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    var color = Color.Parse(colorStr);
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                        HeaderBackground = DominantColorService.CreateHeaderGradient(color));
-                    return;
-                }
-                catch (FormatException) { }
+                    if (string.Equals(_currentPlaylistId, targetPlaylistId, StringComparison.Ordinal))
+                        AmbientColor = LMP.UI.Services.ThemeManagerService.GetThemeColor("Accent");
+                });
+                return;
+            }
+
+            if (_currentPlaylist?.EffectiveColor is { } colorStr && Color.TryParse(colorStr, out var parsed))
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (string.Equals(_currentPlaylistId, targetPlaylistId, StringComparison.Ordinal))
+                        AmbientColor = parsed;
+                });
+                return;
             }
 
             if (string.IsNullOrEmpty(ThumbnailUrl) || !PlaylistEditorViewModel.IsValidUri(ThumbnailUrl))
             {
-                await SetHeaderBackgroundAsync(null);
+                await SetAmbientColorAsync(null, targetPlaylistId);
                 return;
             }
 
@@ -462,18 +530,17 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             if (dominantColor is not null)
             {
                 _ = SaveComputedColorAsync(dominantColor.Value);
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                    HeaderBackground = DominantColorService.CreateHeaderGradient(dominantColor.Value));
+                await SetAmbientColorAsync(dominantColor.Value, targetPlaylistId);
             }
             else
             {
-                await SetHeaderBackgroundAsync(null);
+                await SetAmbientColorAsync(null, targetPlaylistId);
             }
         }
         catch (Exception ex)
         {
-            Log.Warn($"[Playlist] Gradient error: {ex.Message}");
-            await SetHeaderBackgroundAsync(null);
+            Log.Warn($"[Playlist] Ambient color error: {ex.Message}");
+            await SetAmbientColorAsync(null, targetPlaylistId);
         }
     }
 
@@ -496,8 +563,12 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         }
     }
 
-    private async Task SetHeaderBackgroundAsync(IBrush? brush) =>
-        await Dispatcher.UIThread.InvokeAsync(() => HeaderBackground = brush);
+    private async Task SetAmbientColorAsync(Color? color, string targetPlaylistId) =>
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (string.Equals(_currentPlaylistId, targetPlaylistId, StringComparison.Ordinal))
+                AmbientColor = color;
+        });
 
     #region Playback
 
@@ -538,8 +609,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             playlistName: PlaylistName);
 
         IsShuffleActive = true;
-        _shuffleAnimationTimer?.Stop();
-        _shuffleAnimationTimer = new DispatcherTimer(
+        _shuffleAnimationTimer ??= new DispatcherTimer(
             TimeSpan.FromMilliseconds(800),
             DispatcherPriority.Normal,
             (_, _) =>
@@ -547,6 +617,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 IsShuffleActive = false;
                 _shuffleAnimationTimer?.Stop();
             });
+
+        _shuffleAnimationTimer.Stop();
         _shuffleAnimationTimer.Start();
     }
 
@@ -574,8 +646,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 Downloads.StartDownload(track);
         }
 
-        _downloadAnimationTimer?.Stop();
-        _downloadAnimationTimer = new DispatcherTimer(
+        _downloadAnimationTimer ??= new DispatcherTimer(
             TimeSpan.FromSeconds(2),
             DispatcherPriority.Normal,
             (_, _) =>
@@ -583,6 +654,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 IsDownloadingActive = false;
                 _downloadAnimationTimer?.Stop();
             });
+
+        _downloadAnimationTimer.Stop();
         _downloadAnimationTimer.Start();
         return Task.CompletedTask;
     }
@@ -596,12 +669,42 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     private void OnPlaybackPurityChanged(string? activeId, bool isPure, bool isPlayingPure) => UpdatePlaybackState();
 
+    private void OnPlayerIsPlayingChanged(bool isPlaying)
+    {
+        if (_disposed) return;
+
+        if (Dispatcher.UIThread.CheckAccess())
+            IsPlaybackActive = isPlaying;
+        else
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!_disposed)
+                    IsPlaybackActive = isPlaying;
+            });
+    }
+
+    private void OnPlayerVolumeOverdriveChanged(double factor)
+    {
+        if (_disposed) return;
+
+        if (Dispatcher.UIThread.CheckAccess())
+            VolumeOverdriveFactor = factor;
+        else
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!_disposed)
+                    VolumeOverdriveFactor = factor;
+            });
+    }
+
     private void UpdatePlaybackState()
     {
         bool isThis = string.Equals(PlayerControl.ActivePlaylistId, _currentPlaylistId, StringComparison.Ordinal);
         IsPlayingThisPlaylist = isThis;
+        IsPlaybackActive = PlayerControl.IsPlaying;
         IsQueuePure = isThis && PlayerControl.IsQueuePure;
         IsPlayingPure = isThis && PlayerControl.IsPlayingPure;
+        OnPropertyChanged(nameof(IsPlayingBarsActive));
         OnPropertyChanged(nameof(PlayButtonTooltip));
     }
 
@@ -815,28 +918,9 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_disposed)
         {
-            LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
-            LibService.OnDataChanged -= OnLibraryDataChanged;
-            _playlistService.OnPlaylistChanged -= OnServicePlaylistChanged;
-
-            _dataChangedDebounceTimer?.Stop();
-            _dataChangedDebounceTimer = null;
-
-            _shuffleAnimationTimer?.Stop();
-            _shuffleAnimationTimer = null;
-
-            _downloadAnimationTimer?.Stop();
-            _downloadAnimationTimer = null;
-
-            PlayerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
-
-            _playlistLoadCts?.Cancel();
-            _playlistLoadCts?.Dispose();
-            _playlistLoadCts = null;
-
-            _currentPlaylist = null;
+            _disposed = true;
         }
         base.Dispose(disposing);
     }

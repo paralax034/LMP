@@ -531,7 +531,7 @@ public static partial class HotPathAllocationTests
                 deltaCs = after.ContextSwitches >= before.ContextSwitches
                     ? after.ContextSwitches - before.ContextSwitches
                     : after.ContextSwitches;
-                deltaTime100Ns = Math.Max(0L, (after.KernelTime - before.KernelTime) + (after.UserTime - before.UserTime));
+                deltaTime100Ns = Math.Max(0L, after.KernelTime - before.KernelTime + (after.UserTime - before.UserTime));
                 isNew = false;
             }
             else

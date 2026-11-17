@@ -520,7 +520,7 @@ internal sealed class AudioSpectrumAnalyzer
                 ref var s = ref _bandStates[b];
 
                 float y = c.B0 * x + s.Z1;
-                s.Z1 = (c.B1 * x + s.Z2) - c.A1 * y;
+                s.Z1 = c.B1 * x + s.Z2 - c.A1 * y;
                 s.Z2 = c.B2 * x - c.A2 * y;
                 pSumSq12[b] += y * y;
             }

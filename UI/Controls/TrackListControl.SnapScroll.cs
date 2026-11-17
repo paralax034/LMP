@@ -32,6 +32,7 @@ public partial class TrackListControl
         #region Fields
 
         private readonly ScrollViewer _sv;
+        private readonly Action<TimeSpan> _frameCallback;
         private ScrollBar? _verticalScrollBar;
         private TopLevel? _topLevel;
 
@@ -52,6 +53,7 @@ public partial class TrackListControl
         public SnapScrollHelper(ScrollViewer sv)
         {
             _sv = sv;
+            _frameCallback = OnAnimationFrame;
             _currentY = sv.Offset.Y;
             _targetY = _currentY;
             _topLevel = TopLevel.GetTopLevel(sv);
@@ -195,7 +197,15 @@ public partial class TrackListControl
             _lastTickTimestamp = currentTimestamp;
 
             if (dt > 0.05) dt = 0.05;
-            if (dt <= 0.0) return;
+            if (dt <= 0.0)
+            {
+                var tl = _topLevel ??= TopLevel.GetTopLevel(_sv);
+                if (tl != null)
+                    tl.RequestAnimationFrame(_frameCallback);
+                else
+                    StopAnimation();
+                return;
+            }
 
             double maxScroll = GetMaxScrollY();
             _targetY = Math.Clamp(_targetY, 0, maxScroll);
@@ -213,7 +223,7 @@ public partial class TrackListControl
 
             ApplyOffset(_currentY);
 
-            (_topLevel ??= TopLevel.GetTopLevel(_sv))?.RequestAnimationFrame(OnAnimationFrame);
+            (_topLevel ??= TopLevel.GetTopLevel(_sv))?.RequestAnimationFrame(_frameCallback);
         }
 
         private void StartAnimation()
@@ -223,7 +233,7 @@ public partial class TrackListControl
             _isAnimating = true;
             _lastTickTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
 
-            (_topLevel ??= TopLevel.GetTopLevel(_sv))?.RequestAnimationFrame(OnAnimationFrame);
+            (_topLevel ??= TopLevel.GetTopLevel(_sv))?.RequestAnimationFrame(_frameCallback);
         }
 
         private void StopAnimation()

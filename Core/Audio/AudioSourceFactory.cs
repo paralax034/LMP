@@ -161,12 +161,8 @@ public static class AudioSourceFactory
         StreamUrlProvider? urlProvider = null,
         StreamingConfig? config = null)
     {
-        var cacheManager = GlobalCache;
-        if (cacheManager == null)
-        {
-            throw new InvalidOperationException(
+        var cacheManager = GlobalCache ?? throw new InvalidOperationException(
                 "AudioSourceFactory.InitializeGlobalCache() must be called before creating sources");
-        }
 
         Log.Info($"[AudioSourceFactory] CreateAsync -> {descriptor}");
 
@@ -329,12 +325,8 @@ public static class AudioSourceFactory
           StreamingConfig? config = null,
           CancellationToken ct = default)
     {
-        var cacheManager = GlobalCache;
-        if (cacheManager == null)
-        {
-            throw new InvalidOperationException(
+        var cacheManager = GlobalCache ?? throw new InvalidOperationException(
                 "AudioSourceFactory.InitializeGlobalCache() must be called before creating sources");
-        }
 
         config ??= _currentConfig;
         trackId ??= GenerateTrackIdFromUrl(url);

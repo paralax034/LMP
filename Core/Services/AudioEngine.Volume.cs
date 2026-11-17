@@ -54,6 +54,28 @@ public sealed partial class AudioEngine
         RaiseOnUI(() => OnMaxVolumeChanged?.Invoke(_library.Settings.MaxVolumeLimit));
     }
 
+    /// <summary>
+    /// Computes an animation intensity multiplier from playback volume:
+    /// keeps a stable 1.0x baseline up to 75% loudness, ramps smoothly to 1.25x at 100%,
+    /// and up to 1.60x under software volume boost.
+    /// </summary>
+    public static double ComputeVolumeOverdrive(int volumePercent, int maxVolumeLimit, bool volumeBoostEnabled)
+    {
+        int maxVol = Math.Max(maxVolumeLimit, 100);
+        int normalCeiling = volumeBoostEnabled ? Math.Min(maxVol, VolumeNormalRange) : maxVol;
+        if (normalCeiling <= 0) return 1.0;
+
+        double normalized = (double)volumePercent / normalCeiling;
+        if (normalized <= 0.75)
+            return 1.0;
+
+        if (normalized <= 1.0)
+            return 1.0 + (normalized - 0.75) / 0.25 * 0.25;
+
+        double boostT = Math.Clamp(normalized - 1.0, 0.0, 1.0);
+        return 1.25 + (0.35 * boostT);
+    }
+
     /// <summary>Initializes volume from settings at startup or after database load.</summary>
     private void InitializeVolumeFromSettings()
     {

@@ -8,86 +8,214 @@
     <Grid>
         <!-- Empty State -->
         <StackPanel IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center"
-            VerticalAlignment="Center" Spacing="16">
-            <!-- Empty State: empty queue icon -->
+            VerticalAlignment="Center" Spacing="12">
             <PathIcon Data="{StaticResource Icon.PlaylistMusic}"
-                Width="64" Height="64"
+                Width="48" Height="48"
                 Foreground="{DynamicResource TextMutedBrush}"
+                Opacity="0.6"
                 HorizontalAlignment="Center" />
-            <StackPanel HorizontalAlignment="Center">
-                <TextBlock Text="{Binding L[Queue_Empty]}" FontSize="20" FontWeight="Bold"
+            <StackPanel HorizontalAlignment="Center" Spacing="4">
+                <TextBlock Text="{Binding L[Queue_Empty]}" FontSize="16" FontWeight="SemiBold"
                     Foreground="{DynamicResource TextPrimaryBrush}" TextAlignment="Center" />
-                <TextBlock Text="{Binding L[Queue_EmptySubtitle]}" FontSize="14"
-                    Foreground="{DynamicResource TextSecondaryBrush}" TextAlignment="Center"
-                    Margin="0,4,0,0" />
+                <TextBlock Text="{Binding L[Queue_EmptySubtitle]}" FontSize="13"
+                    Foreground="{DynamicResource TextMutedBrush}" TextAlignment="Center" />
             </StackPanel>
         </StackPanel>
 
         <!-- Content -->
-        <Grid RowDefinitions="Auto, *" IsVisible="{Binding !IsEmpty}">
+        <Grid RowDefinitions="Auto, 2, *" IsVisible="{Binding !IsEmpty}">
 
-            <!-- HEADER -->
-            <StackPanel Grid.Row="0" Margin="24,24,24,8" Spacing="12">
-                <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel>
-                        <TextBlock Text="{Binding L[Queue_Title]}" FontSize="24"
-                            FontWeight="Bold" />
-                        <TextBlock Text="{Binding L[Queue_NowPlaying]}" FontSize="12"
-                            Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                        <!-- Header actions -->
-                        <Button Command="{Binding ShuffleQueueCommand}" Classes="header-icon-btn"
+            <!-- Cinematic animated ambient backdrop spanning header + list, attenuated on scroll -->
+            <controls:AmbientBackdrop x:Name="AmbientBackdrop"
+                Grid.Row="0" Grid.RowSpan="3"
+                BaseColor="{Binding SourcePlaylistColor}"
+                IsPlaying="{Binding IsPlaybackActive}"
+                IsReactive="True"
+                VolumeFactor="{Binding VolumeOverdriveFactor}"
+                IsMixed="{Binding IsQueueMixed}"
+                IsHitTestVisible="False" />
+
+            <!-- ROW 0: SINGLE-LINE FLAT HEADER STRIP (matching SearchView) -->
+            <Border Grid.Row="0"
+                Classes="header-strip"
+                Background="Transparent"
+                BorderBrush="{DynamicResource BgHighlightBrush}"
+                BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="Auto, *, Auto" Height="46">
+
+                    <!-- 1. LEFT: Clickable position counter (e.g. 2 / 665) -->
+                    <Button Grid.Column="0"
+                        Classes="header-cell-btn"
+                        BorderThickness="0,0,1,0"
+                        MinWidth="68"
+                        Padding="14,0"
+                        Command="{Binding ScrollToCurrentTrackCommand}"
+                        ToolTip.Tip="{Binding L[Queue_ScrollToCurrent]}">
+                        <TextBlock FontSize="13" VerticalAlignment="Center" TextAlignment="Center">
+                            <Run Text="{Binding CurrentTrackNumberDisplay}" FontWeight="Bold"
+                                Foreground="{DynamicResource AccentTextBrush}" />
+                            <Run Text=" / " Foreground="{DynamicResource TextMutedBrush}" />
+                            <Run Text="{Binding TotalCount}" FontWeight="SemiBold"
+                                Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </TextBlock>
+                    </Button>
+
+                    <!-- 2. CENTER-LEFT: Source playlist link + queue time telemetry -->
+                    <Grid Grid.Column="1"
+                        HorizontalAlignment="Left"
+                        ColumnDefinitions="*, Auto"
+                        Margin="14,0,12,0"
+                        VerticalAlignment="Center">
+
+                        <Grid Grid.Column="0"
+                            ColumnDefinitions="*, Auto, Auto"
+                            IsVisible="{Binding HasSourcePlaylist}"
+                            VerticalAlignment="Center">
+                            <Button Grid.Column="0"
+                                Classes="link-btn"
+                                HorizontalAlignment="Left"
+                                Command="{Binding GoToSourcePlaylistCommand}"
+                                ToolTip.Tip="{Binding GoToPlaylistTooltip}">
+                                <TextBlock Text="{Binding SourcePlaylistDisplayName}"
+                                    Foreground="{DynamicResource AccentTextBrush}"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    TextTrimming="CharacterEllipsis"
+                                    VerticalAlignment="Center" />
+                            </Button>
+                            <Border Grid.Column="1"
+                                Classes="meta-chip"
+                                IsVisible="{Binding IsQueueMixed}"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                ToolTip.Tip="{Binding L[Queue_MixedTooltip]}">
+                                <TextBlock Text="{Binding L[Queue_MixedBadge]}"
+                                    FontSize="10"
+                                    FontWeight="SemiBold"
+                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </Border>
+                            <Border Grid.Column="2" Classes="meta-divider" />
+                        </Grid>
+
+                        <Button Grid.Column="1"
+                            Classes="header-cell-btn inline"
+                            Command="{Binding ToggleTimeDisplayModeCommand}"
+                            ToolTip.Tip="{Binding QueueTimeTooltip}">
+                            <TextBlock FontSize="13" VerticalAlignment="Center">
+                                <Run Text="{Binding FormattedElapsedDuration}" FontWeight="SemiBold"
+                                    Foreground="{DynamicResource TextPrimaryBrush}" />
+                                <Run Text=" / " Foreground="{DynamicResource TextMutedBrush}" />
+                                <Run Text="{Binding FormattedSecondaryDuration}"
+                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </TextBlock>
+                        </Button>
+                    </Grid>
+
+                    <!-- 3. RIGHT: Wider filter + unified action group -->
+                    <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        Spacing="2"
+                        VerticalAlignment="Stretch"
+                        Margin="0,0,12,0">
+
+                        <controls:FilterBar
+                            FilterText="{Binding FilterQuery}"
+                            Watermark="{Binding L[Search_LocalFilterTitle]}"
+                            Compact="True"
+                            Width="280"
+                            VerticalAlignment="Center"
+                            Margin="0,0,10,0" />
+
+                        <Border Width="1"
+                            VerticalAlignment="Stretch"
+                            Background="{DynamicResource BgHighlightBrush}"
+                            Margin="0,0,6,0" />
+
+                        <Button Command="{Binding ShuffleQueueCommand}"
+                            Classes="header-icon-btn"
+                            VerticalAlignment="Center"
                             ToolTip.Tip="{Binding L[Queue_Shuffle]}">
-                            <PathIcon Data="{StaticResource Icon.Shuffle}" Width="18" Height="18" />
+                            <PathIcon Data="{StaticResource Icon.Shuffle}" Width="17"
+                                Height="17" />
                         </Button>
-                        <Button Command="{Binding DownloadAllCommand}" Classes="header-icon-btn"
+
+                        <Button Command="{Binding DownloadAllCommand}"
+                            Classes="header-icon-btn"
+                            VerticalAlignment="Center"
                             ToolTip.Tip="{Binding L[Queue_DownloadAll]}">
-                            <PathIcon Data="{StaticResource Icon.Download}" Width="18" Height="18" />
+                            <PathIcon Data="{StaticResource Icon.Download}" Width="17"
+                                Height="17" />
                         </Button>
+
                         <Button Command="{Binding SaveQueueToPlaylistCommand}"
                             Classes="header-icon-btn"
+                            VerticalAlignment="Center"
                             ToolTip.Tip="{Binding L[Queue_SaveToPlaylist]}">
-                            <PathIcon Data="{StaticResource Icon.ContentSave}" Width="18"
-                                Height="18" />
+                            <PathIcon Data="{StaticResource Icon.ContentSave}" Width="16"
+                                Height="16" />
                         </Button>
-                        <Button Command="{Binding ClearQueueCommand}" Classes="header-icon-btn"
+
+                        <Button Command="{Binding ClearQueueCommand}"
+                            Classes="header-icon-btn danger"
+                            VerticalAlignment="Center"
                             ToolTip.Tip="{Binding L[Queue_Clear]}">
-                            <PathIcon Data="{StaticResource Icon.Broom}" Width="18" Height="18" />
+                            <PathIcon Data="{StaticResource Icon.Broom}" Width="16"
+                                Height="16" />
                         </Button>
                     </StackPanel>
                 </Grid>
+            </Border>
 
-                <controls:FilterBar
-                    FilterText="{Binding FilterQuery}"
-                    Watermark="{Binding L[Search_LocalFilterTitle]}"
-                    Compact="True" />
-            </StackPanel>
+            <!-- ROW 1: GPU-ONLY 2px QUEUE PROGRESS LINE ALONG HEADER BORDER -->
+            <Border Grid.Row="1"
+                Height="2"
+                Background="Transparent"
+                ClipToBounds="True"
+                IsHitTestVisible="False">
+                <Border Background="{DynamicResource AccentBrush}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    RenderTransformOrigin="0%,50%">
+                    <Border.RenderTransform>
+                        <ScaleTransform ScaleX="{Binding QueueProgressRatio}" />
+                    </Border.RenderTransform>
+                </Border>
+            </Border>
 
             <!-- Filter No Results -->
-            <StackPanel Grid.Row="1"
+            <StackPanel Grid.Row="2"
                 IsVisible="{Binding IsFilterEmpty}"
                 HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
                 <PathIcon Data="{StaticResource Icon.MagnifyClose}"
                     Width="48" Height="48"
                     Foreground="{DynamicResource TextMutedBrush}"
+                    Opacity="0.6"
                     HorizontalAlignment="Center" />
-                <TextBlock Text="{Binding L[Search_NoResults]}" FontSize="16"
-                    Foreground="{DynamicResource TextSecondaryBrush}" TextAlignment="Center" />
+                <TextBlock Text="{Binding L[Search_NoResults]}" FontSize="15"
+                    FontWeight="Medium"
+                    Foreground="{DynamicResource TextMutedBrush}" TextAlignment="Center" />
             </StackPanel>
 
-            <!-- List -->
-            <ScrollViewer Grid.Row="1" Margin="24,0"
+            <!-- List (Scrollbar strictly at the right window edge, closed by a full-width 1px line) -->
+            <ScrollViewer x:Name="QueueScrollViewer"
+                Grid.Row="2"
+                HorizontalScrollBarVisibility="Disabled"
                 IsVisible="{Binding !IsFilterEmpty}">
-                <controls:TrackListControl x:Name="QueueTrackList"
-                    Items="{Binding QueueItems}"
-                    FilterText="{Binding FilterQuery}"
-                    IsLoading="{Binding IsLoading}"
-                    IsLoadingMore="False"
-                    ReachedEnd="True"
-                    IsQueueContext="True"
-                    EnableReordering="{Binding CanReorderItems}"
-                    MoveItemCommand="{Binding MoveItemCommand}" />
+                <StackPanel Margin="0,10,0,24">
+                    <controls:TrackListControl x:Name="QueueTrackList"
+                        Margin="16,0"
+                        Items="{Binding QueueItems}"
+                        FilterText="{Binding FilterQuery}"
+                        IsLoading="{Binding IsLoading}"
+                        IsLoadingMore="False"
+                        ReachedEnd="False"
+                        IsQueueContext="True"
+                        EnableReordering="{Binding CanReorderItems}"
+                        MoveItemCommand="{Binding MoveItemCommand}" />
+                    <Border Height="1"
+                        Background="{DynamicResource BgHighlightBrush}"
+                        Margin="0,8,0,0" />
+                </StackPanel>
             </ScrollViewer>
         </Grid>
     </Grid>

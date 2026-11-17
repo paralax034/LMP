@@ -58,6 +58,11 @@ public sealed class PlayerControlService : IDisposable
     public int CurrentVolume { get; private set; }
 
     /// <summary>
+    /// Normalized animation intensity multiplier derived from current volume and audio boost settings.
+    /// </summary>
+    public double VolumeOverdriveFactor { get; private set; } = 1.0;
+
+    /// <summary>
     /// ID of the playlist from which the current queue was launched.
     /// Null = source is not a playlist (Home, Search, single track, or cleared queue).
     /// </summary>
@@ -98,6 +103,7 @@ public sealed class PlayerControlService : IDisposable
     public event Action? QueueChanged;
     public event Action<int>? QueueCountChanged;
     public event Action<int>? VolumeChanged;
+    public event Action<double>? VolumeOverdriveChanged;
 
     /// <summary>
     /// Event raised when the active playlist source or queue purity changes.
@@ -147,6 +153,7 @@ public sealed class PlayerControlService : IDisposable
         ShuffleEnabled = _audio.ShuffleEnabled;
         QueueCount = _audio.Queue.Count;
         CurrentVolume = (int)Math.Round(_audio.GetVolume());
+        RefreshVolumeOverdrive(raiseEvent: false);
         SyncSourceAndPurityFromEngine(raiseEvent: false);
 
         _audio.OnPlaybackStateChanged += HandlePlaybackStateChanged;
@@ -179,6 +186,7 @@ public sealed class PlayerControlService : IDisposable
 
     private void HandleLibraryInitialized()
     {
+        RefreshVolumeOverdrive(raiseEvent: true);
         ForceSync();
     }
 
@@ -545,6 +553,7 @@ public sealed class PlayerControlService : IDisposable
             _audio.SetVolumeInstant(clamped);
             CurrentVolume = clamped;
             VolumeChanged?.Invoke(clamped);
+            RefreshVolumeOverdrive(raiseEvent: true);
         }
     }
 
@@ -870,6 +879,33 @@ public sealed class PlayerControlService : IDisposable
             CurrentVolume = actualVolume;
             VolumeChanged?.Invoke(actualVolume);
         }
+
+        RefreshVolumeOverdrive(raiseEvent: true);
+    }
+
+    private void RefreshVolumeOverdrive(bool raiseEvent)
+    {
+        var settings = _library.Settings;
+        double factor = AudioEngine.ComputeVolumeOverdrive(
+            CurrentVolume,
+            settings.MaxVolumeLimit,
+            settings.Audio.VolumeBoostEnabled);
+
+        if (Math.Abs(VolumeOverdriveFactor - factor) <= 0.0001)
+            return;
+
+        VolumeOverdriveFactor = factor;
+        if (!raiseEvent)
+            return;
+
+        if (Dispatcher.UIThread.CheckAccess())
+            VolumeOverdriveChanged?.Invoke(factor);
+        else
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!_disposed)
+                    VolumeOverdriveChanged?.Invoke(factor);
+            });
     }
 
     /// <summary>
@@ -959,6 +995,7 @@ public sealed class PlayerControlService : IDisposable
         ShuffleEnabled = _audio.ShuffleEnabled;
         QueueCount = _audio.Queue.Count;
         CurrentVolume = (int)Math.Round(_audio.GetVolume());
+        RefreshVolumeOverdrive(raiseEvent: true);
 
         var actualTrack = _audio.CurrentTrack;
         if (CurrentTrack?.Id != actualTrack?.Id)

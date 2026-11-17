@@ -61,6 +61,23 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
 
     [ObservableProperty] public partial LocalizedItem<TrackAnimationSpeed>? SelectedTrackAnimationSpeed { get; set; }
     [ObservableProperty] public partial bool UseWaveAnimation { get; set; }
+
+    [ObservableProperty]
+    public partial IReadOnlyList<LocalizedItem<AmbientBackdropMode>> AmbientBackdropModeOptions { get; private set; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAmbientBackdropEnabled))]
+    public partial LocalizedItem<AmbientBackdropMode>? SelectedAmbientBackdropMode { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AmbientBackdropIntensityText))]
+    public partial int AmbientBackdropIntensity { get; set; } = 100;
+
+    public bool IsAmbientBackdropEnabled =>
+        SelectedAmbientBackdropMode?.Value is not null and not AmbientBackdropMode.Off;
+
+    public string AmbientBackdropIntensityText => $"{AmbientBackdropIntensity}%";
+
     [ObservableProperty] public partial bool HasUnsavedThemeChanges { get; set; }
 
     bool IUnsavedChangesGuard.HasUnsavedChanges => HasUnsavedThemeChanges;
@@ -106,6 +123,15 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
         RefreshPresets();
         RefreshLists();
         LoadSettings();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
+        }
+        base.Dispose(disposing);
     }
 
     private void OnLanguageChanged(object? sender, string langCode)
@@ -180,6 +206,10 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
             var currentSpeed = SelectedTrackAnimationSpeed?.Value ?? _library.Settings.TrackAnimationSpeed;
             TrackAnimationSpeedOptions = LocalizedItem.CreateList<TrackAnimationSpeed>("AnimationSpeed_");
             SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FindByValue(currentSpeed, 2);
+
+            var currentBackdropMode = SelectedAmbientBackdropMode?.Value ?? _library.Settings.AmbientBackdropMode;
+            AmbientBackdropModeOptions = LocalizedItem.CreateList<AmbientBackdropMode>("AmbientBackdrop_");
+            SelectedAmbientBackdropMode = AmbientBackdropModeOptions.FindByValue(currentBackdropMode, 2);
         }
         finally
         {
@@ -196,6 +226,11 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
             UseWaveAnimation = s.UseWaveAnimation;
             SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FindByValue(s.TrackAnimationSpeed, 2);
             AudioWaveBorder.ConfigureGlobal(s.UseWaveAnimation, s.TrackAnimationSpeed);
+
+            int clampedIntensity = Math.Clamp(s.AmbientBackdropIntensity, 20, 150);
+            AmbientBackdropIntensity = clampedIntensity;
+            SelectedAmbientBackdropMode = AmbientBackdropModeOptions.FindByValue(s.AmbientBackdropMode, 2);
+            AmbientBackdrop.ConfigureGlobal(s.AmbientBackdropMode, clampedIntensity);
 
             RefreshPresets();
             LoadThemeColors();
@@ -364,6 +399,24 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
         _library.UpdateSettings(s => s.TrackAnimationSpeed = value.Value);
         AudioWaveBorder.ConfigureGlobal(UseWaveAnimation, value.Value);
         Log.Info($"[Settings] TrackAnimationSpeed -> {value.Value}");
+    }
+
+    partial void OnSelectedAmbientBackdropModeChanged(LocalizedItem<AmbientBackdropMode>? value)
+    {
+        if (_isLoadingSettings || value is null) return;
+        _library.UpdateSettings(s => s.AmbientBackdropMode = value.Value);
+        AmbientBackdrop.ConfigureGlobal(value.Value, AmbientBackdropIntensity);
+        Log.Info($"[Settings] AmbientBackdropMode -> {value.Value}");
+    }
+
+    partial void OnAmbientBackdropIntensityChanged(int value)
+    {
+        if (_isLoadingSettings) return;
+        int clamped = Math.Clamp(value, 20, 150);
+        _library.UpdateSettings(s => s.AmbientBackdropIntensity = clamped);
+        AmbientBackdrop.ConfigureGlobal(
+            SelectedAmbientBackdropMode?.Value ?? _library.Settings.AmbientBackdropMode,
+            clamped);
     }
 
     private void OnEditorThemeModified()

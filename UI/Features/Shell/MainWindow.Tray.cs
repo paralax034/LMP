@@ -232,9 +232,9 @@ public partial class MainWindow
         _isInTray = true;
         _isMinimized = false;
         _isDeactivated = false;
-        ApplySuspendLevel();
 
         Hide();
+        ApplySuspendLevel();
 
         if (!OperatingSystem.IsWindows())
         {
@@ -250,11 +250,12 @@ public partial class MainWindow
         _isMinimized = false;
         _isDeactivated = false;
         _isRestoringFromTray = true;
-        ApplySuspendLevel();
 
         WindowState = WindowState.Normal;
         Show();
         Activate();
+
+        ApplySuspendLevel();
 
         _playerControl?.ForceSync();
 

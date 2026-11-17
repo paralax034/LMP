@@ -102,8 +102,21 @@ public sealed class BufferedProgressBar : Control
     private IBrush? _cachedBufferBrush;
     private Color _lastBufferColor;
     private double _lastRenderedPlayedWidth = -1000.0;
+    private const double MinFrameIntervalSeconds = 0.0125;
+    private readonly Action<TimeSpan> _frameCallback;
+    private readonly Action<SuspendLevel> _suspendLevelChangedHandler;
+    private readonly EventHandler<AvaloniaPropertyChangedEventArgs> _topLevelPropertyChangedHandler;
+    private TopLevel? _attachedTopLevel;
+    private long _lastFrameTs;
 
     private static readonly IReadOnlyList<(double Start, double End)> FullyBufferedTarget = new[] { (0.0, 1.0) };
+
+    public BufferedProgressBar()
+    {
+        _frameCallback = OnAnimationFrame;
+        _suspendLevelChangedHandler = OnSuspendLevelChanged;
+        _topLevelPropertyChangedHandler = OnTopLevelPropertyChanged;
+    }
 
     #endregion
 
@@ -121,6 +134,18 @@ public sealed class BufferedProgressBar : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (!ReferenceEquals(_attachedTopLevel, topLevel))
+        {
+            if (_attachedTopLevel != null)
+                _attachedTopLevel.PropertyChanged -= _topLevelPropertyChangedHandler;
+
+            _attachedTopLevel = topLevel;
+            if (_attachedTopLevel != null)
+                _attachedTopLevel.PropertyChanged += _topLevelPropertyChangedHandler;
+        }
+
+        ViewModelBase.SuspendLevelChanged += _suspendLevelChangedHandler;
         if (_isInterpolating)
         {
             StartAnimationLoop();
@@ -130,7 +155,43 @@ public sealed class BufferedProgressBar : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _rafActive = false;
+        ViewModelBase.SuspendLevelChanged -= _suspendLevelChangedHandler;
+
+        if (_attachedTopLevel != null)
+        {
+            _attachedTopLevel.PropertyChanged -= _topLevelPropertyChangedHandler;
+            _attachedTopLevel = null;
+        }
+
         base.OnDetachedFromVisualTree(e);
+    }
+
+    private bool CanAnimate() =>
+        IsEffectivelyVisible
+        && ViewModelBase.CurrentSuspendLevel == SuspendLevel.None
+        && _attachedTopLevel != null
+        && (_attachedTopLevel is not Window w || (w.IsVisible && w.WindowState != WindowState.Minimized));
+
+    private void OnSuspendLevelChanged(SuspendLevel _)
+    {
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            HandleResumeIfInterpolating();
+        else
+            Avalonia.Threading.Dispatcher.UIThread.Post(HandleResumeIfInterpolating);
+    }
+
+    private void OnTopLevelPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == Window.WindowStateProperty || e.Property == Visual.IsVisibleProperty)
+            HandleResumeIfInterpolating();
+    }
+
+    private void HandleResumeIfInterpolating()
+    {
+        if (CanAnimate() && _isInterpolating)
+            StartAnimationLoop();
+        else if (!CanAnimate())
+            _rafActive = false;
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -173,24 +234,40 @@ public sealed class BufferedProgressBar : Control
 
     private void StartAnimationLoop()
     {
-        if (_rafActive) return;
-        var topLevel = TopLevel.GetTopLevel(this);
+        if (_rafActive || !CanAnimate()) return;
+        var topLevel = _attachedTopLevel ??= TopLevel.GetTopLevel(this);
         if (topLevel == null) return;
 
         _rafActive = true;
-        topLevel.RequestAnimationFrame(OnAnimationFrame);
+        _lastFrameTs = System.Diagnostics.Stopwatch.GetTimestamp() - (System.Diagnostics.Stopwatch.Frequency / 60);
+        topLevel.RequestAnimationFrame(_frameCallback);
     }
 
     private void OnAnimationFrame(TimeSpan time)
     {
-        if (!_rafActive) return;
+        if (!_rafActive || _attachedTopLevel == null || !CanAnimate())
+        {
+            _rafActive = false;
+            return;
+        }
 
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (System.Diagnostics.Stopwatch.GetElapsedTime(_lastFrameTs, now).TotalSeconds < MinFrameIntervalSeconds)
+        {
+            if (_isInterpolating)
+                _attachedTopLevel.RequestAnimationFrame(_frameCallback);
+            else
+                _rafActive = false;
+            return;
+        }
+
+        _lastFrameTs = now;
         UpdateSmoothRanges();
         InvalidateVisual();
 
         if (_isInterpolating)
         {
-            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(OnAnimationFrame);
+            _attachedTopLevel.RequestAnimationFrame(_frameCallback);
         }
         else
         {
@@ -252,6 +329,9 @@ public sealed class BufferedProgressBar : Control
     /// <inheritdoc />
     public override void Render(DrawingContext context)
     {
+        if (_isInterpolating && !_rafActive && CanAnimate())
+            StartAnimationLoop();
+
         var bounds = Bounds;
         double width = bounds.Width;
         double height = bounds.Height;

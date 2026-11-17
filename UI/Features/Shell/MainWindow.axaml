@@ -40,6 +40,12 @@
         <Grid Grid.Row="0" Height="46" Background="{DynamicResource BgSecondaryBrush}"
               ColumnDefinitions="Auto, Auto, *, Auto, Auto" Name="TitleBar">
 
+            <!-- Soft top ambient bleed for Queue/Playlist pages (Option A) -->
+            <Border Grid.Column="0" Grid.ColumnSpan="5"
+                    Background="{Binding TitleBarAmbientBrush}"
+                    Opacity="{Binding TitleBarAmbientOpacity}"
+                    IsHitTestVisible="False" />
+
             <!-- Col 0: App Logo -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Background="Transparent" BorderThickness="0"

@@ -479,10 +479,10 @@ public sealed class EqualizerProcessor
             double v2L = Ic2EqL + (a2 * Ic1EqL + a3 * v3L);
             double v2R = Ic2EqR + (a2 * Ic1EqR + a3 * v3R);
 
-            Ic1EqL = (v1L + v1L) - Ic1EqL;
-            Ic1EqR = (v1R + v1R) - Ic1EqR;
-            Ic2EqL = (v2L + v2L) - Ic2EqL;
-            Ic2EqR = (v2R + v2R) - Ic2EqR;
+            Ic1EqL = v1L + v1L - Ic1EqL;
+            Ic1EqR = v1R + v1R - Ic1EqR;
+            Ic2EqL = v2L + v2L - Ic2EqL;
+            Ic2EqR = v2R + v2R - Ic2EqR;
 
             double m0 = c.M0;
             double m1 = c.M1;
@@ -551,7 +551,7 @@ public sealed class EqualizerProcessor
         _sampleRate = sampleRate > 0 ? sampleRate : AudioConstants.DefaultSampleRate;
         _channels = Math.Max(1, channels);
         if (_channels > 2)
-            _extraChannelStates = new StereoSvfState[((_channels - 1) / 2) * BandCount];
+            _extraChannelStates = new StereoSvfState[(_channels - 1) / 2 * BandCount];
 
         var freqs = BandFrequenciesHz;
         for (int i = 0; i < BandCount; i++)
@@ -644,7 +644,7 @@ public sealed class EqualizerProcessor
             _sampleRate = newRate;
             _channels = newCh;
             _extraChannelStates = newCh > 2
-                ? new StereoSvfState[((newCh - 1) / 2) * BandCount]
+                ? new StereoSvfState[(newCh - 1) / 2 * BandCount]
                 : null;
 
             var freqs = BandFrequenciesHz;
@@ -1052,10 +1052,10 @@ public sealed class EqualizerProcessor
                 double v2L = ic2L + (a2 * ic1L + a3 * v3L);
                 double v2R = ic2R + (a2 * ic1R + a3 * v3R);
 
-                ic1L = (v1L + v1L) - ic1L;
-                ic1R = (v1R + v1R) - ic1R;
-                ic2L = (v2L + v2L) - ic2L;
-                ic2R = (v2R + v2R) - ic2R;
+                ic1L = v1L + v1L - ic1L;
+                ic1R = v1R + v1R - ic1R;
+                ic2L = v2L + v2L - ic2L;
+                ic2R = v2R + v2R - ic2R;
 
                 ptr[0] = (float)(m0 * inL + (m1 * v1L + m2 * v2L));
                 ptr[1] = (float)(m0 * inR + (m1 * v1R + m2 * v2R));

@@ -245,6 +245,38 @@
                         MinWidth="200" />
                 </Grid>
 
+                <!-- Ambient backdrop mode -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="{Binding L[Settings_AmbientBackdropMode]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_AmbientBackdropModeDesc]}" />
+                    </StackPanel>
+                    <ComboBox Grid.Column="1"
+                        ItemsSource="{Binding AmbientBackdropModeOptions}"
+                        SelectedItem="{Binding SelectedAmbientBackdropMode}"
+                        MinWidth="200" />
+                </Grid>
+
+                <!-- Ambient backdrop intensity -->
+                <Grid ColumnDefinitions="*, Auto" IsVisible="{Binding IsAmbientBackdropEnabled}">
+                    <StackPanel>
+                        <TextBlock Classes="label"
+                            Text="{Binding L[Settings_AmbientBackdropIntensity]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_AmbientBackdropIntensityDesc]}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12"
+                        VerticalAlignment="Center">
+                        <Slider Minimum="20" Maximum="150"
+                            TickFrequency="5" IsSnapToTickEnabled="True"
+                            Width="160"
+                            Value="{Binding AmbientBackdropIntensity}" />
+                        <TextBlock Classes="value-label"
+                            Text="{Binding AmbientBackdropIntensityText}" />
+                    </StackPanel>
+                </Grid>
+
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
                 <!-- WCAG 2.0 Contrast & Readability Diagnostics -->

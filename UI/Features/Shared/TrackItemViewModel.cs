@@ -113,8 +113,10 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     [ObservableProperty] public partial bool IsPlaylistContext { get; set; }
     [ObservableProperty] public partial bool IsQueueContext { get; set; }
 
+    private ObservableCollection<PlaylistMenuItemViewModel>? _playlistMenuItems;
+
     [ObservableProperty] public partial string AddToPlaylistHeader { get; private set; } = string.Empty;
-    public ObservableCollection<PlaylistMenuItemViewModel> PlaylistMenuItems { get; } = [];
+    public ObservableCollection<PlaylistMenuItemViewModel> PlaylistMenuItems => _playlistMenuItems ??= [];
 
     public bool ShowAddToQueue => !IsQueueContext;
     public bool HasCacheIcon => !IsDownloading && (Track.IsDownloaded || Track.IsCached);
@@ -353,7 +355,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         _submenuCts?.Cancel();
         _submenuCts?.Dispose();
         _submenuCts = null;
-        PlaylistMenuItems.Clear();
+        _playlistMenuItems?.Clear();
     }
 
     private async Task TogglePlaylistMembershipAsync(PlaylistMenuItemViewModel item, IReadOnlyList<TrackInfo> targets)
@@ -629,7 +631,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
             StartRadioAction = null;
             RemoveFromPlaylistAction = null;
             SelectionProvider = null;
-            PlaylistMenuItems.Clear();
+            _playlistMenuItems?.Clear();
         }
         base.Dispose(disposing);
         IsDisposed = true;

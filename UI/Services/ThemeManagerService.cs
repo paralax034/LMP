@@ -81,11 +81,16 @@ public sealed class ThemeManagerService
         SetColor(resources, pendingBatch, "TextMuted", theme.TextMuted);
         SetColor(resources, pendingBatch, "TextDark", theme.TextDark);
 
-        // CONTRAST TEXT FOR ACCENT BUTTONS
+        // CONTRAST TEXT FOR ACCENT BUTTONS & READABLE ACCENT TEXT
         // Automatically determine black or white text on an accent background
+        _ = TryParseColor(theme.BgPrimary, out var bgPrimary);
         _ = TryParseColor(theme.AccentColor, out var accent);
+        _ = TryParseColor(theme.TextPrimary, out var textPrimary);
         var accentButtonText = GetContrastingTextColor(accent);
         SetColorDirect(resources, pendingBatch, "AccentButtonText", accentButtonText);
+
+        var accentText = DeriveReadableAccentText(accent, bgPrimary, textPrimary);
+        SetColorDirect(resources, pendingBatch, "AccentText", accentText);
 
         // AVALONIA FLUENT THEME COMPATIBILITY
         ApplyFluentOverrides(resources, pendingBatch, theme, _appliedFluentTheme);
@@ -187,8 +192,43 @@ public sealed class ThemeManagerService
     }
 
     /// <summary>
+    /// Ensures accent-colored text and thin icons maintain WCAG AA+ readability
+    /// over dark and ambient-tinted backgrounds while preserving the theme's accent hue.
+    /// </summary>
+    public static Color DeriveReadableAccentText(Color accent, Color bgPrimary, Color textPrimary)
+    {
+        const double minContrast = 5.8;
+        if (GetContrastRatio(accent, bgPrimary) >= minContrast)
+            return accent;
+
+        Color bestCandidate = accent;
+        double bestContrast = GetContrastRatio(accent, bgPrimary);
+
+        for (int step = 1; step <= 20; step++)
+        {
+            double t = step * 0.05;
+            var candidate = Color.FromRgb(
+                (byte)Math.Clamp((int)Math.Round(accent.R + ((textPrimary.R - accent.R) * t)), 0, 255),
+                (byte)Math.Clamp((int)Math.Round(accent.G + ((textPrimary.G - accent.G) * t)), 0, 255),
+                (byte)Math.Clamp((int)Math.Round(accent.B + ((textPrimary.B - accent.B) * t)), 0, 255));
+
+            double contrast = GetContrastRatio(candidate, bgPrimary);
+            if (contrast >= minContrast)
+                return candidate;
+
+            if (contrast > bestContrast)
+            {
+                bestContrast = contrast;
+                bestCandidate = candidate;
+            }
+        }
+
+        return bestCandidate;
+    }
+
+    /// <summary>
     /// Applies overrides for the Avalonia Fluent theme.
-    /// Required for standard controls (CheckBox, ToggleSwitch, 
+    /// Required for standard controls (CheckBox, ToggleSwitch,
     /// ComboBox, Slider, dialog windows, etc.) to work properly with custom theme colors.
     /// </summary>
     private void ApplyFluentOverrides(

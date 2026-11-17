@@ -253,7 +253,7 @@ internal static class YoutubeParsingHelpers
                 for (int d = 0; d < fractionDigits; d++)
                     divisor *= 10;
 
-                return integerPart * multiplier + (fractionPart * multiplier) / divisor;
+                return integerPart * multiplier + fractionPart * multiplier / divisor;
             }
 
             return allDigits * multiplier;

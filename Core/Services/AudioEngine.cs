@@ -4,6 +4,7 @@ using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Http;
 using LMP.Core.Audio.Interfaces;
 using LMP.Core.Audio.Normalization;
+using LMP.Core.Audio.Sources;
 
 namespace LMP.Core.Services;
 
@@ -229,7 +230,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private int _cacheRetryCount;
 
     /// <summary>
-    /// Indicates whether the active <see cref="Audio.Sources.CachingStreamSource"/>
+    /// Indicates whether the active <see cref="CachingStreamSource"/>
     /// was actually suspended by the engine's lifecycle policy.
     /// </summary>
     private int _sourceLifecycleSuspended;
@@ -464,8 +465,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
         _youtube.OnNTokenDecryptionStarted += HandleNTokenDecryptionStarted;
         CdnConnectionPreWarmer.OnTunnelDeadDetected += HandleCdnTunnelDead;
-        Audio.Sources.CachingStreamSource.OnNetworkStalled += HandleSourceNetworkStalled;
-        Audio.Sources.CachingStreamSource.OnNetworkRecovered += HandleSourceNetworkRecovered;
+        CachingStreamSource.OnNetworkStalled += HandleSourceNetworkStalled;
+        CachingStreamSource.OnNetworkRecovered += HandleSourceNetworkRecovered;
 
         _commandQueue = Channel.CreateBounded<IEngineCommand>(
             new BoundedChannelOptions(CommandQueueCapacity)

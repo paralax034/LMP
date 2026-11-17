@@ -125,7 +125,7 @@ namespace Avalonia.Layout
 
             for (int i = 0; i < count; i++)
             {
-                int index = realizedIndex == 0 ? realizedIndex + i : (endIndex - 1) - i;
+                int index = realizedIndex == 0 ? realizedIndex + i : endIndex - 1 - i;
                 var elementRef = _realizedElements[index];
 
                 if (elementRef != null)
