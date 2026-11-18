@@ -1,4 +1,4 @@
-﻿using Avalonia; 
+﻿using Avalonia;
 using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Http;
 using LMP.Core.Data;
@@ -14,7 +14,7 @@ namespace LMP;
 public sealed class AppEntry
 {
 #if DEBUG
-    private static bool _disableAvaloniaLogging;
+    private static bool _enableAvaloniaLogging;
     private static Avalonia.Logging.LogEventLevel _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Debug;
 #endif
 
@@ -105,13 +105,16 @@ public sealed class AppEntry
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
-            if (string.Equals(arg, "--fast", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(arg, "--fast", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "-f", StringComparison.OrdinalIgnoreCase))
             {
                 IsFastStartup = true;
             }
 #if DEBUG
             else if (string.Equals(arg, "--test-ui", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(arg, "--debug-ui", StringComparison.OrdinalIgnoreCase))
+                     string.Equals(arg, "--debug-ui", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-tui", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-ui", StringComparison.OrdinalIgnoreCase))
             {
                 IsTestUiMode = true;
                 IsFastStartup = true;
@@ -122,7 +125,8 @@ public sealed class AppEntry
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
-            if (string.Equals(arg, "--headless", StringComparison.OrdinalIgnoreCase)
+            if (string.Equals(arg, "--headless", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "-hl", StringComparison.OrdinalIgnoreCase)
 #if DEBUG
                 || (!IsTestUiMode && Tests.ManualTests.IsTestCliArgument(arg))
 #endif
@@ -158,37 +162,44 @@ public sealed class AppEntry
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
-            if (string.IsNullOrEmpty(arg)) continue;
+            if (string.IsNullOrEmpty(arg))
+            {
+                continue;
+            }
 
             if (string.Equals(arg, "--telemetry", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(arg, "--flight-recorder", StringComparison.OrdinalIgnoreCase))
+                string.Equals(arg, "--flight-recorder", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "-tel", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "-fr", StringComparison.OrdinalIgnoreCase))
             {
                 enableTelemetry = true;
             }
-            else if (string.Equals(arg, "--no-telemetry", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(arg, "--no-telemetry", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-ntel", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-nfr", StringComparison.OrdinalIgnoreCase))
             {
                 enableTelemetry = false;
             }
 #if DEBUG
-            else if (string.Equals(arg, "--no-avalonia-logs", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(arg, "--avalonia-logs", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-al", StringComparison.OrdinalIgnoreCase))
             {
-                _disableAvaloniaLogging = true;
+                _enableAvaloniaLogging = true;
+            }
+            else if (string.Equals(arg, "--no-avalonia-logs", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-nal", StringComparison.OrdinalIgnoreCase))
+            {
+                _enableAvaloniaLogging = false;
             }
             else if (arg.StartsWith("--avalonia-log-level=", StringComparison.OrdinalIgnoreCase))
             {
-                var levelStr = arg.AsSpan(21);
-                if (levelStr.Equals("Verbose".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                    _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Verbose;
-                else if (levelStr.Equals("Debug".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                    _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Debug;
-                else if (levelStr.Equals("Information".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                    _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Information;
-                else if (levelStr.Equals("Warning".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                    _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Warning;
-                else if (levelStr.Equals("Error".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                    _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Error;
-                else if (levelStr.Equals("Fatal".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                    _avaloniaLogLevel = Avalonia.Logging.LogEventLevel.Fatal;
+                _enableAvaloniaLogging = true;
+                TryParseAvaloniaLogLevel(arg.AsSpan(21), ref _avaloniaLogLevel);
+            }
+            else if (arg.StartsWith("-al=", StringComparison.OrdinalIgnoreCase))
+            {
+                _enableAvaloniaLogging = true;
+                TryParseAvaloniaLogLevel(arg.AsSpan(4), ref _avaloniaLogLevel);
             }
 #endif
         }
@@ -316,13 +327,13 @@ public sealed class AppEntry
 #if DEBUG
         builder.AfterSetup(_ =>
         {
-            if (!_disableAvaloniaLogging)
+            if (_enableAvaloniaLogging)
             {
+                Log.Info($"[AppEntry] Avalonia diagnostic logs enabled (Level={_avaloniaLogLevel}).");
                 Avalonia.Logging.Logger.Sink = new AvaloniaCustomLogSink(_avaloniaLogLevel);
             }
             else
             {
-                Log.Info("[AppEntry] Avalonia diagnostic logs are completely disabled.");
                 Avalonia.Logging.Logger.Sink = null;
             }
         });
@@ -330,6 +341,52 @@ public sealed class AppEntry
 
         return builder;
     }
+
+#if DEBUG
+    private static void TryParseAvaloniaLogLevel(
+        ReadOnlySpan<char> levelStr,
+        ref Avalonia.Logging.LogEventLevel target)
+    {
+        if (levelStr.Equals("Verbose", StringComparison.OrdinalIgnoreCase) ||
+            levelStr.Equals("v", StringComparison.OrdinalIgnoreCase) ||
+            levelStr.Equals("trc", StringComparison.OrdinalIgnoreCase))
+        {
+            target = Avalonia.Logging.LogEventLevel.Verbose;
+        }
+        else if (levelStr.Equals("Debug", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("d", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("dbg", StringComparison.OrdinalIgnoreCase))
+        {
+            target = Avalonia.Logging.LogEventLevel.Debug;
+        }
+        else if (levelStr.Equals("Information", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("Info", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("i", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("inf", StringComparison.OrdinalIgnoreCase))
+        {
+            target = Avalonia.Logging.LogEventLevel.Information;
+        }
+        else if (levelStr.Equals("Warning", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("Warn", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("w", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("wrn", StringComparison.OrdinalIgnoreCase))
+        {
+            target = Avalonia.Logging.LogEventLevel.Warning;
+        }
+        else if (levelStr.Equals("Error", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("Err", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("e", StringComparison.OrdinalIgnoreCase))
+        {
+            target = Avalonia.Logging.LogEventLevel.Error;
+        }
+        else if (levelStr.Equals("Fatal", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("Ftl", StringComparison.OrdinalIgnoreCase) ||
+                 levelStr.Equals("f", StringComparison.OrdinalIgnoreCase))
+        {
+            target = Avalonia.Logging.LogEventLevel.Fatal;
+        }
+    }
+#endif
 
     private static void SetupGlobalExceptionHandlers()
     {

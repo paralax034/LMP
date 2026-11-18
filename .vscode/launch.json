@@ -7,7 +7,7 @@
             "request": "launch",
             "preLaunchTask": "build: debug",
             "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-            "args": ["--fast", "--avalonia-log-level=Warning"],
+            "args": ["-f"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "justMyCode": false,
@@ -29,7 +29,7 @@
             "request": "launch",
             "preLaunchTask": "build: debug",
             "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-            "args": ["--test-ui", "--avalonia-log-level=Warning"],
+            "args": ["-tui"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "justMyCode": false,
@@ -51,7 +51,7 @@
             "request": "launch",
             "preLaunchTask": "build: debug",
             "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-            "args": ["--test", "--test-category=Unit"],
+            "args": ["-t", "-tc=Unit"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "justMyCode": false,
@@ -73,7 +73,7 @@
             "request": "launch",
             "preLaunchTask": "build: debug",
             "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-            "args": ["--test"],
+            "args": ["-t"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "justMyCode": false,
@@ -95,7 +95,7 @@
             "request": "launch",
             "preLaunchTask": "build: debug",
             "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-            "args": ["--avalonia-log-level=Warning"],
+            "args": [],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "justMyCode": false,
@@ -112,12 +112,12 @@
             }
         },
         {
-            "name": "🎵 Debug (all logs)",
+            "name": "🎵 Debug (all logs + Avalonia)",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build: debug",
             "program": "${workspaceFolder}/bin/Debug/net11.0/LMP.dll",
-            "args": [],
+            "args": ["-al"],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "justMyCode": false,
@@ -157,4 +157,3 @@
         }
     ]
 }
-

@@ -24,15 +24,21 @@ public static class ManualTests
     /// </summary>
     public static bool IsTestCliArgument(string arg)
     {
-        if (string.IsNullOrEmpty(arg)) return false;
+        if (string.IsNullOrEmpty(arg))
+        {
+            return false;
+        }
 
         return string.Equals(arg, "--test", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "-t", StringComparison.OrdinalIgnoreCase)
             || string.Equals(arg, "--run-tests", StringComparison.OrdinalIgnoreCase)
             || string.Equals(arg, "--run-cache-tests", StringComparison.OrdinalIgnoreCase)
             || string.Equals(arg, "--test-list", StringComparison.OrdinalIgnoreCase)
-            || arg.StartsWith("--test-group=", StringComparison.OrdinalIgnoreCase)
-            || arg.StartsWith("--test-category=", StringComparison.OrdinalIgnoreCase)
-            || arg.StartsWith("--test-filter=", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(arg, "--list", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "-tl", StringComparison.OrdinalIgnoreCase)
+            || TryMatchPrefix(arg, "--test-group=", "--group=", "-tg=", "-g=", out _)
+            || TryMatchPrefix(arg, "--test-category=", "--category=", "-tc=", "-c=", out _)
+            || TryMatchPrefix(arg, "--test-filter=", "--filter=", "-tf=", null, out _);
     }
 
     /// <summary>
@@ -43,7 +49,9 @@ public static class ManualTests
         for (int i = 0; i < args.Length; i++)
         {
             if (IsTestCliArgument(args[i]))
+            {
                 return true;
+            }
         }
 
         return false;
@@ -58,7 +66,7 @@ public static class ManualTests
     /// <summary>
     /// Parses CLI arguments, filters tests via <see cref="TestDiscovery"/>, and executes them via <see cref="TestRunner"/>.
     /// Returns the process exit code (<c>0</c> — success, <c>1</c> — failed tests or empty filter).
-    /// Without <c>--verbose</c>, logs during execution are written to a file only; its path is printed in the summary.
+    /// Without <c>--verbose</c> (<c>-v</c>), logs during execution are written to a file only; its path is printed in the summary.
     /// </summary>
     public static async Task<int> RunCliAsync(string[] args, CancellationToken ct = default)
     {
@@ -71,13 +79,19 @@ public static class ManualTests
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i];
-            if (string.IsNullOrEmpty(arg)) continue;
+            if (string.IsNullOrEmpty(arg))
+            {
+                continue;
+            }
 
-            if (string.Equals(arg, "--test-list", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(arg, "--test-list", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "--list", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "-tl", StringComparison.OrdinalIgnoreCase))
             {
                 listOnly = true;
             }
-            else if (string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase))
             {
                 verbose = true;
             }
@@ -88,23 +102,23 @@ public static class ManualTests
                 nameFilters ??= [];
                 nameFilters.Add("CacheTests");
             }
-            else if (arg.StartsWith("--test-group=", StringComparison.OrdinalIgnoreCase))
+            else if (TryMatchPrefix(arg, "--test-group=", "--group=", "-tg=", "-g=", out var groupVal))
             {
                 groupFilter ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                ParseCsvTokens(arg.AsSpan(13), groupFilter);
+                ParseCsvTokens(groupVal, groupFilter);
             }
-            else if (arg.StartsWith("--test-category=", StringComparison.OrdinalIgnoreCase))
+            else if (TryMatchPrefix(arg, "--test-category=", "--category=", "-tc=", "-c=", out var catVal))
             {
                 categoryFilter ??= [];
-                ParseCategories(arg.AsSpan(16), categoryFilter);
+                ParseCategories(catVal, categoryFilter);
             }
-            else if (arg.StartsWith("--test-filter=", StringComparison.OrdinalIgnoreCase))
+            else if (TryMatchPrefix(arg, "--test-filter=", "--filter=", "-tf=", null, out var filterVal))
             {
-                var pattern = arg[14..].Trim();
-                if (!string.IsNullOrEmpty(pattern))
+                var pattern = filterVal.Trim();
+                if (!pattern.IsEmpty)
                 {
                     nameFilters ??= [];
-                    nameFilters.Add(pattern);
+                    nameFilters.Add(pattern.ToString());
                 }
             }
         }
@@ -219,6 +233,42 @@ public static class ManualTests
         Console.WriteLine($"  Full log: {Log.CurrentLogFile}\n");
 
         return failed > 0 ? 1 : 0;
+    }
+
+    private static bool TryMatchPrefix(
+        string arg,
+        string p1,
+        string p2,
+        string p3,
+        string? p4,
+        out ReadOnlySpan<char> value)
+    {
+        if (arg.StartsWith(p1, StringComparison.OrdinalIgnoreCase))
+        {
+            value = arg.AsSpan(p1.Length);
+            return true;
+        }
+
+        if (arg.StartsWith(p2, StringComparison.OrdinalIgnoreCase))
+        {
+            value = arg.AsSpan(p2.Length);
+            return true;
+        }
+
+        if (arg.StartsWith(p3, StringComparison.OrdinalIgnoreCase))
+        {
+            value = arg.AsSpan(p3.Length);
+            return true;
+        }
+
+        if (p4 is not null && arg.StartsWith(p4, StringComparison.OrdinalIgnoreCase))
+        {
+            value = arg.AsSpan(p4.Length);
+            return true;
+        }
+
+        value = ReadOnlySpan<char>.Empty;
+        return false;
     }
 
     private static void ParseCsvTokens(ReadOnlySpan<char> raw, HashSet<string> target)

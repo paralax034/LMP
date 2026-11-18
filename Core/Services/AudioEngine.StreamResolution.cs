@@ -479,7 +479,7 @@ public sealed partial class AudioEngine
     {
         lock (_cdnForbiddenClientsLock)
         {
-            return IsCdnForbiddenStateCurrent(trackId) ? _cdnForbiddenClients.ToArray() : Array.Empty<string>();
+            return IsCdnForbiddenStateCurrent(trackId) ? _cdnForbiddenClients.ToArray() : [];
         }
     }
 

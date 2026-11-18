@@ -21,7 +21,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
     /// <summary>
     /// Immutable FrozenDictionary for O(1) key lookups without synchronization overhead or collision checks.
     /// </summary>
-    private FrozenDictionary<string, string> _resources = FrozenDictionary<string, string>.Empty;
+    private FrozenDictionary<string, string> _resources = [];
 
     /// <summary>
     /// Pool of missing key markers formatted as [key] to prevent GC allocations on repeated requests.
@@ -143,7 +143,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
 
             if (langCode == "en")
             {
-                _resources = FrozenDictionary<string, string>.Empty;
+                _resources = [];
                 Log.Warn("Using empty dictionary");
             }
             else

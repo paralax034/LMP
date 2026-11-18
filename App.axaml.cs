@@ -449,6 +449,7 @@ public partial class App : Application
                     {
                         _appLifetimeCts.Dispose();
                         Log.Info("Shutdown complete. Exiting with code 0.");
+                        Log.Shutdown();
 
                         // Guaranteed clean exit with code 0.
                         // Using desktop.Shutdown() after canceling e.Cancel often leads to exit code -1 in Avalonia.
@@ -471,6 +472,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Fatal($"Initialization failed: {ex.Message}\n{ex.StackTrace}");
+            Log.Shutdown();
 
             await Dispatcher.UIThread.InvokeAsync(() => { _splash?.UpdateStatus(L["Splash_Error_Title"]); });
 
