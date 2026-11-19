@@ -349,12 +349,10 @@ public sealed partial class AudioEngine
             CurrentTrack.EqualizerPresetId = presetId;
 
         var reg = _trackRegistry.TryGet(track.Id);
-        if (reg != null)
-            reg.EqualizerPresetId = presetId;
+        reg?.EqualizerPresetId = presetId;
 
         var lib = _library.GetTrack(track.Id);
-        if (lib != null)
-            lib.EqualizerPresetId = presetId;
+        lib?.EqualizerPresetId = presetId;
     }
 
     /// <summary>
@@ -863,14 +861,11 @@ public sealed partial class AudioEngine
             effectivePresetId = EqualizerPresets.ResolveEffectiveBands(audioSettings, track, bands);
         }
 
-        if (pipeline != null)
-        {
-            pipeline.Equalizer.Configure(
+        pipeline?.Equalizer.Configure(
                 eqEnabled,
                 bands,
                 preampDb,
                 autoPreamp: true);
-        }
 
         if (snapImmediately)
         {

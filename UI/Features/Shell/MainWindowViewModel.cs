@@ -297,6 +297,22 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private ViewModelBase? _observedAmbientPage;
 
+    partial void OnCurrentPageNameChanged(string value)
+    {
+        var page = value switch
+        {
+            "Home" => DiscordNavigationPage.Home,
+            "Search" => DiscordNavigationPage.Search,
+            "Library" => DiscordNavigationPage.Library,
+            "Queue" => DiscordNavigationPage.Queue,
+            "Settings" => DiscordNavigationPage.Settings,
+            "Playlist" => DiscordNavigationPage.Playlist,
+            _ => DiscordNavigationPage.Unknown
+        };
+
+        _services.GetService<DiscordRpcService>()?.SetActivePage(page);
+    }
+
     partial void OnCurrentPageChanged(ViewModelBase? value)
     {
         if (_observedAmbientPage != null)
@@ -427,8 +443,8 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        _ = DeferredInitAsync(playlistVM, "Playlist", isInitialNavigation: false);
         _ = LoadPlaylistSafeAsync(playlistVM, playlistId);
+        _ = DeferredInitAsync(playlistVM, "Playlist", isInitialNavigation: false);
     }
 
     private static async Task LoadPlaylistSafeAsync(PlaylistViewModel vm, string playlistId)

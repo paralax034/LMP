@@ -51,6 +51,11 @@ public sealed class PlayerControlService : IDisposable
     public int QueueCount { get; private set; }
 
     /// <summary>
+    /// Zero-based index of the currently active track inside <see cref="Queue"/>, or -1 if none.
+    /// </summary>
+    public int CurrentQueueIndex => _audio.CurrentQueueIndex;
+
+    /// <summary>
     /// Snapshot of the current playback queue from <see cref="AudioEngine"/>.
     /// </summary>
     public IReadOnlyList<TrackInfo> Queue => _audio.Queue;
@@ -136,11 +141,8 @@ public sealed class PlayerControlService : IDisposable
         _playlistSync = playlistSync;
         _playlistService = playlistService;
 
-        if (_playlistSync != null)
-        {
-            _playlistSync.IsAudioBufferingCheck = () =>
+        _playlistSync?.IsAudioBufferingCheck = () =>
                 _audio.IsLoading || (_audio.IsPlaying && !_audio.IsFullyBuffered && _audio.BufferProgress < 0.15);
-        }
 
         CurrentTrack = _audio.CurrentTrack;
         IsPlaying = _audio.IsPlaying;

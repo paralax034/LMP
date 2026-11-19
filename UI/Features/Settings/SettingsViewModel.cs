@@ -15,6 +15,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IUnsavedChangesGu
     private bool _isDataLoaded;
     private bool _isDisposed;
     private bool _isRevertingSidebarSelection;
+    private bool _isPageActive;
 
     [ObservableProperty] public partial bool IsContentReady { get; private set; }
     [ObservableProperty] public partial SettingsSidebarItemBase? SelectedSidebarItem { get; set; }
@@ -128,7 +129,7 @@ public sealed partial class SettingsViewModel : ViewModelBase, IUnsavedChangesGu
         ActivateSidebarSection(targetItem);
     }
 
-    private static void ActivateSidebarSection(SettingsSidebarItemBase value)
+    private void ActivateSidebarSection(SettingsSidebarItemBase value)
     {
         var section = value.GetSection();
 
@@ -140,11 +141,25 @@ public sealed partial class SettingsViewModel : ViewModelBase, IUnsavedChangesGu
         {
             storageVm.UpdateCacheStats();
         }
+
+        SyncGeneralPreviewActiveState();
+    }
+
+    private void SyncGeneralPreviewActiveState()
+    {
+        if (_initializedSections.TryGetValue(typeof(GeneralSettingsViewModel), out var section)
+            && section is GeneralSettingsViewModel generalVm)
+        {
+            bool isGeneralSelected = SelectedSidebarItem is GeneralSidebarItem;
+            generalVm.SetPreviewActive(_isPageActive && isGeneralSelected);
+        }
     }
 
     public override async Task OnNavigatedToAsync()
     {
         if (_isDisposed) return;
+
+        _isPageActive = true;
 
         if (!_isDataLoaded)
         {
@@ -156,8 +171,16 @@ public sealed partial class SettingsViewModel : ViewModelBase, IUnsavedChangesGu
             }
         }
 
+        SyncGeneralPreviewActiveState();
         IsContentReady = true;
         await Task.CompletedTask;
+    }
+
+    public override void OnNavigatedFrom()
+    {
+        _isPageActive = false;
+        SyncGeneralPreviewActiveState();
+        base.OnNavigatedFrom();
     }
 
     private void LoadAllSections()

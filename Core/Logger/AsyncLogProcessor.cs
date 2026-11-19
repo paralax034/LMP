@@ -1050,7 +1050,7 @@ public sealed partial class AsyncLogProcessor : IDisposable, IAsyncDisposable
     private static void WriteThreeDigits(Span<byte> dst, ref int pos, int value)
     {
         dst[pos++] = (byte)('0' + (value / 100));
-        dst[pos++] = (byte)('0' + ((value / 10) % 10));
+        dst[pos++] = (byte)('0' + (value / 10 % 10));
         dst[pos++] = (byte)('0' + (value % 10));
     }
 

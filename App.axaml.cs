@@ -301,6 +301,10 @@ public partial class App : Application
 
             Log.Info($"Main window ready. Total splash time: {stopwatch.ElapsedMilliseconds}ms");
 
+            // Start Discord Rich Presence in background after UI is already visible (0 ms splash overhead)
+            var discordRpc = AppEntry.Services.GetRequiredService<DiscordRpcService>();
+            discordRpc.Start();
+
             // Update check and notification
             if (BootstrapSettings.Current.AppUpdatedThisRun)
             {
@@ -425,6 +429,11 @@ public partial class App : Application
 
                         // GRACEFULLY release the audio engine and cache.
                         // Do this BEFORE canceling the token so threads terminate normally without throwing IOException
+                        var discordRpcToDispose = AppEntry.Services.GetService<DiscordRpcService>();
+                        if (discordRpcToDispose != null)
+                        {
+                            await discordRpcToDispose.DisposeAsync().ConfigureAwait(false);
+                        }
                         AppEntry.Services.GetService<MediaTransportCoordinator>()?.Dispose();
                         AppEntry.Services.GetService<PlayerControlService>()?.Dispose();
                         await audioEngine.DisposeAsync().ConfigureAwait(false);

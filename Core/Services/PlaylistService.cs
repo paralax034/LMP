@@ -487,6 +487,22 @@ public sealed class PlaylistService
     }
 
     /// <summary>
+    /// Persists a refreshed playlist cover URL without raising <see cref="OnPlaylistChanged"/>.
+    /// </summary>
+    public async Task UpdateThumbnailUrlSilentlyAsync(string playlistId, string thumbnailUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(playlistId) || playlistId == LibraryService.LikedPlaylistId)
+            return;
+
+        var existing = await GetPlaylistAsync(playlistId, ct).ConfigureAwait(false);
+        if (existing == null || string.Equals(existing.ThumbnailUrl, thumbnailUrl, StringComparison.Ordinal))
+            return;
+
+        existing.ThumbnailUrl = thumbnailUrl;
+        await _playlists.UpsertAsync(existing, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Enqueues cloud playlist metadata updates (name, description, cover) into the background Outbox queue using a Last-Write-Wins strategy.
     /// </summary>
     public void EnqueueCloudMetadataUpdate(

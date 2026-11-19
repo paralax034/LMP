@@ -274,13 +274,11 @@ public sealed class MediaTransportCoordinator : IDisposable
         if (ReferenceEquals(_observedTrack, track))
             return;
 
-        if (_observedTrack != null)
-            _observedTrack.PropertyChanged -= HandleObservedTrackPropertyChanged;
+        _observedTrack?.PropertyChanged -= HandleObservedTrackPropertyChanged;
 
         _observedTrack = track;
 
-        if (track != null)
-            track.PropertyChanged += HandleObservedTrackPropertyChanged;
+        track?.PropertyChanged += HandleObservedTrackPropertyChanged;
     }
 
     private void HandleObservedTrackPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -552,8 +550,7 @@ public sealed class MediaTransportCoordinator : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        if (_library != null)
-            _library.OnInitialized -= HandleLibraryInitialized;
+        _library?.OnInitialized -= HandleLibraryInitialized;
 
         DetachWindow();
         _transport.Dispose();

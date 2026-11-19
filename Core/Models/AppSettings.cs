@@ -199,6 +199,107 @@ public enum AudioQualityPreference
     Standard
 }
 
+/// <summary>
+/// Discord Rich Presence activity verb type sent in <c>SET_ACTIVITY</c>.
+/// Numeric values match the official Discord RPC ActivityType enum.
+/// </summary>
+public enum DiscordRpcActivityType
+{
+    /// <summary>"Listening to ..." — displays Spotify-style music progress bar.</summary>
+    Listening = 2,
+
+    /// <summary>"Playing ..."</summary>
+    Playing = 0,
+
+    /// <summary>"Watching ..."</summary>
+    Watching = 3
+}
+
+/// <summary>
+/// Controls which field Discord displays in the compact member-list status text (<c>status_display_type</c>).
+/// </summary>
+public enum DiscordRpcStatusDisplay
+{
+    /// <summary>Displays application name (e.g. "Listening to Lite Music Player").</summary>
+    AppName = 0,
+
+    /// <summary>Displays the <c>state</c> field (artist name).</summary>
+    Artist = 1,
+
+    /// <summary>Displays the <c>details</c> field (track title).</summary>
+    TrackTitle = 2
+}
+
+/// <summary>
+/// Controls how playback progress timestamps are rendered in Discord Rich Presence.
+/// </summary>
+public enum DiscordRpcTimestampMode
+{
+    /// <summary>Sends both start and end timestamps so Discord renders a live progress bar.</summary>
+    ProgressBar = 0,
+
+    /// <summary>Sends only the start timestamp (elapsed timer).</summary>
+    ElapsedOnly = 1,
+
+    /// <summary>Omits timestamps completely.</summary>
+    None = 2
+}
+
+/// <summary>
+/// Formatting mode for the primary Rich Presence title line (<c>details</c>).
+/// </summary>
+public enum DiscordRpcDetailsFormat
+{
+    /// <summary>Track title only (artist shown on the second line).</summary>
+    TrackTitle = 0,
+
+    /// <summary>"Title — Artist".</summary>
+    TrackAndArtist = 1,
+
+    /// <summary>"Artist — Title".</summary>
+    ArtistAndTrack = 2
+}
+
+/// <summary>
+/// Controls Discord Rich Presence behavior when playback is paused.
+/// </summary>
+public enum DiscordRpcPausedBehavior
+{
+    /// <summary>Keeps the track visible without a ticking progress bar and shows a paused state.</summary>
+    ShowPaused = 0,
+
+    /// <summary>Clears the Discord activity while paused.</summary>
+    ClearPresence = 1
+}
+
+/// <summary>
+/// Style of the small corner badge (<c>assets.small_image</c>) on the Discord Rich Presence cover.
+/// </summary>
+public enum DiscordRpcBadgeStyle
+{
+    /// <summary>No corner badge — cleanest minimalist cover.</summary>
+    None = 0,
+
+    /// <summary>Shows the public YouTube playlist cover in the corner with a clickable playlist link.</summary>
+    PublicPlaylistCover = 1,
+
+    /// <summary>Shows the authenticated listener's YouTube channel avatar with a clickable channel link.</summary>
+    ListenerAvatar = 2,
+
+    /// <summary>User-supplied external HTTPS image, GIF, or animated WebP URL.</summary>
+    Custom = 3
+}
+
+/// <summary>
+/// One-click layout presets for Discord Rich Presence appearance.
+/// </summary>
+public enum DiscordRpcPreset
+{
+    Minimal = 0,
+    Balanced = 1,
+    Rich = 2
+}
+
 public sealed class ProxySettings
 {
     public bool Enabled { get; set; } = false;
@@ -431,6 +532,115 @@ public sealed class UpdateSettings
 }
 
 /// <summary>
+/// Detailed configuration for Discord Rich Presence integration.
+/// </summary>
+public sealed class DiscordRpcSettings
+{
+    /// <summary>
+    /// Optional custom Discord Application ID (17–22 digit snowflake).
+    /// When empty, <see cref="Services.DiscordRpcService.DefaultClientId"/> is used.
+    /// </summary>
+    public string CustomClientId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Activity verb displayed in Discord (Listening / Playing / Watching).
+    /// </summary>
+    public DiscordRpcActivityType ActivityType { get; set; } = DiscordRpcActivityType.Listening;
+
+    /// <summary>
+    /// Field highlighted in the Discord member list status text (<c>status_display_type</c>).
+    /// </summary>
+    public DiscordRpcStatusDisplay StatusDisplay { get; set; } = DiscordRpcStatusDisplay.TrackTitle;
+
+    /// <summary>
+    /// Progress timestamp display mode (ProgressBar, ElapsedOnly, or None).
+    /// </summary>
+    public DiscordRpcTimestampMode TimestampMode { get; set; } = DiscordRpcTimestampMode.ProgressBar;
+
+    /// <summary>
+    /// Formatting mode for the primary <c>details</c> line.
+    /// </summary>
+    public DiscordRpcDetailsFormat DetailsFormat { get; set; } = DiscordRpcDetailsFormat.TrackTitle;
+
+    /// <summary>
+    /// Behavior when playback is paused.
+    /// </summary>
+    public DiscordRpcPausedBehavior PausedBehavior { get; set; } = DiscordRpcPausedBehavior.ShowPaused;
+
+    /// <summary>
+    /// Display the track's HTTPS cover art URL as the large presence image.
+    /// </summary>
+    public bool ShowCoverArt { get; set; } = true;
+
+    /// <summary>
+    /// Display a clickable "Listen on YouTube" button for YouTube tracks.
+    /// </summary>
+    public bool ShowTrackButton { get; set; } = true;
+
+    /// <summary>
+    /// Display a clickable button linking to the LMP GitHub repository.
+    /// </summary>
+    public bool ShowGitHubButton { get; set; } = false;
+
+    /// <summary>
+    /// Include the active playlist name when playing from a playlist.
+    /// </summary>
+    public bool ShowPlaylistName { get; set; } = true;
+
+    /// <summary>
+    /// Share a clickable YouTube link (button and badge link) when playing a strictly public playlist.
+    /// Private, unlisted, and local playlists are never exposed.
+    /// </summary>
+    public bool ShowPublicPlaylistLink { get; set; } = true;
+
+    /// <summary>
+    /// Display a compact monochrome heart indicator (♥ when liked, ♡ when not liked).
+    /// </summary>
+    public bool ShowLikeStatus { get; set; } = true;
+
+    /// <summary>
+    /// Display the active repeat mode indicator (↻1 / ↻).
+    /// </summary>
+    public bool ShowRepeatMode { get; set; } = true;
+
+    /// <summary>
+    /// Display the shuffle mode indicator (⇄) when shuffle is enabled.
+    /// </summary>
+    public bool ShowShuffleMode { get; set; } = true;
+
+    /// <summary>
+    /// Display current queue position (e.g. 1/31) when the queue has multiple tracks.
+    /// </summary>
+    public bool ShowQueuePosition { get; set; } = false;
+
+    /// <summary>
+    /// Display a clickable link button to the listener's own YouTube channel (@handle).
+    /// Disabled by default for privacy.
+    /// </summary>
+    public bool ShowListenerChannel { get; set; } = false;
+
+    /// <summary>
+    /// Strip a redundant leading "Artist - " prefix from YouTube track titles when it matches the track author.
+    /// </summary>
+    public bool StripAuthorFromTitle { get; set; } = true;
+
+    /// <summary>
+    /// Style of the small corner badge rendered over the cover art in Discord.
+    /// </summary>
+    public DiscordRpcBadgeStyle BadgeStyle { get; set; } = DiscordRpcBadgeStyle.PublicPlaylistCover;
+
+    /// <summary>
+    /// Custom HTTPS URL (PNG/WebP/GIF/AVIF) used when <see cref="BadgeStyle"/> is <see cref="DiscordRpcBadgeStyle.Custom"/>.
+    /// </summary>
+    public string CustomBadgeUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Show an idle status when no track is loaded instead of clearing presence.
+    /// </summary>
+    public bool ShowIdleStatus { get; set; } = false;
+}
+
+/// <summary>
 /// Application settings. Stored as JSON in Settings table.
 /// </summary>
 public sealed class AppSettings
@@ -464,6 +674,7 @@ public sealed class AppSettings
     public string LanguageCode { get; set; } = "en";
     public string DownloadPath { get; set; } = string.Empty;
     public bool DiscordRpcEnabled { get; set; } = true;
+    public DiscordRpcSettings DiscordRpc { get; set; } = new();
     public bool SystemMediaTransportEnabled { get; set; } = true;
     public bool AutoPlayOnUrlPaste { get; set; } = true;
     public int LoadBatchSize { get; set; } = 20;

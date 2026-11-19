@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:LMP.UI.Features.Settings.ViewModels"
+    xmlns:ui="using:LMP.UI.Controls"
     x:Class="LMP.UI.Features.Settings.Pages.GeneralPage"
     x:DataType="vm:GeneralSettingsViewModel"
     x:CompileBindings="True">
@@ -111,16 +112,14 @@
                             </StackPanel>
                         </Button>
 
-                        <!-- Download update button (shown only when the archive is not yet
-                        downloaded) -->
+                        <!-- Download update button -->
                         <Button Classes="primary-btn"
                             Content="{Binding L[Settings_DownloadUpdate]}"
                             Command="{Binding DownloadUpdateCommand}"
                             IsVisible="{Binding CanDownloadUpdate}"
                             Height="28" Padding="12,0" />
 
-                        <!-- Restart and apply button (shown instead of the download
-                        button) -->
+                        <!-- Restart and apply button -->
                         <Button Classes="primary-btn"
                             Content="{Binding L[Settings_RestartToApply]}"
                             Command="{Binding ApplyUpdateCommand}"
@@ -134,7 +133,6 @@
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6"
                             VerticalAlignment="Center">
 
-                            <!-- Commit count -->
                             <Border Classes="meta-chip"
                                 ToolTip.Tip="{Binding L[Metadata_Tooltip_Commit]}">
                                 <TextBlock Text="{Binding GitCommitCount}" FontSize="11"
@@ -143,7 +141,6 @@
                                     VerticalAlignment="Center" />
                             </Border>
 
-                            <!-- Commit hash -->
                             <Border Classes="meta-chip"
                                 ToolTip.Tip="{Binding L[Metadata_Tooltip_Hash]}">
                                 <TextBlock Text="{Binding GitCommitHash}" FontSize="11"
@@ -152,7 +149,6 @@
                                     VerticalAlignment="Center" />
                             </Border>
 
-                            <!-- Build date -->
                             <Border Classes="meta-chip"
                                 ToolTip.Tip="{Binding L[Metadata_Tooltip_BuildDate]}">
                                 <TextBlock Text="{Binding BuildDateString}" FontSize="11"
@@ -161,12 +157,10 @@
                                     VerticalAlignment="Center" />
                             </Border>
 
-                            <!-- GitHub repository metadata -->
                             <StackPanel Orientation="Horizontal" Spacing="6"
                                 IsVisible="{Binding HasRepoInfo}"
                                 VerticalAlignment="Center">
 
-                                <!-- Stars -->
                                 <Border Classes="meta-chip"
                                     ToolTip.Tip="{Binding L[Metadata_Tooltip_Stars]}">
                                     <StackPanel Orientation="Horizontal" Spacing="4"
@@ -180,7 +174,6 @@
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Open Issues -->
                                 <Border Classes="meta-chip"
                                     ToolTip.Tip="{Binding L[Metadata_Tooltip_Issues]}">
                                     <StackPanel Orientation="Horizontal" Spacing="4"
@@ -196,7 +189,6 @@
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Git branch -->
                                 <Border Classes="meta-chip"
                                     ToolTip.Tip="{Binding L[Metadata_Tooltip_Branch]}">
                                     <TextBlock Text="{Binding RepoBranch, StringFormat='git:{0}'}"
@@ -206,7 +198,6 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- Update status with smooth fade-in opacity -->
                         <TextBlock Grid.Column="2"
                             Text="{Binding UpdateStatusText}"
                             FontSize="11"
@@ -229,7 +220,7 @@
                         VerticalAlignment="Center" />
                 </Panel>
 
-                <!--  Auto-check settings  -->
+                <!-- Auto-check settings -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Classes="label" Text="{Binding L[Settings_AutoCheckUpdates]}" />
@@ -239,7 +230,7 @@
                         VerticalAlignment="Center" />
                 </Grid>
 
-                <!--  Auto-check interval  -->
+                <!-- Auto-check interval -->
                 <Grid ColumnDefinitions="*, 200, 70"
                     IsEnabled="{Binding AutoCheckUpdates}">
                     <StackPanel VerticalAlignment="Center">
@@ -261,32 +252,501 @@
             </StackPanel>
         </Border>
 
+        <!-- Discord Rich Presence (Minimalist header + Live Preview + One-click Presets + Collapsible Details) -->
+        <Border Classes="card">
+            <StackPanel Spacing="16">
+
+                <!-- Header row (minimal: status text shown only when not connected; dot tooltip shows user) -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <PathIcon Data="{StaticResource Icon.Discord}"
+                                Width="16" Height="16"
+                                Foreground="{DynamicResource AccentBrush}"
+                                VerticalAlignment="Center" />
+                            <TextBlock Classes="label"
+                                Text="{Binding L[General_Discord]}"
+                                VerticalAlignment="Center" />
+                            <Ellipse Width="7" Height="7"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding DiscordRpcEnabled}"
+                                ToolTip.Tip="{Binding DiscordStatusText}">
+                                <Ellipse.Fill>
+                                    <SolidColorBrush Color="{Binding DiscordStatusColor}" />
+                                </Ellipse.Fill>
+                            </Ellipse>
+                        </StackPanel>
+                        <TextBlock Text="{Binding DiscordStatusText}"
+                            FontSize="11"
+                            Foreground="{DynamicResource TextSecondaryBrush}"
+                            IsVisible="{Binding ShowDiscordStatusText}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                        VerticalAlignment="Center">
+                        <Button Classes="icon-btn ghost-btn"
+                            Command="{Binding ReconnectDiscordRpcCommand}"
+                            IsVisible="{Binding DiscordRpcEnabled}"
+                            Width="28" Height="28" Padding="6"
+                            ToolTip.Tip="{Binding L[DiscordRpc_Reconnect_Tip]}">
+                            <PathIcon Data="{StaticResource Icon.Refresh}" Width="14" Height="14" />
+                        </Button>
+                        <ToggleSwitch IsChecked="{Binding DiscordRpcEnabled}"
+                            VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Active body: Live Preview + Presets + Collapsible Customization -->
+                <StackPanel Spacing="14" IsVisible="{Binding DiscordRpcEnabled}">
+
+                    <!-- Compact Discord Live Preview Card -->
+                    <Border Background="{DynamicResource BgPrimaryBrush}"
+                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14,12">
+                        <Panel>
+                            <!-- Active / Demo Activity Card -->
+                            <StackPanel Spacing="10" IsVisible="{Binding DiscordPreview.IsVisibleInDiscord}">
+                                <!-- Header line: "Listening to Lite Music Player" + optional DEMO badge -->
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Grid.Column="0"
+                                        Text="{Binding DiscordPreviewHeaderText}"
+                                        FontSize="11"
+                                        FontWeight="SemiBold"
+                                        Foreground="{DynamicResource TextSecondaryBrush}"
+                                        TextTrimming="CharacterEllipsis"
+                                        VerticalAlignment="Center" />
+                                    <Border Grid.Column="1"
+                                        IsVisible="{Binding DiscordPreview.IsDemoTrack}"
+                                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        Padding="5,1"
+                                        VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding L[DiscordRpc_Preview_DemoBadge]}"
+                                            FontSize="9"
+                                            FontWeight="SemiBold"
+                                            Foreground="{DynamicResource TextMutedBrush}" />
+                                    </Border>
+                                </Grid>
+
+                                <!-- Cover + Track Metadata + Progress -->
+                                <Grid ColumnDefinitions="Auto, *">
+                                    <!-- 60x60 cover + optional corner animated badge -->
+                                    <Panel Grid.Column="0" Width="60" Height="60"
+                                        Margin="0,0,12,0" VerticalAlignment="Top">
+                                        <Border CornerRadius="8" ClipToBounds="True"
+                                            Background="{DynamicResource BgSecondaryBrush}"
+                                            BorderBrush="{DynamicResource BgHighlightBrush}"
+                                            BorderThickness="1">
+                                            <Panel>
+                                                <PathIcon Data="{StaticResource Icon.MusicNote}"
+                                                    Width="24" Height="24"
+                                                    Foreground="{DynamicResource AccentBrush}"
+                                                    IsVisible="{Binding DiscordPreview.CoverUrl, Converter={x:Static StringConverters.IsNullOrEmpty}}" />
+                                                <Image ui:SmartImage.Source="{Binding DiscordPreview.CoverUrl}"
+                                                    ui:SmartImage.Quality="Low"
+                                                    Stretch="UniformToFill"
+                                                    IsVisible="{Binding DiscordPreview.CoverUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                            </Panel>
+                                        </Border>
+
+                                        <!-- Corner badge (public playlist cover / listener avatar / custom image) -->
+                                        <Border Width="22" Height="22" CornerRadius="11"
+                                            ClipToBounds="True"
+                                            HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                            Margin="0,0,-4,-4"
+                                            Background="{DynamicResource BgPrimaryBrush}"
+                                            BorderBrush="{DynamicResource BgPrimaryBrush}"
+                                            BorderThickness="2"
+                                            ToolTip.Tip="{Binding DiscordPreview.SmallImageTooltip}"
+                                            IsVisible="{Binding DiscordPreview.SmallImageUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                            <Image ui:SmartImage.Source="{Binding DiscordPreview.SmallImageUrl}"
+                                                ui:SmartImage.Quality="Low"
+                                                Stretch="UniformToFill" />
+                                        </Border>
+                                    </Panel>
+
+                                    <!-- Text stack + Progress bar -->
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DiscordPreview.Details}"
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="{DynamicResource TextPrimaryBrush}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding DiscordPreview.State}"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource TextSecondaryBrush}"
+                                            TextTrimming="CharacterEllipsis"
+                                            IsVisible="{Binding DiscordPreview.State, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                        <TextBlock Text="{Binding DiscordPreview.LargeText}"
+                                            FontSize="11"
+                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            TextTrimming="CharacterEllipsis"
+                                            IsVisible="{Binding DiscordPreview.LargeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                                        <!-- Live / frozen-when-paused progress bar -->
+                                        <Grid ColumnDefinitions="Auto, *, Auto"
+                                            Margin="0,6,0,0"
+                                            IsVisible="{Binding DiscordPreview.ShowProgressBar}">
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4"
+                                                VerticalAlignment="Center">
+                                                <PathIcon Data="{StaticResource Icon.Pause}"
+                                                    Width="9" Height="9"
+                                                    Foreground="{DynamicResource TextMutedBrush}"
+                                                    VerticalAlignment="Center"
+                                                    IsVisible="{Binding DiscordPreview.IsPaused}" />
+                                                <TextBlock Text="{Binding DiscordPreview.ElapsedText}"
+                                                    FontFamily="Consolas, monospace"
+                                                    FontSize="10"
+                                                    Foreground="{DynamicResource TextMutedBrush}"
+                                                    VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <ProgressBar Grid.Column="1"
+                                                Value="{Binding DiscordPreview.ProgressPercent}"
+                                                Maximum="100"
+                                                Height="3"
+                                                MinWidth="40"
+                                                Margin="8,0"
+                                                BorderThickness="0"
+                                                VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2"
+                                                Text="{Binding DiscordPreview.DurationText}"
+                                                FontFamily="Consolas, monospace"
+                                                FontSize="10"
+                                                Foreground="{DynamicResource TextMutedBrush}"
+                                                VerticalAlignment="Center" />
+                                        </Grid>
+
+                                        <!-- Elapsed-only line -->
+                                        <TextBlock Text="{Binding DiscordPreviewElapsedLabel}"
+                                            FontFamily="Consolas, monospace"
+                                            FontSize="10"
+                                            Foreground="{DynamicResource TextMutedBrush}"
+                                            Margin="0,4,0,0"
+                                            IsVisible="{Binding DiscordPreview.ShowElapsedOnly}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Link Buttons Preview -->
+                                <StackPanel Orientation="Horizontal" Spacing="8"
+                                    IsVisible="{Binding DiscordPreview.HasButtons}">
+                                    <Border Background="Transparent"
+                                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="5"
+                                        Padding="10,4"
+                                        IsVisible="{Binding DiscordPreview.Button1Label, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                        <TextBlock Text="{Binding DiscordPreview.Button1Label}"
+                                            FontSize="11"
+                                            Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </Border>
+                                    <Border Background="Transparent"
+                                        BorderBrush="{DynamicResource BgHighlightBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="5"
+                                        Padding="10,4"
+                                        IsVisible="{Binding DiscordPreview.Button2Label, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                        <TextBlock Text="{Binding DiscordPreview.Button2Label}"
+                                            FontSize="11"
+                                            Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Hidden while paused placeholder -->
+                            <TextBlock Text="{Binding L[DiscordRpc_Preview_Hidden]}"
+                                FontSize="12"
+                                Foreground="{DynamicResource TextMutedBrush}"
+                                HorizontalAlignment="Center"
+                                Margin="0,8"
+                                IsVisible="{Binding !DiscordPreview.IsVisibleInDiscord}" />
+                        </Panel>
+                    </Border>
+
+                    <!-- One-click style presets -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="format-item-btn"
+                            Classes.active="{Binding IsDiscordPresetMinimal}"
+                            Command="{Binding ApplyDiscordMinimalPresetCommand}"
+                            Padding="12,5">
+                            <TextBlock Text="{Binding L[DiscordRpc_Preset_Minimal]}" FontSize="12" />
+                        </Button>
+                        <Button Classes="format-item-btn"
+                            Classes.active="{Binding IsDiscordPresetBalanced}"
+                            Command="{Binding ApplyDiscordBalancedPresetCommand}"
+                            Padding="12,5">
+                            <TextBlock Text="{Binding L[DiscordRpc_Preset_Balanced]}" FontSize="12" />
+                        </Button>
+                        <Button Classes="format-item-btn"
+                            Classes.active="{Binding IsDiscordPresetRich}"
+                            Command="{Binding ApplyDiscordRichPresetCommand}"
+                            Padding="12,5">
+                            <TextBlock Text="{Binding L[DiscordRpc_Preset_Rich]}" FontSize="12" />
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Collapsible Fine-Tuning & Advanced Settings -->
+                    <Expander Header="{Binding L[DiscordRpc_Advanced]}"
+                        HorizontalAlignment="Stretch"
+                        IsExpanded="False">
+                        <StackPanel Spacing="14" Margin="0,12,0,0">
+
+                            <!-- Activity type -->
+                            <Grid ColumnDefinitions="*, 16, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ActivityType]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ActivityTypeDesc]}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2"
+                                    ItemsSource="{Binding DiscordActivityTypeOptions}"
+                                    SelectedItem="{Binding SelectedDiscordActivityType}"
+                                    MinWidth="220"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Compact member-list highlight -->
+                            <Grid ColumnDefinitions="*, 16, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_StatusDisplay]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_StatusDisplayDesc]}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2"
+                                    ItemsSource="{Binding DiscordStatusDisplayOptions}"
+                                    SelectedItem="{Binding SelectedDiscordStatusDisplay}"
+                                    MinWidth="220"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Details line format -->
+                            <Grid ColumnDefinitions="*, 16, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_DetailsFormat]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_DetailsFormatDesc]}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2"
+                                    ItemsSource="{Binding DiscordDetailsFormatOptions}"
+                                    SelectedItem="{Binding SelectedDiscordDetailsFormat}"
+                                    MinWidth="220"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Timestamp / progress mode -->
+                            <Grid ColumnDefinitions="*, 16, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_TimestampMode]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_TimestampModeDesc]}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2"
+                                    ItemsSource="{Binding DiscordTimestampModeOptions}"
+                                    SelectedItem="{Binding SelectedDiscordTimestampMode}"
+                                    MinWidth="220"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Paused behavior -->
+                            <Grid ColumnDefinitions="*, 16, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_PausedBehavior]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_PausedBehaviorDesc]}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2"
+                                    ItemsSource="{Binding DiscordPausedBehaviorOptions}"
+                                    SelectedItem="{Binding SelectedDiscordPausedBehavior}"
+                                    MinWidth="220"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Animated corner badge style -->
+                            <Grid ColumnDefinitions="*, 16, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_BadgeStyle]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_BadgeStyleDesc]}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="2"
+                                    ItemsSource="{Binding DiscordBadgeStyleOptions}"
+                                    SelectedItem="{Binding SelectedDiscordBadgeStyle}"
+                                    MinWidth="220"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Custom GIF/WebP URL (shown only when BadgeStyle == Custom) -->
+                            <StackPanel Spacing="6" IsVisible="{Binding IsDiscordCustomBadgeSelected}">
+                                <TextBox Text="{Binding DiscordCustomBadgeUrl, Mode=TwoWay}"
+                                    PlaceholderText="{Binding L[DiscordRpc_CustomBadgePlaceholder]}"
+                                    MaxLength="256"
+                                    FontFamily="Consolas, monospace" />
+                                <TextBlock Text="{Binding L[DiscordRpc_CustomBadgeInvalid]}"
+                                    FontSize="11"
+                                    Foreground="{DynamicResource SystemErrorBrush}"
+                                    IsVisible="{Binding IsDiscordCustomBadgeUrlInvalid}" />
+                            </StackPanel>
+
+                            <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
+
+                            <!-- Clean duplicate artist prefix -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_StripAuthor]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_StripAuthorDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordStripAuthorFromTitle}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show album cover -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowCoverArt]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowCoverArtDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowCoverArt}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show playlist name -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowPlaylistName]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowPlaylistNameDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowPlaylistName}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Share clickable public playlist link -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowPublicPlaylistLink]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowPublicPlaylistLinkDesc]}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowPublicPlaylistLink}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show like heart (purple / outline) -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowLikeStatus]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowLikeStatusDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowLikeStatus}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show repeat mode indicator -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowRepeatMode]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowRepeatModeDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowRepeatMode}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show shuffle mode indicator -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowShuffleMode]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowShuffleModeDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowShuffleMode}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show queue position (1/31) -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowQueuePosition]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowQueuePositionDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowQueuePosition}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show YouTube link button -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowTrackButton]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowTrackButtonDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowTrackButton}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show listener's YouTube channel (opt-in) -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowListenerChannel]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowListenerChannelDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowListenerChannel}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show GitHub link button -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowGitHubButton]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowGitHubButtonDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowGitHubButton}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <!-- Show idle status -->
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ShowIdleStatus]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ShowIdleStatusDesc]}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordShowIdleStatus}"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
+
+                            <!-- Custom Discord Application ID -->
+                            <StackPanel Spacing="8">
+                                <StackPanel>
+                                    <TextBlock Classes="label" Text="{Binding L[DiscordRpc_ClientId]}" />
+                                    <TextBlock Classes="desc" Text="{Binding L[DiscordRpc_ClientIdDesc]}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <Grid ColumnDefinitions="*, 8, Auto">
+                                    <TextBox Grid.Column="0"
+                                        Text="{Binding DiscordCustomClientId, Mode=TwoWay}"
+                                        PlaceholderText="{Binding L[DiscordRpc_ClientIdPlaceholder]}"
+                                        MaxLength="24"
+                                        FontFamily="Consolas, monospace" />
+                                    <Button Grid.Column="2"
+                                        Content="{Binding L[Common_Reset]}"
+                                        Command="{Binding ResetDiscordClientIdCommand}"
+                                        IsEnabled="{Binding DiscordCustomClientId, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                </Grid>
+
+                                <TextBlock Text="{Binding L[DiscordRpc_ClientIdInvalid]}"
+                                    FontSize="11"
+                                    Foreground="{DynamicResource SystemErrorBrush}"
+                                    IsVisible="{Binding IsDiscordCustomClientIdInvalid}" />
+                            </StackPanel>
+
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
         <!-- General parameters -->
         <Border Classes="card">
             <StackPanel Spacing="16">
 
-                <!--  Discord RPC  -->
-                <Grid ColumnDefinitions="*, Auto">
-                    <StackPanel VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBlock Classes="label" Text="{Binding L[General_Discord]}"
-                                VerticalAlignment="Center" />
-                            <Border Classes="feature-badge coming-soon" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding L[Common_ComingSoon]}"
-                                    VerticalAlignment="Center" />
-                            </Border>
-                        </StackPanel>
-                        <TextBlock Classes="desc" Text="{Binding L[General_DiscordDesc]}" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1"
-                        IsChecked="{Binding DiscordRpcEnabled}"
-                        IsEnabled="False"
-                        VerticalAlignment="Center" />
-                </Grid>
-
-                <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
-
-                <!--  Search cache  -->
+                <!-- Search cache -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Classes="label" Text="{Binding L[Settings_SearchCache]}" />
@@ -333,7 +793,7 @@
 
                 <Separator Background="{DynamicResource BgHighlightBrush}" Height="1" />
 
-                <!--  Reset  -->
+                <!-- Reset -->
                 <Button Content="{Binding L[Storage_ResetApp]}"
                     Command="{Binding ResetLibraryCommand}"
                     HorizontalAlignment="Left"

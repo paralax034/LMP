@@ -152,6 +152,7 @@ internal static class ServiceRegistration
                 ? new WindowsSystemMediaTransport()
                 : NullSystemMediaTransport.Instance);
         services.AddSingleton<MediaTransportCoordinator>();
+        services.AddSingleton<DiscordRpcService>();
 
         services.AddTransient<HomeViewModel>();
         services.AddTransient<SearchViewModel>();

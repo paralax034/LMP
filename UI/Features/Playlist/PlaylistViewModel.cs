@@ -21,6 +21,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     private readonly PlaylistEditService _editService;
     private readonly PlaylistService _playlistService;
     private readonly CookieAuthService _auth;
+    private readonly DiscordRpcService _discordRpc;
 
     private readonly EventHandler<string> _languageChangedHandler;
     private DispatcherTimer? _dataChangedDebounceTimer;
@@ -181,7 +182,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         PlaylistService playlistService,
         PlaylistEditService editService,
         PlayerControlService playerControl,
-        CookieAuthService auth)
+        CookieAuthService auth,
+        DiscordRpcService discordRpc)
         : base(downloads, vmFactory, playerControl)
     {
         _dialog = dialog;
@@ -190,6 +192,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         _playlistService = playlistService;
         _editService = editService;
         _auth = auth;
+        _discordRpc = discordRpc;
 
         _items.RemoveFromPlaylistAction = HandleRemoveFromPlaylistAction;
         _items.StartRadioAction = t => Log.Info($"[Playlist] Start radio requested for {t.Title}");
@@ -294,6 +297,9 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         if (IsLikedPlaylist)
             AmbientColor = LMP.UI.Services.ThemeManagerService.GetThemeColor("Accent");
 
+        if (_currentPlaylist != null && string.Equals(_currentPlaylist.Id, _currentPlaylistId, StringComparison.Ordinal))
+            _discordRpc.SetViewingPlaylist(_currentPlaylist);
+
         OnPropertyChanged(nameof(IsPlayingBarsActive));
         return base.OnNavigatedToAsync();
     }
@@ -393,6 +399,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         if (!string.Equals(_currentPlaylistId, playlistId, StringComparison.Ordinal))
         {
+            _currentPlaylist = null;
             FilterQuery = string.Empty;
             IsLikedPlaylist = string.Equals(playlistId, LibraryService.LikedPlaylistId, StringComparison.Ordinal);
             AmbientColor = IsLikedPlaylist
@@ -494,6 +501,9 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         TotalDuration = payload.TotalDuration;
         FormatDuration();
+
+        if (IsPageActive)
+            _discordRpc.SetViewingPlaylist(playlist);
     }
 
     private async Task LoadAmbientColorAsync(string targetPlaylistId)
