@@ -530,10 +530,15 @@ internal sealed partial class CachingStreamSource
     }
 
     /// <summary>
-    /// Creates a terminal exception indicating the unified refresh budget was exhausted after HTTP 403.
-    /// The message indicates the actual root cause based on the last attempt outcome, rather than generically stating "CDN rejected URL".
+    /// Records a terminal download failure so background preload stops immediately
+    /// and subsequent range requests fail fast without sending dead HTTP requests.
     /// </summary>
-    /// <returns>An exception with reason <see cref="ChunkDownloadFailureReason.Forbidden403"/>.</returns>
+    private void RecordPermanentFatal(ChunkDownloadFatalException fatal)
+    {
+        if (fatal.Reason is ChunkDownloadFailureReason.UmpFormat or ChunkDownloadFailureReason.Forbidden403)
+            Interlocked.CompareExchange(ref _permanentFatalException, fatal, null);
+    }
+
     private ChunkDownloadFatalException CreateForbiddenBudgetExhaustedException()
     {
         int spent = Volatile.Read(ref _forbiddenRefreshBudgetSpent);
@@ -548,13 +553,16 @@ internal sealed partial class CachingStreamSource
         Log.Error($"[CachingSource] [{_trackId}] HTTP 403 persists, refresh budget exhausted " +
                   $"({spent}/{MaxForbiddenRefreshBudget}, last outcome: {last}): {cause}. Escalating to fatal.");
 
-        return new ChunkDownloadFatalException(
+        var fatal = new ChunkDownloadFatalException(
             message: $"Stream URL refresh budget exhausted after HTTP 403 ({spent}/{MaxForbiddenRefreshBudget}): {cause}",
             chunkIndex: -1,
             consecutiveFailures: Volatile.Read(ref _consecutive403Count),
             reason: ChunkDownloadFailureReason.Forbidden403,
             trackId: _trackId,
             httpStatusCode: 403);
+
+        RecordPermanentFatal(fatal);
+        return fatal;
     }
 
     // --- 403 Diagnostics ---

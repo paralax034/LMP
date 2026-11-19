@@ -116,6 +116,8 @@ internal sealed class WebMContainerParser : IContainerParser
     {
         ReleaseCurrentFrame();
         _parser.Reset();
+        if (_parser.CuePoints.Count > 0)
+            _parser.ExpectClusterHeader();
     }
 
     private void ReleaseCurrentFrame()

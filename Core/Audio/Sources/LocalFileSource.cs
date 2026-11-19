@@ -107,6 +107,9 @@ internal sealed class LocalFileSource : IAudioSource
     /// <summary>Absolute path to the file on disk.</summary>
     public string FilePath => _filePath;
 
+    /// <summary>Indicates whether this source is backed by <see cref="AudioCacheManager"/> rather than a user download.</summary>
+    internal bool IsCacheBacked => _cacheManager != null && !string.IsNullOrEmpty(_cacheKey);
+
     #endregion
 
     #region Initialization
@@ -296,14 +299,14 @@ internal sealed class LocalFileSource : IAudioSource
                 long alignedStart = currentEx.AbsoluteBytePosition - (currentEx.AbsoluteBytePosition % alignmentBytes);
                 int logicalIndex = (int)(alignedStart / alignmentBytes);
 
-                if (!string.IsNullOrEmpty(_trackId) && _expectedSize > 0)
+                if (IsCacheBacked && _expectedSize > 0)
                 {
                     Log.Warn($"[LocalFileSource] Cache corruption detected for track {_trackId} " +
                              $"at byte {currentEx.AbsoluteBytePosition} " +
                              $"(Range {alignedStart}-{alignedStart + alignmentBytes - 1}). " +
                              $"Performing surgical invalidation.");
 
-                    AudioSourceFactory.GlobalCache.InvalidateRangeByTrackId(_trackId, alignedStart, alignmentBytes);
+                    _cacheManager!.InvalidateRange(_cacheKey!, alignedStart, alignmentBytes);
 
                     throw new CacheInvalidatedException(
                         $"Cache corruption detected at byte {currentEx.AbsoluteBytePosition} " +
@@ -315,7 +318,7 @@ internal sealed class LocalFileSource : IAudioSource
                         inner: currentEx);
                 }
 
-                Log.Warn($"[LocalFileSource] Offline fallback: skipping corrupted range around byte {currentEx.AbsoluteBytePosition}");
+                Log.Warn($"[LocalFileSource] Non-cache file corruption: skipping range around byte {currentEx.AbsoluteBytePosition}");
 
                 long nextBoundary = Math.Min(alignedStart + alignmentBytes, _fileStream!.Length);
                 if (nextBoundary >= _fileStream.Length)
@@ -350,9 +353,9 @@ internal sealed class LocalFileSource : IAudioSource
     /// <returns>Aligned range size in bytes.</returns>
     private int ResolveRepairAlignmentBytes()
     {
-        if (!string.IsNullOrEmpty(_trackId))
+        if (IsCacheBacked)
         {
-            int alignment = AudioSourceFactory.GlobalCache.FindBestCache(_trackId)?.AlignmentBytes ?? 0;
+            int alignment = _cacheManager!.GetCacheInfo(_cacheKey!)?.AlignmentBytes ?? 0;
             if (alignment > 0)
                 return alignment;
         }

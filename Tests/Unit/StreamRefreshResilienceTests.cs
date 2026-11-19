@@ -264,6 +264,131 @@ public static class StreamRefreshResilienceTests
         return Task.CompletedTask;
     }
 
+    [TestMethod(TestCategory.Unit, "Continuation Compatibility Rejects Clen Mismatch", Group = TestGroups.Network, Order = 42)]
+    public static Task TestIsContinuationVariantCompatibleClenMismatchAsync()
+    {
+        var entry = new AudioCacheEntry
+        {
+            CacheKey = "yt_clen_test_WebM_160",
+            TrackId = "yt_clen_test",
+            Format = AudioFormat.WebM,
+            Bitrate = 142,
+            TotalSize = 6_511_915
+        };
+
+        TestAssert.False(
+            LMP.Core.Services.AudioEngine.IsContinuationVariantCompatible(entry, AudioFormat.WebM, 142, 6_511_918),
+            "Eager/primed continuation URL with changed clen (+3B) must be rejected");
+
+        TestAssert.True(
+            LMP.Core.Services.AudioEngine.IsContinuationVariantCompatible(entry, AudioFormat.WebM, 142, 6_511_915),
+            "Exact matching format, bitrate bucket, and clen must be accepted");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Degraded Itag18 Guard, Strict Format Check & Cache Bucket Matching", Group = TestGroups.Network, Order = 43)]
+    public static Task TestDegradedManifestAndCacheBucketGuardsAsync()
+    {
+        var itag18 = new LMP.Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
+            18, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=18",
+            new LMP.Core.Youtube.Videos.Streams.Container("mp4"),
+            new LMP.Core.Youtube.Videos.Streams.FileSize(2_700_000),
+            new LMP.Core.Youtube.Videos.Streams.Bitrate(139_000),
+            "mp4a.40.2", null, null, false);
+
+        var itag251 = new LMP.Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
+            251, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251",
+            new LMP.Core.Youtube.Videos.Streams.Container("webm"),
+            new LMP.Core.Youtube.Videos.Streams.FileSize(2_500_000),
+            new LMP.Core.Youtube.Videos.Streams.Bitrate(142_000),
+            "opus", null, null, false);
+
+        TestAssert.True(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag18]),
+            "Single-variant itag=18 fallback manifest must be detected as degraded");
+        TestAssert.False(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag251]),
+            "Single adaptive itag=251 stream is not degraded muxed-only");
+        TestAssert.False(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag18, itag251]),
+            "Multi-variant manifest with adaptive streams must be cached normally");
+
+        var mp4Desc = new ResolvedStreamDescriptor
+        {
+            TrackId = "yt_strict",
+            Format = AudioFormat.Mp4,
+            Codec = AudioCodec.Aac,
+            BitrateKbps = 139,
+            Origin = StreamSource.ProviderMemoryCache
+        };
+
+        TestAssert.False(LMP.Core.Services.YoutubeProvider.MatchesStrictFormat(mp4Desc, AudioFormat.WebM, requireExactFormat: true),
+            "Strict variantOverride=WebM must bypass cached Mp4 descriptor");
+        TestAssert.True(LMP.Core.Services.YoutubeProvider.MatchesStrictFormat(mp4Desc, AudioFormat.WebM, requireExactFormat: false),
+            "Non-strict preference may fall back to available descriptor");
+
+        var webm142 = new StreamSelectionHint(AudioFormat.WebM, 142);
+        TestAssert.True(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.WebM, 145),
+            "142kbps and 145kbps WebM belong to the same 160kbps bucket");
+        TestAssert.False(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.WebM, 50),
+            "50kbps WebM (itag=249) must NOT reset a 142kbps (itag=251) partial cache");
+        TestAssert.False(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.Mp4, 142),
+            "Mp4 stream must NOT reset a WebM partial cache");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "CdnForbiddenClientTracker Clears On Egress Mismatch And Respects TTL", Group = TestGroups.Network, Order = 44)]
+    public static Task TestCdnForbiddenClientsClearedOnEgressMismatchAsync()
+    {
+        long nowMs = 1_000;
+        var tracker = new LMP.Core.Services.AudioEngine.CdnForbiddenClientTracker(ttlMs: 10_000, clockMs: () => nowMs);
+        const string trackId = "yt_2Eqqlyr9CZg";
+
+        var excluded = tracker.Register(trackId, "WEB_REMIX");
+        TestAssert.Equal(1, excluded.Length);
+        TestAssert.Equal("WEB_REMIX", excluded[0]);
+        TestAssert.Equal(1, tracker.GetSnapshot(trackId).Length);
+
+        // Egress IP rotation clears excluded clients immediately so WEB_REMIX is not stuck banned
+        tracker.Clear(trackId);
+        TestAssert.Equal(0, tracker.GetSnapshot(trackId).Length, "Egress mismatch must clear excluded clients for the track");
+
+        // Re-register and verify TTL expiration
+        _ = tracker.Register(trackId, "WEB_REMIX");
+        nowMs += 10_001;
+        TestAssert.Equal(0, tracker.GetSnapshot(trackId).Length, "Excluded clients must expire after TTL");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "ShouldUseLocalDownload Respects BypassLocalDownload On Corruption Retry", Group = TestGroups.Network, Order = 45)]
+    public static Task TestLocalDownloadBypassOnCorruptionRecoveryAsync()
+    {
+        string tempFile = Path.Combine(Path.GetTempPath(), "LMP_LocalDlBypass_" + Guid.NewGuid().ToString("N") + ".webm");
+        File.WriteAllBytes(tempFile, [0x1A, 0x45, 0xDF, 0xA3]);
+        try
+        {
+            var track = new TrackInfo
+            {
+                Id = "yt_DiDUIfMk7go",
+                IsDownloaded = true,
+                LocalPath = tempFile
+            };
+
+            TestAssert.True(
+                LMP.Core.Services.AudioEngine.ShouldUseLocalDownload(track, bypassLocalDownload: false),
+                "Normal playback must prefer existing local download");
+            TestAssert.False(
+                LMP.Core.Services.AudioEngine.ShouldUseLocalDownload(track, bypassLocalDownload: true),
+                "Corruption recovery retry must bypass stale IsDownloaded/LocalPath even before SQLite flush");
+        }
+        finally
+        {
+            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+        }
+
+        return Task.CompletedTask;
+    }
+
     [TestMethod(TestCategory.Unit, "Refresh Descriptor Compatibility With Source Snapshot", Group = TestGroups.Network, Order = 38)]
     public static Task TestRefreshDescriptorCompatibilityAsync()
     {

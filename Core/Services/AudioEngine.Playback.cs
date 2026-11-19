@@ -119,7 +119,7 @@ public sealed partial class AudioEngine
         }
 
         RaiseOnUI(_raiseQueueChangedOnUIDelegate);
-        await PlayCurrentIndexAsync(cmd.Session, cmd.SeekPosition, startPlaying: true, isRetry: cmd.IsRetry, pauseEpoch: cmd.PauseEpoch).ConfigureAwait(false);
+        await PlayCurrentIndexAsync(cmd.Session, cmd.SeekPosition, startPlaying: true, isRetry: cmd.IsRetry, pauseEpoch: cmd.PauseEpoch, bypassLocalDownload: cmd.BypassLocalDownload).ConfigureAwait(false);
     }
 
     private async Task HandleStartQueueAsync(StartQueueCommand cmd)
@@ -237,7 +237,8 @@ public sealed partial class AudioEngine
         TimeSpan? seekPosition = null,
         bool startPlaying = true,
         bool isRetry = false,
-        int pauseEpoch = -1)
+        int pauseEpoch = -1,
+        bool bypassLocalDownload = false)
     {
         TrackInfo? track;
         lock (_queueLock)
@@ -252,7 +253,7 @@ public sealed partial class AudioEngine
         // Do not block the actor thread waiting for the previous canceled task:
         // cancellation of the old session was already initiated via CancellationTokenSource in BeginNewSession().
         // The new task starts instantly, while the canceled one completes asynchronously on the ThreadPool.
-        var playTask = PlayTrackCoreAsync(track, session, GetSessionToken(), seekPosition, startPlaying, isRetry, pauseEpoch);
+        var playTask = PlayTrackCoreAsync(track, session, GetSessionToken(), seekPosition, startPlaying, isRetry, pauseEpoch, bypassLocalDownload);
         Volatile.Write(ref _activePlayTask, playTask);
 
         return Task.CompletedTask;
@@ -268,7 +269,8 @@ public sealed partial class AudioEngine
        TimeSpan? seekPosition = null,
        bool startPlaying = true,
        bool isRetry = false,
-       int pauseEpoch = -1)
+       int pauseEpoch = -1,
+       bool bypassLocalDownload = false)
     {
         if (_session.IsStaleOrCancelled(session, ct) || IsSealedFailedTrack(track.Id))
             return;
@@ -317,6 +319,12 @@ public sealed partial class AudioEngine
             else
             {
                 track = _trackRegistry.RegisterOrUpdate(track);
+            }
+
+            if (bypassLocalDownload && (track.IsDownloaded || !string.IsNullOrEmpty(track.LocalPath)))
+            {
+                track.IsDownloaded = false;
+                track.LocalPath = null;
             }
 
             lock (_playerDispatchLock)
@@ -369,7 +377,7 @@ public sealed partial class AudioEngine
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    var descriptor = await ResolveStreamAsync(track, ct, seekPosition).ConfigureAwait(false);
+                    var descriptor = await ResolveStreamAsync(track, ct, seekPosition, bypassLocalDownload).ConfigureAwait(false);
 
                     if (descriptor.HasPerceptualLufs)
                     {
@@ -458,6 +466,14 @@ public sealed partial class AudioEngine
             }
         }
         catch (Exception) when (_session.IsStaleOrCancelled(session, ct)) { }
+        catch (CacheInvalidatedException)
+        {
+            // Routed and deduplicated via AudioPlayer.Events.ErrorOccurred -> HandleCacheInvalidated.
+        }
+        catch (InvalidDataException) when (_player.GetActivePipeline()?.Source is Audio.Sources.LocalFileSource { IsCacheBacked: false })
+        {
+            // Routed and deduplicated via AudioPlayer.Events.ErrorOccurred -> HandleCorruptedLocalDownload.
+        }
         catch (Exception ex)
         {
             AbortCurrentTrackPlaybackAfterFatalError(track.Id);
@@ -510,6 +526,12 @@ public sealed partial class AudioEngine
             else if (ex is CacheInvalidatedException cacheEx)
             {
                 HandleCacheInvalidated(cacheEx);
+            }
+            else if (ex is InvalidDataException
+                     && _player.GetActivePipeline()?.Source is Audio.Sources.LocalFileSource { IsCacheBacked: false }
+                     && HandleCorruptedLocalDownload(ex))
+            {
+                return;
             }
             else
             {

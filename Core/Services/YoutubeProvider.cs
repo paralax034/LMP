@@ -657,10 +657,15 @@ public partial class YoutubeProvider : IDisposable
             }
         }
 
+        bool requireExactFormat = variantOverride is { HasFormat: true };
+
         // RAM/disk manifests may contain URLs for a client already rejected with HTTP 403 by CDN: bypass caches and call API if exclusions exist.
         if (!forceRefresh && !hasExcludedClients && _manifestRamCache.TryGetValue(track.Id, out var ramManifest))
         {
-            var d = SelectFromManifest(ramManifest, track.Id, requested.Format, requested.BitrateKbps, StreamSource.ProviderMemoryCache);
+            var d = TrySelectFromManifest(
+                ramManifest, track.Id, requested.Format, requested.BitrateKbps,
+                StreamSource.ProviderMemoryCache, requireExactFormat, "RAM");
+
             if (d != null && !StreamUrlEgressGuard.Shared.IsBoundToCurrentEgress(d.Value.Url))
             {
                 Log.Info($"[YouTube] RAM manifest for {track.Id} is bound to another egress IP, dropping");
@@ -684,11 +689,13 @@ public partial class YoutubeProvider : IDisposable
             if (diskEntry is { Variants.Count: > 0 })
             {
                 var diskManifest = ReconstructManifest(diskEntry);
-                _manifestRamCache[track.Id] = diskManifest;
+                var d = TrySelectFromManifest(
+                    diskManifest, track.Id, requested.Format, requested.BitrateKbps,
+                    StreamSource.SessionCache, requireExactFormat, "Disk");
 
-                var d = SelectFromManifest(diskManifest, track.Id, requested.Format, requested.BitrateKbps, StreamSource.SessionCache);
                 if (d != null)
                 {
+                    _manifestRamCache[track.Id] = diskManifest;
                     Log.Info($"[YouTube] RefreshStreamAsync DISK MANIFEST ({diskEntry.Variants.Count} variants) -> {d}");
                     return d;
                 }
@@ -711,8 +718,7 @@ public partial class YoutubeProvider : IDisposable
             if (audioStreams.Count == 0)
                 throw new StreamUnavailableException($"No audio streams for {rawVideoId}", rawVideoId, StreamUnavailableReason.AllClientsFailed);
 
-            _manifestRamCache[track.Id] = manifest;
-            SessionCacheStore.RecordManifest(track.Id, audioStreams, manifest.IntegratedLufs);
+            TryCacheManifest(track.Id, manifest, audioStreams);
 
             var descriptor = SelectFromManifest(manifest, track.Id, requested.Format, requested.BitrateKbps) ?? throw new StreamUnavailableException($"No matching stream for {rawVideoId}", rawVideoId, StreamUnavailableReason.AllClientsFailed);
             Log.Info($"[YouTube] RefreshStreamAsync YOUTUBE API ({audioStreams.Count} variants) -> {descriptor}");
@@ -842,8 +848,7 @@ public partial class YoutubeProvider : IDisposable
 
             if (audioStreams.Count > 0)
             {
-                _manifestRamCache[trackId] = manifest;
-                SessionCacheStore.RecordManifest(trackId, audioStreams, manifest.IntegratedLufs);
+                TryCacheManifest(trackId, manifest, audioStreams);
             }
 
             return MapManifestToOptions(manifest);
@@ -1742,6 +1747,59 @@ public partial class YoutubeProvider : IDisposable
     #endregion
 
     #region Manifest Mapping Helpers
+
+    /// <summary>
+    /// Returns <c>true</c> if the manifest contains only the degraded single-variant muxed fallback stream (<c>itag=18</c>).
+    /// Such manifests must not overwrite or poison RAM/session caches.
+    /// </summary>
+    internal static bool IsDegradedMuxedOnlyManifest(IReadOnlyList<AudioOnlyStreamInfo> audioStreams) =>
+        audioStreams.Count == 1 && audioStreams[0].Itag == 18;
+
+    /// <summary>
+    /// Validates whether a candidate descriptor satisfies a strict format override.
+    /// </summary>
+    internal static bool MatchesStrictFormat(
+        ResolvedStreamDescriptor descriptor,
+        AudioFormat? requiredFormat,
+        bool requireExactFormat) =>
+        !requireExactFormat
+        || requiredFormat is not { } fmt
+        || fmt == AudioFormat.Unknown
+        || descriptor.Format == fmt;
+
+    private void TryCacheManifest(
+        string trackId,
+        StreamManifest manifest,
+        List<AudioOnlyStreamInfo> audioStreams)
+    {
+        if (IsDegradedMuxedOnlyManifest(audioStreams))
+        {
+            Log.Warn($"[YouTube] Skipping cache persistence for degraded 1-variant itag=18 manifest: {trackId}");
+            return;
+        }
+
+        _manifestRamCache[trackId] = manifest;
+        SessionCacheStore.RecordManifest(trackId, audioStreams, manifest.IntegratedLufs);
+    }
+
+    private ResolvedStreamDescriptor? TrySelectFromManifest(
+        StreamManifest manifest,
+        string trackId,
+        AudioFormat? targetFormat,
+        int targetBitrate,
+        StreamSource origin,
+        bool requireExactFormat,
+        string cacheTier)
+    {
+        var d = SelectFromManifest(manifest, trackId, targetFormat, targetBitrate, origin);
+        if (d != null && !MatchesStrictFormat(d.Value, targetFormat, requireExactFormat))
+        {
+            Log.Debug($"[YouTube] {cacheTier} manifest for {trackId} lacks requested format {targetFormat}, bypassing cache");
+            return null;
+        }
+
+        return d;
+    }
 
     private ResolvedStreamDescriptor? SelectFromManifest(
         StreamManifest manifest,

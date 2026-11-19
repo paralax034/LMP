@@ -383,6 +383,9 @@ internal sealed partial class CachingStreamSource
         if (IsRangeLocallyAvailable(position, minimumLength))
             return RangeDownloadResult.Success;
 
+        if (Volatile.Read(ref _permanentFatalException) is { } permanentFatal)
+            throw permanentFatal;
+
         ct.ThrowIfCancellationRequested();
 
         // Proactive check: refresh URL BEFORE sending request only if URL exists but is expiring.
@@ -825,12 +828,16 @@ internal sealed partial class CachingStreamSource
             Http.CdnConnectionPreWarmer.RecordHost(requestBaseUrl);
 
             if (response.Content.Headers.ContentType?.MediaType?.Contains("yt-ump") == true)
-                throw new ChunkDownloadFatalException(
+            {
+                var umpFatal = new ChunkDownloadFatalException(
                     "YouTube returned encrypted UMP format",
                     chunkIndex: logicalIndex,
                     consecutiveFailures: 0,
                     reason: ChunkDownloadFailureReason.UmpFormat,
                     trackId: _trackId);
+                RecordPermanentFatal(umpFatal);
+                throw umpFatal;
+            }
 
             response.EnsureSuccessStatusCode();
 

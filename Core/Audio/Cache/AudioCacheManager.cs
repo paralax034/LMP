@@ -587,8 +587,14 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         entry.OriginalUrl = url;
         entry.LastAccessedAt = DateTime.UtcNow;
 
-        if (totalSize > 0 && (entry.TotalSize <= 0 || (entry.TotalSize < totalSize && !entry.IsComplete)))
+        if (!entry.IsComplete && totalSize > 0 && entry.TotalSize > 0 && entry.TotalSize != totalSize)
+        {
+            ResetPartialEntryCore(entry, totalSize, alignmentBytes);
+        }
+        else if (totalSize > 0 && entry.TotalSize <= 0)
+        {
             entry.TotalSize = totalSize;
+        }
 
         if (bitrate > 0)
             entry.Bitrate = bitrate;
@@ -599,6 +605,91 @@ public sealed partial class AudioCacheManager : IAsyncDisposable, IDisposable
         AddToTrackIndex(trackId, cacheKey);
         MarkDirty();
         return entry;
+    }
+
+    /// <summary>
+    /// Safely resets a stale partial cache entry in-place without evicting its active
+    /// <see cref="CacheFileHandle"/> lease, preventing handle leaks and cross-session lease theft.
+    /// </summary>
+    internal bool ResetPartialEntry(string cacheKey, long newTotalSize, int alignmentBytes = 0)
+    {
+        if (_disposed || string.IsNullOrEmpty(cacheKey))
+            return false;
+
+        if (!_entries.TryGetValue(cacheKey, out var entry) || entry.IsComplete)
+            return false;
+
+        ResetPartialEntryCore(entry, newTotalSize, alignmentBytes);
+        MarkDirty();
+        return true;
+    }
+
+    private void ResetPartialEntryCore(AudioCacheEntry entry, long newTotalSize, int alignmentBytes)
+    {
+        if (_disposed)
+            return;
+
+        string cacheKey = entry.CacheKey;
+        var fileLock = _fileLocks.GetOrAdd(cacheKey, static _ => new SemaphoreSlim(1, 1));
+        bool acquired = false;
+        try
+        {
+            acquired = fileLock.Wait(millisecondsTimeout: 1000);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            return;
+        }
+
+        if (!acquired)
+        {
+            Log.Warn($"[AudioCache] Timed out waiting for file lock to reset partial cache {cacheKey}");
+            return;
+        }
+
+        try
+        {
+            if (_disposed || entry.IsComplete)
+                return;
+
+            long previousTotalSize = entry.TotalSize;
+            if (newTotalSize > 0 && previousTotalSize == newTotalSize && entry.DownloadedBytes == 0)
+                return;
+
+            Log.Warn($"[AudioCache] Content length changed for partial cache {cacheKey}: " +
+                     $"{previousTotalSize} -> {newTotalSize}. Resetting stale partial data.");
+
+            entry.ResetDownloadedRanges();
+            if (newTotalSize > 0)
+                entry.TotalSize = newTotalSize;
+            entry.ActualFileSize = 0;
+            if (alignmentBytes > 0)
+                entry.AlignmentBytes = alignmentBytes;
+
+            string path = GetCachePath(entry);
+            if (File.Exists(path))
+            {
+                var fileHandle = GetFileHandle(cacheKey);
+                fileHandle.BeginIo();
+                try
+                {
+                    var handle = fileHandle.GetOrOpen();
+                    RandomAccess.SetLength(handle, 0);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"[AudioCache] Failed to truncate stale partial file {cacheKey}: {ex.Message}");
+                }
+                finally
+                {
+                    fileHandle.EndIo();
+                }
+            }
+        }
+        finally
+        {
+            try { fileLock.Release(); } catch (ObjectDisposedException) { }
+        }
     }
 
     private void RemoveCache(string cacheKey) => RemoveCacheCore(cacheKey, saveIndex: true);

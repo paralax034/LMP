@@ -60,7 +60,9 @@ internal sealed partial class CachingStreamSource
         int lastReportedProgress = -1;
 #endif
 
-        while (!ct.IsCancellationRequested && _cacheEntry is { IsComplete: false })
+        while (!ct.IsCancellationRequested
+               && _cacheEntry is { IsComplete: false }
+               && Volatile.Read(ref _permanentFatalException) == null)
         {
             try
             {

@@ -1,11 +1,9 @@
 using System.Buffers;
 using System.Diagnostics;
+using LMP.Core.Audio.Cache;
+using LMP.Core.Audio.Sources;
 using LMP.Tests.Framework;
-using CacheByteRange = LMP.Core.Audio.Cache.CacheByteRange;
-using CachingStreamSource = LMP.Core.Audio.Sources.CachingStreamSource;
-using RamRangeBlock = LMP.Core.Audio.Sources.CachingStreamSource.RamRangeBlock;
-using SlidingRamCache = LMP.Core.Audio.Sources.CachingStreamSource.SlidingRamCache;
-using SlotWaitOutcome = LMP.Core.Audio.Sources.CachingStreamSource.SlotWaitOutcome;
+using static LMP.Core.Audio.Sources.CachingStreamSource;
 
 namespace LMP.Tests.Unit;
 
@@ -287,6 +285,108 @@ public static class CachingSourceDownloadTests
         TestAssert.Equal(131_072L, foundDisk);
 
         return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "PreloadLoop Stops After Forbidden403 Budget Exhausted", Group = TestGroups.Audio, Order = 33)]
+    public static async Task TestPreloadLoopStopsAfterForbiddenBudgetExhaustedAsync()
+    {
+        using var tempCache = new StreamRefreshResilienceTests.TempCacheManager();
+        const string trackId = "yt_preload_403_stop";
+        const int initialPrebufferBytes = 16_384;
+        const long contentLength = 262_144;
+        string cacheKey = AudioSourceFactory.BuildCacheKey(trackId, AudioFormat.WebM, 160);
+
+        byte[] minimalHeader = BuildMinimalWebMHeaderBytes();
+        byte[] bootstrapPrefix = new byte[initialPrebufferBytes];
+        minimalHeader.CopyTo(bootstrapPrefix, 0);
+
+        _ = tempCache.Manager.CreateOrUpdate(
+            cacheKey, trackId, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251&c=WEB_REMIX",
+            contentLength, AudioFormat.WebM, LMP.Core.Audio.Interfaces.AudioCodec.Opus, 160, alignmentBytes: 16_384);
+        await tempCache.Manager.WriteRangeAsync(cacheKey, 0, bootstrapPrefix).ConfigureAwait(false);
+
+        int requests = 0;
+        int refreshes = 0;
+        long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        using var handler = new ForbiddenCountingHandler(() => Interlocked.Increment(ref requests));
+        using var httpClient = new HttpClient(handler, disposeHandler: false);
+
+        var config = new StreamingConfig
+        {
+            InitialPrebufferBytes = initialPrebufferBytes,
+            MinRequestSizeBytes = 16_384,
+            MaxRequestSizeBytes = 32_768,
+            RequestAlignmentBytes = 16_384,
+            PreloadIntervalMs = 50,
+            RefreshCooldownMs = 5,
+            PostRefreshDelayMs = 5
+        };
+
+        using var source = new CachingStreamSource(
+            cacheKey,
+            trackId,
+            $"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=init&itag=251&clen={contentLength}&c=WEB_REMIX",
+            contentLength,
+            AudioFormat.WebM,
+            LMP.Core.Audio.Interfaces.AudioCodec.Opus,
+            160,
+            tempCache.Manager,
+            config,
+            (_, _) =>
+            {
+                int n = Interlocked.Increment(ref refreshes);
+                return ValueTask.FromResult<string?>(
+                    $"https://rr1---sn-test.googlevideo.com/videoplayback?expire={nowUnix + 21600}&n=tok{n}&itag=251&clen={contentLength}&c=WEB_REMIX");
+            },
+            httpClient);
+
+        TestAssert.True(await source.InitializeAsync().ConfigureAwait(false), "Local bootstrap must initialize cleanly");
+
+        // Wait for PreloadLoopAsync to hit 403 and exhaust the 3-refresh budget
+        bool budgetExhausted = await AudioPipelineTestHarness.WaitUntilAsync(() => Volatile.Read(ref requests) >= 4, 5_000).ConfigureAwait(false);
+        TestAssert.True(budgetExhausted, $"Preload must attempt up to budget (got {requests})");
+
+        // Allow any in-flight parallel range task from the initial tick to settle, then verify PreloadLoopAsync stops completely
+        await Task.Delay(150).ConfigureAwait(false);
+        int requestsAfterBudget = Volatile.Read(ref requests);
+        await Task.Delay(350).ConfigureAwait(false);
+        TestAssert.Equal(requestsAfterBudget, Volatile.Read(ref requests),
+            "PreloadLoopAsync must stop after Forbidden403 budget exhaustion instead of spamming HTTP 403 every interval");
+
+        bool threwFatal = false;
+        byte[] readBuf = new byte[4096];
+        try
+        {
+            _ = await source.ReadAtAsync(initialPrebufferBytes, readBuf, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (LMP.Core.Exceptions.ChunkDownloadFatalException ex) when (ex.Reason == LMP.Core.Exceptions.ChunkDownloadFailureReason.Forbidden403)
+        {
+            threwFatal = true;
+        }
+        TestAssert.True(threwFatal, "ReadAtAsync must immediately surface cached Forbidden403 fatal exception");
+    }
+
+    private static byte[] BuildMinimalWebMHeaderBytes()
+    {
+        using var ms = new MemoryStream();
+        ms.Write([0x1A, 0x45, 0xDF, 0xA3, 0x80]); // EBML
+        ms.Write([0x18, 0x53, 0x80, 0x67, 0xFF]); // Segment
+        ms.Write([0x15, 0x49, 0xA9, 0x66, 0x87, 0x2A, 0xD7, 0xB1, 0x83, 0x0F, 0x42, 0x40]); // Info
+        ms.Write([0x1F, 0x43, 0xB6, 0x75, 0xFF]); // Cluster 1 marker
+        return ms.ToArray();
+    }
+
+    private sealed class ForbiddenCountingHandler(Action onRequest) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            onRequest();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden)
+            {
+                Content = new ByteArrayContent([]),
+                RequestMessage = request
+            });
+        }
     }
 
     private static void AddBlock(SlidingRamCache cache, long offset, int length)

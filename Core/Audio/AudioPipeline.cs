@@ -706,6 +706,15 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     {
                         var posMs = _source.PositionMs;
                         var durMs = _streamInfo.DurationMs;
+
+                        if (_source is Sources.LocalFileSource { IsCacheBacked: false })
+                        {
+                            Log.Warn($"[AudioPipeline] Corrupted/truncated local download detected after resync: " +
+                                     $"pos={posMs}ms/{durMs}ms — bypassing AudioCache invalidation");
+                            throw new InvalidDataException(
+                                $"Downloaded local file is corrupted or truncated: reached {posMs}ms of {durMs}ms");
+                        }
+
                         Log.Warn($"[AudioPipeline] Truncated cache detected after resync: " +
                                  $"pos={posMs}ms/{durMs}ms — invalidating cache entry");
 
@@ -829,6 +838,11 @@ internal sealed class AudioPipeline : IAsyncDisposable
         {
             Log.Error($"[AudioPipeline] Decoder fatal: {ex.Message}", ex);
             onError?.Invoke(ex);
+        }
+        finally
+        {
+            Volatile.Write(ref _warmupThreshold, 0);
+            Interlocked.Exchange(ref _warmupTcs, null)?.TrySetResult();
         }
     }
 
@@ -1387,7 +1401,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
         try
         {
             await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(maxWaitMs), ct).ConfigureAwait(false);
-            return true;
+            return _pcmBuffer.Count >= minSamples;
         }
         catch (TimeoutException)
         {

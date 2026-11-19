@@ -313,6 +313,7 @@ internal sealed partial class CachingStreamSource : IAudioSource
     /// <summary>Flag (0/1): free refresh after external IP change has already been consumed in the current budget window.</summary>
     private int _egressRefreshUsed;
     private Exception? _lastDownloadException;
+    private ChunkDownloadFatalException? _permanentFatalException;
 
     // Source-level circuit breaker
     private readonly Lock _circuitBreakerLock = new();

@@ -175,6 +175,71 @@ public static class AudioPipelineDecoderOwnershipTests
         }
     }
 
+    /// <summary>When the decoder exits immediately with CacheInvalidatedException, WaitForBufferAsync unblocks promptly without waiting for timeout.</summary>
+    [TestMethod(TestCategory.Unit, "WaitForBufferAsync Unblocks Immediately On Decoder Error", Group = TestGroups.Audio, Order = 21, TimeoutSeconds = 10)]
+    public static async Task TestWaitForBufferUnblocksImmediatelyOnDecoderExceptionAsync()
+    {
+        var source = new ThrowingCacheAudioSource(SampleRate, Channels);
+        var backend = new NullAudioBackend();
+        var ring = new LockFreeRingBuffer<float>(SampleRate * Channels);
+        var pipeline = AudioPipelineTestHarness.Create(
+            source,
+            new ConstantDecoder(SampleRate, Channels, framesPerDecode: 960, maxFrameSize: 960, value: 0.1f),
+            backend,
+            ring);
+
+        try
+        {
+            Exception? captured = null;
+            var waitTask = pipeline.WaitForBufferAsync(minSamples: 9600, maxWaitMs: 5_000, CancellationToken.None);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            pipeline.StartDecoding(new AudioPlayerOptions(), null, ex => captured = ex);
+
+            bool ready = await waitTask.ConfigureAwait(false);
+            sw.Stop();
+
+            TestAssert.False(ready, "WaitForBufferAsync must return false when decoder fails before threshold");
+            TestAssert.True(sw.ElapsedMilliseconds < 1_000,
+                $"WaitForBufferAsync must unblock immediately on decoder fatal, took {sw.ElapsedMilliseconds}ms");
+            TestAssert.True(await AudioPipelineTestHarness.WaitUntilAsync(() => captured != null, 1_000).ConfigureAwait(false));
+            TestAssert.True(captured is Core.Exceptions.CacheInvalidatedException);
+        }
+        finally
+        {
+            await pipeline.DisposeAsync().ConfigureAwait(false);
+            backend.Dispose();
+        }
+    }
+
+    private sealed class ThrowingCacheAudioSource(int sampleRate, int channels) : IAudioSource
+    {
+        public long DurationMs => 60_000;
+        public long PositionMs => 0;
+        public bool CanSeek => true;
+        public AudioCodec Codec => AudioCodec.Opus;
+        public double BufferProgress => 100.0;
+        public bool IsFullyBuffered => true;
+        public byte[]? DecoderConfig => null;
+        public int SampleRate => sampleRate;
+        public int Channels => channels;
+
+        public ValueTask<bool> InitializeAsync(CancellationToken ct = default) => ValueTask.FromResult(true);
+        public ValueTask<AudioFrame?> ReadFrameAsync(CancellationToken ct = default) =>
+            ValueTask.FromException<AudioFrame?>(new Core.Exceptions.CacheInvalidatedException(
+                "Simulated corruption",
+                Core.Exceptions.CacheInvalidationKind.ParserResync,
+                isRecoverable: true,
+                trackId: "yt_warmup_err"));
+        public ValueTask<bool> SeekAsync(long positionMs, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public IReadOnlyList<(double Start, double End)> GetBufferedRanges() => [];
+        public void ReleaseRamBuffers() { }
+        public void CancelPendingOperations() { }
+        public void SetPlaybackActive(bool active) { }
+        public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class GateBlockingDecoder(int sampleRate, int channels) : IAudioDecoder
     {
         private readonly ManualResetEventSlim _gate = new(false);

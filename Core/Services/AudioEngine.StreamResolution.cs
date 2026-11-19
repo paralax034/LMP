@@ -21,31 +21,91 @@ public sealed partial class AudioEngine
     /// <summary>Lifetime of the excluded client list after a CDN 403 (ms).</summary>
     private const long CdnForbiddenClientsTtlMs = 10 * 60 * 1000;
 
-    /// <summary>Protects the state of clients whose URLs received a CDN 403 for the current track.</summary>
-    private readonly Lock _cdnForbiddenClientsLock = new();
+    /// <summary>
+    /// Thread-safe per-track tracker of InnerTube clients (<c>c</c> stream URL parameter)
+    /// whose URLs were rejected by CDN with HTTP 403.
+    /// </summary>
+    internal sealed class CdnForbiddenClientTracker
+    {
+        private readonly Lock _lock = new();
+        private readonly long _ttlMs;
+        private readonly Func<long> _clockMs;
+        private readonly List<string> _clients = new(4);
+        private string? _trackId;
+        private long _lastTick;
 
-    /// <summary>The track to which <see cref="_cdnForbiddenClients"/> applies.</summary>
-    private string? _cdnForbiddenClientsTrackId;
+        public CdnForbiddenClientTracker(long ttlMs = CdnForbiddenClientsTtlMs, Func<long>? clockMs = null)
+        {
+            _ttlMs = ttlMs;
+            _clockMs = clockMs ?? (() => Environment.TickCount64);
+        }
 
-    /// <summary>Timestamp of the last registered CDN 403 (<see cref="Environment.TickCount64"/>).</summary>
-    private long _cdnForbiddenClientsTick;
+        private bool IsCurrentLocked(string trackId) =>
+            string.Equals(_trackId, trackId, StringComparison.Ordinal)
+            && (_clockMs() - _lastTick) < _ttlMs;
 
-    /// <summary>InnerTube clients (<c>c</c> stream URL parameter) whose URLs were rejected by the CDN with HTTP 403.</summary>
-    private readonly List<string> _cdnForbiddenClients = new(4);
+        public string[] GetSnapshot(string trackId)
+        {
+            lock (_lock)
+            {
+                return IsCurrentLocked(trackId) ? _clients.ToArray() : [];
+            }
+        }
+
+        public void Clear(string trackId)
+        {
+            lock (_lock)
+            {
+                if (string.Equals(_trackId, trackId, StringComparison.Ordinal))
+                {
+                    _clients.Clear();
+                    _trackId = null;
+                    _lastTick = 0;
+                }
+            }
+        }
+
+        public string[] Register(string trackId, string? clientName)
+        {
+            lock (_lock)
+            {
+                if (!IsCurrentLocked(trackId))
+                {
+                    _clients.Clear();
+                    _trackId = trackId;
+                }
+
+                _lastTick = _clockMs();
+
+                if (!string.IsNullOrWhiteSpace(clientName)
+                    && !_clients.Exists(c => string.Equals(c, clientName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _clients.Add(clientName);
+                }
+
+                return _clients.ToArray();
+            }
+        }
+    }
+
+    private readonly CdnForbiddenClientTracker _cdnForbiddenClients = new();
 
     #region Stream Resolution
 
     /// <summary>
-    /// Resolves the audio stream source for playing the track.
+    /// Determines whether playback resolution should open the user's downloaded local file (Path 0).
     /// </summary>
-    /// <param name="track">Track metadata.</param>
-    /// <param name="ct">Cancellation token for the asynchronous operation.</param>
-    /// <param name="seekPosition">Initial playback position when seeking.</param>
-    /// <returns>Handle to the prepared audio stream.</returns>
+    internal static bool ShouldUseLocalDownload(TrackInfo track, bool bypassLocalDownload) =>
+        !bypassLocalDownload
+        && track.IsDownloaded
+        && !string.IsNullOrEmpty(track.LocalPath)
+        && File.Exists(track.LocalPath);
+
     private async Task<ResolvedStreamDescriptor> ResolveStreamAsync(
         TrackInfo track,
         CancellationToken ct,
-        TimeSpan? seekPosition = null)
+        TimeSpan? seekPosition = null,
+        bool bypassLocalDownload = false)
     {
         var requested = StreamSelectionHint.FromTrack(track, _library.Settings.RememberTrackFormat);
 
@@ -55,16 +115,16 @@ public sealed partial class AudioEngine
         var rawId = track.GetRawIdSpan().ToString();
 
         // --- Path 0: Downloaded local files (Downloads folder) ---
-        if (track.IsDownloaded && !string.IsNullOrEmpty(track.LocalPath) && File.Exists(track.LocalPath))
+        if (ShouldUseLocalDownload(track, bypassLocalDownload) && track.LocalPath is { } localDownloadPath)
         {
-            var downloadedFormat = AudioSourceFactory.DetectFormat(track.LocalPath);
+            var downloadedFormat = AudioSourceFactory.DetectFormat(localDownloadPath);
             if (downloadedFormat == AudioFormat.Unknown) downloadedFormat = AudioFormat.WebM;
 
             bool isUserOverrodeFormat = requested.HasFormat && requested.Format != downloadedFormat;
 
             if (!isUserOverrodeFormat)
             {
-                var fileInfo = new FileInfo(track.LocalPath);
+                var fileInfo = new FileInfo(localDownloadPath);
                 var codec = AudioSourceFactory.GetCodecForFormat(downloadedFormat);
                 int fileBitrateKbps = track.Duration.TotalSeconds > 0
                     ? Math.Max((int)(fileInfo.Length * 8 / track.Duration.TotalSeconds / 1000), 32)
@@ -73,7 +133,7 @@ public sealed partial class AudioEngine
                 var descriptor = new ResolvedStreamDescriptor
                 {
                     TrackId = track.Id,
-                    Url = track.LocalPath,
+                    Url = localDownloadPath,
                     Format = downloadedFormat,
                     Codec = codec,
                     BitrateKbps = fileBitrateKbps,
@@ -372,6 +432,38 @@ public sealed partial class AudioEngine
         {
             Log.Warn($"[AudioEngine] Continuation URL for {track.Id} skipped: variant {d.Format}/{d.BitrateKbps}kbps " +
                      $"(itag={d.Itag}, clen={d.ContentLengthBytes}) does not match cached clen={expectedContentLength}");
+
+            if (!ct.IsCancellationRequested
+                && IsSameCacheBucket(requested, d.Format, d.BitrateKbps))
+            {
+                string staleKey = AudioSourceFactory.BuildCacheKey(track.Id, requested.Format!.Value, requested.BitrateKbps);
+                bool isCurrentTrack = string.Equals(CurrentTrack?.Id, track.Id, StringComparison.Ordinal);
+                TimeSpan resumePosition = isCurrentTrack ? CurrentPosition : TimeSpan.Zero;
+
+                // Stop the live stale source BEFORE resetting the shared AudioCacheEntry/file handle
+                // so it cannot race on RandomAccess.SetLength(0) or accept the new clen URL into old RAM/Cues state.
+                if (_player.GetActivePipeline()?.Source is Audio.Sources.CachingStreamSource activeCs
+                    && string.Equals(activeCs.CacheKey, staleKey, StringComparison.Ordinal))
+                {
+                    activeCs.CancelPendingOperations();
+                    activeCs.CancelActiveReads();
+                    _player.Stop();
+                }
+
+                AudioSourceFactory.GlobalCache.ResetPartialEntry(staleKey, d.ContentLengthBytes);
+
+                if (!ct.IsCancellationRequested && isCurrentTrack)
+                {
+                    HandleCacheInvalidated(
+                        new Exceptions.CacheInvalidatedException(
+                            $"Partial cache size {expectedContentLength} no longer matches live stream {d.ContentLengthBytes}",
+                            Exceptions.CacheInvalidationKind.ShortRead,
+                            isRecoverable: true,
+                            trackId: track.Id),
+                        resumePositionOverride: resumePosition);
+                }
+            }
+
             return null;
         }
 
@@ -464,51 +556,26 @@ public sealed partial class AudioEngine
             : AcquireUrlCallbackAsync(request, ct);
 
     /// <summary>
-    /// Checks whether the saved list of excluded clients belongs to the track and TTL has not expired. Must be called under lock.
-    /// </summary>
-    /// <param name="trackId">Track identifier.</param>
-    private bool IsCdnForbiddenStateCurrent(string trackId) =>
-        string.Equals(_cdnForbiddenClientsTrackId, trackId, StringComparison.Ordinal)
-        && Environment.TickCount64 - _cdnForbiddenClientsTick < CdnForbiddenClientsTtlMs;
-
-    /// <summary>
     /// Returns a snapshot of clients excluded after a CDN 403 for the track; an empty array if there are no exclusions.
     /// </summary>
     /// <param name="trackId">Track identifier.</param>
-    private string[] GetCdnForbiddenClients(string trackId)
-    {
-        lock (_cdnForbiddenClientsLock)
-        {
-            return IsCdnForbiddenStateCurrent(trackId) ? _cdnForbiddenClients.ToArray() : [];
-        }
-    }
+    private string[] GetCdnForbiddenClients(string trackId) =>
+        _cdnForbiddenClients.GetSnapshot(trackId);
+
+    /// <summary>
+    /// Clears excluded CDN clients for the track after an IP-bound egress mismatch.
+    /// </summary>
+    /// <param name="trackId">Track identifier.</param>
+    private void ClearCdnForbiddenClients(string trackId) =>
+        _cdnForbiddenClients.Clear(trackId);
 
     /// <summary>
     /// Registers a client whose URL was rejected by the CDN with HTTP 403 and returns the current list of track exclusions.
     /// </summary>
     /// <param name="trackId">Track identifier.</param>
     /// <param name="clientName">Value of the <c>c</c> parameter from the rejected URL; <c>null</c> — extend TTL only.</param>
-    private string[] RegisterCdnForbiddenClient(string trackId, string? clientName)
-    {
-        lock (_cdnForbiddenClientsLock)
-        {
-            if (!IsCdnForbiddenStateCurrent(trackId))
-            {
-                _cdnForbiddenClients.Clear();
-                _cdnForbiddenClientsTrackId = trackId;
-            }
-
-            _cdnForbiddenClientsTick = Environment.TickCount64;
-
-            if (!string.IsNullOrWhiteSpace(clientName)
-                && !_cdnForbiddenClients.Exists(c => string.Equals(c, clientName, StringComparison.OrdinalIgnoreCase)))
-            {
-                _cdnForbiddenClients.Add(clientName);
-            }
-
-            return _cdnForbiddenClients.ToArray();
-        }
-    }
+    private string[] RegisterCdnForbiddenClient(string trackId, string? clientName) =>
+        _cdnForbiddenClients.Register(trackId, clientName);
 
     /// <summary>
     /// Returns the URL of the refreshed descriptor only if it targets the same stream variant as source.
@@ -577,6 +644,7 @@ public sealed partial class AudioEngine
 
         if (isEgressMismatch)
         {
+            ClearCdnForbiddenClients(trackId);
             Log.Warn($"[AudioEngine] 403 for {trackId}: URL is bound to ip=" +
                      $"{LMP.Core.Youtube.Utils.StreamUrlEgressGuard.TryGetBoundIp(request.CurrentUrl)}, " +
                      $"current egress ip={LMP.Core.Youtube.Utils.StreamUrlEgressGuard.Shared.ObservedIp}; client is not blamed");
@@ -776,11 +844,11 @@ public sealed partial class AudioEngine
             if (result == null || string.IsNullOrEmpty(result.Value.Url))
                 return;
 
-            if (!IsContinuationVariantCompatible(expectedEntry, result.Value.Format, result.Value.Bitrate))
+            if (!IsContinuationVariantCompatible(expectedEntry, result.Value.Format, result.Value.Bitrate, result.Value.Size))
             {
                 Log.Warn($"[AudioEngine] Continuation priming variant mismatch for {track.Id}: " +
-                         $"expected={expectedEntry.Format}/{expectedEntry.Bitrate}kbps, " +
-                         $"actual={result.Value.Format}/{result.Value.Bitrate}kbps");
+                         $"expected={expectedEntry.Format}/{expectedEntry.Bitrate}kbps/{expectedEntry.TotalSize}B, " +
+                         $"actual={result.Value.Format}/{result.Value.Bitrate}kbps/{result.Value.Size}B");
                 return;
             }
 
@@ -907,15 +975,33 @@ public sealed partial class AudioEngine
         return variants[0];
     }
 
-    private static bool IsContinuationVariantCompatible(
+    /// <summary>
+    /// Returns <c>true</c> if the candidate stream maps to the exact same format and normalized bitrate cache bucket
+    /// as the requested partial-cache variant.
+    /// </summary>
+    internal static bool IsSameCacheBucket(
+        StreamSelectionHint requested,
+        AudioFormat candidateFormat,
+        int candidateBitrateKbps) =>
+        requested.HasFormat
+        && requested.HasBitrate
+        && candidateFormat == requested.Format
+        && candidateBitrateKbps > 0
+        && AudioConstants.NormalizeBitrate(candidateBitrateKbps) == AudioConstants.NormalizeBitrate(requested.BitrateKbps);
+
+    internal static bool IsContinuationVariantCompatible(
         AudioCacheEntry expectedEntry,
         AudioFormat format,
-        int bitrate)
+        int bitrate,
+        long contentLength = 0)
     {
         if (format == AudioFormat.Unknown)
             return false;
 
         if (format != expectedEntry.Format)
+            return false;
+
+        if (contentLength > 0 && expectedEntry.TotalSize > 0 && contentLength != expectedEntry.TotalSize)
             return false;
 
         if (bitrate <= 0 || expectedEntry.Bitrate <= 0)
@@ -943,7 +1029,7 @@ public sealed partial class AudioEngine
             for (int i = 0; i < manifest.Variants.Count; i++)
             {
                 var variant = manifest.Variants[i];
-                if (IsContinuationVariantCompatible(expectedEntry, variant.Format, variant.Bitrate / 1000))
+                if (IsContinuationVariantCompatible(expectedEntry, variant.Format, variant.Bitrate / 1000, variant.Clen))
                 {
                     url = variant.Url;
                     return true;
@@ -958,7 +1044,7 @@ public sealed partial class AudioEngine
             expectedEntry.Bitrate);
 
         if (descriptor is { HasLiveUrl: true } d &&
-            IsContinuationVariantCompatible(expectedEntry, d.Format, d.BitrateKbps))
+            IsContinuationVariantCompatible(expectedEntry, d.Format, d.BitrateKbps, d.ContentLengthBytes))
         {
             if (d.ExpireUtc == default || DateTime.UtcNow.AddMinutes(5) < d.ExpireUtc)
             {

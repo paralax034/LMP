@@ -58,6 +58,7 @@ internal sealed class WebMParser : IDisposable
     private const long DEFAULT_TIMECODE_SCALE = 1_000_000; // 1ms in nanoseconds
     private const int ReadBufferSize = 64 * 1024;
     private const int MaxResyncScanBytes = 256 * 1024;
+    private const int MaxZeroPaddingBytes = 16;
 
     private readonly Stream _stream;
     private readonly byte[] _readBuffer;
@@ -81,6 +82,7 @@ internal sealed class WebMParser : IDisposable
     private int _audioTrackNumber = 1;
     private bool _headersParsed;
     private bool _requiresResync;
+    private bool _expectCluster;
 
     /// <summary>Byte position of the start of content in the last recognized Cluster.</summary>
     public long LastClusterBytePosition { get; private set; }
@@ -330,6 +332,7 @@ internal sealed class WebMParser : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
 
+        long elementStart = StreamPositionWithBuffer();
         int buffered = (int)Math.Min(count, _bufLen - _bufPos);
         _bufPos += buffered;
         count -= buffered;
@@ -339,7 +342,13 @@ internal sealed class WebMParser : IDisposable
 
         if (_stream.CanSeek)
         {
-            _stream.Position += count;
+            long target = _stream.Position + count;
+            if (target > _stream.Length)
+                throw new ParserCorruptionException(
+                    elementStart,
+                    $"EBML element skip ({count} bytes) exceeds stream length ({_stream.Length})");
+
+            _stream.Position = target;
             _bufPos = 0;
             _bufLen = 0;
             return ValueTask.CompletedTask;
@@ -636,11 +645,22 @@ internal sealed class WebMParser : IDisposable
             if (_lacedFrames.TryDequeue(out var queuedFrame))
                 return new ValueTask<AudioBlock?>(queuedFrame);
 
-            if (TryReadNextBlockFromBufferSync(ct, out var syncBlock))
-                return new ValueTask<AudioBlock?>(syncBlock);
+            try
+            {
+                if (TryReadNextBlockFromBufferSync(ct, out var syncBlock))
+                    return new ValueTask<AudioBlock?>(syncBlock);
 
-            if (TryFillBufferSync() && TryReadNextBlockFromBufferSync(ct, out syncBlock))
-                return new ValueTask<AudioBlock?>(syncBlock);
+                if (TryFillBufferSync() && TryReadNextBlockFromBufferSync(ct, out syncBlock))
+                    return new ValueTask<AudioBlock?>(syncBlock);
+            }
+            catch (EndOfStreamException ex) when (!ct.IsCancellationRequested && _stream.CanSeek)
+            {
+                return new ValueTask<AudioBlock?>(HandleCorruptionOrNull(ex, "Unexpected EOF inside EBML stream"));
+            }
+            catch (InvalidDataException ex) when (!ct.IsCancellationRequested && _stream.CanSeek)
+            {
+                return new ValueTask<AudioBlock?>(HandleCorruptionOrNull(ex, "EBML structural corruption detected"));
+            }
         }
 
         return ReadNextBlockSlowAsync(ct);
@@ -680,9 +700,18 @@ internal sealed class WebMParser : IDisposable
                 return false;
             }
 
+            if (_expectCluster && id != CLUSTER_ID)
+            {
+                _bufPos = savedPos;
+                errorKind = -4;
+                errorValue = id;
+                break;
+            }
+
             switch (id)
             {
                 case CLUSTER_ID:
+                    _expectCluster = false;
                     LastClusterBytePosition = StreamPositionWithBuffer();
                     continue;
 
@@ -750,6 +779,10 @@ internal sealed class WebMParser : IDisposable
                 ThrowInvalidIdVIntLength((int)errorValue);
             if (errorKind == -2)
                 ThrowInvalidSizeVIntLength((int)errorValue);
+            if (errorKind == -3)
+                ThrowExcessiveZeroPadding();
+            if (errorKind == -4)
+                ThrowUnexpectedElementAfterSeek((uint)errorValue);
             ThrowInvalidElementSize(errorValue, errorKind == 1 ? "Cluster Timecode" : "Block");
         }
 
@@ -758,7 +791,7 @@ internal sealed class WebMParser : IDisposable
 
     /// <summary>
     /// Tries to synchronously read the EBML element header from the buffer without async calls or bounds checks.
-    /// Returns: <c>1</c> — success, <c>0</c> — insufficient data in buffer, <c>-1</c> — invalid ID VINT, <c>-2</c> — invalid Size VINT.
+    /// Returns: <c>1</c> — success, <c>0</c> — insufficient data in buffer, <c>-1</c> — invalid ID VINT, <c>-2</c> — invalid Size VINT, <c>-3</c> — excessive zero padding.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int TryReadElementHeaderSync(out uint id, out long size, out int invalidVIntLen)
@@ -770,6 +803,7 @@ internal sealed class WebMParser : IDisposable
         int pos = _bufPos;
         int len = _bufLen;
         ref byte bufRef = ref MemoryMarshal.GetArrayDataReference(_readBuffer);
+        int zeroRun = 0;
 
         while (true)
         {
@@ -780,6 +814,8 @@ internal sealed class WebMParser : IDisposable
             }
             byte b = Unsafe.Add(ref bufRef, pos);
             if (b != 0x00) break;
+            if (++zeroRun > MaxZeroPaddingBytes)
+                return -3;
             pos++;
         }
 
@@ -1064,11 +1100,20 @@ internal sealed class WebMParser : IDisposable
                     return syncFrame;
 
                 var (id, size) = await ReadElementHeaderAsync(ct).ConfigureAwait(false);
-                if (id == 0) return null;
+                if (id == 0)
+                {
+                    if (_expectCluster)
+                        throw new EndOfStreamException("Unexpected EOF while expecting WebM Cluster after seek.");
+                    return null;
+                }
+
+                if (_expectCluster && id != CLUSTER_ID)
+                    ThrowUnexpectedElementAfterSeek(id);
 
                 switch (id)
                 {
                     case CLUSTER_ID:
+                        _expectCluster = false;
                         LastClusterBytePosition = StreamPositionWithBuffer();
                         continue;
 
@@ -1101,17 +1146,11 @@ internal sealed class WebMParser : IDisposable
             }
             catch (EndOfStreamException ex) when (!ct.IsCancellationRequested && _stream.CanSeek)
             {
-                if (ct.IsCancellationRequested || _requiresResync)
-                    return null;
-
-                throw new ParserCorruptionException(StreamPositionWithBuffer(), "Unexpected EOF inside EBML stream", ex);
+                return HandleCorruptionOrNull(ex, "Unexpected EOF inside EBML stream");
             }
             catch (InvalidDataException ex) when (!ct.IsCancellationRequested && _stream.CanSeek)
             {
-                if (ct.IsCancellationRequested || _requiresResync)
-                    return null;
-
-                throw new ParserCorruptionException(StreamPositionWithBuffer(), "EBML structural corruption detected", ex);
+                return HandleCorruptionOrNull(ex, "EBML structural corruption detected");
             }
         }
         return null;
@@ -1262,12 +1301,15 @@ internal sealed class WebMParser : IDisposable
     private async ValueTask<(uint Id, long Size)> ReadElementHeaderAsync(CancellationToken ct)
     {
         int firstByte;
+        int zeroRun = 0;
         while (true)
         {
             if (!await EnsureBufferedAsync(1, ct).ConfigureAwait(false)) return (0, 0);
             firstByte = BufferedReadByte();
             if (firstByte < 0) return (0, 0);
             if (firstByte != 0x00) break;
+            if (++zeroRun > MaxZeroPaddingBytes)
+                ThrowExcessiveZeroPadding();
         }
 
         int idLength = GetVIntLength((byte)firstByte);
@@ -1424,6 +1466,25 @@ internal sealed class WebMParser : IDisposable
 
     [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowExcessiveZeroPadding() =>
+        throw new InvalidDataException("Excessive zero padding in EBML stream.");
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowUnexpectedElementAfterSeek(uint id) =>
+        throw new InvalidDataException($"Expected WebM Cluster element after seek, found ID 0x{id:X}.");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private AudioBlock? HandleCorruptionOrNull(Exception ex, string message)
+    {
+        if (_requiresResync)
+            return null;
+
+        throw new ParserCorruptionException(StreamPositionWithBuffer(), message, ex);
+    }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowInvalidSignedVIntLength(int len) =>
         throw new InvalidDataException($"Invalid EBML Signed VINT length: {len}");
 
@@ -1472,6 +1533,7 @@ internal sealed class WebMParser : IDisposable
                     _bufPos = 0;
                     _bufLen = 0;
                     _currentClusterTimecode = 0;
+                    _expectCluster = false;
                     ResyncOccurred = true;
                     return true;
                 }
@@ -1497,6 +1559,11 @@ internal sealed class WebMParser : IDisposable
     }
 
     /// <summary>
+    /// Marks that the next element read after a seek must be a Cluster header.
+    /// </summary>
+    internal void ExpectClusterHeader() => _expectCluster = true;
+
+    /// <summary>
     /// Resets parser buffer state.
     /// </summary>
     public void Reset()
@@ -1505,6 +1572,7 @@ internal sealed class WebMParser : IDisposable
         _bufLen = 0;
         _currentClusterTimecode = 0;
         _requiresResync = false;
+        _expectCluster = false;
         ResyncOccurred = false;
 
         while (_lacedFrames.TryDequeue(out var frame))

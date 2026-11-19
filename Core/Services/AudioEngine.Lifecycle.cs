@@ -122,14 +122,14 @@ public sealed partial class AudioEngine
 
     #region Error Handling
 
-    private void HandleCacheInvalidated(CacheInvalidatedException cacheEx)
+    private void HandleCacheInvalidated(CacheInvalidatedException cacheEx, TimeSpan? resumePositionOverride = null)
     {
         var trackId = cacheEx.TrackId ?? CurrentTrack?.Id;
 
         if (cacheEx.IsRecoverable && _cacheRetryCount < MaxCacheAutoRetries)
         {
             int retryNumber = Interlocked.Increment(ref _cacheRetryCount);
-            var resumePosition = CurrentPosition;
+            var resumePosition = resumePositionOverride ?? CurrentPosition;
             var track = CurrentTrack;
 
             Log.Info($"[AudioEngine] Cache auto-retry #{retryNumber}/{MaxCacheAutoRetries}: track={trackId}, kind={cacheEx.Kind}, pos={resumePosition}");
@@ -171,7 +171,64 @@ public sealed partial class AudioEngine
             catch (Exception ex) { Log.Warn($"[AudioEngine] Failed to remove cache: {ex.Message}"); }
         }
 
+        AbortCurrentTrackPlaybackAfterFatalError(trackId);
         RaiseError(new CacheInvalidatedException(cacheEx.Message, cacheEx.InnerException));
+    }
+
+    /// <summary>
+    /// Handles confirmed container corruption inside an exported local download file (<c>Downloads</c>):
+    /// clears stale <see cref="TrackInfo.IsDownloaded"/>/<see cref="TrackInfo.LocalPath"/> metadata
+    /// (without deleting the user's file on disk) and retries playback cleanly from cache/network.
+    /// </summary>
+    private bool HandleCorruptedLocalDownload(Exception ex)
+    {
+        var track = CurrentTrack;
+        if (track == null || !track.IsDownloaded || string.IsNullOrEmpty(track.LocalPath))
+            return false;
+
+        string trackId = track.Id;
+        string brokenPath = track.LocalPath;
+        var resumePosition = CurrentPosition;
+
+        Log.Warn($"[AudioEngine] Corrupted local download detected for {trackId} ('{brokenPath}'): {ex.Message}. " +
+                 "Invalidating IsDownloaded status to allow clean playback recovery.");
+
+        InvalidateTrackDownloadStatus(track);
+
+        if (_cacheRetryCount < MaxCacheAutoRetries)
+        {
+            int retryNumber = Interlocked.Increment(ref _cacheRetryCount);
+            Log.Info($"[AudioEngine] Local download recovery retry #{retryNumber}/{MaxCacheAutoRetries}: track={trackId}, pos={resumePosition}");
+
+            ResetSealedFailedTrack();
+            int session = BeginNewSession();
+            EnqueueCommand(new PlayTrackCommand(track, session, resumePosition, IsRetry: true, BypassLocalDownload: true));
+            return true;
+        }
+
+        AbortCurrentTrackPlaybackAfterFatalError(trackId);
+        return false;
+    }
+
+    private void InvalidateTrackDownloadStatus(TrackInfo track)
+    {
+        static void ClearDownloadFlags(TrackInfo target)
+        {
+            target.IsDownloaded = false;
+            target.LocalPath = null;
+        }
+
+        ClearDownloadFlags(track);
+
+        var registryTrack = _trackRegistry.TryGet(track.Id);
+        if (registryTrack != null && !ReferenceEquals(registryTrack, track))
+            ClearDownloadFlags(registryTrack);
+
+        var libraryTrack = _library.GetTrack(track.Id);
+        if (libraryTrack != null && !ReferenceEquals(libraryTrack, track) && !ReferenceEquals(libraryTrack, registryTrack))
+            ClearDownloadFlags(libraryTrack);
+
+        _ = _library.AddOrUpdateTrackAsync(libraryTrack ?? registryTrack ?? track);
     }
 
     private void RaiseError(Exception exception)

@@ -32,7 +32,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         int Session,
         TimeSpan? SeekPosition = null,
         bool IsRetry = false,
-        int PauseEpoch = -1) : IEngineCommand;
+        int PauseEpoch = -1,
+        bool BypassLocalDownload = false) : IEngineCommand;
 
     /// <summary>Start the queue from the specified track.</summary>
     private sealed record StartQueueCommand(
