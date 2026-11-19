@@ -12,13 +12,6 @@
         <!--             HEADER STRIP STYLES            -->
         <!-- ========================================== -->
 
-        <Style Selector="Border.header-strip">
-            <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Padding" Value="0" />
-        </Style>
-
         <Style Selector="Border.stat-block">
             <Setter Property="Padding" Value="16,12" />
             <Setter Property="Background" Value="Transparent" />
@@ -343,7 +336,6 @@
                        <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PlaylistCardViewModel">
                                 <Button Classes="playlist-card-inner"
-                                        Classes.visible="{Binding IsVisible}"
                                         Classes.is-active="{Binding IsActive}"
                                         Classes.is-liked="{Binding IsLikedPlaylist}"
                                         Classes.menu-open="{Binding IsMenuOpen}"

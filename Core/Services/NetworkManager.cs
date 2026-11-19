@@ -31,7 +31,8 @@ public sealed partial class NetworkManager : IDisposable
     private volatile HttpClient _updateClient;
 
     private ProxySettings? _currentProxy;
-    private readonly InternetProfile _currentProfile = InternetProfile.Medium;
+    private static NetworkManager? _activeInstance;
+    private InternetProfile _currentProfile = InternetProfile.Medium;
     private string? _lastOutboundIp;
     private bool _isVpnActive;
     private long _lastRebuildTick;
@@ -169,9 +170,34 @@ public sealed partial class NetworkManager : IDisposable
 
         _addressDebounceTimer = new Timer(OnAddressDebounceTimerCallback, this, Timeout.Infinite, Timeout.Infinite);
         _addressSubscription = new WeakAddressChangedSubscription(this);
+        Volatile.Write(ref _activeInstance, this);
         _watchdogTask = Task.Run(NetworkWatchdogLoopAsync);
 
         Log.Info($"[NetworkManager] Initialized. Outbound IP: {_lastOutboundIp ?? "(none)"}, VPN: {_isVpnActive}");
+    }
+
+    /// <summary>
+    /// Updates the active internet streaming profile in a centralized manner.
+    /// </summary>
+    internal static void ApplyGlobalProfile(InternetProfile profile)
+    {
+        if (Volatile.Read(ref _activeInstance) is { } instance && !Volatile.Read(ref instance._disposed))
+            instance.UpdateProfile(profile);
+        else
+            AudioSourceFactory.ApplyInternetProfile(profile);
+    }
+
+    /// <summary>
+    /// Updates the active internet streaming profile for this <see cref="NetworkManager"/> instance.
+    /// </summary>
+    public void UpdateProfile(InternetProfile profile)
+    {
+        lock (_stateLock)
+        {
+            _currentProfile = profile;
+        }
+
+        AudioSourceFactory.ApplyInternetProfile(profile);
     }
 
     public void UpdateProxy(ProxySettings? proxy)
@@ -199,21 +225,31 @@ public sealed partial class NetworkManager : IDisposable
             }
         }
 
-        Volatile.Write(ref _lastRebuildTick, now);
-
         HttpClient oldAudio, oldApi, oldImage, oldProbe, oldUpdate;
-        HttpClient newAudio, newApi, newImage, newProbe, newUpdate;
-
-        ProxySettings? proxy;
-        lock (_stateLock)
-        {
-            proxy = _currentProxy;
-        }
-
-        (newAudio, newApi, newImage, newProbe, newUpdate) = CreateClientCluster(proxy);
 
         lock (_rebuildLock)
         {
+            if (!force)
+            {
+                long elapsed = Environment.TickCount64 - Volatile.Read(ref _lastRebuildTick);
+                if (elapsed < RebuildCooldownMs)
+                {
+                    Log.Debug(
+                        $"[NetworkManager] Rebuild skipped (cooldown: {elapsed}ms < {RebuildCooldownMs}ms). Reason: {reason}");
+                    return;
+                }
+            }
+
+            Volatile.Write(ref _lastRebuildTick, Environment.TickCount64);
+
+            ProxySettings? proxy;
+            lock (_stateLock)
+            {
+                proxy = _currentProxy;
+            }
+
+            var (newAudio, newApi, newImage, newProbe, newUpdate) = CreateClientCluster(proxy);
+
             oldAudio = Interlocked.Exchange(ref _audioClient, newAudio);
             oldApi = Interlocked.Exchange(ref _apiClient, newApi);
             oldImage = Interlocked.Exchange(ref _imageClient, newImage);
@@ -238,6 +274,18 @@ public sealed partial class NetworkManager : IDisposable
         }
     }
 
+    private static SocketsHttpHandler CreateBaseSocketsHandler(
+        IWebProxy? effectiveProxy,
+        bool hasExplicitProxy,
+        TimeSpan connectTimeout) =>
+        new()
+        {
+            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
+            Proxy = effectiveProxy,
+            UseProxy = true,
+            ConnectTimeout = connectTimeout
+        };
+
     private static (HttpClient Audio, HttpClient Api, HttpClient Image, HttpClient Probe, HttpClient Update)
         CreateClientCluster(ProxySettings? proxy)
     {
@@ -251,22 +299,13 @@ public sealed partial class NetworkManager : IDisposable
         var effectiveProxy = hasExplicitProxy ? customProxy : null;
 
         // 1. Audio CDN Client (HTTP/1.1, KeepAlive, DoH)
-        var audioHandler = new SocketsHttpHandler
-        {
-            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
-            Proxy = effectiveProxy,
-            UseProxy = true,
-            // Disable client-side timeouts.
-            // Allow the YouTube server to close the connection itself (TCP FIN).
-            // Then reading will return 0 bytes, preventing an IOException!
-            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
-            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
-            MaxConnectionsPerServer = 6,
-            AutomaticDecompression = DecompressionMethods.All,
-            UseCookies = false,
-            ResponseDrainTimeout = TimeSpan.FromSeconds(1),
-            ConnectTimeout = TimeSpan.FromSeconds(6),
-        };
+        var audioHandler = CreateBaseSocketsHandler(effectiveProxy, hasExplicitProxy, TimeSpan.FromSeconds(6));
+        audioHandler.PooledConnectionLifetime = Timeout.InfiniteTimeSpan;
+        audioHandler.PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan;
+        audioHandler.MaxConnectionsPerServer = 6;
+        audioHandler.AutomaticDecompression = DecompressionMethods.All;
+        audioHandler.UseCookies = false;
+        audioHandler.ResponseDrainTimeout = TimeSpan.FromSeconds(1);
 
         var audioClient = new HttpClient(audioHandler)
         {
@@ -277,42 +316,30 @@ public sealed partial class NetworkManager : IDisposable
         audioClient.DefaultRequestHeaders.Add("Accept", "*/*");
 
         // 2. Api Client (HTTP/2, KeepAlive Ping)
-        var apiHandler = new SocketsHttpHandler
-        {
-            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
-            Proxy = effectiveProxy,
-            UseProxy = true,
-            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
-            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
-            MaxConnectionsPerServer = 20,
-            EnableMultipleHttp2Connections = true,
-            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
-            ConnectTimeout = TimeSpan.FromSeconds(6),
-            AutomaticDecompression =
-                DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-            AllowAutoRedirect = false,
-            UseCookies = false
-        };
+        var apiHandler = CreateBaseSocketsHandler(effectiveProxy, hasExplicitProxy, TimeSpan.FromSeconds(6));
+        apiHandler.PooledConnectionLifetime = Timeout.InfiniteTimeSpan;
+        apiHandler.PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan;
+        apiHandler.MaxConnectionsPerServer = 20;
+        apiHandler.EnableMultipleHttp2Connections = true;
+        apiHandler.KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests;
+        apiHandler.KeepAlivePingDelay = TimeSpan.FromSeconds(30);
+        apiHandler.KeepAlivePingTimeout = TimeSpan.FromSeconds(10);
+        apiHandler.AutomaticDecompression =
+            DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli;
+        apiHandler.AllowAutoRedirect = false;
+        apiHandler.UseCookies = false;
 
         var apiClient = new HttpClient(apiHandler) { Timeout = Timeout.InfiniteTimeSpan };
 
         // 3. Image Client (HTTP/2)
-        var imageHandler = new SocketsHttpHandler
-        {
-            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
-            Proxy = effectiveProxy,
-            UseProxy = true,
-            MaxConnectionsPerServer = 8,
-            PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
-            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
-            EnableMultipleHttp2Connections = true,
-            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
-            ConnectTimeout = TimeSpan.FromSeconds(6)
-        };
+        var imageHandler = CreateBaseSocketsHandler(effectiveProxy, hasExplicitProxy, TimeSpan.FromSeconds(6));
+        imageHandler.MaxConnectionsPerServer = 8;
+        imageHandler.PooledConnectionLifetime = Timeout.InfiniteTimeSpan;
+        imageHandler.PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan;
+        imageHandler.EnableMultipleHttp2Connections = true;
+        imageHandler.KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests;
+        imageHandler.KeepAlivePingDelay = TimeSpan.FromSeconds(30);
+        imageHandler.KeepAlivePingTimeout = TimeSpan.FromSeconds(10);
 
         var imageClient = new HttpClient(imageHandler)
         {
@@ -322,18 +349,12 @@ public sealed partial class NetworkManager : IDisposable
         };
 
         // 4. Probe Client (HTTP/1.1, fast timeouts, and timely pool cleanup)
-        var probeHandler = new SocketsHttpHandler
-        {
-            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
-            Proxy = effectiveProxy,
-            UseProxy = true,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(1),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15),
-            ResponseDrainTimeout = TimeSpan.FromMilliseconds(250),
-            MaxConnectionsPerServer = 4,
-            ConnectTimeout = TimeSpan.FromSeconds(4),
-            AllowAutoRedirect = false
-        };
+        var probeHandler = CreateBaseSocketsHandler(effectiveProxy, hasExplicitProxy, TimeSpan.FromSeconds(4));
+        probeHandler.PooledConnectionLifetime = TimeSpan.FromMinutes(1);
+        probeHandler.PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15);
+        probeHandler.ResponseDrainTimeout = TimeSpan.FromMilliseconds(250);
+        probeHandler.MaxConnectionsPerServer = 4;
+        probeHandler.AllowAutoRedirect = false;
 
         var probeClient = new HttpClient(probeHandler)
         {
@@ -343,18 +364,12 @@ public sealed partial class NetworkManager : IDisposable
         };
 
         // 5. Update Client (HTTP/1.1, automatic redirects for GitHub Releases and S3 CDN)
-        var updateHandler = new SocketsHttpHandler
-        {
-            ConnectCallback = hasExplicitProxy ? null : SharedHttpClient.ConnectWithKeepAliveAsync,
-            Proxy = effectiveProxy,
-            UseProxy = true,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
-            ConnectTimeout = TimeSpan.FromSeconds(10),
-            AutomaticDecompression = DecompressionMethods.All,
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 5
-        };
+        var updateHandler = CreateBaseSocketsHandler(effectiveProxy, hasExplicitProxy, TimeSpan.FromSeconds(10));
+        updateHandler.PooledConnectionLifetime = TimeSpan.FromMinutes(2);
+        updateHandler.PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30);
+        updateHandler.AutomaticDecompression = DecompressionMethods.All;
+        updateHandler.AllowAutoRedirect = true;
+        updateHandler.MaxAutomaticRedirections = 5;
 
         var updateClient = new HttpClient(updateHandler) { Timeout = TimeSpan.FromSeconds(30) };
 
@@ -711,6 +726,7 @@ public sealed partial class NetworkManager : IDisposable
     {
         if (Volatile.Read(ref _disposed)) return;
         Volatile.Write(ref _disposed, true);
+        Interlocked.CompareExchange(ref _activeInstance, null, this);
 
         _addressSubscription.Unsubscribe();
         _addressDebounceTimer.Dispose();

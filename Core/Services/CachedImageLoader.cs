@@ -37,13 +37,12 @@ public sealed class CachedImageLoader : IAsyncImageLoader
             return null;
 
         // Strict validation: http:// and https:// only
-        if (!url.StartsWith(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-            !url.StartsWith(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             return null;
 
         try
         {
-            // GetImageAsync already calls AddRef() internally
             return await _cache.GetImageAsync(url, _defaultQuality).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

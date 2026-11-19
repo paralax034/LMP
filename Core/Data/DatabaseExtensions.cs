@@ -13,7 +13,7 @@ public static class DatabaseExtensions
     /// <summary>
     /// Current version of the database schema.
     /// </summary>
-    public const int CurrentDbVersion = 6;
+    public const int CurrentDbVersion = 7;
 
     private const int SqliteBusy = 5;
     private const int SqliteLocked = 6;
@@ -36,6 +36,7 @@ public static class DatabaseExtensions
             "MessageRaw" TEXT NULL,
             "MessageArgsJson" TEXT NULL,
             "RecommendationKey" TEXT NULL,
+            "RecommendationRaw" TEXT NULL,
             "Severity" INTEGER NOT NULL,
             "IsRead" INTEGER NOT NULL,
             "TrackId" TEXT NULL,
@@ -302,6 +303,7 @@ public static class DatabaseExtensions
         await AddColumnIfNotExistsAsync(context, "Tracks", "IntegratedLufs", "REAL", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Tracks", "IntegratedLufsSource", "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
         await AddColumnIfNotExistsAsync(context, "Tracks", "EqualizerPresetId", "TEXT", ct).ConfigureAwait(false);
+        await AddColumnIfNotExistsAsync(context, "Notifications", "RecommendationRaw", "TEXT", ct).ConfigureAwait(false);
 
         bool closeOnExit = await EnsureConnectionOpenAsync(context, ct).ConfigureAwait(false);
         try

@@ -3,14 +3,16 @@ using Avalonia.Media.Imaging;
 namespace LMP.Core.Models;
 
 /// <summary>
-/// Wrapper around a shared <see cref="Avalonia.Media.Imaging.Bitmap"/> for memory tracking in the LRU cache.
+/// Wrapper around a cached <see cref="Avalonia.Media.Imaging.Bitmap"/> for byte-size tracking in the LRU cache.
+/// Note: Does not implement reference counting; cache eviction only clears its own reference so GC can reclaim
+/// the bitmap after visual controls detach.
 /// </summary>
 public sealed class RefCountedBitmap : IDisposable
 {
     private int _disposed;
     private Bitmap? _bitmap;
 
-    public Bitmap Bitmap => _bitmap!;
+    public Bitmap? Bitmap => Volatile.Read(ref _bitmap);
     public long EstimatedBytes { get; }
     public DateTime CachedAt { get; }
 
@@ -36,6 +38,6 @@ public sealed class RefCountedBitmap : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        _bitmap = null;
+        Volatile.Write(ref _bitmap, null);
     }
 }

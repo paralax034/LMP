@@ -497,7 +497,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     private void ApplyStreamingProfile()
     {
-        AudioSourceFactory.ApplyInternetProfile(_library.Settings.InternetProfile);
+        _networkManager.UpdateProfile(_library.Settings.InternetProfile);
     }
 
     #endregion
@@ -777,6 +777,19 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     public void StopPlaybackKeepTrack()
     {
+        StopCore(clearTrackAndSource: false);
+    }
+
+    /// <summary>
+    /// Stops playback and clears track state.
+    /// </summary>
+    public void Stop()
+    {
+        StopCore(clearTrackAndSource: true);
+    }
+
+    private void StopCore(bool clearTrackAndSource)
+    {
         lock (_playerDispatchLock)
         {
             _playIntent = false;
@@ -789,21 +802,11 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         SetManualLoading(false);
         Volatile.Write(ref _lastSwitchPositionTicks, 0);
         Volatile.Write(ref _currentPositionTicks, 0);
-        RaiseOnUI(_raisePositionChangedOnUIDelegate);
-    }
 
-    /// <summary>
-    /// Stops playback and clears track state.
-    /// </summary>
-    public void Stop()
-    {
-        lock (_playerDispatchLock)
+        if (!clearTrackAndSource)
         {
-            _playIntent = false;
-            Interlocked.Increment(ref _pauseEpoch);
-            Interlocked.Increment(ref _queueReplaceSeq);
-            BeginNewSession();
-            _player.Stop();
+            RaiseOnUI(_raisePositionChangedOnUIDelegate);
+            return;
         }
 
         bool sourceChanged = false;
@@ -811,18 +814,18 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
         {
             if (_queueSource.Kind != QueueSourceKind.Manual || _isQueuePure)
             {
-                _queueSource = QueueSource.CreateManual(++_queueSourceGeneration);
+                _queueSource = TransitionOnClearQueue(ref _queueSourceGeneration);
                 _isQueuePure = false;
                 sourceChanged = true;
             }
         }
 
-        Volatile.Write(ref _lastSwitchPositionTicks, 0);
         CurrentTrack = null;
         StreamInfo = AudioStreamInfo.Empty;
 
         RaiseOnUI(() =>
         {
+            OnPositionChanged?.Invoke(TimeSpan.Zero);
             OnTrackChanged?.Invoke(null);
             if (sourceChanged)
                 OnQueueSourceChanged?.Invoke();
@@ -929,7 +932,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
 
     public static Task ReinitializeWithProfileAsync(InternetProfile profile)
     {
-        AudioSourceFactory.ApplyInternetProfile(profile);
+        NetworkManager.ApplyGlobalProfile(profile);
         return Task.CompletedTask;
     }
 

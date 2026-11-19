@@ -22,33 +22,73 @@ public sealed class PlayerControlService : IDisposable
     private readonly Lock _liveSyncLock = new();
     private CancellationTokenSource? _liveSyncCts;
 
-    public bool IsPlaying { get; private set; }
+    private volatile bool _isPlaying;
+    private volatile bool _isPaused;
+    private volatile bool _isLoading;
+    private int _playbackState;
+    private volatile bool _canGoNext;
+    private volatile bool _canGoPrevious;
+    private TrackInfo? _currentTrack;
+    private int _repeatMode;
+    private volatile bool _shuffleEnabled;
+    private int _queueCount;
+    private int _currentVolume;
+    private double _volumeOverdriveFactor = 1.0;
+    private string? _activePlaylistId;
+    private string? _activePlaylistName;
+    private volatile bool _isQueuePure;
+    private volatile bool _isPlayingPure;
 
-    public bool IsPaused { get; private set; }
+    public bool IsPlaying { get => _isPlaying; private set => _isPlaying = value; }
 
-    public bool IsLoading { get; private set; }
+    public bool IsPaused { get => _isPaused; private set => _isPaused = value; }
 
-    public PlaybackState PlaybackState { get; private set; }
+    public bool IsLoading { get => _isLoading; private set => _isLoading = value; }
 
-    public bool CanGoNext { get; private set; }
+    public PlaybackState PlaybackState
+    {
+        get => (PlaybackState)Volatile.Read(ref _playbackState);
+        private set => Volatile.Write(ref _playbackState, (int)value);
+    }
 
-    public bool CanGoPrevious { get; private set; }
+    public bool CanGoNext { get => _canGoNext; private set => _canGoNext = value; }
+
+    public bool CanGoPrevious { get => _canGoPrevious; private set => _canGoPrevious = value; }
 
     public TimeSpan CurrentPosition => _audio.CurrentPosition;
 
     public bool HasSeekableDuration => _audio.TotalDuration > TimeSpan.Zero;
 
-    public TimeSpan TotalDuration => _audio.TotalDuration > TimeSpan.Zero
-        ? _audio.TotalDuration
-        : (CurrentTrack?.Duration ?? TimeSpan.Zero);
+    public TimeSpan TotalDuration
+    {
+        get
+        {
+            var audioDuration = _audio.TotalDuration;
+            return audioDuration > TimeSpan.Zero
+                ? audioDuration
+                : (CurrentTrack?.Duration ?? TimeSpan.Zero);
+        }
+    }
 
-    public TrackInfo? CurrentTrack { get; private set; }
+    public TrackInfo? CurrentTrack
+    {
+        get => Volatile.Read(ref _currentTrack);
+        private set => Volatile.Write(ref _currentTrack, value);
+    }
 
-    public RepeatMode RepeatMode { get; private set; }
+    public RepeatMode RepeatMode
+    {
+        get => (RepeatMode)Volatile.Read(ref _repeatMode);
+        private set => Volatile.Write(ref _repeatMode, (int)value);
+    }
 
-    public bool ShuffleEnabled { get; private set; }
+    public bool ShuffleEnabled { get => _shuffleEnabled; private set => _shuffleEnabled = value; }
 
-    public int QueueCount { get; private set; }
+    public int QueueCount
+    {
+        get => Volatile.Read(ref _queueCount);
+        private set => Volatile.Write(ref _queueCount, value);
+    }
 
     /// <summary>
     /// Zero-based index of the currently active track inside <see cref="Queue"/>, or -1 if none.
@@ -60,33 +100,50 @@ public sealed class PlayerControlService : IDisposable
     /// </summary>
     public IReadOnlyList<TrackInfo> Queue => _audio.Queue;
 
-    public int CurrentVolume { get; private set; }
+    public int CurrentVolume
+    {
+        get => Volatile.Read(ref _currentVolume);
+        private set => Volatile.Write(ref _currentVolume, value);
+    }
 
     /// <summary>
     /// Normalized animation intensity multiplier derived from current volume and audio boost settings.
     /// </summary>
-    public double VolumeOverdriveFactor { get; private set; } = 1.0;
+    public double VolumeOverdriveFactor
+    {
+        get => Volatile.Read(ref _volumeOverdriveFactor);
+        private set => Volatile.Write(ref _volumeOverdriveFactor, value);
+    }
 
     /// <summary>
     /// ID of the playlist from which the current queue was launched.
     /// Null = source is not a playlist (Home, Search, single track, or cleared queue).
     /// </summary>
-    public string? ActivePlaylistId { get; private set; }
+    public string? ActivePlaylistId
+    {
+        get => Volatile.Read(ref _activePlaylistId);
+        private set => Volatile.Write(ref _activePlaylistId, value);
+    }
 
     /// <summary>
     /// Display name of the active source playlist, or <see langword="null"/> if the source is manual.
+    /// Dynamically reflects localization changes for system playlists.
     /// </summary>
-    public string? ActivePlaylistName { get; private set; }
+    public string? ActivePlaylistName
+    {
+        get => Volatile.Read(ref _activePlaylistName);
+        private set => Volatile.Write(ref _activePlaylistName, value);
+    }
 
     /// <summary>
     /// Indicates whether the active playback queue matches the composition of the launched playlist.
     /// </summary>
-    public bool IsQueuePure { get; private set; }
+    public bool IsQueuePure { get => _isQueuePure; private set => _isQueuePure = value; }
 
     /// <summary>
     /// Indicates whether the pristine queue of the launched playlist is currently playing.
     /// </summary>
-    public bool IsPlayingPure { get; private set; }
+    public bool IsPlayingPure { get => _isPlayingPure; private set => _isPlayingPure = value; }
 
     public bool HasTrack => CurrentTrack != null;
 
@@ -168,7 +225,9 @@ public sealed class PlayerControlService : IDisposable
         _audio.OnQueueSourceChanged += HandleQueueSourceChanged;
         _audio.OnLoadingStateChanged += HandleLoadingStateChanged;
         _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
+        _audio.OnAudioSettingsChanged += HandleAudioSettingsChanged;
         _audio.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
+        LocalizationService.Instance.LanguageChanged += HandleLanguageChanged;
 
         if (_playlistService != null)
         {
@@ -318,16 +377,20 @@ public sealed class PlayerControlService : IDisposable
     {
         if (_disposed || tracks is null) return 0;
 
+        IReadOnlyList<TrackInfo> materialized = tracks as IReadOnlyList<TrackInfo> ?? [.. tracks];
+        if (materialized.Count == 0) return 0;
+
         if (_trackRegistry != null)
         {
-            foreach (var track in tracks)
+            for (int i = 0; i < materialized.Count; i++)
             {
+                var track = materialized[i];
                 if (track != null)
                     _trackRegistry.RegisterOrUpdate(track);
             }
         }
 
-        return _audio.EnqueueRangeUnique(tracks);
+        return _audio.EnqueueRangeUnique(materialized);
     }
 
     /// <summary>
@@ -527,13 +590,16 @@ public sealed class PlayerControlService : IDisposable
     /// </summary>
     /// <param name="delta">Amount of volume change.</param>
     /// <returns>The new volume value.</returns>
+    private int GetEffectiveMaxVolume()
+    {
+        int maxVolume = _library.Settings.MaxVolumeLimit;
+        return maxVolume > 0 ? maxVolume : 100;
+    }
+
     public int AdjustVolume(int delta)
     {
         int currentVolume = (int)Math.Round(_audio.GetVolume());
-        int maxVolume = _library.Settings.MaxVolumeLimit;
-        if (maxVolume <= 0) maxVolume = 100;
-
-        int newVolume = Math.Clamp(currentVolume + delta, 0, maxVolume);
+        int newVolume = Math.Clamp(currentVolume + delta, 0, GetEffectiveMaxVolume());
         SetVolume(newVolume);
         return newVolume;
     }
@@ -544,10 +610,7 @@ public sealed class PlayerControlService : IDisposable
     /// <param name="volume">New volume value (0–MaxVolume).</param>
     public void SetVolume(int volume)
     {
-        int maxVolume = _library.Settings.MaxVolumeLimit;
-        if (maxVolume <= 0) maxVolume = 100;
-
-        int clamped = Math.Clamp(volume, 0, maxVolume);
+        int clamped = Math.Clamp(volume, 0, GetEffectiveMaxVolume());
         int current = (int)Math.Round(_audio.GetVolume());
 
         if (clamped != current)
@@ -611,7 +674,7 @@ public sealed class PlayerControlService : IDisposable
         if (!AudioEngine.ShouldSyncLikedOnTrackUpdated(source, track))
             return;
 
-        ScheduleLivePlaylistSync(LibraryService.LikedPlaylistId, source.Generation, source.Name);
+        ScheduleLivePlaylistSync(LibraryService.LikedPlaylistId, source.Generation, ResolveActivePlaylistName(source));
     }
 
     private void ScheduleLivePlaylistSync(string playlistId, int expectedGeneration, string? updatedName)
@@ -787,11 +850,36 @@ public sealed class PlayerControlService : IDisposable
         SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
 
+    private static string? ResolveActivePlaylistName(QueueSource source)
+    {
+        if (source.Kind != QueueSourceKind.Playlist)
+            return null;
+
+        if (string.Equals(source.Id, LibraryService.LikedPlaylistId, StringComparison.Ordinal))
+            return LocalizationService.Instance["Playlist_Liked"];
+
+        return source.Name;
+    }
+
+    private void HandleLanguageChanged(object? sender, string _)
+    {
+        if (_disposed) return;
+
+        if (string.Equals(ActivePlaylistId, LibraryService.LikedPlaylistId, StringComparison.Ordinal))
+            SyncSourceAndPurityFromEngine(raiseEvent: true);
+    }
+
+    private void HandleAudioSettingsChanged()
+    {
+        if (_disposed) return;
+        RefreshVolumeOverdrive(raiseEvent: true);
+    }
+
     private void SyncSourceAndPurityFromEngine(bool raiseEvent)
     {
         var source = _audio.QueueSource;
         string? newPlaylistId = source.Kind == QueueSourceKind.Playlist ? source.Id : null;
-        string? newPlaylistName = source.Kind == QueueSourceKind.Playlist ? source.Name : null;
+        string? newPlaylistName = ResolveActivePlaylistName(source);
         bool isPure = _audio.IsQueuePure;
         bool playingPure = isPure && IsPlaying;
 
@@ -1048,7 +1136,9 @@ public sealed class PlayerControlService : IDisposable
         _audio.OnQueueSourceChanged -= HandleQueueSourceChanged;
         _audio.OnLoadingStateChanged -= HandleLoadingStateChanged;
         _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
+        _audio.OnAudioSettingsChanged -= HandleAudioSettingsChanged;
         _audio.OnNTokenDecryptionWarning -= HandleNTokenDecryptionWarning;
+        LocalizationService.Instance.LanguageChanged -= HandleLanguageChanged;
 
         Log.Debug("[PlayerControl] Service disposed");
     }

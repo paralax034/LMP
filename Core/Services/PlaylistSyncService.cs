@@ -10,9 +10,30 @@ using LMP.Core.Youtube.Videos;
 namespace LMP.Core.Services;
 
 /// <summary>
-/// Sync service for local playlists and YouTube Music platform, managing the Smart Cloud Mutation Outbox Queue.
-/// Encapsulates operation coalescing, LIS-based permutation compression, SQLite persistence, network status awareness, and conflict resolution.
+/// Import strategy selected for an account playlist during YouTube account synchronization.
 /// </summary>
+public enum AccountPlaylistImportAction : byte
+{
+    Import = 0,
+    Merge = 1,
+    Duplicate = 2
+}
+
+/// <summary>
+/// Descriptor of a single user-selected YouTube playlist to import or merge.
+/// </summary>
+public readonly record struct AccountPlaylistImportItem(
+    string YoutubeId,
+    string Title,
+    AccountPlaylistImportAction Action);
+
+/// <summary>
+/// Summary of completed account playlist import operations.
+/// </summary>
+public readonly record struct AccountPlaylistImportResult(
+    int ImportedCount,
+    int MergedCount);
+
 public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 {
     /// <summary>Identifier of the system queue bucket for like mutations.</summary>
@@ -3751,6 +3772,315 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             return false;
 
         return await _youtube.UploadPlaylistThumbnailAsync(youtubePlaylistId, imageData).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Fetches authenticated user playlists from YouTube, excluding system/mix playlists
+    /// and playlists currently queued for deletion in the cloud Outbox.
+    /// </summary>
+    public async Task<List<Playlist>> FetchImportableAccountPlaylistsAsync(CancellationToken ct = default)
+    {
+        var ytPlaylists = await _youtube.GetUserPlaylistsByAuthAsync().ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        // Await Outbox hydration so deletions from the previous session are visible (zombie playlist protection)
+        var pendingDeletedYtIds = await GetPendingDeletedYoutubeIdsAsync(ct: ct).ConfigureAwait(false);
+
+        var result = new List<Playlist>(ytPlaylists.Count);
+        for (int i = 0; i < ytPlaylists.Count; i++)
+        {
+            var p = ytPlaylists[i];
+            if (string.IsNullOrEmpty(p.YoutubeId)
+                || p.YoutubeId == "LM"
+                || p.YoutubeId == "VLLM"
+                || p.YoutubeId.StartsWith("RD", StringComparison.Ordinal)
+                || pendingDeletedYtIds.Contains(p.YoutubeId))
+            {
+                continue;
+            }
+
+            result.Add(p);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Executes parallel YouTube account playlist import/merge with InternetProfile throttling,
+    /// rate-limit/403 abort protection, and task notification reporting.
+    /// </summary>
+    public async Task<AccountPlaylistImportResult> ImportAccountPlaylistsAsync(
+        IReadOnlyList<AccountPlaylistImportItem> items,
+        IReadOnlyDictionary<string, Playlist> existingByName,
+        IReadOnlyDictionary<string, Playlist> existingByYtId,
+        Func<string, CancellationToken, Task<List<string>>> getPlaylistTrackIdsAsync,
+        Func<Playlist, CancellationToken, Task> savePlaylistAsync,
+        Func<CancellationToken, Task> syncLikedTracksAsync,
+        Action<double>? onProgress = null,
+        System.Windows.Input.ICommand? cancelCommand = null,
+        CancellationToken ct = default)
+    {
+        const string importTaskKey = "import:youtube_account";
+        int importedCount = 0;
+        int mergedCount = 0;
+        int processed = 0;
+        int abortedBy403OrCooldown = 0;
+
+        int maxDegree = (_library?.Settings.InternetProfile ?? InternetProfile.Medium) switch
+        {
+            InternetProfile.Low => 1,
+            InternetProfile.Medium => 2,
+            InternetProfile.High => 3,
+            InternetProfile.Ultra => 4,
+            _ => 2
+        };
+
+        using var mergeLock = new SemaphoreSlim(1, 1);
+        using var throttle = new SemaphoreSlim(maxDegree, maxDegree);
+        using var abortCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var linkedCt = abortCts.Token;
+
+        void UpdateImportTaskUi(string? msgKey, object[]? msgArgs, double prog)
+        {
+            double clamped = Math.Clamp(prog, 0.0, 1.0);
+            onProgress?.Invoke(clamped);
+
+            _notifications.UpsertTaskNotification(
+                taskKey: importTaskKey,
+                titleKey: "Library_SyncYoutube",
+                titleRaw: null,
+                messageKey: msgKey,
+                messageArgs: msgArgs,
+                messageRaw: null,
+                dynamicMessageFactory: null,
+                statusText: items.Count > 0 ? $"{Math.Min(Volatile.Read(ref processed), items.Count)}/{items.Count}" : null,
+                progress: clamped,
+                isIndeterminate: false,
+                actionKey: "Button_Cancel",
+                actionCommand: cancelCommand,
+                isCancelAction: true);
+        }
+
+        try
+        {
+            UpdateImportTaskUi("Sync_ImportingPlaylists", null, 0.05);
+
+            var tasks = new List<Task>(items.Count);
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                tasks.Add(Task.Run(async () =>
+                {
+                    await throttle.WaitAsync(linkedCt).ConfigureAwait(false);
+                    try
+                    {
+                        linkedCt.ThrowIfCancellationRequested();
+                        if (_disposed || Volatile.Read(ref abortedBy403OrCooldown) != 0)
+                            return;
+
+                        UpdateImportTaskUi(
+                            "Sync_ImportingPlaylist",
+                            [item.Title],
+                            0.1 + (0.75 * Volatile.Read(ref processed) / Math.Max(1, items.Count)));
+
+                        CancelPendingDeleteByYoutubeId(item.YoutubeId);
+
+                        Playlist? fullPlaylist;
+                        try
+                        {
+                            fullPlaylist = await _youtube.ImportPlaylistAsync(
+                                item.YoutubeId, _auth.IsAuthenticated, linkedCt).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (ex is BotDetectionException or HttpRequestException)
+                        {
+                            if (Interlocked.Exchange(ref abortedBy403OrCooldown, 1) == 0)
+                            {
+                                Log.Warn($"[PlaylistSync] Aborting parallel import due to rate-limit/403 on '{item.YoutubeId}': {ex.Message}");
+                                abortCts.Cancel();
+                            }
+                            throw;
+                        }
+
+                        if (fullPlaylist == null)
+                        {
+                            Interlocked.Increment(ref processed);
+                            return;
+                        }
+
+                        await mergeLock.WaitAsync(linkedCt).ConfigureAwait(false);
+                        try
+                        {
+                            if (!existingByYtId.TryGetValue(item.YoutubeId, out var existing))
+                                existingByName.TryGetValue(item.Title, out existing);
+
+                            bool shouldMerge = (item.Action == AccountPlaylistImportAction.Merge
+                                                || (existingByYtId.ContainsKey(item.YoutubeId)
+                                                    && item.Action != AccountPlaylistImportAction.Duplicate))
+                                               && existing != null;
+
+                            if (shouldMerge && existing != null)
+                            {
+                                var existingTrackIds = await getPlaylistTrackIdsAsync(existing.Id, linkedCt).ConfigureAwait(false);
+                                var existingTrackSet = new HashSet<string>(existingTrackIds, StringComparer.Ordinal);
+
+                                bool tracksChanged = false;
+                                bool metadataChanged = ApplyMergedCloudMetadata(existing, fullPlaylist);
+
+                                for (int tIdx = 0; tIdx < fullPlaylist.TrackIds.Count; tIdx++)
+                                {
+                                    var trackId = fullPlaylist.TrackIds[tIdx];
+                                    if (existingTrackSet.Add(trackId))
+                                    {
+                                        existing.TrackIds.Add(trackId);
+                                        tracksChanged = true;
+                                    }
+
+                                    if (_registry.TryGet(trackId) is { } tracked)
+                                    {
+                                        tracked.InPlaylists.Add(existing.Id);
+                                        _registry.UpdatePinStatus(tracked);
+                                    }
+                                }
+
+                                if (tracksChanged || metadataChanged)
+                                    await savePlaylistAsync(existing, linkedCt).ConfigureAwait(false);
+
+                                Interlocked.Increment(ref mergedCount);
+                            }
+                            else
+                            {
+                                if (item.Action == AccountPlaylistImportAction.Duplicate && existing != null)
+                                    fullPlaylist.Name = $"{item.Title} ({SL["Sync_DuplicateName"]})";
+
+                                if (_auth.IsAuthenticated)
+                                {
+                                    fullPlaylist.SyncMode = PlaylistSyncMode.TwoWaySync;
+                                    fullPlaylist.YoutubeId = item.YoutubeId;
+                                }
+
+                                await savePlaylistAsync(fullPlaylist, linkedCt).ConfigureAwait(false);
+                                Interlocked.Increment(ref importedCount);
+                            }
+                        }
+                        finally
+                        {
+                            mergeLock.Release();
+                        }
+
+                        int done = Interlocked.Increment(ref processed);
+                        UpdateImportTaskUi(
+                            "Sync_ImportingPlaylist",
+                            [item.Title],
+                            0.1 + (0.75 * done / Math.Max(1, items.Count)));
+                    }
+                    finally
+                    {
+                        throttle.Release();
+                    }
+                }, linkedCt));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+            UpdateImportTaskUi("Sync_LikedSongs", null, 0.9);
+            await syncLikedTracksAsync(ct).ConfigureAwait(false);
+
+            _notifications.CompleteTaskNotification(
+                importTaskKey,
+                completedMessageKey: items.Count > 0 ? "Sync_Success_Msg" : "Sync_Success_Msg_LikedOnly",
+                completedMessageArgs: items.Count > 0 ? [importedCount, mergedCount] : null,
+                severity: NotificationSeverity.Success);
+
+            return new AccountPlaylistImportResult(importedCount, mergedCount);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _notifications.CompleteTaskNotification(
+                importTaskKey,
+                completedMessageKey: "Sync_Cancelled",
+                severity: NotificationSeverity.Warning);
+            return new AccountPlaylistImportResult(importedCount, mergedCount);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[PlaylistSync] Background account import error: {ex.Message}");
+            _notifications.CompleteTaskNotification(
+                importTaskKey,
+                completedMessageRaw: SL["Sync_Error_API"] + ": " + ex.Message,
+                severity: NotificationSeverity.Error);
+            return new AccountPlaylistImportResult(importedCount, mergedCount);
+        }
+    }
+
+    private static bool ApplyMergedCloudMetadata(Playlist existing, Playlist incoming)
+    {
+        bool changed = false;
+
+        if (!string.Equals(existing.Author, incoming.Author, StringComparison.Ordinal))
+        {
+            existing.Author = incoming.Author;
+            changed = true;
+        }
+
+        if (!string.Equals(existing.OwnerChannelId, incoming.OwnerChannelId, StringComparison.Ordinal))
+        {
+            existing.OwnerChannelId = incoming.OwnerChannelId;
+            changed = true;
+        }
+
+        if (existing.Ownership != incoming.Ownership)
+        {
+            existing.Ownership = incoming.Ownership;
+            changed = true;
+        }
+
+        if (existing.Visibility != incoming.Visibility)
+        {
+            existing.Visibility = incoming.Visibility;
+            changed = true;
+        }
+
+        if (existing.CloudTrackCount != incoming.CloudTrackCount)
+        {
+            existing.CloudTrackCount = incoming.CloudTrackCount;
+            changed = true;
+        }
+
+        if (existing.ViewCount != incoming.ViewCount)
+        {
+            existing.ViewCount = incoming.ViewCount;
+            changed = true;
+        }
+
+        if (existing.ReleaseDate != incoming.ReleaseDate)
+        {
+            existing.ReleaseDate = incoming.ReleaseDate;
+            changed = true;
+        }
+
+        if (!string.Equals(existing.ThumbnailUrl, incoming.ThumbnailUrl, StringComparison.Ordinal))
+        {
+            existing.ThumbnailUrl = incoming.ThumbnailUrl;
+            changed = true;
+        }
+
+        if (!string.Equals(existing.Description, incoming.Description, StringComparison.Ordinal))
+        {
+            existing.Description = incoming.Description;
+            changed = true;
+        }
+
+        if (existing.IsCloudUnavailable)
+        {
+            existing.IsCloudUnavailable = false;
+            changed = true;
+        }
+
+        existing.LastSyncedAtUtc = DateTime.UtcNow;
+        existing.UpdatedAt = DateTime.Now;
+
+        return changed;
     }
 
     #endregion

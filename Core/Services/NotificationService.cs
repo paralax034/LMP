@@ -50,6 +50,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
     public bool IsToastVisible => CurrentToast != null;
 
+    private readonly Lock _toastLock = new();
     private CancellationTokenSource? _toastCts;
     private CancellationTokenSource? _cleanupCts;
     private bool _isInitialized;
@@ -248,7 +249,8 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
             }
         }
 
-        void ApplyOnUi()
+        // Always enqueue on UI Dispatcher FIFO to preserve causal order against CompleteTaskNotification.
+        Dispatcher.UIThread.Post(() =>
         {
             Notification? existing = null;
             for (int i = 0; i < Notifications.Count; i++)
@@ -315,12 +317,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
             }
 
             OnTasksChanged?.Invoke();
-        }
-
-        if (Dispatcher.UIThread.CheckAccess())
-            ApplyOnUi();
-        else
-            Dispatcher.UIThread.Post(ApplyOnUi);
+        });
     }
 
     /// <summary>
@@ -346,7 +343,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
                 Volatile.Write(ref _activeTaskCount, _activeTaskKeys.Count);
         }
 
-        void ApplyOnUi()
+        Dispatcher.UIThread.Post(() =>
         {
             Notification? existing = null;
             int idx = -1;
@@ -381,6 +378,14 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
                     existing.Severity = severity;
                     existing.Timestamp = DateTime.UtcNow;
 
+                    string? fallbackDynamicSnapshot =
+                        string.IsNullOrEmpty(completedMessageKey)
+                        && string.IsNullOrEmpty(completedMessageRaw)
+                        && dynamicMessageFactory == null
+                        && existing.DynamicMessageFactory != null
+                            ? existing.Message
+                            : null;
+
                     existing.DynamicMessageFactory = dynamicMessageFactory;
                     if (!string.IsNullOrEmpty(completedMessageKey))
                     {
@@ -393,6 +398,18 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
                         existing.MessageKey = null;
                         existing.MessageArgs = null;
                         existing.MessageRaw = completedMessageRaw;
+                    }
+                    else if (existing.DynamicMessageFactory != null)
+                    {
+                        existing.MessageKey = null;
+                        existing.MessageArgs = null;
+                        existing.MessageRaw = existing.Message;
+                    }
+                    else if (fallbackDynamicSnapshot != null)
+                    {
+                        existing.MessageKey = null;
+                        existing.MessageArgs = null;
+                        existing.MessageRaw = fallbackDynamicSnapshot;
                     }
 
                     existing.NotifyVisualStateChanged();
@@ -407,12 +424,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
             }
 
             OnTasksChanged?.Invoke();
-        }
-
-        if (Dispatcher.UIThread.CheckAccess())
-            ApplyOnUi();
-        else
-            Dispatcher.UIThread.Post(ApplyOnUi);
+        });
     }
 
     private void OnLanguageChanged(object? sender, string langCode)
@@ -513,7 +525,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            toRemove = [.. Notifications.Where(n => n.Timestamp < threshold)];
+            toRemove = [.. Notifications.Where(n => !n.IsTaskActive && n.Timestamp < threshold)];
         });
 
         if (toRemove is not { Count: > 0 }) return;
@@ -558,7 +570,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
         }
     }
 
-    public sealed record AttemptDto(string ClientName, bool Success, string? ErrorMessage, DateTime Timestamp);
+
 
     #endregion
 
@@ -574,11 +586,32 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
             if (!notification.IsRead) _unreadCount++;
 
             // Evict the oldest items while maintaining the counter
-            while (Notifications.Count > MaxNotifications)
+            int historyCount = 0;
+            for (int i = 0; i < Notifications.Count; i++)
             {
-                var last = Notifications[^1];
-                if (!last.IsRead) _unreadCount = Math.Max(0, _unreadCount - 1);
-                Notifications.RemoveAt(Notifications.Count - 1);
+                if (!Notifications[i].IsTaskActive)
+                    historyCount++;
+            }
+
+            while (historyCount > MaxNotifications)
+            {
+                int evictIndex = -1;
+                for (int i = Notifications.Count - 1; i >= 0; i--)
+                {
+                    if (!Notifications[i].IsTaskActive)
+                    {
+                        evictIndex = i;
+                        break;
+                    }
+                }
+
+                if (evictIndex < 0)
+                    break;
+
+                var victim = Notifications[evictIndex];
+                if (!victim.IsRead) _unreadCount = Math.Max(0, _unreadCount - 1);
+                Notifications.RemoveAt(evictIndex);
+                historyCount--;
             }
 
             RaiseUnreadProperties();
@@ -587,10 +620,14 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
 
     private async Task ShowToastInternalAsync(Notification notification, int durationMs, CancellationToken ct)
     {
-        _toastCts?.Cancel();
-        _toastCts?.Dispose();
-        _toastCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var localToken = _toastCts.Token;
+        CancellationToken localToken;
+        lock (_toastLock)
+        {
+            _toastCts?.Cancel();
+            _toastCts?.Dispose();
+            _toastCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            localToken = _toastCts.Token;
+        }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -678,14 +715,30 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
             if (Notifications.Remove(notification))
             {
                 if (!notification.IsRead) _unreadCount = Math.Max(0, _unreadCount - 1);
+                if (notification.IsTaskActive)
+                {
+                    RecalculateActiveTasks();
+                    OnTasksChanged?.Invoke();
+                }
                 RaiseUnreadProperties();
             }
+        });
+
+        _ = Task.Run(async () =>
+        {
+            try { await _repository.DeleteByIdAsync(notification.Id).ConfigureAwait(false); }
+            catch (Exception ex) { Log.Warn($"[NotificationService] Remove DB error: {ex.Message}"); }
         });
     }
 
     public void DismissToast()
     {
-        _toastCts?.Cancel();
+        lock (_toastLock)
+        {
+            try { _toastCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
             CurrentToast = null;
@@ -703,6 +756,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasUnread));
     }
 
+#if DEBUG
     /// <summary>
     /// Generates a set of test notifications to benchmark UI panel performance.
     /// </summary>
@@ -809,6 +863,7 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
         RaiseUnreadProperties();
         Log.Info($"[NotificationService] Seeded {count} debug notifications (Unread: {_unreadCount})");
     }
+#endif
 
     #endregion
 
@@ -819,8 +874,12 @@ public sealed partial class NotificationService : ObservableObject, IDisposable
         LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
         _cleanupCts?.Cancel();
         _cleanupCts?.Dispose();
-        _toastCts?.Cancel();
-        _toastCts?.Dispose();
+        lock (_toastLock)
+        {
+            _toastCts?.Cancel();
+            _toastCts?.Dispose();
+            _toastCts = null;
+        }
         Notifications.Clear();
         CurrentToast = null;
         Log.Info("[NotificationService] Disposed");

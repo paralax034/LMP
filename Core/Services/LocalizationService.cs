@@ -266,36 +266,57 @@ public sealed class LocalizationService : INotifyPropertyChanged
         if (!_isInitialized) return $"{count}";
 
         var absCount = Math.Abs(count);
-        var lastTwo = absCount % 100;
-        var lastOne = absCount % 10;
-
         string numSuffix;
         string nameSuffix;
 
-        if (count == 0)
+        if (string.Equals(CurrentLanguageCode, "ru", StringComparison.OrdinalIgnoreCase))
         {
-            numSuffix = "_0";
-            nameSuffix = "_zero";
-        }
-        else if (lastTwo >= 11 && lastTwo <= 19)
-        {
-            numSuffix = "_5";
-            nameSuffix = "_many";
-        }
-        else if (lastOne == 1)
-        {
-            numSuffix = "_1";
-            nameSuffix = "_one";
-        }
-        else if (lastOne >= 2 && lastOne <= 4)
-        {
-            numSuffix = "_2";
-            nameSuffix = "_few";
+            var lastTwo = absCount % 100;
+            var lastOne = absCount % 10;
+
+            if (count == 0)
+            {
+                numSuffix = "_0";
+                nameSuffix = "_zero";
+            }
+            else if (lastTwo >= 11 && lastTwo <= 19)
+            {
+                numSuffix = "_5";
+                nameSuffix = "_many";
+            }
+            else if (lastOne == 1)
+            {
+                numSuffix = "_1";
+                nameSuffix = "_one";
+            }
+            else if (lastOne >= 2 && lastOne <= 4)
+            {
+                numSuffix = "_2";
+                nameSuffix = "_few";
+            }
+            else
+            {
+                numSuffix = "_5";
+                nameSuffix = "_many";
+            }
         }
         else
         {
-            numSuffix = "_5";
-            nameSuffix = "_many";
+            if (count == 0)
+            {
+                numSuffix = "_0";
+                nameSuffix = "_zero";
+            }
+            else if (absCount == 1)
+            {
+                numSuffix = "_1";
+                nameSuffix = "_one";
+            }
+            else
+            {
+                numSuffix = "_5";
+                nameSuffix = "_other";
+            }
         }
 
         string? pattern = null;
@@ -307,7 +328,8 @@ public sealed class LocalizationService : INotifyPropertyChanged
             {
                 pattern = zeroMany;
             }
-            else if (!_resources.TryGetValue(string.Concat(key, "_other"), out pattern))
+            else if (!_resources.TryGetValue(string.Concat(key, "_other"), out pattern) &&
+                     !_resources.TryGetValue(string.Concat(key, "_many"), out pattern))
             {
                 _resources.TryGetValue(key, out pattern);
             }

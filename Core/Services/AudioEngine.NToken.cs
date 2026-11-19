@@ -10,9 +10,13 @@ public sealed partial class AudioEngine
         Interlocked.CompareExchange(ref _nTokenActiveTrackId, null, skippedTrackId);
 
         int session;
+        int pauseEpoch;
+        bool startPlaying;
         lock (_playerDispatchLock)
         {
             Interlocked.Increment(ref _queueReplaceSeq);
+            startPlaying = _playIntent;
+            pauseEpoch = Volatile.Read(ref _pauseEpoch);
             session = BeginNewSession();
             _player.Stop();
         }
@@ -22,7 +26,7 @@ public sealed partial class AudioEngine
 
         if (canAdvance)
         {
-            EnqueueCommand(new PlayCurrentIndexCommand(session));
+            EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: startPlaying, PauseEpoch: pauseEpoch));
             return;
         }
 

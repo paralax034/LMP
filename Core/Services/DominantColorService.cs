@@ -11,7 +11,6 @@ namespace LMP.Core.Services;
 /// </summary>
 public sealed class DominantColorService
 {
-    private readonly NetworkManager _networkManager;
     private readonly ImageCacheService _imageCache;
     private readonly ConcurrentDictionary<string, Color> _cache = new(StringComparer.Ordinal);
     private const int MaxCacheEntries = 256;
@@ -23,7 +22,7 @@ public sealed class DominantColorService
 
     public DominantColorService(NetworkManager networkManager, ImageCacheService imageCache)
     {
-        _networkManager = networkManager;
+        _ = networkManager;
         _imageCache = imageCache;
     }
 
@@ -73,7 +72,6 @@ public sealed class DominantColorService
     private async Task<Color?> ExtractColorAsync(string imageUrl, CancellationToken ct)
     {
         string? targetFilePath = null;
-        byte[]? fallbackData = null;
 
         if (IsLocalPath(imageUrl))
         {
@@ -89,44 +87,20 @@ public sealed class DominantColorService
                 return null;
             }
         }
-        else
+        else if (imageUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                 || imageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            // Use the unified FNV-1a disk cache path from ImageCacheService (zero redundant network downloads and zero Avalonia.Bitmap allocations)
-            var diskPath = ImageCacheService.GetDiskCachePath(imageUrl);
-
-            if (!File.Exists(diskPath))
-            {
-                await _imageCache.EnsureDiskFileAsync(imageUrl, ct).ConfigureAwait(false);
-            }
-
-            if (File.Exists(diskPath))
-            {
-                targetFilePath = diskPath;
-            }
-            else
-            {
-                try
-                {
-                    fallbackData = await _networkManager.ImageClient.GetByteArrayAsync(imageUrl, ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn($"[DominantColor] HTTP download failed: {ex.Message}");
-                    return null;
-                }
-            }
+            targetFilePath = await _imageCache.EnsureCoverDiskPathAsync(imageUrl, ct).ConfigureAwait(false);
         }
 
-        if (targetFilePath == null && (fallbackData == null || fallbackData.Length == 0))
+        if (targetFilePath == null)
             return null;
 
         return await Task.Run(() =>
         {
             if (ct.IsCancellationRequested) return null;
 
-            using var codec = targetFilePath != null
-                ? SKCodec.Create(targetFilePath)
-                : SKCodec.Create(new SKMemoryStream(fallbackData));
+            using var codec = SKCodec.Create(targetFilePath);
 
             if (codec == null)
             {
@@ -167,7 +141,7 @@ public sealed class DominantColorService
         if (string.IsNullOrWhiteSpace(url)) return false;
 
         // file:// URI
-        if (url.StartsWith(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
+        if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
             return true;
 
         // Absolute Windows path (C:\...) or Unix path (/home/...)

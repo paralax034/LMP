@@ -37,10 +37,7 @@
 
             <!-- ROW 0: SINGLE-LINE FLAT HEADER STRIP (matching SearchView) -->
             <Border Grid.Row="0"
-                Classes="header-strip"
-                Background="Transparent"
-                BorderBrush="{DynamicResource BgHighlightBrush}"
-                BorderThickness="0,0,0,1">
+                Classes="header-strip">
                 <Grid ColumnDefinitions="Auto, *, Auto" Height="46">
 
                     <!-- 1. LEFT: Clickable position counter (e.g. 2 / 665) -->

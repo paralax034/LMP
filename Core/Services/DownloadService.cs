@@ -46,7 +46,42 @@ public sealed class DownloadService
     /// </list>
     /// </summary>
     /// <param name="track">Track information object.</param>
-    public void StartDownload(TrackInfo track)
+    public void StartDownload(TrackInfo track) => StartDownload(track, checkQuota: true);
+
+    /// <summary>
+    /// Starts batch downloads after checking the downloads folder quota once off the UI thread.
+    /// </summary>
+    internal async Task StartDownloadsBatchAsync(IReadOnlyList<TrackInfo> tracks)
+    {
+        if (tracks.Count == 0)
+            return;
+
+        long limitMb = _library.Settings.Storage.DownloadedTracksLimitMb;
+        if (limitMb > 0)
+        {
+            string downloadPath = _library.DownloadPath;
+            var (_, currentSizeMb) = await Task.Run(() =>
+                Audio.Cache.AudioCacheManager.GetDownloadsStats(downloadPath)).ConfigureAwait(false);
+
+            if (currentSizeMb >= limitMb)
+            {
+                Log.Warn($"[DownloadService] Download limit reached: {currentSizeMb}MB >= {limitMb}MB. Batch download aborted.");
+                return;
+            }
+        }
+
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            var track = tracks[i];
+            if (!track.IsDownloaded)
+                StartDownload(track, checkQuota: false);
+        }
+    }
+
+    /// <summary>
+    /// Starts the track download process with optional quota pre-verification (skipped when already verified by a batch caller).
+    /// </summary>
+    internal void StartDownload(TrackInfo track, bool checkQuota, bool allowInstantExport = true)
     {
         lock (_lock)
         {
@@ -54,33 +89,49 @@ public sealed class DownloadService
                 return;
         }
 
-        // Check the downloads folder quota
-        long limitMb = _library.Settings.Storage.DownloadedTracksLimitMb;
-        if (limitMb > 0)
+        if (checkQuota)
         {
-            var (_, currentSizeMb) = Audio.Cache.AudioCacheManager.GetDownloadsStats(_library.DownloadPath);
-            if (currentSizeMb >= limitMb)
+            long limitMb = _library.Settings.Storage.DownloadedTracksLimitMb;
+            if (limitMb > 0)
             {
-                Log.Warn($"[DownloadService] Download limit reached: {currentSizeMb}MB >= {limitMb}MB. Download aborted for {track.Id}.");
-                OnCompleted?.Invoke(track.Id, false, null);
+                var (_, currentSizeMb) = Audio.Cache.AudioCacheManager.GetDownloadsStats(_library.DownloadPath);
+                if (currentSizeMb >= limitMb)
+                {
+                    Log.Warn($"[DownloadService] Download limit reached: {currentSizeMb}MB >= {limitMb}MB. Download aborted for {track.Id}.");
+                    OnCompleted?.Invoke(track.Id, false, null);
+                    return;
+                }
+            }
+        }
+
+        bool isFullyCached = allowInstantExport && AudioSourceFactory.GlobalCache.IsTrackFullyCached(track.Id);
+
+        lock (_lock)
+        {
+            if (_activeTasks.ContainsKey(track.Id) || track.IsDownloaded)
                 return;
-            }
+
+            _activeTasks[track.Id] = isFullyCached
+                ? new DownloadTask { Progress = 0f }
+                : new DownloadTask { Progress = 0f, CancellationSource = new CancellationTokenSource() };
         }
 
-        // Path 1: Already fully cached → instant export (0 network bytes)
-        if (AudioSourceFactory.GlobalCache.IsTrackFullyCached(track.Id))
-        {
-            lock (_lock)
-            {
-                _activeTasks[track.Id] = new DownloadTask { Progress = 0f };
-            }
-
+        if (isFullyCached)
             _ = RunInstantExportAsync(track, AudioSourceFactory.GlobalCache);
-            return;
-        }
+        else
+            _ = RunGapFillDownloadAsync(track);
+    }
 
-        // Path 2: Partial or no cache → gap-fill + export
-        EnqueueGapFillDownload(track);
+    private async Task<bool> TryFinalizeDownloadedTrackAsync(TrackInfo track)
+    {
+        var updatedTrack = await _library.GetTrackAsync(track.Id).ConfigureAwait(false);
+        if (updatedTrack == null || string.IsNullOrEmpty(updatedTrack.LocalPath))
+            return false;
+
+        track.MarkAsDownloaded(updatedTrack.LocalPath, updatedTrack.PreferredFormat, updatedTrack.PreferredBitrate);
+        OnProgress?.Invoke(track.Id, 1.0f);
+        OnCompleted?.Invoke(track.Id, true, updatedTrack.LocalPath);
+        return true;
     }
 
     /// <summary>
@@ -88,6 +139,7 @@ public sealed class DownloadService
     /// </summary>
     private async Task RunInstantExportAsync(TrackInfo track, Audio.Cache.AudioCacheManager cache)
     {
+        bool exported = false;
         try
         {
             OnProgress?.Invoke(track.Id, 0f);
@@ -100,17 +152,7 @@ public sealed class DownloadService
                 _library.DownloadPath).ConfigureAwait(false);
 
             if (success)
-            {
-                var updatedTrack = await _library.GetTrackAsync(track.Id).ConfigureAwait(false);
-                if (updatedTrack != null)
-                {
-                    track.IsDownloaded = true;
-                    track.LocalPath = updatedTrack.LocalPath;
-                    OnProgress?.Invoke(track.Id, 1.0f);
-                    OnCompleted?.Invoke(track.Id, true, track.LocalPath);
-                    return;
-                }
-            }
+                exported = await TryFinalizeDownloadedTrackAsync(track).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -124,26 +166,8 @@ public sealed class DownloadService
             }
         }
 
-        // If instant export fails — fallback to gap-fill
-        EnqueueGapFillDownload(track);
-    }
-
-    /// <summary>
-    /// Enqueues a download task with concurrency limits.
-    /// Uses gap-fill: downloads missing ranges only via HTTP range requests.
-    /// </summary>
-    private void EnqueueGapFillDownload(TrackInfo track)
-    {
-        lock (_lock)
-        {
-            if (_activeTasks.ContainsKey(track.Id) || track.IsDownloaded)
-                return;
-
-            var cts = new CancellationTokenSource();
-            _activeTasks[track.Id] = new DownloadTask { Progress = 0f, CancellationSource = cts };
-        }
-
-        _ = RunGapFillDownloadAsync(track);
+        if (!exported)
+            StartDownload(track, checkQuota: false, allowInstantExport: false);
     }
 
     /// <summary>
@@ -152,6 +176,7 @@ public sealed class DownloadService
     private async Task RunGapFillDownloadAsync(TrackInfo track)
     {
         await _downloadSemaphore.WaitAsync().ConfigureAwait(false);
+        DownloadTask? removedTask = null;
 
         try
         {
@@ -160,7 +185,7 @@ public sealed class DownloadService
             {
                 if (!_activeTasks.TryGetValue(track.Id, out var task))
                     return;
-                ct = task.CancellationSource.Token;
+                ct = task.CancellationSource?.Token ?? CancellationToken.None;
             }
 
             // Step 1: Resolve stream URL (uses session cache → 0 API calls for recently played tracks)
@@ -207,17 +232,8 @@ public sealed class DownloadService
                 ct,
                 _library.DownloadPath).ConfigureAwait(false);
 
-            if (exported)
-            {
-                var updatedTrack = await _library.GetTrackAsync(track.Id).ConfigureAwait(false);
-                if (updatedTrack != null)
-                {
-                    track.IsDownloaded = true;
-                    track.LocalPath = updatedTrack.LocalPath;
-                    OnCompleted?.Invoke(track.Id, true, track.LocalPath);
-                    return;
-                }
-            }
+            if (exported && await TryFinalizeDownloadedTrackAsync(track).ConfigureAwait(false))
+                return;
 
             OnCompleted?.Invoke(track.Id, false, null);
         }
@@ -234,15 +250,23 @@ public sealed class DownloadService
         {
             lock (_lock)
             {
-                _activeTasks.Remove(track.Id);
+                if (_activeTasks.Remove(track.Id, out var task))
+                    removedTask = task;
             }
+            removedTask?.Dispose();
             _downloadSemaphore.Release();
         }
     }
 
-    private sealed class DownloadTask
+    private sealed class DownloadTask : IDisposable
     {
         public float Progress { get; set; }
-        public CancellationTokenSource CancellationSource { get; set; } = new();
+        public CancellationTokenSource? CancellationSource { get; set; }
+
+        public void Dispose()
+        {
+            CancellationSource?.Dispose();
+            CancellationSource = null;
+        }
     }
 }

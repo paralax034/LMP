@@ -268,6 +268,14 @@
         </Style.Animations>
     </Style>
 
+    <!-- SHARED HEADER STRIP -->
+    <Style Selector="Border.header-strip">
+        <Setter Property="BorderBrush" Value="{DynamicResource BgHighlightBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
     <!-- PLAYLIST UTILITIES -->
     <Style Selector="Border.liked-gradient">
         <Setter Property="CornerRadius" Value="8,8,0,0" />

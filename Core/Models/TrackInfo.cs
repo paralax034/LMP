@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using LMP.Core.Audio.Normalization;
@@ -14,8 +15,10 @@ namespace LMP.Core.Models;
 [MemoryPackable]
 public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchResult
 {
+    private const int MaxPrefixedIdCacheEntries = 4096;
+
     [MemoryPackIgnore]
-    private static readonly ConditionalWeakTable<string, string> _idCache = [];
+    private static readonly ConcurrentDictionary<string, string> _idCache = new(StringComparer.Ordinal);
 
     #region Identity
 
@@ -52,11 +55,14 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string GetCachedPrefixedId(string prefix, string rawId)
     {
-        if (!_idCache.TryGetValue(rawId, out var cached))
-        {
-            cached = string.Concat(prefix, rawId);
-            _idCache.AddOrUpdate(rawId, cached);
-        }
+        if (_idCache.TryGetValue(rawId, out var cached))
+            return cached;
+
+        if (_idCache.Count >= MaxPrefixedIdCacheEntries)
+            _idCache.Clear();
+
+        cached = string.Concat(prefix, rawId);
+        _idCache.TryAdd(rawId, cached);
         return cached;
     }
 
@@ -310,6 +316,12 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
                 foreach (var playlistId in fresh.InPlaylists)
                     InPlaylists.Add(playlistId);
             }
+
+            if (fresh.IsCached && !IsCached)
+                IsCached = true;
+
+            if (EqualizerPresetId != fresh.EqualizerPresetId)
+                EqualizerPresetId = fresh.EqualizerPresetId;
         }
         else
         {
@@ -318,13 +330,13 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
 
             if (fresh.IsDisliked && !IsDisliked)
                 IsDisliked = true;
+
+            if (!string.IsNullOrEmpty(fresh.EqualizerPresetId) && fresh.EqualizerPresetId != EqualizerPresetId)
+                EqualizerPresetId = fresh.EqualizerPresetId;
         }
 
         if (fresh.HasIntegratedLufs)
             SetIntegratedLufs(fresh.IntegratedLufs, fresh.IntegratedLufsSource);
-
-        if (!string.IsNullOrEmpty(fresh.EqualizerPresetId) && fresh.EqualizerPresetId != EqualizerPresetId)
-            EqualizerPresetId = fresh.EqualizerPresetId;
 
         if (fresh.TransientFormat is { } transientFormat
             && transientFormat != AudioFormat.Unknown

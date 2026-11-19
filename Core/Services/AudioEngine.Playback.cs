@@ -54,6 +54,37 @@ public sealed partial class AudioEngine
         _commandQueue.Writer.TryWrite(command);
     }
 
+    private void DispatchPlayCurrentIndex(bool startPlaying)
+    {
+        int session;
+        int pauseEpoch;
+        lock (_playerDispatchLock)
+        {
+            if (startPlaying)
+                _playIntent = true;
+
+            pauseEpoch = Volatile.Read(ref _pauseEpoch);
+            session = BeginNewSession();
+        }
+
+        EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: startPlaying, PauseEpoch: pauseEpoch));
+    }
+
+    private void DispatchPlayCurrentIndexFromCurrentIntent()
+    {
+        int session;
+        int pauseEpoch;
+        bool startPlaying;
+        lock (_playerDispatchLock)
+        {
+            startPlaying = CurrentTrack != null && _playIntent;
+            pauseEpoch = Volatile.Read(ref _pauseEpoch);
+            session = BeginNewSession();
+        }
+
+        EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: startPlaying, PauseEpoch: pauseEpoch));
+    }
+
     #endregion
 
     #region Navigation & Queue Handlers
@@ -489,12 +520,20 @@ public sealed partial class AudioEngine
 
     private void HandlePlayerStateChanged(PlaybackState state)
     {
-        // Intention is checked against state: quality change and recovery trigger PlayAsync bypassing SetPlaybackStateAsync.
-        // Preserve _playIntent across device-loss pauses so queue mutations continue auto-advancing on reconnect.
-        if (state == PlaybackState.Playing)
-            _playIntent = true;
-        else if (state == PlaybackState.Paused && _player.GetActivePipeline()?.IsDeviceLost != true)
-            _playIntent = false;
+        // Ignore delayed Paused events from an evicted/stopped track while a new track is preparing.
+        lock (_playerDispatchLock)
+        {
+            if (state == PlaybackState.Playing)
+            {
+                _playIntent = true;
+            }
+            else if (state == PlaybackState.Paused
+                     && Volatile.Read(ref _manualLoadingFlag) == 0
+                     && _player.GetActivePipeline()?.IsDeviceLost != true)
+            {
+                _playIntent = false;
+            }
+        }
 
         ApplyLifecycleSourceSuspendPolicy();
         RaiseOnUI(_raiseStateChangedOnUIDelegate);

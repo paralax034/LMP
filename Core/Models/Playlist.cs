@@ -84,6 +84,20 @@ public sealed class Playlist : IBatchItem, ISearchResult
         ? $"https://www.youtube.com/playlist?list={YoutubeId}"
         : string.Empty;
 
+    /// <summary>
+    /// Resolves the shareable YouTube playlist URL, including the system Liked playlist (<c>list=LM</c>)
+    /// when authenticated.
+    /// </summary>
+    public string? GetYoutubeUrl(bool isAuthenticated)
+    {
+        if (Id == LibraryService.LikedPlaylistId)
+            return isAuthenticated ? "https://www.youtube.com/playlist?list=LM" : null;
+
+        return string.IsNullOrEmpty(YoutubeId)
+            ? null
+            : $"https://www.youtube.com/playlist?list={YoutubeId}";
+    }
+
     #endregion
 
     #region Appearance
@@ -229,7 +243,7 @@ public sealed class Playlist : IBatchItem, ISearchResult
     /// System playlist (Liked, Watch Later).
     /// </summary>
     [JsonIgnore]
-    public bool IsSystem => Ownership == PlaylistOwnership.System;
+    public bool IsSystem => Ownership == PlaylistOwnership.System || Id == LibraryService.LikedPlaylistId;
 
     #endregion
 

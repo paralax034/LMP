@@ -293,6 +293,7 @@ public sealed class DiscordRpcService : IAsyncDisposable
         _playlistService?.OnPlaylistChanged += HandlePlaylistMetadataChanged;
 
         _authService?.OnAuthStateChanged += HandleAuthStateChanged;
+        LocalizationService.Instance.LanguageChanged += HandleLanguageChanged;
     }
 
     /// <summary>
@@ -361,30 +362,36 @@ public sealed class DiscordRpcService : IAsyncDisposable
             {
                 _cachedViewingPlaylist = null;
             }
-            else if (_cachedViewingPlaylist is not { } existing
-                || !string.Equals(existing.PlaylistId, playlist.Id, StringComparison.Ordinal))
+            else
             {
                 bool isPublic = IsPublicCloudPlaylist(playlist);
                 string? rawThumb = isPublic && IsValidExternalImageUrl(playlist.ThumbnailUrl)
                     ? playlist.ThumbnailUrl!.Trim()
                     : null;
 
-                bool verified = !isPublic;
-                string? cachedThumb = null;
-                if (isPublic && _verifiedThumbCache.TryGetValue(playlist.Id, out var cached)
-                    && string.Equals(cached.SourceUrl, rawThumb, StringComparison.Ordinal))
+                if (_cachedViewingPlaylist is not { } existing
+                    || !string.Equals(existing.PlaylistId, playlist.Id, StringComparison.Ordinal)
+                    || existing.IsPublicCloud != isPublic
+                    || !string.Equals(existing.DisplayName, playlist.Name, StringComparison.Ordinal))
                 {
-                    verified = true;
-                    cachedThumb = cached.VerifiedUrl;
-                }
+                    bool verified = !isPublic;
+                    string? cachedThumb = null;
+                    if (isPublic && _verifiedThumbCache.TryGetValue(playlist.Id, out var cached)
+                        && string.Equals(cached.SourceUrl, rawThumb, StringComparison.Ordinal))
+                    {
+                        verified = true;
+                        cachedThumb = cached.VerifiedUrl;
+                    }
 
-                _cachedViewingPlaylist = new CachedPlaylistRpcMeta(
-                    PlaylistId: playlist.Id,
-                    IsPublicCloud: isPublic,
-                    PublicUrl: isPublic ? playlist.Url : null,
-                    ThumbnailUrl: cachedThumb,
-                    DisplayName: playlist.Name,
-                    IsThumbnailVerified: verified);
+                    _cachedViewingPlaylist = new CachedPlaylistRpcMeta(
+                        PlaylistId: playlist.Id,
+                        IsPublicCloud: isPublic,
+                        PublicUrl: isPublic ? playlist.Url : null,
+                        ThumbnailUrl: cachedThumb,
+                        DisplayName: playlist.Name,
+                        IsThumbnailVerified: verified);
+                    changed = true;
+                }
             }
         }
 
@@ -514,6 +521,7 @@ public sealed class DiscordRpcService : IAsyncDisposable
     private void HandleQueueChanged() => MarkDirty();
     private void HandleForceSync() => MarkDirty();
     private void HandleAuthStateChanged() => MarkDirty();
+    private void HandleLanguageChanged(object? sender, string _) => MarkDirty();
 
     private void HandlePlaybackPurityChanged(string? playlistId, bool _, bool _1)
     {
@@ -677,15 +685,7 @@ public sealed class DiscordRpcService : IAsyncDisposable
             Button2Label: btn2);
     }
 
-    internal static string FormatTime(TimeSpan time)
-    {
-        if (time < TimeSpan.Zero)
-            time = TimeSpan.Zero;
-
-        if (time.TotalHours >= 1)
-            return $"{(int)time.TotalHours}:{time.Minutes:D2}:{time.Seconds:D2}";
-        return $"{time.Minutes:D2}:{time.Seconds:D2}";
-    }
+    internal static string FormatTime(TimeSpan time) => DurationFormatter.FormatZeroPadded(time);
 
     private void UpdateStatus(
         DiscordRpcConnectionState state,
@@ -1334,7 +1334,22 @@ public sealed class DiscordRpcService : IAsyncDisposable
                             break;
                     }
 
-                    if (await EnsurePlaylistMetadataLoadedAsync(freshInput, ct).ConfigureAwait(false))
+                    bool metadataUpdated = await EnsurePlaylistMetadataLoadedAsync(freshInput, ct).ConfigureAwait(false);
+                    bool dirtiedDuringAwait;
+                    lock (_stateLock)
+                    {
+                        dirtiedDuringAwait = _dirty;
+                        if (!dirtiedDuringAwait)
+                        {
+                            forcePublish |= _forcePublish;
+                            _forcePublish = false;
+                        }
+                    }
+
+                    if (dirtiedDuringAwait)
+                        continue;
+
+                    if (metadataUpdated)
                         freshInput = CaptureInputSnapshot();
 
                     if (!freshInput.Enabled || !string.Equals(freshInput.ClientId, activeClientId, StringComparison.Ordinal))
@@ -1689,27 +1704,15 @@ public sealed class DiscordRpcService : IAsyncDisposable
         }
 
         List<DiscordActivityButton>? buttons = null;
-        static void TryAdd(ref List<DiscordActivityButton>? list, string label, string url)
-        {
-            if (list is { Count: >= 2 })
-                return;
-
-            string? normalized = NormalizeDiscordText(label, MaxButtonLabelBytes);
-            if (string.IsNullOrEmpty(normalized))
-                return;
-
-            list ??= new List<DiscordActivityButton>(2);
-            list.Add(new DiscordActivityButton { Label = normalized, Url = url });
-        }
 
         if (!string.IsNullOrEmpty(playlistButtonUrl))
-            TryAdd(ref buttons, L["DiscordRpc_Button_OpenPlaylist"], playlistButtonUrl);
+            TryAddButton(ref buttons, L["DiscordRpc_Button_OpenPlaylist"], playlistButtonUrl);
 
         if (input.ShowListenerChannel && !string.IsNullOrEmpty(input.ListenerChannelUrl))
-            TryAdd(ref buttons, FormatListenerButtonLabel(input.ListenerHandle), input.ListenerChannelUrl);
+            TryAddButton(ref buttons, FormatListenerButtonLabel(input.ListenerHandle), input.ListenerChannelUrl);
 
         if (input.ShowGitHubButton)
-            TryAdd(ref buttons, L["DiscordRpc_Button_GitHub"], G.GitHubUrl);
+            TryAddButton(ref buttons, L["DiscordRpc_Button_GitHub"], G.GitHubUrl);
 
         DiscordActivityTimestamps? timestamps = null;
         if (input.TimestampMode != DiscordRpcTimestampMode.None && input.IdleSinceUtc is { } idleSince)
@@ -1869,43 +1872,43 @@ public sealed class DiscordRpcService : IAsyncDisposable
         }
     }
 
+    private static void TryAddButton(ref List<DiscordActivityButton>? list, string label, string url)
+    {
+        if (list is { Count: >= 2 })
+            return;
+
+        string? normalized = NormalizeDiscordText(label, MaxButtonLabelBytes);
+        if (string.IsNullOrEmpty(normalized))
+            return;
+
+        list ??= new List<DiscordActivityButton>(2);
+        list.Add(new DiscordActivityButton { Label = normalized, Url = url });
+    }
+
     private static List<DiscordActivityButton>? BuildButtons(
         in DiscordPresenceInput input,
         string? trackUrl)
     {
         List<DiscordActivityButton>? buttons = null;
 
-        static void TryAdd(ref List<DiscordActivityButton>? list, string label, string url)
-        {
-            if (list is { Count: >= 2 })
-                return;
-
-            string? normalized = NormalizeDiscordText(label, MaxButtonLabelBytes);
-            if (string.IsNullOrEmpty(normalized))
-                return;
-
-            list ??= new List<DiscordActivityButton>(2);
-            list.Add(new DiscordActivityButton { Label = normalized, Url = url });
-        }
-
         if (input.ShowTrackButton && !string.IsNullOrEmpty(trackUrl))
         {
-            TryAdd(ref buttons, LocalizationService.Instance["DiscordRpc_Button_ListenYouTube"], trackUrl);
+            TryAddButton(ref buttons, LocalizationService.Instance["DiscordRpc_Button_ListenYouTube"], trackUrl);
         }
 
         if (input.ShowPublicPlaylistLink && !string.IsNullOrEmpty(input.PublicPlaylistUrl))
         {
-            TryAdd(ref buttons, LocalizationService.Instance["DiscordRpc_Button_OpenPlaylist"], input.PublicPlaylistUrl);
+            TryAddButton(ref buttons, LocalizationService.Instance["DiscordRpc_Button_OpenPlaylist"], input.PublicPlaylistUrl);
         }
 
         if (input.ShowListenerChannel && !string.IsNullOrEmpty(input.ListenerChannelUrl))
         {
-            TryAdd(ref buttons, FormatListenerButtonLabel(input.ListenerHandle), input.ListenerChannelUrl);
+            TryAddButton(ref buttons, FormatListenerButtonLabel(input.ListenerHandle), input.ListenerChannelUrl);
         }
 
         if (input.ShowGitHubButton)
         {
-            TryAdd(ref buttons, LocalizationService.Instance["DiscordRpc_Button_GitHub"], G.GitHubUrl);
+            TryAddButton(ref buttons, LocalizationService.Instance["DiscordRpc_Button_GitHub"], G.GitHubUrl);
         }
 
         return buttons;
@@ -2065,6 +2068,7 @@ public sealed class DiscordRpcService : IAsyncDisposable
         _playlistService?.OnPlaylistChanged -= HandlePlaylistMetadataChanged;
 
         _authService?.OnAuthStateChanged -= HandleAuthStateChanged;
+        LocalizationService.Instance.LanguageChanged -= HandleLanguageChanged;
     }
 
     public async ValueTask DisposeAsync()

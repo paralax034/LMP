@@ -10,12 +10,10 @@ namespace LMP.UI.Features.Queue;
 public sealed partial class QueueViewModel : TrackListBaseViewModel
 {
     private readonly PlaylistService _playlistService;
-    private readonly CookieAuthService _auth;
-    private readonly DialogService _dialog;
+    private readonly PlaylistEditService _editService;
 
     private int _selfMoveCounter;
     private string? _activePlaylistId;
-    private string? _activePlaylistName;
     private bool _isLikedSource;
     private CancellationTokenSource? _colorLoadCts;
     private TimeSpan _elapsedBeforeCurrent;
@@ -44,14 +42,11 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     public bool IsEmpty => TotalCount == 0;
     public override bool CanReorderItems => CanReorder && TotalCount > 1;
 
-    public bool HasSourcePlaylistName =>
-        !string.IsNullOrWhiteSpace(_activePlaylistName)
-        || string.Equals(_activePlaylistId, LibraryService.LikedPlaylistId, StringComparison.Ordinal);
+    public bool HasSourcePlaylistName => !string.IsNullOrWhiteSpace(PlayerControl.ActivePlaylistName);
 
-    public string SourcePlaylistDisplayName => !string.IsNullOrWhiteSpace(_activePlaylistName)
-        ? _activePlaylistName
-        : string.Equals(_activePlaylistId, LibraryService.LikedPlaylistId, StringComparison.Ordinal)
-            ? L["Playlist_Liked"]
+    public string SourcePlaylistDisplayName =>
+        !string.IsNullOrWhiteSpace(PlayerControl.ActivePlaylistName)
+            ? PlayerControl.ActivePlaylistName
             : L["Nav_Playlist"];
 
     public string GoToPlaylistTooltip => HasSourcePlaylistName
@@ -81,16 +76,14 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     /// </summary>
     public QueueViewModel(
         PlaylistService playlistService,
-        CookieAuthService auth,
-        DialogService dialog,
+        PlaylistEditService editService,
         TrackViewModelFactory vmFactory,
         DownloadService downloads,
         PlayerControlService? playerControl = null)
         : base(downloads, vmFactory, playerControl)
     {
         _playlistService = playlistService;
-        _auth = auth;
-        _dialog = dialog;
+        _editService = editService;
 
         _items.IsQueueContext = true;
 
@@ -313,17 +306,14 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         if (_disposed) return;
 
         var playlistId = PlayerControl.ActivePlaylistId;
-        var playlistName = PlayerControl.ActivePlaylistName;
         bool hasSource = !string.IsNullOrEmpty(playlistId);
         bool isMixed = hasSource && !PlayerControl.IsQueuePure;
 
         bool idChanged = !string.Equals(_activePlaylistId, playlistId, StringComparison.Ordinal);
-        bool nameChanged = !string.Equals(_activePlaylistName, playlistName, StringComparison.Ordinal);
         bool visibilityChanged = HasSourcePlaylist != hasSource;
         bool mixedChanged = IsQueueMixed != isMixed;
 
         _activePlaylistId = playlistId;
-        _activePlaylistName = playlistName;
 
         if (visibilityChanged)
         {
@@ -336,12 +326,9 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
             IsQueueMixed = isMixed;
         }
 
-        if (idChanged || nameChanged || visibilityChanged)
-        {
-            OnPropertyChanged(nameof(SourcePlaylistDisplayName));
-            OnPropertyChanged(nameof(HasSourcePlaylistName));
-            OnPropertyChanged(nameof(GoToPlaylistTooltip));
-        }
+        OnPropertyChanged(nameof(SourcePlaylistDisplayName));
+        OnPropertyChanged(nameof(HasSourcePlaylistName));
+        OnPropertyChanged(nameof(GoToPlaylistTooltip));
 
         if (idChanged)
         {
@@ -559,16 +546,8 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         QueueTimeTooltip = string.Format(L["Queue_TimeTooltip"], elapsedText, remainingText, totalText);
     }
 
-    private static string FormatDuration(TimeSpan duration)
-    {
-        if (duration < TimeSpan.Zero)
-            duration = TimeSpan.Zero;
-
-        int totalHours = (int)duration.TotalHours;
-        return totalHours >= 1
-            ? $"{totalHours}:{duration:mm\\:ss}"
-            : duration.ToString(@"m\:ss");
-    }
+    private static string FormatDuration(TimeSpan duration) =>
+        LMP.Core.Helpers.DurationFormatter.FormatShort(duration);
 
     private bool IsQueueContentIdentical(IReadOnlyList<TrackInfo> rawQueue)
     {
@@ -592,46 +571,13 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         SaveQueueToPlaylistCommand.NotifyCanExecuteChanged();
     }
 
-    private Task DownloadAllAsync()
-    {
-        var rawQueue = PlayerControl.Queue;
-        for (int i = 0; i < rawQueue.Count; i++)
-        {
-            var track = rawQueue[i];
-            if (!track.IsDownloaded)
-                Downloads.StartDownload(track);
-        }
-
-        return Task.CompletedTask;
-    }
+    private Task DownloadAllAsync() => Downloads.StartDownloadsBatchAsync(PlayerControl.Queue);
 
     /// <summary>
     /// Saves the current playback queue to a new playlist with optional binding to YouTube Music.
     /// </summary>
-    private async Task SaveQueueToPlaylistAsync()
-    {
-        var result = await _dialog.ShowCreatePlaylistDialogAsync();
-        if (result == null || string.IsNullOrWhiteSpace(result.Name)) return;
-
-        var trimmedName = result.Name.Trim();
-        var playlist = await _playlistService.CreatePlaylistAsync(
-            name: trimmedName,
-            description: result.Description,
-            thumbnailUrl: result.ThumbnailUrl,
-            customColor: result.CustomColor,
-            computedColor: result.ComputedColor);
-
-        var tracks = PlayerControl.Queue;
-        if (tracks.Count > 0)
-        {
-            await _playlistService.AddTracksToPlaylistAsync(playlist.Id, tracks);
-        }
-
-        if (result.SyncToCloud && _auth.IsAuthenticated)
-        {
-            await _playlistService.LinkToCloudAsync(playlist.Id);
-        }
-    }
+    private Task<Core.Models.Playlist?> SaveQueueToPlaylistAsync() =>
+        _editService.CreatePlaylistAsync(PlayerControl.Queue);
 
     protected override void Dispose(bool disposing)
     {

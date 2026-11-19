@@ -99,6 +99,16 @@ public sealed class ImageCacheService : IDisposable
         _ = Task.Run(InitializeDiskCache);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int NormalizeDecodeWidth(int decodeWidth) => decodeWidth switch
+    {
+        <= 0 => 0,
+        <= 120 => 120,
+        <= 200 => 200,
+        <= 400 => 400,
+        _ => 800
+    };
+
     /// <summary>
     /// Synchronously provides a bitmap from RAM without delays or Task allocations.
     /// </summary>
@@ -108,23 +118,16 @@ public sealed class ImageCacheService : IDisposable
         bitmap = null;
         if (_isDisposed || string.IsNullOrEmpty(url)) return false;
 
-        int normalizedWidth = decodeWidth switch
-        {
-            <= 0 => 0,
-            <= 120 => 120,
-            <= 200 => 200,
-            <= 400 => 400,
-            _ => 800
-        };
+        int normalizedWidth = NormalizeDecodeWidth(decodeWidth);
 
         var memKey = ComputeMemoryKeyHash(url, normalizedWidth);
 
         lock (_lruLock)
         {
-            if (_memoryCache.TryGetValue(memKey, out var cached))
+            if (_memoryCache.TryGetValue(memKey, out var cached) && cached.Bitmap is { } liveBitmap)
             {
                 TouchLruUnsafe(memKey);
-                bitmap = cached.Bitmap;
+                bitmap = liveBitmap;
                 return true;
             }
         }
@@ -148,14 +151,7 @@ public sealed class ImageCacheService : IDisposable
         // Normalization in ONE place: cache key and actual decode use the same value.
         // Without this: width=44 → key=120, decode=44 → cache contains 44px bitmap under key 120.
         // Next request width=100 → key=120 → hit → gets 44px instead of 100px.
-        int normalizedWidth = decodeWidth switch
-        {
-            <= 0 => 0,
-            <= 120 => 120,
-            <= 200 => 200,
-            <= 400 => 400,
-            _ => 800
-        };
+        int normalizedWidth = NormalizeDecodeWidth(decodeWidth);
 
         var memKey = ComputeMemoryKeyHash(url, normalizedWidth);
 
@@ -455,9 +451,7 @@ public sealed class ImageCacheService : IDisposable
         long estimatedBytes = entry.EstimatedBytes;
         bool added = false;
         long evictedBytes = 0;
-        List<RefCountedBitmap>? evictedEntries = null;
 
-        // LRU eviction under lock
         lock (_lruLock)
         {
             while ((_memoryCache.Count >= MaxMemoryItems ||
@@ -465,11 +459,7 @@ public sealed class ImageCacheService : IDisposable
                 && _lruOrder.Last != null)
             {
                 evictedBytes += EvictLastUnsafe(out var removed);
-                if (removed != null)
-                {
-                    evictedEntries ??= new List<RefCountedBitmap>(4);
-                    evictedEntries.Add(removed);
-                }
+                removed?.Dispose();
             }
 
             if (!_memoryCache.ContainsKey(key))
@@ -486,13 +476,6 @@ public sealed class ImageCacheService : IDisposable
             }
         }
 
-        // --- Native memory release and GC pressure outside lock ---
-        if (evictedEntries != null)
-        {
-            for (int i = 0; i < evictedEntries.Count; i++)
-                evictedEntries[i].Dispose();
-        }
-
         if (evictedBytes > 0)
             GC.RemoveMemoryPressure(evictedBytes);
 
@@ -502,8 +485,7 @@ public sealed class ImageCacheService : IDisposable
 
     /// <summary>
     /// Called with <c>_lruLock</c> held.
-    /// Returns the size of the evicted bitmap and the object itself for subsequent
-    /// <see cref="RefCountedBitmap.Dispose"/> and <see cref="GC.RemoveMemoryPressure"/> outside lock.
+    /// Returns the size of the evicted entry and unlinks it for subsequent cleanup.
     /// </summary>
     private long EvictLastUnsafe(out RefCountedBitmap? removed)
     {
@@ -542,7 +524,6 @@ public sealed class ImageCacheService : IDisposable
     /// <param name="aggressive">If <c>true</c>, additionally halves RAM cache under high memory pressure.</param>
     private void EnforceMemoryLimits(bool aggressive = false)
     {
-        List<RefCountedBitmap>? evictedEntries = null;
         long evictedBytes = 0;
 
         lock (_lruLock)
@@ -557,18 +538,8 @@ public sealed class ImageCacheService : IDisposable
                    && _lruOrder.Last != null)
             {
                 evictedBytes += EvictLastUnsafe(out var removed);
-                if (removed != null)
-                {
-                    evictedEntries ??= new List<RefCountedBitmap>(4);
-                    evictedEntries.Add(removed);
-                }
+                removed?.Dispose();
             }
-        }
-
-        if (evictedEntries != null)
-        {
-            for (int i = 0; i < evictedEntries.Count; i++)
-                evictedEntries[i].Dispose();
         }
 
         if (evictedBytes > 0)
@@ -641,28 +612,17 @@ public sealed class ImageCacheService : IDisposable
     public void ClearMemoryCache()
     {
         long totalBytes;
-        RefCountedBitmap[]? toDispose = null;
 
         lock (_lruLock)
         {
             totalBytes = _currentMemoryCacheBytes;
-            if (_memoryCache.Count > 0)
-            {
-                toDispose = new RefCountedBitmap[_memoryCache.Count];
-                _memoryCache.Values.CopyTo(toDispose, 0);
-            }
+            foreach (var entry in _memoryCache.Values)
+                entry.Dispose();
 
             _memoryCache.Clear();
             _lruOrder.Clear();
             _lruIndex.Clear();
             Volatile.Write(ref _currentMemoryCacheBytes, 0);
-        }
-
-        // Deterministic release of Skia native memory outside lock
-        if (toDispose != null)
-        {
-            for (int i = 0; i < toDispose.Length; i++)
-                toDispose[i].Dispose();
         }
 
         if (totalBytes > 0)
@@ -728,9 +688,18 @@ public sealed class ImageCacheService : IDisposable
         => EnsureDiskCachedAsync(url, ct);
 
     /// <summary>
-    /// Ensures the cover file exists on disk without decoding a raster into RAM and returns its path.
-    /// Returns synchronously on disk cache hit with zero task allocation.
+    /// Synchronously returns the disk cache path if the cover image file is already cached on disk; otherwise <see langword="null"/>.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public string? TryGetCachedDiskPath(string? url)
+    {
+        if (_isDisposed || string.IsNullOrEmpty(url))
+            return null;
+
+        string diskPath = GetDiskCachePath(url);
+        return File.Exists(diskPath) ? diskPath : null;
+    }
+
     public ValueTask<string?> EnsureCoverDiskPathAsync(string? url, CancellationToken ct = default)
     {
         if (_isDisposed || string.IsNullOrEmpty(url))
@@ -779,15 +748,7 @@ public sealed class ImageCacheService : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong ComputeMemoryKeyHash(ReadOnlySpan<char> url, int normalizedWidth)
     {
-        ulong hash = FnvOffsetBasis;
-
-        foreach (char c in url)
-        {
-            hash ^= (byte)c;
-            hash *= FnvPrime;
-            hash ^= (byte)(c >> 8);
-            hash *= FnvPrime;
-        }
+        ulong hash = ComputeDiskKeyHash(url);
 
         hash ^= (byte)'_';
         hash *= FnvPrime;

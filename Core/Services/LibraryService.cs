@@ -24,6 +24,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     private readonly LegacyMigrationService _migration;
 
     private readonly SemaphoreSlim _settingsLock = new(1, 1);
+    private readonly Lock _settingsMutationLock = new();
 
     // Serializes like operations: rapid clicks write the latest state to SQLite rather than task completion order
     private readonly SemaphoreSlim _likeWriteGate = new(1, 1);
@@ -33,6 +34,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     private string _lastHydratedOwnerId = string.Empty;
     private CancellationTokenSource? _hydrationCts;
     private readonly Lock _hydrationLock = new();
+    private int _disposed;
 
     public AppSettings Settings { get; private set; } = new();
     public bool IsInitialized { get; private set; }
@@ -458,8 +460,7 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     public async Task<List<TrackInfo>> GetRecentlyPlayedAsync(int count = 20, CancellationToken ct = default)
     {
         var tracks = await _tracks.GetRecentlyPlayedAsync(CurrentOwnerId, count, ct).ConfigureAwait(false);
-        for (int i = 0; i < tracks.Count; i++)
-            _registry.RegisterOrUpdate(tracks[i]);
+        await HydrateAndRegisterTracksAsync(tracks, ct).ConfigureAwait(false);
         return tracks;
     }
 
@@ -489,13 +490,44 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     public string DownloadPath
     {
         get => string.IsNullOrEmpty(Settings.DownloadPath) ? G.Folder.Downloads : Settings.DownloadPath;
-        set { Settings.DownloadPath = value; SaveSettingsImmediate(); }
+        set
+        {
+            lock (_settingsMutationLock)
+            {
+                Settings.DownloadPath = value;
+            }
+
+            SaveSettingsImmediate();
+        }
     }
 
     public void UpdateSettings(Action<AppSettings> update)
     {
-        update(Settings);
-        _saveDebounceTimer.Change(SettingsSaveDebounceMs, Timeout.Infinite);
+        lock (_settingsMutationLock)
+        {
+            update(Settings);
+        }
+
+        if (Volatile.Read(ref _disposed) == 0)
+        {
+            try { _saveDebounceTimer.Change(SettingsSaveDebounceMs, Timeout.Infinite); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private AppSettings SnapshotSettingsForPersistence()
+    {
+        byte[] utf8;
+        lock (_settingsMutationLock)
+        {
+            utf8 = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+                Settings,
+                AppJsonContext.Default.AppSettings);
+        }
+
+        return System.Text.Json.JsonSerializer.Deserialize(
+            utf8,
+            AppJsonContext.Default.AppSettings) ?? new AppSettings();
     }
 
     private void OnSaveTimerCallback(object? state) => _ = SaveSettingsAsync();
@@ -517,7 +549,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         try
         {
-            await _settings.SetAsync("AppSettings", Settings, ct).ConfigureAwait(false);
+            var snapshot = SnapshotSettingsForPersistence();
+            await _settings.SetAsync("AppSettings", snapshot, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -545,7 +578,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         try
         {
-            _settings.Set("AppSettings", Settings);
+            var snapshot = SnapshotSettingsForPersistence();
+            _settings.Set("AppSettings", snapshot);
         }
         catch (Exception ex)
         {
@@ -600,11 +634,14 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         await connection.ApplySchemaMigrationAsync(DatabaseExtensions.CurrentDbVersion, ct).ConfigureAwait(false);
         await connection.OptimizeAsync(ct).ConfigureAwait(false);
 
-        Settings = new AppSettings();
+        lock (_settingsMutationLock)
+        {
+            Settings = new AppSettings();
+        }
         OnDataChanged?.Invoke();
     }
 
-    public void Dispose()
+    private void TeardownShared()
     {
         _auth.OnAuthStateChanged -= HandleAuthStateChanged;
 
@@ -616,6 +653,14 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
 
         SaveSettingsSync();
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        TeardownShared();
         _saveDebounceTimer.Dispose();
         _settingsLock.Dispose();
         _likeWriteGate.Dispose();
@@ -624,18 +669,12 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _auth.OnAuthStateChanged -= HandleAuthStateChanged;
-
-        lock (_hydrationLock)
-        {
-            _hydrationCts?.Cancel();
-            _hydrationCts?.Dispose();
-            _hydrationCts = null;
-        }
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
 
         await _registry.FlushAsync().ConfigureAwait(false);
 
-        SaveSettingsSync();
+        TeardownShared();
         await _saveDebounceTimer.DisposeAsync().ConfigureAwait(false);
         _settingsLock.Dispose();
         _likeWriteGate.Dispose();

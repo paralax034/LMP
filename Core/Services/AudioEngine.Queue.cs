@@ -254,8 +254,7 @@ public sealed partial class AudioEngine
             if (shouldAutoplay && playbackTrack != null)
             {
                 ResetSealedFailedTrack();
-                int session = BeginNewSession();
-                EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: true));
+                DispatchPlayCurrentIndex(startPlaying: true);
             }
         }
 
@@ -289,8 +288,7 @@ public sealed partial class AudioEngine
         if (shouldAutoplay && playbackTrack != null)
         {
             ResetSealedFailedTrack();
-            int session = BeginNewSession();
-            EnqueueCommand(new PlayCurrentIndexCommand(session, StartPlaying: true));
+            DispatchPlayCurrentIndex(startPlaying: true);
         }
     }
 
@@ -334,7 +332,7 @@ public sealed partial class AudioEngine
             _queue.Clear();
             _currentIndex = -1;
             if (current != null) { _queue.Add(current); _currentIndex = 0; }
-            _queueSource = QueueSource.CreateManual(++_queueSourceGeneration);
+            _queueSource = TransitionOnClearQueue(ref _queueSourceGeneration);
             RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
         }
@@ -349,8 +347,6 @@ public sealed partial class AudioEngine
     {
         bool removedCurrent;
         bool canMove = false;
-        // Intent to listen comes from engine state: after loading while paused, player is Stopped, and !IsPaused would start playback
-        bool startPlaying = CurrentTrack != null && _playIntent;
 
         lock (_queueLock)
         {
@@ -372,8 +368,7 @@ public sealed partial class AudioEngine
         if (canMove)
         {
             ResetSealedFailedTrack();
-            int session = BeginNewSession();
-            EnqueueCommand(new PlayCurrentIndexCommand(session, startPlaying));
+            DispatchPlayCurrentIndexFromCurrentIntent();
         }
         else
         {
@@ -410,7 +405,7 @@ public sealed partial class AudioEngine
             if (_queueSource.Kind == QueueSourceKind.Playlist
                 && string.Equals(_queueSource.Id, playlistId, StringComparison.Ordinal))
             {
-                _queueSource = QueueSource.CreateManual(++_queueSourceGeneration);
+                _queueSource = TransitionOnClearQueue(ref _queueSourceGeneration);
                 _isQueuePure = false;
                 detached = true;
             }
@@ -433,7 +428,6 @@ public sealed partial class AudioEngine
         IReadOnlyList<TrackInfo> addedTracks,
         string? newPlaylistName = null)
     {
-        bool startPlaying = CurrentTrack != null && _playIntent;
         PlaylistDiffOutcome outcome;
         bool purityChanged;
 
@@ -478,8 +472,7 @@ public sealed partial class AudioEngine
             if (outcome.CanMoveNext)
             {
                 ResetSealedFailedTrack();
-                int session = BeginNewSession();
-                EnqueueCommand(new PlayCurrentIndexCommand(session, startPlaying));
+                DispatchPlayCurrentIndexFromCurrentIntent();
             }
             else
             {
@@ -763,19 +756,36 @@ public sealed partial class AudioEngine
     /// </summary>
     private void PreWarmNextTracksInQueue(int currentIndex, HttpClient httpClient, CancellationToken ct)
     {
+        if (RepeatMode == RepeatMode.One)
+            return;
+
         TrackInfo? next1 = null;
         TrackInfo? next2 = null;
+        int idx1;
+        int idx2 = -1;
 
         lock (_queueLock)
         {
-            int idx1 = currentIndex + 1;
-            int idx2 = currentIndex + 2;
-            if ((uint)idx1 < (uint)_queue.Count) next1 = _queue[idx1];
-            if ((uint)idx2 < (uint)_queue.Count) next2 = _queue[idx2];
+            int count = _queue.Count;
+            if (count <= 1 || currentIndex < 0)
+                return;
+
+            bool repeatAll = RepeatMode == RepeatMode.All;
+            idx1 = currentIndex + 1 < count ? currentIndex + 1 : (repeatAll ? 0 : -1);
+            if (idx1 >= 0 && count > 2)
+            {
+                int candidate2 = idx1 + 1;
+                idx2 = candidate2 < count ? candidate2 : (repeatAll ? 0 : -1);
+                if (idx2 == currentIndex)
+                    idx2 = -1;
+            }
+
+            if ((uint)idx1 < (uint)count) next1 = _queue[idx1];
+            if ((uint)idx2 < (uint)count) next2 = _queue[idx2];
         }
 
-        PreWarmSingleQueueTrack(next1, currentIndex + 1, httpClient, ct);
-        PreWarmSingleQueueTrack(next2, currentIndex + 2, httpClient, ct);
+        PreWarmSingleQueueTrack(next1, idx1, httpClient, ct);
+        PreWarmSingleQueueTrack(next2, idx2, httpClient, ct);
     }
 
     private void PreWarmSingleQueueTrack(TrackInfo? next, int queueIdx, HttpClient httpClient, CancellationToken ct)
@@ -792,7 +802,7 @@ public sealed partial class AudioEngine
         }
         else
         {
-            string rawId = next.GetRawIdSpan().ToString();
+            string rawId = next.GetRawId();
             var hint = StreamSelectionHint.FromTrack(next, _library.Settings.RememberTrackFormat);
             var descriptor = _youtube.TryGetCachedStreamDescriptor(
                 rawId,

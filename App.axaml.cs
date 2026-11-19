@@ -28,7 +28,6 @@ public partial class App : Application
         Log.Info("Framework initialization completed.");
         // The flag is raised from within the loop: synchronous theme, localization, and splash prevent false 400ms SPIKE pings
         Dispatcher.UIThread.Post(LMP.Core.Diagnostics.ProcessFlightRecorder.MarkUiDispatcherReady, DispatcherPriority.Background);
-        AudioSourceFactory.RegisterLazyFactory(() => AppEntry.Services.GetRequiredService<AudioCacheManager>());
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -129,12 +128,12 @@ public partial class App : Application
                 if (savedLang == "en" && currentLang != "en")
                 {
                     Log.Info($"First run: saving auto-detected '{currentLang}' to DB (was default 'en')");
-                    library.Settings.LanguageCode = currentLang;
+                    library.UpdateSettings(s => s.LanguageCode = currentLang);
                 }
                 else if (savedLang != "en")
                 {
                     Log.Info($"Applying saved language from DB: {savedLang}");
-                    L.CurrentLanguage = savedLang;
+                    await Dispatcher.UIThread.InvokeAsync(() => L.CurrentLanguage = savedLang);
                 }
             }
 
@@ -457,6 +456,7 @@ public partial class App : Application
                     finally
                     {
                         _appLifetimeCts.Dispose();
+                        Core.Diagnostics.ProcessFlightRecorder.ShutdownGlobal();
                         Log.Info("Shutdown complete. Exiting with code 0.");
                         Log.Shutdown();
 

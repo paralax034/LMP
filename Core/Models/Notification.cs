@@ -172,7 +172,19 @@ public sealed partial class Notification : ObservableObject
         ? L[TitleKey]
         : TitleRaw ?? "";
 
-    public string TrackUrl => !string.IsNullOrEmpty(TrackId) ? $"https://www.youtube.com/watch?v={TrackId}" : "";
+    public string TrackUrl
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(TrackId))
+                return string.Empty;
+
+            var rawId = LMP.Core.Youtube.Utils.YoutubeIdHelper.ExtractRawId(TrackId);
+            return !string.IsNullOrEmpty(rawId)
+                ? $"https://www.youtube.com/watch?v={rawId}"
+                : string.Empty;
+        }
+    }
 
     /// <summary>
     /// Localized message.
@@ -334,9 +346,13 @@ public sealed record AttemptRecord(
     string? ErrorMessage,
     DateTime Timestamp)
 {
+    [System.Text.Json.Serialization.JsonIgnore]
     public string FormattedTime => Timestamp.ToString("HH:mm:ss");
+
+    [System.Text.Json.Serialization.JsonIgnore]
     public string StatusIcon => Success ? "✅" : "❌";
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string DisplayMessage
     {
         get
@@ -345,11 +361,7 @@ public sealed record AttemptRecord(
                 return LocalizationService.Instance["Attempt_Success"];
 
             if (!string.IsNullOrEmpty(ErrorMessage))
-            {
-                return ErrorMessage.Length > 50
-                    ? ErrorMessage[..50] + "..."
-                    : ErrorMessage;
-            }
+                return ErrorMessage;
 
             return LocalizationService.Instance["Attempt_Failed"];
         }

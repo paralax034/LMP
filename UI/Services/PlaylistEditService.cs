@@ -30,6 +30,41 @@ public sealed class PlaylistEditService
     public sealed record EditResult(bool Changed, Playlist Playlist);
 
     /// <summary>
+    /// Displays the create-playlist dialog, persists the new playlist with optional initial tracks,
+    /// and optionally links it to the authenticated YouTube Music account.
+    /// </summary>
+    public async Task<Playlist?> CreatePlaylistAsync(
+        IReadOnlyList<TrackInfo>? initialTracks = null,
+        CancellationToken ct = default)
+    {
+        var result = await _dialog.ShowCreatePlaylistDialogAsync();
+        if (result == null || string.IsNullOrWhiteSpace(result.Name))
+            return null;
+
+        var trimmedName = result.Name.Trim();
+        var playlist = await _playlistService.CreatePlaylistAsync(
+            name: trimmedName,
+            description: result.Description,
+            thumbnailUrl: result.ThumbnailUrl,
+            customColor: result.CustomColor,
+            computedColor: result.ComputedColor,
+            ct: ct).ConfigureAwait(false);
+
+        if (initialTracks is { Count: > 0 })
+        {
+            await _playlistService.AddTracksToPlaylistAsync(playlist.Id, initialTracks, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (result.SyncToCloud && _auth.IsAuthenticated)
+        {
+            await _playlistService.LinkToCloudAsync(playlist.Id, ct).ConfigureAwait(false);
+        }
+
+        return playlist;
+    }
+
+    /// <summary>
     /// Coordinates the process of editing playlist metadata and cloud linking.
     /// </summary>
     /// <param name="playlistId">The identifier of the playlist being edited.</param>

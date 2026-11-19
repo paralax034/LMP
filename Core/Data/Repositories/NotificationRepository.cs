@@ -16,7 +16,7 @@ internal sealed class NotificationRepository : INotificationRepository
 
     private const string NotificationColumnsSelect = """
         n.Id, n.TitleKey, n.TitleRaw, n.MessageKey, n.MessageRaw,
-        n.MessageArgsJson, n.RecommendationKey, n.Severity, n.IsRead,
+        n.MessageArgsJson, n.RecommendationKey, n.RecommendationRaw, n.Severity, n.IsRead,
         n.TrackId, n.TrackTitle, n.ExceptionDetails, n.AttemptsJson, n.CreatedAt
         """;
 
@@ -66,13 +66,8 @@ internal sealed class NotificationRepository : INotificationRepository
         string? attemptsJson = null;
         if (notification.Attempts is { Count: > 0 })
         {
-            var dtos = new List<NotificationService.AttemptDto>(notification.Attempts.Count);
-            for (int i = 0; i < notification.Attempts.Count; i++)
-            {
-                var a = notification.Attempts[i];
-                dtos.Add(new NotificationService.AttemptDto(a.ClientName, a.Success, a.ErrorMessage, a.Timestamp));
-            }
-            attemptsJson = JsonSerializer.Serialize(dtos, AppJsonContext.Default.ListAttemptDto);
+            var list = new List<AttemptRecord>(notification.Attempts);
+            attemptsJson = JsonSerializer.Serialize(list, AppJsonContext.Default.ListAttemptRecord);
         }
 
         string? argsJson = null;
@@ -92,12 +87,12 @@ internal sealed class NotificationRepository : INotificationRepository
         cmd.CommandText = """
             INSERT INTO Notifications (
                 Id, TitleKey, TitleRaw, MessageKey, MessageRaw,
-                MessageArgsJson, RecommendationKey, Severity, IsRead,
+                MessageArgsJson, RecommendationKey, RecommendationRaw, Severity, IsRead,
                 TrackId, TrackTitle, ExceptionDetails, AttemptsJson, CreatedAt
             )
             VALUES (
                 @id, @titleKey, @titleRaw, @messageKey, @messageRaw,
-                @messageArgsJson, @recommendationKey, @severity, @isRead,
+                @messageArgsJson, @recommendationKey, @recommendationRaw, @severity, @isRead,
                 @trackId, @trackTitle, @exceptionDetails, @attemptsJson, @createdAt
             );
             """;
@@ -109,6 +104,7 @@ internal sealed class NotificationRepository : INotificationRepository
         AddParameter(cmd, "@messageRaw", (object?)notification.MessageRaw ?? DBNull.Value);
         AddParameter(cmd, "@messageArgsJson", (object?)argsJson ?? DBNull.Value);
         AddParameter(cmd, "@recommendationKey", (object?)notification.RecommendationKey ?? DBNull.Value);
+        AddParameter(cmd, "@recommendationRaw", (object?)notification.RecommendationRaw ?? DBNull.Value);
         AddParameter(cmd, "@severity", (int)notification.Severity);
         AddParameter(cmd, "@isRead", notification.IsRead ? 1 : 0);
         AddParameter(cmd, "@trackId", (object?)notification.TrackId ?? DBNull.Value);
@@ -173,6 +169,18 @@ internal sealed class NotificationRepository : INotificationRepository
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task DeleteByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM Notifications WHERE Id = @id;";
+        AddParameter(cmd, "@id", id.ToString());
+
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     #region ADO.NET Вспомогательные методы
 
     /// <summary>
@@ -193,17 +201,18 @@ internal sealed class NotificationRepository : INotificationRepository
         var messageRaw = reader.IsDBNull(4) ? null : reader.GetString(4);
         var messageArgsJson = reader.IsDBNull(5) ? null : reader.GetString(5);
         var recommendationKey = reader.IsDBNull(6) ? null : reader.GetString(6);
-        var severity = reader.GetInt32(7);
-        var isRead = reader.GetInt32(8) != 0;
-        var trackId = reader.IsDBNull(9) ? null : reader.GetString(9);
-        var trackTitle = reader.IsDBNull(10) ? null : reader.GetString(10);
-        var exceptionDetails = reader.IsDBNull(11) ? null : reader.GetString(11);
-        var attemptsJson = reader.IsDBNull(12) ? null : reader.GetString(12);
+        var recommendationRaw = reader.IsDBNull(7) ? null : reader.GetString(7);
+        var severity = reader.GetInt32(8);
+        var isRead = reader.GetInt32(9) != 0;
+        var trackId = reader.IsDBNull(10) ? null : reader.GetString(10);
+        var trackTitle = reader.IsDBNull(11) ? null : reader.GetString(11);
+        var exceptionDetails = reader.IsDBNull(12) ? null : reader.GetString(12);
+        var attemptsJson = reader.IsDBNull(13) ? null : reader.GetString(13);
 
         DateTime createdAt = DateTime.UtcNow;
-        if (!reader.IsDBNull(13))
+        if (!reader.IsDBNull(14))
         {
-            var createdAtStr = reader.GetString(13);
+            var createdAtStr = reader.GetString(14);
             if (DateTime.TryParse(createdAtStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsedDt))
             {
                 createdAt = parsedDt;
@@ -215,15 +224,10 @@ internal sealed class NotificationRepository : INotificationRepository
         {
             try
             {
-                var dtos = JsonSerializer.Deserialize(attemptsJson, AppJsonContext.Default.ListAttemptDto);
-                if (dtos is { Count: > 0 })
+                var list = JsonSerializer.Deserialize(attemptsJson, AppJsonContext.Default.ListAttemptRecord);
+                if (list is { Count: > 0 })
                 {
-                    attempts = new ObservableCollection<AttemptRecord>();
-                    for (int i = 0; i < dtos.Count; i++)
-                    {
-                        var d = dtos[i];
-                        attempts.Add(new AttemptRecord(d.ClientName, d.Success, d.ErrorMessage, d.Timestamp));
-                    }
+                    attempts = new ObservableCollection<AttemptRecord>(list);
                 }
             }
             catch { }
@@ -257,6 +261,7 @@ internal sealed class NotificationRepository : INotificationRepository
             MessageRaw = messageRaw,
             MessageArgs = args,
             RecommendationKey = recommendationKey,
+            RecommendationRaw = recommendationRaw,
             Severity = (NotificationSeverity)severity,
             IsRead = isRead,
             TrackId = trackId,

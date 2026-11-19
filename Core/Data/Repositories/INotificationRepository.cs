@@ -41,4 +41,9 @@ public interface INotificationRepository
     /// Used by <see cref="NotificationService"/> auto-cleanup.
     /// </summary>
     Task DeleteOlderThanAsync(DateTime threshold, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes a single notification by its unique identifier.
+    /// </summary>
+    Task DeleteByIdAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
 }

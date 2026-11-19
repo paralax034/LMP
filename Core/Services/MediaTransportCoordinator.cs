@@ -415,8 +415,7 @@ public sealed class MediaTransportCoordinator : IDisposable
             if (Volatile.Read(ref _disposed) != 0 || ct.IsCancellationRequested || Interlocked.Read(ref _trackGeneration) != generation)
                 return;
 
-            string diskPath = ImageCacheService.GetDiskCachePath(url);
-            if (File.Exists(diskPath))
+            if (_imageCache.TryGetCachedDiskPath(url) is { } diskPath)
             {
                 PublishMetadataIfCurrent(metadata, diskPath, generation, ct);
                 return;

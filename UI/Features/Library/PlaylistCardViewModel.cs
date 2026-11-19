@@ -19,6 +19,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     private readonly Action<string> _onOpen;
 
     private readonly EventHandler<string> _languageChangedHandler;
+    private readonly Action _authChangedHandler;
     private bool _isDisposed;
 
     #endregion
@@ -100,17 +101,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
     /// YouTube playlist URL for CopyLinkButton.
     /// Null if the playlist is not bound to YouTube.
     /// </summary>
-    public string? YoutubeUrl
-    {
-        get
-        {
-            if (IsLikedPlaylist && _auth.IsAuthenticated)
-                return "https://www.youtube.com/playlist?list=LM";
-            return string.IsNullOrEmpty(Playlist.YoutubeId)
-                ? null
-                : $"https://www.youtube.com/playlist?list={Playlist.YoutubeId}";
-        }
-    }
+    public string? YoutubeUrl => Playlist.GetYoutubeUrl(_auth.IsAuthenticated);
 
     /// <summary>
     /// Gets a value indicating whether the YouTube playlist link can be copied.
@@ -348,6 +339,20 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
         };
         LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
 
+        _authChangedHandler = () =>
+        {
+            if (_isDisposed || !IsLikedPlaylist) return;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_isDisposed) return;
+                ApplyCloudState(Playlist);
+                OnPropertyChanged(nameof(YoutubeUrl));
+                OnPropertyChanged(nameof(CanCopyLink));
+                CopyLinkCommand.NotifyCanExecuteChanged();
+            });
+        };
+        _auth.OnAuthStateChanged += _authChangedHandler;
+
         SyncInitialPlaybackState();
     }
 
@@ -405,6 +410,15 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
             Author = playlist.Author;
         }
 
+        Playlist.Description = playlist.Description;
+        Playlist.OwnerChannelId = playlist.OwnerChannelId;
+        Playlist.CustomColor = playlist.CustomColor;
+        Playlist.ComputedColor = playlist.ComputedColor;
+        Playlist.CloudTrackCount = playlist.CloudTrackCount;
+        Playlist.ViewCount = playlist.ViewCount;
+        Playlist.ReleaseDate = playlist.ReleaseDate;
+        Playlist.LastSyncedAtUtc = playlist.LastSyncedAtUtc;
+
         // ═══ Ownership & Visibility ═══
         bool ownershipChanged = Playlist.Ownership != playlist.Ownership
                                 || Playlist.Visibility != playlist.Visibility;
@@ -425,8 +439,15 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
             Playlist.YoutubeId = playlist.YoutubeId;
             Playlist.IsCloudUnavailable = playlist.IsCloudUnavailable;
             ApplyCloudState(playlist);
+            OnPropertyChanged(nameof(IsLocal));
             OnPropertyChanged(nameof(YoutubeUrl));
             OnPropertyChanged(nameof(CanCopyLink));
+        }
+
+        if (ownershipChanged || cloudChanged)
+        {
+            OnPropertyChanged(nameof(IsReadOnly));
+            OnPropertyChanged(nameof(CanEdit));
         }
 
         DeleteCommand.NotifyCanExecuteChanged();
@@ -507,6 +528,7 @@ public sealed partial class PlaylistCardViewModel : ViewModelBase
             _isDisposed = true;
 
             _playerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
+            _auth.OnAuthStateChanged -= _authChangedHandler;
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
         }
         base.Dispose(disposing);
