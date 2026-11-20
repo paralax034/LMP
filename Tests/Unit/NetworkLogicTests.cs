@@ -110,4 +110,48 @@ public static class NetworkLogicTests
 
         return Task.CompletedTask;
     }
+
+    [TestMethod(TestCategory.Unit, "CancellationHelper & NetworkErrorHelper Unified Classification", Group = TestGroups.Network, Order = 4)]
+    public static Task TestCancellationHelperUnifiedClassificationAsync()
+    {
+        using var userCts = new CancellationTokenSource();
+        userCts.Cancel();
+
+        // 1. Explicit token-backed user cancellation -> true everywhere
+        var userCancelEx = new TaskCanceledException("User switched track", null, userCts.Token);
+        TestAssert.True(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(userCancelEx));
+        TestAssert.True(LMP.Core.Audio.Helpers.CancellationHelper.IsCancellationLike(userCancelEx));
+        TestAssert.True(LMP.Core.Helpers.NetworkErrorHelper.IsCancellationLike(userCancelEx));
+
+        // 2. HttpClient timeout (TaskCanceledException with CancellationToken.None) -> false everywhere
+        var httpTimeoutEx = new TaskCanceledException("HttpClient.Timeout elapsed");
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(httpTimeoutEx));
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsCancellationLike(httpTimeoutEx));
+        TestAssert.False(LMP.Core.Helpers.NetworkErrorHelper.IsCancellationLike(httpTimeoutEx));
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsCancellationOrTokenCancelled(httpTimeoutEx, CancellationToken.None));
+        TestAssert.True(LMP.Core.Audio.Helpers.CancellationHelper.IsCancellationOrTokenCancelled(httpTimeoutEx, userCts.Token));
+
+        // 3. ChunkDownloadFatalException wrapping a TaskCanceledException (even with canceled internal token) -> never a user cancel
+        var chunkFatalFromTimeout = new LMP.Core.Exceptions.ChunkDownloadFatalException(
+            "Max retries", 0, 3, LMP.Core.Exceptions.ChunkDownloadFailureReason.MaxRetriesExceeded, "yt_test", null, httpTimeoutEx);
+        var chunkFatalFromInternalCts = new LMP.Core.Exceptions.ChunkDownloadFatalException(
+            "Max retries", 0, 3, LMP.Core.Exceptions.ChunkDownloadFailureReason.MaxRetriesExceeded, "yt_test", null, userCancelEx);
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(chunkFatalFromTimeout));
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsCancellationLike(chunkFatalFromTimeout));
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(chunkFatalFromInternalCts));
+
+        // 4. YoutubeNetworkException(Timeout) wrapping a canceled token -> never a user cancel
+        var ytTimeout = new LMP.Core.Youtube.Exceptions.YoutubeNetworkException(
+            "Read timed out", LMP.Core.Youtube.Exceptions.NetworkErrorType.Timeout, userCancelEx);
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(ytTimeout));
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsCancellationLike(ytTimeout));
+
+        // 5. AudioSourceException wrapping user cancellation vs HTTP timeout
+        var wrappedUserCancel = new LMP.Core.Exceptions.AudioSourceException("Init aborted", userCancelEx);
+        var wrappedHttpTimeout = new LMP.Core.Exceptions.AudioSourceException("Init timed out", httpTimeoutEx);
+        TestAssert.True(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(wrappedUserCancel));
+        TestAssert.False(LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(wrappedHttpTimeout));
+
+        return Task.CompletedTask;
+    }
 }

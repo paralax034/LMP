@@ -103,10 +103,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         AudioSourceFactory.OnFormatCached += HandleFormatCached;
     }
 
-    public override async Task OnNavigatedToAsync()
-    {
-        await base.OnNavigatedToAsync().ConfigureAwait(false);
-    }
+    public override Task OnNavigatedToAsync() => base.OnNavigatedToAsync();
 
     partial void OnFilterQueryChanged(string value)
     {

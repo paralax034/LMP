@@ -650,7 +650,10 @@ internal sealed class AudioPipeline : IAsyncDisposable
                 catch (OperationCanceledException ex)
                 {
                     Log.Error($"[AudioPipeline] Read failed after {retryCount} transient retries: {ex.Message}");
-                    onError?.Invoke(ex);
+                    onError?.Invoke(new LMP.Core.Youtube.Exceptions.YoutubeNetworkException(
+                        $"Read failed after {retryCount} transient retries: {ex.Message}",
+                        LMP.Core.Youtube.Exceptions.NetworkErrorType.Timeout,
+                        ex));
                     break;
                 }
                 catch (ChunkDownloadFatalException) { throw; }

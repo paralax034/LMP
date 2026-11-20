@@ -67,34 +67,8 @@ public static class NetworkErrorHelper
     /// </summary>
     /// <param name="exception">Exception to evaluate.</param>
     /// <returns><c>true</c> if it is a pure user cancellation; <c>false</c> if it is a network/timeout error.</returns>
-    public static bool IsCancellationLike(Exception? exception)
-    {
-        if (exception is null)
-            return false;
-
-        for (var current = exception; current != null; current = current.InnerException)
-        {
-            if (current is ChunkDownloadFatalException or YoutubeNetworkException)
-                return false;
-
-            // An explicit token-backed OperationCanceledException/TaskCanceledException
-            // takes precedence over any inner IOException/SocketException produced when
-            // aborting an in-flight socket or SSL read.
-            if (current is OperationCanceledException oce)
-                return oce.CancellationToken.IsCancellationRequested;
-
-            if (current is TimeoutException or
-                IOException or
-                System.Net.Sockets.SocketException or
-                System.Net.WebException or
-                HttpRequestException)
-            {
-                return false;
-            }
-        }
-
-        return false;
-    }
+    public static bool IsCancellationLike(Exception? exception) =>
+        LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(exception);
 
     /// <summary>
     /// Checks if the exception is caused by an SSL/TLS handshake failure or a connection reset

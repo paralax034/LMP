@@ -140,7 +140,6 @@ internal static class ServiceRegistration
         services.AddSingleton(sp => new PlayerControlService(
             sp.GetRequiredService<AudioEngine>(),
             sp.GetRequiredService<LibraryService>(),
-            sp.GetService<NotificationService>(),
             sp.GetService<YoutubeProvider>(),
             sp.GetService<CookieAuthService>(),
             sp.GetService<TrackRegistry>(),

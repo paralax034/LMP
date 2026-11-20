@@ -513,7 +513,8 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
     {
         if (_isDisposed) return;
 
-        await base.OnNavigatedToAsync().ConfigureAwait(false);
+        await base.OnNavigatedToAsync();
+        if (_isDisposed) return;
 
         if (string.IsNullOrWhiteSpace(_currentQuery))
         {
@@ -523,6 +524,7 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
 
         OnPropertyChanged(nameof(IsBusy));
         await LoadHistoryAsync();
+        if (_isDisposed) return;
 
         if (Source == ContentSource.Local && Items.Count == 0)
         {
@@ -881,9 +883,12 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
             var (tracks, session) = await _youtube.SearchWithSessionAsync(
                 _currentQuery, InitialBatchSize, MaxResults, GetSearchFilter(), ct);
 
-            if (_isDisposed) return;
-
-            _searchSession = session;
+            if (_isDisposed || ct.IsCancellationRequested)
+            {
+                try { session?.Dispose(); } catch { }
+                ct.ThrowIfCancellationRequested();
+                return;
+            }
 
             if (Source == ContentSource.YouTubeMusic)
             {
@@ -891,8 +896,8 @@ public sealed partial class SearchViewModel : TrackListBaseViewModel
                     tracks[i].IsMusic = true;
             }
 
-            ct.ThrowIfCancellationRequested();
-            if (_isDisposed) return;
+            try { _searchSession?.Dispose(); } catch { }
+            _searchSession = session;
 
             if (tracks.Count > 0 && LibService.Settings.EnableSearchCache)
             {

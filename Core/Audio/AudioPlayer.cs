@@ -395,7 +395,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 }
                 catch (Exception ex)
                 {
-                    if (CancellationHelper.IsCancellationLike(ex) || _session.IsStale(command.SessionId))
+                    if (CancellationHelper.IsUserCancellation(ex) || _session.IsStale(command.SessionId))
                         continue;
 
                     Log.Error($"[AudioPlayer] Command error: {ex.Message}", ex);
@@ -886,7 +886,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         catch (Exception ex) when (
             cmd.ExternalCancellationToken.IsCancellationRequested ||
             _session.IsStale(cmd.SessionId) ||
-            CancellationHelper.IsCancellationLike(ex))
+            CancellationHelper.IsUserCancellation(ex))
         {
             CompletePlayCommandCanceled(cmd.Completion);
             CleanupOrphanedPipelineOnCancel(createdPipeline);
@@ -1296,7 +1296,7 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         if (IsPipelineCommandStale(cmd.Pipeline, cmd.SessionId))
             return Task.CompletedTask;
 
-        if (CancellationHelper.IsCancellationLike(cmd.Error))
+        if (CancellationHelper.IsUserCancellation(cmd.Error))
             return Task.CompletedTask;
 
         HandleError(cmd.Error);

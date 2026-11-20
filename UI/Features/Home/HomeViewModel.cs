@@ -86,12 +86,12 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
     {
         if (_isDisposed) return;
 
-        await base.OnNavigatedToAsync().ConfigureAwait(false);
+        await base.OnNavigatedToAsync();
+        if (_isDisposed) return;
 
         if (!_isDataLoaded)
         {
             await LoadTracksAsync();
-            _isDataLoaded = true;
         }
     }
 
@@ -120,6 +120,8 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
 
     private async Task LoadTracksAsync(bool force = false)
     {
+        if (_isDisposed) return;
+
         var category = SelectedCategory;
         if (category is null) return;
 
@@ -191,7 +193,10 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
         finally
         {
             if (!_isDisposed && ReferenceEquals(_categoryCts, loadCts))
+            {
+                _isDataLoaded = true;
                 IsLoading = false;
+            }
         }
     }
 

@@ -9,6 +9,14 @@ namespace LMP.Core.Services;
 public sealed class PlayerControlService : IDisposable
 {
     private const int LiveSyncDebounceMs = 75;
+    private const double LowBufferYieldThresholdPercent = 15.0;
+
+    internal static bool ShouldYieldToAudioBuffering(
+        bool isLoading,
+        bool isPlaying,
+        bool isFullyBuffered,
+        double bufferProgressPercent) =>
+        isLoading || (isPlaying && !isFullyBuffered && bufferProgressPercent < LowBufferYieldThresholdPercent);
 
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
@@ -161,7 +169,6 @@ public sealed class PlayerControlService : IDisposable
     public PlayerControlService(
         AudioEngine audio,
         LibraryService library,
-        NotificationService? notificationService = null,
         YoutubeProvider? youtube = null,
         CookieAuthService? auth = null,
         TrackRegistry? trackRegistry = null,
@@ -170,15 +177,20 @@ public sealed class PlayerControlService : IDisposable
     {
         _audio = audio;
         _library = library;
-        _ = notificationService;
         _youtube = youtube;
         _auth = auth;
         _trackRegistry = trackRegistry;
         _playlistSync = playlistSync;
         _playlistService = playlistService;
 
-        _playlistSync?.IsAudioBufferingCheck = () =>
-                _audio.IsLoading || (_audio.IsPlaying && !_audio.IsFullyBuffered && _audio.BufferProgress < 0.15);
+        if (_playlistSync != null)
+        {
+            _playlistSync.IsAudioBufferingCheck = () => ShouldYieldToAudioBuffering(
+                _audio.IsLoading,
+                _audio.IsPlaying,
+                _audio.IsFullyBuffered,
+                _audio.BufferProgress);
+        }
 
         _lastTrackId = _audio.CurrentTrack?.Id;
         _lastCanGoNext = _audio.CanGoNext;
@@ -1026,6 +1038,9 @@ public sealed class PlayerControlService : IDisposable
         _disposed = true;
 
         CancelPendingLiveSync();
+
+        if (_playlistSync != null)
+            _playlistSync.IsAudioBufferingCheck = null;
 
         _library.OnInitialized -= HandleLibraryInitialized;
         _library.OnTrackUpdated -= HandleTrackUpdated;

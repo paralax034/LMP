@@ -1608,4 +1608,128 @@ public static class AudioLogicTests
 
         return Task.CompletedTask;
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_activeVms")]
+    private static extern ref Dictionary<int, LMP.UI.Features.Shared.TrackItemViewModel> VirtualTrackListActiveVms(
+        LMP.UI.ViewModels.VirtualTrackList list);
+
+    [TestMethod(TestCategory.Unit, "VirtualTrackList RemoveTrack & MoveTrack Under Active Filter", Group = TestGroups.Audio, Order = 50)]
+    public static Task TestVirtualTrackListFilteredRemoveAndMoveAsync()
+    {
+        static TrackInfo Track(string id, string title) => new() { Id = id, Title = title, Author = "Artist" };
+
+        var factory = (LMP.UI.Services.TrackViewModelFactory)RuntimeHelpers.GetUninitializedObject(
+            typeof(LMP.UI.Services.TrackViewModelFactory));
+        using var list = new LMP.UI.ViewModels.VirtualTrackList(factory);
+
+        var activeVms = VirtualTrackListActiveVms(list);
+        try
+        {
+            var stubB = (LMP.UI.Features.Shared.TrackItemViewModel)RuntimeHelpers.GetUninitializedObject(
+                typeof(LMP.UI.Features.Shared.TrackItemViewModel));
+            var stubD = (LMP.UI.Features.Shared.TrackItemViewModel)RuntimeHelpers.GetUninitializedObject(
+                typeof(LMP.UI.Features.Shared.TrackItemViewModel));
+
+            // 1. RemoveTrack for tracks hidden by active FilterQuery (before, between, and after visible items)
+            list.SetTracks([
+                Track("yt_a", "Alpha"),
+                Track("yt_b", "Beta match"),
+                Track("yt_c", "Gamma"),
+                Track("yt_d", "Delta match"),
+                Track("yt_e", "Epsilon")
+            ]);
+            list.ApplyFilter("match");
+            TestAssert.Equal(5, list.TotalCount);
+            TestAssert.Equal(2, list.FilteredCount);
+
+            // Simulate materialized VMs for visible master indices (1 -> yt_b, 3 -> yt_d)
+            activeVms[1] = stubB;
+            activeVms[3] = stubD;
+
+            // Remove hidden item BEFORE all visible items (masterIndex = 0)
+            TestAssert.True(list.RemoveTrack("yt_a"));
+            TestAssert.Equal(4, list.TotalCount);
+            TestAssert.Equal(2, list.FilteredCount);
+            TestAssert.Equal("yt_b", list.GetTrackAt(0)?.Id);
+            TestAssert.Equal("yt_d", list.GetTrackAt(1)?.Id);
+            TestAssert.Equal(0, list.IndexOfTrackId("yt_b"));
+            TestAssert.Equal(1, list.IndexOfTrackId("yt_d"));
+            TestAssert.True(ReferenceEquals(stubB, list[0]), "Cached VM key for yt_b must shift from 1 to 0");
+            TestAssert.True(ReferenceEquals(stubD, list[1]), "Cached VM key for yt_d must shift from 3 to 2");
+
+            // Remove hidden item BETWEEN visible items (masterIndex = 1)
+            TestAssert.True(list.RemoveTrack("yt_c"));
+            TestAssert.Equal(3, list.TotalCount);
+            TestAssert.Equal(2, list.FilteredCount);
+            TestAssert.Equal("yt_b", list.GetTrackAt(0)?.Id);
+            TestAssert.Equal("yt_d", list.GetTrackAt(1)?.Id);
+            TestAssert.True(ReferenceEquals(stubB, list[0]));
+            TestAssert.True(ReferenceEquals(stubD, list[1]), "Cached VM key for yt_d must shift from 2 to 1");
+
+            // Remove hidden item AFTER visible items so FilteredCount == TotalCount
+            TestAssert.True(list.RemoveTrack("yt_e"));
+            TestAssert.Equal(2, list.TotalCount);
+            TestAssert.Equal(2, list.FilteredCount);
+            TestAssert.Equal("yt_b", list.GetTrackAt(0)?.Id);
+            TestAssert.Equal("yt_d", list.GetTrackAt(1)?.Id);
+            TestAssert.Equal(0, list.IndexOfTrackId("yt_b"));
+            TestAssert.Equal(1, list.IndexOfTrackId("yt_d"));
+            TestAssert.True(ReferenceEquals(stubB, list[0]));
+            TestAssert.True(ReferenceEquals(stubD, list[1]));
+
+            // 2. MoveTrack under active filter must update _filteredIndices[newVisualIndex] to masterNew
+            activeVms.Clear();
+            list.SetTracks([
+                Track("yt_1", "One match"),
+                Track("yt_2", "Two"),
+                Track("yt_3", "Three match"),
+                Track("yt_4", "Four")
+            ]);
+            list.ApplyFilter("match");
+            TestAssert.Equal(2, list.FilteredCount);
+
+            activeVms[0] = stubB; // yt_1
+            activeVms[2] = stubD; // yt_3
+
+            list.MoveTrack(0, 1);
+            TestAssert.Equal("yt_3", list.GetTrackAt(0)?.Id);
+            TestAssert.Equal("yt_1", list.GetTrackAt(1)?.Id);
+            TestAssert.True(ReferenceEquals(stubD, list[0]));
+            TestAssert.True(ReferenceEquals(stubB, list[1]));
+
+            list.MoveTrack(1, 0);
+            TestAssert.Equal("yt_1", list.GetTrackAt(0)?.Id);
+            TestAssert.Equal("yt_3", list.GetTrackAt(1)?.Id);
+            TestAssert.True(ReferenceEquals(stubB, list[0]));
+            TestAssert.True(ReferenceEquals(stubD, list[1]));
+        }
+        finally
+        {
+            activeVms.Clear();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "PlayerControlService Low-Buffer Yield Threshold (Percent Scale)", Group = TestGroups.Audio, Order = 51)]
+    public static Task TestPlayerControlLowBufferYieldThresholdAsync()
+    {
+        TestAssert.True(
+            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: false, bufferProgressPercent: 5.0),
+            "5% buffer while playing must yield background sync");
+        TestAssert.True(
+            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: false, bufferProgressPercent: 14.9),
+            "14.9% buffer while playing must still yield background sync");
+        TestAssert.False(
+            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: false, bufferProgressPercent: 15.0),
+            "15.0% buffer threshold must allow background sync");
+        TestAssert.False(
+            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: true, bufferProgressPercent: 5.0),
+            "Fully buffered stream must not block background sync");
+        TestAssert.True(
+            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: true, isPlaying: false, isFullyBuffered: false, bufferProgressPercent: 100.0),
+            "Active loading state must always yield background sync");
+
+        return Task.CompletedTask;
+    }
 }

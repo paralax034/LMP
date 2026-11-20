@@ -211,7 +211,6 @@ public sealed class VirtualTrackList : IVirtualTrackList
 
         _index.Move(masterOld, masterNew);
 
-        int movingMaster = _filteredIndices[oldVisualIndex];
         if (oldVisualIndex < newVisualIndex)
         {
             Array.Copy(_filteredIndices, oldVisualIndex + 1, _filteredIndices, oldVisualIndex,
@@ -223,7 +222,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
                 oldVisualIndex - newVisualIndex);
         }
 
-        _filteredIndices[newVisualIndex] = movingMaster;
+        _filteredIndices[newVisualIndex] = masterNew;
 
         if (_filteredCount != _index.Count)
         {
@@ -326,32 +325,33 @@ public sealed class VirtualTrackList : IVirtualTrackList
             Array.Copy(_filteredIndices, visualIndex + 1, _filteredIndices, visualIndex,
                 _filteredCount - visualIndex - 1);
             _filteredCount--;
-
-            for (int i = 0; i < _filteredCount; i++)
-            {
-                if (_filteredIndices[i] > masterIndex)
-                    _filteredIndices[i]--;
-            }
-
-            if (_activeVms.Count > 0)
-            {
-                var remapped = new Dictionary<int, TrackItemViewModel>(_activeVms.Count);
-                foreach (var kvp in _activeVms)
-                {
-                    int key = kvp.Key;
-                    int newKey = key > masterIndex ? key - 1 : key;
-                    remapped[newKey] = kvp.Value;
-                }
-
-                _activeVms.Clear();
-                foreach (var kvp in remapped)
-                {
-                    _activeVms[kvp.Key] = kvp.Value;
-                }
-            }
-
-            RaiseReset();
         }
+
+        for (int i = 0; i < _filteredCount; i++)
+        {
+            if (_filteredIndices[i] > masterIndex)
+                _filteredIndices[i]--;
+        }
+
+        if (_activeVms.Count > 0)
+        {
+            var remapped = new Dictionary<int, TrackItemViewModel>(_activeVms.Count);
+            foreach (var kvp in _activeVms)
+            {
+                int key = kvp.Key;
+                int newKey = key > masterIndex ? key - 1 : key;
+                remapped[newKey] = kvp.Value;
+            }
+
+            _activeVms.Clear();
+            foreach (var kvp in remapped)
+            {
+                _activeVms[kvp.Key] = kvp.Value;
+            }
+        }
+
+        if (visualIndex >= 0)
+            RaiseReset();
 
         if (removedSelection)
             NotifySelectionChanged();

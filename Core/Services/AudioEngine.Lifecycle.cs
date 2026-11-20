@@ -126,29 +126,24 @@ public sealed partial class AudioEngine
 
     private void HandleCacheInvalidated(CacheInvalidatedException cacheEx, TimeSpan? resumePositionOverride = null)
     {
-        var trackId = cacheEx.TrackId ?? CurrentTrack?.Id;
+        var currentTrack = CurrentTrack;
+        var trackId = cacheEx.TrackId ?? currentTrack?.Id;
+        bool isCurrentTrack = currentTrack != null
+                              && !string.IsNullOrEmpty(trackId)
+                              && string.Equals(currentTrack.Id, trackId, StringComparison.Ordinal);
 
         if (cacheEx.IsRecoverable && _cacheRetryCount < MaxCacheAutoRetries)
         {
-            int retryNumber = Interlocked.Increment(ref _cacheRetryCount);
-            var resumePosition = resumePositionOverride ?? CurrentPosition;
-            var track = CurrentTrack;
-
-            Log.Info($"[AudioEngine] Cache auto-retry #{retryNumber}/{MaxCacheAutoRetries}: track={trackId}, kind={cacheEx.Kind}, pos={resumePosition}");
-
-            if (cacheEx.Kind is CacheInvalidationKind.FileDeleted)
+            if (cacheEx.Kind is CacheInvalidationKind.FileDeleted && !string.IsNullOrEmpty(trackId))
             {
-                if (!string.IsNullOrEmpty(trackId))
+                try
                 {
-                    try
-                    {
-                        AudioSourceFactory.GlobalCache.RemoveTrackCache(trackId);
-                        Log.Info($"[AudioEngine] Removed missing cache registry for retry: {trackId}");
-                    }
-                    catch (Exception removeEx)
-                    {
-                        Log.Warn($"[AudioEngine] Failed to remove cache: {removeEx.Message}");
-                    }
+                    AudioSourceFactory.GlobalCache.RemoveTrackCache(trackId);
+                    Log.Info($"[AudioEngine] Removed missing cache registry for retry: {trackId}");
+                }
+                catch (Exception removeEx)
+                {
+                    Log.Warn($"[AudioEngine] Failed to remove cache: {removeEx.Message}");
                 }
             }
             else if (cacheEx.Kind is CacheInvalidationKind.ParserResync or CacheInvalidationKind.ShortRead)
@@ -156,12 +151,33 @@ public sealed partial class AudioEngine
                 Log.Info($"[AudioEngine] Surgical patch in progress. Preserving existing cache file for: {trackId}");
             }
 
-            if (track != null)
+            if (!isCurrentTrack || currentTrack == null)
+                return;
+
+            var resumePosition = resumePositionOverride ?? CurrentPosition;
+            int session;
+            int pauseEpoch;
+            int retryNumber;
+
+            lock (_playerDispatchLock)
             {
+                if (!string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal))
+                    return;
+
+                if (!_playIntent)
+                {
+                    _player.Stop();
+                    return;
+                }
+
+                retryNumber = Interlocked.Increment(ref _cacheRetryCount);
                 ResetSealedFailedTrack();
-                int session = BeginNewSession();
-                EnqueueCommand(new PlayTrackCommand(track, session, resumePosition, IsRetry: true));
+                pauseEpoch = Volatile.Read(ref _pauseEpoch);
+                session = BeginNewSession();
             }
+
+            Log.Info($"[AudioEngine] Cache auto-retry #{retryNumber}/{MaxCacheAutoRetries}: track={trackId}, kind={cacheEx.Kind}, pos={resumePosition}");
+            EnqueueCommand(new PlayTrackCommand(currentTrack, session, resumePosition, IsRetry: true, PauseEpoch: pauseEpoch));
             return;
         }
 
@@ -172,6 +188,9 @@ public sealed partial class AudioEngine
             try { AudioSourceFactory.GlobalCache.RemoveTrackCache(trackId); }
             catch (Exception ex) { Log.Warn($"[AudioEngine] Failed to remove cache: {ex.Message}"); }
         }
+
+        if (!isCurrentTrack)
+            return;
 
         AbortCurrentTrackPlaybackAfterFatalError(trackId);
         RaiseError(new CacheInvalidatedException(cacheEx.Message, cacheEx.InnerException));
@@ -197,14 +216,42 @@ public sealed partial class AudioEngine
 
         InvalidateTrackDownloadStatus(track);
 
-        if (_cacheRetryCount < MaxCacheAutoRetries)
-        {
-            int retryNumber = Interlocked.Increment(ref _cacheRetryCount);
-            Log.Info($"[AudioEngine] Local download recovery retry #{retryNumber}/{MaxCacheAutoRetries}: track={trackId}, pos={resumePosition}");
+        int session;
+        int pauseEpoch;
+        int retryNumber;
+        bool shouldRetry;
 
-            ResetSealedFailedTrack();
-            int session = BeginNewSession();
-            EnqueueCommand(new PlayTrackCommand(track, session, resumePosition, IsRetry: true, BypassLocalDownload: true));
+        lock (_playerDispatchLock)
+        {
+            if (!string.Equals(CurrentTrack?.Id, trackId, StringComparison.Ordinal))
+                return true;
+
+            if (!_playIntent)
+            {
+                _player.Stop();
+                return true;
+            }
+
+            shouldRetry = _cacheRetryCount < MaxCacheAutoRetries;
+            if (shouldRetry)
+            {
+                retryNumber = Interlocked.Increment(ref _cacheRetryCount);
+                ResetSealedFailedTrack();
+                pauseEpoch = Volatile.Read(ref _pauseEpoch);
+                session = BeginNewSession();
+            }
+            else
+            {
+                retryNumber = 0;
+                pauseEpoch = -1;
+                session = 0;
+            }
+        }
+
+        if (shouldRetry)
+        {
+            Log.Info($"[AudioEngine] Local download recovery retry #{retryNumber}/{MaxCacheAutoRetries}: track={trackId}, pos={resumePosition}");
+            EnqueueCommand(new PlayTrackCommand(track, session, resumePosition, IsRetry: true, PauseEpoch: pauseEpoch, BypassLocalDownload: true));
             return true;
         }
 
