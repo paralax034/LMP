@@ -205,6 +205,26 @@ public sealed partial class AudioEngine
 
     #region Public API
 
+    private TrackInfo? TryClaimIdleAutoplayLocked(int candidateIndex)
+    {
+        if (CurrentTrack is null && !IsPlaying && !IsLoading && (uint)candidateIndex < (uint)_queue.Count)
+        {
+            _currentIndex = candidateIndex;
+            return _queue[candidateIndex];
+        }
+
+        return null;
+    }
+
+    private void TriggerIdleAutoplay(TrackInfo? playbackTrack)
+    {
+        if (playbackTrack is null)
+            return;
+
+        ResetSealedFailedTrack();
+        DispatchPlayCurrentIndex(startPlaying: true);
+    }
+
     /// <summary>
     /// Adds a range of tracks to the queue, filtering out duplicates without LINQ allocations.
     /// If the queue was empty, automatically starts playback of the first added track.
@@ -214,8 +234,7 @@ public sealed partial class AudioEngine
     public int EnqueueRangeUnique(IEnumerable<TrackInfo> tracks)
     {
         int addedCount = 0;
-        TrackInfo? playbackTrack = null;
-        bool shouldAutoplay = false;
+        TrackInfo? playbackTrack;
 
         lock (_queueLock)
         {
@@ -233,38 +252,23 @@ public sealed partial class AudioEngine
                 }
             }
 
-            if (addedCount > 0)
-            {
-                RecalculateQueuePurityLocked();
-                InvalidateQueueSnapshot();
+            if (addedCount == 0)
+                return 0;
 
-                if (CurrentTrack == null && !IsPlaying && !IsLoading)
-                {
-                    _currentIndex = initialCount;
-                    playbackTrack = _queue[_currentIndex];
-                    shouldAutoplay = true;
-                }
-            }
+            RecalculateQueuePurityLocked();
+            InvalidateQueueSnapshot();
+            playbackTrack = TryClaimIdleAutoplayLocked(initialCount);
         }
 
-        if (addedCount > 0)
-        {
-            RaiseOnUI(_raiseQueueChangedOnUIDelegate);
-
-            if (shouldAutoplay && playbackTrack != null)
-            {
-                ResetSealedFailedTrack();
-                DispatchPlayCurrentIndex(startPlaying: true);
-            }
-        }
+        RaiseOnUI(_raiseQueueChangedOnUIDelegate);
+        TriggerIdleAutoplay(playbackTrack);
 
         return addedCount;
     }
 
     public void Enqueue(TrackInfo track)
     {
-        TrackInfo? playbackTrack = null;
-        bool shouldAutoplay = false;
+        TrackInfo? playbackTrack;
 
         lock (_queueLock)
         {
@@ -274,22 +278,11 @@ public sealed partial class AudioEngine
             _queue.Add(track);
             RecalculateQueuePurityLocked();
             InvalidateQueueSnapshot();
-
-            if (CurrentTrack == null && !IsPlaying && !IsLoading)
-            {
-                _currentIndex = _queue.Count - 1;
-                playbackTrack = _queue[_currentIndex];
-                shouldAutoplay = true;
-            }
+            playbackTrack = TryClaimIdleAutoplayLocked(_queue.Count - 1);
         }
 
         RaiseOnUI(_raiseQueueChangedOnUIDelegate);
-
-        if (shouldAutoplay && playbackTrack != null)
-        {
-            ResetSealedFailedTrack();
-            DispatchPlayCurrentIndex(startPlaying: true);
-        }
+        TriggerIdleAutoplay(playbackTrack);
     }
 
     public void EnqueueRange(IEnumerable<TrackInfo> tracks)

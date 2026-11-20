@@ -67,6 +67,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     private bool _isSeeking;
     private bool _isFormatsFlyoutOpen;
     private bool _isInitializing;
+    private bool _disposed;
 
     private int _lastVolumeBeforeMute;
 
@@ -385,8 +386,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
             _playerControl.ShuffleQueue();
             IsShuffleAnimating = true;
 
-            _shuffleAnimationTimer?.Stop();
-            _shuffleAnimationTimer = new DispatcherTimer(
+            _shuffleAnimationTimer ??= new DispatcherTimer(
                 TimeSpan.FromMilliseconds(ShuffleAnimationDurationMs),
                 DispatcherPriority.Normal,
                 (_, _) =>
@@ -394,6 +394,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                     IsShuffleAnimating = false;
                     _shuffleAnimationTimer?.Stop();
                 });
+            _shuffleAnimationTimer.Stop();
             _shuffleAnimationTimer.Start();
         }, () => HasQueueToShuffle);
 
@@ -406,7 +407,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         ToggleRepeatCommand = new RelayCommand(() =>
         {
             _playerControl.ToggleRepeat();
-            ShowHint(
+            _ = ShowHintAsync(
                 v => IsRepeatHintVisible = v,
                 () => RepeatHintText = RepeatMode switch
                 {
@@ -440,7 +441,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                 await _playerControl.ToggleLikeAsync(CurrentTrack);
                 IsLiked = CurrentTrack.IsLiked;
                 OnPropertyChanged(nameof(LikeTooltip));
-                ShowHint(
+                _ = ShowHintAsync(
                     v => IsLikeHintVisible = v,
                     () => LikeHintText = IsLiked ? SL["Track_Added"] : SL["Track_Removed"]);
             }
@@ -597,7 +598,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     private void OnLibraryTrackUpdated(TrackInfo t)
     {
-        if (CurrentTrack != null && t.Id == CurrentTrack.Id)
+        if (CurrentTrack != null && t.Id == CurrentTrack.Id && !ReferenceEquals(t, CurrentTrack))
         {
             void SyncUpdatedTrack()
             {
@@ -651,7 +652,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
     #region Unified Hint System
 
-    private async void ShowHint(Action<bool> setVisible, Action setText, int durationMs = HintDisplayDurationMs)
+    private async Task ShowHintAsync(Action<bool> setVisible, Action setText, int durationMs = HintDisplayDurationMs)
     {
         _activeHintCts?.Cancel();
         _activeHintCts?.Dispose();
@@ -670,6 +671,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
                 return;
 
             setVisible(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"[PlayerBar] Hint timer error: {ex.Message}");
         }
         finally
         {
@@ -850,7 +855,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         }
 
         BufferProgressPercent = 100;
-        BufferedRanges = [(0.0, 1.0)];
+        BufferedRanges = Core.Audio.AudioConstants.FullBufferedRanges;
         IsFullyBuffered = true;
         OnPropertyChanged(nameof(UseSegmentedBuffer));
     }
@@ -1349,9 +1354,7 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     }
 
     private static string FormatTime(TimeSpan time) =>
-        time.TotalHours >= 1
-            ? time.ToString(@"h\:mm\:ss")
-            : time.ToString(@"m\:ss");
+        LMP.Core.Helpers.DurationFormatter.FormatShort(time);
 
     #endregion
 
@@ -1575,30 +1578,13 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     {
         const string titleKey = "Error_StreamUnavailable_Title";
 
-        string messageKey = exception switch
-        {
-            YoutubeNetworkException netEx => netEx.GetLocalizationKey(),
-            LoginRequiredException lre => lre.GetLocalizationKey(),
-            BotDetectionException => "Error_Login_BotDetection",
-            VideoUnplayableException => "Error_Video_Unavailable",
-            _ => "Error_Stream_Generic"
-        };
+        string messageKey = exception is not null
+            ? LMP.UI.Services.PlaybackErrorMappingHelper.GetMessageKey(exception, fallbackKey: "Error_Stream_Generic")
+            : "Error_Stream_Generic";
 
-        string? recommendationKey = exception switch
-        {
-            YoutubeNetworkException netEx => netEx.GetRecommendationKey(),
-            LoginRequiredException lre => lre.Reason switch
-            {
-                LoginRequiredReason.AgeRestricted => "Recommendation_Login_AgeRestricted",
-                LoginRequiredReason.Private => "Recommendation_Private",
-                LoginRequiredReason.MembersOnly => "Recommendation_MembersOnly",
-                LoginRequiredReason.BotDetection => "Recommendation_BotDetection",
-                _ => "Recommendation_Login"
-            },
-            BotDetectionException => "Recommendation_BotDetection",
-            VideoUnplayableException => "Recommendation_VideoUnavailable",
-            _ => null
-        };
+        string? recommendationKey = exception is not null
+            ? LMP.UI.Services.PlaybackErrorMappingHelper.GetRecommendationKey(exception, _youtube.AuthService.IsAuthenticated)
+            : null;
 
         if (recommendationKey == null)
         {
@@ -1748,8 +1734,9 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
     /// </summary>
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_disposed)
         {
+            _disposed = true;
             Equalizer.Dispose();
 
             LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
@@ -1757,6 +1744,8 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             _activeHintCts?.Cancel();
             _activeHintCts?.Dispose();
+            _activeHintCts = null;
+            _activeHintSetter = null;
 
             AttachObservedTrack(null);
 

@@ -30,4 +30,13 @@ public static class CancellationHelper
     /// <returns>true if the token is canceled or the exception contains a cancellation.</returns>
     public static bool IsCancellationOrTokenCancelled(Exception? exception, CancellationToken ct) =>
         ct.IsCancellationRequested || IsCancellationLike(exception);
+
+    /// <summary>
+    /// Determines whether the exception represents an explicit user/token-initiated cancellation
+    /// rather than a network timeout (such as <see cref="HttpClient"/> timeout) or transport error.
+    /// </summary>
+    /// <param name="exception">The exception to check. null → false.</param>
+    /// <returns><c>true</c> if a token-backed cancellation is detected; otherwise <c>false</c>.</returns>
+    public static bool IsUserCancellation(Exception? exception) =>
+        LMP.Core.Helpers.NetworkErrorHelper.IsCancellationLike(exception);
 }

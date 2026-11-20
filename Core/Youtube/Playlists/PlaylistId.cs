@@ -23,8 +23,32 @@ public partial struct PlaylistId
     {
         if (playlistId.Length < 2) return false;
         foreach (var c in playlistId.AsSpan())
-            if (!char.IsLetterOrDigit(c) && c is not ('_' or '-')) return false;
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-')) return false;
         return true;
+    }
+
+    private static readonly Regex[] UrlRegexes =
+    [
+        PlaylistUrlRegex(),
+        WatchListUrlRegex(),
+        ShortListUrlRegex(),
+        EmbedListUrlRegex()
+    ];
+
+    private static string? TryNormalizeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        for (int i = 0; i < UrlRegexes.Length; i++)
+        {
+            var match = UrlRegexes[i].Match(url);
+            if (!match.Success) continue;
+
+            var id = WebUtility.UrlDecode(match.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
+        }
+
+        return null;
     }
 
     private static string? TryNormalize(string? playlistIdOrUrl)
@@ -33,36 +57,21 @@ public partial struct PlaylistId
 
         if (IsValid(playlistIdOrUrl)) return playlistIdOrUrl;
 
-        {
-            var raw = MyRegex().Match(playlistIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex1().Match(playlistIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex2().Match(playlistIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex3().Match(playlistIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-
-        return null;
+        return TryNormalizeUrl(playlistIdOrUrl);
     }
+
+    /// <summary>
+    /// Attempts to extract a playlist ID strictly from a YouTube URL (rejects bare IDs and search terms).
+    /// </summary>
+    public static PlaylistId? TryParseUrl(string? url) =>
+        TryNormalizeUrl(url) is { } id ? new PlaylistId(id) : (PlaylistId?)null;
 
     /// <summary>
     /// Attempts to parse the specified string as a YouTube playlist ID or URL.
     /// Returns null in case of failure.
     /// </summary>
     public static PlaylistId? TryParse(string? playlistIdOrUrl) =>
-        TryNormalize(playlistIdOrUrl) is { } id ? new PlaylistId(id) : default;
+        TryNormalize(playlistIdOrUrl) is { } id ? new PlaylistId(id) : (PlaylistId?)null;
 
     /// <summary>
     /// Parses the specified string as a YouTube playlist ID or URL.
@@ -81,14 +90,14 @@ public partial struct PlaylistId
     /// </summary>
     public static implicit operator string(PlaylistId playlistId) => playlistId.ToString();
 
-    [GeneratedRegex(@"youtube\..+?/playlist.*?list=(.*?)(?:&|/|$)")]
-    private static partial Regex MyRegex();
-    [GeneratedRegex(@"youtube\..+?/watch.*?list=(.*?)(?:&|/|$)")]
-    private static partial Regex MyRegex1();
-    [GeneratedRegex(@"youtu\.be/.*?/.*?list=(.*?)(?:&|/|$)")]
-    private static partial Regex MyRegex2();
-    [GeneratedRegex(@"youtube\..+?/embed/.*?/.*?list=(.*?)(?:&|/|$)")]
-    private static partial Regex MyRegex3();
+    [GeneratedRegex(@"youtube\..+?/playlist[^#]*?[?&]list=([^&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PlaylistUrlRegex();
+    [GeneratedRegex(@"youtube\..+?/watch[^#]*?[?&]list=([^&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex WatchListUrlRegex();
+    [GeneratedRegex(@"youtu\.be/[^#]*?[?&]list=([^&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ShortListUrlRegex();
+    [GeneratedRegex(@"youtube\..+?/(?:embed|shorts|live)/[^#]*?[?&]list=([^&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EmbedListUrlRegex();
 }
 
 public partial struct PlaylistId : IEquatable<PlaylistId>

@@ -209,21 +209,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     {
         if (tracks.Count == 0) return;
 
-        var trackIds = new List<string>(tracks.Count);
-        for (int i = 0; i < tracks.Count; i++)
-            trackIds.Add(tracks[i].Id);
-
-        var playlistsMap = await _playlists.GetPlaylistsForTracksAsync(trackIds, CurrentOwnerId, ct).ConfigureAwait(false);
         var canonicalList = new List<TrackInfo>(tracks.Count);
-
-        for (int i = 0; i < tracks.Count; i++)
-        {
-            var t = tracks[i];
-            t.InPlaylists = playlistsMap.TryGetValue(t.Id, out var pls) ? pls : [];
-            var canonical = _registry.RegisterOrUpdate(t);
-            canonicalList.Add(canonical);
-        }
-
+        await HydrateAndRegisterTracksAsync(tracks, ct, canonicalList).ConfigureAwait(false);
         await _tracks.UpsertBatchAsync(canonicalList, ct).ConfigureAwait(false);
     }
 
@@ -246,7 +233,10 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     /// <summary>
     /// Performs batch hydration of playlist relationships and registers tracks in the L1 registry.
     /// </summary>
-    private async Task HydrateAndRegisterTracksAsync(List<TrackInfo> tracks, CancellationToken ct)
+    private async Task HydrateAndRegisterTracksAsync(
+        IReadOnlyList<TrackInfo> tracks,
+        CancellationToken ct,
+        List<TrackInfo>? canonicalOut = null)
     {
         if (tracks.Count == 0) return;
 
@@ -260,7 +250,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         {
             var t = tracks[i];
             t.InPlaylists = playlistsMap.TryGetValue(t.Id, out var pls) ? pls : [];
-            _registry.RegisterOrUpdate(t);
+            var canonical = _registry.RegisterOrUpdate(t);
+            canonicalOut?.Add(canonical);
         }
     }
 
@@ -309,15 +300,15 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
     public async Task ClearDownloadsMetadataAsync(CancellationToken ct = default)
     {
         var downloadedInDb = await _tracks.GetDownloadedAsync(CurrentOwnerId, 10000, 0, ct).ConfigureAwait(false);
-        var updatedIds = new HashSet<string>(StringComparer.Ordinal);
+        await _tracks.ClearAllDownloadsAsync(ct).ConfigureAwait(false);
 
+        var updatedIds = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < downloadedInDb.Count; i++)
         {
-            var t = downloadedInDb[i];
-            updatedIds.Add(t.Id);
-            await _tracks.SetDownloadedAsync(t.Id, false, null, ct).ConfigureAwait(false);
+            var id = downloadedInDb[i].Id;
+            updatedIds.Add(id);
 
-            var inMem = _registry.TryGet(t.Id);
+            var inMem = _registry.TryGet(id);
             if (inMem != null)
             {
                 inMem.IsDownloaded = false;
@@ -332,7 +323,6 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
             {
                 pinned.IsDownloaded = false;
                 pinned.LocalPath = null;
-                await _tracks.SetDownloadedAsync(pinned.Id, false, null, ct).ConfigureAwait(false);
                 _registry.UpdatePinStatus(pinned);
             }
         }
@@ -515,19 +505,14 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
         }
     }
 
-    private AppSettings SnapshotSettingsForPersistence()
+    private string SerializeSettingsSnapshot()
     {
-        byte[] utf8;
         lock (_settingsMutationLock)
         {
-            utf8 = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            return System.Text.Json.JsonSerializer.Serialize(
                 Settings,
-                AppJsonContext.Default.AppSettings);
+                AppJsonContext.DefaultCompact.AppSettings);
         }
-
-        return System.Text.Json.JsonSerializer.Deserialize(
-            utf8,
-            AppJsonContext.Default.AppSettings) ?? new AppSettings();
     }
 
     private void OnSaveTimerCallback(object? state) => _ = SaveSettingsAsync();
@@ -549,8 +534,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         try
         {
-            var snapshot = SnapshotSettingsForPersistence();
-            await _settings.SetAsync("AppSettings", snapshot, ct).ConfigureAwait(false);
+            var json = SerializeSettingsSnapshot();
+            await _settings.SetRawJsonAsync("AppSettings", json, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -578,8 +563,8 @@ public sealed class LibraryService : IAsyncDisposable, IDisposable
 
         try
         {
-            var snapshot = SnapshotSettingsForPersistence();
-            _settings.Set("AppSettings", snapshot);
+            var json = SerializeSettingsSnapshot();
+            _settings.SetRawJson("AppSettings", json);
         }
         catch (Exception ex)
         {

@@ -180,6 +180,11 @@ public interface ITrackRepository
     Task SetDownloadedAsync(string id, bool downloaded, string? localPath, CancellationToken ct = default);
 
     /// <summary>
+    /// Clears download flags and local file paths for all downloaded tracks in a single SQL statement.
+    /// </summary>
+    Task ClearAllDownloadsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Persists track-level integrated loudness and its source.
     /// </summary>
     /// <param name="id">Track identifier.</param>

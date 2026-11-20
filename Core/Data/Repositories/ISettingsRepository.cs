@@ -55,4 +55,19 @@ public interface ISettingsRepository
     void Set<T>(
         string key,
         T value);
+
+    /// <summary>
+    /// Asynchronously saves a pre-serialized JSON payload to the database without re-serialization.
+    /// </summary>
+    Task SetRawJsonAsync(
+        string key,
+        string jsonPayload,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Synchronously saves a pre-serialized JSON payload to the database without re-serialization.
+    /// </summary>
+    void SetRawJson(
+        string key,
+        string jsonPayload);
 }

@@ -106,28 +106,27 @@ internal sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISe
     }
 
     /// <inheritdoc />
-    public async Task SetAsync<T>(
+    public Task SetAsync<T>(
          string key,
          T value,
-         CancellationToken ct = default)
-    {
-        string jsonPayload = SerializeJson(value);
+         CancellationToken ct = default) =>
+        SetRawJsonAsync(key, SerializeJson(value), ct);
 
+    /// <inheritdoc />
+    public void Set<T>(
+        string key,
+        T value) =>
+        SetRawJson(key, SerializeJson(value));
+
+    /// <inheritdoc />
+    public async Task SetRawJsonAsync(
+        string key,
+        string jsonPayload,
+        CancellationToken ct = default)
+    {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
-
-        var pKey = cmd.CreateParameter();
-        pKey.ParameterName = "@key";
-        pKey.Value = key;
-        cmd.Parameters.Add(pKey);
-
-        var pValue = cmd.CreateParameter();
-        pValue.ParameterName = "@value";
-        pValue.Value = jsonPayload;
-        cmd.Parameters.Add(pValue);
-
+        await using var cmd = CreateSetCommand(connection, key, jsonPayload);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
         try
@@ -142,16 +141,33 @@ internal sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISe
     }
 
     /// <inheritdoc />
-    public void Set<T>(
+    public void SetRawJson(
         string key,
-        T value)
+        string jsonPayload)
     {
-        string jsonPayload = SerializeJson(value);
-
         using var connection = _factory.CreateConnection();
         connection.Open();
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = CreateSetCommand(connection, key, jsonPayload);
+        cmd.ExecuteNonQuery();
+
+        try
+        {
+            using var walCmd = connection.CreateCommand();
+            walCmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
+            walCmd.ExecuteNonQuery();
+        }
+        catch { }
+
+        Log.Info($"[SettingsRepository] Successfully committed '{key}' (sync) to database (JSON)");
+    }
+
+    private static Microsoft.Data.Sqlite.SqliteCommand CreateSetCommand(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        string key,
+        string jsonPayload)
+    {
+        var cmd = connection.CreateCommand();
         cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
 
         var pKey = cmd.CreateParameter();
@@ -164,17 +180,7 @@ internal sealed class SettingsRepository(ISqliteConnectionFactory factory) : ISe
         pValue.Value = jsonPayload;
         cmd.Parameters.Add(pValue);
 
-        cmd.ExecuteNonQuery();
-
-        try
-        {
-            using var walCmd = connection.CreateCommand();
-            walCmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
-            walCmd.ExecuteNonQuery();
-        }
-        catch { }
-
-        Log.Info($"[SettingsRepository] Successfully committed '{key}' (sync) to database (JSON)");
+        return cmd;
     }
 
     #region Serialization Helpers

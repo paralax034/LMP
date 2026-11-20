@@ -6,6 +6,86 @@ using LMP.Core.Youtube.Utils;
 namespace LMP.UI.Services;
 
 /// <summary>
+/// Single source of truth for mapping playback and stream resolution exceptions
+/// to localization message and recommendation keys.
+/// </summary>
+internal static class PlaybackErrorMappingHelper
+{
+    public static string GetMessageKey(Exception exception, string? fallbackKey = null) => exception switch
+    {
+        YoutubeNetworkException netEx => netEx.GetLocalizationKey(),
+        LoginRequiredException lre => lre.GetLocalizationKey(),
+        StreamUnavailableException streamEx => streamEx.GetLocalizationKey(),
+        ChunkDownloadFatalException chunkEx => chunkEx.GetLocalizationKey(),
+        BotDetectionException => "Error_Login_BotDetection",
+        VideoUnplayableException => "Error_Video_Unavailable",
+        _ => fallbackKey ?? exception.Message
+    };
+
+    public static string? GetRecommendationKey(Exception exception, bool isAuthenticated)
+    {
+        if (NetworkErrorHelper.IsSslOrTlsHandshakeFailure(exception))
+            return "Recommendation_DpiBlocked";
+
+        return exception switch
+        {
+            LoginRequiredException login => login.Reason switch
+            {
+                LoginRequiredReason.AgeRestricted => "Recommendation_Login_AgeRestricted",
+                LoginRequiredReason.Private => "Recommendation_Private",
+                LoginRequiredReason.MembersOnly => "Recommendation_MembersOnly",
+                LoginRequiredReason.BotDetection => "Recommendation_BotDetection",
+                _ => "Recommendation_Login"
+            },
+            BotDetectionException => "Recommendation_BotDetection",
+            VideoUnplayableException => isAuthenticated
+                ? "Recommendation_VideoUnavailable"
+                : "Recommendation_Login_403",
+            StreamUnavailableException stream => GetStreamRecommendation(stream, isAuthenticated),
+            ChunkDownloadFatalException chunk => GetChunkRecommendation(chunk, isAuthenticated),
+            YoutubeNetworkException netEx => netEx.GetRecommendationKey(),
+            _ => null
+        };
+    }
+
+    private static string GetStreamRecommendation(StreamUnavailableException stream, bool isAuthenticated)
+    {
+        if (stream.Reason == StreamUnavailableReason.CopyrightBlocked)
+            return "Recommendation_Copyright";
+
+        if (stream.Reason == StreamUnavailableReason.Forbidden403)
+            return isAuthenticated ? "Recommendation_ChangeClient" : "Recommendation_Login_403";
+
+        if (stream.Reason == StreamUnavailableReason.AllClientsFailed)
+            return isAuthenticated ? "Recommendation_AllClientsFailed_Auth" : "Recommendation_Login_403";
+
+        return stream.Reason switch
+        {
+            StreamUnavailableReason.RegionBlocked => "Recommendation_UseVPN",
+            StreamUnavailableReason.AgeRestricted => "Recommendation_Login_AgeRestricted",
+            StreamUnavailableReason.Private => "Recommendation_Private",
+            StreamUnavailableReason.Removed => "Recommendation_Removed",
+            StreamUnavailableReason.PaymentRequired => "Recommendation_Payment",
+            StreamUnavailableReason.LiveStream => "Recommendation_LiveStream",
+            _ => "Recommendation_ContactDev"
+        };
+    }
+
+    private static string GetChunkRecommendation(ChunkDownloadFatalException chunk, bool isAuthenticated)
+    {
+        if (chunk.Reason == ChunkDownloadFailureReason.Forbidden403)
+            return isAuthenticated ? "Recommendation_ChangeClient" : "Recommendation_Login_403";
+
+        return chunk.Reason switch
+        {
+            ChunkDownloadFailureReason.NetworkError => "Recommendation_CheckNetwork",
+            ChunkDownloadFailureReason.UmpFormat => "Recommendation_ChangeClient",
+            _ => "Recommendation_ContactDev"
+        };
+    }
+}
+
+/// <summary>
 /// Playback error handling orchestrator.
 /// Single point of decision making.
 /// Completely non-blocking — uses toast notifications instead of modal dialogs.
@@ -17,8 +97,8 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     private readonly NotificationService _notificationService;
     private readonly LibraryService _libraryService;
 
-    private readonly HashSet<string> _recentlyShownErrors = new(StringComparer.Ordinal);
-    private DateTime _lastErrorCleanup = DateTime.MinValue;
+    private readonly Dictionary<string, long> _recentlyShownErrors = new(StringComparer.Ordinal);
+    private long _lastErrorCleanupTick = Environment.TickCount64;
 
     private static readonly TimeSpan ErrorCacheCleanupInterval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan ErrorDeduplicationWindow = TimeSpan.FromSeconds(10);
@@ -42,6 +122,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         _audioEngine.OnErrorOccurred += HandleError;
         _audioEngine.OnDeviceLost += HandleDeviceLost;
         _audioEngine.OnDeviceRestored += HandleDeviceRestored;
+        _audioEngine.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
 
         Core.Audio.Sources.CachingStreamSource.OnSourceWarning += HandleSourceWarning;
 
@@ -114,6 +195,68 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         _ = ShowDeviceRestoredToastAsync();
     }
 
+    private void HandleNTokenDecryptionWarning(AudioEngine.NTokenWarningInfo warning)
+    {
+        if (_disposed)
+            return;
+
+        var mode = _libraryService.Settings.Audio.NTokenNotificationMode;
+        switch (mode)
+        {
+            case NTokenNotificationMode.Disabled:
+                Log.Debug($"[Orchestrator] N-Token warning suppressed for track '{warning.Track?.Id}' as configured.");
+                return;
+
+            case NTokenNotificationMode.PanelOnly:
+                _ = PublishNTokenWarningAsync(warning, showToast: false);
+                return;
+
+            default:
+                _ = PublishNTokenWarningAsync(warning, showToast: true);
+                return;
+        }
+    }
+
+    private async Task PublishNTokenWarningAsync(
+        AudioEngine.NTokenWarningInfo warning,
+        bool showToast)
+    {
+        try
+        {
+            var track = warning.Track;
+            string trackDisplay = track?.Title ?? track?.Id ?? "Unknown";
+            string? trackTitle = track?.Title ?? track?.Id;
+            string messageKey = warning.WasSkipped
+                ? "Notification_NToken_Skipped"
+                : "Notification_NToken_Message";
+
+            if (showToast)
+            {
+                await _notificationService.ShowToastAsync(
+                    titleKey: "Notification_NToken_Title",
+                    messageKey: messageKey,
+                    severity: NotificationSeverity.Warning,
+                    messageArgs: [trackDisplay],
+                    trackId: track?.Id,
+                    trackTitle: trackTitle);
+            }
+            else
+            {
+                await _notificationService.AddToPanelAsync(
+                    titleKey: "Notification_NToken_Title",
+                    messageKey: messageKey,
+                    severity: NotificationSeverity.Warning,
+                    messageArgs: [trackDisplay],
+                    trackId: track?.Id,
+                    trackTitle: trackTitle);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[Orchestrator] Failed to publish n-token warning: {ex.Message}");
+        }
+    }
+
     private async Task ShowDeviceRestoredToastAsync()
     {
         try
@@ -141,33 +284,26 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     {
         if (_disposed) return;
 
-        if (NetworkErrorHelper.IsCancellationLike(exception))
+        var actualException = UnwrapException(exception);
+        if (NetworkErrorHelper.IsCancellationLike(exception) || NetworkErrorHelper.IsCancellationLike(actualException))
         {
             Log.Debug($"[Orchestrator] Suppressing cancelled error: {exception.GetType().Name}");
             return;
         }
 
-        if (IsStalePlaybackError(exception))
+        if (IsStalePlaybackError(actualException))
         {
-            Log.Debug($"[Orchestrator] Suppressing stale error: {exception.GetType().Name}");
+            Log.Debug($"[Orchestrator] Suppressing stale error: {actualException.GetType().Name}");
             return;
         }
 
-        string errorKey = GetErrorDeduplicationKey(exception);
+        string errorKey = GetErrorDeduplicationKey(actualException);
         bool isDuplicate = !TryRegisterError(errorKey);
 
-        Log.Info($"[Orchestrator] Handling error: {exception.GetType().Name} (isDuplicate={isDuplicate})");
+        Log.Info($"[Orchestrator] Handling error: {actualException.GetType().Name} (isDuplicate={isDuplicate})");
 
         try
         {
-            var actualException = UnwrapException(exception);
-
-            if (actualException is OperationCanceledException oce && NetworkErrorHelper.IsCancellationLike(oce))
-            {
-                Log.Debug("[Orchestrator] Suppressing unwrapped cancellation");
-                return;
-            }
-
             await (actualException switch
             {
                 AudioDeviceException devEx => HandleAudioDeviceUnavailableAsync(devEx),
@@ -179,8 +315,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
                 StreamUnavailableException streamEx => HandleStreamUnavailableAsync(streamEx, isDuplicate),
                 VideoUnplayableException unplayableEx => HandleVideoUnplayableAsync(unplayableEx, isDuplicate),
                 ChunkDownloadFatalException chunkEx => HandleChunkFatalAsync(chunkEx, isDuplicate),
-                OperationCanceledException oce2
-                    when NetworkErrorHelper.IsCancellationLike(oce2) => Task.CompletedTask,
                 _ => HandleGenericErrorAsync(actualException, isDuplicate)
             });
         }
@@ -253,8 +387,8 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
 
         _notificationService.TryPlayErrorSound();
 
-        var messageKey = GetLoginRequiredMessageKey(exception);
-        var recommendationKey = GetRecommendation(exception);
+        var messageKey = PlaybackErrorMappingHelper.GetMessageKey(exception);
+        var recommendationKey = PlaybackErrorMappingHelper.GetRecommendationKey(exception, _youtube.AuthService.IsAuthenticated);
         var (Id, Title) = GetCurrentTrackInfo();
 
         await _notificationService.ShowPlaybackErrorAsync(
@@ -271,20 +405,15 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
     {
         Log.Error($"[Orchestrator] Stream unavailable: {exception.Reason} for {exception.VideoId}");
         var attempts = ExtractAttemptsFromException(exception);
-        var messageKey = GetStreamErrorMessageKey(exception);
+        var messageKey = PlaybackErrorMappingHelper.GetMessageKey(exception);
         await DispatchPlaybackErrorAsync(exception, messageKey, attempts, isDuplicate);
     }
 
     private async Task HandleVideoUnplayableAsync(VideoUnplayableException exception, bool isDuplicate)
     {
         Log.Error($"[Orchestrator] Video unplayable: {exception.VideoId} — {exception.Message}");
-
-        string recommendationKey = _youtube.AuthService.IsAuthenticated
-            ? "Recommendation_VideoUnavailable"
-            : "Recommendation_Login_403";
-
-        await DispatchPlaybackErrorAsync(exception, "Error_Video_Unavailable", null, isDuplicate,
-            recommendationKeyOverride: recommendationKey);
+        var messageKey = PlaybackErrorMappingHelper.GetMessageKey(exception);
+        await DispatchPlaybackErrorAsync(exception, messageKey, null, isDuplicate);
     }
 
     private async Task HandleChunkFatalAsync(ChunkDownloadFatalException exception, bool isDuplicate)
@@ -293,7 +422,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         var attempts = new List<AttemptRecord> {
             new($"Chunk {exception.ChunkIndex}", false, $"{exception.Reason}: {exception.Message}", DateTime.UtcNow)
         };
-        var messageKey = GetChunkErrorMessageKey(exception);
+        var messageKey = PlaybackErrorMappingHelper.GetMessageKey(exception);
         await DispatchPlaybackErrorAsync(exception, messageKey, attempts, isDuplicate);
     }
 
@@ -385,7 +514,9 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         string finalMessageOrKey = isSslFailure ? "Error_SslHandshake_Failed" : messageOrKey;
 
         string? recommendationKey = recommendationKeyOverride
-            ?? (isSslFailure ? "Recommendation_DpiBlocked" : GetRecommendation(exception));
+            ?? (isSslFailure
+                ? "Recommendation_DpiBlocked"
+                : PlaybackErrorMappingHelper.GetRecommendationKey(exception, _youtube.AuthService.IsAuthenticated));
 
         _notificationService.TryPlayErrorSound();
 
@@ -461,47 +592,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         ];
     }
 
-    private static string GetChunkErrorMessageKey(ChunkDownloadFatalException exception)
-    {
-        return exception.Reason switch
-        {
-            ChunkDownloadFailureReason.Forbidden403 => "Error_Stream_Forbidden",
-            ChunkDownloadFailureReason.UmpFormat => "Error_Stream_UmpFormat",
-            ChunkDownloadFailureReason.MaxRetriesExceeded => "Error_Stream_MaxRetries",
-            ChunkDownloadFailureReason.NetworkError => "Error_Stream_Network",
-            _ => "Error_Stream_Unknown"
-        };
-    }
-
-    private static string GetStreamErrorMessageKey(StreamUnavailableException exception)
-    {
-        return exception.Reason switch
-        {
-            StreamUnavailableReason.CopyrightBlocked => "Error_Stream_CopyrightBlocked",
-            StreamUnavailableReason.Forbidden403 => "Error_Stream_Forbidden",
-            StreamUnavailableReason.RegionBlocked => "Error_Stream_RegionBlocked",
-            StreamUnavailableReason.AgeRestricted => "Error_Stream_AgeRestricted",
-            StreamUnavailableReason.Private => "Error_Stream_Private",
-            StreamUnavailableReason.AllClientsFailed => "Error_Stream_AllClientsFailed",
-            StreamUnavailableReason.LiveStream => "Error_Stream_LiveStream",
-            StreamUnavailableReason.Removed => "Error_Stream_Removed",
-            StreamUnavailableReason.PaymentRequired => "Error_Stream_PaymentRequired",
-            _ => "Error_Stream_Unknown"
-        };
-    }
-
-    private static string GetLoginRequiredMessageKey(LoginRequiredException exception)
-    {
-        return exception.Reason switch
-        {
-            LoginRequiredReason.AgeRestricted => "Error_Login_AgeRestricted",
-            LoginRequiredReason.Private => "Error_Login_Private",
-            LoginRequiredReason.MembersOnly => "Error_Login_MembersOnly",
-            LoginRequiredReason.BotDetection => "Error_Login_BotDetection",
-            _ => "Error_Login_Required"
-        };
-    }
-
     private static Exception UnwrapException(Exception exception)
     {
         if (exception is AggregateException agg && agg.InnerExceptions.Count > 0)
@@ -547,30 +637,39 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
 
     private bool TryRegisterError(string errorKey)
     {
-        if (DateTime.UtcNow - _lastErrorCleanup > ErrorCacheCleanupInterval)
-        {
-            lock (_recentlyShownErrors)
-            {
-                _recentlyShownErrors.Clear();
-                _lastErrorCleanup = DateTime.UtcNow;
-            }
-        }
+        long now = Environment.TickCount64;
+        long windowMs = (long)ErrorDeduplicationWindow.TotalMilliseconds;
+        long cleanupMs = (long)ErrorCacheCleanupInterval.TotalMilliseconds;
 
         lock (_recentlyShownErrors)
         {
-            if (_recentlyShownErrors.Contains(errorKey))
+            if (now - _lastErrorCleanupTick > cleanupMs)
+            {
+                _lastErrorCleanupTick = now;
+                if (_recentlyShownErrors.Count > 0)
+                {
+                    List<string>? expired = null;
+                    foreach (var kvp in _recentlyShownErrors)
+                    {
+                        if (kvp.Value <= now)
+                        {
+                            expired ??= [];
+                            expired.Add(kvp.Key);
+                        }
+                    }
+
+                    if (expired != null)
+                    {
+                        for (int i = 0; i < expired.Count; i++)
+                            _recentlyShownErrors.Remove(expired[i]);
+                    }
+                }
+            }
+
+            if (_recentlyShownErrors.TryGetValue(errorKey, out long expiresAt) && expiresAt > now)
                 return false;
 
-            _recentlyShownErrors.Add(errorKey);
-
-            _ = Task.Delay(ErrorDeduplicationWindow).ContinueWith(_ =>
-            {
-                lock (_recentlyShownErrors)
-                {
-                    _recentlyShownErrors.Remove(errorKey);
-                }
-            });
-
+            _recentlyShownErrors[errorKey] = now + windowMs;
             return true;
         }
     }
@@ -589,70 +688,6 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
 
     #endregion
 
-    #region Recommendations
-
-    private string? GetRecommendation(Exception exception)
-    {
-        var isAuthenticated = _youtube.AuthService.IsAuthenticated;
-
-        if (NetworkErrorHelper.IsSslOrTlsHandshakeFailure(exception))
-            return "Recommendation_DpiBlocked";
-
-        return exception switch
-        {
-            LoginRequiredException login => login.Reason switch
-            {
-                LoginRequiredReason.AgeRestricted => "Recommendation_Login_AgeRestricted",
-                LoginRequiredReason.MembersOnly => "Recommendation_MembersOnly",
-                _ => "Recommendation_Login"
-            },
-            VideoUnplayableException => isAuthenticated
-                ? "Recommendation_VideoUnavailable"
-                : "Recommendation_Login_403",
-            StreamUnavailableException stream => GetStreamRecommendation(stream, isAuthenticated),
-            ChunkDownloadFatalException chunk => GetChunkRecommendation(chunk, isAuthenticated),
-            _ => null
-        };
-    }
-
-    private static string GetStreamRecommendation(StreamUnavailableException stream, bool isAuthenticated)
-    {
-        if (stream.Reason == StreamUnavailableReason.CopyrightBlocked)
-            return "Recommendation_Copyright";
-
-        if (stream.Reason == StreamUnavailableReason.Forbidden403)
-            return isAuthenticated ? "Recommendation_ChangeClient" : "Recommendation_Login_403";
-
-        if (stream.Reason == StreamUnavailableReason.AllClientsFailed)
-            return isAuthenticated ? "Recommendation_AllClientsFailed_Auth" : "Recommendation_Login_403";
-
-        return stream.Reason switch
-        {
-            StreamUnavailableReason.RegionBlocked => "Recommendation_UseVPN",
-            StreamUnavailableReason.AgeRestricted => "Recommendation_Login_AgeRestricted",
-            StreamUnavailableReason.Private => "Recommendation_Private",
-            StreamUnavailableReason.Removed => "Recommendation_Removed",
-            StreamUnavailableReason.PaymentRequired => "Recommendation_Payment",
-            StreamUnavailableReason.LiveStream => "Recommendation_LiveStream",
-            _ => "Recommendation_ContactDev"
-        };
-    }
-
-    private static string GetChunkRecommendation(ChunkDownloadFatalException chunk, bool isAuthenticated)
-    {
-        if (chunk.Reason == ChunkDownloadFailureReason.Forbidden403)
-            return isAuthenticated ? "Recommendation_ChangeClient" : "Recommendation_Login_403";
-
-        return chunk.Reason switch
-        {
-            ChunkDownloadFailureReason.NetworkError => "Recommendation_CheckNetwork",
-            ChunkDownloadFailureReason.UmpFormat => "Recommendation_ChangeClient",
-            _ => "Recommendation_ContactDev"
-        };
-    }
-
-    #endregion
-
     #region Dispose
 
     public void Dispose()
@@ -663,6 +698,7 @@ public sealed class PlaybackErrorOrchestrator : IDisposable
         _audioEngine.OnErrorOccurred -= HandleError;
         _audioEngine.OnDeviceLost -= HandleDeviceLost;
         _audioEngine.OnDeviceRestored -= HandleDeviceRestored;
+        _audioEngine.OnNTokenDecryptionWarning -= HandleNTokenDecryptionWarning;
 
         Core.Audio.Sources.CachingStreamSource.OnSourceWarning -= HandleSourceWarning;
 

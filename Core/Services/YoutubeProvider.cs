@@ -53,8 +53,7 @@ public partial class YoutubeProvider : IDisposable
     private Task? _initTask;
     private readonly Lock _initLock = new();
 
-    private static readonly Regex YoutubeVideoRegex = _YoutubeVideoRegex();
-    private static readonly Regex YoutubePlaylistRegex = _YoutubePlaylistRegex();
+    // URL parsing is delegated to VideoId.TryParse and PlaylistId.TryParse.
 
     #endregion
 
@@ -231,7 +230,7 @@ public partial class YoutubeProvider : IDisposable
     public YoutubeClient GetClient()
     {
         EnsureInitializedOnDemand();
-        return _youtube ?? throw new InvalidOperationException("YouTube client not initialized");
+        return Volatile.Read(ref _youtube) ?? throw new InvalidOperationException("YouTube client not initialized");
     }
 
     #endregion
@@ -250,6 +249,17 @@ public partial class YoutubeProvider : IDisposable
 
     #region Edit YouTube Data
 
+    private void EnsureCanMutatePlaylist(string? playlistId, bool validatePlaylistId = true)
+    {
+        if (validatePlaylistId && string.IsNullOrWhiteSpace(playlistId))
+            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
+
+        if (AuthService?.IsAuthenticated != true)
+            throw new InvalidOperationException("Cannot modify cloud playlist: user is not authenticated.");
+
+        VideoController.ThrowIfInCooldown();
+    }
+
     /// <summary>
     /// Sets the "Liked" status for a track on YouTube Music.
     /// </summary>
@@ -259,7 +269,7 @@ public partial class YoutubeProvider : IDisposable
         try
         {
             var rawId = YoutubeIdHelper.ExtractRawId(trackId);
-            await _youtube.Music.LikeTrackAsync(rawId, like);
+            await GetClient().Music.LikeTrackAsync(rawId, like);
             Log.Info($"[Music] Like={like} for {rawId}");
         }
         catch (Exception ex)
@@ -278,14 +288,11 @@ public partial class YoutubeProvider : IDisposable
         string? description = null,
         CancellationToken ct = default)
     {
-        if (AuthService?.IsAuthenticated != true)
-            throw new InvalidOperationException("Cannot create cloud playlist: user is not authenticated.");
-
-        VideoController.ThrowIfInCooldown();
+        EnsureCanMutatePlaylist(null, validatePlaylistId: false);
 
         try
         {
-            var ytId = await _youtube.Mutations.CreatePlaylistAsync(title, videoIds, description, ct);
+            var ytId = await GetClient().Mutations.CreatePlaylistAsync(title, videoIds, description, ct);
             Log.Info($"[Music] Created playlist '{title}' → YT ID: {ytId}");
             return ytId;
         }
@@ -392,7 +399,7 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            await _youtube.Mutations.MoveTracksAsync(playlistId, moves, ct);
+            await GetClient().Mutations.MoveTracksAsync(playlistId, moves, ct);
             Log.Info($"[Music] Reordered {moves.Count} tracks in playlist {playlistId}");
         }
         catch (BotDetectionException) { throw; }
@@ -408,17 +415,11 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public async Task EditPlaylistDescriptionAsync(string playlistId, string description)
     {
-        if (string.IsNullOrWhiteSpace(playlistId))
-            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
-
-        if (AuthService?.IsAuthenticated != true)
-            throw new InvalidOperationException("Cannot edit cloud playlist: user is not authenticated.");
-
-        VideoController.ThrowIfInCooldown();
+        EnsureCanMutatePlaylist(playlistId);
 
         try
         {
-            await _youtube.Mutations.SetPlaylistDescriptionAsync(playlistId, description);
+            await GetClient().Mutations.SetPlaylistDescriptionAsync(playlistId, description);
             Log.Info($"[Music] Updated description for playlist {playlistId}");
         }
         catch (BotDetectionException) { throw; }
@@ -436,17 +437,11 @@ public partial class YoutubeProvider : IDisposable
         string playlistId,
         byte[] imageData)
     {
-        if (string.IsNullOrWhiteSpace(playlistId))
-            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
-
-        if (AuthService?.IsAuthenticated != true)
-            throw new InvalidOperationException("Cannot upload thumbnail: user is not authenticated.");
-
-        VideoController.ThrowIfInCooldown();
+        EnsureCanMutatePlaylist(playlistId);
 
         try
         {
-            var result = await _youtube.Mutations.UploadPlaylistThumbnailAsync(
+            var result = await GetClient().Mutations.UploadPlaylistThumbnailAsync(
                 playlistId, imageData);
 
             if (result)
@@ -473,17 +468,11 @@ public partial class YoutubeProvider : IDisposable
         string? description,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(playlistId))
-            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
-
-        if (AuthService?.IsAuthenticated != true)
-            throw new InvalidOperationException("Cannot edit cloud playlist: user is not authenticated.");
-
-        VideoController.ThrowIfInCooldown();
+        EnsureCanMutatePlaylist(playlistId);
 
         try
         {
-            await _youtube.Mutations.EditPlaylistDetailsAsync(playlistId, newTitle, description, ct)
+            await GetClient().Mutations.EditPlaylistDetailsAsync(playlistId, newTitle, description, ct)
                 .ConfigureAwait(false);
             Log.Info($"[Music] Updated details for playlist {playlistId} " +
                      $"(name={newTitle != null}, desc={description != null})");
@@ -501,17 +490,11 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public async Task RenamePlaylistAsync(string playlistId, string newTitle)
     {
-        if (string.IsNullOrWhiteSpace(playlistId))
-            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
-
-        if (AuthService?.IsAuthenticated != true)
-            throw new InvalidOperationException("Cannot rename cloud playlist: user is not authenticated.");
-
-        VideoController.ThrowIfInCooldown();
+        EnsureCanMutatePlaylist(playlistId);
 
         try
         {
-            await _youtube.Mutations.RenamePlaylistAsync(playlistId, newTitle);
+            await GetClient().Mutations.RenamePlaylistAsync(playlistId, newTitle);
             Log.Info($"[Music] Renamed playlist {playlistId} → '{newTitle}'");
         }
         catch (BotDetectionException) { throw; }
@@ -527,17 +510,11 @@ public partial class YoutubeProvider : IDisposable
     /// </summary>
     public async Task DeletePlaylistAsync(string playlistId)
     {
-        if (string.IsNullOrWhiteSpace(playlistId))
-            throw new ArgumentException("Playlist ID cannot be empty.", nameof(playlistId));
-
-        if (AuthService?.IsAuthenticated != true)
-            throw new InvalidOperationException("Cannot delete cloud playlist: user is not authenticated.");
-
-        VideoController.ThrowIfInCooldown();
+        EnsureCanMutatePlaylist(playlistId);
 
         try
         {
-            await _youtube.Mutations.DeletePlaylistAsync(playlistId);
+            await GetClient().Mutations.DeletePlaylistAsync(playlistId);
             Log.Info($"[Music] Deleted playlist {playlistId} from YouTube");
         }
         catch (BotDetectionException) { throw; }
@@ -562,7 +539,7 @@ public partial class YoutubeProvider : IDisposable
 
         try
         {
-            var data = await _youtube.Sync.GetFullPlaylistDataAsync(youtubePlaylistId, ct);
+            var data = await GetClient().Sync.GetFullPlaylistDataAsync(youtubePlaylistId, ct);
 
             Log.Info($"[Music] Fetched full playlist data: " +
                      $"'{data.Title}', {data.Tracks.Count} tracks for {youtubePlaylistId}");
@@ -707,7 +684,7 @@ public partial class YoutubeProvider : IDisposable
         try
         {
             var vId = VideoId.Parse(rawVideoId);
-            var manifest = await _youtube.Videos.Streams
+            var manifest = await GetClient().Videos.Streams
                 .GetManifestAsync(vId, ct, forceRefresh, excludedClients)
                 .ConfigureAwait(false);
 
@@ -755,10 +732,10 @@ public partial class YoutubeProvider : IDisposable
         if (string.IsNullOrWhiteSpace(videoId)) return [];
         EnsureInitializedOnDemand();
 
-        string trackId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId : $"yt_{videoId}";
-        string rawId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId[3..] : videoId;
+        string trackId = YoutubeIdHelper.ToTrackId(videoId);
+        string rawId = YoutubeIdHelper.ExtractRawId(videoId);
 
-        var track = _trackRegistry.TryGet(trackId) ?? _libraryService?.GetTrack(trackId);
+        var track = _trackRegistry.TryGet(trackId);
         bool isExplicitDownload = track != null && track.IsDownloaded && !string.IsNullOrEmpty(track.LocalPath) && File.Exists(track.LocalPath);
 
         StreamManifest? manifest = null;
@@ -838,7 +815,7 @@ public partial class YoutubeProvider : IDisposable
         try
         {
             var vId = VideoId.Parse(rawId);
-            manifest = await _youtube.Videos.Streams
+            manifest = await GetClient().Videos.Streams
                 .GetManifestAsync(vId, ct)
                 .ConfigureAwait(false);
 
@@ -883,7 +860,7 @@ public partial class YoutubeProvider : IDisposable
         var rawId = YoutubeIdHelper.ExtractRawId(trackId);
         if (!string.Equals(rawId, trackId, StringComparison.Ordinal))
         {
-            _manifestRamCache.TryRemove($"yt_{rawId}", out _);
+            _manifestRamCache.TryRemove(YoutubeIdHelper.ToTrackId(rawId), out _);
             _manifestRamCache.TryRemove(rawId, out _);
         }
 
@@ -990,10 +967,10 @@ public partial class YoutubeProvider : IDisposable
         if (string.IsNullOrWhiteSpace(query)) return QueryType.None;
         query = query.Trim();
 
-        if (YoutubePlaylistRegex.IsMatch(query)) return QueryType.Playlist;
-        if (YoutubeVideoRegex.IsMatch(query) ||
-            query.StartsWith(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-            query.StartsWith(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        if (PlaylistId.TryParseUrl(query) is not null) return QueryType.Playlist;
+        if (VideoId.TryParseUrl(query) is not null ||
+            query.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            query.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
             return QueryType.DirectUrl;
         }
@@ -1007,9 +984,7 @@ public partial class YoutubeProvider : IDisposable
     public static string? ExtractVideoId(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
-        var match = YoutubeVideoRegex.Match(url);
-        if (match.Success) return match.Groups[1].Value;
-        try { return VideoId.TryParse(url)?.Value; } catch { return null; }
+        return VideoId.TryParse(url)?.Value;
     }
 
     /// <summary>
@@ -1021,8 +996,9 @@ public partial class YoutubeProvider : IDisposable
         EnsureInitializedOnDemand();
         try
         {
-            var videoId = VideoId.TryParse(url) ?? VideoId.Parse(ExtractVideoId(url) ?? "");
-            var rawTrack = await _youtube.Videos.GetAsync(videoId);
+            var videoId = VideoId.TryParse(url);
+            if (videoId is null) return null;
+            var rawTrack = await GetClient().Videos.GetAsync(videoId.Value);
             return _trackRegistry.RegisterOrUpdate(rawTrack);
         }
         catch (Exception ex)
@@ -1062,7 +1038,7 @@ public partial class YoutubeProvider : IDisposable
 
         Log.Info($"[YouTube] Streaming search '{query}' (Filter: {filter})...");
 
-        await foreach (var batch in _youtube.Search.GetResultBatchesAsync(query, filter, ct))
+        await foreach (var batch in GetClient().Search.GetResultBatchesAsync(query, filter, ct))
         {
             if (ct.IsCancellationRequested) yield break;
 
@@ -1450,9 +1426,10 @@ public partial class YoutubeProvider : IDisposable
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, attemptTimeoutCts.Token);
             var token = linkedCts.Token;
 
+            var hl = Uri.EscapeDataString(YoutubeHttpHandler.GetHl());
             var endpoint = i == 0
-                ? $"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={encoded}&hl=ru"
-                : $"https://suggestqueries-clients6.youtube.com/complete/search?client=firefox&ds=yt&q={encoded}&hl=ru";
+                ? $"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={encoded}&hl={hl}"
+                : $"https://suggestqueries-clients6.youtube.com/complete/search?client=firefox&ds=yt&q={encoded}&hl={hl}";
 
             try
             {
@@ -1543,8 +1520,9 @@ public partial class YoutubeProvider : IDisposable
             var playlistId = PlaylistId.TryParse(url);
             if (playlistId == null) return null;
 
-            var playlist = await _youtube.Playlists.GetAsync(playlistId.Value);
-            var rawTracks = await _youtube.Playlists.GetVideosAsync(playlistId.Value).CollectAsync();
+            var client = GetClient();
+            var playlist = await client.Playlists.GetAsync(playlistId.Value);
+            var rawTracks = await client.Playlists.GetVideosAsync(playlistId.Value).CollectAsync();
 
             var tracks = new List<TrackInfo>(rawTracks.Count);
             for (int i = 0; i < rawTracks.Count; i++)
@@ -1608,7 +1586,7 @@ public partial class YoutubeProvider : IDisposable
         {
             var plId = new PlaylistId(playlistId);
 
-            var result = await _youtube.Playlists.ImportAsync(plId, ct).ConfigureAwait(false);
+            var result = await GetClient().Playlists.ImportAsync(plId, ct).ConfigureAwait(false);
 
             var playlist = result.Playlist;
             playlist.SyncMode = isAccountSync
@@ -1636,7 +1614,7 @@ public partial class YoutubeProvider : IDisposable
                 {
                     try
                     {
-                        var fullData = await _youtube.Sync.GetFullPlaylistDataAsync(playlist.YoutubeId, ct).ConfigureAwait(false);
+                        var fullData = await GetClient().Sync.GetFullPlaylistDataAsync(playlist.YoutubeId, ct).ConfigureAwait(false);
                         if (fullData?.Tracks is { Count: > 0 } remoteTracks)
                         {
                             var mappings = new List<(string TrackId, string SetVideoId)>(remoteTracks.Count);
@@ -1644,7 +1622,7 @@ public partial class YoutubeProvider : IDisposable
                             {
                                 var r = remoteTracks[i];
                                 if (!string.IsNullOrEmpty(r.SetVideoId))
-                                    mappings.Add(("yt_" + r.VideoId, r.SetVideoId));
+                                    mappings.Add((YoutubeIdHelper.ToTrackId(r.VideoId), r.SetVideoId));
                             }
 
                             if (mappings.Count > 0)
@@ -1825,10 +1803,9 @@ public partial class YoutubeProvider : IDisposable
         var format = YoutubeIdHelper.MapContainerToFormat(stream.Container.Name);
         var codec = DetermineCodec(stream, format);
 
-        DateTime expireUtc = DateTime.MaxValue;
-        var expireStr = UrlEx.TryGetQueryParameterValue(url, "expire");
-        if (expireStr != null && long.TryParse(expireStr, out var unix))
-            expireUtc = DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime;
+        DateTime expireUtc = UrlEx.TryGetExpireUtc(url, out var parsedExpire)
+            ? parsedExpire
+            : DateTime.MaxValue;
 
         string cdnHost = "";
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -1941,7 +1918,7 @@ public partial class YoutubeProvider : IDisposable
             _nTokenDecryptor.InvalidateCache();
             _sigCipherDecryptor.InvalidateCache();
             _nTokenDecryptor.PlayerManager.InvalidateContext();
-            _youtube.Videos.Streams.InvalidateCipherManifest();
+            Volatile.Read(ref _youtube)?.Videos.Streams.InvalidateCipherManifest();
             SessionCacheStore.Invalidate(trackId);
             _manifestRamCache.TryRemove(trackId, out _);
             Log.Info($"[YouTube] [{rawVideoId}] Caches and PoToken purged for force refresh.");
@@ -1965,7 +1942,7 @@ public partial class YoutubeProvider : IDisposable
     /// <param name="bitrate">Desired bitrate.</param>
     public ResolvedStreamDescriptor? TryGetCachedStreamDescriptor(string videoId, AudioFormat? format, int bitrate)
     {
-        string trackId = videoId.StartsWith("yt_", StringComparison.Ordinal) ? videoId : $"yt_{videoId}";
+        string trackId = YoutubeIdHelper.ToTrackId(videoId);
         if (_manifestRamCache.TryGetValue(trackId, out var manifest))
         {
             // A URL issued for a different external IP will be rejected by CDN with HTTP 403: do not yield such descriptor.
@@ -1996,27 +1973,20 @@ public partial class YoutubeProvider : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _nTokenDecryptor.OnComplexDecryptionStarted -= HandleNTokenDecryptionStarted;
         AuthService?.OnAuthStateChanged -= ReloadClient;
-
         _networkManager.NetworkRebuilt -= ReloadClient;
 
-        _youtube?.Dispose();
+        _currentSearchSession?.Dispose();
+        _currentSearchSession = null;
+
+        Interlocked.Exchange(ref _youtube, null!)?.Dispose();
         _poTokenProvider?.Dispose();
         _poTokenProvider = null;
 
         _manifestRamCache.Clear();
         Log.Info("[YouTube] Provider disposed");
     }
-
-    [GeneratedRegex(
-        @"(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex _YoutubeVideoRegex();
-
-    [GeneratedRegex(
-        @"(?:youtube\.com\/.*[?&]list=)([a-zA-Z0-9_-]+)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex _YoutubePlaylistRegex();
 
     #endregion
 }

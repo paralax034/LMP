@@ -23,10 +23,37 @@ public partial struct VideoId
     {
         if (videoId.Length != 11) return false;
         foreach (var c in videoId.AsSpan())
-            if (!char.IsLetterOrDigit(c) && c is not ('_' or '-')) return false;
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-')) return false;
         return true;
     }
 
+
+    private static readonly Regex[] UrlRegexes =
+    [
+        WatchUrlRegex(),
+        ShortWatchUrlRegex(),
+        ShortUrlRegex(),
+        EmbedUrlRegex(),
+        LegacyVUrlRegex(),
+        ShortsUrlRegex(),
+        LiveUrlRegex()
+    ];
+
+    private static string? TryNormalizeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        for (int i = 0; i < UrlRegexes.Length; i++)
+        {
+            var match = UrlRegexes[i].Match(url);
+            if (!match.Success) continue;
+
+            var id = WebUtility.UrlDecode(match.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
+        }
+
+        return null;
+    }
 
     private static string? TryNormalize(string? videoIdOrUrl)
     {
@@ -34,46 +61,21 @@ public partial struct VideoId
 
         if (IsValid(videoIdOrUrl)) return videoIdOrUrl;
 
-        {
-            var raw = MyRegex().Match(videoIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex1().Match(videoIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex2().Match(videoIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex3().Match(videoIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex4().Match(videoIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-        {
-            var raw = MyRegex5.Match(videoIdOrUrl).Groups[1].Value;
-            var id = WebUtility.UrlDecode(raw);
-            if (!string.IsNullOrWhiteSpace(id) && IsValid(id)) return id;
-        }
-
-        return null;
+        return TryNormalizeUrl(videoIdOrUrl);
     }
+
+    /// <summary>
+    /// Attempts to extract a video ID strictly from a YouTube URL (rejects bare IDs and search terms).
+    /// </summary>
+    public static VideoId? TryParseUrl(string? url) =>
+        TryNormalizeUrl(url) is { } id ? new VideoId(id) : (VideoId?)null;
 
     /// <summary>
     /// Attempts to parse the specified string as a video ID or URL.
     /// Returns null in case of failure.
     /// </summary>
     public static VideoId? TryParse(string? videoIdOrUrl) =>
-        TryNormalize(videoIdOrUrl) is { } id ? new VideoId(id) : default;
+        TryNormalize(videoIdOrUrl) is { } id ? new VideoId(id) : (VideoId?)null;
 
     /// <summary>
     /// Parses the specified string as a YouTube video ID or URL.
@@ -93,19 +95,20 @@ public partial struct VideoId
     /// </summary>
     public static implicit operator string(VideoId videoId) => videoId.ToString();
 
-    [GeneratedRegex(@"youtube\..+?/watch.*?v=(.*?)(?:&|/|$)")]
-    private static partial Regex MyRegex();
-    [GeneratedRegex(@"youtu\.be/watch.*?v=(.*?)(?:\?|&|/|$)")]
-    private static partial Regex MyRegex1();
-    [GeneratedRegex(@"youtu\.be/(.*?)(?:\?|&|/|$)")]
-    private static partial Regex MyRegex2();
-    [GeneratedRegex(@"youtube\..+?/embed/(.*?)(?:\?|&|/|$)")]
-    private static partial Regex MyRegex3();
-    [GeneratedRegex(@"youtube\..+?/shorts/(.*?)(?:\?|&|/|$)")]
-    private static partial Regex MyRegex4();
-
-    [GeneratedRegex(@"youtube\..+?/live/(.*?)(?:\?|&|/|$)")]
-    private static partial Regex MyRegex5 { get; }
+    [GeneratedRegex(@"youtube\..+?/watch[^#]*?[?&]v=([^&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex WatchUrlRegex();
+    [GeneratedRegex(@"youtu\.be/watch[^#]*?[?&]v=([^&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ShortWatchUrlRegex();
+    [GeneratedRegex(@"youtu\.be/([^?&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ShortUrlRegex();
+    [GeneratedRegex(@"youtube\..+?/embed/([^?&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EmbedUrlRegex();
+    [GeneratedRegex(@"youtube\..+?/v/([^?&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex LegacyVUrlRegex();
+    [GeneratedRegex(@"youtube\..+?/shorts/([^?&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ShortsUrlRegex();
+    [GeneratedRegex(@"youtube\..+?/live/([^?&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex LiveUrlRegex();
 }
 
 public partial struct VideoId : IEquatable<VideoId>

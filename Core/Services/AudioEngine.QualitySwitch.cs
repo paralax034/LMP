@@ -93,6 +93,12 @@ public sealed partial class AudioEngine
 
                     if (descriptor == null)
                     {
+                        lock (_playerDispatchLock)
+                        {
+                            if (!_session.IsStale(cmd.Session))
+                                TrySyncActivePlaybackSessionLocked(cmd.Track, cmd.Session);
+                        }
+
                         if (!_session.IsStale(cmd.Session))
                             RaiseError(new InvalidOperationException("No stream available"));
                         return;
@@ -112,6 +118,11 @@ public sealed partial class AudioEngine
                         && currentInfo.Bitrate == d.BitrateKbps)
                     {
                         Log.Info($"[AudioEngine] SwitchQuality skipped: active pipeline already matches");
+                        lock (_playerDispatchLock)
+                        {
+                            if (!_session.IsStale(cmd.Session))
+                                TrySyncActivePlaybackSessionLocked(cmd.Track, cmd.Session, resumeClockIfPlaying: true);
+                        }
                         RaiseOnUI(() =>
                         {
                             if (!_session.IsStale(cmd.Session))
@@ -155,6 +166,17 @@ public sealed partial class AudioEngine
                     }
 
                     await switchPlayTask.ConfigureAwait(false);
+
+                    lock (_playerDispatchLock)
+                    {
+                        if (!_session.IsStaleOrCancelled(cmd.Session, ct)
+                            && !TrySyncActivePlaybackSessionLocked(cmd.Track, cmd.Session, resumeClockIfPlaying: true)
+                            && _playIntent
+                            && _player.State == PlaybackState.Playing)
+                        {
+                            BeginPlaybackSessionLocked(cmd.Track, cmd.Session, isPlayingNow: true);
+                        }
+                    }
 
                     ApplyGainToPipeline();
                     break;

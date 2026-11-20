@@ -320,6 +320,16 @@ public partial class App : Application
             {
                 var updateService = AppEntry.Services.GetRequiredService<UpdateService>();
 
+                static async Task ShowUpdateAvailableToastAsync(NotificationService notif, string versionName)
+                {
+                    await notif.ShowToastAsync(
+                        titleKey: "Update_Available_Title",
+                        messageKey: "Update_Available_Toast",
+                        severity: NotificationSeverity.Info,
+                        durationMs: 8000,
+                        messageArgs: [versionName]).ConfigureAwait(false);
+                }
+
                 // Background startup check without waiting for cooldown (15s timeout to prevent hanging)
                 _ = Task.Run(async () =>
                 {
@@ -335,12 +345,7 @@ public partial class App : Application
                         {
                             Log.Info(
                                 $"[App] Startup check detected new update '{checkResult.VersionName}'. Dispatching info toast.");
-                            await notifications.ShowToastAsync(
-                                titleKey: "Update_Available_Title",
-                                messageKey: "Update_Available_Toast",
-                                severity: NotificationSeverity.Info,
-                                durationMs: 8000,
-                                messageArgs: [checkResult.VersionName]).ConfigureAwait(false);
+                            await ShowUpdateAvailableToastAsync(notifications, checkResult.VersionName).ConfigureAwait(false);
                         }
                     }
                     catch (OperationCanceledException)
@@ -369,12 +374,7 @@ public partial class App : Application
                             {
                                 Log.Info(
                                     $"[App] Periodic background check detected new update '{periodicResult.VersionName}'. Dispatching info toast.");
-                                await notifications.ShowToastAsync(
-                                    titleKey: "Update_Available_Title",
-                                    messageKey: "Update_Available_Toast",
-                                    severity: NotificationSeverity.Info,
-                                    durationMs: 8000,
-                                    messageArgs: [periodicResult.VersionName]).ConfigureAwait(false);
+                                await ShowUpdateAvailableToastAsync(notifications, periodicResult.VersionName).ConfigureAwait(false);
                             }
                         }
                     }
@@ -426,6 +426,9 @@ public partial class App : Application
                         CdnHostStatsStore.Save();
                         SessionCacheStore.Save();
 
+                        // Dispose UI ViewModels/timers on UI thread BEFORE any ConfigureAwait(false)
+                        mainWindowVM?.Dispose();
+
                         // GRACEFULLY release the audio engine and cache.
                         // Do this BEFORE canceling the token so threads terminate normally without throwing IOException
                         var discordRpcToDispose = AppEntry.Services.GetService<DiscordRpcService>();
@@ -435,7 +438,14 @@ public partial class App : Application
                         }
                         AppEntry.Services.GetService<MediaTransportCoordinator>()?.Dispose();
                         AppEntry.Services.GetService<PlayerControlService>()?.Dispose();
+                        var playlistSyncToDispose = AppEntry.Services.GetService<PlaylistSyncService>();
+                        if (playlistSyncToDispose is not null)
+                        {
+                            await playlistSyncToDispose.DisposeAsync().ConfigureAwait(false);
+                        }
+                        AppEntry.Services.GetService<PlaybackErrorOrchestrator>()?.Dispose();
                         await audioEngine.DisposeAsync().ConfigureAwait(false);
+                        AppEntry.Services.GetService<YoutubeProvider>()?.Dispose();
                         AppEntry.Services.GetService<ImageCacheService>()?.Dispose();
                         var cacheToDispose = audioCacheManager ?? AudioSourceFactory.TryGetInitializedGlobalCache();
                         if (cacheToDispose != null)

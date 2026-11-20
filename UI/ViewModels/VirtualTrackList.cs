@@ -29,6 +29,7 @@ public sealed class VirtualTrackList : IVirtualTrackList
     private readonly HashSet<string> _selectedTrackIds = new(StringComparer.Ordinal);
 
     private string? _currentActiveTrackId;
+    private string _currentFilterQuery = string.Empty;
     private bool _currentIsPlaying;
 
     private bool _isDisposed;
@@ -145,7 +146,8 @@ public sealed class VirtualTrackList : IVirtualTrackList
             _selectedTrackIds.RemoveWhere(id => _index.FindIndexById(id) < 0);
         }
 
-        RebuildFilteredIndices(string.Empty);
+        _currentFilterQuery = string.Empty;
+        RebuildFilteredIndices(_currentFilterQuery);
         RaiseReset();
         NotifySelectionChanged();
     }
@@ -157,12 +159,13 @@ public sealed class VirtualTrackList : IVirtualTrackList
             _index.Append(track);
         }
 
-        RebuildFilteredIndices(string.Empty);
+        RebuildFilteredIndices(_currentFilterQuery);
         RaiseReset();
     }
     public void ApplyFilter(string query)
     {
-        RebuildFilteredIndices(query);
+        _currentFilterQuery = query ?? string.Empty;
+        RebuildFilteredIndices(_currentFilterQuery);
         PruneUnfilteredViewModels();
         RaiseReset();
         NotifySelectionChanged();

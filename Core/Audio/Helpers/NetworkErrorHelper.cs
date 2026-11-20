@@ -72,40 +72,24 @@ public static class NetworkErrorHelper
         if (exception is null)
             return false;
 
-        // Classified network errors are never "cancellation"
-        if (exception is ChunkDownloadFatalException or YoutubeNetworkException)
-            return false;
-
-        // Walk the chain looking for hard network evidence
         for (var current = exception; current != null; current = current.InnerException)
         {
+            if (current is ChunkDownloadFatalException or YoutubeNetworkException)
+                return false;
+
+            // An explicit token-backed OperationCanceledException/TaskCanceledException
+            // takes precedence over any inner IOException/SocketException produced when
+            // aborting an in-flight socket or SSL read.
+            if (current is OperationCanceledException oce)
+                return oce.CancellationToken.IsCancellationRequested;
+
             if (current is TimeoutException or
                 IOException or
                 System.Net.Sockets.SocketException or
                 System.Net.WebException or
-                HttpRequestException or
-                YoutubeNetworkException)
+                HttpRequestException)
             {
                 return false;
-            }
-
-            // TaskCanceledException from HttpClient.Timeout:
-            // its OWN CancellationToken is NOT requested — this is a timeout, not a user cancel
-            if (current is TaskCanceledException tce && !tce.CancellationToken.IsCancellationRequested)
-            {
-                return false;
-            }
-        }
-
-        // Only treat as cancellation if we found OperationCanceledException
-        // with its token actually requested (user-initiated)
-        for (var current = exception; current != null; current = current.InnerException)
-        {
-            if (current is OperationCanceledException oce)
-            {
-                // If CancellationToken.IsCancellationRequested is true, user cancelled
-                // If false — it's an internal timeout masquerading as cancellation
-                return oce.CancellationToken.IsCancellationRequested;
             }
         }
 

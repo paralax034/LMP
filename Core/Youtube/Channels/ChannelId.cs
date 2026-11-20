@@ -24,7 +24,7 @@ public partial struct ChannelId
         if (!channelId.StartsWith("UC", StringComparison.Ordinal) || channelId.Length != 24)
             return false;
         foreach (var c in channelId.AsSpan())
-            if (!char.IsLetterOrDigit(c) && c is not ('_' or '-')) return false;
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-')) return false;
         return true;
     }
 
@@ -34,8 +34,10 @@ public partial struct ChannelId
 
         if (IsValid(channelIdOrUrl)) return channelIdOrUrl;
 
-        var raw = MyRegex().Match(channelIdOrUrl).Groups[1].Value;
-        var id = WebUtility.UrlDecode(raw);
+        var match = ChannelUrlRegex().Match(channelIdOrUrl);
+        if (!match.Success) return null;
+
+        var id = WebUtility.UrlDecode(match.Groups[1].Value);
         return !string.IsNullOrWhiteSpace(id) && IsValid(id) ? id : null;
     }
 
@@ -44,7 +46,7 @@ public partial struct ChannelId
     /// Returns null in case of failure.
     /// </summary>
     public static ChannelId? TryParse(string? channelIdOrUrl) =>
-        TryNormalize(channelIdOrUrl) is { } id ? new ChannelId(id) : default;
+        TryNormalize(channelIdOrUrl) is { } id ? new ChannelId(id) : (ChannelId?)null;
 
     /// <summary>
     /// Parses the specified string as a YouTube channel ID or URL.
@@ -63,8 +65,8 @@ public partial struct ChannelId
     /// </summary>
     public static implicit operator string(ChannelId channelId) => channelId.ToString();
 
-    [GeneratedRegex(@"youtube\..+?/channel/(.*?)(?:\?|&|/|$)")]
-    private static partial Regex MyRegex();
+    [GeneratedRegex(@"youtube\..+?/channel/([^?&#/]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ChannelUrlRegex();
 }
 
 public partial struct ChannelId : IEquatable<ChannelId>

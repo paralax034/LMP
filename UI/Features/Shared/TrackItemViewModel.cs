@@ -100,9 +100,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
     public bool IsLiked => Track.IsLiked;
     public bool IsDownloaded => Track.IsDownloaded;
 
-    public string FormattedDuration => Duration.TotalHours >= 1
-        ? Duration.ToString(@"h\:mm\:ss")
-        : Duration.ToString(@"m\:ss");
+    public string FormattedDuration => LMP.Core.Helpers.DurationFormatter.FormatShort(Duration);
 
     [ObservableProperty] public partial bool IsActive { get; private set; }
     [ObservableProperty] public partial bool IsPlaying { get; private set; }
@@ -562,45 +560,35 @@ public sealed partial class TrackItemViewModel : ViewModelBase
         if (IsDisposed) return;
 
         var targets = GetActionTargets();
-        if (targets.Count > 1)
+        var builder = targets.Count > 1 ? new System.Text.StringBuilder(targets.Count * 45) : null;
+        string? singleUrl = null;
+
+        for (int i = 0; i < targets.Count; i++)
         {
-            var builder = new System.Text.StringBuilder(targets.Count * 45);
-            for (int i = 0; i < targets.Count; i++)
+            var target = targets[i];
+            var targetUrl = !string.IsNullOrEmpty(target.Url)
+                ? target.Url
+                : $"https://www.youtube.com/watch?v={target.GetRawId()}";
+
+            if (string.IsNullOrEmpty(targetUrl)) continue;
+
+            if (builder != null)
             {
-                var target = targets[i];
-                var targetUrl = target.Url;
-                if (string.IsNullOrEmpty(targetUrl))
-                    targetUrl = $"https://www.youtube.com/watch?v={target.GetRawId()}";
-
-                if (!string.IsNullOrEmpty(targetUrl))
-                {
-                    if (builder.Length > 0) builder.AppendLine();
-                    builder.Append(targetUrl);
-                }
+                if (builder.Length > 0) builder.AppendLine();
+                builder.Append(targetUrl);
             }
-
-            if (builder.Length == 0)
+            else
             {
-                CopyHintService.Instance.Show(
-                    L["Track_CopyLink_NoUrl"],
-                    CopyHintKind.Warning,
-                    null);
-                return;
+                singleUrl = targetUrl;
+                break;
             }
-
-            await Clipboard.SetTextAsync(builder.ToString()).ConfigureAwait(false);
-            CopyHintService.Instance.Show(
-                L["Track_Copied"],
-                CopyHintKind.Success,
-                null);
-            return;
         }
 
-        var url = Track.Url;
-        if (string.IsNullOrEmpty(url))
-            url = $"https://www.youtube.com/watch?v={Track.GetRawId()}";
+        string? payload = builder != null
+            ? (builder.Length > 0 ? builder.ToString() : null)
+            : singleUrl;
 
-        if (string.IsNullOrEmpty(url))
+        if (string.IsNullOrEmpty(payload))
         {
             CopyHintService.Instance.Show(
                 L["Track_CopyLink_NoUrl"],
@@ -609,8 +597,7 @@ public sealed partial class TrackItemViewModel : ViewModelBase
             return;
         }
 
-        await Clipboard.SetTextAsync(url).ConfigureAwait(false);
-
+        await Clipboard.SetTextAsync(payload).ConfigureAwait(false);
         CopyHintService.Instance.Show(
             L["Track_Copied"],
             CopyHintKind.Success,

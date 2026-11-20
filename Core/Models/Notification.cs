@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Text.Json.Serialization;
 using System.Windows.Input;
 
 namespace LMP.Core.Models;
@@ -346,13 +347,13 @@ public sealed record AttemptRecord(
     string? ErrorMessage,
     DateTime Timestamp)
 {
-    [System.Text.Json.Serialization.JsonIgnore]
+    [JsonIgnore]
     public string FormattedTime => Timestamp.ToString("HH:mm:ss");
 
-    [System.Text.Json.Serialization.JsonIgnore]
+    [JsonIgnore]
     public string StatusIcon => Success ? "✅" : "❌";
 
-    [System.Text.Json.Serialization.JsonIgnore]
+    [JsonIgnore]
     public string DisplayMessage
     {
         get

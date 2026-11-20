@@ -21,7 +21,6 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
     private readonly ImageCacheService _imageCache;
     private readonly EventHandler<string> _languageChangedHandler;
 
-    private string _currentQuery = "";
     private CancellationTokenSource? _categoryCts;
     private bool _isDisposed;
     private bool _isDataLoaded;
@@ -124,29 +123,33 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
         var category = SelectedCategory;
         if (category is null) return;
 
-        _categoryCts?.Cancel();
-        _categoryCts?.Dispose();
-        _categoryCts = new CancellationTokenSource();
-        var ct = _categoryCts.Token;
+        var oldCts = _categoryCts;
+        var loadCts = new CancellationTokenSource();
+        _categoryCts = loadCts;
+        oldCts?.Cancel();
+        oldCts?.Dispose();
+
+        var ct = loadCts.Token;
 
         IsLoading = true;
 
         try
         {
-            await Task.Delay(50, ct);
+            if (!await ct.DelayNoThrowAsync(50, continueOnCapturedContext: true))
+                return;
 
             if (category.IsSpecial)
             {
-                var recent = await LibService.GetRecentlyPlayedAsync(DefaultFetchSize);
+                var recent = await LibService.GetRecentlyPlayedAsync(DefaultFetchSize, ct);
                 if (ct.IsCancellationRequested) return;
                 SetTracks(recent);
             }
             else
             {
-                _currentQuery = category.Query;
+                string query = category.Query;
 
                 var cached = !force
-                    ? await _searchCache.GetAsync(_currentQuery, SearchSource.YouTube, 30)
+                    ? await _searchCache.GetAsync(query, SearchSource.YouTube, 30)
                     : null;
 
                 List<TrackInfo> tracks;
@@ -154,21 +157,25 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
                 if (cached is { Count: > 0 })
                 {
                     tracks = cached;
-                    _ = RefreshCacheInBackgroundAsync(ct);
+                    _ = RefreshCacheInBackgroundAsync(query, ct);
                 }
                 else
                 {
-                    tracks = await _youtube.SearchAsync(_currentQuery, DefaultFetchSize);
+                    tracks = await _youtube.SearchFastAsync(query, DefaultFetchSize, ct: ct);
                     if (ct.IsCancellationRequested) return;
 
                     if (tracks.Count > 0)
-                        _ = _searchCache.SetAsync(_currentQuery, SearchSource.YouTube, tracks);
+                        _ = _searchCache.SetAsync(query, SearchSource.YouTube, tracks);
                 }
 
-                var imageUrls = tracks.Take(20)
-                    .Select(static t => t.ThumbnailUrl)
-                    .Where(static u => !string.IsNullOrEmpty(u));
-                _ = _imageCache.PrefetchAsync(imageUrls!, ct);
+                int prefetchLimit = Math.Min(20, tracks.Count);
+                var imageUrls = new List<string>(prefetchLimit);
+                for (int i = 0; i < prefetchLimit; i++)
+                {
+                    if (!string.IsNullOrEmpty(tracks[i].ThumbnailUrl))
+                        imageUrls.Add(tracks[i].ThumbnailUrl);
+                }
+                _ = _imageCache.PrefetchAsync(imageUrls, ct);
 
                 if (ct.IsCancellationRequested) return;
                 SetTracks(tracks);
@@ -183,18 +190,21 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
         }
         finally
         {
-            IsLoading = false;
+            if (!_isDisposed && ReferenceEquals(_categoryCts, loadCts))
+                IsLoading = false;
         }
     }
 
-    private async Task RefreshCacheInBackgroundAsync(CancellationToken ct)
+    private async Task RefreshCacheInBackgroundAsync(string query, CancellationToken ct)
     {
         try
         {
-            await Task.Delay(3000, ct);
-            var fresh = await _youtube.SearchAsync(_currentQuery, DefaultFetchSize);
+            if (!await ct.DelayNoThrowAsync(3000, continueOnCapturedContext: false))
+                return;
+
+            var fresh = await _youtube.SearchFastAsync(query, DefaultFetchSize, ct: ct);
             if (ct.IsCancellationRequested || fresh.Count == 0) return;
-            await _searchCache.SetAsync(_currentQuery, SearchSource.YouTube, fresh);
+            await _searchCache.SetAsync(query, SearchSource.YouTube, fresh);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -264,6 +274,7 @@ public sealed partial class HomeViewModel : TrackListBaseViewModel
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
             _categoryCts?.Cancel();
             _categoryCts?.Dispose();
+            _categoryCts = null;
         }
 
         base.Dispose(disposing);

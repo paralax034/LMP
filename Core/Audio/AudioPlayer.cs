@@ -1106,7 +1106,12 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
                 && pipeline.Source.CanSeek)
             {
                 if (await FastRewindInternalAsync(pipeline, cmd.SessionId).ConfigureAwait(false))
+                {
+                    _events.RaiseTrackFastReplayed(
+                        pipeline.StreamInfo.TrackId,
+                        CurrentPlaybackIntent == PlaybackIntent.Play);
                     return;
+                }
             }
         }
 
@@ -1115,11 +1120,12 @@ internal sealed partial class AudioPlayer : IAsyncDisposable, IDisposable
         _sharedBackend.Flush();
 
         var old = Interlocked.Exchange(ref _activePipeline, null);
+        string? endedTrackId = old?.StreamInfo.TrackId;
         if (old != null)
             TrackAndFirePipelineDispose(old);
 
         SetState(PlayerState.Idle);
-        _events.RaiseTrackEnded();
+        _events.RaiseTrackEnded(endedTrackId);
     }
 
     /// <summary>

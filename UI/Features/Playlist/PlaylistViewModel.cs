@@ -57,12 +57,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
     public string FormattedTrackCount =>
         LocalizationService.Instance.GetPlural("Playlist_TracksCount", TrackCount);
 
-    public string? PlaylistYoutubeUrl =>
-        IsLikedPlaylist && _auth.IsAuthenticated
-            ? "https://www.youtube.com/playlist?list=LL"
-            : _currentPlaylist?.YoutubeId is { Length: > 0 } id
-                ? $"https://www.youtube.com/playlist?list={id}"
-                : null;
+    public string? PlaylistYoutubeUrl => _currentPlaylist?.GetYoutubeUrl(_auth.IsAuthenticated);
 
     [ObservableProperty] public partial bool HasYoutubeLink { get; private set; }
 
@@ -428,10 +423,14 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 var trackIds = await _playlistService.GetPlaylistTrackIdsAsync(playlistId, loadCt).ConfigureAwait(false);
 
                 loadCt.ThrowIfCancellationRequested();
-                var totalDuration = await _playlistService.GetPlaylistTotalDurationAsync(playlistId, loadCt).ConfigureAwait(false);
-
-                loadCt.ThrowIfCancellationRequested();
                 var tracks = await _playlistService.GetPlaylistTracksAsync(playlistId, loadCt).ConfigureAwait(false);
+
+                var totalDuration = TimeSpan.Zero;
+                for (int i = 0; i < tracks.Count; i++)
+                {
+                    if (tracks[i].Duration > TimeSpan.Zero)
+                        totalDuration += tracks[i].Duration;
+                }
 
                 return new PlaylistLoadPayload(playlist, trackIds, totalDuration, tracks);
             }, loadCt).ConfigureAwait(false);
@@ -484,7 +483,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         _items.IsPlaylistContext = CanEdit;
 
-        IsTwoWaySynced = playlist.SyncMode == PlaylistSyncMode.TwoWaySync;
+        IsTwoWaySynced = playlist.SyncMode == PlaylistSyncMode.TwoWaySync
+                         || (IsLikedPlaylist && _auth.IsAuthenticated);
         HasCloudSource = playlist.HasCloudLink || (IsLikedPlaylist && _auth.IsAuthenticated);
         CanRefreshFromCloud = playlist.CanPullFromCloud || (IsLikedPlaylist && _auth.IsAuthenticated);
         HasStatusChips = IsReadOnly || IsPrivate || IsUnlisted || HasCloudSource;
@@ -645,16 +645,10 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
             playlistName: PlaylistName);
     }
 
-    private Task DownloadAllAsync()
+    private async Task DownloadAllAsync()
     {
         IsDownloadingActive = true;
         var allTracks = GetPlaylistTracksSnapshot();
-        for (int i = 0; i < allTracks.Count; i++)
-        {
-            var track = allTracks[i];
-            if (!track.IsDownloaded)
-                Downloads.StartDownload(track);
-        }
 
         _downloadAnimationTimer ??= new DispatcherTimer(
             TimeSpan.FromSeconds(2),
@@ -667,7 +661,8 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
 
         _downloadAnimationTimer.Stop();
         _downloadAnimationTimer.Start();
-        return Task.CompletedTask;
+
+        await Downloads.StartDownloadsBatchAsync(allTracks);
     }
 
     private void EnqueueUniquePlaylistTracks()
@@ -931,6 +926,29 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
         if (disposing && !_disposed)
         {
             _disposed = true;
+
+            LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
+            LibService.OnDataChanged -= OnLibraryDataChanged;
+            _playlistService.OnPlaylistChanged -= OnServicePlaylistChanged;
+            PlayerControl.PlaybackPurityChanged -= OnPlaybackPurityChanged;
+            PlayerControl.IsPlayingChanged -= OnPlayerIsPlayingChanged;
+            PlayerControl.VolumeOverdriveChanged -= OnPlayerVolumeOverdriveChanged;
+
+            _dataChangedDebounceTimer?.Stop();
+            _dataChangedDebounceTimer = null;
+
+            _shuffleAnimationTimer?.Stop();
+            _shuffleAnimationTimer = null;
+
+            _downloadAnimationTimer?.Stop();
+            _downloadAnimationTimer = null;
+
+            _playlistLoadCts?.Cancel();
+            _playlistLoadCts?.Dispose();
+            _playlistLoadCts = null;
+
+            _items.RemoveFromPlaylistAction = null;
+            _items.StartRadioAction = null;
         }
         base.Dispose(disposing);
     }

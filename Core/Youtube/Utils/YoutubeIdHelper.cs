@@ -67,6 +67,26 @@ public static class YoutubeIdHelper
     }
 
     /// <summary>
+    /// Ensures a track identifier carries the canonical <see cref="VideoIdPrefix"/>
+    /// unless it already has a known prefix (<c>yt_</c>, <c>yt_pl_</c>, or <c>local_</c>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static string ToTrackId(string id)
+    {
+        if (string.IsNullOrEmpty(id))
+            return string.Empty;
+
+        if (id.StartsWith(VideoIdPrefix, StringComparison.Ordinal)
+            || id.StartsWith(PlaylistIdPrefix, StringComparison.Ordinal)
+            || id.StartsWith("local_", StringComparison.Ordinal))
+        {
+            return id;
+        }
+
+        return string.Concat(VideoIdPrefix, id);
+    }
+
+    /// <summary>
     /// Centralally converts a playlist identifier into a canonical InnerTube API browseId.
     /// Correctly normalizes system sections (LL -> VLLL, LM -> VLLM, WL -> VLWL) and appends the VL prefix.
     /// </summary>

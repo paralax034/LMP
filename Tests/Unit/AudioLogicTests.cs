@@ -886,21 +886,6 @@ public static class AudioLogicTests
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_callback")]
     private static extern ref AudioDataCallback? WinAudioCallbackField(WinAudioBackend backend);
 
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_crossfadeTailFrames")]
-    private static extern ref int WinAudioCrossfadeTailFramesField(WinAudioBackend backend);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_crossfadeTail")]
-    private static extern ref float[] WinAudioCrossfadeTailField(WinAudioBackend backend);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lastWasapiL")]
-    private static extern ref float WinAudioLastLField(WinAudioBackend backend);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lastWasapiR")]
-    private static extern ref float WinAudioLastRField(WinAudioBackend backend);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "CaptureCrossfadeTailUnderLock")]
-    private static extern void CallWinAudioCaptureTail(WinAudioBackend backend);
-
     [TestMethod(TestCategory.Unit, "Ring Alignment, Resampler -90dB Aliasing, Shelf SVF, Multi-Ch Limiter/EQ & WebM CodecPrivate", Group = TestGroups.Audio, Order = 15)]
     [SupportedOSPlatform("windows")]
     public static async Task TestAudioPipelineIntegrityInvariantsAsync()

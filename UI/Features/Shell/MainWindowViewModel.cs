@@ -23,6 +23,7 @@ namespace LMP.UI.Features.Shell;
 public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IServiceProvider _services;
+    private readonly LibraryService _library;
     private readonly Dictionary<string, ViewModelBase> _pageCache = new(StringComparer.Ordinal);
 
     // NAVIGATION
@@ -57,7 +58,10 @@ public partial class MainWindowViewModel : ViewModelBase
     private ViewModelBase? _pendingInitialPage;
     private string _pendingInitialPageName = string.Empty;
     private bool _isShellShown;
+    private bool _disposed;
     private int _startupAuthValidationStarted;
+    private readonly EventHandler<string> _languageChangedHandler;
+    private readonly PropertyChangedEventHandler _dialogHostPropertyChangedHandler;
 
     public MainWindowViewModel(
         IServiceProvider services,
@@ -71,24 +75,27 @@ public partial class MainWindowViewModel : ViewModelBase
         Log.Info("MainWindowViewModel constructor started.");
 
         _services = services;
+        _library = library;
         PlayerBar = playerBar;
         NotificationButton = notificationButton;
         NotificationPanel = notificationPanel;
         ToastOverlay = toastOverlay;
         DialogHost = dialogHost;
 
-        library.OnAccountHydrated += HandleGlobalAccountHydrated;
+        _library.OnAccountHydrated += HandleGlobalAccountHydrated;
         AmbientBackdrop.GlobalConfigChanged += RefreshTitleBarAmbient;
 
-        LocalizationService.Instance.LanguageChanged += (_, _) => { OnPropertyChanged(nameof(L)); };
+        _languageChangedHandler = (_, _) => OnPropertyChanged(nameof(L));
+        LocalizationService.Instance.LanguageChanged += _languageChangedHandler;
 
-        DialogHost.PropertyChanged += (s, e) =>
+        _dialogHostPropertyChangedHandler = (_, e) =>
         {
             if (e.PropertyName == nameof(DialogHostViewModel.HasActiveDialog))
             {
                 NavigateCommand.NotifyCanExecuteChanged();
             }
         };
+        DialogHost.PropertyChanged += _dialogHostPropertyChangedHandler;
 
         Navigate("Home");
 
@@ -231,17 +238,37 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private void SwitchToPage(ViewModelBase newPage, string pageName, bool startDeferredInit = true)
+    {
+        var oldPage = CurrentPage;
+        var oldPageName = CurrentPageName;
+
+        oldPage?.OnNavigatedFrom();
+
+        CurrentPage = newPage;
+        CurrentPageName = pageName;
+
+        if (!startDeferredInit)
+            return;
+
+        bool isInitialNavigation = !_isShellShown && oldPage is null && string.IsNullOrEmpty(oldPageName);
+        if (isInitialNavigation)
+        {
+            _pendingInitialPage = newPage;
+            _pendingInitialPageName = pageName;
+        }
+        else
+        {
+            _ = DeferredInitAsync(newPage, pageName, isInitialNavigation: false);
+        }
+    }
+
     private void ExecuteNavigateCore(string pageName)
     {
         if (IsNavigationLocked || DialogHost.HasActiveDialog) return;
 
         var sw = Stopwatch.StartNew();
         Log.Info($"Switching to page: {pageName}");
-
-        var oldPage = CurrentPage;
-        var oldPageName = CurrentPageName;
-
-        oldPage?.OnNavigatedFrom();
 
         if (!_pageCache.TryGetValue(pageName, out var newPage))
         {
@@ -269,30 +296,10 @@ public partial class MainWindowViewModel : ViewModelBase
             _pageCache[pageName] = newPage;
         }
 
-        CurrentPage = newPage;
-        CurrentPageName = pageName;
+        SwitchToPage(newPage, pageName);
 
         sw.Stop();
         Log.Info($"Page '{pageName}' ready in {sw.ElapsedMilliseconds}ms, executing init...");
-
-        bool isInitialNavigation = !_isShellShown && oldPage == null && string.IsNullOrEmpty(oldPageName);
-        if (isInitialNavigation)
-        {
-            _pendingInitialPage = newPage;
-            _pendingInitialPageName = pageName;
-        }
-        else
-        {
-            _ = DeferredInitAsync(newPage, pageName, isInitialNavigation: false);
-        }
-
-        if (oldPage is IDisposable disposable && !string.IsNullOrEmpty(oldPageName))
-        {
-            if (!_pageCache.ContainsKey(oldPageName))
-            {
-                _ = DisposePageDelayedAsync(disposable, oldPageName);
-            }
-        }
     }
 
     private ViewModelBase? _observedAmbientPage;
@@ -420,11 +427,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
         Log.Info($"Navigating to Playlist: {playlistId}");
 
-        var oldPage = CurrentPage;
-        var oldPageName = CurrentPageName;
-
-        oldPage?.OnNavigatedFrom();
-
         if (!_pageCache.TryGetValue("Playlist", out var playlistPage) ||
             playlistPage is not PlaylistViewModel playlistVM)
         {
@@ -432,17 +434,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _pageCache["Playlist"] = playlistVM;
         }
 
-        CurrentPage = playlistVM;
-        CurrentPageName = "Playlist";
-
-        if (oldPage is IDisposable disposable && !string.IsNullOrEmpty(oldPageName))
-        {
-            if (!_pageCache.ContainsKey(oldPageName))
-            {
-                _ = DisposePageDelayedAsync(disposable, oldPageName);
-            }
-        }
-
+        SwitchToPage(playlistVM, "Playlist", startDeferredInit: false);
         _ = LoadPlaylistSafeAsync(playlistVM, playlistId);
         _ = DeferredInitAsync(playlistVM, "Playlist", isInitialNavigation: false);
     }
@@ -464,6 +456,19 @@ public partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     private async Task DeferredInitAsync(ViewModelBase page, string pageName, bool isInitialNavigation)
     {
+        if (_disposed)
+            return;
+
+        CancellationToken ct;
+        try
+        {
+            ct = _lifetimeCts.Token;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
         try
         {
             if (isInitialNavigation)
@@ -471,7 +476,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
             }
 
-            if (_lifetimeCts.IsCancellationRequested)
+            if (ct.IsCancellationRequested || _disposed)
                 return;
 
             if (CurrentPage != page)
@@ -486,35 +491,21 @@ public partial class MainWindowViewModel : ViewModelBase
 
             Log.Info($"[Navigation] Init for '{pageName}' completed in {sw.ElapsedMilliseconds}ms");
 
+            if (ct.IsCancellationRequested || _disposed)
+                return;
+
             if (isInitialNavigation && Interlocked.Exchange(ref _startupAuthValidationStarted, 1) == 0)
             {
-                _ = ValidateAuthOnStartupAsync(_lifetimeCts.Token);
+                _ = ValidateAuthOnStartupAsync(ct);
             }
         }
-        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested || _disposed)
         {
         }
         catch (Exception ex)
         {
             Log.Error($"[Navigation] Init failed for '{pageName}': {ex.Message}");
         }
-    }
-
-    private async Task DisposePageDelayedAsync(IDisposable page, string pageName)
-    {
-        await Task.Delay(256, _lifetimeCts.Token);
-
-        try
-        {
-            page.Dispose();
-            Log.Debug($"[Navigation] Disposed old page: {pageName}");
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[Navigation] Error disposing {pageName}: {ex.Message}");
-        }
-
-        _services.GetRequiredService<TrackRegistry>().CleanupDeadReferences();
     }
 
     private static void OpenGitHubExternal()
@@ -611,9 +602,13 @@ public partial class MainWindowViewModel : ViewModelBase
     /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_disposed)
         {
+            _disposed = true;
+            _library.OnAccountHydrated -= HandleGlobalAccountHydrated;
             AmbientBackdrop.GlobalConfigChanged -= RefreshTitleBarAmbient;
+            LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
+            DialogHost.PropertyChanged -= _dialogHostPropertyChangedHandler;
 
             if (_observedAmbientPage != null)
             {
@@ -625,6 +620,14 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 queueVm.NavigateToPlaylistRequested -= NavigateToPlaylist;
             }
+
+            foreach (var cachedPage in _pageCache.Values)
+            {
+                cachedPage.Dispose();
+            }
+            _pageCache.Clear();
+
+            PlayerBar.Dispose();
 
             _lifetimeCts.Cancel();
             _lifetimeCts.Dispose();

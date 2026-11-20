@@ -34,13 +34,15 @@ public sealed partial class TrackInfo : ObservableObject, IBatchItem, ISearchRes
 
             if (!string.IsNullOrEmpty(value))
             {
-                if (value.StartsWith("yt_") || value.StartsWith("yt_pl_"))
+                if (value.StartsWith(YoutubeIdHelper.VideoIdPrefix, StringComparison.Ordinal)
+                    || value.StartsWith(YoutubeIdHelper.PlaylistIdPrefix, StringComparison.Ordinal)
+                    || value.StartsWith("local_", StringComparison.Ordinal))
                 {
                     field = value;
                 }
                 else
                 {
-                    field = GetCachedPrefixedId("yt_", value);
+                    field = GetCachedPrefixedId(YoutubeIdHelper.VideoIdPrefix, value);
                 }
             }
             else

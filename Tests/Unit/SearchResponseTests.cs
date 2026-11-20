@@ -1,5 +1,11 @@
+using System.Net.Sockets;
 using System.Text;
+using LMP.Core.Audio.Helpers;
+using LMP.Core.Helpers;
 using LMP.Core.Youtube.Bridge;
+using LMP.Core.Youtube.Channels;
+using LMP.Core.Youtube.Playlists;
+using LMP.Core.Youtube.Videos;
 using LMP.Tests.Framework;
 
 namespace LMP.Tests.Unit;
@@ -96,5 +102,76 @@ public static class SearchResponseTests
 
     // Continuation token
     TestAssert.Equal("SEARCH_CONTINUATION_TOKEN_999", response.ContinuationToken);
+  }
+
+  [TestMethod(TestCategory.Unit, "YouTube ID Parsing & DetectQueryType Contracts", Group = TestGroups.Youtube, Order = 2)]
+  public static Task TestIdParsingAndDetectQueryTypeContractsAsync()
+  {
+    // Negative cases: bare search terms, spaces, Cyrillic, and 11-char words must NEVER return non-null structs
+    TestAssert.True(PlaylistId.TryParse("linkin park") is null, "Spaces must not parse as PlaylistId");
+    TestAssert.True(PlaylistId.TryParse("кино") is null, "Cyrillic must not parse as PlaylistId");
+    TestAssert.True(PlaylistId.TryParseUrl("Bearwolf") is null, "Bare word must not parse as Playlist URL");
+    TestAssert.True(PlaylistId.TryParseUrl("PL1234567890") is null, "Bare playlist ID must not parse as Playlist URL");
+    TestAssert.True(PlaylistId.TryParseUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ&blacklist=true") is null, "Query param ending in list= must not parse as PlaylistId");
+
+    TestAssert.True(VideoId.TryParse("invalid") is null, "Invalid string must not parse as VideoId");
+    TestAssert.True(VideoId.TryParse("кириллица12") is null, "Cyrillic 11-char string must not parse as VideoId");
+    TestAssert.True(VideoId.TryParseUrl("dQw4w9WgXcQ") is null, "Bare 11-char ID must not parse as Video URL");
+    TestAssert.True(VideoId.TryParseUrl("https://www.youtube.com/watch?rv=12345678901") is null, "Query param ending in v= must not parse as VideoId");
+    TestAssert.True(VideoId.TryParseUrl("https://www.youtube.com/watch?nav=12345678901") is null, "11-char query param ending in v= must not parse as VideoId");
+
+    TestAssert.True(ChannelId.TryParse("Bearwolf") is null, "Invalid string must not parse as ChannelId");
+    TestAssert.True(ChannelId.TryParse("UCкириллица1234567890123") is null, "Cyrillic must not parse as ChannelId");
+
+    // DetectQueryType: normal search queries (single word, multi-word, 11-char word, Cyrillic, http/https words)
+    TestAssert.Equal(QueryType.None, YoutubeProvider.DetectQueryType("   "));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("Bearwolf"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("linkin park"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("Soundtracks"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("кино группа"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("crystal castles - char slowed"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("http"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("https"));
+    TestAssert.Equal(QueryType.Search, YoutubeProvider.DetectQueryType("http 404 remix"));
+
+    // DetectQueryType & ID extraction: video URLs (including fragments and preceding params ending with 'v')
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://www.youtube.com/watch?si=abc&v=dQw4w9WgXcQ"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://www.youtube.com/watch?rv=1&v=dQw4w9WgXcQ#t=30"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://youtu.be/dQw4w9WgXcQ"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://youtu.be/dQw4w9WgXcQ#t=30"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://www.youtube.com/live/dQw4w9WgXcQ"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://www.youtube.com/shorts/dQw4w9WgXcQ"));
+    TestAssert.Equal(QueryType.DirectUrl, YoutubeProvider.DetectQueryType("https://www.youtube.com/v/dQw4w9WgXcQ"));
+    TestAssert.Equal("dQw4w9WgXcQ", YoutubeProvider.ExtractVideoId("https://www.youtube.com/watch?rv=1&v=dQw4w9WgXcQ#t=30"));
+    TestAssert.Equal("dQw4w9WgXcQ", YoutubeProvider.ExtractVideoId("https://youtu.be/dQw4w9WgXcQ#t=30"));
+
+    // DetectQueryType & ID extraction: playlist URLs (including youtu.be, embed, shorts, live, fragments)
+    TestAssert.Equal(QueryType.Playlist, YoutubeProvider.DetectQueryType("https://www.youtube.com/playlist?list=PL1234567890"));
+    TestAssert.Equal(QueryType.Playlist, YoutubeProvider.DetectQueryType("https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=RDAMVM123"));
+    TestAssert.Equal(QueryType.Playlist, YoutubeProvider.DetectQueryType("https://youtu.be/dQw4w9WgXcQ?list=PL1234567890#t=10"));
+    TestAssert.Equal(QueryType.Playlist, YoutubeProvider.DetectQueryType("https://www.youtube.com/embed/dQw4w9WgXcQ?list=PL1234567890"));
+    TestAssert.Equal(QueryType.Playlist, YoutubeProvider.DetectQueryType("https://www.youtube.com/shorts/dQw4w9WgXcQ?list=PL1234567890"));
+    TestAssert.Equal(QueryType.Playlist, YoutubeProvider.DetectQueryType("https://www.youtube.com/live/dQw4w9WgXcQ?list=PL1234567890"));
+    TestAssert.Equal("PL1234567890", PlaylistId.TryParseUrl("https://youtu.be/dQw4w9WgXcQ?list=PL1234567890#t=10")?.Value);
+    TestAssert.Equal("PL1234567890", PlaylistId.TryParseUrl("https://www.youtube.com/embed/dQw4w9WgXcQ?list=PL1234567890")?.Value);
+
+    // Positive ChannelId check (including fragment)
+    var parsedChannel = ChannelId.TryParse("https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw#about");
+    TestAssert.True(parsedChannel is { Value: "UC_x5XG1OV2P6uZZ5FSM9Ttw" }, "Valid channel URL must parse");
+
+    // Cancellation vs timeout/network disambiguation
+    using var userCts = new CancellationTokenSource();
+    userCts.Cancel();
+    var userCancelWrappedSocket = new Exception(
+        "AudioSource aborted",
+        new TaskCanceledException("Aborted", new IOException("Read aborted", new SocketException((int)SocketError.OperationAborted)), userCts.Token));
+    TestAssert.True(CancellationHelper.IsUserCancellation(userCancelWrappedSocket), "Token-backed cancellation wrapping IO/SocketException must be treated as user cancellation");
+
+    var httpTimeout = new TaskCanceledException("Request timed out", new TimeoutException());
+    TestAssert.True(!CancellationHelper.IsUserCancellation(httpTimeout), "Un-cancelled TaskCanceledException timeout must NOT be treated as user cancellation");
+    TestAssert.True(!NetworkErrorHelper.IsCancellationLike(new IOException("Reset", new SocketException((int)SocketError.ConnectionReset))), "Bare IO/SocketException must NOT be treated as cancellation");
+
+    return Task.CompletedTask;
   }
 }

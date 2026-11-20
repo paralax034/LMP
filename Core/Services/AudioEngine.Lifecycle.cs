@@ -96,6 +96,8 @@ public sealed partial class AudioEngine
 
         lock (_playerDispatchLock)
         {
+            EndPlaybackSessionLocked(TrackEndReason.Error);
+
             _playIntent = false;
             Interlocked.Increment(ref _pauseEpoch);
             BeginNewSession();
@@ -224,11 +226,7 @@ public sealed partial class AudioEngine
         if (registryTrack != null && !ReferenceEquals(registryTrack, track))
             ClearDownloadFlags(registryTrack);
 
-        var libraryTrack = _library.GetTrack(track.Id);
-        if (libraryTrack != null && !ReferenceEquals(libraryTrack, track) && !ReferenceEquals(libraryTrack, registryTrack))
-            ClearDownloadFlags(libraryTrack);
-
-        _ = _library.AddOrUpdateTrackAsync(libraryTrack ?? registryTrack ?? track);
+        _ = _library.AddOrUpdateTrackAsync(registryTrack ?? track);
     }
 
     private void RaiseError(Exception exception)
@@ -283,6 +281,14 @@ public sealed partial class AudioEngine
         try { _commandProcessorTask?.Wait(millisecondsTimeout: 500); } catch { }
         try { _volumeSaveTask?.Wait(millisecondsTimeout: 200); } catch { }
         try { Volatile.Read(ref _activePlayTask)?.Wait(millisecondsTimeout: 500); } catch { }
+
+        lock (_playerDispatchLock)
+        {
+            EndPlaybackSessionLocked(TrackEndReason.Stopped);
+        }
+
+        _lifecycleEvents.Writer.TryComplete();
+        try { _lifecycleDispatcherTask?.Wait(millisecondsTimeout: 500); } catch { }
 
         _player.Dispose();
         DisposeRetiredSessionCts();
@@ -376,6 +382,27 @@ public sealed partial class AudioEngine
                 await activePlay
                     .WaitAsync(TimeSpan.FromMilliseconds(loopDrainTimeoutMs))
                     .ConfigureAwait(false);
+            }
+            catch { }
+        }
+
+        lock (_playerDispatchLock)
+        {
+            EndPlaybackSessionLocked(TrackEndReason.Stopped);
+        }
+
+        _lifecycleEvents.Writer.TryComplete();
+        if (_lifecycleDispatcherTask != null)
+        {
+            try
+            {
+                await _lifecycleDispatcherTask
+                    .WaitAsync(TimeSpan.FromMilliseconds(loopDrainTimeoutMs))
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                Log.Warn("[AudioEngine] Lifecycle event dispatcher did not finish within dispose timeout");
             }
             catch { }
         }

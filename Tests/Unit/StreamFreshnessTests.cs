@@ -62,7 +62,7 @@ public static class StreamFreshnessTests
         }
 
         using var tempCache = new TempCacheManager();
-        var source = new CachingStreamSource(
+        using var source = new CachingStreamSource(
             cacheKey: "test_freshness_track",
             trackId: "yt_test_track",
             url: oldUrl,
@@ -77,7 +77,7 @@ public static class StreamFreshnessTests
         await source.EnsureStreamFreshnessAsync(CancellationToken.None).ConfigureAwait(false);
 
         TestAssert.Equal(1, refreshCallCount);
-        TestAssert.False(UrlEx.IsUrlExpiredOrExpiringSoon(source.CacheKey));
+        TestAssert.False(UrlEx.IsUrlExpiredOrExpiringSoon(source.CurrentUrl));
     }
 
     [TestMethod(TestCategory.Unit, "Proactive URL Refresh on Resume", Group = TestGroups.Network, Order = 3)]
@@ -90,7 +90,7 @@ public static class StreamFreshnessTests
         int refreshCalls = 0;
         using var tempCache = new TempCacheManager();
 
-        var source = new CachingStreamSource(
+        using var source = new CachingStreamSource(
             cacheKey: "test_proactive_track",
             trackId: "yt_proactive_track",
             url: expiringUrl,

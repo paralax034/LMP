@@ -14,6 +14,15 @@ internal sealed class AudioPlayerEvents
     /// <summary>Track ended naturally.</summary>
     public event Action? TrackEnded;
 
+    /// <summary>Track ended naturally, carrying the ended pipeline's track identifier.</summary>
+    public event Action<string?>? TrackEndedWithId;
+
+    /// <summary>
+    /// Track ended naturally and was fast-replayed in place (RepeatMode.One) without recreating the pipeline.
+    /// Arguments: trackId, restartedPlaying.
+    /// </summary>
+    public event Action<string?, bool>? TrackFastReplayed;
+
     /// <summary>An error occurred.</summary>
     public event Action<AudioPlayerError>? ErrorOccurred;
 
@@ -42,7 +51,13 @@ internal sealed class AudioPlayerEvents
     // Internal raise methods
     internal void RaisePositionChanged(TimeSpan pos) => PositionChanged?.Invoke(pos);
     internal void RaiseStateChanged(PlaybackState state) => StateChanged?.Invoke(state);
-    internal void RaiseTrackEnded() => TrackEnded?.Invoke();
+    internal void RaiseTrackEnded(string? trackId = null)
+    {
+        TrackEnded?.Invoke();
+        TrackEndedWithId?.Invoke(trackId);
+    }
+    internal void RaiseTrackFastReplayed(string? trackId, bool restartedPlaying) =>
+        TrackFastReplayed?.Invoke(trackId, restartedPlaying);
     internal void RaiseError(AudioPlayerError error) => ErrorOccurred?.Invoke(error);
     internal void RaiseStreamInfo(AudioStreamInfo info) => StreamInfoChanged?.Invoke(info);
     internal void RaiseBufferState(BufferState state) => BufferStateChanged?.Invoke(state);

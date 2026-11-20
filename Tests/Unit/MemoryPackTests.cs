@@ -101,7 +101,7 @@ public static class MemoryPackTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Integration, "SQLite Settings JSON to MemoryPack BLOB Migration", Group = TestGroups.Storage, Order = 3)]
+    [TestMethod(TestCategory.Integration, "SQLite Settings Repository JSON & Legacy Migration", Group = TestGroups.Storage, Order = 3)]
     public static async Task TestSettingsRepositoryBinaryBlobAndLegacyMigrationAsync(IServiceProvider services)
     {
         var settingsRepo = services.GetRequiredService<ISettingsRepository>();
@@ -161,9 +161,6 @@ public static class MemoryPackTests
             await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
     }
-
-    public static Task TestAtomicFileBinaryBakRecoveryAsync() =>
-        AtomicFileTests.TestBinaryBakRecoveryAndAutoHealAsync();
 
     private static AudioCacheManager.AudioCacheIndexEnvelope CreateSampleCacheIndex(int entriesCount)
     {

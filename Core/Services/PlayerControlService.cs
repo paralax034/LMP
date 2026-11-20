@@ -12,7 +12,6 @@ public sealed class PlayerControlService : IDisposable
 
     private readonly AudioEngine _audio;
     private readonly LibraryService _library;
-    private readonly NotificationService? _notificationService;
     private readonly YoutubeProvider? _youtube;
     private readonly CookieAuthService? _auth;
     private readonly TrackRegistry? _trackRegistry;
@@ -21,17 +20,13 @@ public sealed class PlayerControlService : IDisposable
 
     private readonly Lock _liveSyncLock = new();
     private CancellationTokenSource? _liveSyncCts;
+    private readonly Action<RepeatMode, bool> _playbackModesChangedHandler;
 
-    private volatile bool _isPlaying;
-    private volatile bool _isPaused;
-    private volatile bool _isLoading;
-    private int _playbackState;
-    private volatile bool _canGoNext;
-    private volatile bool _canGoPrevious;
-    private TrackInfo? _currentTrack;
-    private int _repeatMode;
-    private volatile bool _shuffleEnabled;
-    private int _queueCount;
+    private string? _lastTrackId;
+    private int _lastNotifiedRepeatMode;
+    private volatile bool _lastNotifiedShuffleEnabled;
+    private volatile bool _lastCanGoNext;
+    private volatile bool _lastCanGoPrevious;
     private int _currentVolume;
     private double _volumeOverdriveFactor = 1.0;
     private string? _activePlaylistId;
@@ -39,21 +34,17 @@ public sealed class PlayerControlService : IDisposable
     private volatile bool _isQueuePure;
     private volatile bool _isPlayingPure;
 
-    public bool IsPlaying { get => _isPlaying; private set => _isPlaying = value; }
+    public bool IsPlaying => _audio.IsPlaying;
 
-    public bool IsPaused { get => _isPaused; private set => _isPaused = value; }
+    public bool IsPaused => _audio.IsPaused;
 
-    public bool IsLoading { get => _isLoading; private set => _isLoading = value; }
+    public bool IsLoading => _audio.IsLoading;
 
-    public PlaybackState PlaybackState
-    {
-        get => (PlaybackState)Volatile.Read(ref _playbackState);
-        private set => Volatile.Write(ref _playbackState, (int)value);
-    }
+    public PlaybackState PlaybackState => _audio.EffectivePlaybackState;
 
-    public bool CanGoNext { get => _canGoNext; private set => _canGoNext = value; }
+    public bool CanGoNext => _audio.CanGoNext;
 
-    public bool CanGoPrevious { get => _canGoPrevious; private set => _canGoPrevious = value; }
+    public bool CanGoPrevious => _audio.CanGoPrevious;
 
     public TimeSpan CurrentPosition => _audio.CurrentPosition;
 
@@ -70,25 +61,13 @@ public sealed class PlayerControlService : IDisposable
         }
     }
 
-    public TrackInfo? CurrentTrack
-    {
-        get => Volatile.Read(ref _currentTrack);
-        private set => Volatile.Write(ref _currentTrack, value);
-    }
+    public TrackInfo? CurrentTrack => _audio.CurrentTrack;
 
-    public RepeatMode RepeatMode
-    {
-        get => (RepeatMode)Volatile.Read(ref _repeatMode);
-        private set => Volatile.Write(ref _repeatMode, (int)value);
-    }
+    public RepeatMode RepeatMode => _audio.RepeatMode;
 
-    public bool ShuffleEnabled { get => _shuffleEnabled; private set => _shuffleEnabled = value; }
+    public bool ShuffleEnabled => _audio.ShuffleEnabled;
 
-    public int QueueCount
-    {
-        get => Volatile.Read(ref _queueCount);
-        private set => Volatile.Write(ref _queueCount, value);
-    }
+    public int QueueCount => _audio.Queue.Count;
 
     /// <summary>
     /// Zero-based index of the currently active track inside <see cref="Queue"/>, or -1 if none.
@@ -191,7 +170,7 @@ public sealed class PlayerControlService : IDisposable
     {
         _audio = audio;
         _library = library;
-        _notificationService = notificationService;
+        _ = notificationService;
         _youtube = youtube;
         _auth = auth;
         _trackRegistry = trackRegistry;
@@ -201,32 +180,28 @@ public sealed class PlayerControlService : IDisposable
         _playlistSync?.IsAudioBufferingCheck = () =>
                 _audio.IsLoading || (_audio.IsPlaying && !_audio.IsFullyBuffered && _audio.BufferProgress < 0.15);
 
-        CurrentTrack = _audio.CurrentTrack;
-        IsPlaying = _audio.IsPlaying;
-        IsPaused = _audio.IsPaused;
-        IsLoading = _audio.IsLoading;
-        PlaybackState = _audio.EffectivePlaybackState;
-        CanGoNext = _audio.CanGoNext;
-        CanGoPrevious = _audio.CanGoPrevious;
-        RepeatMode = _audio.RepeatMode;
-        ShuffleEnabled = _audio.ShuffleEnabled;
-        QueueCount = _audio.Queue.Count;
+        _lastTrackId = _audio.CurrentTrack?.Id;
+        _lastCanGoNext = _audio.CanGoNext;
+        _lastCanGoPrevious = _audio.CanGoPrevious;
+        Volatile.Write(ref _lastNotifiedRepeatMode, (int)_audio.RepeatMode);
+        _lastNotifiedShuffleEnabled = _audio.ShuffleEnabled;
         CurrentVolume = (int)Math.Round(_audio.GetVolume());
         RefreshVolumeOverdrive(raiseEvent: false);
         SyncSourceAndPurityFromEngine(raiseEvent: false);
 
         _audio.OnPlaybackStateChanged += HandlePlaybackStateChanged;
         _audio.OnDetailedPlaybackStateChanged += HandleDetailedPlaybackStateChanged;
-        _audio.OnPlaybackModesChanged += HandlePlaybackModesChanged;
+        _playbackModesChangedHandler = (_, _) => HandlePlaybackModesChanged();
+        _audio.OnPlaybackModesChanged += _playbackModesChangedHandler;
         _audio.OnSeekCompleted += HandleSeekCompleted;
         _audio.OnPositionChanged += HandlePositionChanged;
         _audio.OnTrackChanged += HandleTrackChanged;
+        _audio.OnTrackPlaybackStarted += HandleTrackPlaybackStarted;
         _audio.OnQueueChanged += HandleQueueChanged;
         _audio.OnQueueSourceChanged += HandleQueueSourceChanged;
         _audio.OnLoadingStateChanged += HandleLoadingStateChanged;
         _audio.OnMaxVolumeChanged += HandleMaxVolumeChanged;
         _audio.OnAudioSettingsChanged += HandleAudioSettingsChanged;
-        _audio.OnNTokenDecryptionWarning += HandleNTokenDecryptionWarning;
         LocalizationService.Instance.LanguageChanged += HandleLanguageChanged;
 
         if (_playlistService != null)
@@ -363,9 +338,8 @@ public sealed class PlayerControlService : IDisposable
 
         _audio.RepeatMode = newMode;
         _library.UpdateSettings(s => s.RepeatMode = newMode);
-        RepeatMode = newMode;
         RefreshNavigationCapabilities();
-        RepeatModeChanged?.Invoke(newMode);
+        NotifyRepeatModeIfChanged(newMode);
 
         Log.Debug($"[PlayerControl] RepeatMode changed to {newMode}");
     }
@@ -416,7 +390,6 @@ public sealed class PlayerControlService : IDisposable
         }
 
         var canonical = _trackRegistry?.RegisterOrUpdate(track) ?? track;
-        _ = _library.AddToRecentlyPlayedAsync(canonical);
 
         try
         {
@@ -471,8 +444,7 @@ public sealed class PlayerControlService : IDisposable
             _audio.ShuffleQueue();
 
         _library.UpdateSettings(s => s.ShuffleEnabled = newState);
-        ShuffleEnabled = newState;
-        ShuffleEnabledChanged?.Invoke(newState);
+        NotifyShuffleEnabledIfChanged(newState);
 
         Log.Debug($"[PlayerControl] AutoShuffle changed to {newState}");
     }
@@ -488,8 +460,7 @@ public sealed class PlayerControlService : IDisposable
 
         _audio.ShuffleEnabled = enabled;
         _library.UpdateSettings(s => s.ShuffleEnabled = enabled);
-        ShuffleEnabled = enabled;
-        ShuffleEnabledChanged?.Invoke(enabled);
+        NotifyShuffleEnabledIfChanged(enabled);
 
         Log.Debug($"[PlayerControl] ShuffleEnabled set to {enabled}");
     }
@@ -533,8 +504,6 @@ public sealed class PlayerControlService : IDisposable
                                (isShuffled
                                    ? effectiveTracks[Random.Shared.Next(effectiveTracks.Count)]
                                    : effectiveTracks[0]);
-
-        _ = _library.AddToRecentlyPlayedAsync(targetStartTrack);
 
         string? normalizedPlaylistId = string.IsNullOrWhiteSpace(playlistId) ? null : playlistId;
 
@@ -808,8 +777,6 @@ public sealed class PlayerControlService : IDisposable
 
     private void HandlePlaybackStateChanged(bool isPlaying, bool isPaused)
     {
-        IsPlaying = isPlaying;
-        IsPaused = isPaused;
         IsPlayingChanged?.Invoke(isPlaying);
         IsPausedChanged?.Invoke(isPaused);
 
@@ -823,26 +790,42 @@ public sealed class PlayerControlService : IDisposable
     /// </summary>
     private void HandleTrackChanged(TrackInfo? track)
     {
-        var previous = CurrentTrack;
-        CurrentTrack = track;
+        var previousId = Interlocked.Exchange(ref _lastTrackId, track?.Id);
 
         RefreshNavigationCapabilities();
 
-        if (previous?.Id == track?.Id)
+        if (string.Equals(previousId, track?.Id, StringComparison.Ordinal))
             return;
 
         CurrentTrackChanged?.Invoke(track);
         SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
 
+    private void HandleTrackPlaybackStarted(TrackInfo track)
+    {
+        if (_disposed)
+            return;
+
+        _ = RecordRecentlyPlayedSafeAsync(track);
+    }
+
+    private async Task RecordRecentlyPlayedSafeAsync(TrackInfo track)
+    {
+        try
+        {
+            await _library.AddToRecentlyPlayedAsync(track).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[PlayerControl] Failed to record playback history for '{track.Id}': {ex.Message}");
+        }
+    }
+
     private void HandleQueueChanged()
     {
-        QueueCount = _audio.Queue.Count;
-        QueueCountChanged?.Invoke(QueueCount);
+        QueueCountChanged?.Invoke(_audio.Queue.Count);
         QueueChanged?.Invoke();
         RefreshNavigationCapabilities();
-
-        SyncSourceAndPurityFromEngine(raiseEvent: true);
     }
 
     private void HandleQueueSourceChanged()
@@ -912,31 +895,35 @@ public sealed class PlayerControlService : IDisposable
 
     private void HandleLoadingStateChanged(bool isLoading)
     {
-        IsLoading = isLoading;
         IsLoadingChanged?.Invoke(isLoading);
     }
 
     private void HandleDetailedPlaybackStateChanged(PlaybackState state)
     {
-        PlaybackState = state;
         PlaybackStateChanged?.Invoke(state);
     }
 
-    private void HandlePlaybackModesChanged(RepeatMode repeatMode, bool shuffleEnabled)
+    private void HandlePlaybackModesChanged()
     {
-        if (RepeatMode != repeatMode)
-        {
-            RepeatMode = repeatMode;
-            RepeatModeChanged?.Invoke(repeatMode);
-        }
-
-        if (ShuffleEnabled != shuffleEnabled)
-        {
-            ShuffleEnabled = shuffleEnabled;
-            ShuffleEnabledChanged?.Invoke(shuffleEnabled);
-        }
-
+        NotifyRepeatModeIfChanged(_audio.RepeatMode);
+        NotifyShuffleEnabledIfChanged(_audio.ShuffleEnabled);
         RefreshNavigationCapabilities();
+    }
+
+    private void NotifyRepeatModeIfChanged(RepeatMode mode)
+    {
+        int next = (int)mode;
+        if (Interlocked.Exchange(ref _lastNotifiedRepeatMode, next) != next)
+            RepeatModeChanged?.Invoke(mode);
+    }
+
+    private void NotifyShuffleEnabledIfChanged(bool enabled)
+    {
+        if (_lastNotifiedShuffleEnabled == enabled)
+            return;
+
+        _lastNotifiedShuffleEnabled = enabled;
+        ShuffleEnabledChanged?.Invoke(enabled);
     }
 
     private void HandleSeekCompleted(TimeSpan position)
@@ -953,11 +940,11 @@ public sealed class PlayerControlService : IDisposable
     {
         bool next = _audio.CanGoNext;
         bool prev = _audio.CanGoPrevious;
-        if (CanGoNext == next && CanGoPrevious == prev)
+        if (_lastCanGoNext == next && _lastCanGoPrevious == prev)
             return;
 
-        CanGoNext = next;
-        CanGoPrevious = prev;
+        _lastCanGoNext = next;
+        _lastCanGoPrevious = prev;
         CanNavigateChanged?.Invoke();
     }
 
@@ -998,74 +985,6 @@ public sealed class PlayerControlService : IDisposable
             });
     }
 
-    /// <summary>
-    /// Publishes a complex n-token deciphering warning
-    /// and, if permitted by settings, either adds it to the notification center
-    /// or shows a toast.
-    /// </summary>
-    private void HandleNTokenDecryptionWarning(AudioEngine.NTokenWarningInfo warning)
-    {
-        if (_notificationService == null)
-            return;
-
-        var mode = _library.Settings.Audio.NTokenNotificationMode;
-        switch (mode)
-        {
-            case NTokenNotificationMode.Disabled:
-                Log.Debug($"[PlayerControl] N-Token warning suppressed for track '{warning.Track?.Id}' as configured.");
-                return;
-
-            case NTokenNotificationMode.PanelOnly:
-                _ = PublishNTokenWarningAsync(_notificationService, warning, showToast: false);
-                return;
-
-            default:
-                _ = PublishNTokenWarningAsync(_notificationService, warning, showToast: true);
-                return;
-        }
-    }
-
-    private static async Task PublishNTokenWarningAsync(
-        NotificationService notificationService,
-        AudioEngine.NTokenWarningInfo warning,
-        bool showToast)
-    {
-        try
-        {
-            var track = warning.Track;
-            string trackDisplay = track?.Title ?? track?.Id ?? "Unknown";
-            string? trackTitle = track?.Title ?? track?.Id;
-            string messageKey = warning.WasSkipped
-                ? "Notification_NToken_Skipped"
-                : "Notification_NToken_Message";
-
-            if (showToast)
-            {
-                await notificationService.ShowToastAsync(
-                    titleKey: "Notification_NToken_Title",
-                    messageKey: messageKey,
-                    severity: NotificationSeverity.Warning,
-                    messageArgs: [trackDisplay],
-                    trackId: track?.Id,
-                    trackTitle: trackTitle);
-            }
-            else
-            {
-                await notificationService.AddToPanelAsync(
-                    titleKey: "Notification_NToken_Title",
-                    messageKey: messageKey,
-                    severity: NotificationSeverity.Warning,
-                    messageArgs: [trackDisplay],
-                    trackId: track?.Id,
-                    trackTitle: trackTitle);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"[PlayerControl] Failed to publish n-token warning: {ex.Message}");
-        }
-    }
-
     #endregion
 
     #region Sync
@@ -1075,27 +994,18 @@ public sealed class PlayerControlService : IDisposable
     /// </summary>
     public void ForceSync()
     {
-        IsPlaying = _audio.IsPlaying;
-        IsPaused = _audio.IsPaused;
-        IsLoading = _audio.IsLoading;
-        PlaybackState = _audio.EffectivePlaybackState;
-        CanGoNext = _audio.CanGoNext;
-        CanGoPrevious = _audio.CanGoPrevious;
-        RepeatMode = _audio.RepeatMode;
-        ShuffleEnabled = _audio.ShuffleEnabled;
-        QueueCount = _audio.Queue.Count;
+        Volatile.Write(ref _lastNotifiedRepeatMode, (int)_audio.RepeatMode);
+        _lastNotifiedShuffleEnabled = _audio.ShuffleEnabled;
+        _lastCanGoNext = _audio.CanGoNext;
+        _lastCanGoPrevious = _audio.CanGoPrevious;
         CurrentVolume = (int)Math.Round(_audio.GetVolume());
         RefreshVolumeOverdrive(raiseEvent: true);
 
         var actualTrack = _audio.CurrentTrack;
-        if (CurrentTrack?.Id != actualTrack?.Id)
+        var previousId = Interlocked.Exchange(ref _lastTrackId, actualTrack?.Id);
+        if (!string.Equals(previousId, actualTrack?.Id, StringComparison.Ordinal))
         {
-            CurrentTrack = actualTrack;
             CurrentTrackChanged?.Invoke(actualTrack);
-        }
-        else
-        {
-            CurrentTrack = actualTrack;
         }
 
         PlaybackStateChanged?.Invoke(PlaybackState);
@@ -1128,16 +1038,16 @@ public sealed class PlayerControlService : IDisposable
 
         _audio.OnPlaybackStateChanged -= HandlePlaybackStateChanged;
         _audio.OnDetailedPlaybackStateChanged -= HandleDetailedPlaybackStateChanged;
-        _audio.OnPlaybackModesChanged -= HandlePlaybackModesChanged;
+        _audio.OnPlaybackModesChanged -= _playbackModesChangedHandler;
         _audio.OnSeekCompleted -= HandleSeekCompleted;
         _audio.OnPositionChanged -= HandlePositionChanged;
         _audio.OnTrackChanged -= HandleTrackChanged;
+        _audio.OnTrackPlaybackStarted -= HandleTrackPlaybackStarted;
         _audio.OnQueueChanged -= HandleQueueChanged;
         _audio.OnQueueSourceChanged -= HandleQueueSourceChanged;
         _audio.OnLoadingStateChanged -= HandleLoadingStateChanged;
         _audio.OnMaxVolumeChanged -= HandleMaxVolumeChanged;
         _audio.OnAudioSettingsChanged -= HandleAudioSettingsChanged;
-        _audio.OnNTokenDecryptionWarning -= HandleNTokenDecryptionWarning;
         LocalizationService.Instance.LanguageChanged -= HandleLanguageChanged;
 
         Log.Debug("[PlayerControl] Service disposed");

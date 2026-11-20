@@ -48,6 +48,9 @@ public static partial class OsNotificationHelper
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GlobalUnlock(IntPtr hMem);
 
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr GlobalFree(IntPtr hMem);
+
     #endregion
 
     /// <summary>
@@ -157,20 +160,30 @@ public static partial class OsNotificationHelper
                     IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytesCount);
                     if (hGlobal == IntPtr.Zero) return false;
 
-                    IntPtr target = GlobalLock(hGlobal);
-                    if (target == IntPtr.Zero) return false;
-
+                    bool ownershipTransferred = false;
                     try
                     {
-                        Marshal.Copy(text.ToCharArray(), 0, target, text.Length);
-                        Marshal.WriteInt16(target + (text.Length * sizeof(char)), 0);
+                        IntPtr target = GlobalLock(hGlobal);
+                        if (target == IntPtr.Zero) return false;
+
+                        try
+                        {
+                            Marshal.Copy(text.ToCharArray(), 0, target, text.Length);
+                            Marshal.WriteInt16(target + (text.Length * sizeof(char)), 0);
+                        }
+                        finally
+                        {
+                            GlobalUnlock(hGlobal);
+                        }
+
+                        ownershipTransferred = SetClipboardData(CF_UNICODETEXT, hGlobal) != IntPtr.Zero;
+                        return ownershipTransferred;
                     }
                     finally
                     {
-                        GlobalUnlock(hGlobal);
+                        if (!ownershipTransferred)
+                            GlobalFree(hGlobal);
                     }
-
-                    return SetClipboardData(CF_UNICODETEXT, hGlobal) != IntPtr.Zero;
                 }
                 finally
                 {
@@ -253,13 +266,10 @@ public static partial class OsNotificationHelper
 
     private static async Task ShowWindowsToastAsync(string title, string message)
     {
-        _ = title.Replace("'", "''").Replace("`", "``");
-        _ = message.Replace("'", "''").Replace("`", "``");
-
         var script = $"""
             [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
             [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-            $xml = @"
+            $xml = @'
             <toast>
                 <visual>
                     <binding template='ToastGeneric'>
@@ -269,14 +279,15 @@ public static partial class OsNotificationHelper
                 </visual>
                 <audio silent='true'/>
             </toast>
-            "@
+            '@
             $XmlDocument = [Windows.Data.Xml.Dom.XmlDocument]::new()
             $XmlDocument.LoadXml($xml)
             $AppId = 'LiteMusicPlayer'
             [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($AppId).Show([Windows.UI.Notifications.ToastNotification]::new($XmlDocument))
             """;
 
-        await RunProcessAsync("powershell", $"-NoProfile -NonInteractive -Command \"{script}\"", 5000);
+        string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        await RunProcessAsync("powershell", $"-NoProfile -NonInteractive -EncodedCommand {encodedCommand}", 5000);
     }
 
     private static async Task ShowLinuxNotificationAsync(string title, string message, NotificationSeverity severity)
@@ -328,7 +339,13 @@ public static partial class OsNotificationHelper
     }
 
     private static string EscapeXml(string s) =>
-        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+        s.Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;")
+            .Replace("\"", "&quot;")
+            .Replace("'", "&apos;")
+            .Replace("\r", " ")
+            .Replace("\n", " ");
 
     private static string EscapeShell(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");

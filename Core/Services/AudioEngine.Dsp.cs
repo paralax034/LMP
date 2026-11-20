@@ -46,7 +46,7 @@ public sealed partial class AudioEngine
 
         if (normConfig.Enabled && !string.IsNullOrEmpty(trackId))
         {
-            var registryTrack = _trackRegistry.TryGet(trackId) ?? _library.GetTrack(trackId);
+            var registryTrack = _trackRegistry.TryGet(trackId);
             var currentTrack = CurrentTrack;
             var track = registryTrack ?? (currentTrack?.Id == trackId ? currentTrack : null);
             float resolvedGain = ResolveTrackNormalizationGain(track, trackId, normConfig, out var cacheEntry);
@@ -125,18 +125,13 @@ public sealed partial class AudioEngine
         if (string.IsNullOrEmpty(trackId) || !float.IsFinite(integratedLufs))
             return;
 
-        var canonical = _library.GetTrack(trackId);
+        var canonical = _trackRegistry.TryGet(trackId);
         canonical?.SetIntegratedLufs(integratedLufs, source);
-
-        var registryTrack = _trackRegistry.TryGet(trackId);
-        if (registryTrack != null && !ReferenceEquals(registryTrack, canonical))
-            registryTrack.SetIntegratedLufs(integratedLufs, source);
 
         var current = CurrentTrack;
         if (current != null
             && current.Id == trackId
-            && !ReferenceEquals(current, canonical)
-            && !ReferenceEquals(current, registryTrack))
+            && !ReferenceEquals(current, canonical))
         {
             current.SetIntegratedLufs(integratedLufs, source);
         }
@@ -160,7 +155,7 @@ public sealed partial class AudioEngine
         (float IntegratedLufs, LoudnessSource Source) data,
         CancellationToken ct)
     {
-        var track = _trackRegistry.TryGet(trackId) ?? _library.GetTrack(trackId);
+        var track = _trackRegistry.TryGet(trackId);
         if (track != null)
         {
             track.SetIntegratedLufs(data.IntegratedLufs, data.Source);
@@ -338,7 +333,6 @@ public sealed partial class AudioEngine
         var current = CurrentTrack;
         if (current == null) return null;
         return _trackRegistry.TryGet(current.Id)
-            ?? _library.GetTrack(current.Id)
             ?? current;
     }
 
@@ -350,9 +344,6 @@ public sealed partial class AudioEngine
 
         var reg = _trackRegistry.TryGet(track.Id);
         reg?.EqualizerPresetId = presetId;
-
-        var lib = _library.GetTrack(track.Id);
-        lib?.EqualizerPresetId = presetId;
     }
 
     /// <summary>
@@ -403,21 +394,7 @@ public sealed partial class AudioEngine
 
             audioSettings.EqualizerPreampDb = clamped;
             _pendingEqGlobalSave = true;
-
-            if (Volatile.Read(ref _disposeState) == 0)
-            {
-                if (_eqSaveTimer == null)
-                {
-                    _eqSaveTimer = new Timer(static state =>
-                    {
-                        ((AudioEngine)state!).FlushPendingEqualizerSave();
-                    }, this, 300, Timeout.Infinite);
-                }
-                else
-                {
-                    _eqSaveTimer.Change(300, Timeout.Infinite);
-                }
-            }
+            ArmEqSaveTimerLocked();
         }
 
         var pipeline = _player.GetActivePipeline();
@@ -606,20 +583,7 @@ public sealed partial class AudioEngine
                 _pendingEqGlobalSave = true;
             }
 
-            if (Volatile.Read(ref _disposeState) == 0)
-            {
-                if (_eqSaveTimer == null)
-                {
-                    _eqSaveTimer = new Timer(static state =>
-                    {
-                        ((AudioEngine)state!).FlushPendingEqualizerSave();
-                    }, this, 300, Timeout.Infinite);
-                }
-                else
-                {
-                    _eqSaveTimer.Change(300, Timeout.Infinite);
-                }
-            }
+            ArmEqSaveTimerLocked();
         }
 
         if (trackToSync != null)
@@ -635,6 +599,24 @@ public sealed partial class AudioEngine
         if (notifyUiHeaderImmediately)
         {
             RaiseOnUI(() => OnEqualizerChanged?.Invoke());
+        }
+    }
+
+    private void ArmEqSaveTimerLocked()
+    {
+        if (Volatile.Read(ref _disposeState) != 0)
+            return;
+
+        if (_eqSaveTimer == null)
+        {
+            _eqSaveTimer = new Timer(static state =>
+            {
+                ((AudioEngine)state!).FlushPendingEqualizerSave();
+            }, this, 300, Timeout.Infinite);
+        }
+        else
+        {
+            _eqSaveTimer.Change(300, Timeout.Infinite);
         }
     }
 
@@ -842,7 +824,6 @@ public sealed partial class AudioEngine
         if (!string.IsNullOrEmpty(trackId))
         {
             track = _trackRegistry.TryGet(trackId)
-                 ?? _library.GetTrack(trackId)
                  ?? (CurrentTrack?.Id == trackId ? CurrentTrack : null);
         }
 

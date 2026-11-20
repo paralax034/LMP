@@ -25,6 +25,15 @@ internal sealed partial class TrackRepository : ITrackRepository
         t.IntegratedLufsSource, t.EqualizerPresetId, t.CreatedAt, t.UpdatedAt
         """;
 
+    private const string OwnerMatchUnqualifiedSql =
+        "((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest')) OR (@isGuest = 0 AND OwnerId = @ownerId))";
+
+    private const string LikedOwnerMatchSql =
+        "((@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest')) OR (@isGuest = 0 AND lt.OwnerId = @ownerId))";
+
+    private const string RecentOwnerMatchSql =
+        "((@isGuest = 1 AND (r.OwnerId = '' OR r.OwnerId = 'guest')) OR (@isGuest = 0 AND r.OwnerId = @ownerId))";
+
     /// <summary>
     /// Initializes a new instance of the track repository based on pure SQLite connections.
     /// </summary>
@@ -162,21 +171,18 @@ internal sealed partial class TrackRepository : ITrackRepository
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         var models = new List<TrackInfo>(limit);
-        bool guest = IsGuest(ownerId);
 
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = $"""
             SELECT {TrackColumnsSelect}
             FROM LikedTracks lt
             INNER JOIN Tracks t ON lt.TrackId = t.Id
-            WHERE (@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest'))
-               OR (@isGuest = 0 AND lt.OwnerId = @ownerId)
+            WHERE {LikedOwnerMatchSql}
             ORDER BY lt.LikedAt DESC
             LIMIT @limit OFFSET @offset;
             """;
 
-        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        BindOwnerParameters(cmd, ownerId);
         AddParameter(cmd, "@limit", limit);
         AddParameter(cmd, "@offset", offset);
 
@@ -197,20 +203,17 @@ internal sealed partial class TrackRepository : ITrackRepository
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
         var result = new List<string>(Math.Min(limit, 256));
-        bool guest = IsGuest(ownerId);
 
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             SELECT lt.TrackId
             FROM LikedTracks lt
-            WHERE (@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest'))
-               OR (@isGuest = 0 AND lt.OwnerId = @ownerId)
+            WHERE {LikedOwnerMatchSql}
             ORDER BY lt.LikedAt DESC
             LIMIT @limit OFFSET @offset;
             """;
 
-        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        BindOwnerParameters(cmd, ownerId);
         AddParameter(cmd, "@limit", limit);
         AddParameter(cmd, "@offset", offset);
 
@@ -228,18 +231,15 @@ internal sealed partial class TrackRepository : ITrackRepository
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             SELECT COALESCE(SUM(t.DurationTicks), 0)
             FROM LikedTracks lt
             INNER JOIN Tracks t ON lt.TrackId = t.Id
-            WHERE (@isGuest = 1 AND (lt.OwnerId = '' OR lt.OwnerId = 'guest'))
-               OR (@isGuest = 0 AND lt.OwnerId = @ownerId);
+            WHERE {LikedOwnerMatchSql};
             """;
 
-        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        BindOwnerParameters(cmd, ownerId);
 
         var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return Convert.ToInt64(scalar);
@@ -254,34 +254,43 @@ internal sealed partial class TrackRepository : ITrackRepository
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        var recentIds = new List<string>(limit);
-        bool guest = IsGuest(ownerId);
+        int initialCapacity = Math.Clamp(limit, 0, 100);
+        var models = new List<TrackInfo>(initialCapacity);
+        var trackIds = new List<string>(initialCapacity);
 
         await using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = """
-                SELECT r.TrackId
+            cmd.CommandText = $"""
+                SELECT {TrackColumnsSelect}
                 FROM RecentlyPlayed r
-                WHERE (@isGuest = 1 AND (r.OwnerId = '' OR r.OwnerId = 'guest'))
-                   OR (@isGuest = 0 AND r.OwnerId = @ownerId)
+                INNER JOIN Tracks t ON r.TrackId = t.Id
+                WHERE {RecentOwnerMatchSql}
                 ORDER BY r.PlayedAt DESC
                 LIMIT @limit;
                 """;
 
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+            BindOwnerParameters(cmd, ownerId);
             AddParameter(cmd, "@limit", limit);
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                recentIds.Add(reader.GetString(0));
+                var track = ReadTrackInfo(reader);
+                models.Add(track);
+                trackIds.Add(track.Id);
             }
         }
 
-        if (recentIds.Count == 0) return [];
+        if (models.Count > 0)
+        {
+            var likedTrackIds = await GetLikedTrackIdsSubsetAsync(connection, trackIds, ownerId, ct).ConfigureAwait(false);
+            for (int i = 0; i < models.Count; i++)
+            {
+                models[i].IsLiked = likedTrackIds.Contains(models[i].Id);
+            }
+        }
 
-        return await GetByIdsAsync(recentIds, ownerId ?? string.Empty, ct).ConfigureAwait(false);
+        return models;
     }
 
     /// <inheritdoc />
@@ -300,16 +309,13 @@ internal sealed partial class TrackRepository : ITrackRepository
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             SELECT COUNT(*) FROM LikedTracks
-            WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-               OR (@isGuest = 0 AND OwnerId = @ownerId);
+            WHERE {OwnerMatchUnqualifiedSql};
             """;
 
-        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        BindOwnerParameters(cmd, ownerId);
 
         var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return Convert.ToInt32(scalar);
@@ -357,11 +363,11 @@ internal sealed partial class TrackRepository : ITrackRepository
             await using var cmd = connection.CreateCommand();
             cmd.Transaction = transaction;
             cmd.CommandText = GetUpsertSql();
+            var slots = CreateUpsertParameters(cmd);
 
             for (int i = 0; i < trackList.Count; i++)
             {
-                cmd.Parameters.Clear();
-                BindUpsertParameters(cmd, trackList[i], now);
+                UpdateUpsertParameters(slots, trackList[i], now);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -384,12 +390,12 @@ internal sealed partial class TrackRepository : ITrackRepository
         AddParameter(cmd, "@id", id);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
+
     /// <inheritdoc />
     public async Task SetLikedAsync(string id, string ownerId, bool liked, DateTime? likedAt = null, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
 
         if (liked)
@@ -405,15 +411,13 @@ internal sealed partial class TrackRepository : ITrackRepository
         }
         else
         {
-            cmd.CommandText = """
+            cmd.CommandText = $"""
                 DELETE FROM LikedTracks
                 WHERE TrackId = @id
-                  AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                    OR (@isGuest = 0 AND OwnerId = @ownerId));
+                  AND {OwnerMatchUnqualifiedSql};
                 """;
             AddParameter(cmd, "@id", id);
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+            BindOwnerParameters(cmd, ownerId);
         }
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -499,6 +503,24 @@ internal sealed partial class TrackRepository : ITrackRepository
     }
 
     /// <inheritdoc />
+    public async Task ClearAllDownloadsAsync(CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE Tracks
+            SET IsDownloaded = 0,
+                LocalPath = NULL,
+                UpdatedAt = @updatedAt
+            WHERE IsDownloaded = 1;
+            """;
+
+        AddParameter(cmd, "@updatedAt", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task SaveNormalizationMetadataAsync(
         string id,
         float integratedLufs,
@@ -559,22 +581,19 @@ internal sealed partial class TrackRepository : ITrackRepository
 
         try
         {
-            bool guest = IsGuest(ownerId);
             var nowStr = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
 
             // 1. Delete duplicate
             await using (var cmdDel = connection.CreateCommand())
             {
                 cmdDel.Transaction = transaction;
-                cmdDel.CommandText = """
+                cmdDel.CommandText = $"""
                     DELETE FROM RecentlyPlayed
                     WHERE TrackId = @trackId
-                      AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                        OR (@isGuest = 0 AND OwnerId = @ownerId));
+                      AND {OwnerMatchUnqualifiedSql};
                     """;
                 AddParameter(cmdDel, "@trackId", trackId);
-                AddParameter(cmdDel, "@isGuest", guest ? 1 : 0);
-                AddParameter(cmdDel, "@ownerId", ownerId ?? string.Empty);
+                BindOwnerParameters(cmdDel, ownerId);
                 await cmdDel.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -596,18 +615,16 @@ internal sealed partial class TrackRepository : ITrackRepository
             await using (var cmdPrune = connection.CreateCommand())
             {
                 cmdPrune.Transaction = transaction;
-                cmdPrune.CommandText = """
+                cmdPrune.CommandText = $"""
                     DELETE FROM RecentlyPlayed
                     WHERE Id IN (
                         SELECT Id FROM RecentlyPlayed
-                        WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                           OR (@isGuest = 0 AND OwnerId = @ownerId)
+                        WHERE {OwnerMatchUnqualifiedSql}
                         ORDER BY PlayedAt DESC
                         LIMIT -1 OFFSET 100
                     );
                     """;
-                AddParameter(cmdPrune, "@isGuest", guest ? 1 : 0);
-                AddParameter(cmdPrune, "@ownerId", ownerId ?? string.Empty);
+                BindOwnerParameters(cmdPrune, ownerId);
                 await cmdPrune.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -625,15 +642,12 @@ internal sealed partial class TrackRepository : ITrackRepository
     {
         await using var connection = await _factory.OpenConnectionAsync(ct).ConfigureAwait(false);
 
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             DELETE FROM RecentlyPlayed
-            WHERE (@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-               OR (@isGuest = 0 AND OwnerId = @ownerId);
+            WHERE {OwnerMatchUnqualifiedSql};
             """;
-        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        BindOwnerParameters(cmd, ownerId);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
@@ -789,19 +803,16 @@ internal sealed partial class TrackRepository : ITrackRepository
     /// </summary>
     private static async Task<bool> CheckIsLikedAsync(DbConnection connection, string trackId, string ownerId, CancellationToken ct)
     {
-        bool guest = IsGuest(ownerId);
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             SELECT 1 FROM LikedTracks
             WHERE TrackId = @id
-              AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                OR (@isGuest = 0 AND OwnerId = @ownerId))
+              AND {OwnerMatchUnqualifiedSql}
             LIMIT 1;
             """;
 
         AddParameter(cmd, "@id", trackId);
-        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+        BindOwnerParameters(cmd, ownerId);
 
         var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return scalar is not null && scalar != DBNull.Value;
@@ -820,7 +831,6 @@ internal sealed partial class TrackRepository : ITrackRepository
         if (idList.Count == 0) return [];
 
         var likedSet = new HashSet<string>(StringComparer.Ordinal);
-        bool guest = IsGuest(ownerId);
 
         const int chunkSize = 500;
         for (int i = 0; i < idList.Count; i += chunkSize)
@@ -831,7 +841,7 @@ internal sealed partial class TrackRepository : ITrackRepository
             var paramNames = new string[count];
             for (int j = 0; j < count; j++)
             {
-                var paramName = $"@id{j}";
+                var paramName = ParameterNames500[j];
                 paramNames[j] = paramName;
                 AddParameter(cmd, paramName, idList[i + j]);
             }
@@ -839,12 +849,10 @@ internal sealed partial class TrackRepository : ITrackRepository
             cmd.CommandText = $"""
                 SELECT TrackId FROM LikedTracks
                 WHERE TrackId IN ({string.Join(',', paramNames)})
-                  AND ((@isGuest = 1 AND (OwnerId = '' OR OwnerId = 'guest'))
-                    OR (@isGuest = 0 AND OwnerId = @ownerId));
+                  AND {OwnerMatchUnqualifiedSql};
                 """;
 
-            AddParameter(cmd, "@isGuest", guest ? 1 : 0);
-            AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+            BindOwnerParameters(cmd, ownerId);
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -856,16 +864,25 @@ internal sealed partial class TrackRepository : ITrackRepository
         return likedSet;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void BindOwnerParameters(DbCommand cmd, string? ownerId)
+    {
+        bool guest = IsGuest(ownerId ?? string.Empty);
+        AddParameter(cmd, "@isGuest", guest ? 1 : 0);
+        AddParameter(cmd, "@ownerId", ownerId ?? string.Empty);
+    }
+
     /// <summary>
     /// Adds a strongly typed parameter to the SQLite command.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AddParameter(DbCommand cmd, string name, object? value)
+    private static DbParameter AddParameter(DbCommand cmd, string name, object? value)
     {
         var p = cmd.CreateParameter();
         p.ParameterName = name;
         p.Value = value ?? DBNull.Value;
         cmd.Parameters.Add(p);
+        return p;
     }
 
     /// <summary>
@@ -905,37 +922,85 @@ internal sealed partial class TrackRepository : ITrackRepository
             UpdatedAt = excluded.UpdatedAt;
         """;
 
+    private readonly record struct UpsertParameterSlots(
+        DbParameter Id,
+        DbParameter Title,
+        DbParameter Author,
+        DbParameter ChannelId,
+        DbParameter Url,
+        DbParameter DurationTicks,
+        DbParameter ThumbnailUrl,
+        DbParameter IsOfficialArtist,
+        DbParameter IsMusic,
+        DbParameter IsDisliked,
+        DbParameter IsDownloaded,
+        DbParameter LocalPath,
+        DbParameter PreferredContainer,
+        DbParameter PreferredBitrate,
+        DbParameter RadioSeedId,
+        DbParameter IntegratedLufs,
+        DbParameter IntegratedLufsSource,
+        DbParameter EqualizerPresetId,
+        DbParameter CreatedAt,
+        DbParameter UpdatedAt);
+
+    private static UpsertParameterSlots CreateUpsertParameters(DbCommand cmd) => new(
+        AddParameter(cmd, "@id", null),
+        AddParameter(cmd, "@title", null),
+        AddParameter(cmd, "@author", null),
+        AddParameter(cmd, "@channelId", null),
+        AddParameter(cmd, "@url", null),
+        AddParameter(cmd, "@durationTicks", null),
+        AddParameter(cmd, "@thumbnailUrl", null),
+        AddParameter(cmd, "@isOfficialArtist", null),
+        AddParameter(cmd, "@isMusic", null),
+        AddParameter(cmd, "@isDisliked", null),
+        AddParameter(cmd, "@isDownloaded", null),
+        AddParameter(cmd, "@localPath", null),
+        AddParameter(cmd, "@preferredContainer", null),
+        AddParameter(cmd, "@preferredBitrate", null),
+        AddParameter(cmd, "@radioSeedId", null),
+        AddParameter(cmd, "@integratedLufs", null),
+        AddParameter(cmd, "@integratedLufsSource", null),
+        AddParameter(cmd, "@equalizerPresetId", null),
+        AddParameter(cmd, "@createdAt", null),
+        AddParameter(cmd, "@updatedAt", null));
+
+    private static void UpdateUpsertParameters(in UpsertParameterSlots slots, TrackInfo track, DateTime now)
+    {
+        var nowStr = now.ToString("o", CultureInfo.InvariantCulture);
+
+        slots.Id.Value = track.Id;
+        slots.Title.Value = track.Title ?? string.Empty;
+        slots.Author.Value = track.Author ?? string.Empty;
+        slots.ChannelId.Value = (object?)track.ChannelId ?? DBNull.Value;
+        slots.Url.Value = track.Url ?? string.Empty;
+        slots.DurationTicks.Value = track.Duration.Ticks;
+        slots.ThumbnailUrl.Value = track.ThumbnailUrl ?? string.Empty;
+        slots.IsOfficialArtist.Value = track.IsOfficialArtist ? 1 : 0;
+        slots.IsMusic.Value = track.IsMusic ? 1 : 0;
+        slots.IsDisliked.Value = track.IsDisliked ? 1 : 0;
+        slots.IsDownloaded.Value = track.IsDownloaded ? 1 : 0;
+        slots.LocalPath.Value = (object?)track.LocalPath ?? DBNull.Value;
+        slots.PreferredContainer.Value = (object?)PersistPreferredFormat(track.PreferredFormat) ?? DBNull.Value;
+        slots.PreferredBitrate.Value = track.PreferredBitrate;
+        slots.RadioSeedId.Value = (object?)track.RadioSeedId ?? DBNull.Value;
+        slots.IntegratedLufs.Value = float.IsNaN(track.IntegratedLufs) || !float.IsFinite(track.IntegratedLufs)
+            ? DBNull.Value
+            : track.IntegratedLufs;
+        slots.IntegratedLufsSource.Value = (int)track.IntegratedLufsSource;
+        slots.EqualizerPresetId.Value = (object?)track.EqualizerPresetId ?? DBNull.Value;
+        slots.CreatedAt.Value = nowStr;
+        slots.UpdatedAt.Value = nowStr;
+    }
+
     /// <summary>
     /// Binds track model values to the Upsert query parameters.
     /// </summary>
     private static void BindUpsertParameters(DbCommand cmd, TrackInfo track, DateTime now)
     {
-        var nowStr = now.ToString("o", CultureInfo.InvariantCulture);
-
-        AddParameter(cmd, "@id", track.Id);
-        AddParameter(cmd, "@title", track.Title ?? string.Empty);
-        AddParameter(cmd, "@author", track.Author ?? string.Empty);
-        AddParameter(cmd, "@channelId", (object?)track.ChannelId ?? DBNull.Value);
-        AddParameter(cmd, "@url", track.Url ?? string.Empty);
-        AddParameter(cmd, "@durationTicks", track.Duration.Ticks);
-        AddParameter(cmd, "@thumbnailUrl", track.ThumbnailUrl ?? string.Empty);
-        AddParameter(cmd, "@isOfficialArtist", track.IsOfficialArtist ? 1 : 0);
-        AddParameter(cmd, "@isMusic", track.IsMusic ? 1 : 0);
-        AddParameter(cmd, "@isDisliked", track.IsDisliked ? 1 : 0);
-        AddParameter(cmd, "@isDownloaded", track.IsDownloaded ? 1 : 0);
-        AddParameter(cmd, "@localPath", (object?)track.LocalPath ?? DBNull.Value);
-        AddParameter(cmd, "@preferredContainer", (object?)PersistPreferredFormat(track.PreferredFormat) ?? DBNull.Value);
-        AddParameter(cmd, "@preferredBitrate", track.PreferredBitrate);
-        AddParameter(cmd, "@radioSeedId", (object?)track.RadioSeedId ?? DBNull.Value);
-
-        object lufsVal = float.IsNaN(track.IntegratedLufs) || !float.IsFinite(track.IntegratedLufs)
-            ? DBNull.Value
-            : track.IntegratedLufs;
-        AddParameter(cmd, "@integratedLufs", lufsVal);
-        AddParameter(cmd, "@integratedLufsSource", (int)track.IntegratedLufsSource);
-        AddParameter(cmd, "@equalizerPresetId", (object?)track.EqualizerPresetId ?? DBNull.Value);
-        AddParameter(cmd, "@createdAt", nowStr);
-        AddParameter(cmd, "@updatedAt", nowStr);
+        var slots = CreateUpsertParameters(cmd);
+        UpdateUpsertParameters(slots, track, now);
     }
 
     #endregion

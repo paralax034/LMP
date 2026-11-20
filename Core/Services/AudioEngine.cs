@@ -90,6 +90,31 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// <summary>Context of the n-token warning.</summary>
     public readonly record struct NTokenWarningInfo(TrackInfo? Track, bool WasSkipped);
 
+    /// <summary>Reason why an active track playback session ended.</summary>
+    public enum TrackEndReason : byte
+    {
+        Completed = 0,
+        Skipped = 1,
+        Stopped = 2,
+        Error = 3
+    }
+
+    /// <summary>Lifecycle payload emitted when an active playback session ends.</summary>
+    public readonly record struct TrackPlaybackEndedInfo(
+        TrackInfo Track,
+        TimeSpan PlayedDuration,
+        TimeSpan TotalDuration,
+        TrackEndReason Reason);
+
+    private readonly record struct PlaybackLifecycleEvent(
+        bool IsStarted,
+        TrackInfo? StartedTrack,
+        TrackPlaybackEndedInfo EndedInfo)
+    {
+        public static PlaybackLifecycleEvent Started(TrackInfo track) => new(true, track, default);
+        public static PlaybackLifecycleEvent Ended(TrackPlaybackEndedInfo info) => new(false, null, info);
+    }
+
     #endregion
 
     #region Constants
@@ -236,6 +261,14 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// </summary>
     private int _sourceLifecycleSuspended;
 
+    private readonly Channel<PlaybackLifecycleEvent> _lifecycleEvents;
+    private Task? _lifecycleDispatcherTask;
+    private TrackInfo? _activePlaybackTrack;
+    private int _activePlaybackEngineSession;
+    private long _activePlaybackAccumulatedMs;
+    private long _activePlaybackPlayingSinceTick;
+    private TimeSpan _activePlaybackTotalDuration;
+
     #endregion
 
     #region Observable Properties
@@ -357,6 +390,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     public event Action? OnDeviceRestored;
     public event Action<Exception>? OnErrorOccurred;
     public event Action<NTokenWarningInfo>? OnNTokenDecryptionWarning;
+    public event Action<TrackInfo>? OnTrackPlaybackStarted;
+    public event Action<TrackPlaybackEndedInfo>? OnTrackPlaybackEnded;
 
     private readonly Action _raiseQueueChangedOnUIDelegate;
     private readonly Action _raiseQueueSourceChangedOnUIDelegate;
@@ -476,8 +511,16 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
                 FullMode = BoundedChannelFullMode.DropOldest
             });
 
+        _lifecycleEvents = Channel.CreateUnbounded<PlaybackLifecycleEvent>(
+            new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false
+            });
+
         _commandProcessorTask = Task.Run(ProcessCommandsAsync);
         _volumeSaveTask = Task.Run(VolumeSaveLoopAsync);
+        _lifecycleDispatcherTask = Task.Run(ProcessLifecycleEventsAsync);
 
         LifecycleRegistry.Instance?.RegisterBackgroundSuspendable(this);
     }
@@ -793,6 +836,8 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     {
         lock (_playerDispatchLock)
         {
+            EndPlaybackSessionLocked(TrackEndReason.Stopped);
+
             _playIntent = false;
             Interlocked.Increment(ref _pauseEpoch);
             Interlocked.Increment(ref _queueReplaceSeq);
@@ -904,6 +949,125 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
             return;
 
         RaiseOnUI(_raiseManualLoadingChangedOnUIDelegate);
+    }
+
+    private void AccumulatePlayingTimeLocked(long nowTick)
+    {
+        if (_activePlaybackPlayingSinceTick == 0)
+            return;
+
+        long delta = nowTick - _activePlaybackPlayingSinceTick;
+        if (delta > 0)
+            _activePlaybackAccumulatedMs += delta;
+
+        _activePlaybackPlayingSinceTick = 0;
+    }
+
+    private void CaptureBestTotalDurationLocked(TrackInfo track)
+    {
+        var liveDuration = TotalDuration;
+        if (liveDuration > TimeSpan.Zero)
+        {
+            _activePlaybackTotalDuration = liveDuration;
+        }
+        else if (_activePlaybackTotalDuration <= TimeSpan.Zero && track.Duration > TimeSpan.Zero)
+        {
+            _activePlaybackTotalDuration = track.Duration;
+        }
+    }
+
+    private void BeginPlaybackSessionLocked(TrackInfo track, int session, bool isPlayingNow)
+    {
+        if (_activePlaybackTrack != null)
+            EndPlaybackSessionLocked(TrackEndReason.Skipped);
+
+        _activePlaybackTrack = track;
+        _activePlaybackEngineSession = session;
+        _activePlaybackAccumulatedMs = 0;
+        _activePlaybackPlayingSinceTick = isPlayingNow ? Environment.TickCount64 : 0;
+        _activePlaybackTotalDuration = TotalDuration > TimeSpan.Zero ? TotalDuration : track.Duration;
+
+        _lifecycleEvents.Writer.TryWrite(PlaybackLifecycleEvent.Started(track));
+    }
+
+    private bool TrySyncActivePlaybackSessionLocked(TrackInfo track, int session, bool resumeClockIfPlaying = false)
+    {
+        if (!string.Equals(_activePlaybackTrack?.Id, track.Id, StringComparison.Ordinal))
+            return false;
+
+        _activePlaybackEngineSession = session;
+        CaptureBestTotalDurationLocked(track);
+        if (resumeClockIfPlaying && _player.State == PlaybackState.Playing && _activePlaybackPlayingSinceTick == 0)
+            _activePlaybackPlayingSinceTick = Environment.TickCount64;
+
+        return true;
+    }
+
+    private void EndPlaybackSessionLocked(TrackEndReason reason)
+    {
+        if (_activePlaybackTrack is not { } activeTrack)
+            return;
+
+        AccumulatePlayingTimeLocked(Environment.TickCount64);
+        CaptureBestTotalDurationLocked(activeTrack);
+
+        var playedDuration = TimeSpan.FromMilliseconds(_activePlaybackAccumulatedMs);
+        var totalDuration = _activePlaybackTotalDuration;
+
+        _activePlaybackTrack = null;
+        _activePlaybackEngineSession = 0;
+        _activePlaybackAccumulatedMs = 0;
+        _activePlaybackPlayingSinceTick = 0;
+        _activePlaybackTotalDuration = TimeSpan.Zero;
+
+        _lifecycleEvents.Writer.TryWrite(PlaybackLifecycleEvent.Ended(
+            new TrackPlaybackEndedInfo(activeTrack, playedDuration, totalDuration, reason)));
+    }
+
+    private async Task ProcessLifecycleEventsAsync()
+    {
+        await foreach (var evt in _lifecycleEvents.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            if (evt.IsStarted)
+            {
+                if (evt.StartedTrack is { } started)
+                    RaiseTrackPlaybackStartedSafe(started);
+            }
+            else
+            {
+                RaiseTrackPlaybackEndedSafe(evt.EndedInfo);
+            }
+        }
+    }
+
+    private void RaiseTrackPlaybackStartedSafe(TrackInfo track)
+    {
+        var handler = OnTrackPlaybackStarted;
+        if (handler is null) return;
+
+        try
+        {
+            handler(track);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[AudioEngine] OnTrackPlaybackStarted subscriber error: {ex.Message}");
+        }
+    }
+
+    private void RaiseTrackPlaybackEndedSafe(TrackPlaybackEndedInfo info)
+    {
+        var handler = OnTrackPlaybackEnded;
+        if (handler is null) return;
+
+        try
+        {
+            handler(info);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"[AudioEngine] OnTrackPlaybackEnded subscriber error: {ex.Message}");
+        }
     }
 
     private void RaiseDetailedPlaybackStateIfChanged(PlaybackState effectiveState)

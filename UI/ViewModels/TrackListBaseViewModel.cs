@@ -161,7 +161,7 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         catch (Exception ex)
         {
             Log.Error($"[TrackListBase] Save move failed: {ex.Message}");
-            _items.MoveTrack(newVisualIndex, oldVisualIndex);
+            await Dispatcher.UIThread.InvokeAsync(() => _items.MoveTrack(newVisualIndex, oldVisualIndex));
         }
     }
 
@@ -184,17 +184,14 @@ public abstract partial class TrackListBaseViewModel : ViewModelBase, IFilterabl
         try
         {
             var token = _loadCts?.Token ?? CancellationToken.None;
-            var newTracks = await FetchMoreFromNetworkAsync(token).ConfigureAwait(false);
+            var newTracks = await FetchMoreFromNetworkAsync(token);
 
             if (token.IsCancellationRequested) return;
 
             if (newTracks is { Count: > 0 })
             {
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    _items.AppendTracks(newTracks);
-                    NotifyCountProperties();
-                });
+                _items.AppendTracks(newTracks);
+                NotifyCountProperties();
 
                 if (TotalCount == countBefore)
                     _consecutiveEmptyLoads++;

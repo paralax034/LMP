@@ -266,19 +266,6 @@ public static partial class HotPathAllocationTests
         return Task.CompletedTask;
     }
 
-    // ==========================================
-    //   FORWARDING ALIASES FOR BACKWARD COMPAT
-    // ==========================================
-
-    public static Task TestSharedPlaybackStateInterpolationAsync() =>
-     AudioLogicTests.TestRenderClockPositionContractsAsync();
-
-    public static Task TestAdaptiveDecoderDelayAndTimerSuspendAsync() =>
-        AudioLogicTests.TestAdaptiveDecoderDelayAndBatchHysteresisAsync();
-
-    public static Task TestNetworkManagerAndDelayNoThrowZeroAllocAsync() =>
-        NetworkLogicTests.TestNetworkManagerLogicZeroAllocAsync();
-
     /// <summary>
     /// Validates consistency of the FNV-1a disk cache key for string/span overloads, WEB_REMIX client priority,
     /// and deterministic disposal of <see cref="RefCountedBitmap"/>. Bitmap checks require an initialized
