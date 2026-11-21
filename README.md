@@ -2,8 +2,8 @@
 
 # Lite Music Player (LMP)
 
-**A high-performance, resource-efficient native YouTube Music desktop client for Windows.**  
-Engineered with **.NET 11**, **Avalonia UI 12.1**, and **Native AOT**.
+**Fast, lightweight native YouTube Music player for Windows.**  
+Launches in under a second, runs smoothly at 60–144+ FPS, and stays light on RAM.
 
 [![Runtime](https://img.shields.io/badge/.NET-11.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 [![UI Framework](https://img.shields.io/badge/Avalonia_UI-12.1-8A2BE2?style=flat-square)](https://avaloniaui.net/)
@@ -19,8 +19,7 @@ Engineered with **.NET 11**, **Avalonia UI 12.1**, and **Native AOT**.
 
 <br/>
 
-<!-- HERO DEMO MP4 -->
-<video src="https://github.com/user-attachments/assets/ccc83af4-40fe-4048-b60f-e7c344d0ec91" width="100%" autoplay loop muted playsinline style="border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+<video src="https://github.com/user-attachments/assets/5ded1edb-9974-4ec1-8b7a-fb01dc1f36df" width="100%" autoplay loop muted playsinline style="border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
 </video>
 
 </div>
@@ -29,94 +28,80 @@ Engineered with **.NET 11**, **Avalonia UI 12.1**, and **Native AOT**.
 
 # English
 
-## Overview
+Most desktop music players are basically web browsers wrapped in Electron. **LMP** is a 100% native Windows app — no browser engine, no bloat, just instant response and clean sound.
 
-Most modern desktop music players are web applications packaged into heavy Chromium/Electron wrappers. They often consume 600 MB to 1.5 GB of RAM, launch slowly, and experience frame drops during navigation.
-
-**LMP** is a fully native client built without web technologies. It compiles directly to machine code (Native AOT) and utilizes hardware-accelerated rendering, delivering instant UI responsiveness, minimal memory footprint, and native YouTube Music integration.
-
----
-
-## Performance Comparison
-
-| Metric                   | Web / Electron Clients  | LMP (Native AOT)  |          Impact          |
-| :----------------------- | :---------------------: | :---------------: | :----------------------: |
-| **Cold Startup**         |       4.0 – 8.0 s       |    **~1.2 s**     |      Instant launch      |
-| **Active Playback RAM**  |     600 MB – 1.2 GB     | **~180 – 240 MB** |   Up to 4x less memory   |
-| **Minimized / Tray RAM** |      350 – 700 MB       | **~130 – 160 MB** |  Zero background waste   |
-| **Distribution Size**    |      120 – 250 MB       | **~16 MB (.7z)**  | Compact standalone build |
-| **UI Rendering**         | 30 – 60 FPS (CPU bound) | **60 – 144+ FPS** |   Skia GPU Compositor    |
+| Metric                  | Web / Electron Players | LMP (Native AOT)  |
+| :---------------------- | :--------------------: | :---------------: |
+| **Cold Startup**        |      4.0 – 8.0 s       | **~0.4 – 0.8 s**  |
+| **Active Playback RAM** |    600 MB – 1.2 GB     | **~150 – 210 MB** |
+| **Idle / Minimized**    |      350 – 700 MB      | **~80 – 160 MB**  |
+| **Download Size**       |      120 – 250 MB      | **~17 MB (.7z)**  |
+| **UI Smoothness**       |      30 – 60 FPS       | **60 – 144+ FPS** |
 
 ---
 
-## Core Features
+## What It Can Do
 
-### Visual Customization and Dynamic Effects
+### Visuals & Theme Studio
 
-- Built-in theme presets: Paralax Purple, AMOLED Black, Classic Green, Ocean Deep, and more.
-- Real-time animated audio wave border reacting to currently playing tracks.
-- Customizable animation speeds and full control over accent colors.
+- **Live Background Glow:** **Fluid Wave** and **Aurora** effects in Queue and Playlists that flow seamlessly into the window header and react to your music.
+- **Music-Reactive Track Border:** Live waves running along the currently playing track (or classic pulse), with optional beat glow.
+- **Theme Editor:** Built-in and custom themes, real-time **Live Preview** with easy rollback, readability contrast check, JSON sharing, and instant **EN / RU** switching.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/35e184d4-5294-43c3-9e48-1d4f1a67d0ae" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/f2975a63-1266-4a86-99fc-d9b1b1ae0409" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 <br/>
 
-### EBU R128 / LUFS Loudness Normalization
+### Equalizer & Smart Sound
 
-- Integrated volume normalization matching modern streaming standards.
-- Dual-mode processing (Spotify-like smooth attenuation vs. YouTube standard).
-- Configurable target LUFS threshold (-25 to -10 LUFS) and maximum gain limiting.
-- Custom non-linear volume curves (Quadratic / Linear / Cubic).
+- **Built-In Equalizer:** Switch between an easy **5-band** view and a detailed **10-band** curve that moves with the track, save custom presets, or bind a preset to a single song.
+- **Volume Normalization:** Automatically keeps every track at a comfortable loudness (Spotify-style or YouTube-style) so you don't have to adjust the volume between songs.
+- **Clean Volume Boost:** Safely boost quiet tracks above 100% without distortion, plus 5 volume slider curves to match your headphones.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/575f3dbe-b438-4c15-9985-b0b49e9e34dd" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/88681981-9d2f-474c-ae8d-60030e4c1fda" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 <br/>
 
-### YouTube Cloud & Local Playlist Synchronization
+### Sync, Queue & Discord Rich Presence
 
-- Complete two-way sync for playlists, favorites (Liked Songs), and track metadata.
-- Smart conflict resolution engine (Merge, Duplicate, or Overwrite remote playlists).
-- Quick playlist creation with custom artwork, color tagging, and cloud backup.
-- Multi-account management with instant session switching.
+- **Two-Way YouTube Sync:** Keep your playlists, Liked Songs, covers, and descriptions in sync with YouTube Music, complete with an easy conflict resolver.
+- **Smart Queue:** Reorder multiple tracks at once with Drag-and-Drop, filter instantly, and see elapsed / remaining / total queue time at a glance.
+- **Discord Rich Presence & Media Keys:** Customize how your status looks with a live preview card in Settings, plus full Windows media overlay and keyboard key support.
+- **One-Click Updates & Multi-Account:** Built-in auto-updater and quick switching between channels.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/212907b7-d1fc-4ab7-a7f5-563449918f7a" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/16c2fabd-ce37-4439-8def-7dc1633bb362" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 <br/>
 
-### Intelligent Streaming, Caching and Network Economy
+### Fast Streaming & Offline Mode
 
-- **Adaptive Chunk Streaming:** Instant track playback without waiting for full audio downloads.
-- **Two-Tier Storage Cache:** Configurable disk and RAM quotas for audio files, album covers, and search indexes.
-- **Offline Mode:** Seamless local playback for cached and downloaded tracks.
-- **Automated YouTube Cipher Bypass:** Background decryption of `sig`, `n-token`, and `poToken` parameters with automatic client profile rotation.
+- **Instant Playback:** Tracks start right away without waiting for full downloads, and you can switch audio quality (`Opus` / `AAC`) on the fly.
+- **Flexible Cache & Offline Support:** Set your own RAM and disk limits for audio, covers, and search history — cached and downloaded tracks play smoothly offline.
+- **Reliable Connection:** Built-in YouTube stream decryption and automatic link recovery keep music playing without interruptions.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/cb0b3669-cfb9-42f7-8f70-b988ac60fae8" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/055c3964-0737-4131-9776-e81d14dd6de2" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 ---
 
 <details>
-<summary><b>Technical Architecture & Internal Pipeline (Click to expand)</b></summary>
+<summary><b>Technical Architecture (Under the Hood)</b></summary>
 
-<br/>
-
-- **Compilation Model:** Fully trimmed Native AOT compilation via the .NET ILC compiler into an independent native executable without JIT overhead.
-- **Audio Pipeline:** Direct Windows WASAPI / WinMM audio output engine coupled with native `Concentus` (Opus) and `SharpJaad` (AAC) decoders feeding lock-free ring buffers (`LockFreeRingBuffer`).
-- **MVVM Layer:** Zero-reflection view models driven by compile-time Source Generators (`CommunityToolkit.Mvvm`).
-- **Data Persistence:** Raw ADO.NET SQLite database operations paired with high-speed binary serialization (`MemoryPack`).
-- **Network Stack:** Centralized `NetworkManager` providing connection pooling, DNS-over-HTTPS (DoH), and system/custom proxy support.
-- **Tooling Ecosystem:** Cross-platform build automation engine and zero-allocation static analysis toolset powered by Python 3.
+- **Compilation:** Fully trimmed **Native AOT** (`.NET 11`, `PublishAot=true`, `TrimMode=full`) with zero runtime reflection or JIT overhead.
+- **Audio & DSP:** Direct Windows **WASAPI** (Shared Paced Zero-Copy), `libopus` (`Concentus`) & `SharpJaad.AAC`, lock-free SPSC `LockFreeRingBuffer<float>`, 16-lane Mid/Side SIMD (`AVX2`/`FMA`/`SSE`) `AudioSpectrumAnalyzer`, Cytomic SVF `EqualizerProcessor`, `EbuR128Analyzer`, `TruePeakLimiter`, and windowed-sinc resampler.
+- **Rendering:** Render-thread `CompositionCustomVisualHandler` + SkiaSharp `SKRuntimeEffect` (SkSL) shaders with zero UI-thread wakeups.
+- **Data, Sync & Bypass:** Parameterized ADO.NET SQLite (WAL), `MemoryPack` binary cache, `CommunityToolkit.Mvvm` source generators, persistent Cloud Outbox, and embedded `QuickJS` (`quickjs_bridge.dll`) + `Acornima` AST solver for `sig`, `n-token`, and `poToken` (BotGuard).
 
 </details>
 
@@ -124,28 +109,16 @@ Most modern desktop music players are web applications packaged into heavy Chrom
 
 ## Installation & Build
 
-### Portable Binary (Ready to run)
+**Portable:** Download `LMP-Release-latest.7z` from [**dev**](https://github.com/paralax034/LMP/releases/dev), extract, and run `LMP.exe`.
 
-Download the latest `LMP-Release-latest.7z` from the [**dev**](https://github.com/paralax034/LMP/releases/dev) release, extract to any folder, and launch `LMP.exe`.
-
-### Building from Source
-
-**Requirements:**
-
-- Windows 10 / 11 (x64)
-- .NET 11.0 SDK
-- Python 3.10+ (for cross-platform build orchestration and tooling)
-- Visual Studio Build Tools (C++ Desktop Development workload for Native AOT linking)
+**From Source** (Windows 10/11 x64, .NET 11.0 SDK, Python 3.10+, VS Build Tools C++):
 
 ```bash
-# Clone the repository
 git clone https://github.com/paralax034/LMP.git
 cd LMP
 
-# Run in debug mode (via cross-platform build engine)
 python build.py debug
-
-# Build standalone Native AOT release
+python build.py aot-test --category=Unit run
 python build.py publish
 ```
 
@@ -155,94 +128,80 @@ python build.py publish
 
 # Русский
 
-## Описание проекта
+Большинство десктопных плееров сегодня — это браузер, завёрнутый в Electron. **LMP** написан полностью нативно под Windows: без веб-движков, без лишнего веса, с мгновенным запуском и плавным интерфейсом.
 
-Большинство современных десктопных музыкальных клиентов представляют собой веб-страницы, обёрнутые в тяжёлый Chromium/Electron. Они расходуют от 600 МБ до 1.5 ГБ оперативной памяти, долго запускаются и подтормаживают при навигации.
-
-**LMP (Lite Music Player)** — полностью нативное десктопное приложение без использования веб-движков. Проект компилируется напрямую в машинный код (Native AOT) и использует аппаратный GPU-рендеринг, обеспечивая мгновенный запуск, стабильный фреймрейт и нативную интеграцию с YouTube Music.
-
----
-
-## Сравнение производительности
-
-| Параметр                    |    Web / Electron клиенты    | LMP (Native AOT)  |       Преимущество        |
-| :-------------------------- | :--------------------------: | :---------------: | :-----------------------: |
-| **Холодный запуск**         |         4.0 – 8.0 с          |    **~1.2 с**     |   Мгновенная готовность   |
-| **ОЗУ при воспроизведении** |       600 МБ – 1.2 ГБ        | **~180 – 240 МБ** |  До 4 раз меньше памяти   |
-| **ОЗУ в трее / фоне**       |         350 – 700 МБ         | **~130 – 160 МБ** | Экономия ресурсов системы |
-| **Размер архива**           |         120 – 250 МБ         | **~16 МБ (.7z)**  |  Компактный дистрибутив   |
-| **Отрисовка UI**            | 30 – 60 FPS (нагрузка на ЦП) | **60 – 144+ FPS** |  Плавный GPU Skia рендер  |
+| Параметр                    | Web / Electron плееры | LMP (Native AOT)  |
+| :-------------------------- | :-------------------: | :---------------: |
+| **Холодный запуск**         |      4.0 – 8.0 с      | **~0.4 – 0.8 с**  |
+| **ОЗУ при воспроизведении** |    600 МБ – 1.2 ГБ    | **~150 – 210 МБ** |
+| **ОЗУ в фоне / покое**      |     350 – 700 МБ      | **~80 – 160 МБ**  |
+| **Размер архива**           |     120 – 250 МБ      | **~17 МБ (.7z)**  |
+| **Плавность интерфейса**    |      30 – 60 FPS      | **60 – 144+ FPS** |
 
 ---
 
-## Основные возможности
+## Возможности
 
-### Персонализация и живые визуальные эффекты
+### Оформление и живые эффекты
 
-- Встроенные цветовые темы: Paralax Purple, AMOLED Black, Classic Green, Ocean Deep и другие.
-- Реактивная волновая анимация рамки играющего трека в реальном времени.
-- Настройка скорости пульсации и полное управление акцентными цветами интерфейса.
+- **Фоновая подсветка:** Режимы **Живая волна** и **Аврора** в Очереди и Плейлистах плавно перетекают в шапку окна и откликаются на музыку.
+- **Волновая рамка трека:** Волны, бегущие слева направо в такт битам и вокалу (или классическая пульсация), с опциональным свечением.
+- **Студия тем:** Готовые и свои темы, **Живой предпросмотр** с откатом в один клик, проверка читаемости текста, экспорт/импорт в JSON и мгновенное переключение **RU / EN**.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/35e184d4-5294-43c3-9e48-1d4f1a67d0ae" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/f2975a63-1266-4a86-99fc-d9b1b1ae0409" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 <br/>
 
-### Нормализация звука (LUFS / EBU R128)
+### Эквалайзер и звук
 
-- Аппаратное выравнивание громкости между разнородными треками.
-- Режимы обработки: двухсторонний (как в Spotify) или только понижение (стандарт YouTube).
-- Выбор целевого уровня громкости (от -25 до -10 LUFS) и ограничение максимального усиления.
-- Настройка кривых затухания громкости (Квадратичная / Линейная / Кубическая).
+- **Встроенный эквалайзер:** Простой режим (5 полос) или точный (10 полос) с живой волной от музыки, усилением до эквалайзера, своими пресетами и **профилями для отдельных треков**.
+- **Выравнивание громкости:** Автоматически держит комфортный уровень между тихими и громкими треками (как в Spotify или как на YouTube).
+- **Чистое усиление звука:** Безопасный буст выше 100% без хрипов и 5 кривых громкости под любые наушники.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/575f3dbe-b438-4c15-9985-b0b49e9e34dd" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/88681981-9d2f-474c-ae8d-60030e4c1fda" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 <br/>
 
-### Синхронизация плейлистов с YouTube Music
+### Синхронизация, очередь и Discord
 
-- Двусторонний синк локальных плейлистов, лайков («Понравившиеся») и метаданных.
-- Разрешение конфликтов при импорте (Объединить треки, Создать копию, Пропустить).
-- Создание плейлистов с выбором обложки, цветового кода и сохранением в аккаунт.
-- Поддержка нескольких аккаунтов с быстрым переключением сессий.
+- **Двусторонний синк с YouTube Music:** Синхронизация плейлистов, «Понравившихся», обложек и описаний с удобным окном выбора при конфликтах.
+- **Удобная очередь:** Перетаскивание сразу нескольких треков, быстрый фильтр, счётчик времени (`Прослушано / Осталось / Всего`) и автообновление при правках плейлиста.
+- **Discord Rich Presence и медиа-клавиши:** Настройка статуса с живым предпросмотром прямо в приложении + полная поддержка системных кнопок Windows.
+- **Обновления в один клик и мультиаккаунт:** Автопроверка релизов на GitHub и быстрое переключение каналов.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/212907b7-d1fc-4ab7-a7f5-563449918f7a" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/16c2fabd-ce37-4439-8def-7dc1633bb362" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 <br/>
 
-### Потоковое воспроизведение, кэш и экономия сети
+### Быстрый стриминг и оффлайн
 
-- **Чанковый стриминг:** Треки начинают звучать моментально без ожидания полной загрузки файла.
-- **Двухуровневый кэш:** Раздельные настраиваемые квоты на диске и в RAM для аудио, обложек и поиска.
-- **Оффлайн-режим:** Бесшовное воспроизведение сохраненных треков при отсутствии подключения.
-- **Обход блокировок YouTube:** Фоновая дешифровка токенов `sig`, `n-token`, `poToken` и динамическая ротация клиентских профилей для защиты от троттлинга скорости.
+- **Мгновенный старт:** Треки начинают играть сразу, не дожидаясь полной загрузки, а качество (`Opus` / `AAC`) можно менять прямо во время прослушивания.
+- **Гибкий кэш и оффлайн-режим:** Свои лимиты памяти и диска для музыки, обложек и поиска — всё сохранённое и кэшированное работает без интернета.
+- **Стабильная работа с YouTube:** Встроенная расшифровка потоков и автообновление ссылок при сбоях.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/cb0b3669-cfb9-42f7-8f70-b988ac60fae8" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
+  <video src="https://github.com/user-attachments/assets/055c3964-0737-4131-9776-e81d14dd6de2" width="90%" autoplay loop muted playsinline style="border-radius: 6px;">
   </video>
 </div>
 
 ---
 
 <details>
-<summary><b>Техническая архитектура приложения (Нажмите, чтобы развернуть)</b></summary>
+<summary><b>Техническая архитектура (Для разработчиков)</b></summary>
 
-<br/>
-
-- **Модель компиляции:** Native AOT сборка через ILC-компилятор .NET в единый независимый бинарный файл без участия JIT.
-- **Аудио-пайплайн:** Прямой вывод через WASAPI / WinMM и программные декодеры `Concentus` (Opus) / `SharpJaad` (AAC) с неблокирующими кольцевыми буферами (`LockFreeRingBuffer`).
-- **Слой MVVM:** Компилируемые привязки и Source Generators библиотеки `CommunityToolkit.Mvvm` без использования динамической рефлексии.
-- **Хранилище данных:** Прямое взаимодействие с SQLite через низкоуровневый ADO.NET и бинарную сериализацию `MemoryPack`.
-- **Сетевой стек:** Централизованный `NetworkManager` с пулом соединений, поддержкой DNS-over-HTTPS (DoH) и системных/кастомных прокси.
-- **Инструментарий:** Кроссплатформенный движок сборки и статические анализаторы без аллокаций памяти на базе Python 3.
+- **Компиляция:** Полный **Native AOT** (`.NET 11`, `PublishAot=true`, `TrimMode=full`) без JIT и рефлексии.
+- **Аудио и DSP:** Прямой **WASAPI** (Shared Paced Zero-Copy), `libopus` (`Concentus`) и `SharpJaad.AAC`, неблокирующий `LockFreeRingBuffer<float>`, 16-канальный Mid/Side SIMD (`AVX2`/`FMA`/`SSE`) анализатор спектра, `EqualizerProcessor` (Cytomic SVF), `EbuR128Analyzer`, `TruePeakLimiter` и оконный sinc-ресэмплер.
+- **Рендеринг:** Поток композитора `CompositionCustomVisualHandler` + шейдеры SkiaSharp `SKRuntimeEffect` (SkSL) без нагрузки на UI-поток.
+- **Данные и сеть:** Параметризованный ADO.NET SQLite (WAL), бинарный кэш `MemoryPack`, `CommunityToolkit.Mvvm` Source Generators, Cloud Outbox и встроенный `QuickJS` (`quickjs_bridge.dll`) + AST-анализатор `Acornima` для `sig`, `n-token` и `poToken` (BotGuard).
 
 </details>
 
@@ -250,28 +209,16 @@ python build.py publish
 
 ## Установка и сборка
 
-### Готовая сборка (Portable)
+**Готовая сборка:** Скачайте `LMP-Release-latest.7z` из [**dev**](https://github.com/paralax034/LMP/releases/dev), распакуйте и запустите `LMP.exe`.
 
-Скачайте архив `LMP-Release-latest.7z` из [**dev**](https://github.com/paralax034/LMP/releases/dev), распакуйте в любую папку и запустите `LMP.exe`.
-
-### Сборка из исходников
-
-**Требования:**
-
-- Windows 10 / 11 (x64)
-- .NET 11.0 SDK
-- Python 3.10+ (для кроссплатформенного сборочного движка и утилит)
-- Visual Studio Build Tools (компоненты «Разработка классических приложений на C++» для компоновщика Native AOT)
+**Из исходников** (Windows 10/11 x64, .NET 11.0 SDK, Python 3.10+, VS Build Tools C++):
 
 ```bash
-# Клонирование репозитория
 git clone https://github.com/paralax034/LMP.git
 cd LMP
 
-# Запуск в режиме отладки (через кроссплатформенный сборочный движок)
 python build.py debug
-
-# Публикация нативного релиза (Native AOT)
+python build.py aot-test --category=Unit run
 python build.py publish
 ```
 
