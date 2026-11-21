@@ -107,6 +107,22 @@ public static class RenderClockTests
         RenderClockSnapshot noRate = unknownRate.Read();
         TestAssert.Equal(4_800L, RenderClock.Extrapolate(in noRate, t0 + frequency), "Zero rate must disable extrapolation");
 
+        // 7. Hot-path invariant: Publish, Read, and Extrapolate allocate 0 B
+        var allocClock = new RenderClock();
+        long ts = Stopwatch.GetTimestamp();
+        long tick = frequency / 100;
+        long rendered = 0;
+        long playedSink = 0;
+        TestAssert.ZeroAlloc(() =>
+        {
+            rendered += 960 * Channels;
+            ts += tick;
+            allocClock.Publish(rendered, 9_600, ts, SamplesPerSecond);
+            var snap = allocClock.Read();
+            playedSink += RenderClock.Extrapolate(in snap, ts + tick / 2);
+        }, warmup: 5, iterations: 1_000, context: "RenderClock.Publish/Read/Extrapolate");
+        TestAssert.True(playedSink > 0, "Render clock must advance while publishing");
+
         return Task.CompletedTask;
     }
 
@@ -152,12 +168,71 @@ public static class RenderClockTests
             double expectedSeconds = (double)(seekBase + blockSamples) / SamplesPerSecond;
             double actualSeconds = pipeline.GetPlaybackPosition().TotalSeconds;
             TestAssert.True(Math.Abs(actualSeconds - expectedSeconds) < 1e-6, $"Position {actualSeconds:F6}s must equal {expectedSeconds:F6}s");
+
+            // 4. Pipeline playback position is clamped to track duration
+            pipeline.SetDecodedSamplesPosition(200L * SamplesPerSecond);
+            TestAssert.Equal(TimeSpan.FromSeconds(180), pipeline.GetPlaybackPosition(), "Position must be clamped to the track duration");
         }
         finally
         {
             await pipeline.DisposeAsync().ConfigureAwait(false);
             backend.Dispose();
         }
+    }
+
+    /// <summary>Device is slower than QPC by 1000 ppm: advance lead does not grow to queue depth under steady step or jitter.</summary>
+    [TestMethod(TestCategory.Unit, "RenderClock Carry-Over Converges Under Device Drift", Group = TestGroups.Audio, Order = 43)]
+    public static Task TestRenderClockDriftConvergesAsync()
+    {
+        AssertDriftLeadBounded(jitter: false);
+        AssertDriftLeadBounded(jitter: true);
+        return Task.CompletedTask;
+    }
+
+    private static void AssertDriftLeadBounded(bool jitter)
+    {
+        const int queueSamples = 4_800;
+        const int publishes = 12_000;
+        const double slowDevicePpm = 1_000.0;
+        const double maxLeadMs = RenderClock.MaxCarryLeadMs + 1.0;
+
+        var clock = new RenderClock();
+        long frequency = Stopwatch.Frequency;
+        long periodTicks = frequency / 100;
+        long now = frequency;
+        double elapsedSeconds = 0;
+        uint state = 0x2545F491u;
+        long lastRead = long.MinValue;
+        double maxLeadMsObserved = 0;
+
+        for (int i = 0; i < publishes; i++)
+        {
+            long step = periodTicks;
+            if (jitter)
+            {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                step += state % (uint)(periodTicks / 5) - periodTicks / 10;
+            }
+
+            now += step;
+            elapsedSeconds += (double)step / frequency;
+
+            long actual = (long)(elapsedSeconds * SamplesPerSecond * (1.0 - slowDevicePpm * 1e-6));
+            clock.Publish(actual + queueSamples, queueSamples, now, SamplesPerSecond);
+
+            RenderClockSnapshot snapshot = clock.Read();
+            long read = RenderClock.Extrapolate(in snapshot, now);
+            TestAssert.True(read >= lastRead, $"Reader time must never decrease (jitter={jitter}, publish={i})");
+            lastRead = read;
+
+            if (i >= publishes - 1_000)
+                maxLeadMsObserved = Math.Max(maxLeadMsObserved, (read - actual) * 1000.0 / SamplesPerSecond);
+        }
+
+        TestAssert.True(maxLeadMsObserved <= maxLeadMs,
+            $"Carry-over lead must stay within {maxLeadMs:F0} ms under {slowDevicePpm:F0} ppm drift (jitter={jitter}), got {maxLeadMsObserved:F2} ms");
     }
 
     private static void ReadUntilWriterDone(RenderClock clock, ConcurrencyProbe probe, long baseTimestamp, long step, int publishes)

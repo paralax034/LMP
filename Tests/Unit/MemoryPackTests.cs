@@ -2,10 +2,11 @@ using System.Text.Json;
 using LMP.Core.Audio.Cache;
 using LMP.Core.Audio.Http;
 using LMP.Core.Audio.Interfaces;
+using LMP.Core.Data;
 using LMP.Core.Data.Repositories;
 using LMP.Tests.Framework;
 using MemoryPack;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
 
 namespace LMP.Tests.Unit;
 
@@ -101,64 +102,71 @@ public static class MemoryPackTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Integration, "SQLite Settings Repository JSON & Legacy Migration", Group = TestGroups.Storage, Order = 3)]
-    public static async Task TestSettingsRepositoryBinaryBlobAndLegacyMigrationAsync(IServiceProvider services)
+    [TestMethod(TestCategory.Unit, "SQLite Settings Repository JSON & Legacy Migration", Group = TestGroups.Storage, Order = 3)]
+    public static async Task TestSettingsRepositoryBinaryBlobAndLegacyMigrationAsync()
     {
-        var settingsRepo = services.GetRequiredService<ISettingsRepository>();
-        var connectionFactory = services.GetRequiredService<Core.Data.ISqliteConnectionFactory>();
-        const string testKey = "MigrationTest_AppSettings";
+        string tempDir = Path.Combine(Path.GetTempPath(), "LMP_SettingsMigrationTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string dbPath = Path.Combine(tempDir, "settings_migration.db");
 
-        var legacyJson = JsonSerializer.Serialize(new AppSettings
+        try
         {
-            Volume = 84,
-            DownloadPath = "D:\\LegacyDownloads"
-        }, AppJsonContext.Default.AppSettings);
+            var connectionFactory = new LowMemorySqliteConnectionFactory(dbPath);
+            await using (var initConn = await connectionFactory.OpenConnectionAsync().ConfigureAwait(false))
+            {
+                await initConn.EnsureTablesCreatedAsync(CancellationToken.None).ConfigureAwait(false);
+            }
 
-        await using (var conn = await connectionFactory.OpenConnectionAsync().ConfigureAwait(false))
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
-            var pKey = cmd.CreateParameter();
-            pKey.ParameterName = "@key";
-            pKey.Value = testKey;
-            cmd.Parameters.Add(pKey);
+            var settingsRepo = new SettingsRepository(connectionFactory);
+            const string testKey = "MigrationTest_AppSettings";
 
-            var pVal = cmd.CreateParameter();
-            pVal.ParameterName = "@value";
-            pVal.Value = legacyJson;
-            cmd.Parameters.Add(pVal);
+            var legacyJson = JsonSerializer.Serialize(new AppSettings
+            {
+                Volume = 84,
+                DownloadPath = "D:\\LegacyDownloads"
+            }, AppJsonContext.Default.AppSettings);
 
-            await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+            await using (var conn = await connectionFactory.OpenConnectionAsync().ConfigureAwait(false))
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = "INSERT INTO Settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+                var pKey = cmd.CreateParameter();
+                pKey.ParameterName = "@key";
+                pKey.Value = testKey;
+                cmd.Parameters.Add(pKey);
+
+                var pVal = cmd.CreateParameter();
+                pVal.ParameterName = "@value";
+                pVal.Value = legacyJson;
+                cmd.Parameters.Add(pVal);
+
+                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            var loaded = await settingsRepo.GetAsync<AppSettings>(testKey).ConfigureAwait(false);
+            TestAssert.NotNull(loaded);
+            TestAssert.Equal(84, loaded.Volume);
+            TestAssert.Equal("D:\\LegacyDownloads", loaded.DownloadPath);
+
+            await using (var conn = await connectionFactory.OpenConnectionAsync().ConfigureAwait(false))
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT typeof(Value) FROM Settings WHERE Key = @key LIMIT 1;";
+                var pKey = cmd.CreateParameter();
+                pKey.ParameterName = "@key";
+                pKey.Value = testKey;
+                cmd.Parameters.Add(pKey);
+
+                await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+                TestAssert.True(await reader.ReadAsync().ConfigureAwait(false));
+                var typeName = reader.GetString(0).ToLowerInvariant();
+                TestAssert.True(typeName is "blob" or "text", $"Unexpected SQLite type: {typeName}");
+            }
         }
-
-        var loaded = await settingsRepo.GetAsync<AppSettings>(testKey).ConfigureAwait(false);
-        TestAssert.NotNull(loaded);
-        TestAssert.Equal(84, loaded.Volume);
-
-        await using (var conn = await connectionFactory.OpenConnectionAsync().ConfigureAwait(false))
+        finally
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT typeof(Value), Value FROM Settings WHERE Key = @key LIMIT 1;";
-            var pKey = cmd.CreateParameter();
-            pKey.ParameterName = "@key";
-            pKey.Value = testKey;
-            cmd.Parameters.Add(pKey);
-
-            await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
-            TestAssert.True(await reader.ReadAsync().ConfigureAwait(false));
-            var typeName = reader.GetString(0).ToLowerInvariant();
-            TestAssert.True(typeName is "blob" or "text", $"Unexpected SQLite type: {typeName}");
-        }
-
-        await using (var conn = await connectionFactory.OpenConnectionAsync().ConfigureAwait(false))
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM Settings WHERE Key = @key;";
-            var pKey = cmd.CreateParameter();
-            pKey.ParameterName = "@key";
-            pKey.Value = testKey;
-            cmd.Parameters.Add(pKey);
-            await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+            SqliteConnection.ClearAllPools();
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
         }
     }
 

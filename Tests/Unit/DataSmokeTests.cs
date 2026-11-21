@@ -1,5 +1,6 @@
 using System.Globalization;
 using LMP.Core.Data;
+using LMP.Core.Data.Repositories;
 using LMP.Tests.Framework;
 using Microsoft.Data.Sqlite;
 using SkiaSharp;
@@ -140,34 +141,58 @@ public static class DataSmokeTests
     }
 
     /// <summary>
-    /// Isolation check result is consistent with the host: where an isolated database is not enabled (GUI host),
-    /// the check must be skipped rather than failing with a false red.
+    /// Verifies full <see cref="NotificationRepository"/> CRUD lifecycle (insert, query, mark read, delete)
+    /// against an isolated temporary SQLite database without polluting the user's library.
     /// </summary>
-    [TestMethod(TestCategory.Unit, "Test Database Isolation Verdict Matches Host", Group = TestGroups.Storage, Order = 44)]
-    public static async Task TestDatabaseIsolationVerdictAsync()
+    [TestMethod(TestCategory.Unit, "Notification Repository Storage Lifecycle", Group = TestGroups.System, Order = 10)]
+    public static async Task TestNotificationRepositoryLifecycleAsync()
     {
-        if (AppEntry.IsTestUiMode)
-            TestAssert.Skip("UI test mode intentionally works with the real database");
+        string scratch = CreateScratchDirectory();
+        string dbPath = Path.Combine(scratch, "notifications.db");
 
-        bool isolated = G.FilePath.IsolatedTestDatabaseFolder != null;
-        Exception? failure = null;
         try
         {
-            await TestDatabaseIsolationAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            failure = ex;
-        }
+            var factory = new LowMemorySqliteConnectionFactory(dbPath);
+            await using (var conn = await factory.OpenConnectionAsync().ConfigureAwait(false))
+            {
+                await conn.EnsureTablesCreatedAsync(CancellationToken.None).ConfigureAwait(false);
+            }
 
-        if (isolated)
-        {
-            TestAssert.Null(failure, $"Isolated host must pass the isolation check: {failure?.Message}");
-            return;
-        }
+            var repository = new NotificationRepository(factory);
+            var testId = Guid.NewGuid();
 
-        TestAssert.True(failure is TestSkippedException,
-            $"Host without an isolated database must skip the isolation check, got {failure?.GetType().Name ?? "pass"}: {failure?.Message}");
+            await repository.AddAsync(new Notification
+            {
+                Id = testId,
+                Timestamp = DateTime.UtcNow,
+                TitleKey = "Dialog_Warning_Title",
+                MessageKey = "Auth_ProfileLoadError_Message",
+                Severity = NotificationSeverity.Warning,
+                IsRead = false
+            }).ConfigureAwait(false);
+
+            var loaded = (await repository.GetRecentAsync(limit: 50).ConfigureAwait(false)).Find(n => n.Id == testId);
+            TestAssert.NotNull(loaded, "Failed to retrieve persisted notification from repository");
+            TestAssert.Equal(testId, loaded.Id);
+            TestAssert.Equal(NotificationSeverity.Warning, loaded.Severity);
+            TestAssert.Equal("Dialog_Warning_Title", loaded.TitleKey);
+            TestAssert.Equal("Auth_ProfileLoadError_Message", loaded.MessageKey);
+            TestAssert.False(loaded.IsRead, "Expected notification to be unread initially");
+
+            await repository.MarkAllAsReadAsync().ConfigureAwait(false);
+            var afterRead = (await repository.GetRecentAsync(limit: 50).ConfigureAwait(false)).Find(n => n.Id == testId);
+            TestAssert.NotNull(afterRead);
+            TestAssert.True(afterRead.IsRead, "MarkAllAsReadAsync must persist IsRead=true");
+
+            await repository.DeleteByIdAsync(testId).ConfigureAwait(false);
+            var afterDelete = (await repository.GetRecentAsync(limit: 50).ConfigureAwait(false)).Find(n => n.Id == testId);
+            TestAssert.Null(afterDelete, "DeleteByIdAsync must remove the notification");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); } catch { }
+        }
     }
 
     [TestMethod(TestCategory.Unit, "SkiaSharp 3.x Native Raster & PNG Roundtrip", Group = TestGroups.System, Order = 40)]

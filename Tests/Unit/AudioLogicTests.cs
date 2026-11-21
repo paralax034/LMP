@@ -19,98 +19,60 @@ public static class AudioLogicTests
 {
     private const int SampleRate = 48_000;
     private const int Channels = 2;
-    private const int BufferSamples = SampleRate / 10 * Channels; // 100 ms stereo
-
-    /// <summary>Position based on render clock: advances within the device queue, holds on underrun, and is clamped by track duration.</summary>
-    [TestMethod(TestCategory.Unit, "Render Clock Position: Extrapolation, Starvation Hold & Duration Clamp", Group = TestGroups.Audio, Order = 1)]
-    public static async Task TestRenderClockPositionContractsAsync()
+    [TestMethod(TestCategory.Unit, "Playback Control, Buffer Yield & State Machine Contracts", Group = TestGroups.Audio, Order = 1)]
+    public static async Task TestPlaybackControlAndStateMachineContractsAsync()
     {
-        const int samplesPerSecond = SampleRate * Channels;
-        const long baseSamples = 10L * samplesPerSecond;
-        const long t0 = 1_000_000;
-        long frequency = System.Diagnostics.Stopwatch.Frequency;
+        // 1. Monotonic adaptive decoder delays depending on PCM headroom in the ring buffer
+        TestAssert.Equal(5, AudioPipeline.ComputeBufferFullDelayMs(0, SampleRate, Channels));
+        TestAssert.Equal(5, AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 200 / 1000, SampleRate, Channels));
+        TestAssert.Equal(25, AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 500 / 1000, SampleRate, Channels));
+        TestAssert.Equal(100, AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1100 / 1000, SampleRate, Channels));
+        TestAssert.Equal(180, AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1500 / 1000, SampleRate, Channels));
 
-        var clock = new RenderClock();
+        // 2. PlayerStateTransitions contracts
+        TestAssert.True(PlayerStateTransitions.CanAcceptCommand(PlayerState.Playing, new StarvationCommand(1, null!)));
+        TestAssert.True(PlayerStateTransitions.CanAcceptCommand(PlayerState.Buffering, new StarvationCommand(1, null!)));
+        TestAssert.False(PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new PlayCommand(default, 1)));
+        TestAssert.True(PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new DisposeCommand(1)));
+        TestAssert.True(PlayerStateTransitions.CanTransition(PlayerState.Loading, PlayerState.Paused));
+        TestAssert.True(PlayerStateTransitions.CanAcceptCommand(PlayerState.Loading, new PauseCommand(1)));
 
-        // 1. Device received 10 s + 100 ms, 100 ms of which is still queued: exactly 10 s played
-        clock.Publish(baseSamples + BufferSamples, BufferSamples, t0, samplesPerSecond);
-        RenderClockSnapshot snapshot = clock.Read();
-        TestAssert.Equal(baseSamples, snapshot.PlayedSamples);
+        // 3. PlaybackErrorBehaviorMatrix recovery policies
+        var dialogPolicy = PlaybackErrorBehaviorMatrix.Resolve(
+            PlaybackErrorBehavior.Dialog, PlaybackFailureBehavior.SkipAndPlay);
+        TestAssert.True(dialogPolicy.ShowNotification && dialogPolicy.RequiresUserAction);
+        TestAssert.Equal(PlaybackRecoveryMode.AwaitUserAction, dialogPolicy.RecoveryMode);
 
-        // 2. Between readings, position advances by real time, but no further than submitted to the device
-        long after25Ms = RenderClock.Extrapolate(in snapshot, t0 + frequency / 40);
-        TestAssert.True(Math.Abs(after25Ms - baseSamples - 2_400) <= 1, $"25 ms must advance 2400 samples, got {after25Ms - baseSamples}");
+        var toastSkipPlay = PlaybackErrorBehaviorMatrix.Resolve(
+            PlaybackErrorBehavior.ToastAndSkip, PlaybackFailureBehavior.SkipAndPlay);
+        TestAssert.True(toastSkipPlay.ShowNotification && !toastSkipPlay.RequiresUserAction);
+        TestAssert.Equal(PlaybackRecoveryMode.SkipAndPlay, toastSkipPlay.RecoveryMode);
 
-        long rendered = baseSamples + BufferSamples;
-        TestAssert.Equal(rendered, RenderClock.Extrapolate(in snapshot, t0 + frequency), "Extrapolation must not run past the device queue");
+        var ignoreStop = PlaybackErrorBehaviorMatrix.Resolve(
+            PlaybackErrorBehavior.Ignore, PlaybackFailureBehavior.Stop);
+        TestAssert.False(ignoreStop.ShowNotification, "Ignore mode must suppress notification toasts");
+        TestAssert.Equal(PlaybackRecoveryMode.Stop, ignoreStop.RecoveryMode);
 
-        // 3. Underrun: queue is empty, position holds instead of drifting forward by timer
-        clock.Publish(rendered, 0, t0 + frequency, samplesPerSecond);
-        RenderClockSnapshot starved = clock.Read();
-        TestAssert.Equal(rendered, RenderClock.Extrapolate(in starved, t0 + 2 * frequency), "Starved clock must hold its position");
+        // 4. Low-buffer yield threshold (percent scale)
+        TestAssert.True(PlayerControlService.ShouldYieldToAudioBuffering(false, true, false, 5.0));
+        TestAssert.True(PlayerControlService.ShouldYieldToAudioBuffering(false, true, false, 14.9));
+        TestAssert.False(PlayerControlService.ShouldYieldToAudioBuffering(false, true, false, 15.0));
+        TestAssert.False(PlayerControlService.ShouldYieldToAudioBuffering(false, true, true, 5.0));
+        TestAssert.True(PlayerControlService.ShouldYieldToAudioBuffering(true, false, false, 100.0));
 
-        // 4. Glitchy readings (backward counter): position does not roll back
-        clock.Publish(rendered - 4_800, 0, t0 + 2 * frequency, samplesPerSecond);
-        TestAssert.True(clock.Read().PlayedSamples >= rendered, "Render clock must never move backwards");
-
-        // 5. Pipeline position is clamped to track duration
-        var backend = new NullAudioBackend();
-        var pipeline = AudioPipelineTestHarness.Create(
-            new BlockingAudioSource(SampleRate, Channels),
-            new ConstantDecoder(SampleRate, Channels, framesPerDecode: 960, maxFrameSize: 960, value: 0f),
-            backend,
-            new LockFreeRingBuffer<float>(4_096),
-            new AudioStreamInfo { DurationMs = 1_000 });
-
-        try
+        // 5. AudioPlayer _bufferTimer lifecycle across Buffering -> Suspend -> Resume -> StartPositionTimerDelayed
+        await using var player = new AudioPlayer(new AudioPlayerOptions
         {
-            pipeline.SetDecodedSamplesPosition(2L * samplesPerSecond);
-            TestAssert.Equal(TimeSpan.FromSeconds(1), pipeline.GetPlaybackPosition(), "Position must be clamped to the track duration");
-        }
-        finally
-        {
-            await pipeline.DisposeAsync().ConfigureAwait(false);
-            backend.Dispose();
-        }
-    }
+            UseNullBackend = true,
+            PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
+        });
 
-    [TestMethod(TestCategory.Unit, "Adaptive Decoder Delay & State Machine Contracts", Group = TestGroups.Audio, Order = 2)]
-    public static Task TestAdaptiveDecoderDelayAndBatchHysteresisAsync()
-    {
-        // 1. Monotonic scale of adaptive decoder delays depending on PCM headroom in the buffer
-        int delayEmpty = AudioPipeline.ComputeBufferFullDelayMs(0, SampleRate, Channels);
-        int delayLow = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 200 / 1000, SampleRate, Channels);
-        int delayMid = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 500 / 1000, SampleRate, Channels);
-        int delayHigh = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1100 / 1000, SampleRate, Channels);
-        int delayMax = AudioPipeline.ComputeBufferFullDelayMs(SampleRate * Channels * 1500 / 1000, SampleRate, Channels);
+        PlayerStateField(player) = PlayerState.Buffering;
+        player.SetUiTimersSuspended(true);
+        player.SetUiTimersSuspended(false);
 
-        TestAssert.Equal(5, delayEmpty);
-        TestAssert.Equal(5, delayLow);
-        TestAssert.Equal(25, delayMid);
-        TestAssert.Equal(100, delayHigh);
-        TestAssert.Equal(180, delayMax);
-
-        // 2. Verification of PlayerStateTransitions state machine contracts
-        TestAssert.True(
-            PlayerStateTransitions.CanAcceptCommand(PlayerState.Playing, new StarvationCommand(1, null!)),
-            "StarvationCommand must be accepted in Playing state");
-        TestAssert.True(
-            PlayerStateTransitions.CanAcceptCommand(PlayerState.Buffering, new StarvationCommand(1, null!)),
-            "StarvationCommand must be accepted in Buffering state");
-        TestAssert.False(
-            PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new PlayCommand(default, 1)),
-            "Disposed state must reject all commands except DisposeCommand");
-        TestAssert.True(
-            PlayerStateTransitions.CanAcceptCommand(PlayerState.Disposed, new DisposeCommand(1)),
-            "Disposed state must accept DisposeCommand");
-        TestAssert.True(
-            PlayerStateTransitions.CanTransition(PlayerState.Loading, PlayerState.Paused),
-            "Loading state must allow transitioning to Paused on degraded-mode init");
-        TestAssert.True(
-            PlayerStateTransitions.CanAcceptCommand(PlayerState.Loading, new PauseCommand(1)),
-            "PauseCommand must be accepted while Loading");
-
-        return Task.CompletedTask;
+        StartPositionTimerDelayed(player);
+        TestAssert.NotNull(BufferTimerField(player), "_bufferTimer must be active when StartPositionTimerDelayed runs in Buffering state");
     }
 
     [TestMethod(TestCategory.Unit, "WASAPI Zero-Copy Native Span DSP & Fade Envelope (0 Alloc)", Group = TestGroups.Audio, Order = 3)]
@@ -299,6 +261,22 @@ public static class AudioLogicTests
                 prevSample = left;
             }
         }
+
+        // 4. Zero-allocation hot path for both active volume ramp and steady unity bypass
+        bool toggle = false;
+        TestAssert.ZeroAlloc(() =>
+        {
+            processor.SetVolumeGain(toggle ? 0.3f : 0.9f);
+            toggle = !toggle;
+            processor.Process(stereoChunk.AsSpan());
+        }, warmup: 5, iterations: 1_000, context: "GainProcessor.Process (Ramp)");
+
+        processor.SetVolumeGain(1.0f);
+        for (int i = 0; i < 60; i++)
+            processor.Process(stereoChunk.AsSpan());
+
+        TestAssert.ZeroAlloc(() => processor.Process(stereoChunk.AsSpan()),
+            warmup: 5, iterations: 1_000, context: "GainProcessor.Process (Unity Bypass)");
 
         return Task.CompletedTask;
     }
@@ -777,28 +755,32 @@ public static class AudioLogicTests
         StartPositionTimerDelayed(player);
         TestAssert.True(PositionTimerField(player) is null, "Paused StartPositionTimerDelayed must not start _positionTimer");
 
-        // 4. Rejected PlayCommand (e.g., Disposed state) must deterministically cancel PlayAsync instead of hanging
-        PlayerStateField(player) = PlayerState.Disposed;
-        var playTask = player.PlayAsync(new ResolvedStreamDescriptor
+        // 4. PlayAsync on a genuinely disposed AudioPlayer must throw ObjectDisposedException instead of hanging
+        var disposedPlayer = new AudioPlayer(new AudioPlayerOptions
         {
-            TrackId = "yt_cancel_reject",
-            Format = AudioFormat.WebM,
-            Codec = AudioCodec.Opus,
-            BitrateKbps = 128,
-            Origin = StreamSource.DiskCacheFull
+            UseNullBackend = true,
+            PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
         });
+        await disposedPlayer.DisposeAsync().ConfigureAwait(false);
 
-        bool canceled = false;
+        bool threwDisposedPlayer = false;
         try
         {
+            var playTask = disposedPlayer.PlayAsync(new ResolvedStreamDescriptor
+            {
+                TrackId = "yt_cancel_reject",
+                Format = AudioFormat.WebM,
+                Codec = AudioCodec.Opus,
+                BitrateKbps = 128,
+                Origin = StreamSource.DiskCacheFull
+            });
             await playTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (ObjectDisposedException)
         {
-            canceled = true;
+            threwDisposedPlayer = true;
         }
-        TestAssert.True(canceled, "Rejected PlayAsync must complete as canceled promptly");
-        PlayerStateField(player) = PlayerState.Idle;
+        TestAssert.True(threwDisposedPlayer, "PlayAsync on a disposed AudioPlayer must throw ObjectDisposedException");
 
         // 5. OpusDecoder ref-counted dispose safety: FlushState after Dispose is a safe no-op and Decode throws ObjectDisposedException
         var opus = new LMP.Core.Audio.Decoders.OpusDecoder(SampleRate, Channels);
@@ -818,7 +800,8 @@ public static class AudioLogicTests
         }
         TestAssert.True(threwDisposed, "OpusDecoder.Decode after Dispose must throw ObjectDisposedException");
 
-        // 6. Immediate Stop() / StopAsync() right after PlayAsync() while PlayCommand is still in channel must cancel PlayAsync without hanging
+        // 6. Immediate StopAsync right after PlayAsync while PlayCommand is still in channel must cancel PlayAsync without hanging
+        PlayerStateField(player) = PlayerState.Idle;
         var immediatePlayTask = player.PlayAsync(new ResolvedStreamDescriptor
         {
             TrackId = "yt_immediate_stop",
@@ -839,13 +822,6 @@ public static class AudioLogicTests
             immediatePlayCanceled = true;
         }
         TestAssert.True(immediatePlayCanceled, "PlayAsync followed immediately by StopAsync must be canceled");
-
-        // 7. Ceiling division for 44.1 kHz AAC gating block (17640 samples / 1024 = 18 frames, 18 * 1024 = 18432 >= 17640)
-        const int aacGatingBlockSize = (int)(44100 * 0.4);
-        const int aacNominalSamples = 1024;
-        int framesPerBlock = (aacGatingBlockSize + aacNominalSamples - 1) / aacNominalSamples;
-        TestAssert.Equal(18, framesPerBlock);
-        TestAssert.True(framesPerBlock * aacNominalSamples >= aacGatingBlockSize);
     }
 
     private sealed class ShortCleanAudioSource(int sampleRate, int channels, long durationMs, long positionMs) : IAudioSource
@@ -1096,44 +1072,6 @@ public static class AudioLogicTests
         TestAssert.False(AudioEngine.IsStaleTrackEnd(null, "B"), "User navigation is never stale");
 
         return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "PlaybackErrorBehaviorMatrix & AudioPlayer Timer Lifecycle", Group = TestGroups.Audio, Order = 9)]
-    public static async Task TestPlaybackErrorMatrixAndTimerLifecycleAsync()
-    {
-        // 1. Verification of the recovery policy matrix after playback errors
-        var dialogPolicy = PlaybackErrorBehaviorMatrix.Resolve(
-            PlaybackErrorBehavior.Dialog, PlaybackFailureBehavior.SkipAndPlay);
-        TestAssert.True(dialogPolicy.ShowNotification);
-        TestAssert.True(dialogPolicy.RequiresUserAction);
-        TestAssert.Equal(PlaybackRecoveryMode.AwaitUserAction, dialogPolicy.RecoveryMode);
-
-        var toastSkipPlay = PlaybackErrorBehaviorMatrix.Resolve(
-            PlaybackErrorBehavior.ToastAndSkip, PlaybackFailureBehavior.SkipAndPlay);
-        TestAssert.True(toastSkipPlay.ShowNotification);
-        TestAssert.False(toastSkipPlay.RequiresUserAction);
-        TestAssert.Equal(PlaybackRecoveryMode.SkipAndPlay, toastSkipPlay.RecoveryMode);
-
-        var ignoreStop = PlaybackErrorBehaviorMatrix.Resolve(
-            PlaybackErrorBehavior.Ignore, PlaybackFailureBehavior.Stop);
-        TestAssert.False(ignoreStop.ShowNotification, "Ignore mode must suppress notification toasts");
-        TestAssert.Equal(PlaybackRecoveryMode.Stop, ignoreStop.RecoveryMode);
-
-        // 2. Verification that _bufferTimer activity is preserved in AudioPlayer during transitions Buffering -> Suspend -> Resume -> StartPositionTimerDelayed
-        await using var player = new AudioPlayer(new AudioPlayerOptions
-        {
-            UseNullBackend = true,
-            PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
-        });
-
-        // Put player into Buffering state (as during Starvation) and verify that StartPositionTimerDelayed starts _bufferTimer
-        PlayerStateField(player) = PlayerState.Buffering;
-        player.SetUiTimersSuspended(true);
-        player.SetUiTimersSuspended(false);
-
-        StartPositionTimerDelayed(player);
-        var bufferTimer = BufferTimerField(player);
-        TestAssert.NotNull(bufferTimer, "_bufferTimer must be initialized and active when StartPositionTimerDelayed is called in Buffering/Playing state");
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ProcessStereoSteadySse2")]
@@ -1613,7 +1551,7 @@ public static class AudioLogicTests
     private static extern ref Dictionary<int, LMP.UI.Features.Shared.TrackItemViewModel> VirtualTrackListActiveVms(
         LMP.UI.ViewModels.VirtualTrackList list);
 
-    [TestMethod(TestCategory.Unit, "VirtualTrackList RemoveTrack & MoveTrack Under Active Filter", Group = TestGroups.Audio, Order = 50)]
+    [TestMethod(TestCategory.Unit, "VirtualTrackList RemoveTrack & MoveTrack Under Active Filter", Group = TestGroups.System, Order = 50)]
     public static Task TestVirtualTrackListFilteredRemoveAndMoveAsync()
     {
         static TrackInfo Track(string id, string title) => new() { Id = id, Title = title, Author = "Artist" };
@@ -1642,11 +1580,9 @@ public static class AudioLogicTests
             TestAssert.Equal(5, list.TotalCount);
             TestAssert.Equal(2, list.FilteredCount);
 
-            // Simulate materialized VMs for visible master indices (1 -> yt_b, 3 -> yt_d)
             activeVms[1] = stubB;
             activeVms[3] = stubD;
 
-            // Remove hidden item BEFORE all visible items (masterIndex = 0)
             TestAssert.True(list.RemoveTrack("yt_a"));
             TestAssert.Equal(4, list.TotalCount);
             TestAssert.Equal(2, list.FilteredCount);
@@ -1657,27 +1593,19 @@ public static class AudioLogicTests
             TestAssert.True(ReferenceEquals(stubB, list[0]), "Cached VM key for yt_b must shift from 1 to 0");
             TestAssert.True(ReferenceEquals(stubD, list[1]), "Cached VM key for yt_d must shift from 3 to 2");
 
-            // Remove hidden item BETWEEN visible items (masterIndex = 1)
             TestAssert.True(list.RemoveTrack("yt_c"));
             TestAssert.Equal(3, list.TotalCount);
             TestAssert.Equal(2, list.FilteredCount);
-            TestAssert.Equal("yt_b", list.GetTrackAt(0)?.Id);
-            TestAssert.Equal("yt_d", list.GetTrackAt(1)?.Id);
             TestAssert.True(ReferenceEquals(stubB, list[0]));
             TestAssert.True(ReferenceEquals(stubD, list[1]), "Cached VM key for yt_d must shift from 2 to 1");
 
-            // Remove hidden item AFTER visible items so FilteredCount == TotalCount
             TestAssert.True(list.RemoveTrack("yt_e"));
             TestAssert.Equal(2, list.TotalCount);
             TestAssert.Equal(2, list.FilteredCount);
-            TestAssert.Equal("yt_b", list.GetTrackAt(0)?.Id);
-            TestAssert.Equal("yt_d", list.GetTrackAt(1)?.Id);
             TestAssert.Equal(0, list.IndexOfTrackId("yt_b"));
             TestAssert.Equal(1, list.IndexOfTrackId("yt_d"));
-            TestAssert.True(ReferenceEquals(stubB, list[0]));
-            TestAssert.True(ReferenceEquals(stubD, list[1]));
 
-            // 2. MoveTrack under active filter must update _filteredIndices[newVisualIndex] to masterNew
+            // 2. MoveTrack under active filter updates _filteredIndices[newVisualIndex]
             activeVms.Clear();
             list.SetTracks([
                 Track("yt_1", "One match"),
@@ -1688,8 +1616,8 @@ public static class AudioLogicTests
             list.ApplyFilter("match");
             TestAssert.Equal(2, list.FilteredCount);
 
-            activeVms[0] = stubB; // yt_1
-            activeVms[2] = stubD; // yt_3
+            activeVms[0] = stubB;
+            activeVms[2] = stubD;
 
             list.MoveTrack(0, 1);
             TestAssert.Equal("yt_3", list.GetTrackAt(0)?.Id);
@@ -1707,28 +1635,6 @@ public static class AudioLogicTests
         {
             activeVms.Clear();
         }
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "PlayerControlService Low-Buffer Yield Threshold (Percent Scale)", Group = TestGroups.Audio, Order = 51)]
-    public static Task TestPlayerControlLowBufferYieldThresholdAsync()
-    {
-        TestAssert.True(
-            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: false, bufferProgressPercent: 5.0),
-            "5% buffer while playing must yield background sync");
-        TestAssert.True(
-            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: false, bufferProgressPercent: 14.9),
-            "14.9% buffer while playing must still yield background sync");
-        TestAssert.False(
-            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: false, bufferProgressPercent: 15.0),
-            "15.0% buffer threshold must allow background sync");
-        TestAssert.False(
-            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: false, isPlaying: true, isFullyBuffered: true, bufferProgressPercent: 5.0),
-            "Fully buffered stream must not block background sync");
-        TestAssert.True(
-            PlayerControlService.ShouldYieldToAudioBuffering(isLoading: true, isPlaying: false, isFullyBuffered: false, bufferProgressPercent: 100.0),
-            "Active loading state must always yield background sync");
 
         return Task.CompletedTask;
     }

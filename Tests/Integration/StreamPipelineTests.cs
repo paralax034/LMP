@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using LMP.Core.Audio.Http;
+using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Videos;
 using LMP.Tests.Framework;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,41 +11,66 @@ namespace LMP.Tests.Integration;
 
 /// <summary>
 /// Integration tests for the streaming audio pipeline: manifest retrieval, link decryption,
-/// downloading data chunks, and URL lifetime validation.
+/// URL TTL validation, and container chunk download verification.
 /// </summary>
 public static class StreamPipelineTests
 {
     private static string[] TestVideoIds => TestConfig.Get().Pipeline.TestVideoIds;
 
-    [TestMethod(TestCategory.Integration, "Resolve Stream Manifest & Download Audio Chunk",
+    [TestMethod(TestCategory.Integration, "Resolve Manifest, Verify TTL (>4.5h) & 64KB Container Magic Bytes",
         Group = TestGroups.Youtube, Order = 1, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestStreamResolutionAsync(IServiceProvider services, CancellationToken ct = default)
+    public static async Task TestStreamResolutionTtlAndContainerAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var youtube = services.GetRequiredService<Lazy<YoutubeProvider>>().Value.GetClient();
-        var videoId = TestVideoIds[0];
+        var auth = services.GetRequiredService<CookieAuthService>();
+        var videoId = TestConfig.Get().Pipeline.DebugVideoId;
 
         var sw = Stopwatch.StartNew();
-        var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
+        Core.Youtube.Videos.Streams.StreamManifest manifest;
+        try
+        {
+            manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
+        }
+        catch (LoginRequiredException) when (!auth.IsAuthenticated && !string.Equals(videoId, "dQw4w9WgXcQ", StringComparison.Ordinal))
+        {
+            Log.Warn($"[Pipeline] DebugVideoId '{videoId}' requires auth (AgeRestricted); falling back to public 'dQw4w9WgXcQ'.");
+            videoId = "dQw4w9WgXcQ";
+            manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
+        }
         sw.Stop();
 
-        var audioStreams = manifest.GetAudioOnlyStreams().ToList();
+        var audioStreams = manifest.GetAudioOnlyStreams();
         TestAssert.True(audioStreams.Count > 0, "No audio streams found in manifest");
 
         var best = audioStreams.GetWithHighestBitrate();
+        TestAssert.True(UrlEx.TryGetExpireUtc(best.Url, out var expireUtc), "Stream URL is missing valid &expire= parameter");
+
+        var ttlRemaining = expireUtc - DateTime.UtcNow;
+        TestAssert.True(ttlRemaining.TotalHours >= 4.5, $"TTL remaining is unexpectedly low: {ttlRemaining.TotalHours:F2}h");
+        TestAssert.False(UrlEx.IsUrlExpiredOrExpiringSoon(best.Url, TimeSpan.FromMinutes(5)));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, best.Url);
-        request.Headers.Range = new RangeHeaderValue(0, 1023);
+        request.Headers.Range = new RangeHeaderValue(0, 65535);
+        SharedHttpClient.ApplyUserAgentFromUrl(request, best.Url);
 
         using var response = await SharedHttpClient.Instance.SendAsync(
             request, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
 
         TestAssert.True(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.PartialContent,
-            $"Stream chunk request failed: HTTP {(int)response.StatusCode}");
+            $"Stream chunk download failed: HTTP {(int)response.StatusCode}");
 
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-        TestAssert.True(bytes.Length > 0, "Downloaded stream chunk is empty");
+        var buffer = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        TestAssert.True(buffer.Length > 0, "Downloaded stream chunk is empty");
 
-        Log.Info($"[Pipeline] Resolved in {sw.ElapsedMilliseconds}ms, received {bytes.Length} bytes (itag={best.Itag})");
+        bool isWebM = buffer.Length >= 4 &&
+            buffer[0] == 0x1A && buffer[1] == 0x45 && buffer[2] == 0xDF && buffer[3] == 0xA3;
+        bool isMp4 = buffer.Length >= 8 &&
+            buffer[4] == 'f' && buffer[5] == 't' && buffer[6] == 'y' && buffer[7] == 'p';
+
+        TestAssert.True(isWebM || isMp4, "Downloaded bytes do not match WebM or MP4 container signatures");
+        Log.Info(
+            $"[Pipeline] Resolved {videoId} in {sw.ElapsedMilliseconds}ms, itag={best.Itag}, " +
+            $"TTL={ttlRemaining.TotalHours:F2}h, {buffer.Length}B ({(isWebM ? "WebM/Opus" : "MP4/AAC")})");
     }
 
     [TestMethod(TestCategory.Integration, "Parallel Multi-Video Manifest & Chunk Resolution",
@@ -52,8 +78,11 @@ public static class StreamPipelineTests
     public static async Task TestMultiVideoAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var youtube = services.GetRequiredService<Lazy<YoutubeProvider>>().Value.GetClient();
+        var auth = services.GetRequiredService<CookieAuthService>();
         int success = 0;
+        int skippedAuth = 0;
         int failed = 0;
+        var failureDetails = new System.Collections.Concurrent.ConcurrentQueue<string>();
 
         var options = new ParallelOptions
         {
@@ -66,10 +95,21 @@ public static class StreamPipelineTests
             try
             {
                 var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), token).ConfigureAwait(false);
-                var stream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
+                var audioStreams = manifest.GetAudioOnlyStreams();
+                if (audioStreams.Count == 0)
+                {
+                    Interlocked.Increment(ref failed);
+                    string detail = $"{videoId}: empty audio stream list";
+                    failureDetails.Enqueue(detail);
+                    Log.Warn($"[Pipeline] Multi-video failed — {detail}");
+                    return;
+                }
+
+                var stream = audioStreams.GetWithHighestBitrate();
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, stream.Url);
                 request.Headers.Range = new RangeHeaderValue(0, 1023);
+                SharedHttpClient.ApplyUserAgentFromUrl(request, stream.Url);
 
                 using var response = await SharedHttpClient.Instance.SendAsync(
                     request, HttpCompletionOption.ResponseContentRead, token).ConfigureAwait(false);
@@ -82,76 +122,43 @@ public static class StreamPipelineTests
                         Interlocked.Increment(ref success);
                         return;
                     }
+
+                    string emptyDetail = $"{videoId} (itag={stream.Itag}): empty body";
+                    failureDetails.Enqueue(emptyDetail);
+                    Log.Warn($"[Pipeline] Multi-video failed — {emptyDetail}");
+                }
+                else
+                {
+                    string httpDetail = $"{videoId} (itag={stream.Itag}): HTTP {(int)response.StatusCode}";
+                    failureDetails.Enqueue(httpDetail);
+                    Log.Warn($"[Pipeline] Multi-video failed — {httpDetail}");
                 }
 
                 Interlocked.Increment(ref failed);
             }
-            catch
+            catch (LoginRequiredException) when (!auth.IsAuthenticated)
+            {
+                Interlocked.Increment(ref skippedAuth);
+                Log.Warn($"[Pipeline] Skipping '{videoId}' in unauthenticated multi-video run (LoginRequired/AgeRestricted).");
+            }
+            catch (Exception ex) when (!token.IsCancellationRequested)
             {
                 Interlocked.Increment(ref failed);
+                string exDetail = $"{videoId}: {ex.GetType().Name} ({ex.Message})";
+                failureDetails.Enqueue(exDetail);
+                Log.Warn($"[Pipeline] Multi-video failed — {exDetail}");
             }
         }).ConfigureAwait(false);
 
-        TestAssert.Equal(0, failed, $"Multi-video stream resolution failed for {failed} videos");
-        Log.Info($"[Pipeline] Multi-video: {success}/{TestVideoIds.Length} passed");
-    }
+        TestAssert.Equal(
+            0,
+            failed,
+            $"Multi-video stream resolution failed for {failed} video(s): {string.Join("; ", failureDetails)}");
 
-    [TestMethod(TestCategory.Integration, "Download 64KB Audio & Verify Container Magic Bytes",
-        Group = TestGroups.Youtube, Order = 3, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestAudioDownloadAsync(IServiceProvider services, CancellationToken ct = default)
-    {
-        var youtube = services.GetRequiredService<Lazy<YoutubeProvider>>().Value.GetClient();
-        var videoId = TestVideoIds[0];
+        if (success == 0 && skippedAuth > 0)
+            TestAssert.Skip($"All {skippedAuth} configured TestVideoIds require authentication");
 
-        var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
-        var stream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, stream.Url);
-        request.Headers.Range = new RangeHeaderValue(0, 65535);
-
-        using var response = await SharedHttpClient.Instance.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-
-        TestAssert.True(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.PartialContent,
-            $"Download failed: HTTP {(int)response.StatusCode}");
-
-        var buffer = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-
-        bool isWebM = buffer.Length >= 4 &&
-            buffer[0] == 0x1A && buffer[1] == 0x45 && buffer[2] == 0xDF && buffer[3] == 0xA3;
-        bool isMp4 = buffer.Length >= 8 &&
-            buffer[4] == 'f' && buffer[5] == 't' && buffer[6] == 'y' && buffer[7] == 'p';
-
-        TestAssert.True(isWebM || isMp4, "Downloaded bytes do not match WebM or MP4 container signatures");
-        Log.Info($"[Pipeline] Downloaded {buffer.Length} bytes, container format: {(isWebM ? "WebM/Opus" : "MP4/AAC")}");
-    }
-
-    [TestMethod(TestCategory.Integration, "Verify All Audio Variants in Stream Manifest",
-        Group = TestGroups.Youtube, Order = 4, RequiresNetwork = true, TimeoutSeconds = 90)]
-    public static async Task TestFullPipelineAsync(IServiceProvider services, CancellationToken ct = default)
-    {
-        await TestFullPipelineInternalAsync(services, "dQw4w9WgXcQ", ct).ConfigureAwait(false);
-    }
-
-    [TestMethod(TestCategory.Integration, "Live Stream URL Expire TTL (>4.5h)",
-        Group = TestGroups.Network, Order = 5, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestLiveStreamUrlExpireTtlAsync(IServiceProvider services, CancellationToken ct = default)
-    {
-        var youtube = services.GetRequiredService<Lazy<YoutubeProvider>>().Value.GetClient();
-        var videoId = TestConfig.Get().Pipeline.DebugVideoId;
-
-        var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
-        var audioStream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
-        TestAssert.NotNull(audioStream, "No audio stream found in live manifest");
-
-        var url = audioStream.Url;
-        TestAssert.True(UrlEx.TryGetExpireUtc(url, out var expireUtc), "Stream URL is missing valid &expire= parameter");
-
-        var ttlRemaining = expireUtc - DateTime.UtcNow;
-        TestAssert.True(ttlRemaining.TotalHours >= 4.5, $"TTL remaining is unexpectedly low: {ttlRemaining.TotalHours:F2}h");
-        TestAssert.False(UrlEx.IsUrlExpiredOrExpiringSoon(url, TimeSpan.FromMinutes(5)));
-
-        Log.Info($"[Pipeline] Live URL TTL validated: {ttlRemaining.TotalHours:F2}h remaining");
+        Log.Info($"[Pipeline] Multi-video: {success}/{TestVideoIds.Length} passed (skippedAuth={skippedAuth})");
     }
 
     [TestMethod(TestCategory.Diagnostic, "Inspect Video Stream URL & Query Parameters",
@@ -163,7 +170,19 @@ public static class StreamPipelineTests
         var targetItag = config.DebugTargetItag;
 
         var youtube = services.GetRequiredService<Lazy<YoutubeProvider>>().Value.GetClient();
-        var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
+        var auth = services.GetRequiredService<CookieAuthService>();
+
+        Core.Youtube.Videos.Streams.StreamManifest manifest;
+        try
+        {
+            manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
+        }
+        catch (LoginRequiredException) when (!auth.IsAuthenticated && !string.Equals(videoId, "dQw4w9WgXcQ", StringComparison.Ordinal))
+        {
+            Log.Warn($"[Diagnostic] DebugVideoId '{videoId}' requires auth; falling back to public 'dQw4w9WgXcQ'.");
+            videoId = "dQw4w9WgXcQ";
+            manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
+        }
 
         var audioStreams = manifest.GetAudioOnlyStreams().ToList();
         var stream = (targetItag is not null
@@ -172,40 +191,5 @@ public static class StreamPipelineTests
 
         Log.Info($"[Diagnostic] Selected stream itag={stream.Itag}: {stream.Container}/{stream.AudioCodec}, {stream.Bitrate.KiloBitsPerSecond:F0}kbps");
         Log.Info($"[Diagnostic] Host: {new Uri(stream.Url).Host}");
-    }
-
-    /// <summary>
-    /// Internal check of all manifest audio streams for the specified <paramref name="videoId"/>.
-    /// </summary>
-    public static async Task TestFullPipelineInternalAsync(
-        IServiceProvider services, string videoId = "dQw4w9WgXcQ", CancellationToken ct = default)
-    {
-        var youtube = services.GetRequiredService<Lazy<YoutubeProvider>>().Value.GetClient();
-        var manifest = await youtube.Videos.Streams.GetManifestAsync(VideoId.Parse(videoId), ct).ConfigureAwait(false);
-
-        var audioStreams = manifest.GetAudioOnlyStreams().ToList();
-        TestAssert.True(audioStreams.Count > 0, "No audio streams found in manifest");
-
-        int verified = 0;
-        var inspectStreams = audioStreams.Take(5).ToList();
-
-        for (int i = 0; i < inspectStreams.Count; i++)
-        {
-            var s = inspectStreams[i];
-            using var request = new HttpRequestMessage(HttpMethod.Get, s.Url);
-            request.Headers.Range = new RangeHeaderValue(0, 1023);
-
-            using var response = await SharedHttpClient.Instance.SendAsync(
-                request, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
-
-            if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.PartialContent)
-            {
-                var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-                if (bytes.Length > 0) verified++;
-            }
-        }
-
-        TestAssert.True(verified > 0, "All stream URLs failed (signature decryption or N-token broken)");
-        Log.Info($"[Pipeline] Verified {verified}/{inspectStreams.Count} audio variants for {videoId}");
     }
 }

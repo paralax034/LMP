@@ -2,6 +2,7 @@ using LMP.Core.Audio.Backends;
 using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Interfaces;
 using LMP.Tests.Framework;
+using TokenExtensions = LMP.Core.Helpers.Extensions.CancellationTokenExtensions;
 
 namespace LMP.Tests.Unit;
 
@@ -210,6 +211,72 @@ public static class AudioPipelineDecoderOwnershipTests
             await pipeline.DisposeAsync().ConfigureAwait(false);
             backend.Dispose();
         }
+    }
+
+    /// <summary>SPSC stress test: producer writes a monotonic sequence, consumer verifies ordering and zero data loss.</summary>
+    [TestMethod(TestCategory.Unit, "RingBuffer SPSC Concurrency Stress", Group = TestGroups.Audio, Order = 22, TimeoutSeconds = 30)]
+    public static async Task TestRingBufferContentionStressAsync()
+    {
+        const int totalSamples = SampleRate * Channels; // 1 second stereo; values < 2^24 are exact in float
+        const int chunkSize = SampleRate * Channels * 20 / 1000; // 20 ms chunk
+
+        using var ring = new LockFreeRingBuffer<float>(chunkSize * 16);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = cts.Token;
+
+        var producerTask = Task.Run(async () =>
+        {
+            float[] chunk = new float[chunkSize];
+            int next = 0;
+
+            while (next < totalSamples && !token.IsCancellationRequested)
+            {
+                int count = Math.Min(chunkSize, totalSamples - next);
+                for (int i = 0; i < count; i++)
+                    chunk[i] = next + i;
+
+                int offset = 0;
+                while (offset < count)
+                {
+                    int written = ring.Write(chunk.AsSpan(offset, count - offset));
+                    offset += written;
+
+                    if (written == 0 && !await TokenExtensions.DelayNoThrowAsync(token, 1, continueOnCapturedContext: false).ConfigureAwait(false))
+                        return next + offset;
+                }
+
+                next += count;
+            }
+
+            return next;
+        });
+
+        float[] consumerChunk = new float[chunkSize];
+        int expected = 0;
+
+        while (expected < totalSamples)
+        {
+            int read = ring.Read(consumerChunk.AsSpan());
+            for (int i = 0; i < read; i++)
+            {
+                if (consumerChunk[i] != expected)
+                {
+                    cts.Cancel();
+                    TestAssert.Fail($"SPSC order violated at sample {expected}: got {consumerChunk[i]}");
+                }
+
+                expected++;
+            }
+
+            if (read == 0 && !await TokenExtensions.DelayNoThrowAsync(token, 1, continueOnCapturedContext: false).ConfigureAwait(false))
+                break;
+        }
+
+        int produced = await producerTask.ConfigureAwait(false);
+
+        TestAssert.Equal(totalSamples, produced, $"Producer stalled: wrote {produced} of {totalSamples} samples");
+        TestAssert.Equal(totalSamples, expected, $"Consumer received {expected} of {totalSamples} samples in order");
+        Log.Info($"[Stress] SPSC RingBuffer: {expected:N0} samples transmitted in strict order");
     }
 
     private sealed class ThrowingCacheAudioSource(int sampleRate, int channels) : IAudioSource

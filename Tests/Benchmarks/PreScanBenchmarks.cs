@@ -4,7 +4,7 @@ using LMP.Core.Audio.Helpers;
 using LMP.Core.Audio.Interfaces;
 using LMP.Tests.Framework;
 
-namespace LMP.Tests.Unit;
+namespace LMP.Tests.Benchmarks;
 
 /// <summary>
 /// Benchmarks for EBU R128 pre-scanning speed of Opus and AAC files.
@@ -18,14 +18,12 @@ public static class PreScanBenchmarks
     private const float MaxGain = 3.0f;
 
     [TestMethod(TestCategory.Benchmark, "EBU R128 Isolated Pre-Scan Timing",
-        Group = TestGroups.Audio, Order = 1, TimeoutSeconds = 60)]
+        Group = TestGroups.Audio, Order = 2, TimeoutSeconds = 60)]
     public static async Task BenchmarkIsolatedPreScanAsync()
     {
         var candidates = CollectCandidates(AudioSourceFactory.GlobalCache);
         if (candidates.Count == 0)
-        {
             TestAssert.Skip("No fully cached tracks found in AudioCache. Play tracks to enable pre-scan benchmarks.");
-        }
 
         for (int i = 0; i < candidates.Count; i++)
         {
@@ -43,16 +41,14 @@ public static class PreScanBenchmarks
     }
 
     [TestMethod(TestCategory.Benchmark, "EBU R128 Pre-Scan 30s vs 60s Scope",
-        Group = TestGroups.Audio, Order = 2, TimeoutSeconds = 60)]
+        Group = TestGroups.Audio, Order = 3, TimeoutSeconds = 60)]
     public static async Task BenchmarkScopeComparisonAsync()
     {
         var candidates = CollectCandidates(AudioSourceFactory.GlobalCache)
             .FindAll(c => c.Entry.Codec == AudioCodec.Opus);
 
         if (candidates.Count == 0)
-        {
             TestAssert.Skip("No Opus tracks found in cache — skipping scope comparison");
-        }
 
         var (entry, filePath) = candidates[0];
 

@@ -88,13 +88,6 @@ public sealed class TestConfig
     public SigCipherConfig SigCipher { get; init; } = new();
 
     /// <summary>
-    /// Parameters for SigCipherSolverTests.
-    /// Manages the number of random combinations and benchmark iterations.
-    /// </summary>
-    [JsonPropertyName("solver")]
-    public SolverConfig Solver { get; init; } = new();
-
-    /// <summary>
     /// Parameters for player cross-version compatibility tests.
     /// </summary>
     [JsonPropertyName("playerVersions")]
@@ -124,8 +117,10 @@ public sealed class TestConfig
         public string Docs { get; init; } = "https://github.com/Scream034/LMP/tree/main/Tests/Framework/TestConfig.cs";
 
         /// <summary>Config schema version.</summary>
+        internal const int CurrentSchemaVersion = 2;
+
         [JsonPropertyName("schemaVersion")]
-        public int SchemaVersion { get; init; } = 1;
+        public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     }
 
     /// <summary>
@@ -141,7 +136,7 @@ public sealed class TestConfig
         public string[] TestVideoIds { get; init; } =
         [
             "dQw4w9WgXcQ",
-            "jNQXAC9IVRw",
+            "9bZkp7q19f0",
             "kJQP7kiw5Fk",
         ];
 
@@ -196,24 +191,6 @@ public sealed class TestConfig
         [JsonPropertyName("testSignature")]
         public string TestSignature { get; init; } =
             "AHEqNM4wRQIgUw3FiHA8Pht_xgtH0N_C7fQwvOMGHPW9KCHzFbzj_uECIQDPrmvV4I7V_V-uKiksYsVh1xBFwp_vFpXjjLL7T4pBxg==";
-    }
-
-    /// <summary>
-    /// Configuration for SigCipherSolver tests.
-    /// </summary>
-    public sealed class SolverConfig
-    {
-        /// <summary>
-        /// Number of random combinations for the stress test.
-        /// </summary>
-        [JsonPropertyName("randomCombinationsCount")]
-        public int RandomCombinationsCount { get; init; } = 100;
-
-        /// <summary>
-        /// Number of iterations in the Solver benchmark.
-        /// </summary>
-        [JsonPropertyName("benchmarkIterations")]
-        public int BenchmarkIterations { get; init; } = 50;
     }
 
     /// <summary>
@@ -293,10 +270,16 @@ public sealed class TestConfig
             if (File.Exists(configPath))
             {
                 var json = File.ReadAllText(configPath);
-                var config = JsonSerializer.Deserialize<TestConfig>(json, G.Json.Beautiful);
+                var config = JsonSerializer.Deserialize(json, TestConfigJsonContext.Default.TestConfig);
 
                 if (config is not null)
                 {
+                    if (config.Meta.SchemaVersion < MetaConfig.CurrentSchemaVersion)
+                    {
+                        config = MigrateConfig(config);
+                        SaveConfig(configPath, config);
+                    }
+
                     Log.Debug($"[TestConfig] Loaded from {configPath}");
                     return config;
                 }
@@ -311,6 +294,50 @@ public sealed class TestConfig
         var defaultConfig = new TestConfig();
         SaveConfig(configPath, defaultConfig);
         return defaultConfig;
+    }
+
+    private static TestConfig MigrateConfig(TestConfig old)
+    {
+        var meta = old.Meta ?? new MetaConfig();
+        var pipeline = old.Pipeline ?? new PipelineConfig();
+        var ids = pipeline.TestVideoIds;
+
+        string[] migratedIds;
+        if (ids is not { Length: > 0 })
+        {
+            migratedIds = new PipelineConfig().TestVideoIds;
+        }
+        else
+        {
+            migratedIds = new string[ids.Length];
+            for (int i = 0; i < ids.Length; i++)
+            {
+                migratedIds[i] = string.Equals(ids[i], "jNQXAC9IVRw", StringComparison.Ordinal)
+                    ? "9bZkp7q19f0"
+                    : ids[i];
+            }
+        }
+
+        return new TestConfig
+        {
+            Meta = new MetaConfig
+            {
+                Description = meta.Description,
+                Docs = meta.Docs,
+                SchemaVersion = MetaConfig.CurrentSchemaVersion
+            },
+            Pipeline = new PipelineConfig
+            {
+                TestVideoIds = migratedIds,
+                DebugVideoId = pipeline.DebugVideoId,
+                DebugTargetItag = pipeline.DebugTargetItag,
+                DebugTestDownload = pipeline.DebugTestDownload
+            },
+            NToken = old.NToken ?? new NTokenConfig(),
+            SigCipher = old.SigCipher ?? new SigCipherConfig(),
+            PlayerVersions = old.PlayerVersions ?? new PlayerVersionConfig(),
+            General = old.General ?? new GeneralConfig()
+        };
     }
 
     /// <summary>
@@ -332,7 +359,7 @@ public sealed class TestConfig
     {
         try
         {
-            var json = JsonSerializer.Serialize(config, G.Json.Beautiful);
+            var json = JsonSerializer.Serialize(config, TestConfigJsonContext.Default.TestConfig);
             AtomicFile.WriteText(path, json, createBackup: false);
             Log.Info($"[TestConfig] Saved config to {path}");
         }
@@ -475,3 +502,11 @@ public sealed class TestConfig
         }
     }
 }
+
+[JsonSourceGenerationOptions(
+    WriteIndented = true,
+    PropertyNameCaseInsensitive = true,
+    ReadCommentHandling = JsonCommentHandling.Skip,
+    AllowTrailingCommas = true)]
+[JsonSerializable(typeof(TestConfig))]
+internal sealed partial class TestConfigJsonContext : JsonSerializerContext;

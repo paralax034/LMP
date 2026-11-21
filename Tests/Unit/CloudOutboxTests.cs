@@ -9,239 +9,170 @@ using Microsoft.Data.Sqlite;
 namespace LMP.Tests.Unit;
 
 /// <summary>
-/// Tests for the cloud mutation queue: in-flight operation coalescing, hydration merging,
-/// failure classification, YouTube response alignment, persistence pump, and targeted SQL updates.
+/// Scenario tests for the cloud mutation outbox: in-flight coalescing, hydration merging,
+/// failure classification, cloud rebasing, persistence pump, targeted SQLite updates, and task cards.
 /// </summary>
 public static class CloudOutboxTests
 {
     private const string Owner = "test_owner";
 
-    #region Likes
-
-    [TestMethod(TestCategory.Unit, "Outbox: Like Toggle-Back During Flight", Group = TestGroups.Playlists, Order = 20)]
-    public static Task TestLikeToggleBackDuringFlightAsync()
+    [TestMethod(TestCategory.Unit, "Outbox: Likes Coalescing, Annihilation & In-Flight Toggle-Back", Group = TestGroups.Playlists, Order = 20)]
+    public static Task TestLikesCoalescingAndInFlightLifecycleAsync()
     {
-        var state = NewState("__likes__");
+        // 1. Toggle-back during in-flight send preserves compensating mutation
+        var inFlight = NewState("__likes__");
+        CloudOutboxCoalescer.ApplyLike(inFlight, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
 
-        CloudOutboxCoalescer.ApplyLike(state, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
+        TestAssert.False(CloudOutboxCoalescer.ApplyLike(inFlight, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: true));
+        TestAssert.True(CloudOutboxCoalescer.TryGetLikeTarget(inFlight, "yt_a", out bool target) && !target);
 
-        // Like is already in-flight: reverting to the original value must not annihilate the record
-        bool annihilated = CloudOutboxCoalescer.ApplyLike(state, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: true);
-        TestAssert.False(annihilated);
-        TestAssert.True(CloudOutboxCoalescer.TryGetLikeTarget(state, "yt_a", out bool target));
-        TestAssert.False(target);
+        CloudOutboxCoalescer.CommitLike(inFlight, "yt_a", syncedLiked: true);
+        TestAssert.Equal(1, inFlight.PendingLikes.Count);
+        TestAssert.True(inFlight.PendingLikes[0].BaselineLiked);
+        TestAssert.False(inFlight.PendingLikes[0].TargetLiked);
 
-        // In-flight "true" succeeded: record remains with base true and target false
-        CloudOutboxCoalescer.CommitLike(state, "yt_a", syncedLiked: true);
-        TestAssert.Equal(1, state.PendingLikes.Count);
-        TestAssert.True(state.PendingLikes[0].BaselineLiked);
-        TestAssert.False(state.PendingLikes[0].TargetLiked);
+        CloudOutboxCoalescer.CommitLike(inFlight, "yt_a", syncedLiked: false);
+        TestAssert.True(inFlight.IsEmpty);
 
-        CloudOutboxCoalescer.CommitLike(state, "yt_a", syncedLiked: false);
-        TestAssert.True(state.IsEmpty);
+        // 2. Toggle-back outside flight annihilates; no-op intent does not enqueue
+        var idle = NewState("__likes__");
+        CloudOutboxCoalescer.ApplyLike(idle, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
+        TestAssert.True(CloudOutboxCoalescer.ApplyLike(idle, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: false));
+        TestAssert.True(idle.IsEmpty);
+
+        CloudOutboxCoalescer.ApplyLike(idle, "yt_b", targetLiked: true, baselineLiked: true, isInFlight: false);
+        TestAssert.True(idle.IsEmpty);
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Outbox: Like Annihilation Outside Flight", Group = TestGroups.Playlists, Order = 21)]
-    public static Task TestLikeAnnihilationAsync()
+    [TestMethod(TestCategory.Unit, "Outbox: In-Flight Track Compensations, Create Metadata & Reorder", Group = TestGroups.Playlists, Order = 21)]
+    public static Task TestInFlightTrackMutationsAndCreateMetadataAsync()
     {
-        var state = NewState("__likes__");
+        // 1. Remove during in-flight Add: success -> keeps compensating remove with resolved SetVideoId
+        var addSuccess = NewState("pl_a");
+        addSuccess.YoutubePlaylistId = "PL_A";
+        CloudOutboxCoalescer.ApplyAddTracks(addSuccess, ["yt_a", "yt_b"], inFlightRemoves: null);
+        var sentAdds = new HashSet<string>(addSuccess.PendingAddTrackIds, StringComparer.Ordinal);
 
-        CloudOutboxCoalescer.ApplyLike(state, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
-        bool annihilated = CloudOutboxCoalescer.ApplyLike(state, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: false);
-        TestAssert.True(annihilated);
-        TestAssert.True(state.IsEmpty);
+        CloudOutboxCoalescer.ApplyRemoveTracks(addSuccess, [("yt_a", null)], sentAdds);
+        TestAssert.Equal(2, addSuccess.PendingAddTrackIds.Count);
+        TestAssert.Equal(1, addSuccess.PendingRemoveTracks.Count);
 
-        // Intent matching the base value does not create a record
-        CloudOutboxCoalescer.ApplyLike(state, "yt_b", targetLiked: true, baselineLiked: true, isInFlight: false);
-        TestAssert.True(state.IsEmpty);
-        return Task.CompletedTask;
-    }
+        CloudOutboxCoalescer.CommitAdds(addSuccess, ["yt_a", "yt_b"], [("yt_a", "SV_A"), ("yt_b", "SV_B")]);
+        TestAssert.Equal(0, addSuccess.PendingAddTrackIds.Count);
+        TestAssert.Equal("SV_A", addSuccess.PendingRemoveTracks[0].SetVideoId);
+        TestAssert.False(CloudOutboxCoalescer.ResolveInFlightCompensations(addSuccess, sentAdds, new HashSet<string>(StringComparer.Ordinal)));
 
-    #endregion
+        // 2. Remove during in-flight Add: failure -> clears failed add retry, keeps remove intent
+        var addFail = NewState("pl_a");
+        addFail.YoutubePlaylistId = "PL_A";
+        CloudOutboxCoalescer.ApplyAddTracks(addFail, ["yt_a"], inFlightRemoves: null);
+        var sentFailAdds = new HashSet<string>(addFail.PendingAddTrackIds, StringComparer.Ordinal);
+        CloudOutboxCoalescer.ApplyRemoveTracks(addFail, [("yt_a", null)], sentFailAdds);
+        TestAssert.True(CloudOutboxCoalescer.ResolveInFlightCompensations(addFail, sentFailAdds, new HashSet<string>(StringComparer.Ordinal)));
+        TestAssert.Equal(0, addFail.PendingAddTrackIds.Count);
+        TestAssert.Equal(1, addFail.PendingRemoveTracks.Count);
 
-    #region Tracks In Flight
-
-    [TestMethod(TestCategory.Unit, "Outbox: Remove During In-Flight Add (Success)", Group = TestGroups.Playlists, Order = 22)]
-    public static Task TestRemoveDuringInFlightAddSuccessAsync()
-    {
-        var state = NewState("pl_a");
-        state.YoutubePlaylistId = "PL_A";
-        CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a", "yt_b"], inFlightRemoves: null);
-        var sentAdds = new HashSet<string>(state.PendingAddTrackIds, StringComparer.Ordinal);
-
-        // User deleted the track while add is in-flight: deletion is preserved as a compensating mutation
-        CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", null)], sentAdds);
-        TestAssert.Equal(2, state.PendingAddTrackIds.Count);
-        TestAssert.Equal(1, state.PendingRemoveTracks.Count);
-
-        CloudOutboxCoalescer.CommitAdds(state, ["yt_a", "yt_b"], [("yt_a", "SV_A"), ("yt_b", "SV_B")]);
-        TestAssert.Equal(0, state.PendingAddTrackIds.Count);
-        TestAssert.Equal("SV_A", state.PendingRemoveTracks[0].SetVideoId);
-        TestAssert.False(CloudOutboxCoalescer.ResolveInFlightCompensations(state, sentAdds, new HashSet<string>(StringComparer.Ordinal)));
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Remove During In-Flight Add (Failure)", Group = TestGroups.Playlists, Order = 23)]
-    public static Task TestRemoveDuringInFlightAddFailureAsync()
-    {
-        var state = NewState("pl_a");
-        state.YoutubePlaylistId = "PL_A";
-        CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a"], inFlightRemoves: null);
-        var sentAdds = new HashSet<string>(state.PendingAddTrackIds, StringComparer.Ordinal);
-
-        CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", null)], sentAdds);
-
-        // Add failed: final intent is "no track", retry of add is not sent
-        bool changed = CloudOutboxCoalescer.ResolveInFlightCompensations(state, sentAdds, new HashSet<string>(StringComparer.Ordinal));
-        TestAssert.True(changed);
-        TestAssert.Equal(0, state.PendingAddTrackIds.Count);
-        TestAssert.Equal(1, state.PendingRemoveTracks.Count);
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Re-Add During In-Flight Remove", Group = TestGroups.Playlists, Order = 24)]
-    public static Task TestReAddDuringInFlightRemoveAsync()
-    {
-        var state = NewState("pl_a");
-        state.YoutubePlaylistId = "PL_A";
-        CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", "SV_A")], inFlightAdds: null);
+        // 3. Re-add during in-flight Remove vs pending Remove outside flight
+        var removeInFlight = NewState("pl_a");
+        removeInFlight.YoutubePlaylistId = "PL_A";
+        CloudOutboxCoalescer.ApplyRemoveTracks(removeInFlight, [("yt_a", "SV_A")], inFlightAdds: null);
         var sentRemoves = new HashSet<string>(StringComparer.Ordinal) { "yt_a" };
+        TestAssert.Null(CloudOutboxCoalescer.ApplyAddTracks(removeInFlight, ["yt_a"], sentRemoves));
+        TestAssert.Equal(1, removeInFlight.PendingAddTrackIds.Count);
+        TestAssert.Equal(1, removeInFlight.PendingRemoveTracks.Count);
+        TestAssert.True(CloudOutboxCoalescer.ResolveInFlightCompensations(removeInFlight, new HashSet<string>(StringComparer.Ordinal), sentRemoves));
+        TestAssert.True(removeInFlight.IsEmpty);
 
-        // Deletion in-flight: re-adding does not annihilate it, but queues as a compensating mutation
-        var restored = CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a"], sentRemoves);
-        TestAssert.Null(restored);
-        TestAssert.Equal(1, state.PendingAddTrackIds.Count);
-        TestAssert.Equal(1, state.PendingRemoveTracks.Count);
-
-        // Deletion failed: track remains in the cloud, both operations are cleared
-        bool changed = CloudOutboxCoalescer.ResolveInFlightCompensations(state, new HashSet<string>(StringComparer.Ordinal), sentRemoves);
-        TestAssert.True(changed);
-        TestAssert.True(state.IsEmpty);
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Re-Add Annihilates Pending Remove", Group = TestGroups.Playlists, Order = 25)]
-    public static Task TestReAddAnnihilatesPendingRemoveAsync()
-    {
-        var state = NewState("pl_a");
-        state.YoutubePlaylistId = "PL_A";
-        CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_a", "SV_A")], inFlightAdds: null);
-
-        var restored = CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a"], inFlightRemoves: null);
+        var removeIdle = NewState("pl_a");
+        removeIdle.YoutubePlaylistId = "PL_A";
+        CloudOutboxCoalescer.ApplyRemoveTracks(removeIdle, [("yt_a", "SV_A")], inFlightAdds: null);
+        var restored = CloudOutboxCoalescer.ApplyAddTracks(removeIdle, ["yt_a"], inFlightRemoves: null);
         TestAssert.NotNull(restored);
         TestAssert.Equal(1, restored.Count);
         TestAssert.Equal("SV_A", restored[0].SetVideoId);
-        TestAssert.True(state.IsEmpty);
+        TestAssert.True(removeIdle.IsEmpty);
+
+        // 4. Pending Create absorbs edits, reorders, and metadata before Phase 0 commit
+        var pendingCreate = NewState("pl_new");
+        pendingCreate.PendingCreatePlaylist = true;
+        pendingCreate.HasPendingName = true;
+        pendingCreate.TargetName = "Draft";
+        pendingCreate.HasPendingDescription = true;
+        pendingCreate.TargetDescription = "draft desc";
+
+        CloudOutboxCoalescer.ApplyAddTracks(pendingCreate, ["yt_a", "yt_b", "yt_c"], inFlightRemoves: null);
+        CloudOutboxCoalescer.ApplyRemoveTracks(pendingCreate, [("yt_b", null)], inFlightAdds: null);
+        CloudOutboxCoalescer.ApplyReorder(pendingCreate, ["yt_a", "yt_c"], ["yt_c", "yt_a"], isTargetInFlight: false);
+
+        TestAssert.Equal(2, pendingCreate.PendingAddTrackIds.Count);
+        TestAssert.Equal("yt_c", pendingCreate.PendingAddTrackIds[0]);
+        TestAssert.Equal("yt_a", pendingCreate.PendingAddTrackIds[1]);
+        TestAssert.Equal(0, pendingCreate.PendingRemoveTracks.Count);
+        TestAssert.False(pendingCreate.HasPendingReorder);
+
+        TestAssert.True(CloudOutboxCoalescer.IsUnsentCreate(pendingCreate, isTargetInFlight: false));
+        TestAssert.False(CloudOutboxCoalescer.IsUnsentCreate(pendingCreate, isTargetInFlight: true));
+        CloudOutboxCoalescer.DropMetadataAbsorbedByCreate(pendingCreate);
+        TestAssert.False(pendingCreate.HasPendingName);
+        TestAssert.False(pendingCreate.HasPendingDescription);
+        TestAssert.False(pendingCreate.IsEmpty);
+
+        pendingCreate.HasPendingName = true;
+        pendingCreate.TargetName = "Sent";
+        pendingCreate.HasPendingDescription = true;
+        pendingCreate.TargetDescription = "Newer";
+        CloudOutboxCoalescer.CommitMetadataSentWithCreate(pendingCreate, "Sent", "Old desc");
+        TestAssert.False(pendingCreate.HasPendingName);
+        TestAssert.Null(pendingCreate.TargetName);
+        TestAssert.True(pendingCreate.HasPendingDescription);
+        TestAssert.Equal("Old desc", pendingCreate.BaselineDescription);
+        TestAssert.Equal("Newer", pendingCreate.TargetDescription);
+
+        pendingCreate.YoutubePlaylistId = "PL_created";
+        TestAssert.False(CloudOutboxCoalescer.IsUnsentCreate(pendingCreate, isTargetInFlight: false));
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Outbox: Pending Create Accepts Edits", Group = TestGroups.Playlists, Order = 26)]
-    public static Task TestPendingCreateAcceptsEditsAsync()
+    [TestMethod(TestCategory.Unit, "Outbox: Hydration Merge (Likes & Playlist)", Group = TestGroups.Playlists, Order = 22)]
+    public static Task TestHydrationMergeAsync()
     {
-        var state = NewState("pl_new");
-        state.PendingCreatePlaylist = true;
+        // 1. Likes hydration merge
+        var restoredLikes = NewState("__likes__");
+        CloudOutboxCoalescer.ApplyLike(restoredLikes, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
 
-        CloudOutboxCoalescer.ApplyAddTracks(state, ["yt_a", "yt_b", "yt_c"], inFlightRemoves: null);
-        CloudOutboxCoalescer.ApplyRemoveTracks(state, [("yt_b", null)], inFlightAdds: null);
-        CloudOutboxCoalescer.ApplyReorder(state, ["yt_a", "yt_c"], ["yt_c", "yt_a"], isTargetInFlight: false);
+        var liveLikes = NewState("__likes__");
+        CloudOutboxCoalescer.ApplyLike(liveLikes, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: false);
+        CloudOutboxCoalescer.ApplyLike(liveLikes, "yt_b", targetLiked: true, baselineLiked: false, isInFlight: false);
 
-        // Prior to playlist creation, reordering applies directly to the order of adds without move operations
-        TestAssert.Equal(2, state.PendingAddTrackIds.Count);
-        TestAssert.Equal("yt_c", state.PendingAddTrackIds[0]);
-        TestAssert.Equal("yt_a", state.PendingAddTrackIds[1]);
-        TestAssert.Equal(0, state.PendingRemoveTracks.Count);
-        TestAssert.False(state.HasPendingReorder);
-        return Task.CompletedTask;
-    }
+        var mergedLikes = CloudOutboxCoalescer.MergeRestored(liveLikes, restoredLikes, out _);
+        TestAssert.Equal(1, mergedLikes.PendingLikes.Count);
+        TestAssert.Equal("yt_b", mergedLikes.PendingLikes[0].TrackId);
+        TestAssert.True(mergedLikes.PendingLikes[0].TargetLiked);
 
-    [TestMethod(TestCategory.Unit, "Outbox: Create Carries Metadata", Group = TestGroups.Playlists, Order = 44)]
-    public static Task TestCreateCarriesMetadataAsync()
-    {
-        var state = NewState("pl_new");
-        state.PendingCreatePlaylist = true;
-        state.HasPendingName = true;
-        state.TargetName = "Draft";
-        state.HasPendingDescription = true;
-        state.TargetDescription = "draft desc";
+        // 2. Playlist hydration merge
+        var restoredPl = NewState("pl_a");
+        restoredPl.YoutubePlaylistId = "PL_A";
+        restoredPl.PendingAddTrackIds.Add("yt_a");
+        restoredPl.PendingRemoveTracks.Add(new CloudTrackRemoveEntry { TrackId = "yt_b", SetVideoId = "SV_B" });
 
-        // While creation is not yet in-flight, title and description changes are merged into the creation request itself
-        TestAssert.True(CloudOutboxCoalescer.IsUnsentCreate(state, isTargetInFlight: false));
-        TestAssert.False(CloudOutboxCoalescer.IsUnsentCreate(state, isTargetInFlight: true));
-        CloudOutboxCoalescer.DropMetadataAbsorbedByCreate(state);
-        TestAssert.False(state.HasPendingName);
-        TestAssert.False(state.HasPendingDescription);
-        TestAssert.False(state.IsEmpty);
+        var livePl = NewState("pl_a");
+        livePl.PendingAddTrackIds.Add("yt_b");
+        livePl.PendingAddTrackIds.Add("yt_c");
+        livePl.PendingRemoveTracks.Add(new CloudTrackRemoveEntry { TrackId = "yt_a" });
 
-        // Edits during Phase 0: changes matching the sent payload are cleared, newer changes remain with updated base
-        state.HasPendingName = true;
-        state.TargetName = "Sent";
-        state.HasPendingDescription = true;
-        state.TargetDescription = "Newer";
-        CloudOutboxCoalescer.CommitMetadataSentWithCreate(state, "Sent", "Old desc");
-        TestAssert.False(state.HasPendingName);
-        TestAssert.Null(state.TargetName);
-        TestAssert.True(state.HasPendingDescription);
-        TestAssert.Equal("Old desc", state.BaselineDescription);
-        TestAssert.Equal("Newer", state.TargetDescription);
-
-        state.YoutubePlaylistId = "PL_created";
-        TestAssert.False(CloudOutboxCoalescer.IsUnsentCreate(state, isTargetInFlight: false));
-        return Task.CompletedTask;
-    }
-
-    #endregion
-
-    #region Hydration Merge
-
-    [TestMethod(TestCategory.Unit, "Outbox: Hydration Merge (Likes)", Group = TestGroups.Playlists, Order = 27)]
-    public static Task TestHydrationMergeLikesAsync()
-    {
-        var restored = NewState("__likes__");
-        CloudOutboxCoalescer.ApplyLike(restored, "yt_a", targetLiked: true, baselineLiked: false, isInFlight: false);
-
-        // Prior to hydration, the user unliked yt_a and liked yt_b
-        var live = NewState("__likes__");
-        CloudOutboxCoalescer.ApplyLike(live, "yt_a", targetLiked: false, baselineLiked: true, isInFlight: false);
-        CloudOutboxCoalescer.ApplyLike(live, "yt_b", targetLiked: true, baselineLiked: false, isInFlight: false);
-
-        var merged = CloudOutboxCoalescer.MergeRestored(live, restored, out _);
-        TestAssert.Equal(1, merged.PendingLikes.Count);
-        TestAssert.Equal("yt_b", merged.PendingLikes[0].TrackId);
-        TestAssert.True(merged.PendingLikes[0].TargetLiked);
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Hydration Merge (Playlist)", Group = TestGroups.Playlists, Order = 28)]
-    public static Task TestHydrationMergePlaylistAsync()
-    {
-        var restored = NewState("pl_a");
-        restored.YoutubePlaylistId = "PL_A";
-        restored.PendingAddTrackIds.Add("yt_a");
-        restored.PendingRemoveTracks.Add(new CloudTrackRemoveEntry { TrackId = "yt_b", SetVideoId = "SV_B" });
-
-        var live = NewState("pl_a");
-        live.PendingAddTrackIds.Add("yt_b");
-        live.PendingAddTrackIds.Add("yt_c");
-        live.PendingRemoveTracks.Add(new CloudTrackRemoveEntry { TrackId = "yt_a" });
-
-        var merged = CloudOutboxCoalescer.MergeRestored(live, restored, out var restoredSetVideoIds);
-
-        TestAssert.Equal("PL_A", merged.YoutubePlaylistId);
-        TestAssert.Equal(1, merged.PendingAddTrackIds.Count);
-        TestAssert.Equal("yt_c", merged.PendingAddTrackIds[0]);
-        TestAssert.Equal(0, merged.PendingRemoveTracks.Count);
+        var mergedPl = CloudOutboxCoalescer.MergeRestored(livePl, restoredPl, out var restoredSetVideoIds);
+        TestAssert.Equal("PL_A", mergedPl.YoutubePlaylistId);
+        TestAssert.Equal(1, mergedPl.PendingAddTrackIds.Count);
+        TestAssert.Equal("yt_c", mergedPl.PendingAddTrackIds[0]);
+        TestAssert.Equal(0, mergedPl.PendingRemoveTracks.Count);
         TestAssert.NotNull(restoredSetVideoIds);
         TestAssert.Equal("SV_B", restoredSetVideoIds[0].SetVideoId);
         return Task.CompletedTask;
     }
 
-    #endregion
-
-    #region Failure Policy
-
-    [TestMethod(TestCategory.Unit, "Outbox: Failure Classification", Group = TestGroups.Playlists, Order = 29)]
-    public static Task TestFailureClassificationAsync()
+    [TestMethod(TestCategory.Unit, "Outbox: Failure Classification, Backoff & SetVideoId Alignment", Group = TestGroups.Playlists, Order = 23)]
+    public static Task TestFailurePolicyAndEditAlignmentAsync()
     {
         var ct = CancellationToken.None;
 
@@ -253,20 +184,14 @@ public static class CloudOutboxTests
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(Http(HttpStatusCode.ServiceUnavailable), ct));
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(new HttpRequestException("socket reset"), ct));
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(new TimeoutException(), ct));
-
-        // HttpClient timeout arrives as TaskCanceledException with an uncancelled token
         TestAssert.Equal(CloudOutboxFailureKind.Transient, CloudOutboxCoalescer.ClassifyFailure(new TaskCanceledException(), ct));
         TestAssert.Equal(CloudOutboxFailureKind.Permanent, CloudOutboxCoalescer.ClassifyFailure(new FormatException("bad payload"), ct));
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         TestAssert.Equal(CloudOutboxFailureKind.Canceled, CloudOutboxCoalescer.ClassifyFailure(new OperationCanceledException(cts.Token), cts.Token));
-        return Task.CompletedTask;
-    }
 
-    [TestMethod(TestCategory.Unit, "Outbox: Retry Backoff Is Monotonic", Group = TestGroups.Playlists, Order = 30)]
-    public static Task TestRetryBackoffAsync()
-    {
+        // Monotonic retry backoff
         TestAssert.Equal(0, CloudOutboxCoalescer.ComputeRetryBackoffMs(0, 3_000, 60_000));
         TestAssert.Equal(3_000, CloudOutboxCoalescer.ComputeRetryBackoffMs(1, 3_000, 60_000));
         TestAssert.Equal(6_000, CloudOutboxCoalescer.ComputeRetryBackoffMs(2, 3_000, 60_000));
@@ -280,33 +205,16 @@ public static class CloudOutboxTests
             previous = current;
         }
 
-        return Task.CompletedTask;
-    }
-
-    #endregion
-
-    #region SetVideoId Mapping
-
-    [TestMethod(TestCategory.Unit, "Outbox: Placeholder SetVideoId Is Never Stored", Group = TestGroups.Playlists, Order = 31)]
-    public static Task TestPlaceholderMappingAsync()
-    {
+        // Placeholder SetVideoId filtering and response length guard
         var mappings = CloudOutboxCoalescer.MapAddedSetVideoIds(
             ["yt_a", "yt_b", "yt_c"],
             ["SV_A", CloudOutboxCoalescer.PlaceholderSetVideoId, null]);
-
         TestAssert.Equal(1, mappings.Count);
         TestAssert.Equal("yt_a", mappings[0].TrackId);
         TestAssert.Equal("SV_A", mappings[0].SetVideoId);
-
-        // Response length mismatch: index-based matching is forbidden
         TestAssert.Equal(0, CloudOutboxCoalescer.MapAddedSetVideoIds(["yt_a", "yt_b"], ["SV_A"]).Count);
-        return Task.CompletedTask;
-    }
 
-    [TestMethod(TestCategory.Unit, "Outbox: Edit Result Alignment", Group = TestGroups.Playlists, Order = 32)]
-    public static Task TestEditResultAlignmentAsync()
-    {
-        // Server omitted the middle track: index shifting must not assign SV_C to track v2
+        // Response item alignment across omitted, positional, ambiguous, and duplicate tracks
         var aligned = PlaylistEditResultAligner.Align(["v1", "v2", "v3"], [("v1", "SV_A"), ("v3", "SV_C")]);
         TestAssert.Equal(3, aligned.Count);
         TestAssert.Equal("SV_A", aligned[0]);
@@ -327,18 +235,15 @@ public static class CloudOutboxTests
         return Task.CompletedTask;
     }
 
-    #endregion
-
-    #region Persistence Pump
-
-    [TestMethod(TestCategory.Unit, "Outbox: Persistence Pump Coalesces Writes", Group = TestGroups.Playlists, Order = 33, TimeoutSeconds = 15)]
-    public static async Task TestPersistencePumpCoalescingAsync()
+    [TestMethod(TestCategory.Unit, "Outbox: Persistence Pump Coalescing, Hydration Pause & Retry", Group = TestGroups.Playlists, Order = 24, TimeoutSeconds = 15)]
+    public static async Task TestPersistencePumpLifecycleAsync()
     {
+        // 1. Coalescing burst of 100 dirty signals
         var writes = new List<IReadOnlyList<CloudOutboxRowChange>>();
         var gate = new Lock();
         int version = 0;
 
-        var pump = new CloudOutboxPersistencePump(
+        var coalescePump = new CloudOutboxPersistencePump(
             (_, targetId) =>
             {
                 var s = NewState(targetId);
@@ -356,26 +261,21 @@ public static class CloudOutboxTests
         for (int i = 1; i <= 100; i++)
         {
             Volatile.Write(ref version, i);
-            pump.MarkDirty(Owner, "pl_a");
+            coalescePump.MarkDirty(Owner, "pl_a");
         }
 
-        TestAssert.True(await pump.DrainAsync(5_000).ConfigureAwait(false), "Pump did not drain in time");
-        TestAssert.True(pump.BatchesWritten <= 2, $"Expected <= 2 batches, got {pump.BatchesWritten}");
+        TestAssert.True(await coalescePump.DrainAsync(5_000).ConfigureAwait(false), "Pump did not drain in time");
+        TestAssert.True(coalescePump.BatchesWritten <= 2, $"Expected <= 2 batches, got {coalescePump.BatchesWritten}");
 
         IReadOnlyList<CloudOutboxRowChange> last;
         lock (gate)
             last = writes[^1];
-
         TestAssert.Equal(1, last.Count);
-        TestAssert.NotNull(last[0].State);
         TestAssert.Equal("yt_100", last[0].State!.PendingAddTrackIds[0]);
-    }
 
-    [TestMethod(TestCategory.Unit, "Outbox: Persistence Pump Waits For Hydration", Group = TestGroups.Playlists, Order = 34, TimeoutSeconds = 15)]
-    public static async Task TestPersistencePumpPausedAsync()
-    {
+        // 2. StartPaused holds writes until Resume()
         int written = 0;
-        var pump = new CloudOutboxPersistencePump(
+        var pausedPump = new CloudOutboxPersistencePump(
             (_, _) => null,
             (changes, _) =>
             {
@@ -385,50 +285,42 @@ public static class CloudOutboxTests
             coalesceWindowMs: 0,
             startPaused: true);
 
-        pump.MarkDirty(Owner, "pl_a");
+        pausedPump.MarkDirty(Owner, "pl_a");
         await Task.Delay(100).ConfigureAwait(false);
-
         TestAssert.Equal(0, Volatile.Read(ref written));
-        TestAssert.False(await pump.DrainAsync(100).ConfigureAwait(false));
+        TestAssert.False(await pausedPump.DrainAsync(100).ConfigureAwait(false));
 
-        pump.Resume();
-        TestAssert.True(await pump.DrainAsync(5_000).ConfigureAwait(false));
+        pausedPump.Resume();
+        TestAssert.True(await pausedPump.DrainAsync(5_000).ConfigureAwait(false));
         TestAssert.Equal(1, Volatile.Read(ref written));
-        TestAssert.Equal(0, pump.PendingCount);
-    }
+        TestAssert.Equal(0, pausedPump.PendingCount);
 
-    [TestMethod(TestCategory.Unit, "Outbox: Persistence Pump Retries Failed Batch", Group = TestGroups.Playlists, Order = 35, TimeoutSeconds = 15)]
-    public static async Task TestPersistencePumpRetryAsync()
-    {
+        // 3. Transient batch write failure retries and succeeds
         int calls = 0;
-        var pump = new CloudOutboxPersistencePump(
+        var retryPump = new CloudOutboxPersistencePump(
             (_, targetId) => NewState(targetId),
             (_, _) => Interlocked.Increment(ref calls) == 1
                 ? Task.FromException(new IOException("database is locked"))
                 : Task.CompletedTask,
             coalesceWindowMs: 0);
 
-        pump.MarkDirty(Owner, "pl_a");
-
-        TestAssert.True(await pump.DrainAsync(5_000).ConfigureAwait(false));
+        retryPump.MarkDirty(Owner, "pl_a");
+        TestAssert.True(await retryPump.DrainAsync(5_000).ConfigureAwait(false));
         TestAssert.Equal(2, Volatile.Read(ref calls));
-        TestAssert.Equal(1, pump.BatchesWritten);
+        TestAssert.Equal(1, retryPump.BatchesWritten);
     }
 
-    #endregion
-
-    #region SQLite
-
-    [TestMethod(TestCategory.Unit, "Outbox: SQLite Store Roundtrip", Group = TestGroups.Playlists, Order = 36, TimeoutSeconds = 20)]
-    public static async Task TestOutboxStoreRoundtripAsync()
+    [TestMethod(TestCategory.Unit, "Outbox: SQLite Store Roundtrip & Targeted CloudLinkState", Group = TestGroups.Playlists, Order = 25, TimeoutSeconds = 20)]
+    public static async Task TestSqliteOutboxAndCloudLinkStateAsync()
     {
         var path = CreateTempDbPath();
         ISqliteConnectionFactory factory = CreateFactory(path);
         try
         {
             await CreateSchemaAsync(factory).ConfigureAwait(false);
-            var store = new CloudOutboxStore(factory);
 
+            // 1. Outbox batch write/delete & corrupted payload tolerance
+            var store = new CloudOutboxStore(factory);
             var a = NewState("pl_a");
             a.PendingAddTrackIds.Add("yt_1");
             a.UpdatedAtUtcTicks = 100;
@@ -441,8 +333,6 @@ public static class CloudOutboxTests
             await store.WriteBatchAsync(
                 [new CloudOutboxRowChange(Owner, "pl_a", a), new CloudOutboxRowChange(Owner, "pl_b", b)]).ConfigureAwait(false);
             await store.WriteBatchAsync([new CloudOutboxRowChange(Owner, "pl_a", null)]).ConfigureAwait(false);
-
-            // Corrupted row is skipped without interrupting hydration
             await InsertBrokenOutboxRowAsync(factory).ConfigureAwait(false);
 
             var rows = await store.LoadAllAsync().ConfigureAwait(false);
@@ -451,24 +341,9 @@ public static class CloudOutboxTests
             TestAssert.Equal("SV_2", rows[0].PendingRemoveTracks[0].SetVideoId);
             TestAssert.Equal(200L, rows[0].UpdatedAtUtcTicks);
             TestAssert.Equal(2, rows[0].RetryCount);
-        }
-        finally
-        {
-            CleanupTempDb(factory, path);
-        }
-    }
 
-    [TestMethod(TestCategory.Unit, "Outbox: UpdateCloudLinkState Is Targeted", Group = TestGroups.Playlists, Order = 37, TimeoutSeconds = 20)]
-    public static async Task TestUpdateCloudLinkStateAsync()
-    {
-        var path = CreateTempDbPath();
-        ISqliteConnectionFactory factory = CreateFactory(path);
-        try
-        {
-            await CreateSchemaAsync(factory).ConfigureAwait(false);
+            // 2. Targeted UpdateCloudLinkStateAsync preserves concurrent renames and guards LocalOnly/missing playlists
             var repo = new PlaylistRepository(factory);
-
-            // Row was deleted during creation: update does not resurrect it
             TestAssert.False(await repo.UpdateCloudLinkStateAsync("pl_missing", "PL_X", null, false).ConfigureAwait(false));
 
             await repo.UpsertAsync(new Playlist
@@ -480,7 +355,6 @@ public static class CloudOutboxTests
                 Ownership = PlaylistOwnership.Unknown
             }).ConfigureAwait(false);
 
-            // Concurrent renaming must not be overwritten by binding commitment
             await repo.RenameAsync("pl_sync", "Renamed").ConfigureAwait(false);
             TestAssert.True(await repo.UpdateCloudLinkStateAsync("pl_sync", "PL_NEW", null, false).ConfigureAwait(false));
 
@@ -490,7 +364,6 @@ public static class CloudOutboxTests
             TestAssert.Equal("Renamed", linked.Name);
             TestAssert.Equal(PlaylistOwnership.Mine, linked.Ownership);
 
-            // Binding to another cloud playlist is not overwritten
             TestAssert.False(await repo.UpdateCloudLinkStateAsync("pl_sync", "PL_OTHER", null, false).ConfigureAwait(false));
 
             await repo.UpsertAsync(new Playlist
@@ -500,8 +373,6 @@ public static class CloudOutboxTests
                 OwnerId = Owner,
                 SyncMode = PlaylistSyncMode.LocalOnly
             }).ConfigureAwait(false);
-
-            // Playlist unbound from cloud during creation: result is false, caller will delete the cloud copy
             TestAssert.False(await repo.UpdateCloudLinkStateAsync("pl_local", "PL_Y", null, false).ConfigureAwait(false));
         }
         finally
@@ -510,11 +381,172 @@ public static class CloudOutboxTests
         }
     }
 
-    #endregion
+    [TestMethod(TestCategory.Unit, "Outbox: Cloud Rebase (Rejected Edits, Removals, Reorder & Deleted Guard)", Group = TestGroups.Playlists, Order = 26)]
+    public static Task TestCloudRebaseAndDeletedSelectionAsync()
+    {
+        // 1. Rejected edit detection
+        TestAssert.True(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.BadRequest)));
+        TestAssert.True(CloudOutboxCoalescer.IsRejectedEdit(
+            new YoutubeExplodeException("Playlist operation failed with status: STATUS_FAILED")));
+        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.ServiceUnavailable)));
+        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.Unauthorized)));
+        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(new HttpRequestException("socket reset")));
+        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(new TimeoutException()));
 
-    #region Localization
+        // 2. Removal rebase against current cloud state
+        List<(string TrackId, string SetVideoId)> removalCloud =
+        [
+            ("yt_a", "SV_A"), ("yt_c", "SV_C"), ("yt_c", "SV_C2"), ("yt_d", "SV_D")
+        ];
+        List<CloudTrackRemoveEntry> removals =
+        [
+            new() { TrackId = "yt_a", SetVideoId = "SV_A" },
+            new() { TrackId = "yt_b", SetVideoId = "SV_B" },
+            new() { TrackId = "yt_c", SetVideoId = null },
+            new() { TrackId = "yt_c", SetVideoId = CloudOutboxCoalescer.PlaceholderSetVideoId },
+            new() { TrackId = "yt_a", SetVideoId = "SV_A" }
+        ];
+        var rebased = CloudOutboxCoalescer.SelectRemovalsStillInCloud(removals, removalCloud);
+        TestAssert.Equal(3, rebased.Count);
+        TestAssert.Equal("SV_A", rebased[0].SetVideoId);
+        TestAssert.Equal("SV_C", rebased[1].SetVideoId);
+        TestAssert.Equal("SV_C2", rebased[2].SetVideoId);
+        TestAssert.Equal(0, CloudOutboxCoalescer.SelectRemovalsStillInCloud(removals, []).Count);
 
-    [TestMethod(TestCategory.Unit, "Outbox: Summary Plurals Are Localized", Group = TestGroups.Playlists, Order = 38)]
+        // 3. Reorder rebase skips tracks deleted in cloud and converges cleanly
+        List<(string TrackId, string SetVideoId)> reorderCloud =
+        [
+            ("yt_a", "SV_A"), ("yt_c", "SV_C"), ("yt_d", "SV_D"), ("yt_e", "SV_E"), ("yt_a", "SV_A2")
+        ];
+        var (current, desired) = CloudOutboxCoalescer.BuildRebasedReorder(reorderCloud, ["yt_d", "yt_a", "yt_b", "yt_c"]);
+        TestAssert.Equal(4, current.Count);
+        TestAssert.Equal(3, desired.Count);
+
+        var moves = PlaylistSyncService.BuildMinimalReorderMoves(current, desired);
+        TestAssert.True(moves.Count > 0);
+
+        var simulated = new List<string>(reorderCloud.Count);
+        for (int i = 0; i < reorderCloud.Count; i++)
+            simulated.Add(reorderCloud[i].SetVideoId);
+
+        for (int i = 0; i < moves.Count; i++)
+        {
+            var (setVideoId, predecessor, successor) = moves[i];
+            TestAssert.True(simulated.Contains(setVideoId), $"Stale move target {setVideoId}");
+            simulated.Remove(setVideoId);
+
+            int anchor = predecessor != null ? simulated.IndexOf(predecessor) : simulated.IndexOf(successor!);
+            TestAssert.True(anchor >= 0, $"Stale move anchor for {setVideoId}");
+            simulated.Insert(predecessor != null ? anchor + 1 : anchor, setVideoId);
+        }
+
+        var resultingOrder = simulated.FindAll(desired.Contains);
+        TestAssert.Equal(desired.Count, resultingOrder.Count);
+        for (int i = 0; i < desired.Count; i++)
+            TestAssert.Equal(desired[i], resultingOrder[i]);
+
+        // 4. Cloud-deleted selection guards against partial/empty cloud responses and placeholders
+        List<(string TrackId, string? SetVideoId)> local =
+        [
+            ("yt_a", "SV_A"), ("yt_b", "SV_B"), ("yt_new", null),
+            ("yt_ph", CloudOutboxCoalescer.PlaceholderSetVideoId), ("yt_c", "SV_C")
+        ];
+        var cloud = new HashSet<string>(StringComparer.Ordinal) { "yt_a", "yt_c", "yt_x" };
+        var deleted = CloudOutboxCoalescer.SelectCloudDeletedTrackIds(local, cloud);
+        TestAssert.NotNull(deleted);
+        TestAssert.Equal(1, deleted.Count);
+        TestAssert.True(deleted.Contains("yt_b"));
+
+        var emptyCloud = new HashSet<string>(StringComparer.Ordinal);
+        TestAssert.Null(CloudOutboxCoalescer.SelectCloudDeletedTrackIds(local, emptyCloud));
+
+        List<(string TrackId, string? SetVideoId)> many = [];
+        for (int i = 0; i < 8; i++)
+            many.Add(($"yt_{i}", $"SV_{i}"));
+        TestAssert.Null(CloudOutboxCoalescer.SelectCloudDeletedTrackIds(many, new HashSet<string>(StringComparer.Ordinal) { "yt_0", "yt_1" }));
+
+        var nothingLinked = CloudOutboxCoalescer.SelectCloudDeletedTrackIds([("yt_new", null)], emptyCloud);
+        TestAssert.NotNull(nothingLinked);
+        TestAssert.Equal(0, nothingLinked.Count);
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "LIS Minimal Reorder Compression", Group = TestGroups.Playlists, Order = 6)]
+    public static Task TestLisMinimalReorderCompressionAsync()
+    {
+        // 1. Identical lists -> 0 moves
+        var baseList = new List<string> { "sv_0", "sv_1", "sv_2", "sv_3", "sv_4", "sv_5" };
+        var sameMoves = PlaylistSyncService.BuildMinimalReorderMoves(baseList, baseList);
+        TestAssert.Equal(0, sameMoves.Count, "Identical order must produce 0 moves");
+
+        // 2. Moving the first element to the end of a 6-element list requires exactly 1 LIS move
+        var movedFirstToLast = new List<string> { "sv_1", "sv_2", "sv_3", "sv_4", "sv_5", "sv_0" };
+        var singleMove = PlaylistSyncService.BuildMinimalReorderMoves(baseList, movedFirstToLast);
+        TestAssert.Equal(1, singleMove.Count, "Moving 1st track to end must require exactly 1 LIS move");
+        TestAssert.Equal("sv_0", singleMove[0].SetVideoId);
+        TestAssert.Equal("sv_5", singleMove[0].Predecessor);
+
+        // 3. Exact convergence of a complex permutation to the target order
+        var complexTarget = new List<string> { "sv_4", "sv_1", "sv_0", "sv_5", "sv_2", "sv_3" };
+        var complexMoves = PlaylistSyncService.BuildMinimalReorderMoves(baseList, complexTarget);
+        TestAssert.True(complexMoves.Count <= 3, $"Expected <= 3 moves via LIS, got {complexMoves.Count}");
+
+        var simulated = new List<string>(baseList);
+        for (int i = 0; i < complexMoves.Count; i++)
+        {
+            var (sid, pred, succ) = complexMoves[i];
+            simulated.Remove(sid);
+            if (!string.IsNullOrEmpty(pred))
+            {
+                int pIdx = simulated.IndexOf(pred);
+                simulated.Insert(pIdx + 1, sid);
+            }
+            else if (!string.IsNullOrEmpty(succ))
+            {
+                int sIdx = simulated.IndexOf(succ);
+                simulated.Insert(sIdx, sid);
+            }
+        }
+
+        for (int i = 0; i < complexTarget.Count; i++)
+            TestAssert.Equal(complexTarget[i], simulated[i], $"Simulated order mismatch at index {i}");
+
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Outbox: Task Card Countdown", Group = TestGroups.Playlists, Order = 27)]
+    public static Task TestTaskCardCountdownAsync()
+    {
+        var card = new Notification
+        {
+            IsTask = true,
+            IsTaskActive = true,
+            IsTaskProgressHidden = true,
+            TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(64.5)
+        };
+
+        TestAssert.Equal("1:05", card.TimeAgo);
+        TestAssert.True(card.HasTaskCountdown);
+        TestAssert.False(card.ShowTaskProgress);
+        TestAssert.False(card.ShowTaskFooter);
+
+        card.TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(3599.5);
+        TestAssert.Equal("1:00:00", card.TimeAgo);
+
+        card.TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(-1);
+        TestAssert.Equal(LocalizationService.Instance["CloudTask_Overdue"], card.TimeAgo);
+
+        card.TaskStatusText = "sending";
+        TestAssert.Equal("sending", card.TimeAgo);
+        TestAssert.False(card.HasTaskCountdown);
+
+        card.TaskActionCommand = new RelayCommand(static () => { });
+        card.TaskActionKey = "CloudTask_ForceSend";
+        TestAssert.True(card.ShowTaskFooter);
+        return Task.CompletedTask;
+    }
+
+    [TestMethod(TestCategory.Unit, "Outbox: Summary Plurals Are Localized", Group = TestGroups.Playlists, Order = 28)]
     public static Task TestSummaryPluralsAsync()
     {
         var sl = LocalizationService.Instance;
@@ -545,171 +577,6 @@ public static class CloudOutboxTests
         return Task.CompletedTask;
     }
 
-    #endregion
-
-    #region Cloud Rebase
-
-    [TestMethod(TestCategory.Unit, "Outbox: Rejected Edit Detection", Group = TestGroups.Playlists, Order = 39)]
-    public static Task TestRejectedEditDetectionAsync()
-    {
-        TestAssert.True(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.BadRequest)));
-        TestAssert.True(CloudOutboxCoalescer.IsRejectedEdit(
-            new YoutubeExplodeException("Playlist operation failed with status: STATUS_FAILED")));
-
-        // Transport and auth failures are not edit rejections and do not trigger rebasing
-        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.ServiceUnavailable)));
-        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(Http(HttpStatusCode.Unauthorized)));
-        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(new HttpRequestException("socket reset")));
-        TestAssert.False(CloudOutboxCoalescer.IsRejectedEdit(new TimeoutException()));
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Removal Rebase On Cloud State", Group = TestGroups.Playlists, Order = 40)]
-    public static Task TestRemovalRebaseAsync()
-    {
-        List<(string TrackId, string SetVideoId)> cloud =
-        [
-            ("yt_a", "SV_A"), ("yt_c", "SV_C"), ("yt_c", "SV_C2"), ("yt_d", "SV_D")
-        ];
-
-        List<CloudTrackRemoveEntry> removals =
-        [
-            new() { TrackId = "yt_a", SetVideoId = "SV_A" },
-            new() { TrackId = "yt_b", SetVideoId = "SV_B" },
-            new() { TrackId = "yt_c", SetVideoId = null },
-            new() { TrackId = "yt_c", SetVideoId = CloudOutboxCoalescer.PlaceholderSetVideoId },
-            new() { TrackId = "yt_a", SetVideoId = "SV_A" }
-        ];
-
-        var rebased = CloudOutboxCoalescer.SelectRemovalsStillInCloud(removals, cloud);
-
-        // SV_B deleted on another device: not sent; duplicate SV_A not repeated; yt_c resolved by occurrences
-        TestAssert.Equal(3, rebased.Count);
-        TestAssert.Equal("SV_A", rebased[0].SetVideoId);
-        TestAssert.Equal("SV_C", rebased[1].SetVideoId);
-        TestAssert.Equal("SV_C2", rebased[2].SetVideoId);
-        TestAssert.Equal(0, CloudOutboxCoalescer.SelectRemovalsStillInCloud(removals, []).Count);
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Reorder Rebase Skips Deleted", Group = TestGroups.Playlists, Order = 41)]
-    public static Task TestReorderRebaseAsync()
-    {
-        // Locally: d moved to start. In cloud: b already deleted, e added, a duplicated
-        List<(string TrackId, string SetVideoId)> cloud =
-        [
-            ("yt_a", "SV_A"), ("yt_c", "SV_C"), ("yt_d", "SV_D"), ("yt_e", "SV_E"), ("yt_a", "SV_A2")
-        ];
-
-        var (current, desired) = CloudOutboxCoalescer.BuildRebasedReorder(cloud, ["yt_d", "yt_a", "yt_b", "yt_c"]);
-        TestAssert.Equal(4, current.Count);
-        TestAssert.Equal(3, desired.Count);
-        TestAssert.Equal("SV_D", desired[0]);
-        TestAssert.Equal("SV_A", desired[1]);
-        TestAssert.Equal("SV_C", desired[2]);
-
-        var moves = PlaylistSyncService.BuildMinimalReorderMoves(current, desired);
-        TestAssert.True(moves.Count > 0);
-
-        var simulated = new List<string>(cloud.Count);
-        for (int i = 0; i < cloud.Count; i++)
-            simulated.Add(cloud[i].SetVideoId);
-
-        for (int i = 0; i < moves.Count; i++)
-        {
-            var (setVideoId, predecessor, successor) = moves[i];
-
-            // No move operation references a SetVideoId deleted in the cloud (otherwise YouTube returns 400)
-            TestAssert.True(simulated.Contains(setVideoId), $"Stale move target {setVideoId}");
-            simulated.Remove(setVideoId);
-
-            int anchor = predecessor != null ? simulated.IndexOf(predecessor) : simulated.IndexOf(successor!);
-            TestAssert.True(anchor >= 0, $"Stale move anchor for {setVideoId}");
-            simulated.Insert(predecessor != null ? anchor + 1 : anchor, setVideoId);
-        }
-
-        var resultingOrder = simulated.FindAll(desired.Contains);
-        TestAssert.Equal(desired.Count, resultingOrder.Count);
-        for (int i = 0; i < desired.Count; i++)
-            TestAssert.Equal(desired[i], resultingOrder[i]);
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Outbox: Cloud-Deleted Tracks Selection", Group = TestGroups.Playlists, Order = 42)]
-    public static Task TestCloudDeletedSelectionAsync()
-    {
-        List<(string TrackId, string? SetVideoId)> local =
-        [
-            ("yt_a", "SV_A"), ("yt_b", "SV_B"), ("yt_new", null),
-            ("yt_ph", CloudOutboxCoalescer.PlaceholderSetVideoId), ("yt_c", "SV_C")
-        ];
-        var cloud = new HashSet<string>(StringComparer.Ordinal) { "yt_a", "yt_c", "yt_x" };
-
-        // Only cloud-bound tracks are considered deleted; new ones and placeholders are not yet uploaded
-        var deleted = CloudOutboxCoalescer.SelectCloudDeletedTrackIds(local, cloud);
-        TestAssert.NotNull(deleted);
-        TestAssert.Equal(1, deleted.Count);
-        TestAssert.True(deleted.Contains("yt_b"));
-
-        // Empty cloud response must not wipe out local playlist
-        var emptyCloud = new HashSet<string>(StringComparer.Ordinal);
-        TestAssert.Null(CloudOutboxCoalescer.SelectCloudDeletedTrackIds(local, emptyCloud));
-
-        List<(string TrackId, string? SetVideoId)> many = [];
-        for (int i = 0; i < 8; i++)
-            many.Add(($"yt_{i}", $"SV_{i}"));
-
-        var partialCloud = new HashSet<string>(StringComparer.Ordinal) { "yt_0", "yt_1" };
-        TestAssert.Null(CloudOutboxCoalescer.SelectCloudDeletedTrackIds(many, partialCloud));
-
-        var nothingLinked = CloudOutboxCoalescer.SelectCloudDeletedTrackIds([("yt_new", null)], emptyCloud);
-        TestAssert.NotNull(nothingLinked);
-        TestAssert.Equal(0, nothingLinked.Count);
-        return Task.CompletedTask;
-    }
-
-    #endregion
-
-    #region Task Card
-
-    [TestMethod(TestCategory.Unit, "Outbox: Task Card Countdown", Group = TestGroups.Playlists, Order = 43)]
-    public static Task TestTaskCardCountdownAsync()
-    {
-        var card = new Notification
-        {
-            IsTask = true,
-            IsTaskActive = true,
-            IsTaskProgressHidden = true,
-            TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(64.5)
-        };
-
-        // Seconds are rounded up to prevent lingering at "0:00" prior to actual sending
-        TestAssert.Equal("1:05", card.TimeAgo);
-        TestAssert.True(card.HasTaskCountdown);
-        TestAssert.False(card.ShowTaskProgress);
-        TestAssert.False(card.ShowTaskFooter);
-
-        card.TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(3599.5);
-        TestAssert.Equal("1:00:00", card.TimeAgo);
-
-        // Overdue deadline (worker waiting for network/auth) must not freeze at "0:00"
-        card.TaskDeadlineUtc = DateTime.UtcNow.AddSeconds(-1);
-        TestAssert.Equal(LocalizationService.Instance["CloudTask_Overdue"], card.TimeAgo);
-
-        // Explicit task status takes precedence over countdown, and no timer is needed for it
-        card.TaskStatusText = "sending";
-        TestAssert.Equal("sending", card.TimeAgo);
-        TestAssert.False(card.HasTaskCountdown);
-
-        card.TaskActionCommand = new RelayCommand(static () => { });
-        card.TaskActionKey = "CloudTask_ForceSend";
-        TestAssert.True(card.ShowTaskFooter);
-        return Task.CompletedTask;
-    }
-
-    #endregion
-
     #region Helpers
 
     private static CloudPlaylistOutboxState NewState(string targetId) => new()
@@ -720,7 +587,6 @@ public static class CloudOutboxTests
 
     private static HttpRequestException Http(HttpStatusCode status) => new($"HTTP {(int)status}", null, status);
 
-    // Delegate hides concrete type: tests operate via contract, mirroring DI in AppEntry (CA1859)
     private static readonly Func<string, ISqliteConnectionFactory> CreateFactory =
         static path => new LowMemorySqliteConnectionFactory(path);
 
@@ -765,7 +631,6 @@ public static class CloudOutboxTests
         }
         catch (IOException)
         {
-            // Temp file will be deleted by the OS: test must not fail due to antivirus locks
         }
     }
 

@@ -7,25 +7,19 @@ using LMP.Tests.Framework;
 namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Integration tests for BotGuard PoToken generation.
-/// Core tests with assertions are included in the automated run,
-/// while step-by-step dumpers are categorized under Diagnostic.
+/// Integration tests and step-by-step diagnostic trace for BotGuard PoToken generation.
 /// </summary>
 public static class PoTokenTests
 {
-    // ==========================================
-    //        AUTOMATED INTEGRATION TESTS
-    // ==========================================
-
     [TestMethod(TestCategory.Integration, "BotGuard PoToken Mint & Length Invariant",
         Group = TestGroups.Cipher, Order = 1, RequiresNetwork = true, TimeoutSeconds = 90)]
-    public static async Task TestMintTokenLengthAsync()
+    public static async Task TestMintTokenLengthAsync(CancellationToken ct = default)
     {
         using var service = new BotGuardService(SharedHttpClient.Instance);
         const string videoId = "dQw4w9WgXcQ";
 
         var sw = Stopwatch.StartNew();
-        var token = await service.MintForVideoAsync(videoId).ConfigureAwait(false);
+        var token = await service.MintForVideoAsync(videoId, ct).ConfigureAwait(false);
         sw.Stop();
 
         TestAssert.NotNullOrEmpty(token, "MintForVideoAsync returned null/empty token");
@@ -38,13 +32,13 @@ public static class PoTokenTests
 
     [TestMethod(TestCategory.Integration, "PoToken Full Pipeline Resolution",
         Group = TestGroups.Cipher, Order = 2, RequiresNetwork = true, TimeoutSeconds = 90)]
-    public static async Task TestFullPipelineAsync()
+    public static async Task TestFullPipelineAsync(CancellationToken ct = default)
     {
         using var service = new BotGuardService(SharedHttpClient.Instance);
         var visitorId = Core.Youtube.Utils.YoutubeClientUtils.VisitorData;
 
         var sw = Stopwatch.StartNew();
-        var token = await service.GenerateAsync(visitorId).ConfigureAwait(false);
+        var token = await service.GenerateAsync(visitorId, ct).ConfigureAwait(false);
         sw.Stop();
 
         TestAssert.NotNullOrEmpty(token, "Full pipeline returned null/empty PoToken");
@@ -54,53 +48,32 @@ public static class PoTokenTests
         Log.Info($"[PoToken] ✓ Full pipeline verified in {sw.ElapsedMilliseconds}ms");
     }
 
-    // ==========================================
-    //           DIAGNOSTIC STEP PROBES
-    // ==========================================
-
-    [TestMethod(TestCategory.Diagnostic, "BotGuard Step 1 — WAA Challenge Fetch",
-        Group = TestGroups.Cipher, Order = 10, RequiresNetwork = true, TimeoutSeconds = 30)]
-    public static async Task TestWaaChallengeAsync()
+    [TestMethod(TestCategory.Diagnostic, "BotGuard End-to-End Stage Trace (WAA -> bg.js -> QuickJS -> Integrity)",
+        Group = TestGroups.Cipher, Order = 10, RequiresNetwork = true, TimeoutSeconds = 90)]
+    public static async Task TestBotGuardStepTraceAsync(CancellationToken ct = default)
     {
-        var sw = Stopwatch.StartNew();
-        var challenge = await WaaClient.FetchChallengeAsync(SharedHttpClient.Instance).ConfigureAwait(false);
-        sw.Stop();
+        var http = SharedHttpClient.Instance;
 
-        TestAssert.NotNull(challenge, "FetchChallengeAsync returned null");
+        var sw = Stopwatch.StartNew();
+        var challenge = await WaaClient.FetchChallengeAsync(http, ct: ct).ConfigureAwait(false);
+        TestAssert.NotNull(challenge, "Step 1 (WAA Challenge) returned null");
         TestAssert.NotNullOrEmpty(challenge.Program);
         TestAssert.NotNullOrEmpty(challenge.GlobalName);
         TestAssert.True(challenge.HasScript, "Challenge missing both ScriptUrl and InlineScript");
+        Log.Info($"[PoToken] Step 1 WAA Challenge: {sw.ElapsedMilliseconds}ms (GlobalName='{challenge.GlobalName}')");
 
-        Log.Info($"[PoToken] Challenge resolved in {sw.ElapsedMilliseconds}ms (GlobalName='{challenge.GlobalName}')");
-    }
+        sw.Restart();
+        var bgScript = await ResolveBgScriptAsync(http, challenge, ct).ConfigureAwait(false);
+        TestAssert.NotNullOrEmpty(bgScript);
+        TestAssert.True(bgScript.Length > 10_000, $"Step 2 (bg.js) suspiciously small: {bgScript.Length} bytes");
+        Log.Info($"[PoToken] Step 2 bg.js download: {bgScript.Length / 1024}KB in {sw.ElapsedMilliseconds}ms");
 
-    [TestMethod(TestCategory.Diagnostic, "BotGuard Step 2 — bg.js Script Download",
-        Group = TestGroups.Cipher, Order = 11, RequiresNetwork = true, TimeoutSeconds = 30)]
-    public static async Task TestBgJsDownloadAsync()
-    {
-        var challenge = await WaaClient.FetchChallengeAsync(SharedHttpClient.Instance).ConfigureAwait(false);
-        TestAssert.NotNull(challenge);
-
-        var script = await ResolveBgScriptAsync(challenge).ConfigureAwait(false);
-        TestAssert.NotNullOrEmpty(script);
-        TestAssert.True(script.Length > 10_000, $"bg.js suspiciously small: {script.Length} bytes");
-
-        Log.Info($"[PoToken] bg.js downloaded: {script.Length / 1024}KB");
-    }
-
-    [TestMethod(TestCategory.Diagnostic, "BotGuard Step 3 — QuickJS Snapshot Execution",
-        Group = TestGroups.Cipher, Order = 12, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestQuickJsSnapshotAsync()
-    {
-        var challenge = await WaaClient.FetchChallengeAsync(SharedHttpClient.Instance).ConfigureAwait(false);
-        TestAssert.NotNull(challenge);
-
-        var bgScript = await ResolveBgScriptAsync(challenge).ConfigureAwait(false);
         var handle = QuickJsNative.CreateContext("void 0;");
         TestAssert.True(handle != IntPtr.Zero, "Failed to create QuickJS context");
 
         try
         {
+            sw.Restart();
             var bgEvalRes = QuickJsNative.Eval(handle, bgScript);
             TestAssert.False(bgEvalRes?.StartsWith("__err:", StringComparison.Ordinal) == true, $"bg.js load failed: {bgEvalRes}");
 
@@ -108,43 +81,14 @@ public static class PoTokenTests
             TestAssert.True(bootstrapOk, "Native InitBotGuardBootstrap failed");
 
             var snapshot = await RunAsyncJsFunctionAsync(handle, "_bg_doSnapshot()").ConfigureAwait(false);
-            TestAssert.NotNullOrEmpty(snapshot, "Snapshot execution returned empty");
+            TestAssert.NotNullOrEmpty(snapshot, "Step 3 (QuickJS Snapshot) returned empty");
+            Log.Info($"[PoToken] Step 3 QuickJS Snapshot: {snapshot.Length} chars in {sw.ElapsedMilliseconds}ms");
 
-            Log.Info($"[PoToken] Snapshot success! Length={snapshot.Length}");
-        }
-        finally
-        {
-            QuickJsNative.DestroyContext(handle);
-        }
-    }
-
-    [TestMethod(TestCategory.Diagnostic, "BotGuard Step 4 — IntegrityToken Minting",
-        Group = TestGroups.Cipher, Order = 13, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestIntegrityTokenAsync()
-    {
-        var challenge = await WaaClient.FetchChallengeAsync(SharedHttpClient.Instance).ConfigureAwait(false);
-        TestAssert.NotNull(challenge);
-
-        var bgScript = await ResolveBgScriptAsync(challenge).ConfigureAwait(false);
-        var handle = QuickJsNative.CreateContext("void 0;");
-        TestAssert.True(handle != IntPtr.Zero);
-
-        try
-        {
-            QuickJsNative.Eval(handle, bgScript);
-            QuickJsNative.InitBotGuardBootstrap(handle, challenge.GlobalName, challenge.Program);
-
-            var snapshot = await RunAsyncJsFunctionAsync(handle, "_bg_doSnapshot()").ConfigureAwait(false);
-            TestAssert.NotNullOrEmpty(snapshot);
-
-            var sw = Stopwatch.StartNew();
-            var integrityData = await WaaClient.GenerateIntegrityTokenAsync(SharedHttpClient.Instance, snapshot).ConfigureAwait(false);
-            sw.Stop();
-
-            TestAssert.NotNull(integrityData);
+            sw.Restart();
+            var integrityData = await WaaClient.GenerateIntegrityTokenAsync(http, snapshot, ct).ConfigureAwait(false);
+            TestAssert.NotNull(integrityData, "Step 4 (IntegrityToken) returned null");
             TestAssert.NotNullOrEmpty(integrityData.IntegrityToken);
-
-            Log.Info($"[PoToken] IntegrityToken minted in {sw.ElapsedMilliseconds}ms (TTL={integrityData.EstimatedTtlSecs}s)");
+            Log.Info($"[PoToken] Step 4 IntegrityToken: {sw.ElapsedMilliseconds}ms (TTL={integrityData.EstimatedTtlSecs}s)");
         }
         finally
         {
@@ -152,7 +96,7 @@ public static class PoTokenTests
         }
     }
 
-    private static async Task<string> ResolveBgScriptAsync(BotGuardChallenge challenge)
+    private static async Task<string> ResolveBgScriptAsync(HttpClient http, BotGuardChallenge challenge, CancellationToken ct)
     {
         if (!string.IsNullOrEmpty(challenge.InlineScript))
             return challenge.InlineScript;
@@ -160,7 +104,7 @@ public static class PoTokenTests
         if (string.IsNullOrEmpty(challenge.ScriptUrl))
             throw new InvalidOperationException("Challenge has neither InlineScript nor ScriptUrl");
 
-        return await SharedHttpClient.Instance.GetStringAsync(challenge.ScriptUrl).ConfigureAwait(false);
+        return await http.GetStringAsync(challenge.ScriptUrl, ct).ConfigureAwait(false);
     }
 
     private static async Task<string?> RunAsyncJsFunctionAsync(IntPtr handle, string jsExpression, int timeoutMs = 10_000)

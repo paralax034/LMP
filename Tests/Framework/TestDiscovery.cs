@@ -163,16 +163,18 @@ public static class TestDiscovery
             name = name[..^5];
         else if (name.EndsWith("Benchmarks", StringComparison.Ordinal))
             name = name[..^10];
+        else if (name.EndsWith("Diagnostics", StringComparison.Ordinal))
+            name = name[..^11];
 
         return name switch
         {
-            "SigCipherSolver" or "SigCipher" or "NToken" or "PoToken" => TestGroups.Cipher,
-            "CdnDiagnostic" or "StreamFreshness" => TestGroups.Network,
-            "StreamPipeline" or "PlayerResponse" or "SearchResponse" or "PlaylistStreamingParser" or "StreamingMemoryBenchmark" => TestGroups.Youtube,
-            "Cache" or "AtomicFile" or "MemoryPack" => TestGroups.Storage,
-            "AudioHotPath" or "HotPathAllocation" or "PreScan" => TestGroups.Audio,
-            "PlaylistOrder" => TestGroups.Playlists,
-            "Notification" or "Update" => TestGroups.System,
+            "Cipher" or "SigCipher" or "NToken" or "PoToken" => TestGroups.Cipher,
+            "Cdn" or "CdnDiagnostic" or "StreamFreshness" or "StreamRefreshResilience" or "NetworkLogic" => TestGroups.Network,
+            "StreamPipeline" or "PlayerResponse" or "SearchResponse" or "PlaylistStreamingParser" or "StreamingMemory" => TestGroups.Youtube,
+            "Cache" or "AtomicFile" or "MemoryPack" or "DataSmoke" => TestGroups.Storage,
+            "AudioHotPath" or "HotPathAllocation" or "PreScan" or "WebMParser" or "Mp4BinaryReader" or "RenderClock" => TestGroups.Audio,
+            "PlaylistOrder" or "CloudOutbox" => TestGroups.Playlists,
+            "System" or "Notification" or "Update" or "DebugActions" => TestGroups.System,
             _ => TestGroups.Normalize(name.ToString()),
         };
     }

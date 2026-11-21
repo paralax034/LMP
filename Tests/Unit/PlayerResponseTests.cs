@@ -60,6 +60,15 @@ public static class PlayerResponseTests
     }
     """;
 
+  [TestMethod(TestCategory.Unit, "Extract SignatureTimestamp (STS) from Player JS", Group = TestGroups.Cipher, Order = 1)]
+  public static Task TestStsExtractionAsync()
+  {
+    const string mockPlayerScript = "var sts = 20650; signatureTimestamp: 20650;";
+    var sts = Core.Youtube.Bridge.Common.YoutubeAstSolver.ExtractSts(mockPlayerScript);
+    TestAssert.Equal("20650", sts, "STS extraction mismatch");
+    return Task.CompletedTask;
+  }
+
   [TestMethod(TestCategory.Unit, "PlayerResponse JSON Stream Parsing", Group = TestGroups.Youtube, Order = 1)]
   public static async Task TestPlayerResponseIntegrityAsync()
   {

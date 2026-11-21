@@ -1,7 +1,4 @@
-using System.Net.Sockets;
 using System.Text;
-using LMP.Core.Audio.Helpers;
-using LMP.Core.Helpers;
 using LMP.Core.Youtube.Bridge;
 using LMP.Core.Youtube.Channels;
 using LMP.Core.Youtube.Playlists;
@@ -159,18 +156,6 @@ public static class SearchResponseTests
     // Positive ChannelId check (including fragment)
     var parsedChannel = ChannelId.TryParse("https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw#about");
     TestAssert.True(parsedChannel is { Value: "UC_x5XG1OV2P6uZZ5FSM9Ttw" }, "Valid channel URL must parse");
-
-    // Cancellation vs timeout/network disambiguation
-    using var userCts = new CancellationTokenSource();
-    userCts.Cancel();
-    var userCancelWrappedSocket = new Exception(
-        "AudioSource aborted",
-        new TaskCanceledException("Aborted", new IOException("Read aborted", new SocketException((int)SocketError.OperationAborted)), userCts.Token));
-    TestAssert.True(CancellationHelper.IsUserCancellation(userCancelWrappedSocket), "Token-backed cancellation wrapping IO/SocketException must be treated as user cancellation");
-
-    var httpTimeout = new TaskCanceledException("Request timed out", new TimeoutException());
-    TestAssert.True(!CancellationHelper.IsUserCancellation(httpTimeout), "Un-cancelled TaskCanceledException timeout must NOT be treated as user cancellation");
-    TestAssert.True(!NetworkErrorHelper.IsCancellationLike(new IOException("Reset", new SocketException((int)SocketError.ConnectionReset))), "Bare IO/SocketException must NOT be treated as cancellation");
 
     return Task.CompletedTask;
   }

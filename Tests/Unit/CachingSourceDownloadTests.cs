@@ -192,16 +192,17 @@ public static class CachingSourceDownloadTests
     /// Linear merging of disk ranges and RAM blocks: overlapping, adjacency, and gaps,
     /// with zero-allocation result counting and population.
     /// </summary>
-    [TestMethod(TestCategory.Unit, "MergeBufferedRanges Linear Disk+RAM Merge (0 Alloc)", Group = TestGroups.Audio, Order = 30)]
-    public static Task TestMergeBufferedRangesAsync()
+    [TestMethod(TestCategory.Unit, "Range Merging (0 Alloc), Unaligned Critical Span & Probe Offset", Group = TestGroups.Audio, Order = 30)]
+    public static Task TestRangePlanningMergeAndProbeContractsAsync()
     {
+        // 1. Linear merging of disk ranges and RAM blocks (0 Alloc)
         const long contentLength = 10_000;
         CacheByteRange[] disk = [new(0, 1_000), new(3_000, 4_000), new(8_000, 9_000)];
 
         using var cache = new SlidingRamCache();
-        AddBlock(cache, 900, 600);     // overlaps [0, 1000)  -> [0, 1500)
-        AddBlock(cache, 4_000, 500);   // adjacent to [3000, 4000)  -> [3000, 4500)
-        AddBlock(cache, 6_000, 500);   // standalone segment
+        AddBlock(cache, 900, 600);
+        AddBlock(cache, 4_000, 500);
+        AddBlock(cache, 6_000, 500);
         RamRangeBlock[] ram = cache.GetRangesSnapshot();
 
         int count = CachingStreamSource.MergeBufferedRanges(disk, ram, contentLength, []);
@@ -221,54 +222,27 @@ public static class CachingSourceDownloadTests
                 TestAssert.Fail("MergeBufferedRanges must return the same segment count on every pass");
         }, warmup: 10, iterations: 5_000, context: "MergeBufferedRanges");
 
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// A critical request from an aligned-down start covers the entire reader window from an unaligned seek position
-    /// and does not exceed the end of the content.
-    /// </summary>
-    [TestMethod(TestCategory.Unit, "Critical Download Span Covers Unaligned Seek Head", Group = TestGroups.Audio, Order = 31)]
-    public static Task TestCriticalSpanCoversUnalignedRequestAsync()
-    {
+        // 2. Unaligned critical download span covers seek head and respects content length
         const int alignment = 16_384;
         const int minimumLength = 49_152;
-        const long contentLength = 3_657_225;
         const long requested = 1_090_059;
-        const long planStart = requested - requested % alignment; // 1_081_344: head of 8_715 bytes before position
+        const long planStart = requested - requested % alignment;
 
-        // 1. Unaligned position: length increases by the head, plan ends exactly where the reader window ends
-        int span = CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart, contentLength);
+        int span = CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart, 3_657_225);
         TestAssert.Equal(57_867, span);
-        TestAssert.Equal(requested + minimumLength, planStart + span, "Critical plan must end exactly where the reader window ends");
-
-        // 2. Aligned position: exactly the minimum
-        TestAssert.Equal(minimumLength, CachingStreamSource.ComputeCriticalSpan(planStart, minimumLength, planStart, contentLength));
-
-        // 3. Start shifted past locally available data: minimum is calculated from the plan start
-        TestAssert.Equal(minimumLength, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart + 3 * alignment, contentLength));
-
-        // 4. File tail: length is truncated by the end of content, plan is empty past the end
+        TestAssert.Equal(requested + minimumLength, planStart + span);
+        TestAssert.Equal(minimumLength, CachingStreamSource.ComputeCriticalSpan(planStart, minimumLength, planStart, 3_657_225));
+        TestAssert.Equal(minimumLength, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart + 3 * alignment, 3_657_225));
         TestAssert.Equal(18_656, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, planStart, 1_100_000));
-        TestAssert.Equal(0, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, contentLength, contentLength));
+        TestAssert.Equal(0, CachingStreamSource.ComputeCriticalSpan(requested, minimumLength, 1_100_000, 1_100_000));
 
-        return Task.CompletedTask;
-    }
+        // 3. Coverage probe offset lookup across RAM and disk entries
+        const int probeAlignment = 65_536;
+        using var probeCache = new SlidingRamCache();
+        AddBlock(probeCache, 100_000, 92_000);
+        AddBlock(probeCache, 262_144, 65_536);
 
-    [TestMethod(TestCategory.Unit, "Coverage Probe Offset Lookup Matches Alignment Boundaries", Group = TestGroups.Audio, Order = 32)]
-    public static Task TestCoverageProbeOffsetLookupAsync()
-    {
-        const int alignment = 65_536;
-        using var cache = new SlidingRamCache();
-        AddBlock(cache, 100_000, 92_000); // covers aligned probe [131_072, 196_608)? 100_000 + 92_000 = 192_000 < 196_608 -> no
-        AddBlock(cache, 262_144, 65_536); // covers [262_144, 327_680) -> yes
-
-        long foundRam = cache.FindFirstCoveredProbeOffset(
-            minProbe: alignment,
-            endExclusive: 524_288,
-            alignment: alignment,
-            originStart: 0);
-        TestAssert.Equal(262_144L, foundRam);
+        TestAssert.Equal(262_144L, probeCache.FindFirstCoveredProbeOffset(probeAlignment, 524_288, probeAlignment, 0));
 
         var entry = new Core.Audio.Cache.AudioCacheEntry
         {
@@ -277,12 +251,7 @@ public static class CachingSourceDownloadTests
             TotalSize = 1_000_000
         };
         entry.MarkRangeDownloaded(131_072, 65_536);
-        long foundDisk = entry.FindFirstCoveredProbeOffset(
-            minProbe: alignment,
-            endExclusive: 524_288,
-            alignment: alignment,
-            originStart: 0);
-        TestAssert.Equal(131_072L, foundDisk);
+        TestAssert.Equal(131_072L, entry.FindFirstCoveredProbeOffset(probeAlignment, 524_288, probeAlignment, 0));
 
         return Task.CompletedTask;
     }
@@ -342,12 +311,14 @@ public static class CachingSourceDownloadTests
 
         TestAssert.True(await source.InitializeAsync().ConfigureAwait(false), "Local bootstrap must initialize cleanly");
 
-        // Wait for PreloadLoopAsync to hit 403 and exhaust the 3-refresh budget
-        bool budgetExhausted = await AudioPipelineTestHarness.WaitUntilAsync(() => Volatile.Read(ref requests) >= 4, 5_000).ConfigureAwait(false);
-        TestAssert.True(budgetExhausted, $"Preload must attempt up to budget (got {requests})");
+        // Wait until all 3 refreshes in the 403 budget are actually consumed (parallel ranges can hit 4 requests on refresh #1)
+        bool budgetExhausted = await AudioPipelineTestHarness
+            .WaitUntilAsync(() => Volatile.Read(ref refreshes) >= 3 && Volatile.Read(ref requests) >= 4, 5_000)
+            .ConfigureAwait(false);
+        TestAssert.True(budgetExhausted, $"Preload must exhaust 3-refresh budget (refreshes={refreshes}, requests={requests})");
 
-        // Allow any in-flight parallel range task from the initial tick to settle, then verify PreloadLoopAsync stops completely
-        await Task.Delay(150).ConfigureAwait(false);
+        // Allow the terminal 403 response and any concurrent range task to settle, then verify PreloadLoopAsync stops completely
+        await Task.Delay(250).ConfigureAwait(false);
         int requestsAfterBudget = Volatile.Read(ref requests);
         await Task.Delay(350).ConfigureAwait(false);
         TestAssert.Equal(requestsAfterBudget, Volatile.Read(ref requests),

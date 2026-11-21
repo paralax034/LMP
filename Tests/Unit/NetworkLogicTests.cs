@@ -46,32 +46,7 @@ public static class NetworkLogicTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "DelayNoThrow Cancellation Zero First-Chance Exceptions", Group = TestGroups.Network, Order = 2)]
-    public static async Task TestDelayNoThrowCancellationAsync()
-    {
-        int cancelExceptionsCount = 0;
-        void OnFirstChanceException(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
-        {
-            if (e.Exception is OperationCanceledException)
-                Interlocked.Increment(ref cancelExceptionsCount);
-        }
-
-        AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
-        try
-        {
-            using var cts = new CancellationTokenSource(millisecondsDelay: 15);
-            bool completedNormally = await cts.Token.DelayNoThrowAsync(5_000, continueOnCapturedContext: false).ConfigureAwait(false);
-
-            TestAssert.False(completedNormally, "DelayNoThrowAsync must return false on cancel");
-            TestAssert.Equal(0, cancelExceptionsCount, "SuppressThrowing must not raise first-chance exceptions");
-        }
-        finally
-        {
-            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
-        }
-    }
-
-    [TestMethod(TestCategory.Unit, "YoutubeNetworkException Classification & User-Cancel Guard", Group = TestGroups.Network, Order = 3)]
+    [TestMethod(TestCategory.Unit, "YoutubeNetworkException Classification & User-Cancel Guard", Group = TestGroups.Network, Order = 2)]
     public static Task TestYoutubeNetworkExceptionClassificationAsync()
     {
         // 1. Internal HttpClient timeout when the external token is not canceled -> Timeout

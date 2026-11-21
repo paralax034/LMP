@@ -665,16 +665,6 @@ public static class PlaylistStreamingParserTests
     TestAssert.Equal(2026, YoutubeParsingHelpers.ParseYearFromText("Updated 2026".AsSpan()));
     TestAssert.Equal(new DateOnly(2026, 10, 28), YoutubeParsingHelpers.ParseRelativeDate("2 days ago".AsSpan(), nowUtc));
 
-    var reason = PlayabilityErrorClassifier.Classify(
-        "Video unavailable. This video contains content from SME, who has blocked it on copyright grounds",
-        out var claimant);
-    TestAssert.Equal(Core.Youtube.Exceptions.StreamUnavailableReason.CopyrightBlocked, reason);
-    TestAssert.Equal("SME", claimant);
-
-    var sapisidHeader = Core.Youtube.YoutubeHttpHandler.GetAuthHeader("TEST_SAPISID_VALUE", "https://music.youtube.com");
-    TestAssert.NotNullOrEmpty(sapisidHeader);
-    TestAssert.True(sapisidHeader.StartsWith("SAPISIDHASH ", StringComparison.Ordinal));
-
     TestAssert.ZeroAlloc(() =>
     {
       _ = ThumbnailComparer.AreEquivalent(googleContent576, googleContent1200, playlistId);

@@ -1,26 +1,22 @@
 using System.Diagnostics;
 using LMP.Core.Youtube.Bridge.Common;
 using LMP.Core.Youtube.Bridge.NToken;
+using LMP.Core.Youtube.Bridge.SigCipher;
 using LMP.Tests.Framework;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace LMP.Tests.Unit;
+namespace LMP.Tests.Integration;
 
 /// <summary>
-/// Integration tests and benchmarks for the N-Token decryption subsystem.
-/// Validates interaction with QuickJS runtime, caching, idempotency, and AST Solver.
+/// Live and cached-artifact integration tests for YouTube deciphering (N-Token, SigCipher, AST Solver, QuickJS).
 /// </summary>
-public static class NTokenTests
+public static class CipherTests
 {
     private static string TestToken => TestConfig.Get().NToken.TestToken;
 
-    // ==========================================
-    //          LIVE INTEGRATION TESTS
-    // ==========================================
-
     [TestMethod(TestCategory.Integration, "N-Token Live Decryption",
         Group = TestGroups.Cipher, Order = 1, RequiresNetwork = true, TimeoutSeconds = 60)]
-    public static async Task TestLiveDecryptionAsync(IServiceProvider services, CancellationToken ct = default)
+    public static async Task TestNTokenLiveDecryptionAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var token = TestToken;
@@ -47,7 +43,7 @@ public static class NTokenTests
 
     [TestMethod(TestCategory.Integration, "N-Token Memory Cache Hit (<5ms)",
         Group = TestGroups.Cipher, Order = 2, RequiresNetwork = true, TimeoutSeconds = 30)]
-    public static async Task TestCacheHitAsync(IServiceProvider services, CancellationToken ct = default)
+    public static async Task TestNTokenCacheHitAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var token = TestToken;
@@ -67,7 +63,7 @@ public static class NTokenTests
 
     [TestMethod(TestCategory.Integration, "N-Token Idempotency Guard",
         Group = TestGroups.Cipher, Order = 3, RequiresNetwork = true, TimeoutSeconds = 30)]
-    public static async Task TestIdempotencyAsync(IServiceProvider services, CancellationToken ct = default)
+    public static async Task TestNTokenIdempotencyAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var decryptor = services.GetRequiredService<NTokenDecryptor>();
         var token = TestToken;
@@ -83,32 +79,6 @@ public static class NTokenTests
         TestAssert.True(sw.ElapsedMilliseconds < 5, $"Idempotency check too slow: {sw.ElapsedMilliseconds}ms");
 
         Log.Info($"[NToken] Idempotency guard OK in {sw.ElapsedMilliseconds}ms");
-    }
-
-    private static string[] ResolveCandidatePlayerVersions()
-    {
-        var configured = TestConfig.Get().PlayerVersions.Versions;
-        var cached = PlayerContext.GetCachedVersions();
-
-        if (configured.Length == 0) return cached;
-        if (cached.Length == 0) return configured;
-
-        var combined = new List<string>(configured.Length + cached.Length);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        for (int i = 0; i < cached.Length; i++)
-        {
-            if (seen.Add(cached[i]))
-                combined.Add(cached[i]);
-        }
-
-        for (int i = 0; i < configured.Length; i++)
-        {
-            if (seen.Add(configured[i]))
-                combined.Add(configured[i]);
-        }
-
-        return [.. combined];
     }
 
     [TestMethod(TestCategory.Integration, "AST Solver & QuickJS Persistent Context",
@@ -132,9 +102,7 @@ public static class NTokenTests
         }
 
         if (context is null)
-        {
             TestAssert.Skip($"No cached player versions found in {G.Folder.NTokenCache}");
-        }
 
         Log.Info($"[AST] Testing player version: {usedVersion} (raw BaseJs={context!.BaseJs.Length / 1024}KB)");
 
@@ -175,9 +143,7 @@ public static class NTokenTests
         var versions = ResolveCandidatePlayerVersions();
 
         if (versions.Length == 0)
-        {
             TestAssert.Skip($"No player versions found in test-config.json or {G.Folder.NTokenCache}");
-        }
 
         int passed = 0;
 
@@ -214,61 +180,101 @@ public static class NTokenTests
         }
 
         if (passed == 0)
-        {
             TestAssert.Skip("None of the candidate player versions could be loaded from local cache");
-        }
 
         Log.Info($"[NToken] Compatibility: {passed} player version(s) passed");
     }
 
-    // ==========================================
-    //                BENCHMARK
-    // ==========================================
-
-    [TestMethod(TestCategory.Benchmark, "N-Token QuickJS Persistent Context vs Cache",
-        Group = TestGroups.Cipher, Order = 10, RequiresNetwork = true, TimeoutSeconds = 120)]
-    public static async Task BenchmarkAsync(IServiceProvider services, CancellationToken ct = default)
+    [TestMethod(TestCategory.Integration, "Signature Cipher Live Decryption",
+        Group = TestGroups.Cipher, Order = 6, RequiresNetwork = true, TimeoutSeconds = 60)]
+    public static async Task TestSigCipherLiveDecryptionAsync(IServiceProvider services, CancellationToken ct = default)
     {
-        var decryptor = services.GetRequiredService<NTokenDecryptor>();
-        await decryptor.DecryptAsync(TestToken, ct).ConfigureAwait(false);
+        var decryptor = services.GetRequiredService<SigCipherDecryptor>();
+        var testSig = TestConfig.Get().SigCipher.TestSignature;
 
-        var iterations = TestConfig.Get().NToken.BenchmarkIterations;
-        var tokens = new string[iterations];
-        long nonce = Stopwatch.GetTimestamp() & 0xFFFF;
-        for (int i = 0; i < iterations; i++)
-            tokens[i] = $"B{nonce:X4}{i:D5}AA___"[..15];
-
-        // 1. Cache Miss (call via NTokenDecryptor -> QuickJS persistent context while populating the cache)
         var sw = Stopwatch.StartNew();
-        for (int i = 0; i < tokens.Length; i++)
-            await decryptor.DecryptAsync(tokens[i], ct).ConfigureAwait(false);
+        var result = await decryptor.DecipherAsync(testSig, ct).ConfigureAwait(false);
         sw.Stop();
 
-        var avgMiss = sw.Elapsed.TotalMilliseconds / iterations;
-        Log.Info($"[Benchmark] Cache miss (QuickJS): {avgMiss:F3}ms avg ({iterations} runs)");
+        TestAssert.NotNullOrEmpty(result, "Decryption returned empty string");
+        TestAssert.False(string.Equals(result, testSig, StringComparison.Ordinal), "Decryption returned unchanged signature");
+        TestAssert.True(result.Length > 50, $"Result length suspicious: {result.Length}");
 
-        // 2. Cache Hit (subsequent run over the populated NTokenDecryptor cache without re-invoking QuickJS)
+        var inputChars = new HashSet<char>(testSig);
+        for (int i = 0; i < result.Length; i++)
+            TestAssert.True(inputChars.Contains(result[i]), $"Result contains unexpected character '{result[i]}'");
+
+        int removedCount = testSig.Length - result.Length;
+        TestAssert.True(removedCount is >= 0 and <= 10, $"Removed chars count out of bounds: {removedCount}");
+
         sw.Restart();
-        for (int i = 0; i < tokens.Length; i++)
-            await decryptor.DecryptAsync(tokens[i], ct).ConfigureAwait(false);
+        var cached = await decryptor.DecipherAsync(testSig, ct).ConfigureAwait(false);
         sw.Stop();
 
-        var avgHit = sw.Elapsed.TotalMilliseconds / iterations;
-        Log.Info($"[Benchmark] Cache hit: {avgHit:F3}ms avg");
+        TestAssert.Equal(result, cached, "Cache returned inconsistent result");
+        TestAssert.True(sw.ElapsedMilliseconds < 5, $"Cache hit too slow: {sw.ElapsedMilliseconds}ms");
 
-        TestAssert.True(avgHit < 1.0, $"Cache hit too slow: {avgHit:F3}ms (expected <1ms)");
-        TestAssert.True(avgMiss < 10.0, $"QuickJS call too slow: {avgMiss:F3}ms (expected <10ms)");
+        Log.Info($"[SigCipher] Live decipher verified in {sw.ElapsedMilliseconds}ms (removed {removedCount} chars)");
     }
-}
 
-internal sealed class FixedPlayerContextManager : PlayerContextManager
-{
-    private readonly PlayerContext _context;
+    [TestMethod(TestCategory.Integration, "Concurrent N-Token & Signature Decryption",
+        Group = TestGroups.Cipher, Order = 7, RequiresNetwork = true, TimeoutSeconds = 60)]
+    public static async Task TestConcurrentNAndSigAsync(IServiceProvider services, CancellationToken ct = default)
+    {
+        var jsService = services.GetRequiredService<JsDecryptionService>();
+        await jsService.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
-    public FixedPlayerContextManager(PlayerContext context)
-        : base(static () => Core.Audio.Http.SharedHttpClient.Instance) =>
-        _context = context;
+        var nToken = TestToken;
+        var sigToken = TestConfig.Get().SigCipher.TestSignature;
 
-    public override Task<PlayerContext> GetOrLoadAsync(CancellationToken ct = default) =>
-        Task.FromResult(_context);
+        var sw = Stopwatch.StartNew();
+        var nTask = jsService.CallAsync("n", nToken, ct).AsTask();
+        var sigTask = jsService.CallAsync("sig", sigToken, ct).AsTask();
+
+        await Task.WhenAll(nTask, sigTask).ConfigureAwait(false);
+        sw.Stop();
+
+        TestAssert.True(sigTask.Result != sigToken || nTask.Result != nToken,
+            "Both n and sig returned unchanged — QuickJS execution failed");
+
+        Log.Info($"[SigCipher] Concurrent calls completed in {sw.ElapsedMilliseconds}ms");
+    }
+
+    private static string[] ResolveCandidatePlayerVersions()
+    {
+        var configured = TestConfig.Get().PlayerVersions.Versions;
+        var cached = PlayerContext.GetCachedVersions();
+
+        if (configured.Length == 0) return cached;
+        if (cached.Length == 0) return configured;
+
+        var combined = new List<string>(configured.Length + cached.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < cached.Length; i++)
+        {
+            if (seen.Add(cached[i]))
+                combined.Add(cached[i]);
+        }
+
+        for (int i = 0; i < configured.Length; i++)
+        {
+            if (seen.Add(configured[i]))
+                combined.Add(configured[i]);
+        }
+
+        return [.. combined];
+    }
+
+    private sealed class FixedPlayerContextManager : PlayerContextManager
+    {
+        private readonly PlayerContext _context;
+
+        public FixedPlayerContextManager(PlayerContext context)
+            : base(static () => Core.Audio.Http.SharedHttpClient.Instance) =>
+            _context = context;
+
+        public override Task<PlayerContext> GetOrLoadAsync(CancellationToken ct = default) =>
+            Task.FromResult(_context);
+    }
 }

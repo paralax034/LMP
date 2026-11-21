@@ -135,28 +135,94 @@ public static class StreamRefreshResilienceTests
         bool applied = source.UpdateUrl(BuildUrl(nowUnix, "mp4Tok2", 140, Mp4Length));
         TestAssert.False(applied, "UpdateUrl must reject a foreign variant");
         TestAssert.Equal(compatibleUrl, source.CurrentUrl, "UpdateUrl rejection must keep current URL");
+
+        // 5. Explicit StreamUrlRequest compatibility snapshot checks
+        var snapshot = new StreamUrlRequest(StreamUrlRequestKind.Refresh, "yt_compat", AudioFormat.WebM, 129, WebmLength, "", true);
+        TestAssert.False(snapshot.IsCompatible(AudioFormat.Mp4, Mp4Length), "MP4 descriptor must not continue a WebM source");
+        TestAssert.False(snapshot.IsCompatible(AudioFormat.WebM, 1_400_000), "Another WebM itag (foreign clen) must be rejected");
+        TestAssert.True(snapshot.IsCompatible(AudioFormat.WebM, WebmLength), "Same container and clen must be accepted");
+        TestAssert.True(snapshot.IsCompatible(AudioFormat.WebM, 0), "Unknown candidate size is left to the source URL guard");
+
+        var unknownSource = snapshot with { ContentLength = 0 };
+        TestAssert.True(unknownSource.IsCompatible(AudioFormat.WebM, Mp4Length), "Unknown source size accepts any size of the same container");
+        TestAssert.False(unknownSource.IsCompatible(AudioFormat.Mp4, Mp4Length), "Container check must apply even without size");
     }
 
-    [TestMethod(TestCategory.Unit, "CDN 403 Fallback Order Excludes Failed Clients", Group = TestGroups.Network, Order = 33)]
-    public static Task TestCdnForbiddenFallbackOrderAsync()
+    [TestMethod(TestCategory.Unit, "CDN 403 Fallback, Egress Tracker, Degraded Manifest & Download Bypass", Group = TestGroups.Network, Order = 33)]
+    public static Task TestCdnForbiddenFallbackAndManifestGuardsAsync()
     {
+        // 1. CDN 403 fallback client exclusion order
         var afterRemix = YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden([YoutubeClientNames.WebRemix]);
-        TestAssert.Equal(2, afterRemix.Length, "WEB_REMIX must be excluded");
-        TestAssert.Equal(YoutubeClientNames.Web, afterRemix[0], "WEB must be tried first after CDN 403");
-        TestAssert.Equal(YoutubeClientNames.AndroidVr, afterRemix[1], "ANDROID_VR must be the last resort (bot detection risk)");
+        TestAssert.Equal(2, afterRemix.Length);
+        TestAssert.Equal(YoutubeClientNames.Web, afterRemix[0]);
+        TestAssert.Equal(YoutubeClientNames.AndroidVr, afterRemix[1]);
 
         var afterVr = YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden([YoutubeClientNames.AndroidVr]);
-        TestAssert.Equal(2, afterVr.Length, "ANDROID_VR must be excluded");
-        TestAssert.Equal(YoutubeClientNames.Web, afterVr[0], "WEB must lead the chain");
-        TestAssert.Equal(YoutubeClientNames.WebRemix, afterVr[1], "WEB_REMIX must follow WEB");
+        TestAssert.Equal(YoutubeClientNames.Web, afterVr[0]);
+        TestAssert.Equal(YoutubeClientNames.WebRemix, afterVr[1]);
 
         var caseInsensitive = YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden(["web_remix", "web"]);
-        TestAssert.Equal(1, caseInsensitive.Length, "URL c-parameter comparison must be case-insensitive");
-        TestAssert.Equal(YoutubeClientNames.AndroidVr, caseInsensitive[0], "Only ANDROID_VR must remain");
+        TestAssert.Equal(1, caseInsensitive.Length);
+        TestAssert.Equal(YoutubeClientNames.AndroidVr, caseInsensitive[0]);
 
-        var none = YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden(
-            [YoutubeClientNames.Web, YoutubeClientNames.WebRemix, YoutubeClientNames.AndroidVr]);
-        TestAssert.Equal(0, none.Length, "Fully excluded chain must be empty so the caller fails fast");
+        TestAssert.Equal(0, YoutubeClientUtils.GetStreamFallbackClientsAfterCdnForbidden(
+            [YoutubeClientNames.Web, YoutubeClientNames.WebRemix, YoutubeClientNames.AndroidVr]).Length);
+
+        // 2. Per-track CDN 403 client tracker clears on egress IP change and expires by TTL
+        long nowMs = 1_000;
+        var tracker = new LMP.Core.Services.AudioEngine.CdnForbiddenClientTracker(ttlMs: 10_000, clockMs: () => nowMs);
+        var excluded = tracker.Register("yt_2Eqqlyr9CZg", "WEB_REMIX");
+        TestAssert.Equal(1, excluded.Length);
+        tracker.Clear("yt_2Eqqlyr9CZg");
+        TestAssert.Equal(0, tracker.GetSnapshot("yt_2Eqqlyr9CZg").Length);
+        _ = tracker.Register("yt_2Eqqlyr9CZg", "WEB_REMIX");
+        nowMs += 10_001;
+        TestAssert.Equal(0, tracker.GetSnapshot("yt_2Eqqlyr9CZg").Length);
+
+        // 3. Degraded itag=18 manifest detection, strict format matching & cache bucket equivalence
+        var itag18 = new LMP.Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
+            18, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=18",
+            new LMP.Core.Youtube.Videos.Streams.Container("mp4"),
+            new LMP.Core.Youtube.Videos.Streams.FileSize(2_700_000),
+            new LMP.Core.Youtube.Videos.Streams.Bitrate(139_000),
+            "mp4a.40.2", null, null, false);
+        var itag251 = new LMP.Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
+            251, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251",
+            new LMP.Core.Youtube.Videos.Streams.Container("webm"),
+            new LMP.Core.Youtube.Videos.Streams.FileSize(2_500_000),
+            new LMP.Core.Youtube.Videos.Streams.Bitrate(142_000),
+            "opus", null, null, false);
+
+        TestAssert.True(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag18]));
+        TestAssert.False(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag251]));
+        TestAssert.False(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag18, itag251]));
+
+        var mp4Desc = new ResolvedStreamDescriptor
+        {
+            TrackId = "yt_strict", Format = AudioFormat.Mp4, Codec = AudioCodec.Aac,
+            BitrateKbps = 139, Origin = StreamSource.ProviderMemoryCache
+        };
+        TestAssert.False(LMP.Core.Services.YoutubeProvider.MatchesStrictFormat(mp4Desc, AudioFormat.WebM, requireExactFormat: true));
+        TestAssert.True(LMP.Core.Services.YoutubeProvider.MatchesStrictFormat(mp4Desc, AudioFormat.WebM, requireExactFormat: false));
+
+        var webm142 = new StreamSelectionHint(AudioFormat.WebM, 142);
+        TestAssert.True(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.WebM, 145));
+        TestAssert.False(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.WebM, 50));
+        TestAssert.False(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.Mp4, 142));
+
+        // 4. Corruption recovery bypasses local download even before SQLite flush
+        string tempFile = Path.Combine(Path.GetTempPath(), "LMP_LocalDlBypass_" + Guid.NewGuid().ToString("N") + ".webm");
+        File.WriteAllBytes(tempFile, [0x1A, 0x45, 0xDF, 0xA3]);
+        try
+        {
+            var track = new TrackInfo { Id = "yt_DiDUIfMk7go", IsDownloaded = true, LocalPath = tempFile };
+            TestAssert.True(LMP.Core.Services.AudioEngine.ShouldUseLocalDownload(track, bypassLocalDownload: false));
+            TestAssert.False(LMP.Core.Services.AudioEngine.ShouldUseLocalDownload(track, bypassLocalDownload: true));
+        }
+        finally
+        {
+            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+        }
 
         return Task.CompletedTask;
     }
@@ -201,41 +267,12 @@ public static class StreamRefreshResilienceTests
             "Rejected URL must expose the InnerTube client (c parameter) for exclusion");
     }
 
-    [TestMethod(TestCategory.Unit, "Source Builds Explicit URL Request (Idle)", Group = TestGroups.Network, Order = 36)]
-    public static Task TestSourceBuildsIdleUrlRequestAsync()
-    {
-        const long WebmLength = 2_711_112;
-
-        // Partial cache prior to continuation URL: request carries variant, but is not considered 403-driven.
-        using var handler = new AlwaysForbiddenHandler();
-        using var httpClient = new HttpClient(handler, disposeHandler: false);
-        using var tempCache = new TempCacheManager();
-        using var source = CreateSource(
-            tempCache,
-            httpClient,
-            "",
-            _ => Task.FromResult<string?>(null),
-            contentLength: WebmLength);
-
-        var idle = source.CreateUrlRequest(StreamUrlRequestKind.Acquire);
-        TestAssert.Equal(StreamUrlRequestKind.Acquire, idle.Kind, "Request must keep the requested kind");
-        TestAssert.Equal("yt_refresh_resilience", idle.TrackId, "Request must identify the source track");
-        TestAssert.Equal(string.Empty, idle.CurrentUrl, "Source without URL must report an empty URL");
-        TestAssert.False(idle.IsForbiddenDriven, "Acquire without CDN 403 must not trigger client exclusion");
-        TestAssert.Equal(WebmLength, idle.ContentLength, "Content length must fall back to the constructor value");
-        TestAssert.Equal(new StreamSelectionHint(AudioFormat.WebM, 160), idle.ToSelectionHint(),
-            "Selection hint must address exactly the source variant");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Continuation Variant Selection By Exact Clen", Group = TestGroups.Network, Order = 37)]
+    [TestMethod(TestCategory.Unit, "Continuation Variant Selection By Exact Clen & Compatibility", Group = TestGroups.Network, Order = 37)]
     public static Task TestContinuationVariantSelectionByClenAsync()
     {
         const long Mp4Length = 2_785_782;
         const long WebmLength = 2_711_112;
 
-        // Order matches session cache from the log: MP4 first, then WebM by ascending bitrate.
         var variants = new List<LMP.Core.Audio.Http.VariantEntry>
         {
             new() { Itag = 140, Url = BuildVariantUrl(140), Container = "mp4", Bitrate = 128_000, Clen = Mp4Length },
@@ -245,28 +282,16 @@ public static class StreamRefreshResilienceTests
         };
 
         var webmHint = new StreamSelectionHint(AudioFormat.WebM, 129);
-
         var exact = AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, WebmLength);
         TestAssert.Equal(251, exact?.Itag ?? 0,
             "Partial WebM cache must continue with the variant whose clen matches, not the first WebM variant");
 
-        var unknownSize = AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 1_234_567);
-        TestAssert.Null(unknownSize, "Missing clen match must not fall back to a foreign variant");
+        TestAssert.Null(AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 1_234_567));
+        TestAssert.Null(AudioEngine.SelectContinuationVariantFromEntry(
+            variants, new StreamSelectionHint(AudioFormat.Mp4, 128), WebmLength));
+        TestAssert.Equal(AudioFormat.WebM,
+            AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 0)?.Format ?? AudioFormat.Unknown);
 
-        var foreignContainer = AudioEngine.SelectContinuationVariantFromEntry(
-            variants, new StreamSelectionHint(AudioFormat.Mp4, 128), WebmLength);
-        TestAssert.Null(foreignContainer, "Container mismatch must be rejected even with equal clen");
-
-        var legacy = AudioEngine.SelectContinuationVariantFromEntry(variants, webmHint, 0);
-        TestAssert.Equal(AudioFormat.WebM, legacy?.Format ?? AudioFormat.Unknown,
-            "Without clen the legacy container-based selection must be kept");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Continuation Compatibility Rejects Clen Mismatch", Group = TestGroups.Network, Order = 42)]
-    public static Task TestIsContinuationVariantCompatibleClenMismatchAsync()
-    {
         var entry = new AudioCacheEntry
         {
             CacheKey = "yt_clen_test_WebM_160",
@@ -275,135 +300,8 @@ public static class StreamRefreshResilienceTests
             Bitrate = 142,
             TotalSize = 6_511_915
         };
-
-        TestAssert.False(
-            LMP.Core.Services.AudioEngine.IsContinuationVariantCompatible(entry, AudioFormat.WebM, 142, 6_511_918),
-            "Eager/primed continuation URL with changed clen (+3B) must be rejected");
-
-        TestAssert.True(
-            LMP.Core.Services.AudioEngine.IsContinuationVariantCompatible(entry, AudioFormat.WebM, 142, 6_511_915),
-            "Exact matching format, bitrate bucket, and clen must be accepted");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Degraded Itag18 Guard, Strict Format Check & Cache Bucket Matching", Group = TestGroups.Network, Order = 43)]
-    public static Task TestDegradedManifestAndCacheBucketGuardsAsync()
-    {
-        var itag18 = new LMP.Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
-            18, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=18",
-            new LMP.Core.Youtube.Videos.Streams.Container("mp4"),
-            new LMP.Core.Youtube.Videos.Streams.FileSize(2_700_000),
-            new LMP.Core.Youtube.Videos.Streams.Bitrate(139_000),
-            "mp4a.40.2", null, null, false);
-
-        var itag251 = new LMP.Core.Youtube.Videos.Streams.AudioOnlyStreamInfo(
-            251, "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251",
-            new LMP.Core.Youtube.Videos.Streams.Container("webm"),
-            new LMP.Core.Youtube.Videos.Streams.FileSize(2_500_000),
-            new LMP.Core.Youtube.Videos.Streams.Bitrate(142_000),
-            "opus", null, null, false);
-
-        TestAssert.True(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag18]),
-            "Single-variant itag=18 fallback manifest must be detected as degraded");
-        TestAssert.False(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag251]),
-            "Single adaptive itag=251 stream is not degraded muxed-only");
-        TestAssert.False(LMP.Core.Services.YoutubeProvider.IsDegradedMuxedOnlyManifest([itag18, itag251]),
-            "Multi-variant manifest with adaptive streams must be cached normally");
-
-        var mp4Desc = new ResolvedStreamDescriptor
-        {
-            TrackId = "yt_strict",
-            Format = AudioFormat.Mp4,
-            Codec = AudioCodec.Aac,
-            BitrateKbps = 139,
-            Origin = StreamSource.ProviderMemoryCache
-        };
-
-        TestAssert.False(LMP.Core.Services.YoutubeProvider.MatchesStrictFormat(mp4Desc, AudioFormat.WebM, requireExactFormat: true),
-            "Strict variantOverride=WebM must bypass cached Mp4 descriptor");
-        TestAssert.True(LMP.Core.Services.YoutubeProvider.MatchesStrictFormat(mp4Desc, AudioFormat.WebM, requireExactFormat: false),
-            "Non-strict preference may fall back to available descriptor");
-
-        var webm142 = new StreamSelectionHint(AudioFormat.WebM, 142);
-        TestAssert.True(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.WebM, 145),
-            "142kbps and 145kbps WebM belong to the same 160kbps bucket");
-        TestAssert.False(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.WebM, 50),
-            "50kbps WebM (itag=249) must NOT reset a 142kbps (itag=251) partial cache");
-        TestAssert.False(LMP.Core.Services.AudioEngine.IsSameCacheBucket(webm142, AudioFormat.Mp4, 142),
-            "Mp4 stream must NOT reset a WebM partial cache");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "CdnForbiddenClientTracker Clears On Egress Mismatch And Respects TTL", Group = TestGroups.Network, Order = 44)]
-    public static Task TestCdnForbiddenClientsClearedOnEgressMismatchAsync()
-    {
-        long nowMs = 1_000;
-        var tracker = new LMP.Core.Services.AudioEngine.CdnForbiddenClientTracker(ttlMs: 10_000, clockMs: () => nowMs);
-        const string trackId = "yt_2Eqqlyr9CZg";
-
-        var excluded = tracker.Register(trackId, "WEB_REMIX");
-        TestAssert.Equal(1, excluded.Length);
-        TestAssert.Equal("WEB_REMIX", excluded[0]);
-        TestAssert.Equal(1, tracker.GetSnapshot(trackId).Length);
-
-        // Egress IP rotation clears excluded clients immediately so WEB_REMIX is not stuck banned
-        tracker.Clear(trackId);
-        TestAssert.Equal(0, tracker.GetSnapshot(trackId).Length, "Egress mismatch must clear excluded clients for the track");
-
-        // Re-register and verify TTL expiration
-        _ = tracker.Register(trackId, "WEB_REMIX");
-        nowMs += 10_001;
-        TestAssert.Equal(0, tracker.GetSnapshot(trackId).Length, "Excluded clients must expire after TTL");
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "ShouldUseLocalDownload Respects BypassLocalDownload On Corruption Retry", Group = TestGroups.Network, Order = 45)]
-    public static Task TestLocalDownloadBypassOnCorruptionRecoveryAsync()
-    {
-        string tempFile = Path.Combine(Path.GetTempPath(), "LMP_LocalDlBypass_" + Guid.NewGuid().ToString("N") + ".webm");
-        File.WriteAllBytes(tempFile, [0x1A, 0x45, 0xDF, 0xA3]);
-        try
-        {
-            var track = new TrackInfo
-            {
-                Id = "yt_DiDUIfMk7go",
-                IsDownloaded = true,
-                LocalPath = tempFile
-            };
-
-            TestAssert.True(
-                LMP.Core.Services.AudioEngine.ShouldUseLocalDownload(track, bypassLocalDownload: false),
-                "Normal playback must prefer existing local download");
-            TestAssert.False(
-                LMP.Core.Services.AudioEngine.ShouldUseLocalDownload(track, bypassLocalDownload: true),
-                "Corruption recovery retry must bypass stale IsDownloaded/LocalPath even before SQLite flush");
-        }
-        finally
-        {
-            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
-        }
-
-        return Task.CompletedTask;
-    }
-
-    [TestMethod(TestCategory.Unit, "Refresh Descriptor Compatibility With Source Snapshot", Group = TestGroups.Network, Order = 38)]
-    public static Task TestRefreshDescriptorCompatibilityAsync()
-    {
-        const long Mp4Length = 2_785_782;
-        const long WebmLength = 2_711_112;
-        var snapshot = new StreamUrlRequest(StreamUrlRequestKind.Refresh, "yt_compat", AudioFormat.WebM, 129, WebmLength, "", true);
-
-        TestAssert.False(snapshot.IsCompatible(AudioFormat.Mp4, Mp4Length), "MP4 descriptor must not continue a WebM source");
-        TestAssert.False(snapshot.IsCompatible(AudioFormat.WebM, 1_400_000), "Another WebM itag (foreign clen) must be rejected");
-        TestAssert.True(snapshot.IsCompatible(AudioFormat.WebM, WebmLength), "Same container and clen must be accepted");
-        TestAssert.True(snapshot.IsCompatible(AudioFormat.WebM, 0), "Unknown candidate size is left to the source URL guard");
-
-        var unknownSource = snapshot with { ContentLength = 0 };
-        TestAssert.True(unknownSource.IsCompatible(AudioFormat.WebM, Mp4Length), "Unknown source size accepts any size of the same container");
-        TestAssert.False(unknownSource.IsCompatible(AudioFormat.Mp4, Mp4Length), "Container check must apply even without size");
+        TestAssert.False(LMP.Core.Services.AudioEngine.IsContinuationVariantCompatible(entry, AudioFormat.WebM, 142, 6_511_918));
+        TestAssert.True(LMP.Core.Services.AudioEngine.IsContinuationVariantCompatible(entry, AudioFormat.WebM, 142, 6_511_915));
 
         return Task.CompletedTask;
     }
@@ -511,7 +409,7 @@ public static class StreamRefreshResilienceTests
         return Task.CompletedTask;
     }
 
-    [TestMethod(TestCategory.Unit, "Acquire Request Carries Source Variant", Group = TestGroups.Network, Order = 40)]
+    [TestMethod(TestCategory.Unit, "Acquire Request (Idle & Single-Flight) Carries Source Variant", Group = TestGroups.Network, Order = 40)]
     public static async Task TestAcquireRequestCarriesSourceVariantAsync()
     {
         long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -538,6 +436,15 @@ public static class StreamRefreshResilienceTests
 
         try
         {
+            // Idle source before URL acquisition must report an empty CurrentUrl and non-403 variant hint
+            var idle = source.CreateUrlRequest(StreamUrlRequestKind.Acquire);
+            TestAssert.Equal(StreamUrlRequestKind.Acquire, idle.Kind, "Request must keep the requested kind");
+            TestAssert.Equal("yt_refresh_resilience", idle.TrackId, "Request must identify the source track");
+            TestAssert.Equal(string.Empty, idle.CurrentUrl, "Source without URL must report an empty URL");
+            TestAssert.False(idle.IsForbiddenDriven, "Acquire without CDN 403 must not trigger client exclusion");
+            TestAssert.Equal(WebmLength, idle.ContentLength, "Content length must fall back to the constructor value");
+            TestAssert.Equal(new StreamSelectionHint(AudioFormat.WebM, 160), idle.ToSelectionHint());
+
             bool urlReady = await CachingStreamSourceAccessors.EnsureUrlAvailableAsync(source, CancellationToken.None)
                 .ConfigureAwait(false);
 

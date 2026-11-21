@@ -136,6 +136,35 @@ public static class CachingReadStreamContractTests
         return Task.CompletedTask;
     }
 
+    [TestMethod(TestCategory.Unit, "RamRangeBlock RefCounted Zero-Copy Lifecycle", Group = TestGroups.Audio, Order = 26)]
+    public static Task TestRamRangeBlockZeroCopyRefCountAsync()
+    {
+        const int chunkSize = 384 * 1024;
+        byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(chunkSize);
+        rented[0] = 0xAA;
+        rented[chunkSize - 1] = 0x55;
+
+        var block = new RamRangeBlock(0, rented, chunkSize);
+
+        // 1. Acquire a second reference to simulate background disk write
+        bool retained = block.TryRetainForDiskWrite(chunkSize, out var diskMemory);
+        TestAssert.True(retained);
+        TestAssert.Equal(chunkSize, diskMemory.Length);
+
+        // 2. Simulate block eviction from SlidingRamCache BEFORE the disk write completes
+        block.Dispose();
+
+        TestAssert.Equal((byte)0xAA, diskMemory.Span[0]);
+        TestAssert.Equal((byte)0x55, diskMemory.Span[chunkSize - 1]);
+
+        // 3. Complete disk write — buffer returns to ArrayPool, preventing re-retention
+        block.ReleaseReference();
+        bool retainedAfterRelease = block.TryRetainForDiskWrite(chunkSize, out _);
+        TestAssert.False(retainedAfterRelease);
+
+        return Task.CompletedTask;
+    }
+
     private static async Task<ReadOutcome> ReadOutcomeAsync(Stream stream, Memory<byte> buffer, CancellationToken ct)
     {
         try
