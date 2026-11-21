@@ -79,6 +79,8 @@ public sealed class EqualizerCurveControl : Control
 
     private readonly float[] _targetIso10 = new float[EqualizerProcessor.BandCount];
     private readonly float[] _displayIso10 = new float[EqualizerProcessor.BandCount];
+    private readonly float[] _cachedEqGainDb = new float[EqualizerProcessor.BandCount];
+    private readonly float[] _cachedEqGainFactor = [1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f];
     private readonly float[] _spectrum10 = new float[EqualizerProcessor.BandCount];
     private readonly float[] _macro5Working = new float[5];
     private readonly float[] _emitBufferA = new float[EqualizerProcessor.BandCount];
@@ -252,6 +254,8 @@ public sealed class EqualizerCurveControl : Control
     private bool _isRafActive;
     private long _lastFrameTs;
     private double _visPulsePhase;
+    private float _smoothedMacroEnergy;
+    private float _smoothedPercBoost;
 
     private Color _lastAccentColor;
     private IPen? _zeroLinePen;
@@ -416,6 +420,12 @@ public sealed class EqualizerCurveControl : Control
 
         Span<float> rawBands10 = stackalloc float[EqualizerProcessor.BandCount];
         AudioVisualizerBuffer.CopyBands10(rawBands10);
+        bool hasSnap = AudioVisualizerBuffer.TryReadSnapshot(out var snap);
+
+        float macroTarget = hasSnap ? snap.MacroEnergy : 0f;
+        float percTarget = hasSnap ? MathF.Max(snap.Beat, snap.PercussiveEnergy) : 0f;
+        _smoothedMacroEnergy += (macroTarget - _smoothedMacroEnergy) * (macroTarget > _smoothedMacroEnergy ? specUp * 0.45f : specDown * 0.55f);
+        _smoothedPercBoost += (percTarget - _smoothedPercBoost) * (percTarget > _smoothedPercBoost ? specUp : specDown);
 
         bool hasAudioEnergy = false;
         for (int i = 0; i < EqualizerProcessor.BandCount; i++)
@@ -692,9 +702,23 @@ public sealed class EqualizerCurveControl : Control
             double liveDisplacement = 0.0;
             if (spec > 0.002f)
             {
-                float eqGainFactor = IsEqEnabled ? MathF.Pow(10f, db / 26f) : 0.85f;
-                double harmonicWave = Math.Sin(_visPulsePhase + i * 0.85) * 0.35 + 0.65;
-                liveDisplacement = spec * eqGainFactor * harmonicWave * (plotH * 0.22);
+                float eqGainFactor;
+                if (IsEqEnabled)
+                {
+                    if (_cachedEqGainDb[i] != db)
+                    {
+                        _cachedEqGainDb[i] = db;
+                        _cachedEqGainFactor[i] = MathF.Pow(10f, db / 26f);
+                    }
+                    eqGainFactor = _cachedEqGainFactor[i];
+                }
+                else
+                {
+                    eqGainFactor = 0.85f;
+                }
+                double harmonicWave = Math.Sin(_visPulsePhase + i * 0.85) * 0.25 + 0.75;
+                double dynamicScale = 0.55 + (0.55 * Math.Clamp(_smoothedMacroEnergy, 0f, 1.35f)) + (0.28 * _smoothedPercBoost);
+                liveDisplacement = spec * eqGainFactor * harmonicWave * dynamicScale * (plotH * 0.28);
             }
 
             double y = Math.Clamp(staticY - liveDisplacement, plotTop - 4.0, plotBottom + 2.0);

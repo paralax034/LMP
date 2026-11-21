@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
 using LMP.UI.Controls;
@@ -30,7 +29,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] public partial ViewModelBase? CurrentPage { get; private set; }
     [ObservableProperty] public partial PlayerBarViewModel PlayerBar { get; private set; }
     [ObservableProperty] public partial string CurrentPageName { get; private set; } = "";
-    [ObservableProperty] public partial IBrush? TitleBarAmbientBrush { get; private set; }
+    [ObservableProperty] public partial Color? TitleBarAmbientColor { get; private set; }
     [ObservableProperty] public partial double TitleBarAmbientOpacity { get; private set; }
 
     [ObservableProperty]
@@ -337,9 +336,6 @@ public partial class MainWindowViewModel : ViewModelBase
         RefreshTitleBarAmbient();
     }
 
-    private Color? _lastTitleBarColor;
-    private byte _lastTitleBarPeakAlpha;
-
     private void OnObservedAmbientPagePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(QueueViewModel.SourcePlaylistColor)
@@ -371,35 +367,8 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
 
-        if (color is { } c)
-        {
-            var lifted = AmbientBackdrop.LiftAmbientColor(c);
-            double adaptiveScale = AmbientBackdrop.ComputeAdaptiveBrightnessScale(lifted);
-            byte peakAlpha = (byte)Math.Clamp((int)Math.Round(96.0 * AmbientBackdrop.CurrentIntensity * adaptiveScale), 10, 120);
-
-            if (TitleBarAmbientBrush == null || _lastTitleBarColor != lifted || _lastTitleBarPeakAlpha != peakAlpha)
-            {
-                _lastTitleBarColor = lifted;
-                _lastTitleBarPeakAlpha = peakAlpha;
-                byte topAlpha = (byte)(peakAlpha / 5);
-                TitleBarAmbientBrush = new LinearGradientBrush
-                {
-                    StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                    EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-                    GradientStops =
-                    {
-                        new GradientStop(Color.FromArgb(topAlpha, lifted.R, lifted.G, lifted.B), 0.0),
-                        new GradientStop(Color.FromArgb(peakAlpha, lifted.R, lifted.G, lifted.B), 1.0)
-                    }
-                };
-            }
-
-            TitleBarAmbientOpacity = Math.Clamp(topFactor, 0.0, 1.0);
-        }
-        else
-        {
-            TitleBarAmbientOpacity = 0.0;
-        }
+        TitleBarAmbientColor = color;
+        TitleBarAmbientOpacity = color.HasValue ? Math.Clamp(topFactor, 0.0, 1.0) : 0.0;
     }
 
     private void AttachQueueViewModel(QueueViewModel queue)

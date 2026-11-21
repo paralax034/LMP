@@ -61,6 +61,7 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
 
     [ObservableProperty] public partial LocalizedItem<TrackAnimationSpeed>? SelectedTrackAnimationSpeed { get; set; }
     [ObservableProperty] public partial bool UseWaveAnimation { get; set; }
+    [ObservableProperty] public partial bool WaveBorderReactiveGlow { get; set; } = true;
 
     [ObservableProperty]
     public partial IReadOnlyList<LocalizedItem<AmbientBackdropMode>> AmbientBackdropModeOptions { get; private set; } = [];
@@ -73,10 +74,15 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
     [NotifyPropertyChangedFor(nameof(AmbientBackdropIntensityText))]
     public partial int AmbientBackdropIntensity { get; set; } = 100;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AmbientBackdropReactivityText))]
+    public partial int AmbientBackdropReactivity { get; set; } = 60;
+
     public bool IsAmbientBackdropEnabled =>
         SelectedAmbientBackdropMode?.Value is not null and not AmbientBackdropMode.Off;
 
     public string AmbientBackdropIntensityText => $"{AmbientBackdropIntensity}%";
+    public string AmbientBackdropReactivityText => $"{AmbientBackdropReactivity}%";
 
     [ObservableProperty] public partial bool HasUnsavedThemeChanges { get; set; }
 
@@ -224,13 +230,16 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
         {
             var s = _library.Settings;
             UseWaveAnimation = s.UseWaveAnimation;
+            WaveBorderReactiveGlow = s.WaveBorderReactiveGlow;
             SelectedTrackAnimationSpeed = TrackAnimationSpeedOptions.FindByValue(s.TrackAnimationSpeed, 2);
-            AudioWaveBorder.ConfigureGlobal(s.UseWaveAnimation, s.TrackAnimationSpeed);
+            AudioWaveBorder.ConfigureGlobal(s.UseWaveAnimation, s.TrackAnimationSpeed, s.WaveBorderReactiveGlow);
 
             int clampedIntensity = Math.Clamp(s.AmbientBackdropIntensity, 20, 150);
+            int clampedReactivity = Math.Clamp(s.AmbientBackdropReactivity, 0, 100);
             AmbientBackdropIntensity = clampedIntensity;
+            AmbientBackdropReactivity = clampedReactivity;
             SelectedAmbientBackdropMode = AmbientBackdropModeOptions.FindByValue(s.AmbientBackdropMode, 2);
-            AmbientBackdrop.ConfigureGlobal(s.AmbientBackdropMode, clampedIntensity);
+            AmbientBackdrop.ConfigureGlobal(s.AmbientBackdropMode, clampedIntensity, clampedReactivity);
 
             RefreshPresets();
             LoadThemeColors();
@@ -389,15 +398,29 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
     {
         if (_isLoadingSettings) return;
         _library.UpdateSettings(s => s.UseWaveAnimation = value);
-        AudioWaveBorder.ConfigureGlobal(value, SelectedTrackAnimationSpeed?.Value ?? TrackAnimationSpeed.Medium);
+        AudioWaveBorder.ConfigureGlobal(
+            value,
+            SelectedTrackAnimationSpeed?.Value ?? TrackAnimationSpeed.Medium,
+            WaveBorderReactiveGlow);
         Log.Info($"[Settings] UseWaveAnimation -> {value}");
+    }
+
+    partial void OnWaveBorderReactiveGlowChanged(bool value)
+    {
+        if (_isLoadingSettings) return;
+        _library.UpdateSettings(s => s.WaveBorderReactiveGlow = value);
+        AudioWaveBorder.ConfigureGlobal(
+            UseWaveAnimation,
+            SelectedTrackAnimationSpeed?.Value ?? TrackAnimationSpeed.Medium,
+            value);
+        Log.Info($"[Settings] WaveBorderReactiveGlow -> {value}");
     }
 
     partial void OnSelectedTrackAnimationSpeedChanged(LocalizedItem<TrackAnimationSpeed>? value)
     {
         if (_isLoadingSettings || value is null) return;
         _library.UpdateSettings(s => s.TrackAnimationSpeed = value.Value);
-        AudioWaveBorder.ConfigureGlobal(UseWaveAnimation, value.Value);
+        AudioWaveBorder.ConfigureGlobal(UseWaveAnimation, value.Value, WaveBorderReactiveGlow);
         Log.Info($"[Settings] TrackAnimationSpeed -> {value.Value}");
     }
 
@@ -405,7 +428,7 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
     {
         if (_isLoadingSettings || value is null) return;
         _library.UpdateSettings(s => s.AmbientBackdropMode = value.Value);
-        AmbientBackdrop.ConfigureGlobal(value.Value, AmbientBackdropIntensity);
+        AmbientBackdrop.ConfigureGlobal(value.Value, AmbientBackdropIntensity, AmbientBackdropReactivity);
         Log.Info($"[Settings] AmbientBackdropMode -> {value.Value}");
     }
 
@@ -416,6 +439,18 @@ public sealed partial class AppearanceSettingsViewModel : ViewModelBase, IUnsave
         _library.UpdateSettings(s => s.AmbientBackdropIntensity = clamped);
         AmbientBackdrop.ConfigureGlobal(
             SelectedAmbientBackdropMode?.Value ?? _library.Settings.AmbientBackdropMode,
+            clamped,
+            AmbientBackdropReactivity);
+    }
+
+    partial void OnAmbientBackdropReactivityChanged(int value)
+    {
+        if (_isLoadingSettings) return;
+        int clamped = Math.Clamp(value, 0, 100);
+        _library.UpdateSettings(s => s.AmbientBackdropReactivity = clamped);
+        AmbientBackdrop.ConfigureGlobal(
+            SelectedAmbientBackdropMode?.Value ?? _library.Settings.AmbientBackdropMode,
+            AmbientBackdropIntensity,
             clamped);
     }
 

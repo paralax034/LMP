@@ -5,9 +5,9 @@
   "AddToPlaylist_Selected": "Выбрано: {0}",
   "AddToPlaylist_Title": "В плейлист",
 
+  "AmbientBackdrop_Aurora": "Аврора",
   "AmbientBackdrop_FluidWave": "Живая волна",
   "AmbientBackdrop_Off": "Отключено",
-  "AmbientBackdrop_Wave": "Плавный градиент",
 
   "AnimationSpeed_Epileptic": "Эпилепсия",
   "AnimationSpeed_Fast": "Быстро",
@@ -629,7 +629,7 @@
   "Queue_SaveToPlaylist": "Сохранить очередь в плейлист",
   "Queue_ScrollToCurrent": "Перейти к текущему треку",
   "Queue_Shuffle": "Перемешать очередь",
-  "Queue_TimeTooltip": "Прослушано: {0} • Осталось: {1}\nВсего: {2} • ЛКМ — переключить",
+  "Queue_TimeTooltip": "Прослушано: {0} • Осталось: {1}\nВсего: {2}",
 
   "Recommendation_AllClientsFailed_Auth": "Все клиенты не смогли получить доступ. Попробуйте изменить клиент в Настройках → Сеть, или свяжитесь с разработчиком.",
   "Recommendation_BotDetection": "Подождите несколько минут или смените IP-адрес (VPN).",
@@ -679,6 +679,8 @@
   "Settings_AmbientBackdropIntensityDesc": "Регулирует яркость и глубину фонового свечения в Очереди и Плейлистах.",
   "Settings_AmbientBackdropMode": "Стиль фоновой подсветки",
   "Settings_AmbientBackdropModeDesc": "Аудио-реактивный фоновый эффект на экранах Очереди и Плейлистов.",
+  "Settings_AmbientBackdropReactivity": "Динамика яркости фона",
+  "Settings_AmbientBackdropReactivityDesc": "Насколько сильно яркость фона меняется от громкости и битов трека (0% = ровное свечение).",
   "Settings_Appearance": "Внешний вид",
   "Settings_Audio": "Аудио",
   "Settings_AudioCache": "Аудио кэш",
@@ -789,6 +791,8 @@
   "Settings_VolumeBoost_Tooltip": "Разрешить громкость выше 100%. Если отключено, более высокий максимум громкости только увеличивает точность настройки.",
   "Settings_VolumeCurve": "Кривая громкости",
   "Settings_VolumeCurve_Desc": "Как ползунок громкости преобразуется в реальную громкость",
+  "Settings_WaveBorderReactiveGlow": "Реактивное свечение рамки",
+  "Settings_WaveBorderReactiveGlowDesc": "Динамическая яркость, пружинная толщина линии и мягкое свечение в такт битам и вокалу.",
   "Settings_WindowBehavior": "Поведение окна",
 
   "Splash_BuildingInterface": "Построение интерфейса...",

@@ -8,7 +8,7 @@ public sealed partial class AudioEngine
 
     public Task SwitchQualityAsync(AudioFormat format, int bitrate)
     {
-        if (CurrentTrack == null) return Task.CompletedTask;
+        if (CurrentTrack is not { } track) return Task.CompletedTask;
 
         TimeSpan livePos = CurrentPosition;
         if (livePos.TotalSeconds > 1)
@@ -18,8 +18,6 @@ public sealed partial class AudioEngine
 
         ResetSealedFailedTrack();
         int session = BeginNewSession();
-
-        var track = CurrentTrack;
         track.TransientFormat = format;
         track.TransientBitrate = bitrate;
 

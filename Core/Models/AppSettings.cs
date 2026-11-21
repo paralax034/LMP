@@ -104,10 +104,10 @@ public enum AmbientBackdropMode
     /// <summary>Disabled (0% rendering overhead).</summary>
     Off = 0,
 
-    /// <summary>Smooth top and bottom gradient washes.</summary>
-    Wave = 1,
+    /// <summary>Organic breathing aurora curtain with central vocal glow and radial shockwaves.</summary>
+    Aurora = 1,
 
-    /// <summary>Traveling audio-reactive fluid wave horizon matching the active track border (default).</summary>
+    /// <summary>Traveling left-to-right audio-reactive fluid wave matching the active track border (default).</summary>
     FluidWave = 2
 }
 
@@ -740,6 +740,11 @@ public sealed class AppSettings
     public bool UseWaveAnimation { get; set; } = true;
 
     /// <summary>
+    /// Enables dynamic brightness lift, spring stroke thickness, and soft 2-pass bloom on the active track border.
+    /// </summary>
+    public bool WaveBorderReactiveGlow { get; set; } = true;
+
+    /// <summary>
     /// Animation speed of the playing track in the list.
     /// </summary>
     public TrackAnimationSpeed TrackAnimationSpeed { get; set; } = TrackAnimationSpeed.Medium;
@@ -753,6 +758,12 @@ public sealed class AppSettings
     /// Intensity multiplier for the ambient playlist/queue backdrop in percent (20–150, default 100).
     /// </summary>
     public int AmbientBackdropIntensity { get; set; } = 100;
+
+    /// <summary>
+    /// Dynamic brightness reactivity of the ambient backdrop to track loudness and beats in percent (0–100, default 60).
+    /// 0 = steady calm brightness without flashing; 100 = full verse-to-drop dynamic range.
+    /// </summary>
+    public int AmbientBackdropReactivity { get; set; } = 60;
 
     /// <summary>
     /// List of user-saved custom color themes.

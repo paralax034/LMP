@@ -822,7 +822,79 @@ public static class AudioLogicTests
             immediatePlayCanceled = true;
         }
         TestAssert.True(immediatePlayCanceled, "PlayAsync followed immediately by StopAsync must be canceled");
+
+        // 7. WaitForBufferAsync must return promptly during concurrent immediate decoder EOF (closes finally vs IsCompleted race)
+        var concurrentSw = System.Diagnostics.Stopwatch.StartNew();
+        for (int iter = 0; iter < 25; iter++)
+        {
+            var fastEofSource = new ShortCleanAudioSource(SampleRate, Channels, durationMs: 5_000, positionMs: 5_000);
+            var fastEofBackend = new NullAudioBackend();
+            var fastEofPipeline = AudioPipelineTestHarness.Create(
+                fastEofSource,
+                new ConstantDecoder(SampleRate, Channels, framesPerDecode: 960, maxFrameSize: 960, value: 0.05f),
+                fastEofBackend,
+                new LockFreeRingBuffer<float>(SampleRate * Channels),
+                new AudioStreamInfo { TrackId = "yt_fast_eof_wait", DurationMs = 5_000 });
+            try
+            {
+                fastEofPipeline.StartDecoding(new AudioPlayerOptions(), null, null);
+                bool ready = await fastEofPipeline.WaitForBufferAsync(minSamples: 9_600, maxWaitMs: 3_000, CancellationToken.None).ConfigureAwait(false);
+                TestAssert.False(ready, "Empty ring after decoder EOF must report buffer not ready");
+            }
+            finally
+            {
+                await fastEofPipeline.DisposeAsync().ConfigureAwait(false);
+                fastEofBackend.Dispose();
+            }
+        }
+        concurrentSw.Stop();
+        TestAssert.True(
+            concurrentSw.ElapsedMilliseconds < 2_000,
+            $"WaitForBufferAsync stalled on concurrent immediate EOF ({concurrentSw.ElapsedMilliseconds}ms across 25 runs)");
+
+        // 8. Runtime format change (HE-AAC v2 24kHz/1ch -> 48kHz/2ch) must rescale _decodedSamples so GetPlaybackPosition stays accurate
+        byte[] aot29Asc = [0xEB, 0x09, 0x88, 0x00];
+        var fmtBackend = new NullAudioBackend();
+        var fmtDecoder = new LMP.Core.Audio.Decoders.AacDecoder(24_000, 1);
+        var fmtPipeline = AudioPipelineTestHarness.Create(
+            new ShortCleanAudioSource(24_000, 1, durationMs: 120_000, positionMs: 60_000),
+            fmtDecoder,
+            fmtBackend,
+            new LockFreeRingBuffer<float>(48_000 * 2),
+            new AudioStreamInfo { TrackId = "yt_fmt_rescale", DurationMs = 120_000 });
+        try
+        {
+            fmtPipeline.SetDecodedSamplesPosition(60L * 24_000 * 1);
+            fmtDecoder.Initialize(aot29Asc);
+            bool changed = CallEnsureRuntimeFormatMatchesDecoder(fmtPipeline);
+            TestAssert.True(changed, "EnsureRuntimeFormatMatchesDecoder must detect 24kHz/1ch -> 48kHz/2ch switch");
+            TestAssert.Equal(48_000, fmtPipeline.SampleRate);
+            TestAssert.Equal(2, fmtPipeline.Channels);
+            double posSec = fmtPipeline.GetPlaybackPosition().TotalSeconds;
+            TestAssert.True(Math.Abs(posSec - 60.0) < 0.05, $"Playback position must remain ~60s after format switch, got {posSec:F2}s");
+        }
+        finally
+        {
+            await fmtPipeline.DisposeAsync().ConfigureAwait(false);
+            fmtBackend.Dispose();
+        }
+
+        // 9. AudioPlayer.DisposeAsync must always dispose timers and active pipeline even if _lifetimeCts cancels an in-flight actor step
+        var leakCheckPlayer = new AudioPlayer(new AudioPlayerOptions
+        {
+            UseNullBackend = true,
+            PositionUpdateInterval = TimeSpan.FromMilliseconds(25)
+        });
+        PlayerStateField(leakCheckPlayer) = PlayerState.Buffering;
+        StartPositionTimerDelayed(leakCheckPlayer);
+        TestAssert.NotNull(BufferTimerField(leakCheckPlayer));
+        await leakCheckPlayer.DisposeAsync().ConfigureAwait(false);
+        TestAssert.True(BufferTimerField(leakCheckPlayer) is null, "DisposeAsync must dispose _bufferTimer");
+        TestAssert.True(PositionTimerField(leakCheckPlayer) is null, "DisposeAsync must dispose _positionTimer");
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "EnsureRuntimeFormatMatchesDecoder")]
+    private static extern bool CallEnsureRuntimeFormatMatchesDecoder(AudioPipeline pipeline);
 
     private sealed class ShortCleanAudioSource(int sampleRate, int channels, long durationMs, long positionMs) : IAudioSource
     {

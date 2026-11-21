@@ -19,15 +19,15 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     private TimeSpan _elapsedBeforeCurrent;
     private TimeSpan _totalQueueDuration;
     private long _lastRenderedPositionSecond = long.MinValue;
-    private bool _showRemainingTime;
     private bool _isPageActive;
     private bool _isLivePositionSubscribed;
     private bool _disposed;
 
     [ObservableProperty] public partial int CurrentTrackIndex { get; private set; } = -1;
-    [ObservableProperty] public partial string CurrentTrackNumberDisplay { get; private set; } = "–";
-    [ObservableProperty] public partial string FormattedElapsedDuration { get; private set; } = "0:00";
-    [ObservableProperty] public partial string FormattedSecondaryDuration { get; private set; } = "0:00";
+    [ObservableProperty] public partial string CurrentTrackNumberDisplay { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string FormattedElapsedDuration { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string FormattedRemainingDuration { get; private set; } = string.Empty;
+    [ObservableProperty] public partial string FormattedTotalDuration { get; private set; } = string.Empty;
     [ObservableProperty] public partial string QueueTimeTooltip { get; private set; } = string.Empty;
     [ObservableProperty] public partial double QueueProgressRatio { get; private set; }
     [ObservableProperty] public partial bool HasSourcePlaylist { get; private set; }
@@ -54,7 +54,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         : L["Queue_GoToPlaylist"];
 
     public IRelayCommand ScrollToCurrentTrackCommand { get; }
-    public IRelayCommand ToggleTimeDisplayModeCommand { get; }
     public IRelayCommand GoToSourcePlaylistCommand { get; }
     public IRelayCommand ClearQueueCommand { get; }
     public IRelayCommand ShuffleQueueCommand { get; }
@@ -88,7 +87,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         _items.IsQueueContext = true;
 
         ScrollToCurrentTrackCommand = new RelayCommand(RequestScrollToCurrentTrack, () => CurrentTrackIndex >= 0);
-        ToggleTimeDisplayModeCommand = new RelayCommand(ToggleTimeDisplayMode, () => TotalCount > 0);
         GoToSourcePlaylistCommand = new RelayCommand(GoToSourcePlaylist, () => HasSourcePlaylist);
         ClearQueueCommand = new RelayCommand(AudioClearQueue, () => TotalCount > 0);
         ShuffleQueueCommand = new RelayCommand(AudioShuffleQueue, () => TotalCount > 1);
@@ -150,12 +148,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     {
         if (CurrentTrackIndex >= 0)
             ScrollToCurrentRequested?.Invoke();
-    }
-
-    private void ToggleTimeDisplayMode()
-    {
-        _showRemainingTime = !_showRemainingTime;
-        RefreshPlaybackTiming(force: true);
     }
 
     private void GoToSourcePlaylist()
@@ -539,7 +531,8 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
         string totalText = FormatDuration(_totalQueueDuration);
 
         FormattedElapsedDuration = elapsedText;
-        FormattedSecondaryDuration = _showRemainingTime ? $"-{remainingText}" : totalText;
+        FormattedRemainingDuration = $"-{remainingText}";
+        FormattedTotalDuration = totalText;
         QueueProgressRatio = _totalQueueDuration.TotalSeconds > 0
             ? Math.Clamp(elapsed.TotalSeconds / _totalQueueDuration.TotalSeconds, 0.0, 1.0)
             : 0.0;
@@ -564,7 +557,6 @@ public sealed partial class QueueViewModel : TrackListBaseViewModel
     private void NotifyCommandStates()
     {
         ScrollToCurrentTrackCommand.NotifyCanExecuteChanged();
-        ToggleTimeDisplayModeCommand.NotifyCanExecuteChanged();
         ClearQueueCommand.NotifyCanExecuteChanged();
         ShuffleQueueCommand.NotifyCanExecuteChanged();
         DownloadAllCommand.NotifyCanExecuteChanged();

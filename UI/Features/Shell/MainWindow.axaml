@@ -40,10 +40,23 @@
         <Grid Grid.Row="0" Height="46" Background="{DynamicResource BgSecondaryBrush}"
               ColumnDefinitions="Auto, Auto, *, Auto, Auto" Name="TitleBar">
 
-            <!-- Soft top ambient bleed for Queue/Playlist pages (Option A) -->
+            <!-- Matches BgPrimaryBrush under live bleed so the TitleBar-to-page seam has zero surface contrast step -->
             <Border Grid.Column="0" Grid.ColumnSpan="5"
-                    Background="{Binding TitleBarAmbientBrush}"
+                    Background="{DynamicResource BgPrimaryBrush}"
                     Opacity="{Binding TitleBarAmbientOpacity}"
+                    IsHitTestVisible="False" />
+
+            <!-- Seamless live top ambient bleed matching Queue/Playlist backdrop -->
+            <ctrl:AmbientTitleBarBleed Grid.Column="0" Grid.ColumnSpan="5"
+                                       BaseColor="{Binding TitleBarAmbientColor}"
+                                       BleedOpacity="{Binding TitleBarAmbientOpacity}" />
+
+            <!-- Subtle 1px structural hairline separating window chrome from page content -->
+            <Border Grid.Column="0" Grid.ColumnSpan="5"
+                    Height="1"
+                    VerticalAlignment="Bottom"
+                    Background="{DynamicResource BgHighlightBrush}"
+                    Opacity="0.35"
                     IsHitTestVisible="False" />
 
             <!-- Col 0: App Logo -->

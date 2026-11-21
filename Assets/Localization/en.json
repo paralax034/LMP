@@ -5,9 +5,9 @@
   "AddToPlaylist_Selected": "Selected: {0}",
   "AddToPlaylist_Title": "To Playlist",
 
+  "AmbientBackdrop_Aurora": "Aurora",
   "AmbientBackdrop_FluidWave": "Fluid Wave",
   "AmbientBackdrop_Off": "Disabled",
-  "AmbientBackdrop_Wave": "Smooth Gradient",
 
   "AnimationSpeed_Epileptic": "Epilepsy",
   "AnimationSpeed_Fast": "Fast",
@@ -629,7 +629,7 @@
   "Queue_SaveToPlaylist": "Save Queue to Playlist",
   "Queue_ScrollToCurrent": "Scroll to playing track",
   "Queue_Shuffle": "Shuffle Queue",
-  "Queue_TimeTooltip": "Played: {0} • Left: {1}\nTotal: {2} • Click to toggle",
+  "Queue_TimeTooltip": "Played: {0} • Left: {1}\nTotal: {2}",
 
   "Recommendation_AllClientsFailed_Auth": "All clients failed. Try changing the client in Settings → Network, or contact the developer.",
   "Recommendation_BotDetection": "Wait a few minutes or change your IP address (VPN).",
@@ -679,6 +679,8 @@
   "Settings_AmbientBackdropIntensityDesc": "Adjusts brightness and reach of the playlist/queue background glow.",
   "Settings_AmbientBackdropMode": "Background Glow Style",
   "Settings_AmbientBackdropModeDesc": "Ambient background effect for the Queue and Playlist screens.",
+  "Settings_AmbientBackdropReactivity": "Brightness Reactivity",
+  "Settings_AmbientBackdropReactivityDesc": "How strongly backdrop brightness reacts to track loudness and beats (0% = steady glow).",
   "Settings_Appearance": "Appearance",
   "Settings_Audio": "Audio",
   "Settings_AudioCache": "Audio Cache",
@@ -789,6 +791,8 @@
   "Settings_VolumeBoost_Tooltip": "Allow volume above 100%. When disabled, higher max volume only increases precision for fine-tuning.",
   "Settings_VolumeCurve": "Volume Curve",
   "Settings_VolumeCurve_Desc": "How volume slider maps to actual loudness",
+  "Settings_WaveBorderReactiveGlow": "Reactive Border Glow",
+  "Settings_WaveBorderReactiveGlowDesc": "Dynamic brightness lift, spring stroke thickness, and soft bloom on beats and vocals.",
   "Settings_WindowBehavior": "Window Behavior",
 
   "Splash_BuildingInterface": "Building interface...",

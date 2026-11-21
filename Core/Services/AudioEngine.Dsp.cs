@@ -339,8 +339,9 @@ public sealed partial class AudioEngine
     private void SyncTrackPresetInMemory(TrackInfo track, string? presetId)
     {
         track.EqualizerPresetId = presetId;
-        if (CurrentTrack != null && string.Equals(CurrentTrack.Id, track.Id, StringComparison.Ordinal))
-            CurrentTrack.EqualizerPresetId = presetId;
+        var current = CurrentTrack;
+        if (current != null && string.Equals(current.Id, track.Id, StringComparison.Ordinal))
+            current.EqualizerPresetId = presetId;
 
         var reg = _trackRegistry.TryGet(track.Id);
         reg?.EqualizerPresetId = presetId;

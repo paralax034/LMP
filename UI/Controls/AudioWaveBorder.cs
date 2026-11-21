@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -12,9 +11,11 @@ using SkiaSharp;
 namespace LMP.UI.Controls;
 
 /// <summary>
-/// Border decorator with a continuous hydrodynamic waveguide, where the wavelength represents the note pitch.
-/// Runs 60 FPS animations inside <see cref="CompositionCustomVisualHandler"/> on the render thread
-/// with lazy per-row allocation (inactive rows hold zero compositor resources).
+/// Border decorator driven by left-to-right traveling hydrodynamic wave packets ("audio history stream")
+/// with immediate left-edge entry (0..80 ms audiovisual binding window), zero-mean bipolar bass/kick wavelets
+/// (prevents DC saturation on bass-heavy tracks), adaptive wave-density headroom + smooth tanh ceiling,
+/// non-evicting smooth birth/exit envelopes (zero abrupt disappearances), and optional reactive bloom.
+/// Runs 60 FPS inside <see cref="CompositionCustomVisualHandler"/> on the render thread with 0 B heap allocations.
 /// </summary>
 public sealed class AudioWaveBorder : Decorator
 {
@@ -25,20 +26,16 @@ public sealed class AudioWaveBorder : Decorator
     private const float InsetMarginX = 1.5f;
     private const float InsetMarginY = 3.8f;
 
-    private const double BaseWaveSpeed = 0.70;
     private const double BasePulseSpeed = 1.4;
-    private const double MinFrameIntervalSeconds = 0.0125;
+    private const double MinFrameIntervalSeconds = 0.0155;
     private const double MaxFrameDeltaSeconds = 0.050;
 
-    private const float CornerBlendMargin = 0.08f;
-    private const float MaxSafeDisplacement = 2.6f;
-    private const double MinSpatialSpacing = 0.28;
-
-    private const int MaxActivePackets = 16;
-    private const float SampleStepPx = 16.0f;
-    private const int MinRailSamples = 20;
-    private const int MaxRailSamples = 64;
-    private const float DisplacementZeroEpsilon = 1e-5f;
+    internal const int RailSamples = 64;
+    internal const int MaxWavePackets = 24;
+    internal const float MaxSafeDisplacement = 3.45f;
+    private const float PacketAttackSeconds = 0.050f;
+    private const float CornerBlendMargin = 0.07f;
+    private const float DisplacementZeroEpsilon = 1e-4f;
     private const float BezierCircleConstant = 0.5522847498f;
 
     private static readonly object MsgStart = new();
@@ -48,30 +45,44 @@ public sealed class AudioWaveBorder : Decorator
 
     #endregion
 
-    #region Wave Packet Structs & Composition Handler
+    #region Wave Packet Types
 
-    private enum PacketKind : byte
+    internal enum WavePacketKind : byte
     {
-        KickBullet,
-        BassSwell,
-        MidRipple,
-        HighNeedle
+        KickBullet = 0,
+        BassSwell = 1,
+        MidRipple = 2,
+        HighNeedle = 3
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 8)]
-    private struct WavePacket
+    internal struct WavePacket
     {
-        public double Position;
-        public double Velocity;
-        public double Amplitude;
-        public double Width;
-        public double Frequency;
-        public double PhaseOffset;
-        public double HarmonicRatio;
-        public double HarmonicPhase;
-        public double DecayRate;
+        public float Position;
+        public float HalfWidth;
+        public float Speed;
+        public float Amplitude;
+        public float Frequency;
+        public float Phase;
+        public float Age;
+        public float MaxAge;
+        public float PauseFade;
+        public WavePacketKind Kind;
         public bool IsActive;
     }
+
+    private struct ActiveWavePacket
+    {
+        public float Position;
+        public float InvHalfWidth;
+        public float EffectiveAmp;
+        public float Frequency;
+        public float Phase;
+        public WavePacketKind Kind;
+    }
+
+    #endregion
+
+    #region Wave State & Composition Handler
 
     private struct WaveStateSnapshot
     {
@@ -80,6 +91,7 @@ public sealed class AudioWaveBorder : Decorator
         public bool IsPlaying;
         public bool IsSelected;
         public bool UseWave;
+        public bool ReactiveGlow;
         public TrackAnimationSpeed Speed;
         public float Thickness;
         public float CornerRadius;
@@ -97,12 +109,23 @@ public sealed class AudioWaveBorder : Decorator
         [ThreadStatic] private static SKPaint? t_paint;
 
         private readonly AudioWaveBorder _owner;
-        private readonly WavePacket[] _packets = new WavePacket[MaxActivePackets];
+        private readonly WavePacket[] _packets = new WavePacket[MaxWavePackets];
 
         private WaveStateSnapshot _state;
         private AudioReactiveSignalState _signal;
         private FastXorShift64 _rng;
         private bool _rngInitialized;
+
+        // Perceptual envelopes & 2nd-order spring stroke/glow physics
+        private double _macroEnergy;
+        private double _vocalMode;
+        private double _harmonicMode;
+        private double _percFlash;
+        private double _centroid = 0.40;
+        private double _vocalPhase;
+        private double _cooldownVocal;
+        private double _springPos;
+        private double _springVel;
         private double _pulsePhase;
         private float _drainOpacity = 1f;
         private byte _lastPulseAlpha;
@@ -118,7 +141,7 @@ public sealed class AudioWaveBorder : Decorator
 
         public override Rect GetRenderBounds()
         {
-            double pad = MaxSafeDisplacement + _state.Thickness + 1.0;
+            double pad = MaxSafeDisplacement + (_state.Thickness * 3.5) + 3.0;
             return new Rect(-pad, -pad, EffectiveSize.X + (2.0 * pad), EffectiveSize.Y + (2.0 * pad));
         }
 
@@ -147,8 +170,8 @@ public sealed class AudioWaveBorder : Decorator
                 if (_state.IsActive)
                     _drainOpacity = 1f;
 
-                if (_state.CanAnimate && _state.IsActive && _state.IsPlaying && !HasActivePackets())
-                    TryRestoreSharedWaveState(_state.TrackId, _packets, ref _signal, ref _pulsePhase);
+                if (_state.CanAnimate && _state.IsActive && _state.IsPlaying && !HasActivePackets(_packets))
+                    TryRestoreSharedWaveState(_state.TrackId, _packets, ref _signal, ref _pulsePhase, ref _macroEnergy, ref _vocalMode);
 
                 Invalidate();
                 if (_state.CanAnimate && _state.IsActive && _state.IsPlaying && !_running)
@@ -187,14 +210,14 @@ public sealed class AudioWaveBorder : Decorator
 
                 if (!_state.UseWave)
                 {
-                    Array.Clear(_packets);
+                    ClearPackets();
                     _lastPulseAlpha = 0;
                 }
 
-                if (_state.IsActive && _state.IsPlaying && !HasActivePackets())
-                    TryRestoreSharedWaveState(_state.TrackId, _packets, ref _signal, ref _pulsePhase);
+                if (_state.IsActive && _state.IsPlaying && !HasActivePackets(_packets))
+                    TryRestoreSharedWaveState(_state.TrackId, _packets, ref _signal, ref _pulsePhase, ref _macroEnergy, ref _vocalMode);
 
-                if (!_state.IsActive && _state.IsDraining && _state.UseWave && !HasActivePackets() && !_signal.HasEnergy(0.01))
+                if (!_state.IsActive && _state.IsDraining && _state.UseWave && !HasActivePackets(_packets) && !_signal.HasEnergy(0.005))
                 {
                     _running = false;
                     ResetState();
@@ -206,9 +229,8 @@ public sealed class AudioWaveBorder : Decorator
                 Invalidate();
 
                 bool shouldRun = (_state.IsActive && _state.IsPlaying)
-                              || HasActivePackets()
-                              || _signal.HasEnergy(0.01)
-                              || (!_state.IsActive && _state.IsDraining && _drainOpacity > 0.01f);
+                              || HasResidualEnergy()
+                              || (!_state.IsActive && _state.IsDraining && _drainOpacity > 0.004f);
 
                 if (shouldRun)
                 {
@@ -269,7 +291,7 @@ public sealed class AudioWaveBorder : Decorator
             }
             else if (!_state.IsPlaying)
             {
-                _signal.Reset();
+                ResetState();
                 Invalidate();
             }
             else
@@ -296,54 +318,94 @@ public sealed class AudioWaveBorder : Decorator
 
             using var lease = leaseFeature.Lease();
 
+            bool reactiveGlow = _state.ReactiveGlow;
+            float springKick = MathF.Max(0f, (float)_springPos);
+            float macro = (float)Math.Clamp(_macroEnergy, 0.0, 1.4);
+            float vocal = (float)Math.Clamp(_vocalMode, 0.0, 1.0);
+            float percFlash = (float)Math.Clamp(_percFlash, 0.0, 1.0);
+
             byte baseAlpha = _state.UseWave
                 ? _state.Color.Alpha
-                : ComputePulseAlpha(_state.Color.Alpha, _state.IsSelected, _signal.Beat, _pulsePhase);
+                : ComputePulseAlpha(_state.Color.Alpha, _state.IsSelected, _signal.Beat + (0.25 * springKick), _pulsePhase);
 
             byte alpha = (byte)Math.Clamp((int)Math.Round(baseAlpha * lease.CurrentOpacity * _drainOpacity), 0, 255);
             if (alpha == 0) return;
+
+            byte cr = _state.Color.Red;
+            byte cg = _state.Color.Green;
+            byte cb = _state.Color.Blue;
+            float strokeThickness = _state.Thickness;
+            byte glowAlpha = 0;
+
+            if (reactiveGlow)
+            {
+                float brightLift = Math.Clamp((percFlash * 0.36f) + (springKick * 0.26f) + (vocal * 0.14f), 0f, 0.58f);
+                cr = (byte)Math.Clamp((int)MathF.Round(cr + ((255f - cr) * brightLift)), 0, 255);
+                cg = (byte)Math.Clamp((int)MathF.Round(cg + ((255f - cg) * brightLift)), 0, 255);
+                cb = (byte)Math.Clamp((int)MathF.Round(cb + ((255f - cb) * brightLift)), 0, 255);
+
+                strokeThickness = Math.Clamp(
+                    _state.Thickness * (0.92f + (0.24f * macro) + (0.40f * springKick) + (0.12f * vocal)),
+                    1.0f,
+                    2.7f);
+
+                float glowStrength = Math.Clamp((macro * 0.35f) + (springKick * 0.52f) + (vocal * 0.35f) + (percFlash * 0.38f), 0f, 1.0f);
+                glowAlpha = (byte)Math.Clamp((int)MathF.Round(alpha * 0.32f * glowStrength), 0, 110);
+            }
 
             var canvas = lease.SkCanvas;
             var paint = t_paint ??= new SKPaint();
             paint.Reset();
             paint.IsAntialias = true;
             paint.Style = SKPaintStyle.Stroke;
-            paint.StrokeWidth = _state.Thickness;
             paint.StrokeCap = SKStrokeCap.Round;
             paint.StrokeJoin = SKStrokeJoin.Round;
-            paint.Color = new SKColor(_state.Color.Red, _state.Color.Green, _state.Color.Blue, alpha);
 
             float left = InsetMarginX;
             float top = InsetMarginY;
             float right = InsetMarginX + width;
             float bottom = InsetMarginY + height;
 
-            if (!_state.UseWave || !HasActivePackets())
+            bool hasWaveEnergy = HasActivePackets(_packets) || vocal >= 0.008f || _harmonicMode >= 0.01;
+            if (!_state.UseWave || !hasWaveEnergy)
             {
-                canvas.DrawRoundRect(new SKRect(left, top, right, bottom), radius, radius, paint);
+                var rect = new SKRect(left, top, right, bottom);
+                if (glowAlpha > 3)
+                {
+                    paint.StrokeWidth = strokeThickness * 2.1f;
+                    paint.Color = new SKColor(cr, cg, cb, glowAlpha);
+                    canvas.DrawRoundRect(rect, radius, radius, paint);
+                }
+
+                paint.StrokeWidth = strokeThickness;
+                paint.Color = new SKColor(cr, cg, cb, alpha);
+                canvas.DrawRoundRect(rect, radius, radius, paint);
                 paint.Reset();
                 return;
             }
 
             float horizLen = width - (2f * radius);
-            int railSamples = Math.Clamp((int)(horizLen / SampleStepPx), MinRailSamples, MaxRailSamples);
-            float invSamplesMinusOne = 1f / (railSamples - 1);
+            float invNMinusOne = 1f / (RailSamples - 1);
             float k = radius * BezierCircleConstant;
+
+            // Single stack-allocated displacement evaluation shared symmetrically by top & bottom rails (0 B heap alloc)
+            Span<float> disp = stackalloc float[RailSamples];
+            float vocalAmp = vocal * (0.72f + (0.38f * macro));
+            float harmAmp = (float)_harmonicMode * 0.26f;
+            EvaluateRailDisplacement(_packets, disp, vocalAmp, harmAmp, (float)_vocalPhase, (float)_centroid);
 
             var path = t_path ??= new SKPath();
             path.Rewind();
 
             float startX = left + radius;
-            float topY0 = top - CalculateDisplacement(0f);
-            path.MoveTo(startX, topY0);
+            path.MoveTo(startX, top);
 
             float prevX = startX;
-            float prevY = topY0;
-            for (int i = 1; i < railSamples - 1; i++)
+            float prevY = top;
+            for (int i = 1; i < RailSamples - 1; i++)
             {
-                float u = i * invSamplesMinusOne;
-                float curX = startX + (u * horizLen);
-                float curY = top - CalculateDisplacement(u);
+                float curX = startX + (i * invNMinusOne * horizLen);
+                float curY = top - disp[i];
                 float midX = (prevX + curX) * 0.5f;
                 float midY = (prevY + curY) * 0.5f;
                 if (i == 1)
@@ -356,22 +418,19 @@ public sealed class AudioWaveBorder : Decorator
             }
 
             float rightInnerX = right - radius;
-            float topYEnd = top - CalculateDisplacement(1f);
-            path.QuadTo(prevX, prevY, rightInnerX, topYEnd);
+            path.QuadTo(prevX, prevY, rightInnerX, top);
 
             path.CubicTo(rightInnerX + k, top, right, top + radius - k, right, top + radius);
             path.LineTo(right, bottom - radius);
-
             path.CubicTo(right, bottom - radius + k, rightInnerX + k, bottom, rightInnerX, bottom);
 
-            float bottomY0 = bottom + CalculateDisplacement(1f);
             prevX = rightInnerX;
-            prevY = bottomY0;
-            for (int i = 1; i < railSamples - 1; i++)
+            prevY = bottom;
+            for (int i = 1; i < RailSamples - 1; i++)
             {
-                float u = 1f - (i * invSamplesMinusOne);
-                float curX = startX + (u * horizLen);
-                float curY = bottom + CalculateDisplacement(u);
+                int idx = RailSamples - 1 - i;
+                float curX = startX + (idx * invNMinusOne * horizLen);
+                float curY = bottom + disp[idx];
                 float midX = (prevX + curX) * 0.5f;
                 float midY = (prevY + curY) * 0.5f;
                 if (i == 1)
@@ -383,15 +442,24 @@ public sealed class AudioWaveBorder : Decorator
                 prevY = curY;
             }
 
-            float bottomYEnd = bottom + CalculateDisplacement(0f);
-            path.QuadTo(prevX, prevY, startX, bottomYEnd);
+            path.QuadTo(prevX, prevY, startX, bottom);
 
             path.CubicTo(startX - k, bottom, left, bottom - radius + k, left, bottom - radius);
             path.LineTo(left, top + radius);
-
             path.CubicTo(left, top + radius - k, startX - k, top, startX, top);
             path.Close();
 
+            // Pass 1: Soft reactive bloom halo (only when ReactiveGlow is enabled)
+            if (glowAlpha > 3)
+            {
+                paint.StrokeWidth = strokeThickness * 2.1f;
+                paint.Color = new SKColor(cr, cg, cb, glowAlpha);
+                canvas.DrawPath(path, paint);
+            }
+
+            // Pass 2: Crisp core stroke
+            paint.StrokeWidth = strokeThickness;
+            paint.Color = new SKColor(cr, cg, cb, alpha);
             canvas.DrawPath(path, paint);
             paint.Reset();
         }
@@ -425,23 +493,33 @@ public sealed class AudioWaveBorder : Decorator
             }
         }
 
+        private void ClearPackets() => Array.Clear(_packets);
+
         private void ResetState()
         {
-            Array.Clear(_packets);
+            ClearPackets();
             _signal.Reset();
+            _macroEnergy = 0.0;
+            _vocalMode = 0.0;
+            _harmonicMode = 0.0;
+            _percFlash = 0.0;
+            _cooldownVocal = 0.0;
+            _springPos = 0.0;
+            _springVel = 0.0;
             _drainOpacity = 1f;
             _lastPulseAlpha = 0;
             _wasIdleFrame = false;
         }
 
-        private bool HasActivePackets()
-        {
-            for (int i = 0; i < _packets.Length; i++)
-            {
-                if (_packets[i].IsActive) return true;
-            }
-            return false;
-        }
+        private bool HasResidualEnergy() =>
+            HasActivePackets(_packets)
+            || _signal.HasEnergy(0.005)
+            || _macroEnergy > 0.008
+            || _vocalMode > 0.006
+            || _harmonicMode > 0.008
+            || _percFlash > 0.006
+            || Math.Abs(_springPos) > 0.005
+            || Math.Abs(_springVel) > 0.02;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte ComputePulseAlpha(byte colorAlpha, bool isSelected, double beat, double pulsePhase)
@@ -455,11 +533,11 @@ public sealed class AudioWaveBorder : Decorator
 
         private double GetWaveSpeedMultiplier() => _state.Speed switch
         {
-            TrackAnimationSpeed.VerySlow => 0.32,
-            TrackAnimationSpeed.Slow => 0.60,
+            TrackAnimationSpeed.VerySlow => 0.55,
+            TrackAnimationSpeed.Slow => 0.78,
             TrackAnimationSpeed.Medium => 1.0,
-            TrackAnimationSpeed.Fast => 1.55,
-            TrackAnimationSpeed.Epileptic => 2.40,
+            TrackAnimationSpeed.Fast => 1.30,
+            TrackAnimationSpeed.Epileptic => 1.75,
             _ => 1.0
         };
 
@@ -477,89 +555,124 @@ public sealed class AudioWaveBorder : Decorator
         {
             double volOverdrive = Math.Clamp(_state.VolumeFactor, 1.0, 1.60);
             double volExcess = volOverdrive - 1.0;
-            double waveMultiplier = GetWaveSpeedMultiplier() * (1.0 + (0.30 * volExcess));
+            double speedMult = GetWaveSpeedMultiplier() * (1.0 + (0.22 * volExcess));
             double pulseMultiplier = GetPulseSpeedMultiplier() * (1.0 + (0.25 * volExcess));
 
-            if (canRun)
+            bool hasActiveAudio = false;
+            if (canRun && AudioVisualizerBuffer.TryReadSnapshot(out var snap))
             {
-                double curLow = AudioVisualizerBuffer.LowLevel;
-                double curMid = AudioVisualizerBuffer.MidLevel;
-                double curHigh = AudioVisualizerBuffer.HighLevel;
-                double curBeat = AudioVisualizerBuffer.BeatPulse;
+                hasActiveAudio = true;
+                double ampBoost = 1.0 + (0.35 * volExcess);
+                double macroAlpha = snap.MacroEnergy > _macroEnergy
+                    ? (1.0 - Math.Exp(-dt / 0.065))
+                    : (1.0 - Math.Exp(-dt / 0.280));
+                _macroEnergy += (snap.MacroEnergy - _macroEnergy) * macroAlpha;
 
-                double effBeat = Math.Pow(curBeat, 0.75);
-                double effLow = Math.Pow(curLow, 0.75);
-                double effMid = Math.Pow(curMid, 0.85);
-                double effHigh = Math.Pow(curHigh, 0.85);
+                _vocalMode += (snap.Vocal - _vocalMode) * (1.0 - Math.Exp(-dt / (snap.Vocal > _vocalMode ? 0.055 : 0.180)));
+                _harmonicMode += (snap.HarmonicEnergy - _harmonicMode) * (1.0 - Math.Exp(-dt / 0.120));
+                _centroid += (snap.SpectralCentroid - _centroid) * (1.0 - Math.Exp(-dt / 0.100));
+
+                double rawPercFlash = Math.Clamp(
+                    (snap.SnareFlux * 0.85) + (snap.Beat * 0.60) + (snap.DropImpact * 0.90) + (snap.MidFlux * 0.42) + (snap.HighFlux * 0.32),
+                    0.0,
+                    1.0);
+                _percFlash = Math.Max(rawPercFlash, _percFlash * Math.Exp(-dt / 0.095));
 
                 _signal.AdvanceCooldowns(dt);
+                _cooldownVocal -= dt;
 
                 if (_state.UseWave)
                 {
-                    double baseVelocity = BaseWaveSpeed * waveMultiplier;
-                    double minCooldown = MinSpatialSpacing / Math.Max(0.15, baseVelocity);
-                    double ampBoost = 1.0 + (0.55 * volExcess);
+                    double macroGain = (0.85 + (0.48 * Math.Clamp(_macroEnergy, 0.0, 1.35))) * ampBoost;
+                    float jitter = (float)_rng.NextDouble(0.92, 1.08);
 
-                    if (effBeat > 0.18 && curBeat > _signal.Beat && _signal.CooldownBeat <= 0.0)
+                    double lowRise = snap.Low - _signal.Low;
+                    double midRise = snap.Mid - _signal.Mid;
+                    double highRise = snap.High - _signal.High;
+
+                    // 1. Kick drum & Drop -> crisp zero-mean Ricker crest
+                    double kickDrive = Math.Max(snap.Beat, snap.BassFlux * 0.92);
+                    if (kickDrive > 0.16 && _signal.CooldownBeat <= 0.0)
                     {
-                        SpawnPacket(PacketKind.KickBullet, effBeat * 3.4 * ampBoost, baseVelocity);
-                        _signal.CooldownBeat = minCooldown * 0.95;
+                        float kickAmp = (float)Math.Clamp((0.85 + (kickDrive * 2.10) + (snap.DropImpact * 0.80)) * macroGain * jitter, 1.15, 3.10);
+                        SpawnPacket(_packets, WavePacketKind.KickBullet, kickAmp, (float)_centroid, speedMult, jitter);
+                        _springVel += (kickDrive * 7.8) + (snap.DropImpact * 4.5);
+                        _signal.CooldownBeat = 0.16;
                     }
 
-                    if ((effLow - _signal.Low) > 0.025 && effLow > 0.12 && _signal.CooldownLow <= 0.0)
+                    // 2. Rolling bass swell -> onset flux or band self-rise fallback for compressed mixes
+                    if (((snap.BassFlux > 0.13 && snap.Low > 0.14) || (lowRise > 0.032 && snap.Low > 0.16))
+                        && _signal.CooldownLow <= 0.0
+                        && _signal.CooldownBeat < 0.06)
                     {
-                        SpawnPacket(PacketKind.BassSwell, effLow * 2.8 * ampBoost, baseVelocity);
-                        _signal.CooldownLow = minCooldown * 1.10;
+                        double bassDrive = Math.Max(snap.BassFlux, Math.Clamp(lowRise * 5.0, 0.0, 0.85));
+                        float bassAmp = (float)Math.Clamp((0.70 + (bassDrive * 1.65) + (snap.Low * 0.45)) * macroGain * jitter, 0.95, 2.55);
+                        SpawnPacket(_packets, WavePacketKind.BassSwell, bassAmp, (float)_centroid, speedMult, jitter);
+                        _signal.CooldownLow = 0.28;
                     }
 
-                    if ((effMid - _signal.Mid) > 0.028 && effMid > 0.14 && _signal.CooldownMid <= 0.0)
+                    // 3. Melodic / Synth / Vocal attacks -> onset flux, band self-rise, or sustained vocal shimmer
+                    if ((snap.MidFlux > 0.11 || (midRise > 0.032 && snap.Mid > 0.16)) && _signal.CooldownMid <= 0.0)
                     {
-                        SpawnPacket(PacketKind.MidRipple, effMid * 2.2 * ampBoost, baseVelocity);
-                        _signal.CooldownMid = minCooldown * 0.85;
+                        double midDrive = Math.Max(snap.MidFlux, Math.Clamp(midRise * 5.0, 0.0, 0.85));
+                        float midAmp = (float)Math.Clamp((0.60 + (midDrive * 1.75) + (snap.Vocal * 0.45)) * macroGain * jitter, 0.85, 2.40);
+                        SpawnPacket(_packets, WavePacketKind.MidRipple, midAmp, (float)_centroid, speedMult, jitter);
+                        _springVel += midDrive * 3.8;
+                        _signal.CooldownMid = 0.18;
+                    }
+                    else if ((snap.Vocal > 0.28 || snap.HarmonicEnergy > 0.42) && _cooldownVocal <= 0.0)
+                    {
+                        float vocalAmp = (float)Math.Clamp((0.55 + (snap.Vocal * 1.15) + (snap.HarmonicEnergy * 0.40)) * macroGain * jitter, 0.75, 1.95);
+                        SpawnPacket(_packets, WavePacketKind.MidRipple, vocalAmp, (float)_centroid, speedMult * 0.90, jitter);
+                        _cooldownVocal = 0.30;
                     }
 
-                    if ((effHigh - _signal.High) > 0.030 && effHigh > 0.14 && _signal.CooldownHigh <= 0.0)
+                    // 4. Snare / Hi-Hat / Cymbals -> narrow fast splashes overtaking bass swells
+                    double rawHiFlux = Math.Max(snap.SnareFlux * 1.05, snap.HighFlux);
+                    if ((rawHiFlux > 0.14 || (highRise > 0.030 && snap.High > 0.14)) && _signal.CooldownHigh <= 0.0)
                     {
-                        SpawnPacket(PacketKind.HighNeedle, effHigh * 1.8 * ampBoost, baseVelocity);
-                        _signal.CooldownHigh = minCooldown * 0.70;
+                        double hiDrive = Math.Max(rawHiFlux, Math.Clamp(highRise * 5.5, 0.0, 0.85));
+                        float hiAmp = (float)Math.Clamp((0.50 + (hiDrive * 1.60)) * macroGain * jitter, 0.70, 2.15);
+                        SpawnPacket(_packets, WavePacketKind.HighNeedle, hiAmp, (float)_centroid, speedMult, jitter);
+                        if (snap.SnareFlux > 0.22)
+                            _springVel += snap.SnareFlux * 4.8;
+                        _signal.CooldownHigh = 0.15;
                     }
                 }
 
-                _signal.SmoothToward(effBeat, effLow, effMid, effHigh, dt, 0.080, 0.120, 0.100, 0.070);
+                _vocalPhase = (_vocalPhase + dt * (4.0 + (5.5 * _centroid) + (2.4 * _vocalMode)) * speedMult) % (Math.Tau * 64.0);
+                _signal.SmoothToward(snap.Beat, snap.Low, snap.Mid, snap.High, dt, 0.065, 0.110, 0.095, 0.065);
                 _pulsePhase = (_pulsePhase + (BasePulseSpeed * pulseMultiplier * dt)) % Math.Tau;
             }
             else
             {
-                _signal.Decay(dt, 0.140);
+                double decay = Math.Exp(-dt / 0.200);
+                _signal.Decay(dt, 0.180);
+                _macroEnergy *= decay;
+                _vocalMode *= decay;
+                _harmonicMode *= decay;
+                _percFlash *= Math.Exp(-dt / 0.130);
             }
+
+            // Integrate 2nd-order spring for reactive stroke weight & bloom bounce
+            double springForce = (-210.0 * _springPos) - (18.5 * _springVel);
+            _springVel += springForce * dt;
+            _springPos = Math.Clamp(_springPos + (_springVel * dt), -0.15, 1.25);
+
+            // Advance traveling left-to-right packets (with silky PauseFade when paused/silent)
+            if (_state.UseWave)
+                StepPackets(_packets, dt, speedMult, isPlaying: canRun && hasActiveAudio);
 
             bool isDraining = _state.IsDraining && !_state.IsActive;
             if (isDraining)
-                _drainOpacity = Math.Max(0f, _drainOpacity - (float)(dt * 2.8));
+                _drainOpacity = Math.Max(0f, _drainOpacity - (float)(dt * 2.4));
             else
                 _drainOpacity = 1f;
 
-            bool anyRemaining = false;
-            for (int i = 0; i < _packets.Length; i++)
-            {
-                ref var p = ref _packets[i];
-                if (!p.IsActive) continue;
+            if (canRun && hasActiveAudio)
+                PublishSharedWaveState(_state.TrackId, _packets, in _signal, _pulsePhase, _macroEnergy, _vocalMode);
 
-                p.Position += p.Velocity * dt;
-                p.Amplitude -= p.DecayRate * dt;
-
-                if (p.Position - (p.Width * 0.5) > 1.05 || p.Amplitude <= 0.04)
-                    p.IsActive = false;
-                else
-                    anyRemaining = true;
-            }
-
-            if (canRun)
-            {
-                PublishSharedWaveState(_state.TrackId, _packets, in _signal, _pulsePhase);
-            }
-
-            bool hasEnergy = _signal.HasEnergy(0.01);
+            bool hasEnergy = HasResidualEnergy();
             bool needsRedraw;
             bool continueAnim;
 
@@ -567,14 +680,14 @@ public sealed class AudioWaveBorder : Decorator
             {
                 if (isDraining)
                 {
-                    continueAnim = (anyRemaining || hasEnergy) && _drainOpacity > 0.01f;
+                    continueAnim = hasEnergy && _drainOpacity > 0.004f;
                     needsRedraw = true;
                 }
                 else
                 {
-                    needsRedraw = anyRemaining || hasEnergy || !_wasIdleFrame;
-                    _wasIdleFrame = !anyRemaining && !hasEnergy;
-                    continueAnim = anyRemaining || hasEnergy || (canRun && AudioVisualizerBuffer.HasRecentActivity);
+                    needsRedraw = hasEnergy || !_wasIdleFrame;
+                    _wasIdleFrame = !hasEnergy;
+                    continueAnim = hasEnergy || hasActiveAudio;
                 }
             }
             else
@@ -583,8 +696,8 @@ public sealed class AudioWaveBorder : Decorator
                 byte scaledPulse = (byte)Math.Clamp((int)MathF.Round(rawPulse * _drainOpacity), 0, 255);
                 if (isDraining)
                 {
-                    needsRedraw = scaledPulse != _lastPulseAlpha || _drainOpacity > 0.01f;
-                    continueAnim = _drainOpacity > 0.01f;
+                    needsRedraw = scaledPulse != _lastPulseAlpha || _drainOpacity > 0.004f;
+                    continueAnim = _drainOpacity > 0.004f;
                 }
                 else
                 {
@@ -597,144 +710,292 @@ public sealed class AudioWaveBorder : Decorator
 
             return (needsRedraw, continueAnim);
         }
+    }
 
-        private void SpawnPacket(PacketKind kind, double rawAmp, double baseVelocity)
+    /// <summary>
+    /// Spawns a traveling left-to-right wave packet directly at the left entrance so it becomes visible
+    /// within the 0..80 ms audiovisual binding window. Never hard-evicts an active mid-rail packet.
+    /// </summary>
+    internal static void SpawnPacket(
+        Span<WavePacket> packets,
+        WavePacketKind kind,
+        float amplitude,
+        float centroid,
+        double speedMult,
+        float jitter = 1.0f)
+    {
+        int freeSlot = -1;
+        int mergeEntrySlot = -1;
+        for (int i = 0; i < packets.Length; i++)
         {
-            int targetIndex = -1;
-            double minAmp = double.MaxValue;
-
-            for (int i = 0; i < _packets.Length; i++)
+            if (!packets[i].IsActive)
             {
-                if (!_packets[i].IsActive)
-                {
-                    targetIndex = i;
-                    break;
-                }
-
-                if (_packets[i].Amplitude < minAmp)
-                {
-                    minAmp = _packets[i].Amplitude;
-                    targetIndex = i;
-                }
+                freeSlot = i;
+                break;
             }
 
-            if (targetIndex < 0) return;
-
-            ref var p = ref _packets[targetIndex];
-            p.IsActive = true;
-
-            int domBand = Math.Clamp(AudioVisualizerBuffer.DominantBandIndex, 0, 9);
-            double bandRatio = domBand / 9.0;
-
-            switch (kind)
-            {
-                case PacketKind.KickBullet:
-                    p.Amplitude = Math.Clamp(rawAmp * _rng.NextDouble(0.92, 1.08), 1.6, 3.6);
-                    p.Width = _rng.NextDouble(0.24, 0.32);
-                    p.Velocity = baseVelocity * _rng.NextDouble(0.98, 1.04);
-                    p.Frequency = 0.0;
-                    p.PhaseOffset = 0.0;
-                    p.HarmonicRatio = 0.0;
-                    p.HarmonicPhase = 0.0;
-                    p.DecayRate = _rng.NextDouble(0.09, 0.12);
-                    break;
-
-                case PacketKind.BassSwell:
-                    p.Amplitude = Math.Clamp(rawAmp * _rng.NextDouble(0.90, 1.10), 1.3, 3.1);
-                    p.Width = _rng.NextDouble(0.30, 0.42) * (1.05 - (0.15 * bandRatio));
-                    p.Velocity = baseVelocity * _rng.NextDouble(0.84, 0.94);
-                    p.Frequency = (2.4 + (domBand * 0.55)) * _rng.NextDouble(0.92, 1.08);
-                    p.PhaseOffset = _rng.NextDouble(-Math.PI, Math.PI);
-                    p.HarmonicRatio = _rng.NextDouble(0.15, 0.30);
-                    p.HarmonicPhase = _rng.NextDouble(0.0, Math.Tau);
-                    p.DecayRate = _rng.NextDouble(0.07, 0.10);
-                    break;
-
-                case PacketKind.MidRipple:
-                    p.Amplitude = Math.Clamp(rawAmp * _rng.NextDouble(0.88, 1.12), 1.0, 2.5);
-                    p.Width = _rng.NextDouble(0.18, 0.28);
-                    p.Velocity = baseVelocity * _rng.NextDouble(1.00, 1.12);
-                    p.Frequency = (4.2 + (domBand * 0.75)) * _rng.NextDouble(0.92, 1.08);
-                    p.PhaseOffset = _rng.NextDouble(-Math.PI, Math.PI);
-                    p.HarmonicRatio = _rng.NextDouble(0.10, 0.25);
-                    p.HarmonicPhase = _rng.NextDouble(0.0, Math.Tau);
-                    p.DecayRate = _rng.NextDouble(0.10, 0.14);
-                    break;
-
-                case PacketKind.HighNeedle:
-                    p.Amplitude = Math.Clamp(rawAmp * _rng.NextDouble(0.85, 1.15), 0.8, 2.1);
-                    p.Width = _rng.NextDouble(0.12, 0.18);
-                    p.Velocity = baseVelocity * _rng.NextDouble(1.15, 1.28);
-                    p.Frequency = (7.5 + (domBand * 0.65)) * _rng.NextDouble(0.92, 1.08);
-                    p.PhaseOffset = _rng.NextDouble(-Math.PI, Math.PI);
-                    p.HarmonicRatio = _rng.NextDouble(0.05, 0.20);
-                    p.HarmonicPhase = _rng.NextDouble(0.0, Math.Tau);
-                    p.DecayRate = _rng.NextDouble(0.13, 0.18);
-                    break;
-            }
-
-            p.Position = -(p.Width * 0.5);
+            if (mergeEntrySlot < 0 && packets[i].Kind == kind && packets[i].Position < 0.16f)
+                mergeEntrySlot = i;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private float CalculateDisplacement(float u)
+        if (freeSlot < 0)
         {
-            float rawDisp = 0f;
-
-            for (int i = 0; i < _packets.Length; i++)
+            // Pool saturated: coalesce smoothly into a fresh left-edge packet instead of popping a visible mid-rail wave
+            if (mergeEntrySlot >= 0)
             {
-                ref readonly var p = ref _packets[i];
-                if (!p.IsActive) continue;
+                ref var existing = ref packets[mergeEntrySlot];
+                existing.Amplitude = MathF.Min(2.75f, MathF.Max(existing.Amplitude, amplitude) + (amplitude * 0.16f));
+                existing.PauseFade = 1f;
+            }
+            return;
+        }
 
-                float dist = u - (float)p.Position;
-                float halfWidth = (float)p.Width * 0.5f;
-                float absDist = MathF.Abs(dist);
-                if (absDist >= halfWidth) continue;
+        float clampedCentroid = Math.Clamp(centroid, 0f, 1f);
+        float speedScale = (float)Math.Clamp(speedMult, 0.35, 2.5);
+        float halfWidth;
+        float baseSpeed;
+        float frequency;
+        float maxAge;
 
-                float norm = absDist / halfWidth;
-                float invNorm2 = 1f - (norm * norm);
-                float envelope = invNorm2 * invNorm2;
+        switch (kind)
+        {
+            case WavePacketKind.KickBullet:
+                halfWidth = 0.125f * jitter;
+                baseSpeed = 0.54f * jitter;
+                frequency = 0.65f;
+                maxAge = 3.2f;
+                break;
 
-                float birthProgress = Math.Clamp(((float)p.Position + halfWidth) / ((float)p.Width * 0.8f), 0f, 1f);
-                float birthFade = birthProgress * birthProgress * (3f - (2f * birthProgress));
+            case WavePacketKind.BassSwell:
+                halfWidth = 0.175f * jitter;
+                baseSpeed = 0.42f * jitter;
+                frequency = 0.50f;
+                maxAge = 3.8f;
+                break;
 
-                float exitProgress = Math.Clamp((1.02f - (float)p.Position) / ((float)p.Width * 0.8f), 0f, 1f);
-                float exitFade = exitProgress * exitProgress * (3f - (2f * exitProgress));
+            case WavePacketKind.MidRipple:
+                halfWidth = 0.105f * jitter;
+                baseSpeed = 0.66f * jitter;
+                frequency = 1.60f + (2.40f * clampedCentroid);
+                maxAge = 2.6f;
+                break;
 
-                float packetValue;
-                if (p.Frequency <= 0.01)
-                {
-                    packetValue = envelope * (float)p.Amplitude * birthFade * exitFade;
-                }
-                else
-                {
-                    float phase = (MathF.Tau * (float)p.Frequency * dist) + (float)p.PhaseOffset;
-                    float carrier = MathF.Cos(phase) + ((float)p.HarmonicRatio * MathF.Cos((2f * phase) + (float)p.HarmonicPhase));
-                    packetValue = envelope * (float)p.Amplitude * carrier * birthFade * exitFade;
-                }
+            default: // HighNeedle
+                halfWidth = 0.066f * jitter;
+                baseSpeed = 0.88f * jitter;
+                frequency = 3.20f + (2.60f * clampedCentroid);
+                maxAge = 2.0f;
+                break;
+        }
 
-                rawDisp += packetValue;
+        ref var p = ref packets[freeSlot];
+        p.IsActive = true;
+        // Start right at the left edge so leading crest enters [0..1] immediately at t = 0 ms
+        p.Position = 0.015f;
+        p.HalfWidth = halfWidth;
+        p.Speed = baseSpeed * speedScale;
+        p.Amplitude = Math.Clamp(amplitude, 0.1f, 3.2f);
+        p.Frequency = frequency;
+        p.Phase = 0f;
+        p.Age = 0f;
+        p.MaxAge = maxAge / MathF.Max(0.45f, speedScale);
+        p.PauseFade = 1f;
+        p.Kind = kind;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float SmoothStepF(float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return t * t * (3f - (2f * t));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float ComputePacketEffectiveAmplitude(in WavePacket p)
+    {
+        if (!p.IsActive) return 0f;
+
+        // Smooth 80 ms entry ramp (0 -> 1)
+        float attack = SmoothStepF(p.Age * (1f / PacketAttackSeconds));
+
+        // Smooth life tail fade: stays full until 72% of MaxAge, then dissolves to exact 0.0 at MaxAge
+        float lifeFrac = Math.Clamp(p.Age / MathF.Max(0.1f, p.MaxAge), 0f, 1f);
+        float lifeFade = 1f - SmoothStepF((lifeFrac - 0.72f) * (1f / 0.28f));
+
+        // Smooth right-edge exit fade: dissolves to exact 0.0 as the packet glides off the right corner
+        float exitStart = 1.0f - (p.HalfWidth * 0.35f);
+        float exitSpan = MathF.Max(0.08f, p.HalfWidth * 2.55f);
+        float exitFade = 1f - SmoothStepF((p.Position - exitStart) / exitSpan);
+
+        float travelDamp = MathF.Exp(-p.Age * 0.16f);
+        return p.Amplitude * attack * lifeFade * exitFade * travelDamp * p.PauseFade;
+    }
+
+    /// <summary>
+    /// Advances all active wave packets strictly left-to-right with zero allocations and smooth deactivation
+    /// only after the packet has dissolved to zero.
+    /// </summary>
+    internal static bool StepPackets(Span<WavePacket> packets, double dt, double speedMult, bool isPlaying = true)
+    {
+        float fdt = (float)dt;
+        float phaseStep = fdt * (float)(4.5 * Math.Clamp(speedMult, 0.35, 2.5));
+        float pauseDecay = isPlaying ? 1f : MathF.Exp(-fdt / 0.42f);
+        bool anyActive = false;
+
+        for (int i = 0; i < packets.Length; i++)
+        {
+            ref var p = ref packets[i];
+            if (!p.IsActive) continue;
+
+            p.Age += fdt;
+            p.Position += p.Speed * fdt;
+            p.Phase += phaseStep * p.Frequency;
+            if (!isPlaying)
+                p.PauseFade *= pauseDecay;
+
+            // Deactivate ONLY once lifeFade == 0, exitFade == 0, or PauseFade < 0.3% (zero visual snap)
+            float exitCompletePos = 1.0f + (p.HalfWidth * 2.25f);
+            if (p.Age >= p.MaxAge || p.Position >= exitCompletePos || p.PauseFade < 0.003f)
+            {
+                p.IsActive = false;
+                continue;
             }
 
-            if (MathF.Abs(rawDisp) < DisplacementZeroEpsilon) return 0f;
+            anyActive = true;
+        }
 
-            float ratio = rawDisp / MaxSafeDisplacement;
-            float safeDisp = rawDisp / MathF.Sqrt(1f + (ratio * ratio));
+        return anyActive;
+    }
+
+    /// <summary>
+    /// Compacts active wave packets onto the stack and evaluates the symmetric rail displacement curve once (0 B heap alloc).
+    /// Uses zero-mean bipolar bass/kick wavelets + adaptive density headroom + smooth tanh ceiling so bass-heavy tracks
+    /// never peg flat at maximum displacement.
+    /// </summary>
+    internal static void EvaluateRailDisplacement(
+        ReadOnlySpan<WavePacket> packets,
+        Span<float> disp,
+        float vocalAmp,
+        float harmAmp,
+        float vocalPhase,
+        float centroid)
+    {
+        int n = disp.Length;
+        if (n < 3)
+        {
+            disp.Clear();
+            return;
+        }
+
+        disp[0] = 0f;
+        disp[n - 1] = 0f;
+
+        Span<ActiveWavePacket> active = stackalloc ActiveWavePacket[MaxWavePackets];
+        int activeCount = 0;
+        float activeEnergySum = 0f;
+
+        int limit = Math.Min(packets.Length, MaxWavePackets);
+        for (int i = 0; i < limit; i++)
+        {
+            ref readonly var p = ref packets[i];
+            if (!p.IsActive) continue;
+
+            float effAmp = ComputePacketEffectiveAmplitude(in p);
+            if (effAmp < 0.002f) continue;
+
+            activeEnergySum += effAmp * effAmp;
+            active[activeCount++] = new ActiveWavePacket
+            {
+                Position = p.Position,
+                InvHalfWidth = 1f / MathF.Max(0.02f, p.HalfWidth),
+                EffectiveAmp = effAmp,
+                Frequency = p.Frequency,
+                Phase = p.Phase,
+                Kind = p.Kind
+            };
+        }
+
+        // Adaptive wave-density headroom: keeps normal choruses punchy while preventing excessive stack buildup
+        float excessEnergy = MathF.Max(0f, activeEnergySum - 9.0f);
+        float densityNorm = MathF.Max(0.55f, 1f / MathF.Sqrt(1f + (excessEnergy * 0.06f)));
+
+        float invNMinusOne = 1f / (n - 1);
+        float invSafe = 1f / MaxSafeDisplacement;
+        float centroidFreq = 1.4f + (Math.Clamp(centroid, 0f, 1f) * 2.8f);
+        bool hasContinuousFlow = vocalAmp > 0.008f || harmAmp > 0.008f;
+
+        for (int i = 1; i < n - 1; i++)
+        {
+            float u = i * invNMinusOne;
+            float rawDisp = 0f;
+
+            for (int pIdx = 0; pIdx < activeCount; pIdx++)
+            {
+                ref readonly var pk = ref active[pIdx];
+                float dx = (u - pk.Position) * pk.InvHalfWidth;
+                if (MathF.Abs(dx) >= 2.50f) continue;
+
+                // Water crest asymmetry: crisp leading front (dx > 0), softer trailing wake (dx < 0)
+                float shaped = dx > 0f ? dx * 1.16f : dx * 0.88f;
+                float r2 = shaped * shaped;
+
+                float waveVal = pk.Kind switch
+                {
+                    // Zero-mean Ricker water wavelet: prominent central crest + smooth side troughs (zero DC pile-up)
+                    WavePacketKind.KickBullet => MathF.Exp(-r2 * 1.50f) * (1.0f - (3.0f * r2)),
+                    // Rolling bipolar bass wave: breathes above & below baseline smoothly
+                    WavePacketKind.BassSwell => MathF.Exp(-r2 * 1.35f) * MathF.Cos(shaped * 2.15f),
+                    WavePacketKind.MidRipple => MathF.Exp(-r2 * 1.85f) * MathF.Cos((dx * pk.Frequency * 2.1f) - (pk.Phase * 0.25f)),
+                    _ => MathF.Exp(-r2 * 2.05f) * MathF.Cos((dx * pk.Frequency * 2.4f) - (pk.Phase * 0.35f))
+                };
+
+                rawDisp += pk.EffectiveAmp * waveVal;
+            }
+
+            rawDisp *= densityNorm;
+
+            if (hasContinuousFlow)
+            {
+                // Left-to-right flowing harmonic/vocal ripple (-vocalPhase ensures strictly rightward travel)
+                float carrier1 = MathF.Sin((u * MathF.Tau * 1.5f) - vocalPhase) * 0.65f;
+                float carrier2 = MathF.Sin((u * MathF.Tau * centroidFreq) - (vocalPhase * 1.35f)) * 0.35f;
+                rawDisp += ((vocalAmp * carrier1) + (((vocalAmp * 0.45f) + harmAmp) * carrier2)) * 0.80f;
+            }
+
+            if (MathF.Abs(rawDisp) < DisplacementZeroEpsilon)
+            {
+                disp[i] = 0f;
+                continue;
+            }
+
+            // Smooth C-infinity hyperbolic tangent ceiling: strictly < MaxSafeDisplacement with zero flat-top clipping
+            float safeDisp = MaxSafeDisplacement * MathF.Tanh(rawDisp * invSafe);
 
             float edgeTaper = 1f;
             if (u < CornerBlendMargin)
             {
-                float t = u / CornerBlendMargin;
+                float t = u * (1f / CornerBlendMargin);
                 edgeTaper = t * t * t * (t * ((t * 6f) - 15f) + 10f);
             }
             else if (u > (1f - CornerBlendMargin))
             {
-                float t = (1f - u) / CornerBlendMargin;
+                float t = (1f - u) * (1f / CornerBlendMargin);
                 edgeTaper = t * t * t * (t * ((t * 6f) - 15f) + 10f);
             }
 
-            return safeDisp * edgeTaper;
+            disp[i] = safeDisp * edgeTaper;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool HasActivePackets(ReadOnlySpan<WavePacket> packets)
+    {
+        for (int i = 0; i < packets.Length; i++)
+        {
+            if (packets[i].IsActive)
+                return true;
+        }
+        return false;
     }
 
     #endregion
@@ -742,14 +1003,16 @@ public sealed class AudioWaveBorder : Decorator
     #region Static Global Configuration
 
     private static bool _globalUseWave = true;
+    private static bool _globalReactiveGlow = true;
     private static TrackAnimationSpeed _globalAnimationSpeed = TrackAnimationSpeed.Medium;
     private static bool _isGlobalConfigLoaded;
     private static PlayerControlService? _globalPlayerControl;
 
-    public static void ConfigureGlobal(bool useWave, TrackAnimationSpeed speed)
+    public static void ConfigureGlobal(bool useWave, TrackAnimationSpeed speed, bool reactiveGlow = true)
     {
         _globalUseWave = useWave;
         _globalAnimationSpeed = speed;
+        _globalReactiveGlow = reactiveGlow;
         _isGlobalConfigLoaded = true;
         GlobalConfigChanged?.Invoke();
     }
@@ -771,6 +1034,7 @@ public sealed class AudioWaveBorder : Decorator
                 {
                     _globalUseWave = settings.UseWaveAnimation;
                     _globalAnimationSpeed = settings.TrackAnimationSpeed;
+                    _globalReactiveGlow = settings.WaveBorderReactiveGlow;
                     _isGlobalConfigLoaded = true;
                 }
             }
@@ -786,9 +1050,11 @@ public sealed class AudioWaveBorder : Decorator
     #region Fields
 
     private static readonly Lock s_sharedWaveLock = new();
-    private static readonly WavePacket[] s_sharedPackets = new WavePacket[MaxActivePackets];
+    private static readonly WavePacket[] s_sharedPackets = new WavePacket[MaxWavePackets];
     private static AudioReactiveSignalState s_sharedSignal;
     private static double s_sharedPulsePhase;
+    private static double s_sharedMacroEnergy;
+    private static double s_sharedVocalMode;
     private static string? s_sharedTrackId;
     private static long s_sharedTimestamp;
     private static bool s_hasSharedWave;
@@ -797,14 +1063,18 @@ public sealed class AudioWaveBorder : Decorator
         string? trackId,
         WavePacket[] packets,
         in AudioReactiveSignalState signal,
-        double pulsePhase)
+        double pulsePhase,
+        double macroEnergy,
+        double vocalMode)
     {
         lock (s_sharedWaveLock)
         {
             s_sharedTrackId = trackId;
-            Array.Copy(packets, s_sharedPackets, MaxActivePackets);
+            Array.Copy(packets, s_sharedPackets, MaxWavePackets);
             s_sharedSignal = signal;
             s_sharedPulsePhase = pulsePhase;
+            s_sharedMacroEnergy = macroEnergy;
+            s_sharedVocalMode = vocalMode;
             s_sharedTimestamp = Stopwatch.GetTimestamp();
             s_hasSharedWave = true;
         }
@@ -814,7 +1084,9 @@ public sealed class AudioWaveBorder : Decorator
         string? trackId,
         WavePacket[] targetPackets,
         ref AudioReactiveSignalState signal,
-        ref double pulsePhase)
+        ref double pulsePhase,
+        ref double macroEnergy,
+        ref double vocalMode)
     {
         long now = Stopwatch.GetTimestamp();
         double elapsedSec;
@@ -828,26 +1100,19 @@ public sealed class AudioWaveBorder : Decorator
                 return;
 
             elapsedSec = Stopwatch.GetElapsedTime(s_sharedTimestamp, now).TotalSeconds;
-            if (elapsedSec > 3.5)
+            if (elapsedSec > 2.5)
                 return;
 
-            Array.Copy(s_sharedPackets, targetPackets, MaxActivePackets);
+            Array.Copy(s_sharedPackets, targetPackets, MaxWavePackets);
             signal = s_sharedSignal;
             pulsePhase = s_sharedPulsePhase;
+            macroEnergy = s_sharedMacroEnergy;
+            vocalMode = s_sharedVocalMode;
         }
 
-        double dt = Math.Clamp(elapsedSec, 0.0, 0.8);
+        double dt = Math.Clamp(elapsedSec, 0.0, 0.5);
         pulsePhase = (pulsePhase + (BasePulseSpeed * dt)) % Math.Tau;
-
-        for (int i = 0; i < MaxActivePackets; i++)
-        {
-            ref var p = ref targetPackets[i];
-            if (!p.IsActive) continue;
-
-            p.Position += p.Velocity * dt;
-            if (p.Position - (p.Width * 0.5) > 1.05)
-                p.IsActive = false;
-        }
+        StepPackets(targetPackets, dt, speedMult: 1.0, isPlaying: true);
     }
 
     private readonly Action _globalConfigChangedHandler;
@@ -883,6 +1148,9 @@ public sealed class AudioWaveBorder : Decorator
 
     public static readonly StyledProperty<bool?> UseWaveAnimationProperty =
         AvaloniaProperty.Register<AudioWaveBorder, bool?>(nameof(UseWaveAnimation));
+
+    public static readonly StyledProperty<bool?> ReactiveGlowProperty =
+        AvaloniaProperty.Register<AudioWaveBorder, bool?>(nameof(ReactiveGlow));
 
     public static readonly StyledProperty<TrackAnimationSpeed?> AnimationSpeedProperty =
         AvaloniaProperty.Register<AudioWaveBorder, TrackAnimationSpeed?>(nameof(AnimationSpeed));
@@ -921,6 +1189,12 @@ public sealed class AudioWaveBorder : Decorator
     {
         get => GetValue(UseWaveAnimationProperty);
         set => SetValue(UseWaveAnimationProperty, value);
+    }
+
+    public bool? ReactiveGlow
+    {
+        get => GetValue(ReactiveGlowProperty);
+        set => SetValue(ReactiveGlowProperty, value);
     }
 
     public TrackAnimationSpeed? AnimationSpeed
@@ -963,6 +1237,7 @@ public sealed class AudioWaveBorder : Decorator
         IsPlayingProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
         IsSelectedProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
         UseWaveAnimationProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
+        ReactiveGlowProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
         AnimationSpeedProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
         WaveThicknessProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
         CornerRadiusProperty.Changed.AddClassHandler<AudioWaveBorder>((x, _) => x.OnVisualStatePropertyChanged());
@@ -1116,7 +1391,10 @@ public sealed class AudioWaveBorder : Decorator
             _customVisual = compositor.CreateCustomVisual(new WaveBorderHandler(this));
             _customVisual.Size = new Vector(Bounds.Width, Bounds.Height);
             ElementComposition.SetElementChildVisual(this, _customVisual);
-            WriteSnapshotLocked(seedChanged: true);
+            lock (_stateLock)
+            {
+                WriteSnapshotLocked(seedChanged: true);
+            }
             _customVisual.SendHandlerMessage(MsgStart);
         }
         else
@@ -1240,6 +1518,7 @@ public sealed class AudioWaveBorder : Decorator
             IsPlaying = IsPlaying,
             IsSelected = IsSelected,
             UseWave = UseWaveAnimation ?? _globalUseWave,
+            ReactiveGlow = ReactiveGlow ?? _globalReactiveGlow,
             Speed = AnimationSpeed ?? _globalAnimationSpeed,
             Thickness = thickness,
             CornerRadius = (float)CornerRadius.TopLeft,

@@ -40,73 +40,65 @@
                 Classes="header-strip">
                 <Grid ColumnDefinitions="Auto, *, Auto" Height="46">
 
-                    <!-- 1. LEFT: Clickable position counter (e.g. 2 / 665) -->
-                    <Button Grid.Column="0"
-                        Classes="header-cell-btn"
-                        BorderThickness="0,0,1,0"
-                        MinWidth="68"
-                        Padding="14,0"
-                        Command="{Binding ScrollToCurrentTrackCommand}"
-                        ToolTip.Tip="{Binding L[Queue_ScrollToCurrent]}">
-                        <TextBlock FontSize="13" VerticalAlignment="Center" TextAlignment="Center">
-                            <Run Text="{Binding CurrentTrackNumberDisplay}" FontWeight="Bold"
-                                Foreground="{DynamicResource AccentTextBrush}" />
-                            <Run Text=" / " Foreground="{DynamicResource TextMutedBrush}" />
-                            <Run Text="{Binding TotalCount}" FontWeight="SemiBold"
-                                Foreground="{DynamicResource TextSecondaryBrush}" />
-                        </TextBlock>
-                    </Button>
-
-                    <!-- 2. CENTER-LEFT: Source playlist link + queue time telemetry -->
-                    <Grid Grid.Column="1"
-                        HorizontalAlignment="Left"
+                    <!-- 1. LEFT CORNER: Source playlist title + mixed badge -->
+                    <Grid Grid.Column="0"
                         ColumnDefinitions="*, Auto"
-                        Margin="14,0,12,0"
-                        VerticalAlignment="Center">
+                        IsVisible="{Binding HasSourcePlaylist}"
+                        VerticalAlignment="Center"
+                        MaxWidth="320"
+                        Margin="16,0,2,0">
+                        <Button Grid.Column="0"
+                            Classes="link-btn"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            Command="{Binding GoToSourcePlaylistCommand}"
+                            ToolTip.Tip="{Binding GoToPlaylistTooltip}">
+                            <TextBlock Text="{Binding SourcePlaylistDisplayName}"
+                                Foreground="{DynamicResource AccentTextBrush}"
+                                FontSize="14"
+                                FontWeight="SemiBold"
+                                TextTrimming="CharacterEllipsis"
+                                VerticalAlignment="Center" />
+                        </Button>
+                        <Border Grid.Column="1"
+                            Classes="meta-chip"
+                            IsVisible="{Binding IsQueueMixed}"
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Center"
+                            ToolTip.Tip="{Binding L[Queue_MixedTooltip]}">
+                            <TextBlock Text="{Binding L[Queue_MixedBadge]}"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </Border>
+                    </Grid>
 
-                        <Grid Grid.Column="0"
-                            ColumnDefinitions="*, Auto, Auto"
-                            IsVisible="{Binding HasSourcePlaylist}"
-                            VerticalAlignment="Center">
-                            <Button Grid.Column="0"
-                                Classes="link-btn"
-                                HorizontalAlignment="Left"
-                                Command="{Binding GoToSourcePlaylistCommand}"
-                                ToolTip.Tip="{Binding GoToPlaylistTooltip}">
-                                <TextBlock Text="{Binding SourcePlaylistDisplayName}"
-                                    Foreground="{DynamicResource AccentTextBrush}"
-                                    FontSize="13"
-                                    FontWeight="SemiBold"
-                                    TextTrimming="CharacterEllipsis"
-                                    VerticalAlignment="Center" />
-                            </Button>
-                            <Border Grid.Column="1"
-                                Classes="meta-chip"
-                                IsVisible="{Binding IsQueueMixed}"
-                                Margin="8,0,0,0"
-                                VerticalAlignment="Center"
-                                ToolTip.Tip="{Binding L[Queue_MixedTooltip]}">
-                                <TextBlock Text="{Binding L[Queue_MixedBadge]}"
-                                    FontSize="10"
-                                    FontWeight="SemiBold"
-                                    Foreground="{DynamicResource TextSecondaryBrush}" />
-                            </Border>
-                            <Border Grid.Column="2" Classes="meta-divider" />
-                        </Grid>
+                    <!-- 2. CENTER-LEFT: Frameless track counter (12px) + 3-part queue timing (12px) -->
+                    <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="12"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Margin="12,0">
 
-                        <Button Grid.Column="1"
-                            Classes="header-cell-btn inline"
-                            Command="{Binding ToggleTimeDisplayModeCommand}"
-                            ToolTip.Tip="{Binding QueueTimeTooltip}">
-                            <TextBlock FontSize="13" VerticalAlignment="Center">
-                                <Run Text="{Binding FormattedElapsedDuration}" FontWeight="SemiBold"
-                                    Foreground="{DynamicResource TextPrimaryBrush}" />
-                                <Run Text=" / " Foreground="{DynamicResource TextMutedBrush}" />
-                                <Run Text="{Binding FormattedSecondaryDuration}"
-                                    Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <Button Classes="header-cell-btn inline"
+                            BorderThickness="0"
+                            Padding="4,6"
+                            VerticalAlignment="Center"
+                            Command="{Binding ScrollToCurrentTrackCommand}"
+                            ToolTip.Tip="{Binding L[Queue_ScrollToCurrent]}">
+                            <TextBlock FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                <Run Text="{Binding CurrentTrackNumberDisplay}" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}" /><Run Text="/" Foreground="{DynamicResource TextMutedBrush}" /><Run Text="{Binding TotalCount}" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondaryBrush}" />
                             </TextBlock>
                         </Button>
-                    </Grid>
+
+                        <TextBlock FontSize="12"
+                            VerticalAlignment="Center"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTip.Tip="{Binding QueueTimeTooltip}">
+                            <Run Text="{Binding FormattedElapsedDuration}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" /><Run Text="/" Foreground="{DynamicResource TextMutedBrush}" /><Run Text="{Binding FormattedRemainingDuration}" Foreground="{DynamicResource TextSecondaryBrush}" /><Run Text="/" Foreground="{DynamicResource TextMutedBrush}" /><Run Text="{Binding FormattedTotalDuration}" Foreground="{DynamicResource TextMutedBrush}" />
+                        </TextBlock>
+                    </StackPanel>
 
                     <!-- 3. RIGHT: Wider filter + unified action group -->
                     <StackPanel Grid.Column="2"
@@ -124,8 +116,7 @@
                             Margin="0,0,10,0" />
 
                         <Border Width="1"
-                            VerticalAlignment="Stretch"
-                            Background="{DynamicResource BgHighlightBrush}"
+                            IsVisible="False"
                             Margin="0,0,6,0" />
 
                         <Button Command="{Binding ShuffleQueueCommand}"

@@ -62,6 +62,8 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     private TaskCompletionSource? _warmupTcs;
     private int _warmupThreshold;
+    private int _nextDecoderLoopId;
+    private int _activeDecoderLoopId;
 
     private int _skipFramesCounter;
     private int _decoderResetNeeded;
@@ -486,12 +488,15 @@ internal sealed class AudioPipeline : IAsyncDisposable
             if (!previousAlive)
                 previousCts?.Dispose();
 
+            int loopId = Interlocked.Increment(ref _nextDecoderLoopId);
+            Volatile.Write(ref _activeDecoderLoopId, loopId);
+
             _decoderCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
             token = _decoderCts.Token;
 
             _decoderTask = previousAlive
-                ? Task.Run(() => RunAfterPreviousLoopAsync(previousTask!, previousCts, options, onTrackEnded, onError, token))
-                : Task.Run(() => DecoderLoopAsync(options, onTrackEnded, onError, token));
+                ? Task.Run(() => RunAfterPreviousLoopAsync(previousTask!, previousCts, options, onTrackEnded, onError, loopId, token))
+                : Task.Run(() => DecoderLoopAsync(options, onTrackEnded, onError, loopId, token));
         }
 
 #if AUDIO_SPLICE_AUDIT
@@ -555,6 +560,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
         AudioPlayerOptions options,
         Action? onTrackEnded,
         Action<Exception>? onError,
+        int loopId,
         CancellationToken ct)
     {
         await previousTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
@@ -563,8 +569,15 @@ internal sealed class AudioPipeline : IAsyncDisposable
         if (Interlocked.Exchange(ref _pendingRingClear, 0) == 1)
             _pcmBuffer.Clear();
 
-        if (ct.IsCancellationRequested) return;
-        await DecoderLoopAsync(options, onTrackEnded, onError, ct).ConfigureAwait(false);
+        if (ct.IsCancellationRequested)
+        {
+            Interlocked.CompareExchange(ref _activeDecoderLoopId, 0, loopId);
+            Volatile.Write(ref _warmupThreshold, 0);
+            Interlocked.Exchange(ref _warmupTcs, null)?.TrySetResult();
+            return;
+        }
+
+        await DecoderLoopAsync(options, onTrackEnded, onError, loopId, ct).ConfigureAwait(false);
     }
 
     private Task WaitForResumeOrCancelAsync(CancellationToken ct)
@@ -597,6 +610,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
            AudioPlayerOptions options,
            Action? onTrackEnded,
            Action<Exception>? onError,
+           int loopId,
            CancellationToken ct)
     {
         if (Interlocked.Exchange(ref _pendingRingClear, 0) == 1)
@@ -756,7 +770,11 @@ internal sealed class AudioPipeline : IAsyncDisposable
                             if (frameTs + DecoderPreRollMs >= seekTarget)
                             {
                                 _ = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
-                                EnsureRuntimeFormatMatchesDecoder();
+                                if (EnsureRuntimeFormatMatchesDecoder())
+                                {
+                                    requiredSpace = _decoder.MaxFrameSize * _activeChannels;
+                                    batchRefillSpace = Math.Max(requiredSpace * MinBatchRefillFrames, _pcmBuffer.Capacity / BatchRefillCapacityDivisor);
+                                }
                                 // Decrement the required decoder warmup counter only when a pre-roll frame has actually been decoded!
                                 int remSkip = Volatile.Read(ref _skipFramesCounter);
                                 if (remSkip > 0)
@@ -775,14 +793,21 @@ internal sealed class AudioPipeline : IAsyncDisposable
                     {
                         // Warm up codec internal overlap/prediction state only; never touch render-thread DSP state from decoder thread.
                         _ = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
-                        EnsureRuntimeFormatMatchesDecoder();
+                        if (EnsureRuntimeFormatMatchesDecoder())
+                        {
+                            requiredSpace = _decoder.MaxFrameSize * _activeChannels;
+                            batchRefillSpace = Math.Max(requiredSpace * MinBatchRefillFrames, _pcmBuffer.Capacity / BatchRefillCapacityDivisor);
+                        }
                         Interlocked.Decrement(ref _skipFramesCounter);
                         continue;
                     }
 
                     int samplesDecoded = _decoder.Decode(frame.Value.Data.Span, _decodeBuffer);
-                    if (samplesDecoded > 0)
-                        EnsureRuntimeFormatMatchesDecoder();
+                    if (samplesDecoded > 0 && EnsureRuntimeFormatMatchesDecoder())
+                    {
+                        requiredSpace = _decoder.MaxFrameSize * _activeChannels;
+                        batchRefillSpace = Math.Max(requiredSpace * MinBatchRefillFrames, _pcmBuffer.Capacity / BatchRefillCapacityDivisor);
+                    }
 
                     if (samplesDecoded > 0)
                     {
@@ -844,6 +869,7 @@ internal sealed class AudioPipeline : IAsyncDisposable
         }
         finally
         {
+            Interlocked.CompareExchange(ref _activeDecoderLoopId, 0, loopId);
             Volatile.Write(ref _warmupThreshold, 0);
             Interlocked.Exchange(ref _warmupTcs, null)?.TrySetResult();
         }
@@ -889,16 +915,35 @@ internal sealed class AudioPipeline : IAsyncDisposable
         Volatile.Write(ref _seekTargetMs, targetMs);
     }
 
-    private void EnsureRuntimeFormatMatchesDecoder()
+    private bool EnsureRuntimeFormatMatchesDecoder()
     {
         int decRate = _decoder.SampleRate;
         int decCh = _decoder.Channels;
-        if (decRate == _activeSampleRate && decCh == _activeChannels)
-            return;
+        int oldRate = _activeSampleRate;
+        int oldCh = _activeChannels;
+        if (decRate == oldRate && decCh == oldCh)
+            return false;
 
         bool wasPlaying = _backend.IsPlaying;
         _backend.Flush();
 
+        var spin = new SpinWait();
+        while (Volatile.Read(ref _activeCallbackDepth) > 0)
+            spin.SpinOnce();
+
+        long oldSamplesPerSecond = (long)oldRate * oldCh;
+        long newSamplesPerSecond = (long)decRate * decCh;
+        long currentDecoded = Interlocked.Read(ref _decodedSamples);
+        long rescaledDecoded = currentDecoded;
+        if (currentDecoded > 0 && oldSamplesPerSecond > 0 && newSamplesPerSecond > 0)
+        {
+            rescaledDecoded = (long)Math.Round(
+                (double)currentDecoded * newSamplesPerSecond / oldSamplesPerSecond);
+            if (decCh > 1)
+                rescaledDecoded -= rescaledDecoded % decCh;
+        }
+
+        _pcmBuffer.Clear();
         _activeSampleRate = decRate;
         _activeChannels = decCh;
 
@@ -923,10 +968,11 @@ internal sealed class AudioPipeline : IAsyncDisposable
             Log.Warn($"[AudioPipeline] Runtime format change Reinitialize degraded: {ex.Message}");
         }
 
-        if (_pcmBuffer.IsEmpty)
-            RebaseRenderClock(Interlocked.Read(ref _decodedSamples));
+        Volatile.Write(ref _decodedSamples, rescaledDecoded);
+        RebaseRenderClock(rescaledDecoded);
 
         Log.Info($"[AudioPipeline] Runtime format change applied: {decRate}Hz, {decCh}ch");
+        return true;
     }
 
     private static int GetSkipFramesAfterSeek(AudioCodec codec)
@@ -1387,18 +1433,28 @@ internal sealed class AudioPipeline : IAsyncDisposable
 
     public async Task<bool> WaitForBufferAsync(int minSamples, int maxWaitMs, CancellationToken ct)
     {
-        if (_disposed || _pcmBuffer.Count >= minSamples) return true;
+        if (_disposed) return false;
+        if (_pcmBuffer.Count >= minSamples) return true;
+        if (Volatile.Read(ref _activeDecoderLoopId) == 0 || !IsDecoderAlive) return _pcmBuffer.Count >= minSamples;
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Volatile.Write(ref _warmupTcs, tcs);
-        Volatile.Write(ref _warmupThreshold, minSamples);
+        Interlocked.Exchange(ref _warmupThreshold, minSamples);
 
-        if (_pcmBuffer.Count >= minSamples)
+        if (_disposed)
         {
             Volatile.Write(ref _warmupThreshold, 0);
             Interlocked.CompareExchange(ref _warmupTcs, null, tcs);
             tcs.TrySetResult();
-            return true;
+            return false;
+        }
+
+        if (_pcmBuffer.Count >= minSamples || Volatile.Read(ref _activeDecoderLoopId) == 0 || !IsDecoderAlive)
+        {
+            Volatile.Write(ref _warmupThreshold, 0);
+            Interlocked.CompareExchange(ref _warmupTcs, null, tcs);
+            tcs.TrySetResult();
+            return _pcmBuffer.Count >= minSamples;
         }
 
         try

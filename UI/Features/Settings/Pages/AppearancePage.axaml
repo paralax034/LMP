@@ -232,6 +232,17 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding UseWaveAnimation}" />
                 </Grid>
 
+                <!-- Track border reactive glow & bloom toggle -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <StackPanel>
+                        <TextBlock Classes="label"
+                            Text="{Binding L[Settings_WaveBorderReactiveGlow]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_WaveBorderReactiveGlowDesc]}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding WaveBorderReactiveGlow}" />
+                </Grid>
+
                 <!-- Track playing animation speed -->
                 <Grid ColumnDefinitions="*, Auto">
                     <StackPanel>
@@ -274,6 +285,25 @@
                             Value="{Binding AmbientBackdropIntensity}" />
                         <TextBlock Classes="value-label"
                             Text="{Binding AmbientBackdropIntensityText}" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Ambient backdrop dynamic brightness reactivity -->
+                <Grid ColumnDefinitions="*, Auto" IsVisible="{Binding IsAmbientBackdropEnabled}">
+                    <StackPanel>
+                        <TextBlock Classes="label"
+                            Text="{Binding L[Settings_AmbientBackdropReactivity]}" />
+                        <TextBlock Classes="desc"
+                            Text="{Binding L[Settings_AmbientBackdropReactivityDesc]}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12"
+                        VerticalAlignment="Center">
+                        <Slider Minimum="0" Maximum="100"
+                            TickFrequency="5" IsSnapToTickEnabled="True"
+                            Width="160"
+                            Value="{Binding AmbientBackdropReactivity}" />
+                        <TextBlock Classes="value-label"
+                            Text="{Binding AmbientBackdropReactivityText}" />
                     </StackPanel>
                 </Grid>
 
