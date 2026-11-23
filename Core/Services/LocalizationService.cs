@@ -279,7 +279,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
                 numSuffix = "_0";
                 nameSuffix = "_zero";
             }
-            else if (lastTwo >= 11 && lastTwo <= 19)
+            else if (lastTwo is >= 11 and <= 19)
             {
                 numSuffix = "_5";
                 nameSuffix = "_many";
@@ -289,7 +289,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
                 numSuffix = "_1";
                 nameSuffix = "_one";
             }
-            else if (lastOne >= 2 && lastOne <= 4)
+            else if (lastOne is >= 2 and <= 4)
             {
                 numSuffix = "_2";
                 nameSuffix = "_few";
@@ -319,9 +319,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
             }
         }
 
-        string? pattern = null;
-
-        if (!_resources.TryGetValue(string.Concat(key, numSuffix), out pattern) &&
+        if (!_resources.TryGetValue(string.Concat(key, numSuffix), out string? pattern) &&
             !_resources.TryGetValue(string.Concat(key, nameSuffix), out pattern))
         {
             if (count == 0 && _resources.TryGetValue(string.Concat(key, "_many"), out var zeroMany))

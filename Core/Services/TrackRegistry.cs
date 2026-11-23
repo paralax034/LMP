@@ -183,7 +183,7 @@ public sealed class TrackRegistry
     /// Loads tracks from the DB, registers them in the cache, and returns the loaded instances directly,
     /// preserving the order of the input identifier list.
     /// <para>
-    /// Unlike <see cref="PreloadAsync"/> + <see cref="TryGet"/>, the result
+    /// Unlike separate preload + <see cref="TryGet"/> calls, the result
     /// is unaffected by concurrent <see cref="Clear"/> operations — all tracks are returned
     /// as a local collection rather than retrieved from the cache after an <c>await</c> boundary.
     /// </para>

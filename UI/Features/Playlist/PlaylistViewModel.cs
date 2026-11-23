@@ -775,7 +775,7 @@ public sealed partial class PlaylistViewModel : TrackListBaseViewModel
                 }
 
                 PlaylistSyncOptions? options;
-                if (_currentPlaylist is { CanSyncToCloud: false } || _currentPlaylist is { IsReadOnly: true })
+                if (_currentPlaylist is { CanSyncToCloud: false } or { IsReadOnly: true })
                 {
                     Log.Info($"[Playlist] Playlist '{PlaylistName}' is read-only/foreign (Ownership={_currentPlaylist.Ownership}). " +
                              "Skipping sync dialog and pulling cloud state directly (ReplaceLocal).");

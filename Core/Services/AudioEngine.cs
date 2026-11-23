@@ -202,14 +202,14 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     /// without awaiting, a race condition may occur—the command is already dequeued from the channel,
     /// but its handler has not yet finished mutating the player state.
     /// </summary>
-    private Task? _commandProcessorTask;
+    private readonly Task? _commandProcessorTask;
 
     /// <summary>
     /// Task for the volume persistence loop (<see cref="VolumeSaveLoopAsync"/>).
     /// Awaited during disposal to guarantee flushing the last pending-write
     /// to persistent storage before closing the database.
     /// </summary>
-    private Task? _volumeSaveTask;
+    private readonly Task? _volumeSaveTask;
 
     /// <summary>
     /// The single active playback preparation task.
@@ -262,7 +262,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     private int _sourceLifecycleSuspended;
 
     private readonly Channel<PlaybackLifecycleEvent> _lifecycleEvents;
-    private Task? _lifecycleDispatcherTask;
+    private readonly Task? _lifecycleDispatcherTask;
     private TrackInfo? _activePlaybackTrack;
     private int _activePlaybackEngineSession;
     private long _activePlaybackAccumulatedMs;
@@ -1102,7 +1102,7 @@ public sealed partial class AudioEngine : ObservableObject, ISuspendable, IDispo
     }
 
     /// <summary>
-    /// Extracts <see cref="CdnUnavailableException"/> from any level of the exception chain.
+    /// Extracts <see cref="Exceptions.CdnUnavailableException"/> from any level of the exception chain.
     /// </summary>
     private static Exceptions.CdnUnavailableException? TryExtractCdnException(Exception ex)
     {

@@ -118,7 +118,7 @@ public sealed class LegacyMigrationService
     /// <returns>An initialized application settings model.</returns>
     private static AppSettings MapLegacySettings(LegacyLibraryData d) => new()
     {
-        Volume = d.Volume > 0 && d.Volume <= 1.0f ? (int)(d.Volume * 100) : (int)d.Volume,
+        Volume = d.Volume is > 0 and <= 1.0f ? (int)(d.Volume * 100) : (int)d.Volume,
         ShuffleEnabled = d.ShuffleEnabled,
         RepeatMode = d.RepeatMode,
         MaxVolumeLimit = d.MaxVolumeLimit,

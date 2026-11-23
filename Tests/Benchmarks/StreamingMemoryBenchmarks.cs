@@ -63,8 +63,8 @@ public static class StreamingMemoryBenchmarks
 
         for (int i = 0; i < iterations; i++)
         {
-            var header = YoutubeHttpHandler.GetAuthHeader(sapisid, origin);
-            if (header is null) throw new InvalidOperationException();
+            _ = YoutubeHttpHandler.GetAuthHeader(sapisid, origin)
+                ?? throw new InvalidOperationException();
         }
 
         long totalAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeBytes;

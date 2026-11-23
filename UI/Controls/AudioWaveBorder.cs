@@ -1294,12 +1294,10 @@ public sealed class AudioWaveBorder : Decorator
         if (ReferenceEquals(_subscribedBrush, next))
             return;
 
-        if (_subscribedBrush != null)
-            _subscribedBrush.PropertyChanged -= _brushPropertyChangedHandler;
+        _subscribedBrush?.PropertyChanged -= _brushPropertyChangedHandler;
 
         _subscribedBrush = next;
-        if (_subscribedBrush != null)
-            _subscribedBrush.PropertyChanged += _brushPropertyChangedHandler;
+        _subscribedBrush?.PropertyChanged += _brushPropertyChangedHandler;
     }
 
     protected override void OnDataContextChanged(EventArgs e)

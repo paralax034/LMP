@@ -17,7 +17,7 @@ namespace LMP.Core.Audio.Normalization;
 /// <para><b>Thread model:</b></para>
 /// <list type="bullet">
 ///   <item><see cref="ProcessSamples"/> — fill thread (hot path, zero-alloc)</item>
-///   <item><see cref="Configure"/>, <see cref="LockFromCache"/>, <see cref="LockFromMetadata"/> —
+///   <item><see cref="Configure"/>, <see cref="LockResolvedGain"/>, <see cref="LockGain"/> —
 ///     command thread</item>
 ///   <item><see cref="_pendingNormReset"/> — volatile int, lock-free sync</item>
 /// </list>

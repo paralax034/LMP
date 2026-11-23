@@ -1797,11 +1797,8 @@ public sealed class AmbientBackdrop : Panel
 
     internal void DetachScrollViewer()
     {
-        if (_boundScrollViewer != null)
-        {
-            _boundScrollViewer.PropertyChanged -= _scrollViewerChangedHandler;
-            _boundScrollViewer = null;
-        }
+        _boundScrollViewer?.PropertyChanged -= _scrollViewerChangedHandler;
+        _boundScrollViewer = null;
     }
 
     private void OnScrollViewerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)

@@ -33,17 +33,17 @@ public class AvaloniaCustomLogSink : ILogSink
         {
             case LogEventLevel.Verbose:
             case LogEventLevel.Debug:
-                LMP.Core.Logger.Log.Debug(fullMessage);
+                Logger.Log.Debug(fullMessage);
                 break;
             case LogEventLevel.Information:
-                LMP.Core.Logger.Log.Info(fullMessage);
+                Logger.Log.Info(fullMessage);
                 break;
             case LogEventLevel.Warning:
-                LMP.Core.Logger.Log.Warn(fullMessage);
+                Logger.Log.Warn(fullMessage);
                 break;
             case LogEventLevel.Error:
             case LogEventLevel.Fatal:
-                LMP.Core.Logger.Log.Error(fullMessage);
+                Logger.Log.Error(fullMessage);
                 break;
         }
     }
@@ -69,13 +69,13 @@ public class AvaloniaCustomLogSink : ILogSink
                 int closeIndex = template.IndexOf('}', i);
                 if (closeIndex != -1)
                 {
-                    string inside = template.Substring(i + 1, closeIndex - i - 1);
+                    ReadOnlySpan<char> inside = template.AsSpan(i + 1, closeIndex - i - 1);
                     int colonIndex = inside.IndexOf(':');
-                    string formatModifier = "";
+                    ReadOnlySpan<char> formatModifier = [];
                     if (colonIndex != -1)
                     {
-                        formatModifier = inside.Substring(colonIndex);
-                        inside = inside.Substring(0, colonIndex);
+                        formatModifier = inside[colonIndex..];
+                        inside = inside[..colonIndex];
                     }
 
                     // If it is already a number inside (positional format), leave it as is

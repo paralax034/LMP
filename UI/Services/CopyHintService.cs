@@ -15,7 +15,7 @@ public sealed class CopyHintService
 
     /// <summary>
     /// Raised when a hint needs to be shown.
-    /// <paramref name="screenPosition"/> — cursor position in window coordinates,
+    /// <c>screenPosition</c> — cursor position in window coordinates,
     /// null = bottom center of the window.
     /// </summary>
     public event Action<string, CopyHintKind, Point?>? HintRequested;

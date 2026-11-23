@@ -200,12 +200,10 @@ internal sealed class CompositionSilenceMonitor
         var topLevel = TopLevel.GetTopLevel(_owner);
         if (!ReferenceEquals(_attachedTopLevel, topLevel))
         {
-            if (_attachedTopLevel != null)
-                _attachedTopLevel.PropertyChanged -= _topLevelPropertyChangedHandler;
+            _attachedTopLevel?.PropertyChanged -= _topLevelPropertyChangedHandler;
 
             _attachedTopLevel = topLevel;
-            if (_attachedTopLevel != null)
-                _attachedTopLevel.PropertyChanged += _topLevelPropertyChangedHandler;
+            _attachedTopLevel?.PropertyChanged += _topLevelPropertyChangedHandler;
         }
 
         if (!_isAttached)
@@ -225,11 +223,8 @@ internal sealed class CompositionSilenceMonitor
             _isAttached = false;
         }
 
-        if (_attachedTopLevel != null)
-        {
-            _attachedTopLevel.PropertyChanged -= _topLevelPropertyChangedHandler;
-            _attachedTopLevel = null;
-        }
+        _attachedTopLevel?.PropertyChanged -= _topLevelPropertyChangedHandler;
+        _attachedTopLevel = null;
 
         StopIdleTimer();
     }

@@ -117,7 +117,7 @@ public enum AmbientBackdropMode
 /// <remarks>
 /// <para>Determines whether manual user action is required or if recovery can be automatic.</para>
 /// <para>If automatic mode is selected, the specific queue action is defined by <see cref="PlaybackFailureBehavior"/>.</para>
-/// <para>Used in <see cref="UI.Services.PlaybackErrorOrchestrator"/>.</para>
+/// <para>Used in <c>PlaybackErrorOrchestrator</c>.</para>
 /// </remarks>
 public enum PlaybackErrorBehavior
 {

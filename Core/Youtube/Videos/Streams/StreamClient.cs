@@ -313,23 +313,6 @@ public sealed class StreamClient
             var bitrate = streamData.Bitrate is { } b ? new Bitrate(b) : (Bitrate?)null;
             if (bitrate is null) continue;
 
-                /// <summary>
-    /// Gets the stream manifest for a video.
-    /// <para>
-    /// <b>Always hits the network.</b> Caching is performed by the caller
-    /// (<see cref="SessionCacheStore.RecordManifest"/>).
-    /// This separation of concerns guarantees that StreamClient
-    /// does not mix full and incomplete manifests.
-    /// </para>
-    /// </summary>
-    /// <param name="videoId">Video ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="forceRefresh">Forced refresh after CDN 403: without WEB_REMIX priority.</param>
-    /// <param name="excludedClients">Clients whose URLs were rejected by CDN with HTTP 403; excluded from the fallback chain.</param>
-    /// <returns>Manifest containing all available audio streams.</returns>
-                /// <summary>
-    /// Invalidates signatureTimestamp in the player context manager cache.
-    /// </summary>
             int channels = streamData.AudioChannels;
             if (channels > 2) continue;
 

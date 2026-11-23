@@ -386,7 +386,7 @@ public partial class TrayPopupWindow : Window
     {
         UpdateState(isWindowVisible ?? _lastKnownWindowVisible);
 
-        var screen = Screens.Primary ?? Screens.All.FirstOrDefault();
+        var screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
         if (screen != null)
         {
             var workArea = screen.WorkingArea;

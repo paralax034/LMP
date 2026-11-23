@@ -15,7 +15,7 @@ internal static class UrlEx
     /// Sets the value of a query parameter. If the parameter already exists,
     /// replaces its value IN-PLACE while preserving the order of all other parameters.
     /// If the parameter does not exist, appends it to the end.
-    /// The value is encoded via <see cref="Uri.EscapeDataString"/>,
+    /// The value is encoded via <see cref="Uri.EscapeDataString(string)"/>,
     /// but all other parameters remain untouched (zero re-encoding).
     /// </summary>
     public static string SetQueryParameter(string url, string key, string value)
@@ -265,7 +265,7 @@ internal static class UrlEx
     /// Returns (keyStart, valueStart, valueEnd):
     ///   keyStart   — index of the first character of the key
     ///   valueStart — index of the first character of the value (after '=')
-    ///   valueEnd   — index of the character AFTER the last character of the value ('&' or end of string)
+    ///   valueEnd   — index of the character AFTER the last character of the value ('&amp;' or end of string)
     /// If the parameter is not found, keyStart = -1.
     /// 
     /// Searches using the RAW key (without decoding), as YouTube keys are always plain ASCII.

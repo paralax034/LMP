@@ -96,7 +96,7 @@ public sealed class DominantColorService
         if (targetFilePath == null)
             return null;
 
-        return await Task.Run(() =>
+        return await Task.Run<Color?>(() =>
         {
             if (ct.IsCancellationRequested) return null;
 
@@ -123,13 +123,13 @@ public sealed class DominantColorService
                 return null;
 
             if (decodedBitmap.Width <= SampleSize && decodedBitmap.Height <= SampleSize)
-                return (Color?)AnalyzePixels(decodedBitmap);
+                return AnalyzePixels(decodedBitmap);
 
             using var resized = decodedBitmap.Resize(
                 new SKImageInfo(SampleSize, SampleSize, SKColorType.Rgba8888, SKAlphaType.Premul),
                 new SKSamplingOptions(SKFilterMode.Linear));
 
-            return resized != null ? (Color?)AnalyzePixels(resized) : null;
+            return resized != null ? AnalyzePixels(resized) : null;
         }, ct).ConfigureAwait(false);
     }
 
@@ -205,7 +205,7 @@ public sealed class DominantColorService
 
             RgbToHsl(r, g, b, out _, out float s, out float l);
 
-            if (l < MinLuminance || l > MaxLuminance)
+            if (l is < MinLuminance or > MaxLuminance)
                 continue;
 
             // Weight = saturation. Desaturated grays have low weight

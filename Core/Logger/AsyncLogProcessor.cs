@@ -1,8 +1,10 @@
 using System.Buffers;
 using System.Buffers.Text;
 using System.Globalization;
+#if DEBUG
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+#endif
 using System.Text;
 using System.Text.Unicode;
 

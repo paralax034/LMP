@@ -308,11 +308,11 @@ public sealed partial class TrackItemViewModel : ViewModelBase
                 }
                 else
                 {
-                    var status = _playlistService.GetMembershipStatus(p.Id, targets);
-                    state = status.State;
+                    var (membershipState, includedCount, totalCount) = _playlistService.GetMembershipStatus(p.Id, targets);
+                    state = membershipState;
                     if (targets.Count > 1 && state == PlaylistMembershipState.Indeterminate)
                     {
-                        countText = $"{status.IncludedCount}/{status.TotalCount}";
+                        countText = $"{includedCount}/{totalCount}";
                     }
                 }
 

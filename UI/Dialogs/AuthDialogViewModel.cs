@@ -241,11 +241,11 @@ public sealed partial class AuthDialogViewModel : ViewModelBase
                     int headsIdx = url.IndexOf("heads/", StringComparison.OrdinalIgnoreCase);
                     if (headsIdx >= 0)
                     {
-                        var remaining = url.Substring(headsIdx + 6);
+                        var remaining = url[(headsIdx + 6)..];
                         int zipIdx = remaining.IndexOf(".zip", StringComparison.OrdinalIgnoreCase);
                         if (zipIdx >= 0)
                         {
-                            branch = remaining.Substring(0, zipIdx);
+                            branch = remaining[..zipIdx];
                         }
                     }
 

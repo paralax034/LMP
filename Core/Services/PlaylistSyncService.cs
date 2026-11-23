@@ -657,10 +657,10 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
 
             // Recently deleted playlists: YouTube account list updates with a delay
             PruneExpiredTombstonesUnderLock(DateTime.UtcNow.Ticks);
-            foreach (var key in _deleteTombstones.Keys)
+            foreach (var (ownerKey, youtubeId) in _deleteTombstones.Keys)
             {
-                if (string.Equals(key.OwnerId, owner, StringComparison.Ordinal))
-                    result.Add(key.YoutubeId);
+                if (string.Equals(ownerKey, owner, StringComparison.Ordinal))
+                    result.Add(youtubeId);
             }
         }
 
@@ -3768,7 +3768,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
             return false;
         }
 
-        if (imageData.Length == 0 || imageData.Length > 20 * 1024 * 1024)
+        if (imageData.Length is 0 or > 20 * 1024 * 1024)
             return false;
 
         return await _youtube.UploadPlaylistThumbnailAsync(youtubePlaylistId, imageData).ConfigureAwait(false);
@@ -3791,8 +3791,7 @@ public sealed class PlaylistSyncService : IDisposable, IAsyncDisposable
         {
             var p = ytPlaylists[i];
             if (string.IsNullOrEmpty(p.YoutubeId)
-                || p.YoutubeId == "LM"
-                || p.YoutubeId == "VLLM"
+                || p.YoutubeId is "LM" or "VLLM"
                 || p.YoutubeId.StartsWith("RD", StringComparison.Ordinal)
                 || pendingDeletedYtIds.Contains(p.YoutubeId))
             {

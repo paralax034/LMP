@@ -1,5 +1,7 @@
 using System.Buffers;
+#if DEBUG
 using System.Diagnostics;
+#endif
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -576,7 +578,7 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
                 options: FileOptions.SequentialScan);
 
             long len = fs.Length;
-            if (len <= 0 || len > MaxThumbnailBytes)
+            if (len is <= 0 or > MaxThumbnailBytes)
                 return default;
 
             Span<byte> header = stackalloc byte[12];
@@ -627,7 +629,7 @@ public sealed unsafe partial class WindowsSystemMediaTransport : ISystemMediaTra
                 return default;
 
             var encoded = image.Encode(SKEncodedImageFormat.Jpeg, 85);
-            if (encoded == null || encoded.Size <= 0 || encoded.Size > MaxThumbnailBytes)
+            if (encoded is null || encoded.Size is <= 0 or > MaxThumbnailBytes)
             {
                 encoded?.Dispose();
                 return default;

@@ -743,7 +743,7 @@ public sealed class ImageCacheService : IDisposable
 
     /// <summary>
     /// FNV-1a 64-bit hash of the URL + width. Width normalization is performed by the calling code
-    /// once: <see cref="GetImageAsync"/> normalizes before calling this method.
+    /// once: <see cref="GetImageAsync(string, int, CancellationToken)"/> normalizes before calling this method.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong ComputeMemoryKeyHash(ReadOnlySpan<char> url, int normalizedWidth)

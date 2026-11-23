@@ -35,8 +35,10 @@ public static class BatchItemExtensions
         public async ValueTask<IReadOnlyList<T>> CollectAsync(int count) =>
             await source.TakeAsync(count).ToListAsync();
 
-        /// <inheritdoc cref="CollectAsync{T}(IAsyncEnumerable{T})" />
+        /// <summary>Returns an awaiter for <c>CollectAsync()</c>.</summary>
         public ValueTaskAwaiter<IReadOnlyList<T>> GetAwaiter() =>
+#pragma warning disable CA2012 // Intentional awaitable extension forwarding directly to ValueTask.GetAwaiter()
             source.CollectAsync().GetAwaiter();
+#pragma warning restore CA2012
     }
 }

@@ -270,9 +270,7 @@ namespace Avalonia.Layout
         protected internal override void InitializeForContextCore(VirtualizingLayoutContext context)
         {
             var state = context.LayoutState;
-            var stackState = state as StackLayoutState;
-
-            if (stackState == null)
+            if (state is not StackLayoutState stackState)
             {
                 if (state != null)
                 {

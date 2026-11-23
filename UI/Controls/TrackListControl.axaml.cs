@@ -886,7 +886,7 @@ public partial class TrackListControl : UserControl
         if (!EnableReordering || !HasTrackIndexData(e) || _repeater == null)
         {
             e.DragEffects = DragDropEffects.None;
-            if (_dropIndicatorLine != null) _dropIndicatorLine.IsVisible = false;
+            _dropIndicatorLine?.IsVisible = false;
             return;
         }
 
@@ -910,10 +910,7 @@ public partial class TrackListControl : UserControl
                 }
             }
 
-            if (_dropIndicatorTransform != null)
-            {
-                _dropIndicatorTransform.Y = targetY;
-            }
+            _dropIndicatorTransform?.Y = targetY;
 
             _dropIndicatorLine.IsVisible = true;
         }
@@ -1134,8 +1131,7 @@ public partial class TrackListControl : UserControl
 
     private void CleanupDragStyles()
     {
-        if (_dropIndicatorLine != null)
-            _dropIndicatorLine.IsVisible = false;
+        _dropIndicatorLine?.IsVisible = false;
     }
 
     private static bool IsInteractiveChild(Visual visual)

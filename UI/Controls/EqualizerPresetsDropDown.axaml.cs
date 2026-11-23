@@ -99,13 +99,11 @@ public partial class EqualizerPresetsDropDown : UserControl
         if (ReferenceEquals(_subscribedVm, vm))
             return;
 
-        if (_subscribedVm != null)
-            _subscribedVm.PresetInputFocusRequested -= FocusNewPresetTextBox;
+        _subscribedVm?.PresetInputFocusRequested -= FocusNewPresetTextBox;
 
         _subscribedVm = vm;
 
-        if (_subscribedVm != null)
-            _subscribedVm.PresetInputFocusRequested += FocusNewPresetTextBox;
+        _subscribedVm?.PresetInputFocusRequested += FocusNewPresetTextBox;
     }
 
     private void ApplyCompactMetrics(bool compact)

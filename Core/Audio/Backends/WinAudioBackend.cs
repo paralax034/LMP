@@ -2201,7 +2201,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
             else
             {
                 _fadeState = FadeState.FadingIn;
-                if (_fadeGain <= 0f || _fadeGain >= 1f)
+                if (_fadeGain is <= 0f or >= 1f)
                     _fadeGain = 0f;
             }
         }
@@ -2283,7 +2283,7 @@ internal sealed unsafe partial class WinAudioBackend : IPlaybackBackend
         nint wake = _wakeControlEvent;
         if (timer != 0 && wake != 0 && sleepMs != INFINITE)
         {
-            long dueTime100ns = -(long)sleepMs * HnsPerMillisecond;
+            long dueTime100ns = -sleepMs * HnsPerMillisecond;
             if (SetWaitableTimer(timer, in dueTime100ns, 0, 0, 0, 0) != 0)
             {
                 nint* handles = stackalloc nint[2];

@@ -183,14 +183,11 @@ public sealed class PlayerControlService : IDisposable
         _playlistSync = playlistSync;
         _playlistService = playlistService;
 
-        if (_playlistSync != null)
-        {
-            _playlistSync.IsAudioBufferingCheck = () => ShouldYieldToAudioBuffering(
-                _audio.IsLoading,
-                _audio.IsPlaying,
-                _audio.IsFullyBuffered,
-                _audio.BufferProgress);
-        }
+        _playlistSync?.IsAudioBufferingCheck = () => ShouldYieldToAudioBuffering(
+            _audio.IsLoading,
+            _audio.IsPlaying,
+            _audio.IsFullyBuffered,
+            _audio.BufferProgress);
 
         _lastTrackId = _audio.CurrentTrack?.Id;
         _lastCanGoNext = _audio.CanGoNext;
@@ -566,17 +563,17 @@ public sealed class PlayerControlService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Changes volume by the specified step (positive or negative).
-    /// </summary>
-    /// <param name="delta">Amount of volume change.</param>
-    /// <returns>The new volume value.</returns>
     private int GetEffectiveMaxVolume()
     {
         int maxVolume = _library.Settings.MaxVolumeLimit;
         return maxVolume > 0 ? maxVolume : 100;
     }
 
+    /// <summary>
+    /// Changes volume by the specified step (positive or negative).
+    /// </summary>
+    /// <param name="delta">Amount of volume change.</param>
+    /// <returns>The new volume value.</returns>
     public int AdjustVolume(int delta)
     {
         int currentVolume = (int)Math.Round(_audio.GetVolume());
@@ -1039,8 +1036,7 @@ public sealed class PlayerControlService : IDisposable
 
         CancelPendingLiveSync();
 
-        if (_playlistSync != null)
-            _playlistSync.IsAudioBufferingCheck = null;
+        _playlistSync?.IsAudioBufferingCheck = null;
 
         _library.OnInitialized -= HandleLibraryInitialized;
         _library.OnTrackUpdated -= HandleTrackUpdated;

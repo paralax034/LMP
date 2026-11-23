@@ -5,6 +5,9 @@
     <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
     <AssemblyName>LMP.Decoders.AAC</AssemblyName>
     <RootNamespace>SharpJaad.AAC</RootNamespace>
+    <!-- Opt out of XML doc generation and code-style build enforcement for ported third-party decoder code -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
   <!-- SharpJaad decoder is written in pure C# and requires no external NuGet packages -->

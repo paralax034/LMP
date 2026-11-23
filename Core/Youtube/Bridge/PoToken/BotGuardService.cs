@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Text;
+#if DEBUG
 using LMP.Core.Youtube.Exceptions;
+#endif
 
 namespace LMP.Core.Youtube.Bridge.PoToken;
 

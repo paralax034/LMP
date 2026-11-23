@@ -43,8 +43,7 @@ public partial class QueueView : UserControl
     {
         _trackList = this.FindControl<TrackListControl>("QueueTrackList");
 
-        if (_ambientBackdrop != null)
-            _ambientBackdrop.TopGlowFactorChanged -= OnBackdropTopGlowFactorChanged;
+        _ambientBackdrop?.TopGlowFactorChanged -= OnBackdropTopGlowFactorChanged;
 
         _ambientBackdrop = this.FindControl<AmbientBackdrop>("AmbientBackdrop");
         _scrollViewer = this.FindControl<ScrollViewer>("QueueScrollViewer");
@@ -68,8 +67,7 @@ public partial class QueueView : UserControl
 
     private void OnBackdropTopGlowFactorChanged(double factor)
     {
-        if (_currentVm != null)
-            _currentVm.TopGlowAttenuation = factor;
+        _currentVm?.TopGlowAttenuation = factor;
     }
 
     private void OnDetachedFromVisualTreeHandler(object? sender, VisualTreeAttachmentEventArgs e)
@@ -91,13 +89,11 @@ public partial class QueueView : UserControl
         if (ReferenceEquals(_currentVm, vm))
             return;
 
-        if (_currentVm != null)
-            _currentVm.ScrollToCurrentRequested -= OnScrollToCurrentRequested;
+        _currentVm?.ScrollToCurrentRequested -= OnScrollToCurrentRequested;
 
         _currentVm = vm;
 
-        if (_currentVm != null)
-            _currentVm.ScrollToCurrentRequested += OnScrollToCurrentRequested;
+        _currentVm?.ScrollToCurrentRequested += OnScrollToCurrentRequested;
     }
 
     private void OnScrollToCurrentRequested() => ScrollToPlayingTrack(smooth: true);

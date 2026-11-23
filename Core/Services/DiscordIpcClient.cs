@@ -420,7 +420,7 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
         int rawOpcode = BinaryPrimitives.ReadInt32LittleEndian(_readHeaderBuffer.AsSpan(0, 4));
         int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(_readHeaderBuffer.AsSpan(4, 4));
 
-        if (payloadLength < 0 || payloadLength > MaxFramePayloadBytes)
+        if (payloadLength is < 0 or > MaxFramePayloadBytes)
             throw new InvalidDataException($"Invalid Discord IPC payload length: {payloadLength}");
 
         if (payloadLength == 0)

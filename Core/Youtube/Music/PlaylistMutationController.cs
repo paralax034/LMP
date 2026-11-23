@@ -421,7 +421,6 @@ internal sealed class PlaylistMutationController(HttpClient http)
     /// </summary>
     /// <param name="playlistId">YouTube playlist ID.</param>
     /// <param name="imageData">Image bytes (JPEG/PNG, recommended 1280x720 or square).</param>
-    /// <param name="mimeType">MIME type: "image/jpeg" or "image/png".</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>True if thumbnail was successfully set.</returns>
     public async Task<bool> UploadPlaylistThumbnailAsync(

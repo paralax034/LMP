@@ -1,5 +1,4 @@
 using System.Security.Authentication;
-using LMP.Core.Exceptions;
 using LMP.Core.Youtube.Exceptions;
 
 namespace LMP.Core.Helpers;
@@ -68,7 +67,7 @@ public static class NetworkErrorHelper
     /// <param name="exception">Exception to evaluate.</param>
     /// <returns><c>true</c> if it is a pure user cancellation; <c>false</c> if it is a network/timeout error.</returns>
     public static bool IsCancellationLike(Exception? exception) =>
-        LMP.Core.Audio.Helpers.CancellationHelper.IsUserCancellation(exception);
+        Audio.Helpers.CancellationHelper.IsUserCancellation(exception);
 
     /// <summary>
     /// Checks if the exception is caused by an SSL/TLS handshake failure or a connection reset

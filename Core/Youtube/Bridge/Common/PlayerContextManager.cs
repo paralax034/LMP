@@ -187,7 +187,7 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
 
     /// <summary>
     /// Returns the cached signatureTimestamp.
-    /// Single source of truth for all <see cref="VideoController"/> instances.
+    /// Single source of truth for all <c>VideoController</c> instances.
     /// </summary>
     internal string? GetCachedSignatureTimestamp() => _cachedSignatureTimestamp;
 
@@ -197,8 +197,8 @@ public class PlayerContextManager(Func<HttpClient> httpProvider)
 
     /// <summary>
     /// Resets the signatureTimestamp cache.
-    /// Invoked via <see cref="VideoController.InvalidateSignatureTimestamp"/>
-    /// during 403 recovery — guarantees reset for all <see cref="VideoController"/> instances.
+    /// Invoked via <see cref="Videos.VideoController.InvalidateSignatureTimestamp"/>
+    /// during 403 recovery — guarantees reset for all <c>VideoController</c> instances.
     /// </summary>
     public void InvalidateSignatureTimestamp()
     {

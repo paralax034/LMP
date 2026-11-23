@@ -579,11 +579,8 @@ public partial class MainWindowViewModel : ViewModelBase
             LocalizationService.Instance.LanguageChanged -= _languageChangedHandler;
             DialogHost.PropertyChanged -= _dialogHostPropertyChangedHandler;
 
-            if (_observedAmbientPage != null)
-            {
-                _observedAmbientPage.PropertyChanged -= OnObservedAmbientPagePropertyChanged;
-                _observedAmbientPage = null;
-            }
+            _observedAmbientPage?.PropertyChanged -= OnObservedAmbientPagePropertyChanged;
+            _observedAmbientPage = null;
 
             if (_pageCache.TryGetValue("Queue", out var page) && page is QueueViewModel queueVm)
             {

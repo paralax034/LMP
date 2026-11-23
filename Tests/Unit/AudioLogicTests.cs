@@ -108,7 +108,7 @@ public static class AudioLogicTests
                 ref fadeGain);
 
             TestAssert.True(MathF.Abs(fadeGain - 1.0f) < 1e-5f, $"Fade-in after 960 frames must reach ~1.0f, got {fadeGain:R}");
-            TestAssert.True(fadeSpan[0] > 0f && fadeSpan[0] < 0.01f, "Fade-in first frame must start near zero");
+            TestAssert.True(fadeSpan[0] is > 0f and < 0.01f, "Fade-in first frame must start near zero");
             TestAssert.True(MathF.Abs(fadeSpan[^1] - 1.0f) < 1e-5f, "Fade-in 960th frame must reach unity");
 
             for (int f = 1; f < frames; f++)

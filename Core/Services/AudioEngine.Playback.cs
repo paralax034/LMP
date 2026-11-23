@@ -203,7 +203,7 @@ public sealed partial class AudioEngine
 
             await PlayCurrentIndexAsync(
                 session,
-                startPlaying: canMove ? cmd.StartPlaying : true,
+                startPlaying: !canMove || cmd.StartPlaying,
                 pauseEpoch: cmd.PauseEpoch).ConfigureAwait(false);
             return;
         }

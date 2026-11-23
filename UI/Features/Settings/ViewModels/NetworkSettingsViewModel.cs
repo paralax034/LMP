@@ -201,7 +201,7 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
                 return;
             }
 
-            var netInspection = await Task.Run(() =>
+            var (vpnDetected, (proxyActive, proxyHost, proxyPort, isSystemProxy)) = await Task.Run(() =>
             {
                 bool vpn = _networkManager.CheckIsVpnActive();
                 var proxy = _networkManager.GetActiveProxyInfo();
@@ -221,9 +221,6 @@ public sealed partial class NetworkSettingsViewModel : ViewModelBase
             bool cdnReachable = await ProbeCdnAsync().ConfigureAwait(false);
 
             NetworkLatencyMs = (int)sw.ElapsedMilliseconds;
-
-            var (proxyActive, proxyHost, proxyPort, isSystemProxy) = netInspection.Proxy;
-            bool vpnDetected = netInspection.Vpn;
 
             Log.Info($"[Settings] Network test: {NetworkLatencyMs}ms (proxy={proxyActive} [{proxyHost}:{proxyPort}, system={isSystemProxy}], vpn={vpnDetected}, cdnReachable={cdnReachable})");
 

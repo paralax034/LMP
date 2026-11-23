@@ -1,9 +1,8 @@
-namespace LMP.Core.Youtube.Utils;
-
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using LMP.Core.Helpers.Extensions;
+
+namespace LMP.Core.Youtube.Utils;
 
 /// <summary>
 /// Provides centralized high-performance parsing of YouTube data.
@@ -166,7 +165,7 @@ internal static class YoutubeParsingHelpers
                              + (text[i + 1] - '0') * 100
                              + (text[i + 2] - '0') * 10
                              + (text[i + 3] - '0');
-                    if (year >= 1900 && year <= 2100) return year;
+                    if (year is >= 1900 and <= 2100) return year;
                 }
             }
         }
@@ -208,13 +207,13 @@ internal static class YoutubeParsingHelpers
                 }
                 found = true;
             }
-            else if (found && (c == '.' || c == ','))
+            else if (found && c is '.' or ',')
             {
                 separatorCount++;
                 fractionPart = 0;
                 fractionDigits = 0;
             }
-            else if (found && (c == ' ' || c == '\u00A0'))
+            else if (found && c is ' ' or '\u00A0')
             {
                 if (i + 1 < text.Length && char.IsAsciiDigit(text[i + 1]))
                     continue;

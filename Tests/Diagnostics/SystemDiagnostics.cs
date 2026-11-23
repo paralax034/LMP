@@ -25,7 +25,7 @@ public static partial class SystemDiagnostics
         var genSizes = FormatGenerationSizes(gcBefore);
 
         var services = AppEntry.Services;
-        var imgStats = services.GetService<ImageCacheService>()?.GetStats() ?? (0, 0, 0, 0);
+        var (imgMemoryItems, imgMemoryMb, _, _) = services.GetService<ImageCacheService>()?.GetStats() ?? (0, 0, 0, 0);
         var audioStats = AudioSourceFactory.GlobalCache?.GetStats() ?? default;
         var registry = services.GetService<TrackRegistry>();
         int pinnedTracks = 0;
@@ -76,7 +76,7 @@ public static partial class SystemDiagnostics
             $"Managed Committed: {committedBeforeMb} MB | Managed Live: {liveBeforeMb} MB | Generations: [{genSizes}]");
 
         Log.Info(
-            $"[MemAnatomy] Caches -> ImageCache RAM: {imgStats.MemoryItems} items (~{imgStats.MemoryMb} MB) | " +
+            $"[MemAnatomy] Caches -> ImageCache RAM: {imgMemoryItems} items (~{imgMemoryMb} MB) | " +
             $"AudioCache Index: {audioStats.TotalEntries} entries | TrackRegistry Pinned: {pinnedTracks} tracks | " +
             $"Shell PrewarmedPages: {prewarmedCount}");
 
@@ -225,11 +225,11 @@ public static partial class SystemDiagnostics
         if (startAddr == 0) return null;
         for (int i = 0; i < modules.Count; i++)
         {
-            var m = modules[i];
-            if (startAddr >= m.BaseAddr && startAddr < m.EndAddr)
+            var (baseAddr, endAddr, name) = modules[i];
+            if (startAddr >= baseAddr && startAddr < endAddr)
             {
-                long offset = startAddr - m.BaseAddr;
-                return $"{m.Name}+0x{offset:x}";
+                long offset = startAddr - baseAddr;
+                return $"{name}+0x{offset:x}";
             }
         }
         return $"0x{startAddr:x}";

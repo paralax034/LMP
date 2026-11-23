@@ -743,10 +743,10 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
 
             for (int i = 0; i < rawRanges.Count; i++)
             {
-                var r = rawRanges[i];
+                var (startVal, endVal) = rawRanges[i];
                 double dist = 0;
-                if (currentRatio < r.Start) dist = r.Start - currentRatio;
-                else if (currentRatio > r.End) dist = currentRatio - r.End;
+                if (currentRatio < startVal) dist = startVal - currentRatio;
+                else if (currentRatio > endVal) dist = currentRatio - endVal;
 
                 if (dist < minDistance)
                 {
@@ -913,13 +913,11 @@ public sealed partial class PlayerBarViewModel : ViewModelBase
         if (ReferenceEquals(_observedTrack, track))
             return;
 
-        if (_observedTrack != null)
-            _observedTrack.PropertyChanged -= OnObservedTrackPropertyChanged;
+        _observedTrack?.PropertyChanged -= OnObservedTrackPropertyChanged;
 
         _observedTrack = track;
 
-        if (track != null)
-            track.PropertyChanged += OnObservedTrackPropertyChanged;
+        track?.PropertyChanged += OnObservedTrackPropertyChanged;
     }
 
     private void OnObservedTrackPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

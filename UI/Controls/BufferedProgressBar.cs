@@ -137,12 +137,10 @@ public sealed class BufferedProgressBar : Control
         var topLevel = TopLevel.GetTopLevel(this);
         if (!ReferenceEquals(_attachedTopLevel, topLevel))
         {
-            if (_attachedTopLevel != null)
-                _attachedTopLevel.PropertyChanged -= _topLevelPropertyChangedHandler;
+            _attachedTopLevel?.PropertyChanged -= _topLevelPropertyChangedHandler;
 
             _attachedTopLevel = topLevel;
-            if (_attachedTopLevel != null)
-                _attachedTopLevel.PropertyChanged += _topLevelPropertyChangedHandler;
+            _attachedTopLevel?.PropertyChanged += _topLevelPropertyChangedHandler;
         }
 
         ViewModelBase.SuspendLevelChanged += _suspendLevelChangedHandler;
@@ -157,11 +155,8 @@ public sealed class BufferedProgressBar : Control
         _rafActive = false;
         ViewModelBase.SuspendLevelChanged -= _suspendLevelChangedHandler;
 
-        if (_attachedTopLevel != null)
-        {
-            _attachedTopLevel.PropertyChanged -= _topLevelPropertyChangedHandler;
-            _attachedTopLevel = null;
-        }
+        _attachedTopLevel?.PropertyChanged -= _topLevelPropertyChangedHandler;
+        _attachedTopLevel = null;
 
         base.OnDetachedFromVisualTree(e);
     }

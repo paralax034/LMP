@@ -201,7 +201,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
                 tickCounter++;
                 double uiLatencyMs = MeasureUiPingLatencyMs();
-                GpuSample gpuSample = gpuProbe is not null ? gpuProbe.Sample() : default;
+                GpuSample gpuSample = gpuProbe?.Sample() ?? default;
 
                 if (OperatingSystem.IsWindows())
                 {
@@ -352,7 +352,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         StringBuilder sb,
         StreamWriter writer)
     {
-        IntPtr hProcess = GetCurrentProcess();
+        nint hProcess = GetCurrentProcess();
 
         QueryProcessCycleTime(hProcess, out ulong totalProcessCycles);
 
@@ -378,7 +378,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         int gen1 = GC.CollectionCount(1);
         int gen2 = GC.CollectionCount(2);
 
-        int threadCount = (int)Math.Min(proc->NumberOfThreads, (uint)MaxTrackedThreads);
+        int threadCount = (int)Math.Min(proc->NumberOfThreads, MaxTrackedThreads);
         var threadsPtr = (SYSTEM_THREAD_INFORMATION*)((byte*)proc + sizeof(SYSTEM_PROCESS_INFORMATION));
 
         ulong totalCtxSwitches = 0;
@@ -393,8 +393,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             uint tid = (uint)t.ClientId.UniqueThread;
 
             ulong threadCycles = 0;
-            IntPtr hThread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, false, tid);
-            if (hThread != IntPtr.Zero)
+            nint hThread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, false, tid);
+            if (hThread != nint.Zero)
             {
                 QueryThreadCycleTime(hThread, out threadCycles);
                 CloseHandle(hThread);
@@ -672,14 +672,14 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         private const uint PdhFmtLarge = 0x00000400;
         private const int PdhMoreData = unchecked((int)0x800007D2);
 
-        private readonly IntPtr _hQuery;
-        private readonly IntPtr _hGpuEngine;
-        private readonly IntPtr _hVramDedicated;
-        private readonly IntPtr _hVramShared;
+        private readonly nint _hQuery;
+        private readonly nint _hGpuEngine;
+        private readonly nint _hVramDedicated;
+        private readonly nint _hVramShared;
         private byte[] _pdhBuffer = new byte[16 * 1024];
         private bool _hasPrimed;
 
-        private GpuTelemetryProbe(IntPtr hQuery, IntPtr hGpuEngine, IntPtr hVramDedicated, IntPtr hVramShared)
+        private GpuTelemetryProbe(nint hQuery, nint hGpuEngine, nint hVramDedicated, nint hVramShared)
         {
             _hQuery = hQuery;
             _hGpuEngine = hGpuEngine;
@@ -689,21 +689,21 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
         public static GpuTelemetryProbe? TryCreate(uint pid)
         {
-            if (PdhOpenQueryW(IntPtr.Zero, 0, out IntPtr hQuery) != 0 || hQuery == IntPtr.Zero)
+            if (PdhOpenQueryW(nint.Zero, 0, out nint hQuery) != 0 || hQuery == nint.Zero)
                 return null;
 
             string engPath = string.Create(CultureInfo.InvariantCulture, $@"\GPU Engine(pid_{pid}_*)\Utilization Percentage");
             string dedPath = string.Create(CultureInfo.InvariantCulture, $@"\GPU Process Memory(pid_{pid}_*)\Dedicated Usage");
             string shrPath = string.Create(CultureInfo.InvariantCulture, $@"\GPU Process Memory(pid_{pid}_*)\Shared Usage");
 
-            if (PdhAddEnglishCounterW(hQuery, engPath, 0, out IntPtr hEng) != 0)
+            if (PdhAddEnglishCounterW(hQuery, engPath, 0, out nint hEng) != 0)
             {
                 PdhCloseQuery(hQuery);
                 return null;
             }
 
-            PdhAddEnglishCounterW(hQuery, dedPath, 0, out IntPtr hDed);
-            PdhAddEnglishCounterW(hQuery, shrPath, 0, out IntPtr hShr);
+            PdhAddEnglishCounterW(hQuery, dedPath, 0, out nint hDed);
+            PdhAddEnglishCounterW(hQuery, shrPath, 0, out nint hShr);
 
             var probe = new GpuTelemetryProbe(hQuery, hEng, hDed, hShr);
             if (PdhCollectQueryData(hQuery) == 0)
@@ -713,7 +713,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
         public GpuSample Sample()
         {
-            if (_hQuery == IntPtr.Zero || PdhCollectQueryData(_hQuery) != 0)
+            if (_hQuery == nint.Zero || PdhCollectQueryData(_hQuery) != 0)
                 return default;
 
             if (!_hasPrimed)
@@ -723,8 +723,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             }
 
             (double maxPct, double eng3dPct) = ReadEngineUtilization();
-            long dedBytes = _hVramDedicated != IntPtr.Zero ? ReadSumLarge(_hVramDedicated) : 0;
-            long shrBytes = _hVramShared != IntPtr.Zero ? ReadSumLarge(_hVramShared) : 0;
+            long dedBytes = _hVramDedicated != nint.Zero ? ReadSumLarge(_hVramDedicated) : 0;
+            long shrBytes = _hVramShared != nint.Zero ? ReadSumLarge(_hVramShared) : 0;
 
             return new GpuSample(
                 IsValid: true,
@@ -765,7 +765,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             return (maxPct, Math.Min(100.0, eng3dPct));
         }
 
-        private long ReadSumLarge(IntPtr hCounter)
+        private long ReadSumLarge(nint hCounter)
         {
             if (!TryFetchArray(hCounter, PdhFmtLarge, out uint count))
                 return 0;
@@ -784,7 +784,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
             return total;
         }
 
-        private bool TryFetchArray(IntPtr hCounter, uint format, out uint itemCount)
+        private bool TryFetchArray(nint hCounter, uint format, out uint itemCount)
         {
             uint bufSize = (uint)_pdhBuffer.Length;
             int status;
@@ -809,7 +809,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
         public void Dispose()
         {
-            if (_hQuery != IntPtr.Zero)
+            if (_hQuery != nint.Zero)
                 PdhCloseQuery(_hQuery);
         }
     }
@@ -840,7 +840,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         if (isSpike || (tickCounter % HeartbeatEveryTicks) == 0)
         {
             sb.Clear();
-            sb.Append(inv, $"[{DateTime.Now.ToString("HH:mm:ss.fff", inv)}] [{(isSpike ? "SPIKE" : "HEARTBEAT")}] WS:{ws / (1024.0 * 1024.0):F1}MB | Alloc:{allocMbPerSec:F2}MB/s | UI:{uiLatencyMs:F1}ms")
+            sb.Append(inv, $"[{DateTime.Now:HH:mm:ss.fff}] [{(isSpike ? "SPIKE" : "HEARTBEAT")}] WS:{ws / (1024.0 * 1024.0):F1}MB | Alloc:{allocMbPerSec:F2}MB/s | UI:{uiLatencyMs:F1}ms")
               .AppendLine();
             writer.Write(sb);
             writer.Flush();
@@ -908,17 +908,17 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         }
     }
 
-    private void EnsureModulesCached(IntPtr hProcess, long nowTimestamp)
+    private void EnsureModulesCached(nint hProcess, long nowTimestamp)
     {
         if (_moduleCount > 0 && Stopwatch.GetElapsedTime(_lastModuleRefreshTick, nowTimestamp).TotalSeconds < 30)
             return;
 
         _lastModuleRefreshTick = nowTimestamp;
-        IntPtr* hMods = stackalloc IntPtr[MaxCachedModules];
-        if (!EnumProcessModules(hProcess, hMods, (uint)(MaxCachedModules * sizeof(IntPtr)), out uint cbNeeded))
+        nint* hMods = stackalloc nint[MaxCachedModules];
+        if (!EnumProcessModules(hProcess, hMods, (uint)(MaxCachedModules * sizeof(nint)), out uint cbNeeded))
             return;
 
-        int count = Math.Min(MaxCachedModules, (int)(cbNeeded / (uint)sizeof(IntPtr)));
+        int count = Math.Min(MaxCachedModules, (int)(cbNeeded / (uint)sizeof(nint)));
         char* nameBuf = stackalloc char[128];
         int valid = 0;
 
@@ -953,11 +953,11 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         nuint win32StartAddr = fallbackAddress;
         string? threadName = tid == _mainUiThreadId ? "Avalonia UI" : null;
 
-        IntPtr hThread = OpenThread(THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION, false, tid);
-        if (hThread == IntPtr.Zero)
+        nint hThread = OpenThread(THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION, false, tid);
+        if (hThread == nint.Zero)
             hThread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, false, tid);
 
-        if (hThread != IntPtr.Zero)
+        if (hThread != nint.Zero)
         {
             nuint queriedAddr = 0;
             if (NtQueryInformationThread(
@@ -970,7 +970,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
                 win32StartAddr = queriedAddr;
             }
 
-            if (threadName is null && GetThreadDescription(hThread, out IntPtr pDesc) >= 0 && pDesc != IntPtr.Zero)
+            if (threadName is null && GetThreadDescription(hThread, out nint pDesc) >= 0 && pDesc != nint.Zero)
             {
                 string? desc = Marshal.PtrToStringUni(pDesc);
                 LocalFree(pDesc);
@@ -1141,14 +1141,14 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     {
         public ushort Length;
         public ushort MaximumLength;
-        public IntPtr Buffer;
+        public nint Buffer;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct CLIENT_ID
     {
-        public IntPtr UniqueProcess;
-        public IntPtr UniqueThread;
+        public nint UniqueProcess;
+        public nint UniqueThread;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1165,8 +1165,8 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         public long KernelTime;
         public UNICODE_STRING ImageName;
         public int BasePriority;
-        public IntPtr UniqueProcessId;
-        public IntPtr InheritedFromUniqueProcessId;
+        public nint UniqueProcessId;
+        public nint InheritedFromUniqueProcessId;
         public uint HandleCount;
         public uint SessionId;
         public nuint UniqueProcessKey;
@@ -1197,7 +1197,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
         public long UserTime;
         public long CreateTime;
         public uint WaitTime;
-        public IntPtr StartAddress;
+        public nint StartAddress;
         public CLIENT_ID ClientId;
         public int Priority;
         public int BasePriority;
@@ -1229,9 +1229,9 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct MODULEINFO
     {
-        public IntPtr lpBaseOfDll;
+        public nint lpBaseOfDll;
         public uint SizeOfImage;
-        public IntPtr EntryPoint;
+        public nint EntryPoint;
     }
 
     [LibraryImport("ntdll.dll")]
@@ -1243,7 +1243,7 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
     [LibraryImport("ntdll.dll")]
     private static partial uint NtQueryInformationProcess(
-        IntPtr processHandle,
+        nint processHandle,
         int processInformationClass,
         void* processInformation,
         uint processInformationLength,
@@ -1251,55 +1251,55 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
 
     [LibraryImport("ntdll.dll")]
     private static partial uint NtQueryInformationThread(
-        IntPtr threadHandle,
+        nint threadHandle,
         int threadInformationClass,
         void* threadInformation,
         uint threadInformationLength,
         out uint returnLength);
 
     [LibraryImport("kernel32.dll")]
-    private static partial IntPtr GetCurrentProcess();
+    private static partial nint GetCurrentProcess();
 
     [LibraryImport("kernel32.dll")]
     private static partial uint GetCurrentThreadId();
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial IntPtr OpenThread(
+    private static partial nint OpenThread(
         uint dwDesiredAccess,
         [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle,
         uint dwThreadId);
 
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CloseHandle(IntPtr hObject);
+    private static partial bool CloseHandle(nint hObject);
 
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool QueryProcessCycleTime(IntPtr processHandle, out ulong cycleTime);
+    private static partial bool QueryProcessCycleTime(nint processHandle, out ulong cycleTime);
 
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool QueryThreadCycleTime(IntPtr threadHandle, out ulong cycleTime);
+    private static partial bool QueryThreadCycleTime(nint threadHandle, out ulong cycleTime);
 
     [LibraryImport("kernel32.dll")]
-    private static partial int GetThreadDescription(IntPtr hThread, out IntPtr ppszThreadDescription);
+    private static partial int GetThreadDescription(nint hThread, out nint ppszThreadDescription);
 
     [LibraryImport("kernel32.dll")]
-    private static partial IntPtr LocalFree(IntPtr hMem);
+    private static partial nint LocalFree(nint hMem);
 
     [LibraryImport("user32.dll")]
-    private static partial uint GetGuiResources(IntPtr hProcess, uint uiFlags);
+    private static partial uint GetGuiResources(nint hProcess, uint uiFlags);
 
     [LibraryImport("kernel32.dll", EntryPoint = "K32EnumProcessModules")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool EnumProcessModules(IntPtr hProcess, IntPtr* lphModule, uint cb, out uint lpcbNeeded);
+    private static partial bool EnumProcessModules(nint hProcess, nint* lphModule, uint cb, out uint lpcbNeeded);
 
     [LibraryImport("kernel32.dll", EntryPoint = "K32GetModuleInformation")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetModuleInformation(IntPtr hProcess, IntPtr hModule, out MODULEINFO lpmodinfo, uint cb);
+    private static partial bool GetModuleInformation(nint hProcess, nint hModule, out MODULEINFO lpmodinfo, uint cb);
 
     [LibraryImport("kernel32.dll", EntryPoint = "K32GetModuleBaseNameW")]
-    private static partial uint GetModuleBaseNameW(IntPtr hProcess, IntPtr hModule, char* lpBaseName, uint nSize);
+    private static partial uint GetModuleBaseNameW(nint hProcess, nint hModule, char* lpBaseName, uint nSize);
 
     [StructLayout(LayoutKind.Explicit, Size = 16)]
     private struct PDH_FMT_COUNTERVALUE
@@ -1317,24 +1317,24 @@ public sealed unsafe partial class ProcessFlightRecorder : IDisposable
     }
 
     [LibraryImport("pdh.dll")]
-    private static partial int PdhOpenQueryW(IntPtr szDataSource, nuint dwUserData, out IntPtr phQuery);
+    private static partial int PdhOpenQueryW(nint szDataSource, nuint dwUserData, out nint phQuery);
 
     [LibraryImport("pdh.dll", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int PdhAddEnglishCounterW(IntPtr hQuery, string szFullCounterPath, nuint dwUserData, out IntPtr phCounter);
+    private static partial int PdhAddEnglishCounterW(nint hQuery, string szFullCounterPath, nuint dwUserData, out nint phCounter);
 
     [LibraryImport("pdh.dll")]
-    private static partial int PdhCollectQueryData(IntPtr hQuery);
+    private static partial int PdhCollectQueryData(nint hQuery);
 
     [LibraryImport("pdh.dll")]
     private static partial int PdhGetFormattedCounterArrayW(
-        IntPtr hCounter,
+        nint hCounter,
         uint dwFormat,
         ref uint lpdwBufferSize,
         out uint lpdwItemCount,
         void* pItemBuffer);
 
     [LibraryImport("pdh.dll")]
-    private static partial int PdhCloseQuery(IntPtr hQuery);
+    private static partial int PdhCloseQuery(nint hQuery);
 
     #endregion
 }

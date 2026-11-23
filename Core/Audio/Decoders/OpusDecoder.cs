@@ -19,12 +19,12 @@ internal sealed partial class OpusDecoder : IAudioDecoder
 
     private static readonly bool IsNativeSupported = CheckNativeSupport();
 
-    private IntPtr _nativeDecoder;
+    private nint _nativeDecoder;
     private int _nativeRefCount;
     private int _nativeDisposeSignaled;
     private readonly IOpusDecoder? _managedDecoder;
     private int _lastPacketSamples;
-    private float _headerGainLinear = 1.0f;
+    private readonly float _headerGainLinear = 1.0f;
     private volatile bool _disposed;
 
     /// <summary>
@@ -34,8 +34,8 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     {
         try
         {
-            IntPtr dec = NativeOpus.opus_decoder_create(48000, 2, out int err);
-            if (err == 0 && dec != IntPtr.Zero)
+            nint dec = NativeOpus.opus_decoder_create(48000, 2, out int err);
+            if (err == 0 && dec != nint.Zero)
             {
                 NativeOpus.opus_decoder_destroy(dec);
                 return true;
@@ -73,9 +73,9 @@ internal sealed partial class OpusDecoder : IAudioDecoder
         if (IsNativeSupported)
         {
             _nativeDecoder = NativeOpus.opus_decoder_create(sampleRate, channels, out int error);
-            if (error != 0 || _nativeDecoder == IntPtr.Zero)
+            if (error != 0 || _nativeDecoder == nint.Zero)
             {
-                _nativeDecoder = IntPtr.Zero;
+                _nativeDecoder = nint.Zero;
                 _managedDecoder = OpusCodecFactory.CreateDecoder(sampleRate, channels);
                 Log.Debug($"[OpusDecoder] Created (Managed Concentus fallback float32): {sampleRate}Hz, {channels}ch");
             }
@@ -108,7 +108,7 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     public bool IsInitialized => true;
 
     /// <summary>Indicates whether the zero-allocation native P/Invoke decoder is in use.</summary>
-    internal bool IsUsingNative => _nativeDecoder != IntPtr.Zero;
+    internal bool IsUsingNative => _nativeDecoder != nint.Zero;
 
     public unsafe int Decode(ReadOnlySpan<byte> encodedData, Span<float> outputBuffer)
     {
@@ -121,7 +121,7 @@ internal sealed partial class OpusDecoder : IAudioDecoder
         if (maxFrames <= 0)
             return 0;
 
-        if (TryAcquireNativeDecoder(out IntPtr nativeDec))
+        if (TryAcquireNativeDecoder(out nint nativeDec))
         {
             int samples;
             try
@@ -201,7 +201,7 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     {
         if (_disposed) return;
 
-        if (TryAcquireNativeDecoder(out IntPtr nativeDec))
+        if (TryAcquireNativeDecoder(out nint nativeDec))
         {
             try
             {
@@ -225,7 +225,7 @@ internal sealed partial class OpusDecoder : IAudioDecoder
         if (expectedSamples <= 0)
             return 0;
 
-        if (TryAcquireNativeDecoder(out IntPtr nativeDec))
+        if (TryAcquireNativeDecoder(out nint nativeDec))
         {
             int samples;
             try
@@ -299,25 +299,25 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool TryAcquireNativeDecoder(out IntPtr handle)
+    private bool TryAcquireNativeDecoder(out nint handle)
     {
         while (true)
         {
             int count = Volatile.Read(ref _nativeRefCount);
             if (count <= 0)
             {
-                handle = IntPtr.Zero;
+                handle = nint.Zero;
                 return false;
             }
 
             if (Interlocked.CompareExchange(ref _nativeRefCount, count + 1, count) == count)
             {
                 handle = Volatile.Read(ref _nativeDecoder);
-                if (handle != IntPtr.Zero)
+                if (handle != nint.Zero)
                     return true;
 
                 ReleaseNativeDecoderRef();
-                handle = IntPtr.Zero;
+                handle = nint.Zero;
                 return false;
             }
         }
@@ -328,15 +328,15 @@ internal sealed partial class OpusDecoder : IAudioDecoder
     {
         if (Interlocked.Decrement(ref _nativeRefCount) == 0)
         {
-            IntPtr handle = Interlocked.Exchange(ref _nativeDecoder, IntPtr.Zero);
-            if (handle != IntPtr.Zero)
+            nint handle = Interlocked.Exchange(ref _nativeDecoder, nint.Zero);
+            if (handle != nint.Zero)
                 NativeOpus.opus_decoder_destroy(handle);
         }
     }
 
     private void ReleaseNativeDecoder()
     {
-        if (Interlocked.Exchange(ref _nativeDisposeSignaled, 1) == 0 && _nativeDecoder != IntPtr.Zero)
+        if (Interlocked.Exchange(ref _nativeDisposeSignaled, 1) == 0 && _nativeDecoder != nint.Zero)
             ReleaseNativeDecoderRef();
     }
 
@@ -365,20 +365,20 @@ internal sealed partial class OpusDecoder : IAudioDecoder
 
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-        internal static partial IntPtr opus_decoder_create(int Fs, int channels, out int error);
+        internal static partial nint opus_decoder_create(int Fs, int channels, out int error);
 
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-        internal static partial void opus_decoder_destroy(IntPtr st);
+        internal static partial void opus_decoder_destroy(nint st);
 
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-        internal static partial int opus_decoder_ctl(IntPtr st, int request);
+        internal static partial int opus_decoder_ctl(nint st, int request);
 
         [LibraryImport(LibraryName)]
         [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
         internal static unsafe partial int opus_decode_float(
-            IntPtr st,
+            nint st,
             byte* data,
             int len,
             float* pcm,

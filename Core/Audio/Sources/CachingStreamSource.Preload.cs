@@ -33,7 +33,7 @@ internal sealed partial class CachingStreamSource
     /// Background range prefetch loop.
     /// <para>
     /// The first iteration runs without delay to immediately pick up
-    /// the work of <see cref="SafeStartupPrefetchAsync"/> and continue filling the buffer.
+    /// the work of startup prefetch and continue filling the buffer.
     /// Subsequent iterations are separated by <see cref="StreamingConfig.PreloadIntervalMs"/>.
     /// </para>
     /// <para>
@@ -46,14 +46,10 @@ internal sealed partial class CachingStreamSource
     {
         bool justResumed = false;
 
-        /// <summary>
-        /// "Almost downloaded" threshold — if >= this percentage is downloaded, completion fill is enabled.
-        /// </summary>
+        // "Almost downloaded" threshold — if >= this percentage is downloaded, completion fill is enabled.
         const double CompletionFillThresholdPercent = 90.0;
 
-        /// <summary>
-        /// Maximum absolute size of remaining un-downloaded data to trigger completion fill.
-        /// </summary>
+        // Gets the maximum absolute size of remaining un-downloaded data to trigger completion fill.
         const long CompletionFillMaxRemainingBytes = 512 * 1024;
 
 #if DEBUG
@@ -461,7 +457,7 @@ internal sealed partial class CachingStreamSource
             _cachedBufferedRanges = merged;
         }
         return merged;
-        }
+    }
 
     #endregion
 }

@@ -70,7 +70,7 @@ public sealed class NTokenDecryptor : BaseYoutubeDecryptor
         return nToken;
     }
 
-    /// <inheritdoc cref="DecryptAsync(string, string?, CancellationToken)"/>
+    /// <inheritdoc cref="DecryptAsync(string, string, CancellationToken)"/>
     public ValueTask<string> DecryptAsync(string nToken, CancellationToken ct = default) =>
         DecryptAsync(nToken, contextId: null, ct);
 
@@ -84,7 +84,7 @@ public sealed class NTokenDecryptor : BaseYoutubeDecryptor
     private static bool ValidateResult(string? result, string input)
     {
         if (string.IsNullOrEmpty(result) || result == input) return false;
-        if (result.Length < MinNTokenLength || result.Length > MaxNTokenLength) return false;
+        if (result.Length is < MinNTokenLength or > MaxNTokenLength) return false;
         if (result is "undefined" or "null" or "NaN" or "true" or "false") return false;
 
         foreach (char c in result)

@@ -16,6 +16,9 @@
     <!-- Ensures IDE diagnostics are also included in the build (important for CI) -->
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
+    <!-- Required for CLI enforcement of IDE0005 (unused usings) with generated-code filtering (dotnet/roslyn#41640) -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
     <!-- Any compiler or analyzer warning breaks the build -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
@@ -26,12 +29,13 @@
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
 
     <!--
-      Suppress IL20xx/IL30xx warnings during AOT/trimming analysis and NU1603
-      (Concentus.Native 1.5.2 requests unlisted Concentus.Native.NetCore >= 1.5.1, resolved to 1.5.2)
+      Suppress IL20xx/IL30xx warnings during AOT/trimming analysis, NU1603
+      (Concentus.Native 1.5.2 requests unlisted Concentus.Native.NetCore >= 1.5.1, resolved to 1.5.2),
+      and CS1591/CS1573 XML documentation completeness warnings enabled by GenerateDocumentationFile.
     -->
     <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002;NU1603</NoWarn>
+    <NoWarn>$(NoWarn);IL2026;IL3050;IL3051;IL3002;NU1603;CS1591;CS1573</NoWarn>
 
     <!-- Central Package Management (Directory.Packages.props) + global.json pin the graph without lock file churn -->
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>

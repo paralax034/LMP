@@ -13,23 +13,17 @@ trim_trailing_whitespace = true
 charset = utf-8
 
 # --- Line Ending Overrides ---
-# bash scripts should always use LF line endings to avoid issues with shell interpreters on Linux and macOS.
+# Shell scripts and Git hooks must always use LF line endings for cross-platform compatibility.
 [*.sh]
+end_of_line = lf
+
+[Tools/githooks/*]
 end_of_line = lf
 
 # Localization files are indented with 2 spaces to reduce file size and improve readability.
 [Assets/Localization/*.json]
 indent_size = 2
 
-# --- Generated Code Overrides ---
-[SharpJaad.AAC/**.cs]
-generated_code = true
-dotnet_diagnostic.CS8618.severity = none
-dotnet_diagnostic.CS8600.severity = none
-dotnet_diagnostic.CS8602.severity = none
-dotnet_diagnostic.CS8604.severity = none
-dotnet_diagnostic.CS8625.severity = none
-dotnet_diagnostic.CS0420.severity = none
 
 # --- C# Formatting Rules ---
 [*.cs]
@@ -61,29 +55,172 @@ csharp_space_before_dot = false
 csharp_space_before_semicolon_in_for_statement = false
 csharp_space_around_binary_operators = before_and_after
 
-# --- Diagnostics & Analyzer Rules ---
-# Unused symbols / members
-dotnet_diagnostic.IDE0060.severity = warning
-dotnet_diagnostic.IDE0051.severity = warning
-dotnet_diagnostic.IDE0052.severity = warning
-dotnet_diagnostic.IDE0059.severity = warning
-dotnet_diagnostic.IDE0044.severity = suggestion
+# --- Code Style: Usings, Simplification, Pattern Matching & Modern C# ---
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:warning
 
-# Performance & Code Quality suppressions
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+dotnet_style_predefined_type_for_locals_parameters_members = true:warning
+dotnet_style_predefined_type_for_member_access = true:warning
+
+csharp_style_pattern_matching_over_as_with_null_check = true:warning
+csharp_style_pattern_matching_over_is_with_cast_check = true:warning
+csharp_style_prefer_switch_expression = true:warning
+csharp_style_prefer_pattern_matching = true:warning
+csharp_style_prefer_not_pattern = true:warning
+csharp_style_prefer_extended_property_pattern = true:warning
+
+csharp_style_deconstructed_variable_declaration = true:warning
+csharp_style_prefer_tuple_swap = true:warning
+csharp_style_inlined_variable_declaration = true:warning
+csharp_style_prefer_index_operator = true:warning
+csharp_style_prefer_range_operator = true:warning
+csharp_prefer_static_local_function = true:warning
+csharp_prefer_simple_using_statement = true:suggestion
+csharp_style_prefer_readonly_struct = true:suggestion
+csharp_style_prefer_readonly_struct_member = true:suggestion
+
+dotnet_style_coalesce_expression = true:warning
+dotnet_style_null_propagation = true:warning
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:warning
+dotnet_style_prefer_simplified_boolean_expressions = true:warning
+dotnet_style_prefer_simplified_interpolation = true:warning
+dotnet_style_prefer_compound_assignment = true:warning
+dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
+
+# --- Diagnostics & Analyzer Rules ---
+# Unused code & dead symbols (build errors; IDE0005 replaces CS8019 with generated-code filtering)
+dotnet_diagnostic.CS0168.severity = error
+dotnet_diagnostic.CS0169.severity = error
+dotnet_diagnostic.CS0219.severity = error
+dotnet_diagnostic.CS0414.severity = error
+dotnet_diagnostic.IDE0005.severity = error
+dotnet_diagnostic.IDE0051.severity = error
+dotnet_diagnostic.IDE0052.severity = error
+dotnet_diagnostic.IDE0059.severity = error
+dotnet_diagnostic.IDE0060.severity = error
+
+# High-signal performance, AOT, Lock, Span & ValueTask correctness (build errors)
+dotnet_diagnostic.CA1825.severity = error
+dotnet_diagnostic.CA1826.severity = error
+dotnet_diagnostic.CA1827.severity = error
+dotnet_diagnostic.CA1828.severity = error
+dotnet_diagnostic.CA1829.severity = error
+dotnet_diagnostic.CA1836.severity = error
+dotnet_diagnostic.CA1851.severity = error
+dotnet_diagnostic.CA2012.severity = error
+dotnet_diagnostic.CA2013.severity = error
+dotnet_diagnostic.CA2014.severity = error
+dotnet_diagnostic.CA2265.severity = error
+dotnet_diagnostic.CS9216.severity = error
+dotnet_diagnostic.SYSLIB1045.severity = error
+
+# Performance & Native AOT recommendations (warnings; treated as errors via TreatWarningsAsErrors)
+dotnet_diagnostic.CA1830.severity = warning
+dotnet_diagnostic.CA1834.severity = warning
+dotnet_diagnostic.CA1835.severity = warning
+dotnet_diagnostic.CA1837.severity = warning
+dotnet_diagnostic.CA1838.severity = warning
+dotnet_diagnostic.CA1845.severity = warning
+dotnet_diagnostic.CA1846.severity = warning
+dotnet_diagnostic.CA1847.severity = warning
+dotnet_diagnostic.CA1850.severity = warning
+dotnet_diagnostic.CA1854.severity = warning
+dotnet_diagnostic.CA1855.severity = warning
+dotnet_diagnostic.CA1859.severity = warning
+dotnet_diagnostic.CA1860.severity = warning
+dotnet_diagnostic.CA1861.severity = warning
+dotnet_diagnostic.CA1862.severity = warning
+dotnet_diagnostic.CA1864.severity = warning
+dotnet_diagnostic.CA1865.severity = warning
+dotnet_diagnostic.CA1866.severity = warning
+dotnet_diagnostic.CA1867.severity = warning
+dotnet_diagnostic.CA1868.severity = warning
+dotnet_diagnostic.CA1869.severity = warning
+dotnet_diagnostic.CA1870.severity = warning
+dotnet_diagnostic.SYSLIB1054.severity = warning
+
+# Cleanliness, name simplification, pattern matching & resource safety (warnings)
+dotnet_diagnostic.IDE0001.severity = warning
+dotnet_diagnostic.IDE0002.severity = warning
+dotnet_diagnostic.IDE0004.severity = warning
+dotnet_diagnostic.IDE0018.severity = warning
+dotnet_diagnostic.IDE0019.severity = warning
+dotnet_diagnostic.IDE0020.severity = warning
+dotnet_diagnostic.IDE0029.severity = warning
+dotnet_diagnostic.IDE0030.severity = warning
+dotnet_diagnostic.IDE0031.severity = warning
+dotnet_diagnostic.IDE0038.severity = warning
+dotnet_diagnostic.IDE0041.severity = warning
+dotnet_diagnostic.IDE0042.severity = warning
+dotnet_diagnostic.IDE0044.severity = warning
+dotnet_diagnostic.IDE0056.severity = warning
+dotnet_diagnostic.IDE0057.severity = warning
+dotnet_diagnostic.IDE0062.severity = warning
+dotnet_diagnostic.IDE0065.severity = warning
+dotnet_diagnostic.IDE0066.severity = warning
+dotnet_diagnostic.IDE0071.severity = warning
+dotnet_diagnostic.IDE0075.severity = warning
+dotnet_diagnostic.IDE0078.severity = warning
+dotnet_diagnostic.IDE0083.severity = warning
+dotnet_diagnostic.IDE0150.severity = warning
+dotnet_diagnostic.IDE0170.severity = warning
+dotnet_diagnostic.IDE0180.severity = warning
+dotnet_diagnostic.IDE0260.severity = warning
+dotnet_diagnostic.IDE0270.severity = warning
+dotnet_diagnostic.IDE0330.severity = warning
+dotnet_diagnostic.CA2022.severity = warning
+
+# Refactoring & hot-path optimization hints (suggestions)
+dotnet_diagnostic.CA1805.severity = suggestion
+dotnet_diagnostic.CA1822.severity = suggestion
+dotnet_diagnostic.CA1852.severity = suggestion
+dotnet_diagnostic.CA2000.severity = suggestion
+dotnet_diagnostic.CA2016.severity = suggestion
+dotnet_diagnostic.CA2213.severity = suggestion
+dotnet_diagnostic.IDE0063.severity = suggestion
+dotnet_diagnostic.IDE0074.severity = suggestion
+dotnet_diagnostic.IDE0250.severity = suggestion
+dotnet_diagnostic.IDE0251.severity = suggestion
+dotnet_diagnostic.IDE0300.severity = suggestion
+dotnet_diagnostic.IDE0301.severity = suggestion
+dotnet_diagnostic.IDE0302.severity = suggestion
+dotnet_diagnostic.IDE0303.severity = suggestion
+dotnet_diagnostic.IDE0304.severity = suggestion
+dotnet_diagnostic.IDE0305.severity = suggestion
+
+# Intentional suppressions
 dotnet_diagnostic.CA1031.severity = none
 dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1068.severity = none
 dotnet_diagnostic.IDE0058.severity = none
 dotnet_diagnostic.IDE0290.severity = none
-dotnet_diagnostic.CA1068.severity = none
 
 # StyleCop overrides
 dotnet_analyzer_diagnostic.category-StyleCop.CSharp.MaintainabilityRules.severity = none
 
-# CA1859: Используйте конкретные типы, когда это возможно, для повышения производительности
-dotnet_diagnostic.CA1859.severity = warning
+# --- Generated / Third-Party Code Overrides (must stay after [*.cs] to win precedence) ---
+[SharpJaad.AAC/**.cs]
+generated_code = true
+max_line_length = unset
+dotnet_diagnostic.CS0168.severity = none
+dotnet_diagnostic.CS0169.severity = none
+dotnet_diagnostic.CS0219.severity = none
+dotnet_diagnostic.CS0414.severity = none
+dotnet_diagnostic.CS0420.severity = none
+dotnet_diagnostic.CS8600.severity = none
+dotnet_diagnostic.CS8602.severity = none
+dotnet_diagnostic.CS8604.severity = none
+dotnet_diagnostic.CS8618.severity = none
+dotnet_diagnostic.CS8625.severity = none
+dotnet_diagnostic.IDE0005.severity = none
 
-# IDE0150: Предпочитать проверку "null" проверке типа
-dotnet_diagnostic.IDE0150.severity = warning
-
-# SYSLIB1045: Преобразовать в "GeneratedRegexAttribute".
-dotnet_diagnostic.SYSLIB1045.severity = warning
+# --- Test Overrides ---
+[Tests/**.cs]
+dotnet_diagnostic.IDE0060.severity = suggestion
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA1861.severity = none

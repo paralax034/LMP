@@ -422,7 +422,7 @@ internal sealed class WebMParser : IDisposable
                         continue;
 
                     default:
-                        if (size != UNKNOWN_SIZE && size > 0)
+                        if (size is not UNKNOWN_SIZE and > 0)
                             await SkipBytesAsync(size, ct).ConfigureAwait(false);
                         break;
                 }
@@ -757,7 +757,7 @@ internal sealed class WebMParser : IDisposable
                     continue;
 
                 default:
-                    if (size != UNKNOWN_SIZE && size > 0)
+                    if (size is not UNKNOWN_SIZE and > 0)
                     {
                         if (_bufLen - _bufPos < size)
                         {
@@ -884,7 +884,7 @@ internal sealed class WebMParser : IDisposable
 
             Span<byte> trackBytes = stackalloc byte[8];
             trackBytes[0] = (byte)trackByte;
-            BufferedReadSpan(trackLen - 1).CopyTo(trackBytes.Slice(1, trackLen - 1));
+            BufferedReadSpan(trackLen - 1).CopyTo(trackBytes[1..trackLen]);
             trackNum = ReadVInt(trackBytes[..trackLen]);
         }
 
@@ -1134,7 +1134,7 @@ internal sealed class WebMParser : IDisposable
                         continue;
 
                     default:
-                        if (size != UNKNOWN_SIZE && size > 0)
+                        if (size is not UNKNOWN_SIZE and > 0)
                             await SkipBytesAsync(size, ct).ConfigureAwait(false);
                         continue;
                 }
@@ -1168,7 +1168,7 @@ internal sealed class WebMParser : IDisposable
         if (trackLen == 1) trackNum = trackByte & 0x7F;
         else
         {
-            if (trackLen == 0 || trackLen > 8)
+            if (trackLen is 0 or > 8)
                 throw new ParserCorruptionException(StreamPositionWithBuffer(), $"Invalid EBML Track Number VINT length: {trackLen}");
 
             await EnsureBufferedOrThrowAsync(trackLen - 1, "track number payload", ct).ConfigureAwait(false);
@@ -1313,7 +1313,7 @@ internal sealed class WebMParser : IDisposable
         }
 
         int idLength = GetVIntLength((byte)firstByte);
-        if (idLength == 0 || idLength > 4)
+        if (idLength is 0 or > 4)
             throw new InvalidDataException($"Invalid EBML ID VINT length: {idLength}");
 
         if (idLength > 1 && !await EnsureBufferedAsync(idLength - 1, ct).ConfigureAwait(false)) return (0, 0);
@@ -1327,7 +1327,7 @@ internal sealed class WebMParser : IDisposable
         if (firstByte < 0) return (0, 0);
 
         int sizeLength = GetVIntLength((byte)firstByte);
-        if (sizeLength == 0 || sizeLength > 8)
+        if (sizeLength is 0 or > 8)
             throw new InvalidDataException($"Invalid EBML Size VINT length: {sizeLength}");
 
         if (sizeLength > 1 && !await EnsureBufferedAsync(sizeLength - 1, ct).ConfigureAwait(false)) return (0, 0);
@@ -1347,7 +1347,7 @@ internal sealed class WebMParser : IDisposable
         await EnsureBufferedOrThrowAsync(1, "vint", ct).ConfigureAwait(false);
         int first = BufferedReadByte();
         int len = GetVIntLength((byte)first);
-        if (len == 0 || len > 8)
+        if (len is 0 or > 8)
             throw new InvalidDataException($"Invalid EBML VINT length: {len}");
 
         if (len == 1) return first & 0x7F;
@@ -1365,7 +1365,7 @@ internal sealed class WebMParser : IDisposable
         await EnsureBufferedOrThrowAsync(1, "signed vint", ct).ConfigureAwait(false);
         int first = BufferedReadByte();
         int len = GetVIntLength((byte)first);
-        if (len == 0 || len > 8)
+        if (len is 0 or > 8)
             throw new InvalidDataException($"Invalid EBML Signed VINT length: {len}");
 
         long val;

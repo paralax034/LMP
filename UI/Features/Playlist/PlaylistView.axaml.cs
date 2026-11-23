@@ -27,8 +27,7 @@ public partial class PlaylistView : UserControl
 
     private void OnAttachedToVisualTreeHandler(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        if (_ambientBackdrop != null)
-            _ambientBackdrop.TopGlowFactorChanged -= OnBackdropTopGlowFactorChanged;
+        _ambientBackdrop?.TopGlowFactorChanged -= OnBackdropTopGlowFactorChanged;
 
         _ambientBackdrop = this.FindControl<AmbientBackdrop>("AmbientBackdrop");
         _scrollViewer = this.FindControl<ScrollViewer>("PlaylistScrollViewer");
@@ -38,15 +37,13 @@ public partial class PlaylistView : UserControl
         {
             _ambientBackdrop.TopGlowFactorChanged += OnBackdropTopGlowFactorChanged;
             _ambientBackdrop.AttachScrollViewer(_scrollViewer);
-            if (_currentVm != null)
-                _currentVm.TopGlowAttenuation = _ambientBackdrop.EffectiveTopFactor;
+            _currentVm?.TopGlowAttenuation = _ambientBackdrop.EffectiveTopFactor;
         }
     }
 
     private void OnBackdropTopGlowFactorChanged(double factor)
     {
-        if (_currentVm != null)
-            _currentVm.TopGlowAttenuation = factor;
+        _currentVm?.TopGlowAttenuation = factor;
     }
 
     private void OnDetachedFromVisualTreeHandler(object? sender, VisualTreeAttachmentEventArgs e)

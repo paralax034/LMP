@@ -330,12 +330,10 @@ public sealed class PlayingBarsIndicator : Control
         if (ReferenceEquals(_subscribedBrush, next))
             return;
 
-        if (_subscribedBrush != null)
-            _subscribedBrush.PropertyChanged -= _brushChangedHandler;
+        _subscribedBrush?.PropertyChanged -= _brushChangedHandler;
 
         _subscribedBrush = next;
-        if (_subscribedBrush != null)
-            _subscribedBrush.PropertyChanged += _brushChangedHandler;
+        _subscribedBrush?.PropertyChanged += _brushChangedHandler;
     }
 
     private bool EnsureVisual(Vector size)

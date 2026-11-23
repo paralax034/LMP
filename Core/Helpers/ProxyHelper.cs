@@ -28,7 +28,7 @@ internal static class ProxyHelper
             if (Uri.TryCreate(hostInput, UriKind.Absolute, out var parsedUri))
             {
                 var builder = new UriBuilder(parsedUri);
-                if (builder.Port <= 0 || builder.Port == 80)
+                if (builder.Port is <= 0 or 80)
                     builder.Port = port;
 
                 proxyUri = builder.Uri;

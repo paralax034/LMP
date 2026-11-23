@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using LMP.Core.Youtube;
 using System.Text.RegularExpressions;
+using LMP.Core.Youtube;
 using LMP.Core.Youtube.Utils;
 
 namespace LMP.Core.Services;
@@ -262,7 +262,7 @@ public partial class CookieAuthService
                 int jsonStart = rawJson.IndexOf('{');
                 if (jsonStart >= 0)
                 {
-                    rawJson = rawJson.Substring(jsonStart);
+                    rawJson = rawJson[jsonStart..];
                 }
 
                 using var jsonDoc = JsonDocument.Parse(rawJson);
@@ -270,7 +270,6 @@ public partial class CookieAuthService
                 var results = new List<YoutubeAccountItem>();
                 bool hasActiveAccount = false;
                 string? activeName = null, activeEmail = null, activeAvatar = null, activeGaiaId = null;
-                string? activeHandle = null;
 
                 // getAccountSwitcherEndpoint wraps the entire InnerTube response in the "data" property
                 var dataElement = jsonDoc.RootElement.GetPropertyOrNull("data") ?? jsonDoc.RootElement;
@@ -316,12 +315,12 @@ public partial class CookieAuthService
                                 var signinUrl = signinToken.Value.GetPropertyOrNull("signinUrl")?.GetStringOrNull();
                                 if (!string.IsNullOrEmpty(signinUrl))
                                 {
-                                    int targetIdx = signinUrl.IndexOf("authuser=");
+                                    int targetIdx = signinUrl.IndexOf("authuser=", StringComparison.Ordinal);
                                     if (targetIdx >= 0)
                                     {
-                                        var remaining = signinUrl.Substring(targetIdx + 9);
+                                        var remaining = signinUrl[(targetIdx + 9)..];
                                         int ampIdx = remaining.IndexOf('&');
-                                        parsedAuthUser = ampIdx >= 0 ? remaining.Substring(0, ampIdx) : remaining;
+                                        parsedAuthUser = ampIdx >= 0 ? remaining[..ampIdx] : remaining;
                                     }
                                 }
                             }
@@ -346,7 +345,6 @@ public partial class CookieAuthService
                         activeName = name;
                         activeEmail = sectionEmail;
                         activeAvatar = avatar;
-                        activeHandle = handle;
                         activeGaiaId = gaiaId;
                     }
                 }
@@ -543,7 +541,7 @@ public partial class CookieAuthService
 
         try
         {
-            var (isValid, error, isNetworkError) = await ValidateSessionAsync(cts.Token).ConfigureAwait(false);
+            var (_, error, isNetworkError) = await ValidateSessionAsync(cts.Token).ConfigureAwait(false);
 
             if (cts.IsCancellationRequested) return;
 

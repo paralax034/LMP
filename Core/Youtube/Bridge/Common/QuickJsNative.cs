@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+#if DEBUG
 using LMP.Core.Youtube.Exceptions;
+#endif
 
 namespace LMP.Core.Youtube.Bridge.Common;
 

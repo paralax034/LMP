@@ -71,8 +71,8 @@ public sealed partial class DialogHostViewModel : ViewModelBase
                 // or due to other edge case scenarios (Dispose, repeated CloseDialog).
                 while (_stack.Count > 0 && _stack.Peek().Tcs.Task.IsCompleted)
                 {
-                    var stale = _stack.Pop();
-                    Log.Debug($"[DialogHost] Discarded stale stacked dialog: {stale.Content.GetType().Name}");
+                    var (staleContent, _) = _stack.Pop();
+                    Log.Debug($"[DialogHost] Discarded stale stacked dialog: {staleContent.GetType().Name}");
                 }
 
                 if (_stack.Count > 0)

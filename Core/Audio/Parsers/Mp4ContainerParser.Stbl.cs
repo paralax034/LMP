@@ -365,7 +365,7 @@ internal sealed partial class Mp4ContainerParser
             return;
 
         int dsiLength = await _reader.ReadExpandableLengthAsync(ct).ConfigureAwait(false);
-        if (dsiLength <= 0 || dsiLength > 64)
+        if (dsiLength is <= 0 or > 64)
             return;
 
         byte[] fullDsi = await _reader.ReadBytesAsync(dsiLength, ct).ConfigureAwait(false);

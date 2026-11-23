@@ -323,7 +323,7 @@ internal sealed partial class CachingStreamSource : IAudioSource
     private int _circuitBreakerBackoffMs;
 
     //  Latency Tracking & Adaptive Transport 
-    private readonly object _latencyLock = new();
+    private readonly Lock _latencyLock = new();
     private double _latency0;
     private double _latency1;
     private double _latency2;

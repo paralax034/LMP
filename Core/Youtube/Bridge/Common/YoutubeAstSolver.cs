@@ -748,7 +748,7 @@ public static partial class YoutubeAstSolver
         {
             if (es.Expression is AssignmentExpression ae && ae.Right is FunctionExpression fe && fe.Body is not null)
             {
-                if (ae.Left is Identifier || ae.Left is MemberExpression)
+                if (ae.Left is Identifier or MemberExpression)
                 {
                     targetName = ae.Left;
                     bodyStatements = fe.Body.Body;

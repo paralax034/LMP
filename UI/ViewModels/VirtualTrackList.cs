@@ -1,12 +1,10 @@
-namespace LMP.UI.ViewModels;
-
 using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using Avalonia.Threading;
-using LMP.Core.Models;
 using LMP.UI.Features.Shared;
-using LMP.UI.Services;
+
+namespace LMP.UI.ViewModels;
 
 /// <summary>
 /// Virtualized list adapter with ViewModel ring pool support

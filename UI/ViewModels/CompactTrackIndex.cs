@@ -1,8 +1,7 @@
-namespace LMP.UI.ViewModels;
-
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using LMP.Core.Models;
+
+namespace LMP.UI.ViewModels;
 
 /// <summary>
 /// Data-Oriented structure for flat storage and ultra-fast vectorized

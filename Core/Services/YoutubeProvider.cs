@@ -1,23 +1,22 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
+using System.Text.Json;
+using LMP.Core.Audio.Cache;
+using LMP.Core.Audio.Http;
+using LMP.Core.Audio.Interfaces;
 using LMP.Core.Youtube;
+using LMP.Core.Youtube.Bridge.NToken;
+using LMP.Core.Youtube.Bridge.PoToken;
+using LMP.Core.Youtube.Bridge.SigCipher;
+using LMP.Core.Youtube.Exceptions;
 using LMP.Core.Youtube.Music;
 using LMP.Core.Youtube.Playlists;
 using LMP.Core.Youtube.Search;
-using LMP.Core.Youtube.Videos;
-using LMP.Core.Youtube.Videos.Streams;
 using LMP.Core.Youtube.Utils;
-using LMP.Core.Youtube.Exceptions;
-using LMP.Core.Youtube.Bridge.NToken;
-using LMP.Core.Youtube.Bridge.SigCipher;
-using LMP.Core.Youtube.Bridge.PoToken;
-using LMP.Core.Audio.Http;
-using LMP.Core.Audio.Interfaces;
-using LMP.Core.Audio.Cache;
+using LMP.Core.Youtube.Videos;
 using LMP.Core.Youtube.Videos.ClosedCaptions;
-using System.Text.Json;
+using LMP.Core.Youtube.Videos.Streams;
 
 namespace LMP.Core.Services;
 
@@ -660,7 +659,7 @@ public partial class YoutubeProvider : IDisposable
         if (!forceRefresh && !hasExcludedClients)
         {
             var diskEntry = await SessionCacheStore
-                .TryGetManifestAndProbeAsync(track.Id, Audio.Http.SharedHttpClient.Instance, ct)
+                .TryGetManifestAndProbeAsync(track.Id, SharedHttpClient.Instance, ct)
                 .ConfigureAwait(false);
 
             if (diskEntry is { Variants.Count: > 0 })
@@ -938,7 +937,7 @@ public partial class YoutubeProvider : IDisposable
         if (firstUnblocked == null && streams.Count > 0)
             return streams[0];
 
-        if (preferredFormat is not null && preferredFormat != AudioFormat.Unknown)
+        if (preferredFormat is not null and not AudioFormat.Unknown)
         {
             if (preferredBitrate > 0 && bestMatch != null) return bestMatch;
             if (firstInFormat != null) return firstInFormat;

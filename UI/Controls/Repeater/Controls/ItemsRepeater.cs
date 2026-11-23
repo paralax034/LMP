@@ -362,8 +362,7 @@ namespace Avalonia.Controls
                     var virtInfo = GetVirtualizationInfo(element);
                     virtInfo.KeepAlive = false;
 
-                    if (virtInfo.Owner == ElementOwner.ElementFactory ||
-                        virtInfo.Owner == ElementOwner.PinnedPool)
+                    if (virtInfo.Owner is ElementOwner.ElementFactory or ElementOwner.PinnedPool)
                     {
                         element.Arrange(new Rect(
                             ClearedElementsArrangePosition.X - element.DesiredSize.Width,
@@ -454,10 +453,9 @@ namespace Avalonia.Controls
             // is more strict in that pinned elements will be forcibly
             // unpinned and sent back to the view generator.
             var isClearedDueToCollectionChange =
-                _processingItemsSourceChange != null &&
-                (_processingItemsSourceChange.Action == NotifyCollectionChangedAction.Remove ||
-                    _processingItemsSourceChange.Action == NotifyCollectionChangedAction.Replace ||
-                    _processingItemsSourceChange.Action == NotifyCollectionChangedAction.Reset);
+                _processingItemsSourceChange is { Action: NotifyCollectionChangedAction.Remove
+                    or NotifyCollectionChangedAction.Replace
+                    or NotifyCollectionChangedAction.Reset };
 
             _viewManager.ClearElement(element, isClearedDueToCollectionChange);
             _viewportManager.OnElementCleared(element, GetVirtualizationInfo(element));
@@ -596,17 +594,11 @@ namespace Avalonia.Controls
                 throw new AvaloniaInternalException("Cannot set ItemsSourceView during layout.");
             }
 
-            if (oldValue != null)
-            {
-                oldValue.CollectionChanged -= OnItemsSourceViewChanged;
-            }
+            oldValue?.CollectionChanged -= OnItemsSourceViewChanged;
 
             ItemsSourceView = newValue;
 
-            if (newValue != null)
-            {
-                newValue.CollectionChanged += OnItemsSourceViewChanged;
-            }
+            newValue?.CollectionChanged += OnItemsSourceViewChanged;
 
             if (Layout != null)
             {

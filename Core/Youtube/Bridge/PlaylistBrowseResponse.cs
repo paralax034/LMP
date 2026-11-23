@@ -84,10 +84,8 @@ internal partial class PlaylistBrowseResponse : IPlaylistData
             ?.ElementAtOrNull(1)
             ?.GetPropertyOrNull("playlistSidebarSecondaryInfoRenderer");
 
-        /// <summary>
-        /// Playlist privacy form renderer. Typically available for playlists
-        /// belonging to the currently authenticated user.
-        /// </summary>
+        // Playlist privacy form renderer. Typically available for playlists
+        // belonging to the currently authenticated user.
         var privacyDropdownRenderer = sidebarPrimary
             ?.GetPropertyOrNull("privacyForm")
             ?.GetPropertyOrNull("dropdownFormFieldRenderer");

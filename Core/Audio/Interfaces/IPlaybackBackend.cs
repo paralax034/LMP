@@ -139,7 +139,7 @@ internal interface IPlaybackBackend : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>Used for user volume control (slider).
-    /// Normalization gain (<see cref="AudioPipeline"/> → <see cref="GainCrossfader"/>)
+    /// Normalization gain (<see cref="AudioPipeline"/> → <c>GainProcessor</c>)
     /// is applied separately in AudioCallback when writing to the provider.</para>
     /// <para>Called from the command thread — implementations must be thread-safe.</para>
     /// </remarks>

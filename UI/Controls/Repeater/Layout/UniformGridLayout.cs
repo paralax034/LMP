@@ -285,9 +285,7 @@ namespace Avalonia.Layout
         protected internal override void InitializeForContextCore(VirtualizingLayoutContext context)
         {
             var state = context.LayoutState;
-            var gridState = state as UniformGridLayoutState;
-
-            if (gridState == null)
+            if (state is not UniformGridLayoutState gridState)
             {
                 if (state != null)
                 {

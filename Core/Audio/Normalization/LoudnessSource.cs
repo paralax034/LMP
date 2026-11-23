@@ -7,7 +7,7 @@ namespace LMP.Core.Audio.Normalization;
 /// The numerical order of values strictly corresponds to semantic priority:
 /// a higher number = a more accurate / reliable source.
 /// This property is used directly in the <c>existing &gt; incoming</c> comparison
-/// in <see cref="TrackInfo.SetIntegratedLufs"/> and <see cref="AudioCacheManager.TryUpdateIntegratedLufs"/>.
+/// in <see cref="TrackInfo.SetIntegratedLufs"/> and <see cref="Cache.AudioCacheManager"/>.
 ///
 /// <para>
 /// Intentionally contains only two meaningful values:
