@@ -396,12 +396,14 @@
         Selector="TextBox:not(.flat-search-box):focus /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style
         Selector="TextBox:not(.flat-search-box):focus:pointerover /template/ Border#PART_BorderElement">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style Selector="TextBox:not(.flat-search-box):disabled">

@@ -48,7 +48,6 @@
     <Style Selector="Button:pressed">
         <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Button:disabled">
         <Setter Property="Opacity" Value="0.4" />
@@ -197,7 +196,6 @@
     <Style Selector="Button.accent:pressed">
         <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
@@ -233,7 +231,6 @@
     <Style Selector="Button.primary-btn:pressed">
         <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
     <Style Selector="Button.primary-btn:pressed /template/ ContentPresenter#PART_ContentPresenter">
@@ -266,7 +263,6 @@
     <Style Selector="Button.icon-btn:pressed">
         <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Button.icon-btn:disabled">
         <Setter Property="Opacity" Value="0.4" />
@@ -494,6 +490,7 @@
     </Style>
     <Style Selector="Button.ghost-btn:pressed, Button.transparent-btn:pressed">
         <Setter Property="Background" Value="{DynamicResource BgHighlightTransparentBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
     <Style Selector="Button.ghost-btn PathIcon, Button.transparent-btn PathIcon">
         <Setter Property="Transitions">
@@ -638,7 +635,6 @@
     <Style Selector="Button.ctrl-btn:pressed">
         <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Button.ctrl-btn.active">
         <Setter Property="Background" Value="{DynamicResource AccentTransparentBrush}" />

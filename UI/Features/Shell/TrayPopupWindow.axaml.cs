@@ -386,7 +386,9 @@ public partial class TrayPopupWindow : Window
     {
         UpdateState(isWindowVisible ?? _lastKnownWindowVisible);
 
-        var screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
+        var screen = Screens.ScreenFromPoint(new PixelPoint(x, y))
+            ?? Screens.Primary
+            ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
         if (screen != null)
         {
             var workArea = screen.WorkingArea;
@@ -441,22 +443,36 @@ public partial class TrayPopupWindow : Window
         _onShowWindow?.Invoke();
     }
 
-    private async void OnPlayPauseClick(object? sender, RoutedEventArgs e)
+    private void OnPlayPauseClick(object? sender, RoutedEventArgs e)
     {
         if (_playerControl == null) return;
-        await _playerControl.PlayPauseAsync();
+        _ = RunPlayerActionSafeAsync(() => _playerControl.PlayPauseAsync(), "PlayPause");
     }
 
-    private async void OnNextClick(object? sender, RoutedEventArgs e)
+    private void OnNextClick(object? sender, RoutedEventArgs e)
     {
         HidePopup();
-        if (_playerControl != null) await _playerControl.NextAsync();
+        if (_playerControl != null)
+            _ = RunPlayerActionSafeAsync(() => _playerControl.NextAsync(), "Next");
     }
 
-    private async void OnPrevClick(object? sender, RoutedEventArgs e)
+    private void OnPrevClick(object? sender, RoutedEventArgs e)
     {
         HidePopup();
-        if (_playerControl != null) await _playerControl.PreviousAsync();
+        if (_playerControl != null)
+            _ = RunPlayerActionSafeAsync(() => _playerControl.PreviousAsync(), "Previous");
+    }
+
+    private static async Task RunPlayerActionSafeAsync(Func<Task> action, string actionName)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[TrayPopup] {actionName} failed: {ex.Message}");
+        }
     }
 
     private void OnRepeatClick(object? sender, RoutedEventArgs e)

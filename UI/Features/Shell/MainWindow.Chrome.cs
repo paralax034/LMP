@@ -95,7 +95,7 @@ public partial class MainWindow
             BeginMoveDrag(e);
     }
 
-    protected override async void OnClosing(WindowClosingEventArgs e)
+    protected override void OnClosing(WindowClosingEventArgs e)
     {
         if (_forceClose || e.CloseReason is WindowCloseReason.OSShutdown or WindowCloseReason.ApplicationShutdown)
         {
@@ -117,7 +117,7 @@ public partial class MainWindow
             case CloseAction.Ask:
                 e.Cancel = true;
                 if (!_isCloseDialogOpen)
-                    await HandleAskCloseAsync();
+                    _ = HandleAskCloseAsync();
                 break;
 
             case CloseAction.Exit:
@@ -149,6 +149,13 @@ public partial class MainWindow
                 _forceClose = true;
                 Close();
             }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[Window] Close confirmation dialog failed: {ex.Message}");
         }
         finally
         {

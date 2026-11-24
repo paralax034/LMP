@@ -19,6 +19,7 @@ public sealed partial class DialogHostViewModel : ViewModelBase
     //  Stack: (dialog content, its TCS) 
     private readonly Stack<(object Content, TaskCompletionSource<object?> Tcs)> _stack = new();
     private TaskCompletionSource<object?>? _dialogTcs;
+    private object? _activeDialogContent;
     private readonly Lock _lock = new();
 
     /// <summary>
@@ -33,26 +34,39 @@ public sealed partial class DialogHostViewModel : ViewModelBase
     /// </remarks>
     public async Task<T?> ShowAsync<T>(object dialogContent)
     {
-        var tcs = new TaskCompletionSource<object?>();
+        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         lock (_lock)
         {
             // Stack the current dialog only if its TCS is still active.
-            // Completed TCS = CloseDialog was already called, the dialog is closed —
-            // it must not be restored after the new dialog.
-            if (HasActiveDialog && _dialogTcs is { Task.IsCompleted: false } && CurrentDialog != null)
+            // Track _activeDialogContent synchronously under _lock so concurrent ShowAsync calls
+            // before Dispatcher.UIThread.InvokeAsync executes never orphan the first dialog's TCS.
+            if (_dialogTcs is { Task.IsCompleted: false } && _activeDialogContent is not null)
             {
-                Log.Debug($"[DialogHost] Stacking dialog. Suspending: {CurrentDialog.GetType().Name}, Showing: {dialogContent.GetType().Name}");
-                _stack.Push((CurrentDialog, _dialogTcs));
+                Log.Debug($"[DialogHost] Stacking dialog. Suspending: {_activeDialogContent.GetType().Name}, Showing: {dialogContent.GetType().Name}");
+                _stack.Push((_activeDialogContent, _dialogTcs));
             }
 
             _dialogTcs = tcs;
+            _activeDialogContent = dialogContent;
         }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            CurrentDialog = dialogContent;
-            HasActiveDialog = true;
+            object? topContent;
+            bool hasActive;
+
+            lock (_lock)
+            {
+                hasActive = _dialogTcs is { Task.IsCompleted: false } && _activeDialogContent is not null;
+                topContent = hasActive ? _activeDialogContent : null;
+            }
+
+            if (hasActive)
+            {
+                CurrentDialog = topContent;
+                HasActiveDialog = true;
+            }
         });
 
         Log.Debug($"[DialogHost] Showing: {dialogContent.GetType().Name}");
@@ -61,35 +75,47 @@ public sealed partial class DialogHostViewModel : ViewModelBase
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
+            object? nextContent = null;
+            bool hasNext = false;
+            bool shouldUpdateUi = false;
+
             lock (_lock)
             {
-                if (_dialogTcs != tcs)
-                    return; // Another dialog has already taken control
+                if (_dialogTcs == tcs)
+                {
+                    shouldUpdateUi = true;
 
-                // Defensive cleanup: discard entries with a completed TCS
-                // that might have entered the stack before the IsCompleted check was introduced
-                // or due to other edge case scenarios (Dispose, repeated CloseDialog).
-                while (_stack.Count > 0 && _stack.Peek().Tcs.Task.IsCompleted)
-                {
-                    var (staleContent, _) = _stack.Pop();
-                    Log.Debug($"[DialogHost] Discarded stale stacked dialog: {staleContent.GetType().Name}");
-                }
+                    // Defensive cleanup: discard entries with a completed TCS
+                    // that might have entered the stack before the IsCompleted check was introduced
+                    // or due to other edge case scenarios (Dispose, repeated CloseDialog).
+                    while (_stack.Count > 0 && _stack.Peek().Tcs.Task.IsCompleted)
+                    {
+                        var (staleContent, _) = _stack.Pop();
+                        Log.Debug($"[DialogHost] Discarded stale stacked dialog: {staleContent.GetType().Name}");
+                    }
 
-                if (_stack.Count > 0)
-                {
-                    // Restore the previous dialog from the stack
-                    var (prevContent, prevTcs) = _stack.Pop();
-                    _dialogTcs = prevTcs;
-                    CurrentDialog = prevContent;
-                    HasActiveDialog = true;
-                    Log.Debug($"[DialogHost] Restored from stack: {prevContent.GetType().Name}");
+                    if (_stack.Count > 0)
+                    {
+                        // Restore the previous dialog from the stack
+                        var (prevContent, prevTcs) = _stack.Pop();
+                        _dialogTcs = prevTcs;
+                        _activeDialogContent = prevContent;
+                        nextContent = prevContent;
+                        hasNext = true;
+                        Log.Debug($"[DialogHost] Restored from stack: {prevContent.GetType().Name}");
+                    }
+                    else
+                    {
+                        _dialogTcs = null;
+                        _activeDialogContent = null;
+                    }
                 }
-                else
-                {
-                    HasActiveDialog = false;
-                    CurrentDialog = null;
-                    _dialogTcs = null;
-                }
+            }
+
+            if (shouldUpdateUi)
+            {
+                HasActiveDialog = hasNext;
+                CurrentDialog = nextContent;
             }
         });
 
@@ -113,14 +139,17 @@ public sealed partial class DialogHostViewModel : ViewModelBase
             lock (_lock)
             {
                 _dialogTcs?.TrySetCanceled();
+                _dialogTcs = null;
+                _activeDialogContent = null;
                 while (_stack.Count > 0)
                 {
                     var (_, stackedTcs) = _stack.Pop();
                     stackedTcs.TrySetCanceled();
                 }
-                CurrentDialog = null;
-                HasActiveDialog = false;
             }
+
+            CurrentDialog = null;
+            HasActiveDialog = false;
         }
         base.Dispose(disposing);
     }

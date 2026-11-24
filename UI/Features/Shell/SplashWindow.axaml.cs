@@ -24,6 +24,7 @@ public partial class SplashWindow : Window
         
         // Localized commit string
         var L = LocalizationService.Instance;
+        StatusText.Text = L["Splash_Initializing"];
         BuildInfoText.Text = $"{string.Format(L["Splash_Commits"], info.CommitCount)} • {info.BuildDate:yyyy-MM-dd}";
         
         // GitHub URL

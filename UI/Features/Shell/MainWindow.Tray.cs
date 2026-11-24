@@ -392,6 +392,12 @@ public partial class MainWindow
 
     private void HandleExternalResumeRequest()
     {
+        if (!Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(HandleExternalResumeRequest);
+            return;
+        }
+
         if (_isInTray)
         {
             RestoreFromTray();

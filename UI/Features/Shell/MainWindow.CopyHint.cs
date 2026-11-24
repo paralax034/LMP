@@ -28,8 +28,11 @@ public partial class MainWindow
     private void CleanupCopyHint()
     {
         CopyHintService.Instance.HintRequested -= OnCopyHintRequested;
-        _copyHintCts?.Cancel();
-        _copyHintCts?.Dispose();
+
+        var cts = _copyHintCts;
+        _copyHintCts = null;
+        cts?.Cancel();
+        cts?.Dispose();
 
         if (_copyHintOverlay != null)
         {
@@ -47,18 +50,21 @@ public partial class MainWindow
             return;
         }
 
-        ShowCopyHint(text, kind, cursorPosition);
+        _ = ShowCopyHintAsync(text, kind, cursorPosition);
     }
 
-    private async void ShowCopyHint(string text, CopyHintKind kind, Point? cursorPosition)
+    private async Task ShowCopyHintAsync(string text, CopyHintKind kind, Point? cursorPosition)
     {
         if (_copyHintOverlay is null || _copyHintText is null || _copyHintCanvas is null)
             return;
 
-        _copyHintCts?.Cancel();
-        _copyHintCts?.Dispose();
+        var prevCts = _copyHintCts;
         var cts = new CancellationTokenSource();
         _copyHintCts = cts;
+        var token = cts.Token;
+
+        prevCts?.Cancel();
+        prevCts?.Dispose();
 
         try
         {
@@ -69,19 +75,30 @@ public partial class MainWindow
             _copyHintOverlay.Opacity = 0;
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
-                () => { }, Avalonia.Threading.DispatcherPriority.Render);
+                static () => { }, Avalonia.Threading.DispatcherPriority.Render);
+
+            if (token.IsCancellationRequested || _copyHintCts != cts)
+                return;
 
             PositionCopyHint(cursorPosition);
             _copyHintOverlay.Opacity = 1;
 
-            await Task.Delay(CopyHintDurationMs, cts.Token);
+            if (!await token.DelayNoThrowAsync(TimeSpan.FromMilliseconds(CopyHintDurationMs), continueOnCapturedContext: true)
+                || _copyHintCts != cts)
+                return;
 
             _copyHintOverlay.Opacity = 0;
-            await Task.Delay(CopyHintFadeDurationMs, cts.Token);
+
+            if (!await token.DelayNoThrowAsync(TimeSpan.FromMilliseconds(CopyHintFadeDurationMs), continueOnCapturedContext: true)
+                || _copyHintCts != cts)
+                return;
 
             _copyHintOverlay.IsVisible = false;
         }
-        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Log.Warn($"[CopyHint] Failed to display copy hint: {ex.Message}");
+        }
     }
 
     private void PositionCopyHint(Point? cursorPosition)
@@ -108,8 +125,11 @@ public partial class MainWindow
         if (y < margin)
             y = cursor.Y + 24;
 
-        x = Math.Clamp(x, margin, canvasW - hintW - margin);
-        y = Math.Clamp(y, margin, canvasH - hintH - margin);
+        double maxX = Math.Max(margin, canvasW - hintW - margin);
+        double maxY = Math.Max(margin, canvasH - hintH - margin);
+
+        x = Math.Clamp(x, margin, maxX);
+        y = Math.Clamp(y, margin, maxY);
 
         Canvas.SetLeft(_copyHintOverlay, x);
         Canvas.SetTop(_copyHintOverlay, y);

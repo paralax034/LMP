@@ -254,8 +254,30 @@ public sealed class ThemeManagerService
         UpdateOrSetBrush(resources, batch, "AccentFillColorDefaultBrush", accent);
         UpdateOrSetBrush(resources, batch, "FocusVisualPrimaryBrush", accent);
         UpdateOrSetBrush(resources, batch, "SystemControlFocusVisualPrimaryBrush", accent, 0.85);
+        UpdateOrSetBrush(resources, batch, "FlyoutBackground", bgElevated);
         UpdateOrSetBrush(resources, batch, "FlyoutBorderThemeBrush", bgHighlight);
+        UpdateOrSetBrush(resources, batch, "MenuFlyoutPresenterBackground", bgElevated);
         UpdateOrSetBrush(resources, batch, "MenuFlyoutPresenterBorderBrush", bgHighlight);
+        UpdateOrSetBrush(resources, batch, "MenuFlyoutItemForeground", textPrimary);
+        UpdateOrSetBrush(resources, batch, "MenuFlyoutItemForegroundPointerOver", textPrimary);
+
+        // ComboBox & Button foreground brushes (updated in-place so dropdowns reflect live theme preview)
+        UpdateOrSetBrush(resources, batch, "ComboBoxBorderBrush", bgHighlight);
+        UpdateOrSetBrush(resources, batch, "ComboBoxBorderBrushPointerOver", accent);
+        UpdateOrSetBrush(resources, batch, "ComboBoxBorderBrushPressed", accent);
+        UpdateOrSetBrush(resources, batch, "ComboBoxBorderBrushDisabled", bgHighlight);
+        UpdateOrSetBrush(resources, batch, "ComboBoxForeground", textPrimary);
+        UpdateOrSetBrush(resources, batch, "ComboBoxForegroundPointerOver", textPrimary);
+        UpdateOrSetBrush(resources, batch, "ComboBoxForegroundPressed", textPrimary);
+        UpdateOrSetBrush(resources, batch, "ComboBoxForegroundDisabled", textSecondary);
+        UpdateOrSetBrush(resources, batch, "ComboBoxDropDownBackground", bgPrimary);
+        UpdateOrSetBrush(resources, batch, "ComboBoxDropDownBorderBrush", bgHighlight);
+        UpdateOrSetBrush(resources, batch, "ComboBoxDropDownGlyphForeground", textSecondary);
+
+        UpdateOrSetBrush(resources, batch, "ButtonForeground", textPrimary);
+        UpdateOrSetBrush(resources, batch, "ButtonForegroundPointerOver", textPrimary);
+        UpdateOrSetBrush(resources, batch, "ButtonForegroundPressed", textPrimary);
+        UpdateOrSetBrush(resources, batch, "ButtonForegroundDisabled", textSecondary);
 
         // Interactive control state brushes (Slider, ToggleSwitch, Expander)
         UpdateOrSetBrush(resources, batch, "ToggleSwitchFillOn", new Color(35, accent.R, accent.G, accent.B));
@@ -443,27 +465,6 @@ public sealed class ThemeManagerService
             AddItem(batch, "SliderThumbBackgroundDisabled", textSecondary);
         }
 
-        if (bgPrimaryChanged || bgHighlightChanged || accentChanged || textPrimaryChanged || textSecondaryChanged)
-        {
-            AddItem(batch, "ComboBoxBorderBrush", bgHighlight);
-            AddItem(batch, "ComboBoxBorderBrushPointerOver", accent);
-            AddItem(batch, "ComboBoxBorderBrushPressed", accent);
-            AddItem(batch, "ComboBoxBorderBrushDisabled", bgHighlight);
-
-            AddItem(batch, "ComboBoxForeground", textPrimary);
-            AddItem(batch, "ComboBoxForegroundPointerOver", textPrimary);
-            AddItem(batch, "ComboBoxForegroundPressed", textPrimary);
-            AddItem(batch, "ComboBoxForegroundDisabled", textSecondary);
-
-            AddItem(batch, "ComboBoxDropDownBackground", bgPrimary);
-            AddItem(batch, "ComboBoxDropDownBorderBrush", bgHighlight);
-
-            AddItem(batch, "ButtonForeground", textPrimary);
-            AddItem(batch, "ButtonForegroundPointerOver", textPrimary);
-            AddItem(batch, "ButtonForegroundPressed", textPrimary);
-            AddItem(batch, "ButtonForegroundDisabled", textSecondary);
-        }
-
         if (bgPrimaryChanged || bgSecondaryChanged || bgElevatedChanged || bgHighlightChanged || textPrimaryChanged)
         {
             AddItem(batch, "SolidBackgroundFillColorBase", bgPrimary);
@@ -480,11 +481,6 @@ public sealed class ThemeManagerService
             AddItem(batch, "CardStrokeColorDefault", bgHighlight);
 
             AddItem(batch, "DividerStrokeColorDefault", bgHighlight);
-
-            AddItem(batch, "FlyoutBackground", bgElevated);
-            AddItem(batch, "MenuFlyoutPresenterBackground", bgElevated);
-            AddItem(batch, "MenuFlyoutItemForeground", textPrimary);
-            AddItem(batch, "MenuFlyoutItemForegroundPointerOver", textPrimary);
 
             AddItem(batch, "ContentDialogBackground", bgElevated);
             AddItem(batch, "ContentDialogTopOverlay", bgElevated);

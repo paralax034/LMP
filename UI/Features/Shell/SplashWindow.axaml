@@ -86,7 +86,7 @@
             <!-- STATUS TEXT -->
             <TextBlock Grid.Row="1"
                 x:Name="StatusText"
-                Text="Initializing..."
+                Text=""
                 FontSize="13"
                 Foreground="{DynamicResource TextSecondaryBrush}"
                 HorizontalAlignment="Center"
